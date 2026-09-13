@@ -1304,6 +1304,46 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     assert target.read_bytes() == good
 
 
+def test_distribution_manifest_uses_receipts_and_serves_only_the_requested_file(
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vonk_control.distribution import DistributionError
+
+    service, _sessions = cache
+    primary = _artifact(tmp_path, b"primary weights")
+    auxiliary = _artifact(tmp_path, b"tokenizer", artifact_id="tokenizer", path="tokenizer.json")
+    operation = _download(
+        service, [primary, auxiliary], model_content_sha256="a" * 64,
+        request_key="ef456dfd-03ba-44a8-9304-219c721dc908",
+    )
+    assert operation.artifact_set_sha256 is not None
+    checks = []
+    verify = service._verify_file
+
+    def record_check(path, spec):
+        checks.append(spec.sha256)
+        return verify(path, spec)
+
+    monkeypatch.setattr(service, "_verify_file", record_check)
+    source = ModelCacheVerifiedObjectSource.from_service(service)
+    objects = source.objects_for_set(operation.artifact_set_sha256)
+    assert len(objects) == 2
+    assert checks == [], "loading descriptors must not scan model bytes"
+    digest = str(primary["sha256"])
+    opened = source.open_verified(digest, len(b"primary weights"))
+    try:
+        assert opened.stream.read() == b"primary weights"
+    finally:
+        opened.stream.close()
+    assert checks == [digest], "serving one file must not verify unrelated weights"
+
+    # Trusting publication receipts for descriptors must not bypass the
+    # content check at the actual byte-serving boundary.
+    service._object_path(digest).write_bytes(b"mutated weights")
+    with pytest.raises(DistributionError, match="NAS cache object is unavailable"):
+        source.open_verified(digest, len(b"primary weights"))
+
+
 def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(cache, tmp_path: Path) -> None:
     service, _sessions = cache
     model = "f" * 64
@@ -1426,6 +1466,10 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
                                   artifact_set_sha256=digest, plan_digest=preview["plan_digest"])
     service._run_download(repair.id, force=True, interrupt_after_bytes=1024 * 1024)
     assert service.get_operation(repair.id).state == "partial"
+    available = service.download_preview(
+        model_content_sha256="a" * 64, artifacts=[small, artifact]
+    )
+    assert available["already_cached_bytes"] == len(data) + len(b"config")
     artifact_digest = _required_text(artifact["sha256"], "artifact digest")
     assert service.read_verified_artifact(digest, artifact_digest, "weights.bin") == data
     service.close()

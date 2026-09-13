@@ -3056,9 +3056,18 @@ class ModelCacheService:
                         return
                 artifact = session.get(ModelCacheArtifact, spec.sha256)
                 if artifact is not None:
-                    artifact.actual_bytes = actual_bytes
-                    artifact.state = "partial" if state == "verifying" else state
-                    artifact.updated_at = now
+                    published = (
+                        artifact.state == "verified"
+                        and artifact.verified_at is not None
+                        and artifact.actual_bytes == artifact.expected_bytes == spec.expected_bytes
+                    )
+                    # Refresh bytes belong to the operation's transfer ledger.
+                    # The last verified object remains published until its
+                    # replacement has been verified and atomically committed.
+                    if not published:
+                        artifact.actual_bytes = actual_bytes
+                        artifact.state = "partial" if state == "verifying" else state
+                        artifact.updated_at = now
                 if operation is not None:
                     payload = _validated_operation_payload(operation)
                     manifest = ArtifactSetManifest.from_document(payload["manifest"])
@@ -4663,13 +4672,22 @@ class ModelCacheService:
             "_next_boundary": next_boundary,
         }
 
+    def _require_managed_cache_coverage(self, manifest: ArtifactSetManifest) -> None:
+        if self._managed_cached_objects(manifest) != frozenset(
+            spec.sha256 for spec in manifest.artifacts
+        ):
+            raise ModelCacheConflict(
+                "model_cache.coverage_incomplete",
+                "cache artifact set is not completely verified",
+            )
+
     def verified_artifact_file(
         self,
         artifact_set_sha256: str,
         artifact_sha256: str,
         artifact_path: str,
     ) -> tuple[Path, int, str]:
-        """Return one immutable object only after complete-set verification.
+        """Verify the requested object's bytes in a complete managed cache set.
 
         This is the Controller-to-agent serving seam.  The caller receives a
         content-addressed path and must stream it from the returned file
@@ -4682,11 +4700,7 @@ class ModelCacheService:
                 "model_cache.artifact_missing", "verified cache artifact was not found"
             )
         manifest = self._manifest_for_set(set_digest)
-        if not all(self._object_is_verified(spec) for spec in manifest.artifacts):
-            raise ModelCacheConflict(
-                "model_cache.coverage_incomplete",
-                "cache artifact set is not completely verified",
-            )
+        self._require_managed_cache_coverage(manifest)
         spec = next(
             (
                 value
@@ -4712,9 +4726,10 @@ class ModelCacheService:
     ) -> tuple[dict[str, object], ...]:
         """Describe every verified object in a complete immutable set.
 
-        The distribution worker consumes these descriptors to copy one
-        content-addressed object to one or more agents.  It never receives a
-        source URL or a caller-controlled path from this adapter.
+        Compilation and distribution trust durable publication receipts and
+        check managed file metadata once. Serving an object separately verifies
+        that object's bytes; describing a set must not scan every model file.
+        No source URL or caller-controlled path is exposed by this adapter.
         """
         digest = _optional_digest(artifact_set_sha256)
         if digest is None:
@@ -4722,11 +4737,11 @@ class ModelCacheService:
                 "model_cache.entry_missing", "cache entry was not found"
             )
         manifest = self._manifest_for_set(digest)
+        self._require_managed_cache_coverage(manifest)
         descriptors = []
         for spec in manifest.artifacts:
-            path, size, object_digest = self.verified_artifact_file(
-                digest, spec.sha256, spec.path
-            )
+            path = self._object_path(spec.sha256)
+            size, object_digest = spec.expected_bytes, spec.sha256
             descriptors.append(
                 {
                     "schema_version": SCHEMA_VERSION,
