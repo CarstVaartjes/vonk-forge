@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import os
 from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -480,7 +481,10 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
 
 
 @pytest.mark.parametrize("shared_object", [False, True])
-def test_canonical_dependency_closure_reaches_run_switch(cache, shared_object: bool) -> None:
+@pytest.mark.parametrize("partial_checkpoint", [False, True])
+def test_canonical_dependency_closure_reaches_run_switch(
+    cache, shared_object: bool, partial_checkpoint: bool,
+) -> None:
     service, sessions = cache
     companion = _canonical_model(
         publisher="vonk-forge",
@@ -574,6 +578,12 @@ def test_canonical_dependency_closure_reaches_run_switch(cache, shared_object: b
     }
 
     inspector = DatabaseRunSwitchArtifactInspector(service)
+    if partial_checkpoint:
+        for spec in manifest.artifacts:
+            if spec.expected_bytes:
+                partial = service._partial_path(manifest.digest, spec.sha256)
+                partial.parent.mkdir(parents=True, exist_ok=True)
+                partial.write_bytes(b"x")
     with sessions() as session:
         inspection = inspector.inspect(
             session,
@@ -744,6 +754,83 @@ def test_one_set_with_shared_digest_counts_one_physical_payload(
     assert entry["expected_bytes"] == len(b"shared payload")
     assert entry["unique_bytes"] == len(b"shared payload")
     assert service.storage_summary().unique_used_bytes == len(b"shared payload")
+
+
+@pytest.mark.parametrize(
+    "stored_state",
+    [
+        "verified",
+        "missing",
+        "partial",
+        "symlink",
+        "truncated",
+        "receipt_missing",
+        "unreadable",
+    ],
+)
+def test_preview_uses_durable_verified_cache_metadata_without_reading_model_bytes(
+    cache,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stored_state: str,
+) -> None:
+    service, sessions = cache
+    model = "7" * 64
+    data = b"verified cache model bytes"
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
+    _download(
+        service,
+        [artifact],
+        model_content_sha256=model,
+        request_key="ea2c5c20-038a-4a0d-bdaa-40d756fb01bb",
+    )
+    spec = ArtifactSpec.from_manifest(
+        service.resolve_artifact_set(
+            model_content_sha256=model,
+            artifacts=[artifact],
+        )
+        .artifacts[0]
+        .identity()
+    )
+    path = service._object_path(spec.sha256)
+    if stored_state in {"partial", "receipt_missing"}:
+        with sessions.begin() as session:
+            row = session.get(ModelCacheArtifact, spec.sha256)
+            assert row is not None
+            if stored_state == "partial":
+                row.state = "partial"
+            else:
+                row.verified_at = None
+    elif stored_state == "missing":
+        path.unlink()
+    elif stored_state == "truncated":
+        path.write_bytes(data[:-1])
+    elif stored_state == "symlink":
+        other = tmp_path / "outside-cache.bin"
+        other.write_bytes(data)
+        path.unlink()
+        path.symlink_to(other)
+
+    def reject_byte_scan(*_args, **_kwargs):
+        raise AssertionError("preview reread cached model bytes")
+
+    monkeypatch.setattr(service, "_verify_file", reject_byte_scan)
+    if stored_state == "unreadable":
+        open_file = os.open
+
+        def deny_cache_object(file, *args, **kwargs):
+            if file == path:
+                raise PermissionError(errno.EACCES, "cache object is unreadable")
+            return open_file(file, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", deny_cache_object)
+        with pytest.raises(PermissionError):
+            service.download_preview(model_content_sha256=model, artifacts=[artifact])
+        return
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
+    expected = len(data) if stored_state == "verified" else 0
+    assert preview["already_cached_bytes"] == expected
+    assert preview["new_bytes"] == len(data) - expected
 
 
 def test_operation_transfer_progress_counts_only_missing_objects(

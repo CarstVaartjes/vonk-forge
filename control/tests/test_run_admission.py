@@ -262,14 +262,19 @@ def test_territorial_license_run_admission_is_informational(tmp_path) -> None:
         "run.license_territorial_restrictions_informational"
     )
 
-def test_system_reserve_is_a_floor_not_workload_memory(tmp_path) -> None:
+@pytest.mark.parametrize("platform_floor", [None, 50])
+def test_system_reserve_is_a_floor_not_workload_memory(
+    tmp_path, platform_floor
+) -> None:
     sessions, now, _node, installation = setup(
         tmp_path,
         free_memory=300,
         system_reserve=75,
     )
-    service = RunAdmissionService(
-        sessions, inventory_max_age=300, memory_floor_bytes=50
+    service = (
+        RunAdmissionService(sessions, inventory_max_age=300)
+        if platform_floor is None
+        else RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=50)
     )
 
     plan = service.plan_run(installation, alias="qwen", now=now)
@@ -280,15 +285,21 @@ def test_system_reserve_is_a_floor_not_workload_memory(tmp_path) -> None:
     assert plan.nodes[0].memory_floor_bytes == 75
 
 
-def test_system_reserve_still_blocks_a_run_without_headroom(tmp_path) -> None:
+@pytest.mark.parametrize("platform_floor", [None, 50])
+def test_system_reserve_still_blocks_a_run_without_headroom(
+    tmp_path, platform_floor
+) -> None:
     sessions, now, _node, installation = setup(
         tmp_path,
         free_memory=299,
         system_reserve=75,
     )
-    plan = RunAdmissionService(
-        sessions, inventory_max_age=300, memory_floor_bytes=50
-    ).plan_run(installation, alias="qwen", now=now)
+    service = (
+        RunAdmissionService(sessions, inventory_max_age=300)
+        if platform_floor is None
+        else RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=50)
+    )
+    plan = service.plan_run(installation, alias="qwen", now=now)
 
     assert plan.allowed is False
     assert plan.nodes[0].required_memory_bytes == 225

@@ -98,6 +98,55 @@ def package_step_run(step_name: str) -> str:
     return workflow_step_run(PACKAGE_WORKFLOW.read_text(), step_name)
 
 
+def test_package_reruns_bind_distinct_binary_identities_and_consumers_agree():
+    """A new package version must not collide with a prior immutable build alias."""
+    producers = [
+        (COMPILE_WORKFLOW, "Compile exact package binary set", "build_digest"),
+        (
+            PACKAGE_WORKFLOW,
+            "Validate exact precompiled architecture binary sets",
+            "candidate_build_digest",
+        ),
+        (PACKAGE_WORKFLOW, "Build package twice reproducibly", "arm64_build_digest"),
+        (
+            PACKAGE_WORKFLOW,
+            "Build lifecycle acceptance baseline packages",
+            "arm64_build_digest",
+        ),
+    ]
+    identities = []
+    for version in ["0.1.1~dev.568+g68ea01c503dd", "0.1.1~dev.569+g68ea01c503dd"]:
+        observed = []
+        for path, step_name, variable in producers:
+            body = workflow_step_run(path.read_text(), step_name)
+            assignment = re.search(
+                rf'{variable}="sha256:\$\(.*?\n\s*\)"', body, re.DOTALL
+            )
+            assert assignment is not None
+            environment = {
+                **os.environ,
+                "GITHUB_SHA": "68ea01c503dd056dd6c7fb14e6a81d263bc1cd4a",
+                "VERSION": version,
+                "ARCHITECTURE": "linux-arm64",
+                "platform": "linux-arm64",
+                "lock_digest": "a" * 64,
+            }
+            command = assignment.group() + f'\nprintf "%s" "${variable}"'
+            first = subprocess.check_output(
+                ["bash", "-euc", command], env=environment, text=True
+            )
+            replay = subprocess.check_output(
+                ["bash", "-euc", command], env=environment, text=True
+            )
+            assert first == replay
+            observed.append(first)
+        assert len(set(observed)) == 1, observed
+        identities.append(observed[0])
+    assert identities[0] != identities[1], (
+        "different Debian packages share one immutable binary alias"
+    )
+
+
 def write_executable(path: Path, body: str) -> None:
     path.write_text(f"#!/bin/sh\nset -eu\n{body}\n")
     path.chmod(0o755)

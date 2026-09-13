@@ -232,8 +232,8 @@ runs:
         for architecture in arm64; do
           platform=linux-arm64
           candidate_build_digest="sha256:$(
-            printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-              "$GITHUB_SHA" "$platform" "$lock_digest" \
+            printf 'vonk-agent-build-v2\0%s\0%s\0%s\0%s' \
+              "$GITHUB_SHA" "$platform" "$lock_digest" "$VERSION" \
               | sha256sum | cut -d' ' -f1
           )"
           baseline_build_digest="sha256:$(
@@ -309,8 +309,8 @@ runs:
         epoch=$(git show -s --format=%ct "$GITHUB_SHA")
         lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
         arm64_build_digest="sha256:$(
-          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-            "$GITHUB_SHA" linux-arm64 "$lock_digest" | sha256sum | cut -d' ' -f1
+          printf 'vonk-agent-build-v2\0%s\0%s\0%s\0%s' \
+            "$GITHUB_SHA" linux-arm64 "$lock_digest" "$VERSION" | sha256sum | cut -d' ' -f1
         )"
         arm64_initial_args=()
         arm64_reproducible_args=(--binaries-dir target/aarch64-unknown-linux-gnu/release)
@@ -382,6 +382,7 @@ runs:
         BASELINE_VERSION: ${{ inputs.baseline_version }}
         BINARY_SOURCE_MODE: ${{ inputs.binary_source_mode }}
         NEXT_VERSION: ${{ inputs.next_version }}
+        VERSION: ${{ inputs.version }}
         VONK_SOURCE_REVISION: ${{ github.sha }}
         VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
       run: |
@@ -438,8 +439,8 @@ runs:
           wait_for_packages "${package_pids[@]}"
         else
           arm64_build_digest="sha256:$(
-            printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-              "$GITHUB_SHA" linux-arm64 "$lock_digest" \
+            printf 'vonk-agent-build-v2\0%s\0%s\0%s\0%s' \
+              "$GITHUB_SHA" linux-arm64 "$lock_digest" "$VERSION" \
               | sha256sum | cut -d' ' -f1
           )"
           build_lifecycle linux-arm64 "$arm64_build_digest" \

@@ -683,6 +683,19 @@ def _service(
     )
 
 
+def test_default_run_switch_admission_uses_the_recipe_memory_reserve(tmp_path: Path) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: lifecycle._clock(),
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+    assert plan.allowed, plan.blockers
+
+
 def test_mapping_selection_reads_typed_parameters_from_persisted_mapping(
     tmp_path: Path,
 ) -> None:

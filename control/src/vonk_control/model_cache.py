@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import threading
 import time
 import uuid
@@ -1969,11 +1970,13 @@ class ModelCacheService:
     def _download_preview_for_manifest(
         self, manifest: ArtifactSetManifest
     ) -> dict[str, object]:
-        already_cached = 0
-        for spec in _unique_artifacts(manifest.artifacts).values():
-            if self._object_is_verified(spec):
-                already_cached += spec.expected_bytes
-        transfer = self._transfer_state_for_manifest(manifest, force=False)
+        cached = self._managed_cached_objects(manifest)
+        already_cached = sum(
+            spec.expected_bytes
+            for digest, spec in _unique_artifacts(manifest.artifacts).items()
+            if digest in cached
+        )
+        transfer = self._transfer_state_for_manifest(manifest, force=False, cached=cached)
         new_bytes = require_integer(transfer["total_bytes"], "transfer total bytes")
         storage = self.storage_summary()
         blockers = []
@@ -2003,6 +2006,53 @@ class ModelCacheService:
             "_transfer": transfer,
         }
 
+    def _managed_cached_objects(self, manifest: ArtifactSetManifest) -> frozenset[str]:
+        """Read admission metadata for objects verified into managed storage.
+
+        Publication verifies content before atomically placing an object and
+        recording its receipt. Admission trusts that receipt across processes
+        and restarts, while checking the file is still present and complete.
+        Transfers and explicit verification retain their content checks.
+        """
+        specs = _unique_artifacts(manifest.artifacts)
+        cached: set[str] = set()
+        with self._session() as session:
+            rows = session.scalars(
+                select(ModelCacheArtifact).where(
+                    ModelCacheArtifact.sha256.in_(specs),
+                    ModelCacheArtifact.state == "verified",
+                    ModelCacheArtifact.verified_at.is_not(None),
+                )
+            )
+            for row in rows:
+                spec = specs[row.sha256]
+                if (
+                    row.expected_bytes != spec.expected_bytes
+                    or row.actual_bytes != spec.expected_bytes
+                ):
+                    continue
+                try:
+                    fd = os.open(
+                        self._object_path(row.sha256),
+                        os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
+                    )
+                except (FileNotFoundError, NotADirectoryError):
+                    continue
+                except OSError as exc:
+                    if exc.errno == errno.ELOOP:
+                        continue
+                    raise
+                try:
+                    metadata = os.fstat(fd)
+                    if (
+                        stat.S_ISREG(metadata.st_mode)
+                        and metadata.st_size == spec.expected_bytes
+                    ):
+                        cached.add(row.sha256)
+                finally:
+                    os.close(fd)
+        return frozenset(cached)
+
     def _partial_bytes(self, set_digest: str, spec: ArtifactSpec) -> int:
         """Return only a bounded, reusable partial checkpoint length."""
         partial = self._partial_path(set_digest, spec.sha256)
@@ -2010,8 +2060,9 @@ class ModelCacheService:
             if partial.is_symlink():
                 return 0
             if spec.expected_bytes >= _PARALLEL_RANGE_MIN_BYTES:
-                return range_partial_bytes(partial, spec.expected_bytes,
-                                           workers=_PARALLEL_RANGE_WORKERS)
+                return range_partial_bytes(
+                    partial, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS
+                )
             if not partial.is_file():
                 return 0
             size = partial.stat().st_size
@@ -2028,6 +2079,7 @@ class ModelCacheService:
         manifest: ArtifactSetManifest,
         *,
         force: bool,
+        cached: frozenset[str] | None = None,
     ) -> dict[str, object]:
         """Create the immutable planned transfer and per-object baselines."""
         artifacts: dict[str, dict[str, int | str | None]] = {}
@@ -2038,7 +2090,11 @@ class ModelCacheService:
                 if force
                 else (
                     spec.expected_bytes
-                    if self._object_is_verified(spec)
+                    if (
+                        digest in cached
+                        if cached is not None
+                        else self._object_is_verified(spec)
+                    )
                     else self._partial_bytes(manifest.digest, spec)
                 )
             )
