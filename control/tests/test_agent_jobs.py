@@ -16,9 +16,14 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol import RecipeOperationRequest
+from vonk_agent_protocol import DistributionAssignment, RecipeOperationRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
+from vonk_control.distribution import (
+    DistributionError,
+    DistributionService,
+    MemoryVerifiedObjectSource,
+)
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
     AgentCertificate,
@@ -923,6 +928,85 @@ def test_heartbeat_never_shortens_a_longer_existing_lease(service) -> None:
     progress = jobs.heartbeat(claim, {"phase": "checking"}, 30)
 
     assert progress.deadline >= claim.deadline
+
+
+@pytest.mark.parametrize("restriction", (None, "expired", "revoked", "cancelled", "stale"))
+def test_distribution_heartbeat_renews_only_live_authorized_transfer(service, restriction) -> None:
+    jobs, sessions, clock = service
+    source = MemoryVerifiedObjectSource()
+    model_digest = source.put(b"weights")
+    image_digest = source.put(b"image")
+    assignment = DistributionAssignment.parse({
+        "schema_version": 2, "assignment_id": str(uuid.uuid4()),
+        "plan_digest": COMMIT, "generation": 1, "node_id": NODE_A,
+        "expires_at": (clock.now + timedelta(hours=1)).isoformat(),
+        "model_artifact_set_sha256": "b" * 64,
+        "objects": [
+            {"name": "weights", "sha256": model_digest, "bytes": 7, "kind": "model"},
+            {"name": "image.oci.tar", "sha256": image_digest, "bytes": 5, "kind": "oci-archive"},
+        ],
+        "oci_image_digest": "sha256:" + image_digest, "oci_archive_sha256": image_digest,
+    })
+    source.register_artifact_set(assignment.model_artifact_set_sha256, assignment.objects)
+    source.register_runtime_image(assignment.oci_image_digest, image_digest)
+    distribution = DistributionService(source, clock=clock, sessions=sessions)
+    distribution.register(assignment)
+    other = DistributionAssignment.parse(assignment.to_mapping() | {
+        "assignment_id": str(uuid.uuid4()), "node_id": NODE_B,
+    })
+    distribution.register(other)
+    other_plan = DistributionAssignment.parse(assignment.to_mapping() | {
+        "assignment_id": str(uuid.uuid4()), "plan_digest": "c" * 64,
+    })
+    distribution.register(other_plan)
+    job = parent(sessions, clock)
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    jobs.enqueue(job.id, NODE_A, kind, COMMIT,
+                 {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT})
+    with sessions.begin() as session:
+        certificate = session.get(AgentCertificate, "serial-a")
+        certificate.not_after = clock.now + timedelta(hours=3)
+    claim = claim_agent(jobs, NODE_A, "serial-a", 7200, protocol_version=3,
+                        capabilities=["agent.runtime.rust.v1", kind])
+    assert claim is not None
+    clock.advance(seconds=3600 if restriction == "expired" else 3590)
+    if restriction == "revoked":
+        distribution.revoke(plan_digest=COMMIT, node_id=NODE_A)
+    elif restriction == "cancelled":
+        with sessions.begin() as session:
+            session.get(Job, job.id).result = {"cancel_requested": True}
+    elif restriction == "stale":
+        with sessions.begin() as session:
+            attempt = session.scalar(select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence))
+            attempt.lease_deadline = clock.now
+    if restriction == "stale":
+        with pytest.raises(StaleAgentAttempt):
+            jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 3}, 60)
+    else:
+        jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 3}, 60)
+    clock.advance(seconds=20)
+    # The serving process must observe the durable renewal after the initial
+    # grant elapsed. A different node, revoked grant or expired fence cannot.
+    restarted = DistributionService(source, clock=clock, sessions=sessions)
+    if restriction is None:
+        renewed, spec, opened = restarted.open_object(node_id=NODE_A, plan_digest=COMMIT, digest=model_digest)
+        with opened.stream:
+            assert opened.stream.read() == b"weights"
+        assert spec.sha256 == model_digest
+        assert renewed.to_mapping() | {"expires_at": assignment.to_mapping()["expires_at"]} == assignment.to_mapping()
+        assert renewed.expires_at > clock.now
+    else:
+        with pytest.raises(DistributionError):
+            restarted.authorize(node_id=NODE_A, plan_digest=COMMIT)
+    with pytest.raises(DistributionError):
+        restarted.authorize(node_id=NODE_B, plan_digest=COMMIT)
+    with pytest.raises(DistributionError):
+        restarted.authorize(node_id=NODE_A, plan_digest=other_plan.plan_digest)
+    if restriction is None:
+        clock.advance(seconds=3600)
+        with pytest.raises(DistributionError):
+            restarted.authorize(node_id=NODE_A, plan_digest=COMMIT)
 
 
 def test_claim_persists_authenticated_running_release_identity(service) -> None:
