@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.jobs import JobService
 from vonk_control.models import (
@@ -45,7 +45,7 @@ def queue(tmp_path):
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = Clock()
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_ID, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_ID, state="active", capabilities=[], workload_intent_ordinal=1))
         session.add(
             AgentCertificate(
                 serial="serial-a",
@@ -60,6 +60,7 @@ def queue(tmp_path):
 
 
 def _parent(clock: Clock) -> Job:
+    payload = {"workload_intent_ordinal": 1}
     return Job(
         id=str(uuid.uuid4()),
         request_id=str(uuid.uuid4()),
@@ -68,8 +69,8 @@ def _parent(clock: Clock) -> Job:
         actor="operator",
         authority_revision=COMMIT,
         targets=[NODE_ID],
-        payload_digest=hashlib.sha256(b"{}").hexdigest(),
-        payload={},
+        payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+        payload=payload,
         current_attempt=0,
         created_at=clock.now,
         updated_at=clock.now,

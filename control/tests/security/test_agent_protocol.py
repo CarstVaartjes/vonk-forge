@@ -62,7 +62,7 @@ def service(tmp_path):
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
         for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
-            session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
+            session.add(AgentNode(node_id=node_id, state="active", capabilities=[], workload_intent_ordinal=1))
             session.add(
                 AgentCertificate(
                     serial=serial,
@@ -76,6 +76,7 @@ def service(tmp_path):
 
 
 def enqueue(service: AgentJobService, sessions, clock) -> None:
+    payload = {"workload_intent_ordinal": 1}
     parent = Job(
         request_id=str(uuid.uuid4()),
         kind="agent.operations",
@@ -83,8 +84,8 @@ def enqueue(service: AgentJobService, sessions, clock) -> None:
         actor="operator",
         authority_revision=COMMIT,
         targets=[NODE_A],
-        payload_digest=hashlib.sha256(b"{}").hexdigest(),
-        payload={},
+        payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+        payload=payload,
         current_attempt=0,
         created_at=clock.now,
         updated_at=clock.now,
@@ -147,6 +148,7 @@ def test_revoked_certificate_cannot_publish_result(service) -> None:
 
 def test_secret_bearing_payload_is_rejected(service) -> None:
     _jobs, sessions, clock = service
+    payload = {"workload_intent_ordinal": 1}
     parent = Job(
         request_id=str(uuid.uuid4()),
         kind="agent.operations",
@@ -154,8 +156,8 @@ def test_secret_bearing_payload_is_rejected(service) -> None:
         actor="operator",
         authority_revision=COMMIT,
         targets=[NODE_A],
-        payload_digest=hashlib.sha256(b"{}").hexdigest(),
-        payload={},
+        payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+        payload=payload,
         current_attempt=0,
         created_at=clock.now,
         updated_at=clock.now,
@@ -169,6 +171,7 @@ def test_secret_bearing_payload_is_rejected(service) -> None:
 
 def test_payload_and_result_documents_are_size_limited(service) -> None:
     jobs, sessions, clock = service
+    payload = {"workload_intent_ordinal": 1}
     parent = Job(
         request_id=str(uuid.uuid4()),
         kind="agent.operations",
@@ -176,8 +179,8 @@ def test_payload_and_result_documents_are_size_limited(service) -> None:
         actor="operator",
         authority_revision=COMMIT,
         targets=[NODE_A],
-        payload_digest=hashlib.sha256(b"{}").hexdigest(),
-        payload={},
+        payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+        payload=payload,
         current_attempt=0,
         created_at=clock.now,
         updated_at=clock.now,

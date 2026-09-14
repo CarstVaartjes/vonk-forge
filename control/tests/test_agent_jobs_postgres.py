@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import event, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import TokenCodec
 from vonk_control.enrollment import EnrollmentService
@@ -80,7 +81,7 @@ def service(postgres_engine):
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     with sessions.begin() as session:
         for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
-            session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
+            session.add(AgentNode(node_id=node_id, state="active", capabilities=[], workload_intent_ordinal=1))
         session.flush()
         for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
             session.add(
@@ -96,6 +97,7 @@ def service(postgres_engine):
 
 
 def parent(sessions, clock) -> Job:
+    payload = {"workload_intent_ordinal": 1}
     job = Job(
         request_id=str(uuid.uuid4()),
         kind="agent.operations",
@@ -103,8 +105,8 @@ def parent(sessions, clock) -> Job:
         actor="operator",
         authority_revision=COMMIT,
         targets=[NODE_A, NODE_B],
-        payload_digest=hashlib.sha256(b"{}").hexdigest(),
-        payload={},
+        payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+        payload=payload,
         current_attempt=0,
         created_at=clock.now,
         updated_at=clock.now,

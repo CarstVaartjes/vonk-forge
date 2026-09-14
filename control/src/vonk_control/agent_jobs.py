@@ -647,6 +647,15 @@ class AgentJobService:
             )
             .exists()
         )
+        upgrade_safety_elapsed = (
+            select(AgentOperationAttempt.id)
+            .where(
+                AgentOperationAttempt.operation_id == StoredOperation.id,
+                AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+                AgentOperationAttempt.lease_deadline <= now,
+            )
+            .exists()
+        )
         return (
             select(StoredOperation)
             .where(
@@ -666,8 +675,17 @@ class AgentJobService:
                         StoredOperation.retry_disposition_attempt
                         == StoredOperation.current_attempt,
                         or_(
-                            StoredOperation.retry_due_at.is_(None),
-                            StoredOperation.retry_due_at <= now,
+                            and_(
+                                StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
+                                upgrade_safety_elapsed,
+                            ),
+                            and_(
+                                StoredOperation.kind != AgentOperation.AGENT_UPGRADE.value,
+                                or_(
+                                    StoredOperation.retry_due_at.is_(None),
+                                    StoredOperation.retry_due_at <= now,
+                                ),
+                            ),
                         ),
                         retry_ready_attempt,
                     ),
