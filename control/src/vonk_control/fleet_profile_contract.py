@@ -405,6 +405,9 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     state: FleetProfileOperationState = "queued"
     child_progress: FleetProfileChildProgress | None = None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
+    observation_due_at: datetime | None = None
+    observation_deadline_at: datetime | None = None
+    pending_operation_ids: list[UuidId] = Field(default_factory=list, max_length=128)
     result: FleetProfileSwitchAdapterResult | None = None
 
     @model_validator(mode="after")

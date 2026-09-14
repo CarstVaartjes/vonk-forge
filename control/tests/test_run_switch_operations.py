@@ -707,7 +707,7 @@ def test_same_clock_later_intent_fences_older_queued_work(tmp_path: Path) -> Non
         assert old.payload["workload_intent_ordinal"] == 1
         assert new.payload["workload_intent_ordinal"] == 2
     assert service._advance(first.operation_id) is True
-    assert service.get(first.operation_id).state == "failed"
+    assert service.get(first.operation_id).state == "cancelled"
     assert "superseded" in (service.get(first.operation_id).status_reason or "")
     assert service.get(second.operation_id).state == "queued"
 

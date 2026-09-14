@@ -75,6 +75,7 @@ from .recipe_execution_contract import (
     run_plan_document,
 )
 from .recipe_operations import (
+    RecipeArtifactJobCancellationPending,
     RecipeInstallPreflightExpired,
     RecipeOperationConflict,
     RecipeOperationService,
@@ -180,6 +181,7 @@ class RunSwitchIssuedWorkloadPending(RunSwitchOperationConflict):
         observation_deadline: datetime,
     ) -> None:
         super().__init__(f"run-switch.{kind}-issued-pending: {owner_id} ({job_id})")
+        self.kind = kind
         self.job_id = job_id
         self.observe_due_at = observe_due_at
         self.observation_deadline = observation_deadline
@@ -1211,14 +1213,13 @@ class RecipeLifecyclePhaseExecutor:
             self._lifecycle.reconcile_superseded_unissued(
                 "recipe.stop", target.run_id, ordinal
             )
-            self._observe_older_issued("recipe.stop", target.run_id, ordinal)
             stop_digest = target.plan_digest
-            if target.state == "stopping":
-                # This preview was made while an older Stop owned the run.
-                # Once its issued effect has definitive terminal evidence,
-                # use the same run's current stop authority or accept its
-                # completed stop.  The old digest described `stopping` and
-                # cannot authorize a fresh `lost` stop after cancellation.
+            if target.state in {"starting", "stopping"}:
+                # A newer explicit Stop can cancel an older same-run command
+                # under the current node ordinal.  Re-preview this exact run
+                # because its prior Start/Stop may have changed state after
+                # the high-level plan was reviewed.  The low-level Stop
+                # authority validates current membership and reservations.
                 with self._sessions() as session:
                     run = session.get(RecipeRun, target.run_id)
                     if run is None:
@@ -1234,13 +1235,22 @@ class RecipeLifecyclePhaseExecutor:
                     )
                 stop_digest = fresh.plan_digest
             child_key = str(uuid.uuid5(uuid.UUID(request_key), f"stop:{target.run_id}"))
-            value = self._lifecycle.stop(
-                target.run_id,
-                plan_digest=stop_digest,
-                actor=actor,
-                request_id=child_key,
-                workload_intent_ordinal=ordinal,
-            )
+            try:
+                value = self._lifecycle.stop(
+                    target.run_id,
+                    plan_digest=stop_digest,
+                    actor=actor,
+                    request_id=child_key,
+                    workload_intent_ordinal=ordinal,
+                )
+            except RecipeArtifactJobCancellationPending as pending:
+                raise RunSwitchIssuedWorkloadPending(
+                    kind="artifact-job-cancellation",
+                    owner_id=target.run_id,
+                    job_id=pending.job_id,
+                    observe_due_at=pending.observe_due_at,
+                    observation_deadline=pending.observation_deadline,
+                ) from pending
             return PhaseExecution(value.id, {"run_id": target.run_id})
         if phase.kind == "prepare" and phase.subphase == "container-build":
             return self._execute_container_build(
@@ -4684,13 +4694,26 @@ class RunSwitchOperationService:
                 return True
             plan = _load_plan(raw_plan)
             progress = _read_progress(job.result)
-            if self._superseded_by_newer_scope_job(session, job):
+            intent_status = self._scope_intent_status(session, job)
+            if intent_status == "invalid":
                 self._mark_failed(
                     job,
-                    "run-switch.superseded: a later authorized operation owns this Spark scope",
+                    "run-switch workload authority or Spark scope is invalid",
                     now=now,
                     progress=progress,
                 )
+                session.commit()
+                return True
+            if intent_status == "superseded":
+                job.state = "cancelled"
+                job.status_reason = (
+                    "run-switch.superseded: the logical order was cancelled by "
+                    "a later authorized Spark intent; issued effects still "
+                    "require their own cancellation receipts"
+                )
+                progress["retryable"] = False
+                job.result = _persisted_result(progress)
+                job.updated_at = now
                 session.commit()
                 return True
             observation_due = progress.get("observation_due_at")
@@ -5132,17 +5155,21 @@ class RunSwitchOperationService:
         return True
 
     @staticmethod
-    def _superseded_by_newer_scope_job(session: Session, job: Job) -> bool:
-        """The node authority fences phases regardless of wall-clock ordering."""
+    def _scope_intent_status(session: Session, job: Job) -> str:
+        """Distinguish malformed authority from a later authorized node head."""
 
         ordinal = job.payload.get("workload_intent_ordinal")
         if type(ordinal) is not int or ordinal < 1:
-            return True
+            return "invalid"
         nodes = session.scalars(select(AgentNode).where(AgentNode.node_id.in_(job.targets)))
         current = list(nodes)
-        return len(current) != len(job.targets) or any(
+        if len(current) != len(job.targets):
+            return "invalid"
+        if any(
             node.workload_intent_ordinal != ordinal for node in current
-        )
+        ):
+            return "superseded"
+        return "current"
 
     def _hold_start_observation(
         self,
@@ -5209,12 +5236,23 @@ class RunSwitchOperationService:
                 return False
             deadline = _aware(pending.observation_deadline)
             if now >= deadline:
-                self._mark_failed(
-                    job,
-                    "run-switch.issued-observation-expired: an older issued effect has no definitive outcome",
-                    now=now,
-                    progress=progress,
-                )
+                if pending.kind == "artifact-job-cancellation":
+                    job.state = "waiting-for-operator"
+                    job.status_reason = (
+                        "run-switch.artifact-cancellation-unresolved: "
+                        f"{pending.job_id} has no definitive cancellation receipt"
+                    )
+                    progress["observation_due_at"] = None
+                    progress["observation_deadline_at"] = deadline.isoformat()
+                    job.result = _persisted_result(progress)
+                    job.updated_at = now
+                else:
+                    self._mark_failed(
+                        job,
+                        "run-switch.issued-observation-expired: an older issued effect has no definitive outcome",
+                        now=now,
+                        progress=progress,
+                    )
                 return True
             due = min(
                 deadline,

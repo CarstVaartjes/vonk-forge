@@ -786,9 +786,9 @@ def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> N
     assert second.progress.workload_intent_ordinal == 2
     for _ in range(2):
         assert service.tick() is True
-        if service.application(first.id).state == "failed":
+        if service.application(first.id).state == "cancelled":
             break
-    assert service.application(first.id).state == "failed"
+    assert service.application(first.id).state == "cancelled"
     assert service.application(second.id).state in {"queued", "running"}
 
 
@@ -1124,6 +1124,48 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
             node.workload_intent_ordinal
             for node in session.scalars(select(AgentNode).order_by(AgentNode.node_id))
         ] == [0, 0]
+
+
+def test_all_idle_profile_supersedes_a_queued_load_without_a_run() -> None:
+    sessions = _database()
+    _seed(sessions)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, _node_id(1))
+        assert node is not None
+        node.workload_intent_ordinal = 1
+        session.add(Job(
+            id=_uuid(820),
+            request_id=_uuid(821),
+            kind="recipe.run-switch.v2",
+            state="queued",
+            actor="admin",
+            authority_revision="a" * 64,
+            targets=[_node_id(1)],
+            payload_digest="b" * 64,
+            payload={"workload_intent_ordinal": 1},
+            result={},
+            created_at=NOW,
+            updated_at=NOW,
+        ))
+    adapter = _SwitchAdapter()
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=adapter
+    )
+    profile = service.create(FleetProfileInput(name="Idle", assignments=[]), actor="admin")
+
+    preview = service.preview(profile.id)
+
+    assert [step.node_ids for step in preview.steps] == [[_node_id(1)]]
+    application = service.apply(
+        profile.id, plan_digest=preview.plan_digest,
+        request_key=_uuid(822), actor="admin",
+    )
+    assert application.state == "queued"
+    assert adapter.cancellations == [((_node_id(1),), 2)]
+    with sessions() as session:
+        node = session.get(AgentNode, _node_id(1))
+        assert node is not None
+        assert node.workload_intent_ordinal == 2
     assert application.result is not None
     assert application.result.changed is False
     assert application.result.completed_steps == 0

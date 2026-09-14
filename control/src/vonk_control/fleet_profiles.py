@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
+from .agent_jobs import AgentJobService
 from .bounded_json import integer, require_mapping, sequence
 from .fleet_profile_contract import (
     FleetProfileAction,
@@ -514,6 +515,18 @@ class RunSwitchFleetProfileAdapter:
                     self._write_state(session, application, state)
                     session.flush()
                 return view
+            if child.state == "waiting-for-operator":
+                view = self._view_from_child(application_id, state, child)
+                state["state"] = "waiting-for-operator"
+                state["status_reason"] = child.status_reason
+                state["child_progress"] = (
+                    view.progress.model_dump(mode="json")
+                    if view.progress is not None
+                    else None
+                )
+                self._write_state(session, application, state)
+                session.flush()
+                return view
             if child.state in {"failed", "cancelled"}:
                 reason = child.status_reason or (
                     f"Run/Switch child ended in {child.state}"
@@ -553,6 +566,11 @@ class RunSwitchFleetProfileAdapter:
             position = state["position"]
         queue = sequence(state.get("queue"))
         if queue is None or (integer(position) or 0) >= len(queue):
+            pending_cancellation = self._observe_superseded_agent_effects(
+                session, application, state
+            )
+            if pending_cancellation is not None:
+                return pending_cancellation
             state["state"] = "succeeded"
             state["result"] = {
                 "children": list(sequence(state.get("children")) or ()),
@@ -589,6 +607,60 @@ class RunSwitchFleetProfileAdapter:
         self._write_state(session, application, state)
         session.flush()
         return self._view_from_child(application_id, state, operation)
+
+    def _observe_superseded_agent_effects(
+        self,
+        session: Session,
+        application: FleetProfileApplication,
+        state: dict[str, object],
+    ) -> FleetProfileChildOperation | None:
+        """Wait for older issued cancellation receipts before a switch succeeds."""
+
+        now = _aware(self._run_switch._clock())
+        raw_due = state.get("observation_due_at")
+        if (
+            state.get("state") == "running"
+            and isinstance(raw_due, str)
+            and now < _aware(datetime.fromisoformat(raw_due))
+        ):
+            return self._view_from_state(application, state)
+        ordinal = _canonical_progress(application.progress).workload_intent_ordinal
+        if ordinal is None:
+            raise FleetProfileConflict("Profile switch workload intent is unbound")
+        scope_node_ids = _string_items(
+            state.get("scope_node_ids", []),
+            "profile switch child scope node IDs are invalid",
+        )
+        effects = AgentJobService.assess_superseded_agent_effects_in_session(
+            session, scope_node_ids, ordinal, now
+        )
+        if not effects:
+            state["observation_due_at"] = None
+            state["observation_deadline_at"] = None
+            state["pending_operation_ids"] = []
+            state["status_reason"] = None
+            return None
+        deadline = min(effect.observation_deadline for effect in effects)
+        due = min(effect.observe_due_at for effect in effects)
+        operation_ids = sorted(effect.operation_id for effect in effects)
+        next_state = "waiting-for-operator" if now >= deadline else "running"
+        reason = (
+            "An older issued workload has no definitive cancellation receipt: "
+            if now >= deadline
+            else "Waiting for older issued workload cancellation receipts: "
+        ) + ", ".join(operation_ids)
+        updated = {
+            "state": next_state,
+            "status_reason": reason[:512],
+            "observation_due_at": None if now >= deadline else due.isoformat(),
+            "observation_deadline_at": deadline.isoformat(),
+            "pending_operation_ids": operation_ids,
+        }
+        if any(state.get(key) != value for key, value in updated.items()):
+            state.update(updated)
+            self._write_state(session, application, state)
+            session.flush()
+        return self._view_from_state(application, state)
 
     def _start_child(
         self,
@@ -1773,6 +1845,48 @@ class FleetProfileService:
                     if members & target_nodes:
                         adapter_switch_needed = True
                         changed_nodes.update(members & target_nodes)
+                # A queued workload may not have created a Run yet.  An
+                # explicit all-idle profile still has cancellation work in
+                # that case; the adapter waits for issued cancellation receipts
+                # before publishing its final no-workload receipt.
+                for pending in session.scalars(
+                    select(Job).where(Job.state.in_(("queued", "running")))
+                ):
+                    if type(pending.payload.get("workload_intent_ordinal")) is not int:
+                        continue
+                    members = set(pending.targets)
+                    if not members & target_nodes:
+                        continue
+                    if not members <= target_nodes:
+                        reasons.append(FleetProfileReason(
+                            code="profile.pending_cross_scope",
+                            detail="A pending workload crosses the selected idle scope.",
+                            severity="error",
+                        ))
+                        continue
+                    adapter_switch_needed = True
+                    changed_nodes.update(members)
+                for pending in session.scalars(
+                    select(FleetProfileApplication).where(
+                        FleetProfileApplication.state.in_(("queued", "running"))
+                    )
+                ):
+                    members = {
+                        node_id
+                        for step in _persisted_profile_plan(pending).steps
+                        for node_id in step.node_ids
+                    }
+                    if not members & target_nodes:
+                        continue
+                    if not members <= target_nodes:
+                        reasons.append(FleetProfileReason(
+                            code="profile.pending_cross_scope",
+                            detail="A pending profile change crosses the selected idle scope.",
+                            severity="error",
+                        ))
+                        continue
+                    adapter_switch_needed = True
+                    changed_nodes.update(members)
             for run in active_runs:
                 members = set(run_nodes.get(run.id, ()))
                 # Installation membership is the authoritative complete
@@ -2357,8 +2471,11 @@ class FleetProfileService:
                 row.updated_at = now
                 return True
             if self._superseding_intent(session, row, progress):
-                row.state = "failed"
-                row.status_reason = "Profile intent was superseded by a changed profile or later scoped operation"
+                row.state = "cancelled"
+                row.status_reason = (
+                    "Profile order was replaced by a changed profile or later "
+                    "scoped intent; issued effects retain their own cancellation receipts"
+                )
                 row.updated_at = now
                 return True
             steps = [step.model_dump(mode="json") for step in plan.steps]
