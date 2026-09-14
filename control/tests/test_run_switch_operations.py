@@ -62,7 +62,6 @@ from vonk_control.run_switch_contract import (
     RunSwitchOperation,
     RunSwitchOperationResult,
     RunSwitchPhase,
-    RunSwitchPhaseKind,
     RunSwitchPhaseResult,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
@@ -79,7 +78,6 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationProvider,
     RunSwitchOperationService,
-    _automatic_retry_phase,
     _phase_result,
     _transient_distribution_exception,
     effective_build_receipt,
@@ -2315,7 +2313,7 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert "verify" in _result(verified).completed_phases
 
 
-def test_transient_distribution_failure_requeues_exact_plan_and_progress(
+def test_transient_distribution_child_is_not_replayed_by_parent(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -2349,7 +2347,7 @@ def test_transient_distribution_failure_requeues_exact_plan_and_progress(
     artifact_executor.children[child_id].state = "failed"
     artifact_executor.children[child_id].result = {
         "error_code": "agent.copy.timeout",
-        "uncertain": True,
+        "failure_kind": "temporary-dependency",
         "progress": {
             "completed_bytes": 512,
             "total_bytes": 1024,
@@ -2362,26 +2360,21 @@ def test_transient_distribution_failure_requeues_exact_plan_and_progress(
         },
     }
     assert service.tick() is True
-    queued = service.get(operation.operation_id)
-    assert queued.state == "queued"
-    assert queued.plan_digest == plan.plan_digest
-    assert queued.progress.completed_bytes == 512
+    failed = service.get(operation.operation_id)
+    assert failed.state == "failed"
+    assert failed.plan_digest == plan.plan_digest
+    assert failed.progress.completed_bytes == 512
+    assert failed.result is not None and failed.result.retryable
     with sessions() as session:
         row = session.get(Job, operation.operation_id)
         assert row is not None
-        assert row.current_attempt == 2
+        assert row.current_attempt <= 1
         assert row.result is not None
-        assert row.result["child_operation_id"] is None
-
-    assert service.tick() is True
-    retried = service.get(operation.operation_id)
-    assert retried.state == "running"
-    assert retried.plan_digest == plan.plan_digest
-    assert retried.result is not None
-    assert retried.result.child_operation_id != child_id
+        assert row.result["child_operation_id"] == child_id
+    assert service.tick() is False
 
 
-def test_exhausted_transient_distribution_allows_bounded_operator_retry(
+def test_operator_retry_uses_a_new_request_after_typed_transient_failure(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -2412,16 +2405,13 @@ def test_exhausted_transient_distribution_allows_bounded_operator_retry(
     )
 
     assert service.tick() is True
-    for attempt in range(3):
-        child_id = _child_operation_id(service.get(operation.operation_id))
-        artifact_executor.children[child_id].state = "failed"
-        artifact_executor.children[child_id].result = {
-            "error_code": "agent.copy.timeout",
-            "uncertain": True,
-        }
-        assert service.tick() is True
-        if attempt < 2:
-            assert service.tick() is True
+    child_id = _child_operation_id(service.get(operation.operation_id))
+    artifact_executor.children[child_id].state = "failed"
+    artifact_executor.children[child_id].result = {
+        "error_code": "agent.copy.timeout",
+        "failure_kind": "temporary-dependency",
+    }
+    assert service.tick() is True
     exhausted = service.get(operation.operation_id)
     assert exhausted.state == "failed"
     retry = service.retry(
@@ -2472,30 +2462,6 @@ def test_run_switch_retry_classification_rejects_terminal_http_and_storage_error
     assert _transient_distribution_exception(OSError(errno.EPERM, "permission denied")) is False
     assert _transient_distribution_exception(OSError(errno.ENOSPC, "no space left")) is False
     assert _transient_distribution_exception(OSError(errno.ECONNRESET, "reset")) is True
-
-
-def test_automatic_retry_is_scoped_to_replay_stable_transfer_phases() -> None:
-    """Automatic retry must not re-plan a phase whose preview is volatile.
-
-    A ``transfer`` previews immutable model and image digests and derives its
-    child request key from the phase index, so a retry adopts the same durable
-    operation.  ``start`` admission instead hashes live inventory observation
-    time and current reservations, so automatically retrying it offered the
-    unchanged request key to admission with a changed digest -- the reported
-    ``request key was already used differently`` conflict.
-    """
-
-    def phase(kind: RunSwitchPhaseKind, index: int = 0) -> RunSwitchPhase:
-        return RunSwitchPhase(
-            index=index,
-            kind=kind,
-            state="planned",
-            detail=f"{kind} phase",
-        )
-
-    assert _automatic_retry_phase(phase("transfer")) is True
-    for kind in ("start", "stop", "prepare", "cleanup", "verify", "final_verify"):
-        assert _automatic_retry_phase(phase(kind)) is False
 
 
 class _CountingPreviewLifecycle(RecipeOperationService):

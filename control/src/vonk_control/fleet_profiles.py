@@ -1999,6 +1999,11 @@ class FleetProfileService:
                             )
                         )
                         continue
+                    # An all-idle exact profile still owns removal of scoped
+                    # stopped residue. Without a switch step the adapter never
+                    # receives this desired retention decision.
+                    if self._switch_adapter is not None:
+                        adapter_switch_needed = True
                     runs = tuple(
                         session.scalars(
                             select(RecipeRun)

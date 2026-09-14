@@ -79,6 +79,12 @@ from .recipe_operations import (
     RecipeOperationService,
 )
 from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
+from .recovery_policy import (
+    FailureKind,
+    RecoveryDecision,
+    classify,
+    kind_for_agent_error,
+)
 from .resource_planning import (
     CapacitySnapshot,
     PlannedStopRelease,
@@ -320,16 +326,6 @@ _OPERATION_KINDS = frozenset(
 )
 _MAX_RETRY_ATTEMPTS = 3
 _INSTALL_PREFLIGHT_REFRESH_REASON = "runtime preflight expired during install compilation"
-_TERMINAL_RETRY_MARKERS = (
-    "digest",
-    "integrity",
-    "auth",
-    "credential",
-    "permission",
-    "denied",
-    "revoked",
-    "receipt",
-)
 _PHASES: tuple[RunSwitchPhaseKind, ...] = (
     "transfer",
     "verify",
@@ -4626,19 +4622,17 @@ class RunSwitchOperationService:
                     detail = evidence.get("reason") or evidence.get("status_reason")
                     if isinstance(detail, str) and detail:
                         reason += ": " + detail[:384]
-                    transient = _transient_distribution_failure(child)
-                    if (
-                        transient
-                        and _automatic_retry_phase(plan.phases[phase_index])
-                        and self._queue_transient_retry(
-                            operation_id,
-                            child,
-                            phase_index=phase_index,
-                            child_id=child_id,
-                        )
-                    ):
-                        return True
-                    fail(reason, retryable=transient)
+                    kind = _child_failure_kind(child)
+                    # The agent authority owns exact transfer retry/observation
+                    # and its durable attempt budget. A terminal child is not
+                    # replayed by a second parent-level automatic retry loop.
+                    self._fail(
+                        operation_id,
+                        reason,
+                        retryable=classify(kind) is RecoveryDecision.RETRY,
+                        checkpoint=(phase_index, item_index, child_id),
+                        child_evidence=evidence,
+                    )
                     return True
             with self._sessions.begin() as session:
                 job = session.get(Job, operation_id, with_for_update=True)
@@ -5024,59 +5018,32 @@ class RunSwitchOperationService:
             return self._lifecycle.get(operation_id)
         return None
 
-    def _queue_transient_retry(
+    def _fail(
         self,
         operation_id: str,
-        child: object,
+        reason: str,
         *,
-        phase_index: int,
-        child_id: str,
-    ) -> bool:
-        """Requeue one parent attempt while preserving child progress receipts."""
-
-        now = _now(self._clock)
-        with self._sessions.begin() as session:
-            job = session.get(Job, operation_id, with_for_update=True)
-            if job is None:
-                return False
-            attempt = max(1, int(job.current_attempt or 0))
-            progress = _read_progress(job.result)
-            if job.state not in {"queued", "running"} or progress.get("phase_index") != phase_index or progress.get("child_operation_id") != child_id:
-                return False
-            plan = _load_plan(job.payload["plan"])
-            raw_retry = job.payload.get("retry", {})
-            retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
-            automatic_attempts = retry.get("automatic_attempts")
-            automatic_attempts = (
-                automatic_attempts
-                if type(automatic_attempts) is int and automatic_attempts >= 1
-                else attempt
-            )
-            if phase_index >= len(plan.phases) or automatic_attempts >= _MAX_RETRY_ATTEMPTS:
-                return False
-            phase = plan.phases[phase_index]
-            _merge_progress_evidence(progress, plan, phase, _child_progress_payload(child), now)
-            progress["child_operation_id"] = None
-            progress["retryable"] = True
-            progress["retry_attempt"] = attempt + 1
-            progress["retry_reason"] = "transient distribution failure"
-            retry["automatic_attempts"] = automatic_attempts + 1
-            job.payload = dict(job.payload) | {"retry": retry}
-            job.current_attempt = attempt + 1
-            job.state = "queued"
-            job.status_reason = None
-            job.result = _persisted_result(progress)
-            job.updated_at = _now(self._clock)
-            return True
-
-    def _fail(self, operation_id: str, reason: str, *, retryable: bool = False, checkpoint: tuple[int, int, object] | None = None) -> None:
+        retryable: bool = False,
+        checkpoint: tuple[int, int, object] | None = None,
+        child_evidence: object | None = None,
+    ) -> None:
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.state not in {"queued", "running"}:
                 return
-            if checkpoint is not None and not _checkpoint_matches(job, _read_progress(job.result), *checkpoint):
+            progress = _read_progress(job.result)
+            if checkpoint is not None and not _checkpoint_matches(job, progress, *checkpoint):
                 return
-            self._mark_failed(job, reason, now=_now(self._clock), retryable=retryable)
+            now = _now(self._clock)
+            if child_evidence is not None and checkpoint is not None:
+                plan = _load_plan(job.payload["plan"])
+                if checkpoint[0] < len(plan.phases):
+                    _merge_progress_evidence(
+                        progress, plan, plan.phases[checkpoint[0]], child_evidence, now
+                    )
+            self._mark_failed(
+                job, reason, now=now, retryable=retryable, progress=progress
+            )
 
     @staticmethod
     def _mark_failed(
@@ -5575,6 +5542,28 @@ def _child_progress_payload(child: object) -> Mapping[str, object]:
     return payload
 
 
+def _child_failure_kind(child: object) -> FailureKind:
+    """Read typed child evidence; an unknown mixed result stays blocked."""
+
+    payload = _child_progress_payload(child)
+    if "failure_kind" in payload or "error_code" in payload or payload.get("uncertain") is True:
+        return kind_for_agent_error(payload)
+    kinds: list[FailureKind] = []
+    for field in ("node_evidence", "launch_evidence"):
+        evidence = payload.get(field)
+        if isinstance(evidence, Mapping):
+            kinds.extend(
+                kind_for_agent_error(item)
+                for item in evidence.values()
+                if isinstance(item, Mapping)
+            )
+    if kinds and all(kind is FailureKind.TEMPORARY_DEPENDENCY for kind in kinds):
+        return FailureKind.TEMPORARY_DEPENDENCY
+    if kinds and all(kind is FailureKind.UNCERTAIN_EFFECT for kind in kinds):
+        return FailureKind.UNCERTAIN_EFFECT
+    return FailureKind.INVALID_CONTRACT
+
+
 def _without_observation_time(value: object) -> object:
     """Compare progress as state; elapsed time is projected on reads."""
 
@@ -5640,62 +5629,7 @@ def _established_start_effect(
     return None
 
 
-def _automatic_retry_phase(phase: RunSwitchPhase) -> bool:
-    """Whether re-running this phase adopts the same child it queued before.
-
-    Only a content-addressed distribution phase qualifies.  ``transfer``
-    previews immutable model and image digests and derives its child request
-    key from the phase index, so a retry observes and resumes one durable
-    operation instead of inventing a second one.  ``start`` admission instead
-    hashes live inventory observation time and current reservations, so
-    automatically retrying it re-previewed a different plan and then offered
-    the unchanged request key to admission with a changed digest.  A failed
-    start is therefore reported for an explicit disposition, and the original
-    child is adopted by the executor before mutable admission is read again.
-    """
-
-    return phase.kind == "transfer"
-
-
-def _transient_distribution_failure(child: object) -> bool:
-    """Retry transport uncertainty while keeping receipt failures terminal."""
-
-    payload = _child_progress_payload(child)
-    if getattr(child, "state", None) in {"waiting-for-operator", "uncertain"}:
-        return True
-    raw_uncertain = payload.get("uncertain")
-    text = " ".join(
-        str(payload.get(key, ""))
-        for key in ("error_code", "code", "reason", "detail", "summary", "error")
-    ).casefold()
-    if any(marker in text for marker in _TERMINAL_RETRY_MARKERS):
-        return False
-    if raw_uncertain is True:
-        return True
-    return any(
-        marker in text
-        for marker in (
-            "http",
-            "timeout",
-            "timed out",
-            "connection",
-            "network",
-            "transport",
-            "copy",
-            "unavailable",
-            "temporary",
-            "oserror",
-        )
-    )
-
-
 def _transient_distribution_exception(error: BaseException) -> bool:
-    text = str(error).casefold()
-    if any(
-        marker in text
-        for marker in _TERMINAL_RETRY_MARKERS
-    ):
-        return False
     if isinstance(error, httpx.HTTPError):
         response = getattr(error, "response", None)
         status = getattr(response, "status_code", None)

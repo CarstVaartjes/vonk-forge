@@ -379,7 +379,7 @@ class FleetProfileChildProgress(_StrictModel):
 class FleetProfileSwitchQueueItem(_StrictModel):
     """One durable Run/Switch child in the profile reconciliation queue."""
 
-    kind: Literal["run", "stop"]
+    kind: Literal["run", "stop", "cleanup"]
     id: UuidId
 
 
@@ -387,7 +387,7 @@ class FleetProfileSwitchChildState(_StrictModel):
     """Terminal receipt for a child already completed by the adapter."""
 
     operation_id: UuidId
-    kind: Literal["run", "stop"]
+    kind: Literal["run", "stop", "cleanup"]
     state: Literal["succeeded", "failed", "cancelled"]
     result: FleetProfileSwitchChildResult | None = None
 
@@ -416,7 +416,7 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     queue: list[FleetProfileSwitchQueueItem] = Field(max_length=128)
     position: int = Field(default=0, ge=0, le=128)
     active_operation_id: UuidId | None = None
-    active_kind: Literal["run", "stop"] | None = None
+    active_kind: Literal["run", "stop", "cleanup"] | None = None
     children: list[FleetProfileSwitchChildState] = Field(default_factory=list, max_length=128)
     actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     request_id: UuidId

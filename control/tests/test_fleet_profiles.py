@@ -3280,6 +3280,7 @@ def test_profile_preview_delegates_removal_to_the_orchestrator(
 
     preview = service.preview(profile.id)
 
+    assert [step.kind for step in preview.steps] == ["switch"]
     assert not any(step.kind == "uninstall" for step in preview.steps), [
         step.kind for step in preview.steps
     ]
