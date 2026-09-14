@@ -304,6 +304,12 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     assert mismatch.result["members"][0]["error"] == (
         "distributed transfer byte evidence mismatch"
     )
+    with services.sessions.begin() as session:
+        child = session.get(Job, first.operation_id)
+        assert child is not None
+        child.targets = [NODE_B]
+    with pytest.raises(RuntimeError, match="distribution child target scope changed"):
+        executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress=build_progress)
 
 
 def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:

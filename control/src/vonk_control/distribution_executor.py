@@ -518,6 +518,20 @@ class DurableDistributionPhaseExecutor:
                 "cached_nodes": child.payload.get("cached_nodes"),
                 "assignments": child.payload.get("assignments"),
             }, phase=phase)
+            assignments = child.payload.get("assignments")
+            cached = child.payload.get("cached_nodes")
+            if (
+                not isinstance(assignments, dict)
+                or not isinstance(cached, list)
+                or child.targets != list(assignments)
+                or set(assignments).intersection(cached)
+                or set(assignments).union(cached) != set(phase.node_ids)
+                or any(
+                    DistributionAssignment.parse(raw).node_id != node_id
+                    for node_id, raw in assignments.items()
+                )
+            ):
+                raise RuntimeError("distribution child target scope changed")
             return PhaseExecution(operation_id=child.id, result=receipt)
 
     def _ensure_child(
