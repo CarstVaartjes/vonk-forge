@@ -560,13 +560,17 @@ def _enqueue_recovery_stop(
     }
     targets = sorted(node_id for group in stop_phases for node_id, _payload in group)
     start_jobs = tuple(
-        job
-        for job in session.scalars(
-            select(Job).where(Job.kind == "recipe.start").order_by(Job.created_at, Job.id)
+        session.scalars(
+            select(Job)
+            .where(
+                Job.kind == "recipe.start",
+                Job.payload["owner_kind"].as_string() == "run",
+                Job.payload["owner_id"].as_string() == run.id,
+                Job.payload["recovery"].as_string().is_(None),
+            )
+            .order_by(Job.created_at, Job.id)
+            .limit(2)
         )
-        if job.payload.get("owner_kind") == "run"
-        and job.payload.get("owner_id") == run.id
-        and "recovery" not in job.payload
     )
     if len(start_jobs) != 1:
         raise DistributedLifecycleError("distributed recovery lacks its start authority")

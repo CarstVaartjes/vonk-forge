@@ -50,6 +50,7 @@ from .install_admission import (
 from .models import (
     AgentNode,
     AgentOperation,
+    AgentOperationAttempt,
     AgentPresence,
     ArtifactJob,
     CatalogDocumentRevision,
@@ -255,10 +256,17 @@ def _bound_workload_intent(job: Job) -> int:
 
 def _run_start_intent(session: Session, run_id: str) -> int:
     starts = tuple(
-        job for job in session.scalars(select(Job).where(Job.kind == "recipe.start"))
-        if job.payload.get("owner_kind") == "run"
-        and job.payload.get("owner_id") == run_id
-        and "recovery" not in job.payload
+        session.scalars(
+            select(Job)
+            .where(
+                Job.kind == "recipe.start",
+                Job.payload["owner_kind"].as_string() == "run",
+                Job.payload["owner_id"].as_string() == run_id,
+                Job.payload["recovery"].as_string().is_(None),
+            )
+            .order_by(Job.created_at, Job.id)
+            .limit(2)
+        )
     )
     if len(starts) != 1:
         raise RecipeOperationConflict("recipe run lacks its original start authority")
@@ -275,6 +283,75 @@ def _intent_is_current(session: Session, ordinal: int, targets: Sequence[str]) -
     return tuple(node.node_id for node in nodes) == tuple(sorted(set(targets))) and all(
         node.workload_intent_ordinal == ordinal for node in nodes
     )
+
+
+def _workload_owner_scope(session: Session, kind: str, owner_id: str) -> tuple[str, ...]:
+    if kind == "recipe.stop":
+        if session.get(RecipeRun, owner_id) is None:
+            raise RecipeOperationConflict("recipe run does not exist")
+        statement = select(RunNode.node_id).where(RunNode.run_id == owner_id)
+    elif kind in {"recipe.install", "recipe.uninstall"}:
+        if session.get(RecipeInstallation, owner_id) is None:
+            raise RecipeOperationConflict("recipe installation does not exist")
+        statement = select(InstallationNode.node_id).where(
+            InstallationNode.installation_id == owner_id
+        )
+    else:
+        raise RecipeOperationConflict("workload reconciliation kind is invalid")
+    targets = tuple(sorted(session.scalars(statement)))
+    if not targets or len(targets) != len(set(targets)):
+        raise RecipeOperationConflict("workload owner scope is invalid")
+    return targets
+
+
+def _active_owned_workload_jobs(
+    session: Session, kind: str, owner_id: str, *, lock: bool = False
+) -> tuple[Job, ...]:
+    owner_kind = "run" if kind == "recipe.stop" else "installation"
+    statement = (
+        select(Job)
+        .where(
+            Job.kind == kind,
+            Job.state.in_(("queued", "running")),
+            Job.payload["owner_kind"].as_string() == owner_kind,
+            Job.payload["owner_id"].as_string() == owner_id,
+        )
+        .order_by(Job.id)
+    )
+    if lock:
+        statement = statement.with_for_update(of=Job)
+    return tuple(session.scalars(statement))
+
+
+def _unissued_workload_children(
+    session: Session, job: Job, *, lock: bool = False
+) -> tuple[AgentOperation, ...] | None:
+    ordinal = job.payload.get("workload_intent_ordinal")
+    if type(ordinal) is not int or ordinal < 1:
+        return None
+    statement = (
+        select(AgentOperation)
+        .where(AgentOperation.parent_job_id == job.id)
+        .order_by(AgentOperation.id)
+    )
+    if lock:
+        statement = statement.with_for_update(of=AgentOperation)
+    children = tuple(session.scalars(statement))
+    if not children or any(
+        child.state != "queued"
+        or child.current_attempt != 0
+        or child.workload_intent_ordinal != ordinal
+        or child.node_id not in job.targets
+        for child in children
+    ):
+        return None
+    if session.scalar(
+        select(AgentOperationAttempt.id)
+        .where(AgentOperationAttempt.operation_id.in_(child.id for child in children))
+        .limit(1)
+    ) is not None:
+        return None
+    return children
 
 
 def _cancel_reason(value: object) -> str:
@@ -1429,6 +1506,76 @@ class RecipeOperationService:
             session.add(job)
             session.flush()
             return self._view(job)
+
+    def assess_superseded_unissued(self, kind: str, owner_id: str) -> bool:
+        """Read-only: can an exact older operation be retired before a new intent?"""
+        with self._sessions() as session:
+            scope = _workload_owner_scope(session, kind, owner_id)
+            active = _active_owned_workload_jobs(session, kind, owner_id)
+            return bool(active) and all(
+                tuple(sorted(job.targets)) == scope
+                and _unissued_workload_children(session, job) is not None
+                for job in active
+            )
+
+    def reconcile_superseded_unissued(
+        self, kind: str, owner_id: str, workload_intent_ordinal: int
+    ) -> bool:
+        """Retire only exact older workload jobs with no issued agent attempt."""
+        if type(workload_intent_ordinal) is not int or workload_intent_ordinal < 1:
+            raise RecipeOperationConflict("workload intent ordinal is invalid")
+        now = self._clock()
+        retired = False
+        with self._sessions.begin() as session:
+            scope = _workload_owner_scope(session, kind, owner_id)
+            nodes = tuple(session.scalars(
+                select(AgentNode)
+                .where(AgentNode.node_id.in_(scope))
+                .order_by(AgentNode.node_id)
+                .with_for_update(of=AgentNode)
+            ))
+            if (
+                tuple(node.node_id for node in nodes) != scope
+                or any(
+                    node.workload_intent_ordinal != workload_intent_ordinal
+                    or node.state != "active"
+                    or node.revoked_at is not None
+                    for node in nodes
+                )
+            ):
+                raise RecipeOperationConflict("workload intent was superseded")
+            for job in _active_owned_workload_jobs(session, kind, owner_id, lock=True):
+                previous_ordinal = job.payload.get("workload_intent_ordinal")
+                if tuple(sorted(job.targets)) != scope:
+                    raise RecipeOperationConflict("workload owner scope changed")
+                if (
+                    type(previous_ordinal) is not int
+                    or previous_ordinal < 1
+                    or previous_ordinal >= workload_intent_ordinal
+                ):
+                    continue
+                children = _unissued_workload_children(session, job, lock=True)
+                if children is None:
+                    continue
+                job.state = "cancelled"
+                job.status_reason = "superseded before agent issuance"
+                job.updated_at = now
+                for child in children:
+                    child.state = "cancelled"
+                    child.status_reason = "superseded before agent issuance"
+                    child.retry_due_at = None
+                    child.updated_at = now
+                retired = True
+            if kind == "recipe.stop" and retired and not _active_owned_workload_jobs(
+                session, kind, owner_id
+            ):
+                run = session.get(RecipeRun, owner_id, with_for_update=True)
+                if run is not None and run.state == "stopping" and run.route_state == "withdrawn":
+                    # Keep route withdrawn and reservations until an exact new
+                    # stop observes/finishes the live workload.
+                    run.state = "lost"
+                    run.updated_at = now
+        return retired
 
     def preview_stop(self, run_id: str) -> StopPlan:
         with self._sessions() as session:
@@ -2954,12 +3101,22 @@ class RecipeOperationService:
             }
             for reservation in reservations
         )
+        prospective_run_state = run.state
+        if not lock and run.state == "stopping" and run.route_state == "withdrawn":
+            active_stops = _active_owned_workload_jobs(session, "recipe.stop", run_id)
+            scope = tuple(sorted(node.node_id for node in nodes))
+            if active_stops and all(
+                tuple(sorted(job.targets)) == scope
+                and _unissued_workload_children(session, job) is not None
+                for job in active_stops
+            ):
+                prospective_run_state = "lost"
         return stop_plan(
             run_id=run.id,
             installation_id=run.installation_id,
             recipe_revision_id=revision.id,
             alias=run.alias,
-            run_state=run.state,
+            run_state=prospective_run_state,
             route_state=run.route_state,
             route_generation=run.route_generation,
             route_digest=run.route_digest,
@@ -3051,6 +3208,17 @@ class RecipeOperationService:
         if lock:
             operation_statement = operation_statement.with_for_update(of=Job)
         active_operation = session.scalar(operation_statement) is not None
+        if active_operation and not lock:
+            active_uninstalls = _active_owned_workload_jobs(
+                session, "recipe.uninstall", installation_id
+            )
+            scope = tuple(sorted(node.node_id for node in nodes))
+            if active_uninstalls and all(
+                tuple(sorted(job.targets)) == scope
+                and _unissued_workload_children(session, job) is not None
+                for job in active_uninstalls
+            ):
+                active_operation = False
 
         expected_nodes = stored_installation_plan.get("nodes")
         expected_identity = (
