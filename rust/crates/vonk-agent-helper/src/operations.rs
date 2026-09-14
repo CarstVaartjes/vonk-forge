@@ -1286,8 +1286,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     image_reference,
                     &receipt.image_config_id,
                 )?;
-                match self.inspect_runtime_image_for_reference(image_reference) {
-                    Ok((inspected, _)) => {
+                match self.inspect_runtime_image_for_reference_if_present(image_reference)? {
+                    Some((inspected, _)) => {
                         if inspected.1 != "linux"
                             || inspected.2 != "arm64"
                             || inspected.3 != "v1"
@@ -1300,9 +1300,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         }
                         return Ok(());
                     }
-                    Err(OperationError::InvalidArtifact)
-                        if self.runtime_image_missing(&local_image)? => {}
-                    Err(error) => return Err(error),
+                    None if self.runtime_image_missing(&local_image)? => {}
+                    None => return Err(OperationError::InvalidArtifact),
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -1838,6 +1837,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn inspect_runtime_image(&self, image: &str) -> Result<RuntimeImageInspection, OperationError> {
+        self.inspect_runtime_image_if_present(image)?
+            .ok_or(OperationError::InvalidArtifact)
+    }
+
+    fn inspect_runtime_image_if_present(
+        &self,
+        image: &str,
+    ) -> Result<Option<RuntimeImageInspection>, OperationError> {
         let output = self.run_docker(&[
             "image".to_owned(),
             "inspect".to_owned(),
@@ -1845,40 +1852,56 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "{{.Id}}\t{{.Os}}\t{{.Architecture}}\t{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t{{.Config.User}}".to_owned(),
             image.to_owned(),
         ])?;
+        if !output.success {
+            return if output.exit_code == Some(1) && output.stdout.is_empty() {
+                Ok(None)
+            } else {
+                Err(OperationError::RuntimeImageInspectFailed)
+            };
+        }
         let fields = std::str::from_utf8(&output.stdout)
             .ok()
             .map(str::trim)
             .map(|value| value.split('\t').map(str::to_owned).collect::<Vec<_>>())
             .unwrap_or_default();
-        if !output.success || fields.len() != 5 || !valid_oci_digest(&fields[0]) {
+        if output.exit_code != Some(0) || fields.len() != 5 || !valid_oci_digest(&fields[0]) {
             return Err(OperationError::InvalidArtifact);
         }
-        Ok((
+        Ok(Some((
             fields[0].clone(),
             fields[1].clone(),
             fields[2].clone(),
             fields[3].clone(),
             fields[4].clone(),
-        ))
+        )))
     }
 
     fn inspect_runtime_image_for_reference(
         &self,
         image_reference: &str,
     ) -> Result<(RuntimeImageInspection, String), OperationError> {
+        self.inspect_runtime_image_for_reference_if_present(image_reference)?
+            .ok_or(OperationError::InvalidArtifact)
+    }
+
+    fn inspect_runtime_image_for_reference_if_present(
+        &self,
+        image_reference: &str,
+    ) -> Result<Option<(RuntimeImageInspection, String)>, OperationError> {
         let (local_image, _) = parse_local_image_reference(image_reference)?;
-        match self.inspect_runtime_image(image_reference) {
-            Ok(inspected) => Ok((inspected, image_reference.to_owned())),
-            Err(OperationError::InvalidArtifact) => {
+        match self.inspect_runtime_image_if_present(image_reference)? {
+            Some(inspected) => Ok(Some((inspected, image_reference.to_owned()))),
+            None => {
                 // Classic Docker may discard RepoDigests while loading an OCI
                 // archive. The signed logical reference remains receipt-bound;
                 // use the verified local config ID as the daemon reference so
                 // launch stays pinned to the inspected image object.
-                let inspected = self.inspect_runtime_image(&local_image)?;
+                let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)? else {
+                    return Ok(None);
+                };
                 let operational_image = inspected.0.clone();
-                Ok((inspected, operational_image))
+                Ok(Some((inspected, operational_image)))
             }
-            Err(error) => Err(error),
         }
     }
 
@@ -3595,6 +3618,8 @@ mod tests {
         loads: Arc<std::sync::atomic::AtomicUsize>,
         image_missing: Arc<std::sync::atomic::AtomicBool>,
         wrong_image: Arc<std::sync::atomic::AtomicBool>,
+        malformed_image: Arc<std::sync::atomic::AtomicBool>,
+        empty_listing: Arc<std::sync::atomic::AtomicBool>,
         deny_listing: Arc<std::sync::atomic::AtomicBool>,
     }
 
@@ -3621,6 +3646,13 @@ mod tests {
                     exit_code: Some(0),
                 });
             }
+            if inspect_compiled && self.malformed_image.load(SeqCst) {
+                return Ok(CommandOutput {
+                    success: true,
+                    stdout: b"malformed\n".to_vec(),
+                    exit_code: Some(0),
+                });
+            }
             if arguments.first().map(String::as_str) == Some("image")
                 && arguments.get(1).map(String::as_str) == Some("ls")
             {
@@ -3629,7 +3661,7 @@ mod tests {
                 }
                 return Ok(CommandOutput {
                     success: true,
-                    stdout: if self.image_missing.load(SeqCst) {
+                    stdout: if self.image_missing.load(SeqCst) || self.empty_listing.load(SeqCst) {
                         Vec::new()
                     } else {
                         format!("sha256:{}\n", "b".repeat(64)).into_bytes()
@@ -4946,6 +4978,12 @@ mod tests {
         assert!(executor.runtime_image_import(&arguments).is_err());
         assert_eq!(runner.loads.load(SeqCst), 2);
         runner.wrong_image.store(false, SeqCst);
+        runner.malformed_image.store(true, SeqCst);
+        runner.empty_listing.store(true, SeqCst);
+        assert!(executor.runtime_image_import(&arguments).is_err());
+        assert_eq!(runner.loads.load(SeqCst), 2);
+        runner.malformed_image.store(false, SeqCst);
+        runner.empty_listing.store(false, SeqCst);
         runner.image_missing.store(true, SeqCst);
         runner.deny_listing.store(true, SeqCst);
         assert!(executor.runtime_image_import(&arguments).is_err());
