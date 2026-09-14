@@ -3,190 +3,78 @@
 from __future__ import annotations
 
 import json
-from datetime import timedelta
-from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
-from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
-from vonk_control.models import (
-    AgentNode,
-    Base,
-    FleetProfileApplication,
-    RecipeInstallation,
-    RecipeRun,
-)
+from sqlalchemy import select
 
-from .test_fleet_profiles import (
-    NOW,
-    _input,
-    _node_id,
-    _ProfileLifecycleSimulator,
-    _seed,
-    _uuid,
-)
-
-
-class FailingStart(_ProfileLifecycleSimulator):
-    fail = True
-
-    def start(self, plan, **kwargs):
-        if self.fail:
-            raise RuntimeError("Runtime temporarily unavailable")
-        return super().start(plan, **kwargs)
-
-
-def setup_recovery(tmp_path):
-    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'recovery.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    _recipe, revision = _seed(sessions)
-    operations = FailingStart(sessions)
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW, recipe_operations=operations
-    )
-    profile = service.create(_input(revision), actor="admin")
-    preview = service.preview(profile.id)
-    application = service.apply(
-        profile.id,
-        plan_digest=preview.plan_digest,
-        request_key=_uuid(800),
-        actor="admin",
-    )
-    finish(service, application.id)
-    assert service.application(application.id).state == "failed"
-    return sessions, operations, service, profile, application
-
-
-def finish(service, application_id):
-    for _ in range(20):
-        if service.application(application_id).state in {"failed", "succeeded"}:
-            return
-        assert service.tick()
-    pytest.fail("profile coordinator did not finish")
-
-
-def test_retry_reconciles_partial_completion_and_survives_restart(tmp_path):
-    sessions, operations, service, _profile, original = setup_recovery(tmp_path)
-    failed = service.application(original.id)
-    assert failed.progress.completed_steps == 4
-    assert failed.progress.step_results
-    with sessions() as session:
-        installation_id = session.scalar(select(RecipeInstallation.id))
-        assert installation_id is not None
-    assert service.retry_eligible(original.id)
-    retry = service.retry(original.id, request_key=_uuid(801), actor="admin")
-    assert retry.id != original.id
-    assert retry.retry_of_application_id == original.id
-    assert retry.attempt == 2
-    assert retry.total_steps == 1
-    assert retry.progress.intended_profile == failed.progress.intended_profile
-    with sessions() as session:
-        stored = session.get(FleetProfileApplication, retry.id)
-        assert stored is not None
-        stored_steps = stored.plan["steps"]
-        assert isinstance(stored_steps, list)
-        assert [step["kind"] for step in stored_steps] == ["start"]
-    assert not service.retry_eligible(original.id)
-    with pytest.raises(FleetProfileConflict, match="superseded"):
-        service.retry(original.id, request_key=_uuid(802), actor="admin")
-    persisted_url = sessions.kw["bind"].url
-    sessions.kw["bind"].dispose()
-    sessions = sessionmaker(create_engine(persisted_url), expire_on_commit=False)
-    operations.sessions = sessions
-    restarted = FleetProfileService(
-        sessions, clock=lambda: NOW + timedelta(seconds=1), recipe_operations=operations
-    )
-    assert restarted.retry(original.id, request_key=_uuid(801), actor="admin") == retry
-    operations.fail = False
-    operations.events.clear()
-    finish(restarted, retry.id)
-    final = restarted.application(retry.id)
-    assert final.state == "succeeded"
-    assert operations.events == ["start"]
-    assert final.result is not None
-    assert final.result.completed_steps == 1
-    assert restarted.application(original.id) == failed
-    with sessions() as session:
-        assert list(session.scalars(select(RecipeInstallation.id))) == [installation_id]
-    assert restarted.retry(original.id, request_key=_uuid(801), actor="admin") == final
-    with pytest.raises(FleetProfileConflict, match="request key"):
-        restarted.retry(retry.id, request_key=_uuid(801), actor="admin")
-
-
-def test_failed_retry_can_itself_be_retried_without_replaying_completed_work(tmp_path):
-    _sessions, operations, service, _profile, original = setup_recovery(tmp_path)
-    retry = service.retry(original.id, request_key=_uuid(801), actor="admin")
-    finish(service, retry.id)
-    assert service.retry_eligible(retry.id)
-    third = service.retry(retry.id, request_key=_uuid(802), actor="admin")
-    assert third.attempt == 3
-    operations.fail = False
-    finish(service, third.id)
-    assert service.application(third.id).state == "succeeded"
-
-
-def test_recovery_rejects_obsolete_intent_and_revoked_scope(tmp_path):
-    sessions, _operations, service, profile, original = setup_recovery(tmp_path)
-    with sessions.begin() as session:
-        node = session.get(AgentNode, _node_id(1))
-        assert node is not None
-        node.revoked_at = NOW
-    with pytest.raises(FleetProfileConflict, match="blocks"):
-        service.retry(original.id, request_key=_uuid(801), actor="admin")
-    with sessions.begin() as session:
-        node = session.get(AgentNode, _node_id(1))
-        assert node is not None
-        node.revoked_at = None
-    changed = _input(_uuid(2), name="New intent")
-    service.update(profile.id, changed, actor="admin")
-    assert not service.retry_eligible(original.id)
-    with pytest.raises(FleetProfileConflict, match="obsolete"):
-        service.retry(original.id, request_key=_uuid(801), actor="admin")
+from .test_fleet_profile_recovery_current import _failed_profile
+from .test_fleet_profiles import _uuid
 
 
 def test_profile_edit_supersedes_unissued_assignment_after_failed_load(
     tmp_path,
 ):
-    _sessions, operations, service, profile, original = setup_recovery(tmp_path)
+    from vonk_control.models import Job
+
+    sessions, _lifecycle, service, profile, desired, original, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
     retry = service.retry(original.id, request_key=_uuid(801), actor="admin")
-    changed = _input(_uuid(2)).model_copy(
+    changed = desired.model_copy(
         update={
             "assignments": [
-                _input(_uuid(2)).assignments[0].model_copy(
+                desired.assignments[0].model_copy(
                     update={"assignment_name": "different-chat"}
                 )
             ]
         }
     )
     service.update(profile.id, changed, actor="admin")
-    operations.fail = False
-    operations.events.clear()
-    finish(service, retry.id)
+    assert service.tick()
     assert service.application(retry.id).state == "failed"
     assert "superseded" in (service.application(retry.id).status_reason or "")
-    assert operations.events == []
-    assert service._application_assignments(retry.id)[0].alias == "studio-chat"
+    with sessions() as session:
+        assert (
+            len(
+                tuple(
+                    session.scalars(
+                        select(Job).where(Job.kind == "recipe.run-switch.v2")
+                    )
+                )
+            )
+            == 1
+        )
 
 
 def test_retry_already_reconciled_fleet_returns_real_noop_receipt(tmp_path):
-    sessions, operations, service, _profile, original = setup_recovery(tmp_path)
-    with sessions() as session:
-        installation_id = session.scalar(select(RecipeInstallation.id))
-        assert installation_id is not None
-    operations.fail = False
-    plan = operations.preview_run(installation_id, "studio-chat")
-    operations.start(
-        plan, plan_digest=plan.plan_digest, actor="admin", request_id=_uuid(810)
+    from vonk_control.models import ClusterMapping, RecipeBuild
+
+    from .test_recipe_operations import installed_recipe, started_recipe
+
+    sessions, lifecycle, service, _profile, _desired, original, _child, nodes = (
+        _failed_profile(tmp_path)
     )
-    operations.events.clear()
+    with sessions() as session:
+        mapping_id = session.scalar(select(ClusterMapping.id))
+        build_id = session.scalar(select(RecipeBuild.id))
+    assert mapping_id is not None and build_id is not None
+    installed = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=_uuid(809)
+    )
+    started_recipe(
+        sessions,
+        lifecycle,
+        installed.owner_id,
+        nodes,
+        request_id=_uuid(810),
+        alias="recover-chat",
+    )
     retry = service.retry(original.id, request_key=_uuid(801), actor="admin")
     assert retry.state == "succeeded"
     assert retry.total_steps == 0
     assert retry.result is not None
     assert retry.result.changed is False
-    assert operations.events == []
+    assert service.retry(original.id, request_key=_uuid(801), actor="admin") == retry
 
 
 def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):
@@ -194,7 +82,9 @@ def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):
     from pydantic import ValidationError
     from vonk_control.fleet_profile_contract import FleetProfileApplicationView
 
-    _sessions, _operations, service, _profile, original = setup_recovery(tmp_path)
+    _sessions, _lifecycle, service, _profile, _desired, original, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
     failed = service.application(original.id).model_dump(mode="json")
     for changes in (
         {"status_reason": None},
@@ -206,126 +96,3 @@ def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):
             FleetProfileApplicationView.model_validate_json(
                 json.dumps({**failed, **changes})
             )
-
-
-@pytest.mark.parametrize("entrypoint", ["retry", "load"])
-def test_retry_does_not_abandon_a_still_active_child_after_poll_failure(tmp_path, entrypoint):
-    sessions, operations, service, profile, original = setup_recovery(tmp_path)
-    def recover():
-        if entrypoint == "load":
-            return service.load(profile.number, request_key=_uuid(801), actor="admin")
-        return service.retry(original.id, request_key=_uuid(801), actor="admin")
-    child_id = _uuid(820)
-    operations.operations[child_id] = SimpleNamespace(id=child_id, state="running")
-    with sessions.begin() as session:
-        application = session.get(FleetProfileApplication, original.id)
-        assert application is not None
-        application.current_operation_id = child_id
-    with pytest.raises(FleetProfileConflict, match="still active"):
-        recover()
-    del operations.operations[child_id]
-    with pytest.raises(FleetProfileConflict, match="must be reconciled"):
-        recover()
-
-
-def test_numbered_load_recovers_failed_attempts_and_replays_the_request(tmp_path):
-    sessions, operations, service, profile, original = setup_recovery(tmp_path)
-    failed = service.application(original.id)
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW + timedelta(seconds=1), recipe_operations=operations
-    )
-    retry = service.load(profile.number, request_key=_uuid(830), actor="admin")
-    assert retry.retry_of_application_id == original.id
-    assert retry.attempt == 2
-    with pytest.raises(FleetProfileConflict, match="already active"):
-        service.load(profile.number, request_key=_uuid(832), actor="admin")
-    finish(service, retry.id)
-    assert service.application(retry.id).state == "failed"
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW + timedelta(seconds=2), recipe_operations=operations
-    )
-    operations.fail = False
-    operations.events.clear()
-    third = service.load(profile.number, request_key=_uuid(831), actor="admin")
-    assert third.retry_of_application_id == retry.id
-    assert third.attempt == 3
-    finish(service, third.id)
-    final = service.application(third.id)
-    assert final.state == "succeeded"
-    assert operations.events == ["start"]
-    assert service.application(original.id) == failed
-    assert service.load(profile.number, request_key=_uuid(831), actor="admin") == final
-    with sessions() as session:
-        assert len(list(session.scalars(select(FleetProfileApplication)))) == 3
-    service.update(profile.id, _input(_uuid(2), name="Changed intent"), actor="admin")
-    with pytest.raises(FleetProfileConflict, match="request key"):
-        service.load(profile.number, request_key=_uuid(831), actor="admin")
-
-
-def test_numbered_load_repeated_noop_keeps_distinct_request_receipts(tmp_path):
-    from vonk_control.fleet_profile_contract import FleetProfileInput
-
-    sessions, operations, _service, _profile, _original = setup_recovery(tmp_path)
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW + timedelta(seconds=1), recipe_operations=operations
-    )
-    idle = service.create(
-        FleetProfileInput(name="Keep cached", assignments=[], installation_policy="keep-cached"),
-        actor="admin",
-    )
-    first = service.load(idle.number, request_key=_uuid(840), actor="admin")
-    assert first.state == "succeeded"
-    assert first.total_steps == 0
-    second = service.load(idle.number, request_key=_uuid(841), actor="admin")
-    assert second.id != first.id
-    assert second.state == "succeeded"
-    assert second.result is not None and not second.result.changed
-    assert service.load(idle.number, request_key=_uuid(841), actor="admin") == second
-
-
-def test_restart_adopts_the_child_queued_before_the_parent_checkpoint(tmp_path):
-    """Recovery must not lose the child a crashed tick already queued.
-
-    The step records its child by deterministic request key before the parent
-    commits ``current_operation_id``.  A worker that dies inside that gap came
-    back, re-read mutable admission -- which its own active child has already
-    changed -- and then offered the unchanged request key to admission with a
-    changed digest.  Adoption binds the recorded child instead, so exactly one
-    authorized effect exists and the step still completes.
-    """
-
-    sessions, operations, service, _profile, original = setup_recovery(tmp_path)
-    operations.fail = False
-    retry = service.retry(original.id, request_key=_uuid(801), actor="admin")
-    assert retry.total_steps == 1
-    operations.events.clear()
-
-    assert service.tick() is True
-    queued = service.application(retry.id)
-    child_id = queued.current_operation_id
-    assert child_id is not None
-    assert operations.events == ["start"]
-
-    # Simulate the crash window: the child is durable but the parent never
-    # checkpointed it.
-    with sessions.begin() as session:
-        application = session.get(FleetProfileApplication, retry.id)
-        assert application is not None
-        application.current_operation_id = None
-    operations.events.clear()
-
-    restarted = FleetProfileService(
-        sessions,
-        clock=lambda: NOW + timedelta(seconds=1),
-        recipe_operations=operations,
-    )
-    assert restarted.tick() is True
-    finish(restarted, retry.id)
-
-    recovered = restarted.application(retry.id)
-    assert recovered.state == "succeeded"
-    assert recovered.progress.step_results["0"].operation_id == child_id
-    # No second child was queued for the adopted step.
-    assert operations.events == []
-    with sessions() as session:
-        assert len(list(session.scalars(select(RecipeRun)))) == 1

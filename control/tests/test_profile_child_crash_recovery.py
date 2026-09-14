@@ -69,7 +69,6 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
             sessions,
             clock=lifecycle._clock,
             run_switch_operations=run_switch_service(),
-            recipe_operations=lifecycle,
         )
         profile = service.create(
             FleetProfileInput.model_validate(
@@ -148,7 +147,6 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
             sessionmaker(engine, expire_on_commit=False),
             clock=lifecycle._clock,
             run_switch_operations=run_switch_service(),
-            recipe_operations=lifecycle,
         )
         for _ in range(4):
             restarted.tick()
@@ -211,7 +209,6 @@ def test_postgres_completed_cleanup_child_is_adopted_after_checkpoint_crash(
             sessions,
             clock=lifecycle._clock,
             run_switch_operations=run_switch,
-            recipe_operations=lifecycle,
         )
         profile = service.create(
             FleetProfileInput.model_validate(
@@ -284,7 +281,6 @@ def test_postgres_completed_cleanup_child_is_adopted_after_checkpoint_crash(
                 artifact_phase_executor=RecordingArtifactExecutor(),
                 memory_floor_bytes=50,
             ),
-            recipe_operations=lifecycle,
         )
         for _ in range(4):
             restarted.tick()
