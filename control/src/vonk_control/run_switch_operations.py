@@ -2242,7 +2242,9 @@ class RunSwitchOperationService:
     def tick(self) -> bool:
         """Give every due independent operation a bounded chance to advance."""
 
-        due_at = Job.result["observation_due_at"].as_string()
+        # Canonical JSON emits UTC as Z; the clock's isoformat uses +00:00.
+        # Compare the same spelling so an exactly due operation is eligible.
+        due_at = func.replace(Job.result["observation_due_at"].as_string(), "Z", "+00:00")
         with self._sessions() as session:
             active = (
                 select(Job.id)

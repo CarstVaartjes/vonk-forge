@@ -769,9 +769,9 @@ def test_due_scheduler_reaches_work_past_a_full_parked_batch(
                 payload_digest="a" * 64,
                 payload={},
                 result={"observation_due_at": (
-                    NOW - timedelta(seconds=1) if index == 16
+                    NOW if index == 16
                     else NOW + timedelta(minutes=1)
-                ).isoformat()},
+                ).isoformat().replace("+00:00", "Z")},
                 created_at=NOW,
                 updated_at=NOW,
             ))
