@@ -1289,6 +1289,41 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
     assert step_result.result.verified is True
 
 
+def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> None:
+    """A pending whole-fleet load cannot veto a later authorized profile."""
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    first_profile = service.create(_input(revision_id), actor="admin")
+    second_profile = service.create(
+        _input(revision_id).model_copy(update={"name": "Newer choice"}),
+        actor="admin",
+    )
+    first_preview = service.preview(first_profile.id)
+    first = service.apply(
+        first_profile.id, plan_digest=first_preview.plan_digest,
+        request_key=_uuid(971), actor="admin",
+    )
+    second_preview = service.preview(second_profile.id)
+    second = service.apply(
+        second_profile.id, plan_digest=second_preview.plan_digest,
+        request_key=_uuid(972), actor="admin",
+    )
+    assert first.state == second.state == "queued"
+    assert first.created_at == second.created_at
+    assert first.progress.workload_intent_ordinal == 1
+    assert second.progress.workload_intent_ordinal == 2
+    for _ in range(2):
+        assert service.tick() is True
+        if service.application(first.id).state == "failed":
+            break
+    assert service.application(first.id).state == "failed"
+    assert service.application(second.id).state in {"queued", "running"}
+
+
 def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() -> None:
     sessions = _database()
     _dual_revision_id, _solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
