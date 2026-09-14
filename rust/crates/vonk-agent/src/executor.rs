@@ -45,6 +45,16 @@ const HEARTBEAT_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 /// Smallest delay between two renewal attempts.  A lease that is nearly spent
 /// still gets one bounded attempt instead of a busy loop.
 const HEARTBEAT_RETRY_FLOOR: Duration = Duration::from_millis(50);
+
+/// When a renewal loop attempts its next heartbeat.
+///
+/// ``interval`` is the steady-state cadence once a renewal is accepted and
+/// ``retry_interval`` is the prompt delay after a transient failure.
+#[derive(Clone, Copy)]
+struct HeartbeatSchedule {
+    interval: Duration,
+    retry_interval: Duration,
+}
 const JOB_CANCEL_EXIT_CODE: u32 = 130;
 const JOB_CANCEL_STOP_TIMEOUT_SECONDS: u16 = 5;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
@@ -2537,8 +2547,10 @@ where
                 lease_deadline_sender,
                 cancellation_sender,
                 heartbeat_stop,
-                policy.heartbeat_interval,
-                policy.heartbeat_retry_interval,
+                HeartbeatSchedule {
+                    interval: policy.heartbeat_interval,
+                    retry_interval: policy.heartbeat_retry_interval,
+                },
             );
             let heartbeat_task = tokio::spawn(async move {
                 let _cancel_on_exit = cancel_on_exit;
@@ -2731,12 +2743,11 @@ async fn run_heartbeats<C: LoopClient>(
     lease_deadline: tokio::sync::watch::Sender<DateTime<FixedOffset>>,
     cancellation: tokio::sync::watch::Sender<bool>,
     mut stop: tokio::sync::oneshot::Receiver<()>,
-    interval: Duration,
-    retry_interval: Duration,
+    schedule: HeartbeatSchedule,
 ) -> Result<bool, LoopError> {
     let mut deadline = claim.deadline;
     let mut cancellation_observed = false;
-    let mut delay = interval;
+    let mut delay = schedule.interval;
     loop {
         tokio::select! {
             _ = &mut stop => return Ok(cancellation_observed),
@@ -2760,7 +2771,8 @@ async fn run_heartbeats<C: LoopClient>(
                 // pushed the next attempt past the deadline after a single
                 // lost request, so keep the retry inside the remaining lease
                 // and leave the lease margin for the request itself.
-                delay = retry_interval
+                delay = schedule
+                    .retry_interval
                     .min(remaining_lease(deadline).saturating_sub(HEARTBEAT_LEASE_MARGIN))
                     .max(HEARTBEAT_RETRY_FLOOR);
                 continue;
@@ -2769,7 +2781,7 @@ async fn run_heartbeats<C: LoopClient>(
         };
         // The accepted lease advanced, so the ordinary renewal cadence
         // applies again until the next transient failure.
-        delay = interval;
+        delay = schedule.interval;
         state.apply_heartbeat(&progress, &directive)?;
         lease_deadline.send_replace(directive.deadline);
         deadline = directive.deadline;
