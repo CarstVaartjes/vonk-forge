@@ -38,6 +38,19 @@ they are where shortcuts become incidents.
   live-versus-desired difference before asking for a decision.
 - Preview and apply are the same decision. A preview binds the exact plan the
   apply executes, and a stale plan is rejected rather than re-interpreted.
+- Recovery belongs to the durable operation that owns the work. Persist child
+  identity and progress, adopt existing effects before consulting mutable
+  admission, and resume unfinished work after a restart.
+- A later explicit workload request supersedes older overlapping intent.
+  Children inherit their parent's authority; automatic recovery must never
+  promote an old request above a newer operator decision.
+- Temporary dependencies recover through bounded retries with a visible next
+  attempt. Uncertain effects require exact observation or a safe same-effect
+  retry. Invalid authority, invalid contracts, denied access, and integrity
+  failures remain explicit blockers.
+- Preserve completed work and partial transfers. Managed cache receipts make
+  reuse cheap; ordinary retries must not repeat downloads, full-file hashing,
+  image imports, or package installation without a reason.
 - Consequential fleet-wide platform changes proceed one Spark at a time.
   Recipe profile changes stay topology-atomic.
 - Exact cross-site image reproducibility is desirable but never silently

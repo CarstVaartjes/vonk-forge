@@ -1591,7 +1591,6 @@ def production_app() -> FastAPI:
         sessions,
         clock=clock,
         run_switch_operations=run_switch_operations,
-        recipe_operations=recipe_operations,
         cache_resolver=model_cache.resolve_latest_cached,
     )
     agent_upgrades = AgentUpgradeService(

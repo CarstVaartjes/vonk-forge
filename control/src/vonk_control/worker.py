@@ -356,7 +356,6 @@ def assemble_production_worker(
         fleet_profiles=build_production_fleet_profile_service(
             sessions,
             clock=clock,
-            recipe_operations=lifecycle,
             run_switch_operations=run_switch_operations,
             cache_resolver=(
                 model_cache.resolve_latest_cached if model_cache is not None else None
