@@ -3194,7 +3194,9 @@ mod tests {
                 ],
             )
             .capture_and_forward_stderr(),
-            Duration::from_secs(10),
+            // CI runners may need time to read their APT lists; keep this
+            // diagnostic bounded without using the 180-second production limit.
+            Duration::from_secs(30),
         )
         .unwrap();
         assert!(!output.success);
