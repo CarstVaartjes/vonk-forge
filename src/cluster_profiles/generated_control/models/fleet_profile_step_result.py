@@ -9,6 +9,7 @@ from ..types import UNSET, Unset
 from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
+from typing import Literal, cast
 from typing import Union
 
 if TYPE_CHECKING:
@@ -29,16 +30,14 @@ class FleetProfileStepResult:
     """ Result receipt for one completed profile plan step.
 
         Attributes:
+            kind (Literal['switch']):
             operation_id (str):
-            kind (Union[None, Unset, str]):
-            owner_id (Union[None, Unset, str]):
             result (Union['FleetProfileSwitchAdapterResult', 'FleetProfileSwitchChildResult',
                 'FleetProfileVerificationResult', None, Unset]):
      """
 
+    kind: Literal['switch']
     operation_id: str
-    kind: Union[None, Unset, str] = UNSET
-    owner_id: Union[None, Unset, str] = UNSET
     result: Union['FleetProfileSwitchAdapterResult', 'FleetProfileSwitchChildResult', 'FleetProfileVerificationResult', None, Unset] = UNSET
 
 
@@ -49,19 +48,9 @@ class FleetProfileStepResult:
         from ..models.fleet_profile_verification_result import FleetProfileVerificationResult
         from ..models.fleet_profile_switch_adapter_result import FleetProfileSwitchAdapterResult
         from ..models.fleet_profile_switch_child_result import FleetProfileSwitchChildResult
+        kind = self.kind
+
         operation_id = self.operation_id
-
-        kind: Union[None, Unset, str]
-        if isinstance(self.kind, Unset):
-            kind = UNSET
-        else:
-            kind = self.kind
-
-        owner_id: Union[None, Unset, str]
-        if isinstance(self.owner_id, Unset):
-            owner_id = UNSET
-        else:
-            owner_id = self.owner_id
 
         result: Union[None, Unset, dict[str, Any]]
         if isinstance(self.result, Unset):
@@ -79,12 +68,9 @@ class FleetProfileStepResult:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "kind": kind,
             "operation_id": operation_id,
         })
-        if kind is not UNSET:
-            field_dict["kind"] = kind
-        if owner_id is not UNSET:
-            field_dict["owner_id"] = owner_id
         if result is not UNSET:
             field_dict["result"] = result
 
@@ -98,27 +84,11 @@ class FleetProfileStepResult:
         from ..models.fleet_profile_switch_adapter_result import FleetProfileSwitchAdapterResult
         from ..models.fleet_profile_switch_child_result import FleetProfileSwitchChildResult
         d = dict(src_dict)
+        kind = cast(Literal['switch'] , d.pop("kind"))
+        if kind != 'switch':
+            raise ValueError(f"kind must match const 'switch', got '{kind}'")
+
         operation_id = d.pop("operation_id")
-
-        def _parse_kind(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        kind = _parse_kind(d.pop("kind", UNSET))
-
-
-        def _parse_owner_id(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        owner_id = _parse_owner_id(d.pop("owner_id", UNSET))
-
 
         def _parse_result(data: object) -> Union['FleetProfileSwitchAdapterResult', 'FleetProfileSwitchChildResult', 'FleetProfileVerificationResult', None, Unset]:
             if data is None:
@@ -161,9 +131,8 @@ class FleetProfileStepResult:
 
 
         fleet_profile_step_result = cls(
-            operation_id=operation_id,
             kind=kind,
-            owner_id=owner_id,
+            operation_id=operation_id,
             result=result,
         )
 

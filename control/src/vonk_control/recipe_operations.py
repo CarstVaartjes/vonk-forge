@@ -1537,7 +1537,7 @@ class RecipeOperationService:
             ) + 1
             for node in target_nodes:
                 node.workload_intent_ordinal = workload_intent_ordinal
-            self._agent_jobs.request_superseded_workload_cancellation_in_session(
+            AgentJobService.request_superseded_workload_cancellation_in_session(
                 session, targets, workload_intent_ordinal, now
             )
             payload = {
@@ -3188,7 +3188,7 @@ class RecipeOperationService:
                 ) + 1
                 for node in target_nodes:
                     node.workload_intent_ordinal = workload_intent_ordinal
-                self._agent_jobs.request_superseded_workload_cancellation_in_session(
+                AgentJobService.request_superseded_workload_cancellation_in_session(
                     session, targets, workload_intent_ordinal, now
                 )
             elif (

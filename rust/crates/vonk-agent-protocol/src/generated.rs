@@ -2596,6 +2596,8 @@ pub struct InstallerCandidateArtifacts {
     pub agent_package_linux_arm64: InstallerPackageArtifact,
     #[serde(rename = "agent-package-signature-linux-arm64")]
     pub agent_package_signature_linux_arm64: InstallerReleaseObject,
+    #[serde(rename = "cli-wheel")]
+    pub cli_wheel: InstallerReleaseObject,
     #[serde(rename = "nas-payload")]
     pub nas_payload: InstallerReleaseObject,
     #[serde(rename = "nas-setup-darwin-amd64")]
@@ -4561,6 +4563,7 @@ pub struct RecipeStartSingleEvidence {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RecipeStopPayload {
+    pub cancel_pending_start: bool,
     pub plan_digest: ::std::string::String,
     pub run_id: ::uuid::Uuid,
     pub schema_version: u8,
@@ -8736,6 +8739,8 @@ impl<'de> ::serde::Deserialize<'de> for InstallerCandidateArtifacts {
             pub agent_package_linux_arm64: InstallerPackageArtifact,
             #[serde(rename = "agent-package-signature-linux-arm64")]
             pub agent_package_signature_linux_arm64: InstallerReleaseObject,
+            #[serde(rename = "cli-wheel")]
+            pub cli_wheel: InstallerReleaseObject,
             #[serde(rename = "nas-payload")]
             pub nas_payload: InstallerReleaseObject,
             #[serde(rename = "nas-setup-darwin-amd64")]
@@ -8755,6 +8760,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerCandidateArtifacts {
         Ok(Self {
             agent_package_linux_arm64: raw.agent_package_linux_arm64,
             agent_package_signature_linux_arm64: raw.agent_package_signature_linux_arm64,
+            cli_wheel: raw.cli_wheel,
             nas_payload: raw.nas_payload,
             nas_setup_darwin_amd64: raw.nas_setup_darwin_amd64,
             nas_setup_darwin_arm64: raw.nas_setup_darwin_arm64,
@@ -11409,12 +11415,14 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStopPayload {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
+            pub cancel_pending_start: bool,
             pub plan_digest: ::std::string::String,
             pub run_id: ::uuid::Uuid,
             pub schema_version: u8,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
+            cancel_pending_start: raw.cancel_pending_start,
             plan_digest: raw.plan_digest,
             run_id: raw.run_id,
             schema_version: raw.schema_version,

@@ -6,6 +6,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.agent_failure_kind import AgentFailureKind
+from ..models.agent_failure_kind import check_agent_failure_kind
 from ..models.agent_operation import AgentOperation
 from ..models.agent_operation import check_agent_operation
 from ..types import UNSET, Unset
@@ -33,12 +35,14 @@ class AgentFailureResult:
             diagnostic (Union[None, Unset, str]):
             diagnostics (Union['FailureDiagnostics', None, Unset]):
             error_code (Union[None, Unset, str]):
+            failure_kind (Union[AgentFailureKind, None, Unset]):
             helper_error_code (Union[None, Unset, str]):
             helper_exit_code (Union[None, Unset, int]):
             operation (Union[AgentOperation, None, Unset]):
             package_activation (Union['PackageActivationReceipt', None, Unset]):
             reason (Union[None, Unset, str]):
             recovery (Union[None, Unset, str]):
+            retry_after_seconds (Union[None, Unset, int]):
             stage (Union[None, Unset, str]):
             status (Union[Literal['failed'], None, Unset]):
             summary (Union[None, Unset, str]):
@@ -48,12 +52,14 @@ class AgentFailureResult:
     diagnostic: Union[None, Unset, str] = UNSET
     diagnostics: Union['FailureDiagnostics', None, Unset] = UNSET
     error_code: Union[None, Unset, str] = UNSET
+    failure_kind: Union[AgentFailureKind, None, Unset] = UNSET
     helper_error_code: Union[None, Unset, str] = UNSET
     helper_exit_code: Union[None, Unset, int] = UNSET
     operation: Union[AgentOperation, None, Unset] = UNSET
     package_activation: Union['PackageActivationReceipt', None, Unset] = UNSET
     reason: Union[None, Unset, str] = UNSET
     recovery: Union[None, Unset, str] = UNSET
+    retry_after_seconds: Union[None, Unset, int] = UNSET
     stage: Union[None, Unset, str] = UNSET
     status: Union[Literal['failed'], None, Unset] = UNSET
     summary: Union[None, Unset, str] = UNSET
@@ -85,6 +91,14 @@ class AgentFailureResult:
             error_code = UNSET
         else:
             error_code = self.error_code
+
+        failure_kind: Union[None, Unset, str]
+        if isinstance(self.failure_kind, Unset):
+            failure_kind = UNSET
+        elif isinstance(self.failure_kind, str):
+            failure_kind = self.failure_kind
+        else:
+            failure_kind = self.failure_kind
 
         helper_error_code: Union[None, Unset, str]
         if isinstance(self.helper_error_code, Unset):
@@ -126,6 +140,12 @@ class AgentFailureResult:
         else:
             recovery = self.recovery
 
+        retry_after_seconds: Union[None, Unset, int]
+        if isinstance(self.retry_after_seconds, Unset):
+            retry_after_seconds = UNSET
+        else:
+            retry_after_seconds = self.retry_after_seconds
+
         stage: Union[None, Unset, str]
         if isinstance(self.stage, Unset):
             stage = UNSET
@@ -161,6 +181,8 @@ class AgentFailureResult:
             field_dict["diagnostics"] = diagnostics
         if error_code is not UNSET:
             field_dict["error_code"] = error_code
+        if failure_kind is not UNSET:
+            field_dict["failure_kind"] = failure_kind
         if helper_error_code is not UNSET:
             field_dict["helper_error_code"] = helper_error_code
         if helper_exit_code is not UNSET:
@@ -173,6 +195,8 @@ class AgentFailureResult:
             field_dict["reason"] = reason
         if recovery is not UNSET:
             field_dict["recovery"] = recovery
+        if retry_after_seconds is not UNSET:
+            field_dict["retry_after_seconds"] = retry_after_seconds
         if stage is not UNSET:
             field_dict["stage"] = stage
         if status is not UNSET:
@@ -229,6 +253,26 @@ class AgentFailureResult:
             return cast(Union[None, Unset, str], data)
 
         error_code = _parse_error_code(d.pop("error_code", UNSET))
+
+
+        def _parse_failure_kind(data: object) -> Union[AgentFailureKind, None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                failure_kind_type_0 = check_agent_failure_kind(data)
+
+
+
+                return failure_kind_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[AgentFailureKind, None, Unset], data)
+
+        failure_kind = _parse_failure_kind(d.pop("failure_kind", UNSET))
 
 
         def _parse_helper_error_code(data: object) -> Union[None, Unset, str]:
@@ -311,6 +355,16 @@ class AgentFailureResult:
         recovery = _parse_recovery(d.pop("recovery", UNSET))
 
 
+        def _parse_retry_after_seconds(data: object) -> Union[None, Unset, int]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, int], data)
+
+        retry_after_seconds = _parse_retry_after_seconds(d.pop("retry_after_seconds", UNSET))
+
+
         def _parse_stage(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -359,12 +413,14 @@ class AgentFailureResult:
             diagnostic=diagnostic,
             diagnostics=diagnostics,
             error_code=error_code,
+            failure_kind=failure_kind,
             helper_error_code=helper_error_code,
             helper_exit_code=helper_exit_code,
             operation=operation,
             package_activation=package_activation,
             reason=reason,
             recovery=recovery,
+            retry_after_seconds=retry_after_seconds,
             stage=stage,
             status=status,
             summary=summary,

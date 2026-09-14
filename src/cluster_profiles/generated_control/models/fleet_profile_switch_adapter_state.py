@@ -11,10 +11,12 @@ from ..models.fleet_profile_switch_adapter_state_active_kind_type_0 import Fleet
 from ..models.fleet_profile_switch_adapter_state_state import check_fleet_profile_switch_adapter_state_state
 from ..models.fleet_profile_switch_adapter_state_state import FleetProfileSwitchAdapterStateState
 from ..types import UNSET, Unset
+from dateutil.parser import isoparse
 from typing import cast
 from typing import cast, Union
 from typing import Literal, Union, cast
 from typing import Union
+import datetime
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState
@@ -47,6 +49,9 @@ class FleetProfileSwitchAdapterState:
             active_operation_id (Union[None, Unset, str]):
             child_progress (Union['FleetProfileChildProgress', None, Unset]):
             children (Union[Unset, list['FleetProfileSwitchChildState']]):
+            observation_deadline_at (Union[None, Unset, datetime.datetime]):
+            observation_due_at (Union[None, Unset, datetime.datetime]):
+            pending_operation_ids (Union[Unset, list[str]]):
             position (Union[Unset, int]):  Default: 0.
             result (Union['FleetProfileSwitchAdapterResult', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
@@ -65,6 +70,9 @@ class FleetProfileSwitchAdapterState:
     active_operation_id: Union[None, Unset, str] = UNSET
     child_progress: Union['FleetProfileChildProgress', None, Unset] = UNSET
     children: Union[Unset, list['FleetProfileSwitchChildState']] = UNSET
+    observation_deadline_at: Union[None, Unset, datetime.datetime] = UNSET
+    observation_due_at: Union[None, Unset, datetime.datetime] = UNSET
+    pending_operation_ids: Union[Unset, list[str]] = UNSET
     position: Union[Unset, int] = 0
     result: Union['FleetProfileSwitchAdapterResult', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
@@ -140,6 +148,28 @@ class FleetProfileSwitchAdapterState:
 
 
 
+        observation_deadline_at: Union[None, Unset, str]
+        if isinstance(self.observation_deadline_at, Unset):
+            observation_deadline_at = UNSET
+        elif isinstance(self.observation_deadline_at, datetime.datetime):
+            observation_deadline_at = self.observation_deadline_at.isoformat()
+        else:
+            observation_deadline_at = self.observation_deadline_at
+
+        observation_due_at: Union[None, Unset, str]
+        if isinstance(self.observation_due_at, Unset):
+            observation_due_at = UNSET
+        elif isinstance(self.observation_due_at, datetime.datetime):
+            observation_due_at = self.observation_due_at.isoformat()
+        else:
+            observation_due_at = self.observation_due_at
+
+        pending_operation_ids: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.pending_operation_ids, Unset):
+            pending_operation_ids = self.pending_operation_ids
+
+
+
         position = self.position
 
         result: Union[None, Unset, dict[str, Any]]
@@ -183,6 +213,12 @@ class FleetProfileSwitchAdapterState:
             field_dict["child_progress"] = child_progress
         if children is not UNSET:
             field_dict["children"] = children
+        if observation_deadline_at is not UNSET:
+            field_dict["observation_deadline_at"] = observation_deadline_at
+        if observation_due_at is not UNSET:
+            field_dict["observation_due_at"] = observation_due_at
+        if pending_operation_ids is not UNSET:
+            field_dict["pending_operation_ids"] = pending_operation_ids
         if position is not UNSET:
             field_dict["position"] = position
         if result is not UNSET:
@@ -298,6 +334,49 @@ class FleetProfileSwitchAdapterState:
             children.append(children_item)
 
 
+        def _parse_observation_deadline_at(data: object) -> Union[None, Unset, datetime.datetime]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                observation_deadline_at_type_0 = isoparse(data)
+
+
+
+                return observation_deadline_at_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, Unset, datetime.datetime], data)
+
+        observation_deadline_at = _parse_observation_deadline_at(d.pop("observation_deadline_at", UNSET))
+
+
+        def _parse_observation_due_at(data: object) -> Union[None, Unset, datetime.datetime]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                observation_due_at_type_0 = isoparse(data)
+
+
+
+                return observation_due_at_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, Unset, datetime.datetime], data)
+
+        observation_due_at = _parse_observation_due_at(d.pop("observation_due_at", UNSET))
+
+
+        pending_operation_ids = cast(list[str], d.pop("pending_operation_ids", UNSET))
+
+
         position = d.pop("position", UNSET)
 
         def _parse_result(data: object) -> Union['FleetProfileSwitchAdapterResult', None, Unset]:
@@ -356,6 +435,9 @@ class FleetProfileSwitchAdapterState:
             active_operation_id=active_operation_id,
             child_progress=child_progress,
             children=children,
+            observation_deadline_at=observation_deadline_at,
+            observation_due_at=observation_due_at,
+            pending_operation_ids=pending_operation_ids,
             position=position,
             result=result,
             schema_version=schema_version,

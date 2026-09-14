@@ -6,8 +6,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.fleet_profile_application_progress_child_source_type_0 import check_fleet_profile_application_progress_child_source_type_0
-from ..models.fleet_profile_application_progress_child_source_type_0 import FleetProfileApplicationProgressChildSourceType0
 from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
@@ -17,9 +15,8 @@ from typing import Union
 if TYPE_CHECKING:
   from ..models.fleet_profile_child_progress import FleetProfileChildProgress
   from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
-  from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
   from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
-  from ..models.fleet_profile_application_progress_assignments import FleetProfileApplicationProgressAssignments
+  from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
 
 
 
@@ -34,10 +31,9 @@ class FleetProfileApplicationProgress:
     """ Typed progress tree persisted with every profile application.
 
         Attributes:
-            assignments (Union[Unset, FleetProfileApplicationProgressAssignments]):
             attempt (Union[Unset, int]):  Default: 1.
             child_progress (Union['FleetProfileChildProgress', None, Unset]):
-            child_source (Union[FleetProfileApplicationProgressChildSourceType0, None, Unset]):
+            child_source (Union[Literal['switch-adapter'], None, Unset]):
             completed_steps (Union[Unset, int]):  Default: 0.
             current_label (Union[None, Unset, str]):
             intended_profile (Union['FleetProfileIntendedConfiguration', None, Unset]):
@@ -46,12 +42,12 @@ class FleetProfileApplicationProgress:
             step_results (Union[Unset, FleetProfileApplicationProgressStepResults]):
             switch_adapter (Union['FleetProfileSwitchAdapterState', None, Unset]):
             total_steps (Union[Unset, int]):  Default: 0.
+            workload_intent_ordinal (Union[None, Unset, int]):
      """
 
-    assignments: Union[Unset, 'FleetProfileApplicationProgressAssignments'] = UNSET
     attempt: Union[Unset, int] = 1
     child_progress: Union['FleetProfileChildProgress', None, Unset] = UNSET
-    child_source: Union[FleetProfileApplicationProgressChildSourceType0, None, Unset] = UNSET
+    child_source: Union[Literal['switch-adapter'], None, Unset] = UNSET
     completed_steps: Union[Unset, int] = 0
     current_label: Union[None, Unset, str] = UNSET
     intended_profile: Union['FleetProfileIntendedConfiguration', None, Unset] = UNSET
@@ -60,6 +56,7 @@ class FleetProfileApplicationProgress:
     step_results: Union[Unset, 'FleetProfileApplicationProgressStepResults'] = UNSET
     switch_adapter: Union['FleetProfileSwitchAdapterState', None, Unset] = UNSET
     total_steps: Union[Unset, int] = 0
+    workload_intent_ordinal: Union[None, Unset, int] = UNSET
 
 
 
@@ -68,13 +65,8 @@ class FleetProfileApplicationProgress:
     def to_dict(self) -> dict[str, Any]:
         from ..models.fleet_profile_child_progress import FleetProfileChildProgress
         from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
-        from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
         from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
-        from ..models.fleet_profile_application_progress_assignments import FleetProfileApplicationProgressAssignments
-        assignments: Union[Unset, dict[str, Any]] = UNSET
-        if not isinstance(self.assignments, Unset):
-            assignments = self.assignments.to_dict()
-
+        from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
         attempt = self.attempt
 
         child_progress: Union[None, Unset, dict[str, Any]]
@@ -85,11 +77,9 @@ class FleetProfileApplicationProgress:
         else:
             child_progress = self.child_progress
 
-        child_source: Union[None, Unset, str]
+        child_source: Union[Literal['switch-adapter'], None, Unset]
         if isinstance(self.child_source, Unset):
             child_source = UNSET
-        elif isinstance(self.child_source, str):
-            child_source = self.child_source
         else:
             child_source = self.child_source
 
@@ -135,13 +125,17 @@ class FleetProfileApplicationProgress:
 
         total_steps = self.total_steps
 
+        workload_intent_ordinal: Union[None, Unset, int]
+        if isinstance(self.workload_intent_ordinal, Unset):
+            workload_intent_ordinal = UNSET
+        else:
+            workload_intent_ordinal = self.workload_intent_ordinal
+
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
         })
-        if assignments is not UNSET:
-            field_dict["assignments"] = assignments
         if attempt is not UNSET:
             field_dict["attempt"] = attempt
         if child_progress is not UNSET:
@@ -164,6 +158,8 @@ class FleetProfileApplicationProgress:
             field_dict["switch_adapter"] = switch_adapter
         if total_steps is not UNSET:
             field_dict["total_steps"] = total_steps
+        if workload_intent_ordinal is not UNSET:
+            field_dict["workload_intent_ordinal"] = workload_intent_ordinal
 
         return field_dict
 
@@ -173,20 +169,9 @@ class FleetProfileApplicationProgress:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.fleet_profile_child_progress import FleetProfileChildProgress
         from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
-        from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
         from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
-        from ..models.fleet_profile_application_progress_assignments import FleetProfileApplicationProgressAssignments
+        from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
         d = dict(src_dict)
-        _assignments = d.pop("assignments", UNSET)
-        assignments: Union[Unset, FleetProfileApplicationProgressAssignments]
-        if isinstance(_assignments,  Unset):
-            assignments = UNSET
-        else:
-            assignments = FleetProfileApplicationProgressAssignments.from_dict(_assignments)
-
-
-
-
         attempt = d.pop("attempt", UNSET)
 
         def _parse_child_progress(data: object) -> Union['FleetProfileChildProgress', None, Unset]:
@@ -209,22 +194,16 @@ class FleetProfileApplicationProgress:
         child_progress = _parse_child_progress(d.pop("child_progress", UNSET))
 
 
-        def _parse_child_source(data: object) -> Union[FleetProfileApplicationProgressChildSourceType0, None, Unset]:
+        def _parse_child_source(data: object) -> Union[Literal['switch-adapter'], None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            try:
-                if not isinstance(data, str):
-                    raise TypeError()
-                child_source_type_0 = check_fleet_profile_application_progress_child_source_type_0(data)
-
-
-
-                return child_source_type_0
-            except: # noqa: E722
-                pass
-            return cast(Union[FleetProfileApplicationProgressChildSourceType0, None, Unset], data)
+            child_source_type_0 = cast(Literal['switch-adapter'] , data)
+            if child_source_type_0 != 'switch-adapter':
+                raise ValueError(f"child_source_type_0 must match const 'switch-adapter', got '{child_source_type_0}'")
+            return child_source_type_0
+            return cast(Union[Literal['switch-adapter'], None, Unset], data)
 
         child_source = _parse_child_source(d.pop("child_source", UNSET))
 
@@ -317,8 +296,17 @@ class FleetProfileApplicationProgress:
 
         total_steps = d.pop("total_steps", UNSET)
 
+        def _parse_workload_intent_ordinal(data: object) -> Union[None, Unset, int]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, int], data)
+
+        workload_intent_ordinal = _parse_workload_intent_ordinal(d.pop("workload_intent_ordinal", UNSET))
+
+
         fleet_profile_application_progress = cls(
-            assignments=assignments,
             attempt=attempt,
             child_progress=child_progress,
             child_source=child_source,
@@ -330,6 +318,7 @@ class FleetProfileApplicationProgress:
             step_results=step_results,
             switch_adapter=switch_adapter,
             total_steps=total_steps,
+            workload_intent_ordinal=workload_intent_ordinal,
         )
 
         return fleet_profile_application_progress

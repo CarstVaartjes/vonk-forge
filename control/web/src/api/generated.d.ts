@@ -790,6 +790,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/{number}/requests/{request_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Profile Application By Request */
+        get: operations["getProfileApplicationByRequest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recipe": {
         parameters: {
             query?: never;
@@ -964,6 +981,11 @@ export interface components {
             /** State */
             state: string;
         };
+        /**
+         * AgentFailureKind
+         * @enum {string}
+         */
+        AgentFailureKind: "temporary-dependency" | "uncertain-effect" | "invalid-authority" | "invalid-contract" | "integrity-failure" | "resource-prerequisite";
         /** AgentFailureResult */
         AgentFailureResult: {
             /** Diagnostic */
@@ -971,6 +993,7 @@ export interface components {
             diagnostics?: components["schemas"]["FailureDiagnostics"] | null;
             /** Error Code */
             error_code?: string | null;
+            failure_kind?: components["schemas"]["AgentFailureKind"] | null;
             /** Helper Error Code */
             helper_error_code?: string | null;
             /** Helper Exit Code */
@@ -981,6 +1004,8 @@ export interface components {
             reason?: string | null;
             /** Recovery */
             recovery?: string | null;
+            /** Retry After Seconds */
+            retry_after_seconds?: number | null;
             /** Stage */
             stage?: string | null;
             /** Status */
@@ -2046,10 +2071,6 @@ export interface components {
          * @description Typed progress tree persisted with every profile application.
          */
         FleetProfileApplicationProgress: {
-            /** Assignments */
-            assignments?: {
-                [key: string]: components["schemas"]["FleetProfileAssignmentContext"];
-            };
             /**
              * Attempt
              * @default 1
@@ -2057,7 +2078,7 @@ export interface components {
             attempt: number;
             child_progress?: components["schemas"]["FleetProfileChildProgress"] | null;
             /** Child Source */
-            child_source?: ("recipe" | "switch-adapter") | null;
+            child_source?: "switch-adapter" | null;
             /**
              * Completed Steps
              * @default 0
@@ -2080,6 +2101,8 @@ export interface components {
              * @default 0
              */
             total_steps: number;
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal?: number | null;
         };
         /**
          * FleetProfileApplicationResult
@@ -2165,18 +2188,6 @@ export interface components {
             topology_name: string;
         };
         /**
-         * FleetProfileAssignmentContext
-         * @description Persisted mapping and installation identities for one assignment.
-         */
-        FleetProfileAssignmentContext: {
-            /** Installation Id */
-            installation_id?: string | null;
-            /** Mapping Generation */
-            mapping_generation?: number | null;
-            /** Mapping Id */
-            mapping_id?: string | null;
-        };
-        /**
          * FleetProfileAssignmentInput
          * @description Permissive autosaved recipe choice, not an execution assignment.
          *
@@ -2210,7 +2221,7 @@ export interface components {
         /** FleetProfileAssignmentPreview */
         FleetProfileAssignmentPreview: {
             /** Actions */
-            actions: ("stop" | "create-placement" | "build" | "distribute-image" | "install" | "start" | "switch" | "keep")[];
+            actions: ("switch" | "keep")[];
             /** Assignment Id */
             assignment_id: string;
             /**
@@ -2283,7 +2294,11 @@ export interface components {
              * Phase
              * @enum {string}
              */
-            phase: "model-download" | "container-download" | "container-build" | "target-copy" | "runtime-install" | "start" | "final-verify" | "transfer" | "verify" | "prepare" | "cleanup" | "stop" | "final_verify";
+            phase: "model-download" | "container-download" | "container-build" | "target-copy" | "runtime-install" | "start" | "final-verify" | "transfer" | "verify" | "prepare" | "cleanup" | "stop" | "uninstall" | "final_verify";
+            /** Start Deadline */
+            start_deadline?: string | null;
+            /** Startup Budget Seconds */
+            startup_budget_seconds?: number | null;
             /** Total Bytes */
             total_bytes?: number | null;
         };
@@ -2377,23 +2392,17 @@ export interface components {
         };
         /** FleetProfilePlanStep */
         FleetProfilePlanStep: {
-            /** Assignment Id */
-            assignment_id?: string | null;
             /** Index */
             index: number;
             /**
              * Kind
-             * @enum {string}
+             * @constant
              */
-            kind: "stop" | "uninstall" | "create-placement" | "build" | "distribute-image" | "install" | "start" | "switch";
+            kind: "switch";
             /** Label */
             label: string;
             /** Node Ids */
             node_ids?: string[];
-            /** Owner Id */
-            owner_id?: string | null;
-            /** Recipe Revision Id */
-            recipe_revision_id?: string | null;
         };
         /** FleetProfilePlanSummary */
         FleetProfilePlanSummary: {
@@ -2486,12 +2495,13 @@ export interface components {
          * @description Result receipt for one completed profile plan step.
          */
         FleetProfileStepResult: {
-            /** Kind */
-            kind?: string | null;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "switch";
             /** Operation Id */
             operation_id: string;
-            /** Owner Id */
-            owner_id?: string | null;
             /** Result */
             result?: components["schemas"]["FleetProfileSwitchChildResult"] | components["schemas"]["FleetProfileSwitchAdapterResult"] | components["schemas"]["FleetProfileVerificationResult"] | null;
         };
@@ -2511,7 +2521,7 @@ export interface components {
          */
         FleetProfileSwitchAdapterState: {
             /** Active Kind */
-            active_kind?: ("run" | "stop") | null;
+            active_kind?: ("run" | "stop" | "cleanup") | null;
             /** Active Operation Id */
             active_operation_id?: string | null;
             /** Actor */
@@ -2525,6 +2535,12 @@ export interface components {
             child_progress?: components["schemas"]["FleetProfileChildProgress"] | null;
             /** Children */
             children?: components["schemas"]["FleetProfileSwitchChildState"][];
+            /** Observation Deadline At */
+            observation_deadline_at?: string | null;
+            /** Observation Due At */
+            observation_due_at?: string | null;
+            /** Pending Operation Ids */
+            pending_operation_ids?: string[];
             /**
              * Position
              * @default 0
@@ -2570,7 +2586,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "run" | "stop";
+            kind: "run" | "stop" | "cleanup";
             /** Operation Id */
             operation_id: string;
             result?: components["schemas"]["FleetProfileSwitchChildResult"] | null;
@@ -2591,7 +2607,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "run" | "stop";
+            kind: "run" | "stop" | "cleanup";
         };
         /**
          * FleetProfileVerificationResult
@@ -5655,6 +5671,10 @@ export interface components {
             item_index: number;
             /** Members */
             members?: components["schemas"]["RunSwitchMemberReceipt"][];
+            /** Observation Deadline At */
+            observation_deadline_at?: string | null;
+            /** Observation Due At */
+            observation_due_at?: string | null;
             operation?: components["schemas"]["OperationProgress"] | null;
             /** Operation Phase Index */
             operation_phase_index?: number | null;
@@ -5677,6 +5697,10 @@ export interface components {
              * @default false
              */
             retryable: boolean;
+            /** Start Deadline */
+            start_deadline?: string | null;
+            /** Startup Budget Seconds */
+            startup_budget_seconds?: number | null;
             /** Subphase */
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Total Bytes */
@@ -5686,6 +5710,8 @@ export interface components {
              * @default false
              */
             total_bytes_known: boolean;
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal?: number | null;
         };
         /** RunSwitchPreparedResult */
         RunSwitchPreparedResult: {
@@ -9503,6 +9529,65 @@ export interface operations {
             header?: never;
             path: {
                 number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileApplicationView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getProfileApplicationByRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                request_key: string;
             };
             cookie?: never;
         };
