@@ -166,6 +166,24 @@ class RunSwitchOperationConflict(RuntimeError):
     """The selected outcome is stale, unsupported, or unsafe to execute."""
 
 
+class RunSwitchIssuedWorkloadPending(RunSwitchOperationConflict):
+    """An older issued lifecycle effect needs observation, never blind replay."""
+
+    def __init__(
+        self,
+        *,
+        kind: str,
+        owner_id: str,
+        job_id: str,
+        observe_due_at: datetime,
+        observation_deadline: datetime,
+    ) -> None:
+        super().__init__(f"run-switch.{kind}-issued-pending: {owner_id} ({job_id})")
+        self.job_id = job_id
+        self.observe_due_at = observe_due_at
+        self.observation_deadline = observation_deadline
+
+
 class RunSwitchInstallPreflightExpired(RunSwitchOperationConflict):
     """A compile needs a fresh runtime preflight probe before it is accepted.
 
@@ -1113,6 +1131,19 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution(result=result)
         return PhaseExecution(_started_operation_id(value), result)
 
+    def _observe_older_issued(
+        self, kind: str, owner_id: str, ordinal: int
+    ) -> None:
+        pending = self._lifecycle.assess_superseded_issued(kind, owner_id, ordinal)
+        if pending is not None:
+            raise RunSwitchIssuedWorkloadPending(
+                kind=kind,
+                owner_id=owner_id,
+                job_id=pending.job_id,
+                observe_due_at=pending.observe_due_at,
+                observation_deadline=pending.observation_deadline,
+            )
+
     def execute(
         self,
         plan: RunSwitchPlan,
@@ -1179,6 +1210,7 @@ class RecipeLifecyclePhaseExecutor:
             self._lifecycle.reconcile_superseded_unissued(
                 "recipe.stop", target.run_id, ordinal
             )
+            self._observe_older_issued("recipe.stop", target.run_id, ordinal)
             child_key = str(uuid.uuid5(uuid.UUID(request_key), f"stop:{target.run_id}"))
             value = self._lifecycle.stop(
                 target.run_id,
@@ -1296,6 +1328,7 @@ class RecipeLifecyclePhaseExecutor:
             self._lifecycle.reconcile_superseded_unissued(
                 "recipe.install", installation_id, ordinal
             )
+            self._observe_older_issued("recipe.install", installation_id, ordinal)
             start_installation = getattr(self._lifecycle, "start_installation", None)
             if not callable(start_installation):
                 raise RunSwitchOperationConflict(
@@ -1348,6 +1381,7 @@ class RecipeLifecyclePhaseExecutor:
             self._lifecycle.reconcile_superseded_unissued(
                 "recipe.uninstall", installation_id, ordinal
             )
+            self._observe_older_issued("recipe.uninstall", installation_id, ordinal)
             low_level = self._lifecycle.preview_run(installation_id, plan.alias)
             value = self._lifecycle.start(
                 low_level,
@@ -1383,6 +1417,7 @@ class RecipeLifecyclePhaseExecutor:
             self._lifecycle.reconcile_superseded_unissued(
                 "recipe.uninstall", installation_id, ordinal
             )
+            self._observe_older_issued("recipe.uninstall", installation_id, ordinal)
             try:
                 uninstall_plan = self._lifecycle.preview_uninstall(installation_id)
                 value = self._lifecycle.uninstall(
@@ -4891,6 +4926,13 @@ class RunSwitchOperationService:
                 return self._hold_for_preflight_refresh(
                     operation_id, phase_index, item_index
                 )
+            except RunSwitchIssuedWorkloadPending as pending:
+                return self._hold_issued_observation(
+                    operation_id,
+                    phase_index=phase_index,
+                    item_index=item_index,
+                    pending=pending,
+                )
             except RunSwitchOperationConflict as error:
                 fail(str(error))
                 return True
@@ -4927,6 +4969,10 @@ class RunSwitchOperationService:
             progress = _read_progress(job.result)
             if not _checkpoint_matches(job, progress, phase_index, item_index, None):
                 return False
+            if progress.get("observation_due_at") is not None:
+                progress["observation_due_at"] = None
+                progress["observation_deadline_at"] = None
+                job.status_reason = None
             _merge_progress_evidence(
                 progress,
                 plan,
@@ -5075,6 +5121,48 @@ class RunSwitchOperationService:
             ).isoformat()
             job.state = "running"
             job.status_reason = "Start result uncertain; observing the existing run."
+            job.result = _persisted_result(progress)
+            job.updated_at = now
+        return True
+
+    def _hold_issued_observation(
+        self,
+        operation_id: str,
+        *,
+        phase_index: int,
+        item_index: int,
+        pending: RunSwitchIssuedWorkloadPending,
+    ) -> bool:
+        """Bound polling of an issued older effect without authorizing replay."""
+
+        now = _now(self._clock)
+        with self._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None:
+                return False
+            progress = _read_progress(job.result)
+            if not _checkpoint_matches(job, progress, phase_index, item_index, None):
+                return False
+            deadline = _aware(pending.observation_deadline)
+            if now >= deadline:
+                self._mark_failed(
+                    job,
+                    "run-switch.issued-observation-expired: an older issued effect has no definitive outcome",
+                    now=now,
+                    progress=progress,
+                )
+                return True
+            due = min(
+                deadline,
+                max(now + timedelta(seconds=5), _aware(pending.observe_due_at)),
+            )
+            progress["observation_due_at"] = due.isoformat()
+            progress["observation_deadline_at"] = deadline.isoformat()
+            job.state = "running"
+            job.status_reason = (
+                f"Observing older issued lifecycle operation {pending.job_id}; "
+                "its effect has not been proven finished."
+            )
             job.result = _persisted_result(progress)
             job.updated_at = now
         return True
