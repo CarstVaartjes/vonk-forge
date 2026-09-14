@@ -3028,6 +3028,94 @@ def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
         assert first.recipe_content == revision.document
 
 
+@pytest.mark.parametrize("corruption", [None, "schema", "path", "bytes", "permissions"])
+def test_uninstall_validates_stored_identity_without_requiring_launch_placement(
+    tmp_path: Path,
+    corruption: str | None,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    with sessions.begin() as session:
+        stored = _required(session.get(RecipeInstallation, installation.owner_id))
+        document = json.loads(json.dumps(stored.plan))
+        for compiled in document["compiled_execution_plans"].values():
+            # Installation does not have the signed addresses assigned at start.
+            compiled["runtime"]["placement"]["master_port"] = 29500
+        stored.plan = document
+
+    # The exact persisted document remains inadmissible as an agent launch.
+    for compiled in document["compiled_execution_plans"].values():
+        with pytest.raises(ValueError, match="native fabric placement is incomplete"):
+            RecipeInstallPayload.model_validate_json(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "installation_id": installation.owner_id,
+                        "plan_digest": installation.plan_digest,
+                        "rank": compiled["topology"]["rank"],
+                        "role": compiled["topology"]["role"],
+                        "expected_bytes": 120,
+                        "compiled_execution_plan": compiled,
+                    }
+                )
+            )
+
+    if corruption is not None:
+        malformed = json.loads(json.dumps(document))
+        compiled = malformed["compiled_execution_plans"][nodes[0]]
+        if corruption == "schema":
+            compiled["schema_version"] = 1
+        elif corruption == "path":
+            compiled["artifacts"][0]["path"] = "../unrelated/model"
+        elif corruption == "bytes":
+            compiled["identity"]["model_artifact_bytes"] += 1
+        else:
+            compiled["security"]["privileged"] = True
+        with sessions.begin() as session:
+            _required(
+                session.get(RecipeInstallation, installation.owner_id)
+            ).plan = malformed
+        with pytest.raises(
+            RecipeOperationConflict, match="stored installation plan is invalid"
+        ):
+            service.preview_uninstall(installation.owner_id)
+        with sessions() as session:
+            assert not list(
+                session.scalars(select(Job).where(Job.kind == "recipe.uninstall"))
+            )
+        return
+
+    preview = service.preview_uninstall(installation.owner_id)
+    assert preview.allowed
+    operation = service.uninstall(
+        installation.owner_id,
+        plan_digest=preview.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    with sessions() as session:
+        children = list(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == operation.id
+                )
+            )
+        )
+        assert {child.node_id for child in children} == set(nodes)
+        assert all(
+            child.payload["installation_id"] == installation.owner_id
+            for child in children
+        )
+        assert (
+            _required(session.get(RecipeInstallation, installation.owner_id)).plan
+            == document
+        )
+
+
 def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
     tmp_path: Path,
 ) -> None:
