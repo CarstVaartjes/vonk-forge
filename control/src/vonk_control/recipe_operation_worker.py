@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Protocol
 
 from sqlalchemy import or_, select
@@ -17,36 +16,16 @@ from .recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from .recipe_routes import RecipeRouteNotReady, publication_is_temporary
+from .recovery_policy import RecoveryPolicy
 
 #: Bounded publication retry.  The first attempt is prompt so a momentary
 #: supervisor hiccup does not delay a ready run, and the cap keeps a
 #: persistent dependency failure from becoming a tight retry loop.  The
 #: budget stays inside the Run/Switch final-verification window, so a
 #: dependency that returns still converges without another operator command.
-_ROUTE_PUBLICATION_ATTEMPTS = 6
-_ROUTE_PUBLICATION_BACKOFF_BASE_SECONDS = 5
-_ROUTE_PUBLICATION_BACKOFF_MAX_SECONDS = 60
-
-
-def _route_retry_delay(run_id: str, attempts: int) -> timedelta:
-    """Return the bounded delay after ``attempts`` failed publications.
-
-    Jitter spreads independent runs across the same recovery window.  It comes
-    from the run identity and attempt number rather than a random source so the
-    durable schedule stays reproducible for a given run, which is what makes
-    the recorded retry observable.
-    """
-
-    base = min(
-        _ROUTE_PUBLICATION_BACKOFF_BASE_SECONDS * (2 ** (attempts - 1)),
-        _ROUTE_PUBLICATION_BACKOFF_MAX_SECONDS,
-    )
-    spread = max(1, base // 4)
-    jitter = (
-        int(hashlib.sha256(f"{run_id}:{attempts}".encode()).hexdigest()[:8], 16)
-        % spread
-    )
-    return timedelta(seconds=base + jitter)
+_ROUTE_PUBLICATION_RETRY = RecoveryPolicy(
+    max_failures=6, base_delay_seconds=5, max_delay_seconds=60
+)
 
 
 class _RoutePublisher(Protocol):
@@ -164,7 +143,8 @@ class RecipeOperationWorker:
                 run.route_next_attempt_at = None
                 run.updated_at = now
                 return
-            if attempts >= _ROUTE_PUBLICATION_ATTEMPTS:
+            due_at = _ROUTE_PUBLICATION_RETRY.next_attempt(run_id, attempts, now)
+            if due_at is None:
                 run.route_state = "failed"
                 run.route_error = (
                     f"{detail} (route publication did not converge after "
@@ -173,7 +153,7 @@ class RecipeOperationWorker:
                 run.route_next_attempt_at = None
             else:
                 run.route_error = detail
-                run.route_next_attempt_at = now + _route_retry_delay(run_id, attempts)
+                run.route_next_attempt_at = due_at
             run.updated_at = now
 
     def _expire_initial_observation_deadline(self) -> bool:

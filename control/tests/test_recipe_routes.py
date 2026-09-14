@@ -1529,3 +1529,125 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
         assert owner.owner_generation == marker.generation == publication.generation
         assert publication.activation_marker_digest == marker.digest
         assert marker.generation == max(result.generation for result in results)
+
+
+@pytest.mark.parametrize(
+    ("failure_point", "recovering"),
+    [
+        ("before-activation", False),
+        ("after-activation", False),
+        ("after-activation", True),
+    ],
+)
+def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
+    tmp_path: Path, postgres_engine, failure_point: str, recovering: bool
+) -> None:
+    """A lost publication response adopts an activated bundle on restart."""
+
+    clock = MutableClock(NOW)
+    base, _, _, run_id = setup(tmp_path / "database", clock=clock, engine=postgres_engine)
+    root = tmp_path / "live"
+    acknowledgements: list[int] = []
+    fail_ack = [failure_point == "after-activation"]
+
+    def acknowledge(marker):
+        acknowledgements.append(marker.generation)
+        if fail_ack[0]:
+            fail_ack[0] = False
+            raise OSError("supervisor acknowledgement lost")
+
+    runtime = AtomicRouteBundlePublisher(
+        root, clock=clock, await_supervisor_ack=acknowledge
+    )
+    if failure_point == "before-activation":
+        activate = runtime._activate
+        fail_activate = [True]
+
+        def activate_once(**kwargs):
+            if fail_activate[0]:
+                fail_activate[0] = False
+                raise OSError("supervisor unavailable before activation")
+            return activate(**kwargs)
+
+        runtime._activate = activate_once
+    service = RecipeRouteService(
+        base.sessions,
+        publisher=AtomicRecipeRoutePublisher(runtime, clock=clock),
+        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=clock,
+        maximum_age_seconds=120,
+    )
+    with service.sessions.begin() as session:
+        _recipe_run(session, run_id).route_state = "pending"
+        if recovering:
+            session.add(
+                Job(
+                    request_id=str(uuid4()),
+                    kind="recipe.start",
+                    state="succeeded",
+                    actor="system:distributed-recovery",
+                    authority_revision="a" * 64,
+                    targets=[],
+                    payload_digest="b" * 64,
+                    payload={
+                        "owner_id": run_id,
+                        "recovery": {
+                            "schema_version": 1,
+                            "failed_rank": 1,
+                            "deadline": (NOW + timedelta(seconds=90)).isoformat(),
+                        },
+                    },
+                    result={},
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+
+    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
+    marker_after_failure = (
+        AtomicRouteBundlePublisher(root, clock=clock).inspect()
+        if failure_point == "after-activation"
+        else None
+    )
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.state == "running"
+        assert run.route_state == "pending"
+        assert run.route_next_attempt_at is not None
+        due_at = _aware(run.route_next_attempt_at)
+        if recovering:
+            recovery_job = session.query(Job).filter_by(kind="recipe.start").one()
+            assert recovery_job.result == {}
+
+    clock.now = due_at + timedelta(seconds=1)
+    restarted_runtime = AtomicRouteBundlePublisher(
+        root, clock=clock, await_supervisor_ack=acknowledge
+    )
+    restarted_service = RecipeRouteService(
+        base.sessions,
+        publisher=AtomicRecipeRoutePublisher(restarted_runtime, clock=clock),
+        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=clock,
+        maximum_age_seconds=120,
+    )
+    assert (
+        RecipeOperationWorker(base.sessions, restarted_service, clock=clock).tick()
+        is True
+    )
+    final_marker = AtomicRouteBundlePublisher(root, clock=clock).inspect()
+    with base.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.route_state == "published"
+        assert run.route_generation == final_marker.generation
+        assert run.route_error is None
+        if recovering:
+            recovery_job = session.query(Job).filter_by(kind="recipe.start").one()
+            result = recovery_job.result
+            assert result is not None
+            assert result["recovery_route_published"] is True
+    if marker_after_failure is not None:
+        assert final_marker.digest == marker_after_failure.digest
+        assert acknowledgements == [1, 1]
+    else:
+        assert final_marker.generation == 1
+        assert acknowledgements == [1]

@@ -358,32 +358,57 @@ class AtomicRecipeRoutePublisher:
             current = self._publisher._read_marker(
                 optional=True, verify_files=True, verify_lease=False
             )
-            generation = (current.generation if current is not None else 0) + 1
-            route_document: dict[str, object] = {
-                "generation": generation,
-                "routes": {
-                    alias: endpoint.route_document()
-                    for alias, endpoint in sorted(endpoints.items())
-                },
-                "schema_version": 2,
-                "state": state,
-            }
-            if state == "maintenance":
-                route_document["reason"] = "recipe routes withdrawn"
-            routes = (
-                json.dumps(route_document, sort_keys=True, separators=(",", ":")) + "\n"
-            ).encode()
-            marker = self._publisher._activate(
-                generation=generation,
-                state=state,
-                authority_id=self._AUTHORITY_ID,
-                plan_digest=route_digest,
-                evidence_set_digest=route_digest,
-                routes=routes,
-                litellm=litellm,
-                issued=issued,
-                expires=expires,
+            def route_bytes(generation: int) -> bytes:
+                document: dict[str, object] = {
+                    "generation": generation,
+                    "routes": {
+                        alias: endpoint.route_document()
+                        for alias, endpoint in sorted(endpoints.items())
+                    },
+                    "schema_version": 2,
+                    "state": state,
+                }
+                if state == "maintenance":
+                    document["reason"] = "recipe routes withdrawn"
+                return (
+                    json.dumps(document, sort_keys=True, separators=(",", ":"))
+                    + "\n"
+                ).encode()
+
+            # Activation is durable before the supervisor acknowledgement and
+            # before the database projection. After a lost acknowledgement,
+            # adopt only the exact active, checksum-verified candidate. Merely
+            # matching its route digest would reuse an outdated lease or an
+            # unrelated generation with different rendered bytes.
+            reuse_current = (
+                current is not None
+                and current.state == state
+                and current.authority_id == self._AUTHORITY_ID
+                and current.plan_digest == route_digest
+                and current.evidence_set_digest == route_digest
+                and _aware(datetime.fromisoformat(current.issued_at)) <= issued
+                and _aware(datetime.fromisoformat(current.expires_at))
+                > issued + timedelta(seconds=10)
+                and current.routes_sha256
+                == hashlib.sha256(route_bytes(current.generation)).hexdigest()
+                and current.litellm_sha256 == hashlib.sha256(litellm).hexdigest()
             )
+            if reuse_current:
+                assert current is not None
+                marker = current
+            else:
+                generation = (current.generation if current is not None else 0) + 1
+                marker = self._publisher._activate(
+                    generation=generation,
+                    state=state,
+                    authority_id=self._AUTHORITY_ID,
+                    plan_digest=route_digest,
+                    evidence_set_digest=route_digest,
+                    routes=route_bytes(generation),
+                    litellm=litellm,
+                    issued=issued,
+                    expires=expires,
+                )
             try:
                 self._publisher._require_supervisor_ack(marker)
             except Exception as error:  # noqa: BLE001
@@ -471,6 +496,11 @@ class RecipeRouteService:
         try:
             generation = self._publish(candidate)
         except Exception as publication_error:
+            if publication_is_temporary(publication_error):
+                # The route remains unpublished while the worker schedules a
+                # bounded retry. Recovery authority and its original deadline
+                # remain intact; the next attempt rechecks both before use.
+                raise
             if recovery is None:
                 raise
             try:
