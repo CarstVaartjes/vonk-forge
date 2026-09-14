@@ -249,6 +249,104 @@ fn observation_errors_preserve_safe_category_without_storage_details() {
 }
 
 #[test]
+fn uninstall_removes_only_its_materialization_despite_unrelated_metadata() {
+    let root = tempdir().unwrap();
+    let plan = schema2_single_plan();
+    persist_plan(root.path(), &plan);
+    let installation = root.path().join("installations").join(INSTALLATION);
+    let unrelated = root.path().join("installations").join(RUN);
+    fs::create_dir_all(&unrelated).unwrap();
+    fs::write(unrelated.join("spec.json"), b"invalid unrelated metadata").unwrap();
+    let cache = root.path().join("shared-cache-object");
+    fs::write(&cache, b"shared model bytes").unwrap();
+    let mut expected_bytes = 0;
+    for artifact in &plan.artifacts {
+        let file = installation
+            .join("models")
+            .join(&artifact.selection_id)
+            .join(&artifact.path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::hard_link(&cache, &file).unwrap();
+        expected_bytes += fs::metadata(file).unwrap().len();
+    }
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+        huggingface_curl_config: None,
+    };
+    assert_eq!(
+        runtime
+            .uninstall_with_model_cleanup(
+                INSTALLATION,
+                &plan.identity.recipe_revision_sha256,
+                &plan.artifacts[0].model.content_sha256,
+            )
+            .unwrap(),
+        expected_bytes
+    );
+    assert!(!installation.exists());
+    assert_eq!(
+        fs::read(unrelated.join("spec.json")).unwrap(),
+        b"invalid unrelated metadata"
+    );
+    assert_eq!(fs::read(cache).unwrap(), b"shared model bytes");
+}
+
+#[test]
+fn uninstall_validates_storage_without_requiring_launchable_placement() {
+    let root = tempdir().unwrap();
+    let mut plan = schema2_dual_plan();
+    plan.runtime.placement.local_address = None;
+    assert!(plan.validate().is_err());
+    persist_plan(root.path(), &plan);
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+        huggingface_curl_config: None,
+    };
+    runtime
+        .uninstall(INSTALLATION, &plan.identity.recipe_revision_sha256)
+        .unwrap();
+    assert!(
+        !root
+            .path()
+            .join("installations")
+            .join(INSTALLATION)
+            .exists()
+    );
+}
+
+#[test]
+fn uninstall_rejects_its_own_invalid_metadata_identity_and_artifact_paths() {
+    for defect in ["malformed", "identity", "artifact-path"] {
+        let root = tempdir().unwrap();
+        let mut plan = schema2_single_plan();
+        let recipe = plan.identity.recipe_revision_sha256.clone();
+        match defect {
+            "identity" => plan.identity.recipe_revision_sha256 = "a".repeat(64),
+            "artifact-path" => plan.artifacts[0].path = "../../outside".to_owned(),
+            _ => {}
+        }
+        persist_plan(root.path(), &plan);
+        let installation = root.path().join("installations").join(INSTALLATION);
+        fs::write(installation.join("recipe-content.sha256"), &recipe).unwrap();
+        if defect == "malformed" {
+            fs::write(installation.join("spec.json"), b"{}").unwrap();
+        }
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+            huggingface_curl_config: None,
+        };
+        assert!(
+            runtime.uninstall(INSTALLATION, &recipe).is_err(),
+            "{defect}"
+        );
+        assert!(installation.exists());
+    }
+}
+
+#[test]
 fn retained_job_stop_accepts_only_a_timeout_within_installed_limit() {
     let root = tempdir().unwrap();
     let mut installed = schema2_single_plan();

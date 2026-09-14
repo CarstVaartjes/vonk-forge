@@ -87,7 +87,10 @@ pub fn same_job_workload(
 }
 
 impl CompiledExecutionPlan {
-    pub fn validate(&self) -> Result<(), WorkloadError> {
+    /// Validate the current document, immutable artifact identity, and paths
+    /// without admitting its runtime for execution. Teardown needs this storage
+    /// authority even when saved launch settings can no longer run.
+    pub fn validate_storage(&self) -> Result<(), WorkloadError> {
         let mut value = serde_json::to_value(self)
             .map_err(|_| WorkloadError::Invalid("compiled wire document"))?;
         crate::wire_schema::validate_and_materialize("CompiledExecutionPlan", &mut value)
@@ -169,6 +172,11 @@ impl CompiledExecutionPlan {
         if total != self.identity.model_artifact_bytes {
             return Err(WorkloadError::Invalid("compiled model artifact-set bytes"));
         }
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), WorkloadError> {
+        self.validate_storage()?;
         self.runtime.validate()?;
         self.runtime_image.validate()?;
         let placement = &self.runtime.placement;

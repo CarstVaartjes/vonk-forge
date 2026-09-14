@@ -1081,16 +1081,23 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         expected_recipe_digest: &str,
     ) -> Result<(), OciError> {
-        let installation = managed_path(self.data_root, "installations", installation_id)?;
-        let metadata = fs::symlink_metadata(&installation)?;
-        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        self.load_uninstall_spec(installation_id, expected_recipe_digest)
+            .map(|_| ())
+    }
+
+    fn load_uninstall_spec(
+        &self,
+        installation_id: &str,
+        expected_recipe_digest: &str,
+    ) -> Result<CompiledExecutionPlan, OciError> {
+        let plan = self.read_persisted_spec(installation_id)?;
+        plan.validate_storage()?;
+        if self.recipe_digest(installation_id)? != expected_recipe_digest
+            || plan.identity.recipe_revision_sha256 != expected_recipe_digest
+        {
             return Err(OciError::Artifact);
         }
-        self.load_spec(installation_id)?;
-        if self.recipe_digest(installation_id)? != expected_recipe_digest {
-            return Err(OciError::Artifact);
-        }
-        Ok(())
+        Ok(plan)
     }
 
     pub fn runtime_cache_present(&self, installation_id: &str) -> Result<bool, OciError> {
@@ -1118,10 +1125,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(())
     }
 
-    /// Remove one installation's materialized model files when the signed
-    /// Controller plan proves that this node is the last consumer of the
-    /// model. The global distribution cache is reusable shared state and is
-    /// retained for future installs.
+    /// Remove only this installation's materialized model files. Other
+    /// installations and the shared distribution cache retain their own files
+    /// (including hard links to the same content) for future use.
     pub fn uninstall_with_model_cleanup(
         &self,
         installation_id: &str,
@@ -1146,55 +1152,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if !lower_hex(model_content_sha256, 64) {
             return Err(OciError::Artifact);
         }
-        let (_, persisted) = self.load_persisted_spec(installation_id)?;
-        if self.recipe_digest(installation_id)? != expected_recipe_digest
-            || !spec_references_model(&persisted, model_content_sha256)
-        {
-            return Err(OciError::Artifact);
-        }
-        let remaining = self.installed_specs_except(&[installation_id])?;
-        if remaining
-            .iter()
-            .any(|(_, spec)| spec_references_model(spec, model_content_sha256))
-        {
+        let persisted = self.load_uninstall_spec(installation_id, expected_recipe_digest)?;
+        if !spec_references_model(&persisted, model_content_sha256) {
             return Err(OciError::Artifact);
         }
         let removed_model_bytes =
             materialized_model_bytes(self.data_root, installation_id, &persisted)?;
         Ok(removed_model_bytes)
-    }
-
-    fn installed_specs_except(
-        &self,
-        excluded: &[&str],
-    ) -> Result<Vec<(String, CompiledExecutionPlan)>, OciError> {
-        let root = self.data_root.join("installations");
-        let metadata = fs::symlink_metadata(&root)?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(OciError::Artifact);
-        }
-        let excluded = excluded.iter().copied().collect::<BTreeSet<_>>();
-        let mut entries = fs::read_dir(&root)?.collect::<Result<Vec<_>, _>>()?;
-        if entries.len() > MAX_RUN_DIRECTORY_ENTRIES {
-            return Err(OciError::Artifact);
-        }
-        entries.sort_by_key(fs::DirEntry::file_name);
-        let mut result = Vec::with_capacity(entries.len());
-        for entry in entries {
-            let installation_id = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| OciError::Artifact)?;
-            if excluded.contains(installation_id.as_str()) {
-                continue;
-            }
-            let file_type = entry.file_type()?;
-            if !file_type.is_dir() || file_type.is_symlink() {
-                return Err(OciError::Artifact);
-            }
-            result.push((installation_id.clone(), self.load_spec(&installation_id)?));
-        }
-        Ok(result)
     }
 
     pub fn load_spec(&self, installation_id: &str) -> Result<CompiledExecutionPlan, OciError> {
@@ -2218,7 +2182,7 @@ mod tests {
     fn routine_recipe_uninstall_retains_shared_model_cache() {
         let data = tempdir().unwrap();
         let (installation_id, installation, plan) = persisted_installation(data.path());
-        let recipe_digest = "2".repeat(64);
+        let recipe_digest = plan.identity.recipe_revision_sha256.clone();
         authorize_installation(&installation, &recipe_digest);
         let cached = data
             .path()
