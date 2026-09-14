@@ -11,15 +11,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from collections.abc import Mapping
+from vonk_agent_protocol import AgentFailureKind
 
-
-class FailureKind(StrEnum):
-    TEMPORARY_DEPENDENCY = "temporary-dependency"
-    UNCERTAIN_EFFECT = "uncertain-effect"
-    INVALID_AUTHORITY = "invalid-authority"
-    INVALID_CONTRACT = "invalid-contract"
-    INTEGRITY_FAILURE = "integrity-failure"
-    RESOURCE_PREREQUISITE = "resource-prerequisite"
+FailureKind = AgentFailureKind
 
 
 class RecoveryDecision(StrEnum):
@@ -41,7 +35,7 @@ def kind_for_agent_error(evidence: Mapping[str, object]) -> FailureKind:
 
     A broad operation-level error code such as ``artifact_distribution_failed``
     cannot prove a transient failure: it also covers integrity and custody
-    failures.  New agents provide ``failure_kind`` for the precise boundary.
+    failures. Exact producers provide ``failure_kind`` for the precise boundary.
     """
     raw_kind = evidence.get("failure_kind")
     if isinstance(raw_kind, str):
