@@ -428,6 +428,20 @@
           "default": null,
           "title": "Recovery"
         },
+        "retry_after_seconds": {
+          "anyOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry After Seconds"
+        },
         "stage": {
           "anyOf": [
             {

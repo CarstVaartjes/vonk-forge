@@ -304,6 +304,8 @@ pub struct AgentFailureResult {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub recovery: ::std::option::Option<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub retry_after_seconds: ::std::option::Option<u32>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub stage: ::std::option::Option<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub status: ::std::option::Option<::std::string::String>,
@@ -6424,6 +6426,8 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub recovery: ::std::option::Option<::std::string::String>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub retry_after_seconds: ::std::option::Option<u32>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub stage: ::std::option::Option<::std::string::String>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub status: ::std::option::Option<::std::string::String>,
@@ -6444,6 +6448,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
             package_activation: raw.package_activation,
             reason: raw.reason,
             recovery: raw.recovery,
+            retry_after_seconds: raw.retry_after_seconds,
             stage: raw.stage,
             status: raw.status,
             summary: raw.summary,
