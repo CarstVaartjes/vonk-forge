@@ -4227,22 +4227,34 @@ class RunSwitchOperationService:
                         _complete_cancellation(job, current, now)
                         return True
             if child.state not in _TERMINAL_STATES or child.state != "succeeded":
-                reason = f"run-switch phase operation failed: {child.state if child else 'unknown'}"
-                evidence = _child_progress_payload(child)
-                detail = evidence.get("reason") or evidence.get("status_reason")
-                if isinstance(detail, str) and detail:
-                    reason += ": " + detail[:384]
-                transient = _transient_distribution_failure(child)
-                if (
-                    transient
-                    and _automatic_retry_phase(plan.phases[phase_index])
-                    and self._queue_transient_retry(
-                        operation_id, child, phase_index=phase_index, child_id=child_id
-                    )
-                ):
+                established = _established_start_effect(
+                    self._lifecycle, plan.phases[phase_index], child
+                )
+                if established is not None:
+                    # The effect is established under current authority, so the
+                    # ordinary success path records the checkpoint the missing
+                    # acknowledgement would have produced.
+                    child = _EstablishedEffect(child, established)
+                else:
+                    reason = f"run-switch phase operation failed: {child.state if child else 'unknown'}"
+                    evidence = _child_progress_payload(child)
+                    detail = evidence.get("reason") or evidence.get("status_reason")
+                    if isinstance(detail, str) and detail:
+                        reason += ": " + detail[:384]
+                    transient = _transient_distribution_failure(child)
+                    if (
+                        transient
+                        and _automatic_retry_phase(plan.phases[phase_index])
+                        and self._queue_transient_retry(
+                            operation_id,
+                            child,
+                            phase_index=phase_index,
+                            child_id=child_id,
+                        )
+                    ):
+                        return True
+                    fail(reason, retryable=transient)
                     return True
-                fail(reason, retryable=transient)
-                return True
             with self._sessions.begin() as session:
                 job = session.get(Job, operation_id, with_for_update=True)
                 if job is None:
@@ -5162,6 +5174,54 @@ def _child_progress_payload(child: object) -> Mapping[str, object]:
     if isinstance(child_reason, str) and child_reason:
         payload["status_reason"] = child_reason[:512]
     return payload
+
+
+class _EstablishedEffect:
+    """Present a parked child whose effect the lifecycle owner has observed.
+
+    The ordinary success path records exactly the checkpoint the missing
+    acknowledgement would have produced, so the run keeps one identity and the
+    final verification phase re-confirms it under current authority.
+    """
+
+    def __init__(self, child: object, run_id: str) -> None:
+        self._child = child
+        self.state = "succeeded"
+        self.owner_id = run_id
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._child, name)
+
+
+def _established_start_effect(
+    lifecycle: object,
+    phase: RunSwitchPhase,
+    child: object,
+) -> str | None:
+    """Return the run id when a parked start already produced its effect.
+
+    A start whose result never reached the Controller can still have brought
+    the run up: the acknowledgement is missing, not the effect.  The lifecycle
+    owner observes the exact run, and only an established effect is accepted;
+    anything else keeps its real failure, so a retry policy never conceals a
+    permanently bad model or runtime.
+    """
+
+    if phase.kind != "start" or getattr(child, "state", None) != "waiting-for-operator":
+        return None
+    run_id = getattr(child, "owner_id", None)
+    if not isinstance(run_id, str) or not run_id:
+        return None
+    getter = getattr(lifecycle, "run_status", None)
+    if not callable(getter):
+        return None
+    try:
+        status: Any = getter(run_id)
+    except (KeyError, RuntimeError, TypeError, ValueError):
+        return None
+    if status.healthy and status.route_state == "published":
+        return run_id
+    return None
 
 
 def _automatic_retry_phase(phase: RunSwitchPhase) -> bool:

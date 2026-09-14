@@ -66,6 +66,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchPlan,
     RunSwitchPreviewRequest,
     RunSwitchRetention,
+    RunSwitchStartResult,
     RunSwitchTargetTransferEvidenceResult,
     SparkGroup,
     SparkGroupNode,
@@ -3075,3 +3076,131 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tm
         stale.image_bytes = None
     with pytest.raises(RunSwitchOperationConflict, match="container-build-evidence-invalid"):
         execute()
+
+
+class _ObservingLifecycle(RecipeOperationService):
+    """Real lifecycle service with one scripted run observation.
+
+    Everything except the observation delegates to the real service, so the
+    decision under review sees real durable children and real plans.
+    """
+
+    def __init__(self, inner: RecipeOperationService, *, healthy: bool) -> None:
+        self._inner = inner
+        self._healthy = healthy
+
+    def run_status(self, run_id: str):
+        return replace(
+            self._inner.run_status(run_id),
+            healthy=self._healthy,
+            route_state="published" if self._healthy else "withdrawn",
+        )
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
+
+
+def _parked_start_switch(tmp_path: Path, *, healthy: bool):
+    """A real Run/Switch checkpointed at a parked start whose run is observed."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    observing = _ObservingLifecycle(lifecycle, healthy=healthy)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=observing,
+        clock=lambda: lifecycle._clock(),
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    start_index = next(
+        index for index, phase in enumerate(plan.phases) if phase.kind == "start"
+    )
+    # The launch happens after admission, exactly as the real start phase would
+    # have done it, and is then left parked by the interrupted agent.
+    run_plan = lifecycle.preview_run(installation.owner_id, "qwen")
+    started = lifecycle.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    with sessions.begin() as session:
+        # The launch was interrupted: its operation is parked while the run it
+        # produced may still be serving.
+        child = session.get(Job, started.id)
+        assert child is not None
+        child.state = "waiting-for-operator"
+        row = session.get(Job, operation.operation_id)
+        assert row is not None
+        row.state = "running"
+        row.result = RunSwitchOperationResult(
+            phase_index=start_index,
+            item_index=0,
+            phase="start",
+            completed_phases=[phase.kind for phase in plan.phases[:start_index]],
+            child_operation_id=started.id,
+            phase_results=[
+                RunSwitchStartResult(phase="start", run_id=started.owner_id)
+            ],
+        ).model_dump(mode="json")
+    return service, operation, start_index
+
+
+def test_parked_start_with_an_established_run_completes_without_an_operator(
+    tmp_path: Path,
+) -> None:
+    """A lost start acknowledgement must not require manual recovery.
+
+    The Controller never received the start result, but the run is up and
+    published.  The lifecycle owner observes that exact run, the phase accepts
+    the established effect, and the ordinary final verification confirms it.
+    """
+
+    service, operation, start_index = _parked_start_switch(tmp_path, healthy=True)
+
+    for _ in range(4):
+        if service.get(operation.operation_id).state not in {"queued", "running"}:
+            break
+        service.tick()
+
+    view = service.get(operation.operation_id)
+    assert view.state == "succeeded", view.status_reason
+    completed = _result(view).completed_phases
+    # The parked start was accepted exactly once, through the ordinary
+    # checkpoint, so no effect is repeated by the observation.
+    assert completed.count("start") == 1
+    assert "final_verify" in completed
+    # The start phase was accepted at its own checkpoint, not replayed earlier.
+    assert start_index < len(completed)
+
+
+def test_parked_start_without_an_established_effect_still_fails(tmp_path: Path) -> None:
+    """An unobserved effect keeps its real failure.
+
+    A retry policy must never conceal a permanently bad model or runtime, so a
+    parked start whose run is not established stays a reported failure.
+    """
+
+    service, operation, _start_index = _parked_start_switch(tmp_path, healthy=False)
+
+    for _ in range(4):
+        if service.get(operation.operation_id).state not in {"queued", "running"}:
+            break
+        service.tick()
+
+    view = service.get(operation.operation_id)
+    assert view.state == "failed"
+    assert "waiting-for-operator" in (view.status_reason or "")
