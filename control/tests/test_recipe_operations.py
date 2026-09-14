@@ -134,6 +134,7 @@ class RecordingQueue:
             payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
             payload=dict(payload),
             authority_revision=authority_revision,
+            workload_intent_ordinal=session.get(Job, parent_job_id).payload.get("workload_intent_ordinal"),
             state="queued",
             current_attempt=0,
             created_at=NOW,
@@ -1236,6 +1237,9 @@ def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) ->
         child_operations = list(session.scalars(select(AgentOperation).where(AgentOperation.kind == "recipe.install")))
         assert len(jobs) == 1
         assert {item.kind for item in child_operations} == {"recipe.install"}
+        assert jobs[0].payload["workload_intent_ordinal"] == 1
+        assert all(item.workload_intent_ordinal == 1 for item in child_operations)
+        assert all(session.get(AgentNode, node_id).workload_intent_ordinal == 1 for node_id in nodes)
         assert all(
             "shell" not in json.dumps(item.payload).lower() for item in child_operations
         )

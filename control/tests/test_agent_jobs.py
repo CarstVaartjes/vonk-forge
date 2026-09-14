@@ -16,7 +16,11 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol import DistributionAssignment, RecipeOperationRequest
+from vonk_agent_protocol import (
+    DistributionAssignment,
+    RecipeOperationRequest,
+    canonical_message,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.distribution import (
@@ -125,6 +129,7 @@ def service(tmp_path):
                 AgentNode(
                     node_id=node_id,
                     state="active",
+                    workload_intent_ordinal=1,
                     capabilities=[],
                     architecture="linux-arm64",
                     semantic_version="1.0.0",
@@ -146,6 +151,7 @@ def service(tmp_path):
 
 
 def parent(sessions, clock) -> Job:
+    payload = {"workload_intent_ordinal": 1}
     job = Job(
         request_id=str(uuid.uuid4()),
         kind="agent.operations",
@@ -153,8 +159,8 @@ def parent(sessions, clock) -> Job:
         actor="operator",
         authority_revision=COMMIT,
         targets=[NODE_A, NODE_B],
-        payload_digest=hashlib.sha256(b"{}").hexdigest(),
-        payload={},
+        payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+        payload=payload,
         current_attempt=0,
         created_at=clock.now,
         updated_at=clock.now,
@@ -184,6 +190,15 @@ def test_agent_can_claim_only_its_node_operation(service) -> None:
     assert claim is not None
     assert claim.operation_id == operation.id
     assert claim.node_id == NODE_A
+
+
+def test_workload_enqueue_refuses_parent_without_an_admitted_intent(service) -> None:
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    with sessions.begin() as session:
+        session.get(Job, job.id).payload = {}
+    with pytest.raises(ValueError, match="requires a bound intent"):
+        jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
 
 
 def test_newer_workload_intent_fences_old_enqueues_renewals_and_results(service) -> None:

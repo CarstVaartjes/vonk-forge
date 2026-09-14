@@ -96,6 +96,17 @@ _MUTATING_OPERATIONS = frozenset(
         AgentOperation.RECIPE_UNINSTALL.value,
     }
 )
+_WORKLOAD_INTENT_OPERATIONS = frozenset(
+    {
+        AgentOperation.RECIPE_IMAGE_IMPORT.value,
+        AgentOperation.RECIPE_INSTALL.value,
+        AgentOperation.ARTIFACT_DISTRIBUTION.value,
+        AgentOperation.RECIPE_START.value,
+        AgentOperation.RECIPE_JOB_RUN.value,
+        AgentOperation.RECIPE_STOP.value,
+        AgentOperation.RECIPE_UNINSTALL.value,
+    }
+)
 _TERMINAL_PARENT_STATES = frozenset(
     {"succeeded", "failed", "waiting-for-operator", "expired", "cancelled"}
 )
@@ -292,6 +303,8 @@ class AgentJobService:
         if node_id not in parent.targets:
             raise ValueError("agent operation node must be a parent target")
         workload_intent_ordinal = parent.payload.get("workload_intent_ordinal")
+        if operation in _WORKLOAD_INTENT_OPERATIONS and workload_intent_ordinal is None:
+            raise ValueError("workload operation requires a bound intent")
         if workload_intent_ordinal is not None and (
             type(workload_intent_ordinal) is not int
             or workload_intent_ordinal < 1
@@ -952,6 +965,10 @@ class AgentJobService:
             current_operation.node_id != node.node_id
             or current_operation.node_id not in job.targets
             or current_operation.authority_revision != job.authority_revision
+            or (
+                current_operation.kind in _WORKLOAD_INTENT_OPERATIONS
+                and current_operation.workload_intent_ordinal is None
+            )
             or current_operation.workload_intent_ordinal != job.payload.get("workload_intent_ordinal")
             or (
                 current_operation.workload_intent_ordinal is not None
@@ -1480,6 +1497,10 @@ class AgentJobService:
             or operation.parent_job_id != parent_job_id
             or operation.node_id != node.node_id
             or operation.authority_revision != parent.authority_revision
+            or (
+                operation.kind in _WORKLOAD_INTENT_OPERATIONS
+                and operation.workload_intent_ordinal is None
+            )
             or operation.workload_intent_ordinal != parent.payload.get("workload_intent_ordinal")
             or (
                 operation.workload_intent_ordinal is not None

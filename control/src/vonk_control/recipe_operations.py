@@ -240,6 +240,41 @@ _RETRYABLE_IMAGE_OPERATION_STATES = _TERMINAL_JOB_STATES | frozenset(
 _MEMORY_RESERVATION_KINDS = frozenset({"unified-memory", "host-memory", "gpu-memory"})
 _MAX_ACTION_NODES = 1024
 _MAX_ACTIVE_RUNS = 128
+_WORKLOAD_INTENT_KINDS = frozenset({
+    "recipe.install", "recipe.start", "recipe.stop", "recipe.uninstall",
+    "recipe.image.import.v1",
+})
+
+
+def _bound_workload_intent(job: Job) -> int:
+    ordinal = job.payload.get("workload_intent_ordinal")
+    if type(ordinal) is not int or ordinal < 1:
+        raise RecipeOperationConflict("workload operation lacks its admitted intent")
+    return ordinal
+
+
+def _run_start_intent(session: Session, run_id: str) -> int:
+    starts = tuple(
+        job for job in session.scalars(select(Job).where(Job.kind == "recipe.start"))
+        if job.payload.get("owner_kind") == "run"
+        and job.payload.get("owner_id") == run_id
+        and "recovery" not in job.payload
+    )
+    if len(starts) != 1:
+        raise RecipeOperationConflict("recipe run lacks its original start authority")
+    return _bound_workload_intent(starts[0])
+
+
+def _intent_is_current(session: Session, ordinal: int, targets: Sequence[str]) -> bool:
+    nodes = tuple(session.scalars(
+        select(AgentNode)
+        .where(AgentNode.node_id.in_(targets))
+        .order_by(AgentNode.node_id)
+        .with_for_update(of=AgentNode)
+    ))
+    return tuple(node.node_id for node in nodes) == tuple(sorted(set(targets))) and all(
+        node.workload_intent_ordinal == ordinal for node in nodes
+    )
 
 
 def _cancel_reason(value: object) -> str:
@@ -1283,6 +1318,7 @@ class RecipeOperationService:
             node_payloads=((node_id, payload),),
             authority_digest=authority_digest,
             now=now,
+            workload_intent_ordinal=_run_start_intent(session, run_id),
         )
 
     def notify_agents(self) -> None:
@@ -1738,6 +1774,7 @@ class RecipeOperationService:
             ),
             authority_digest=plan_digest,
             now=now,
+            workload_intent_ordinal=_bound_workload_intent(previous),
         )
 
     def _retry_install_in_session(
@@ -1812,6 +1849,7 @@ class RecipeOperationService:
             ),
             authority_digest=recipe_digest,
             now=now,
+            workload_intent_ordinal=_bound_workload_intent(previous),
         )
 
     def _retry_build_in_session(
@@ -2314,9 +2352,15 @@ class RecipeOperationService:
                             f"vonk:recipe-start-cleanup:{job.id}",
                         )
                     )
+                    intent_current = _intent_is_current(
+                        session, _bound_workload_intent(job), job.targets
+                    )
+                    if not intent_current:
+                        run.state = "failed"
+                        run.route_error = "start cleanup superseded by a newer workload intent"
                     if not session.scalar(
                         select(Job.id).where(Job.request_id == cleanup_request_id)
-                    ):
+                    ) and intent_current:
                         stop_nodes = tuple(
                             session.scalars(
                                 select(RunNode)
@@ -2375,6 +2419,7 @@ class RecipeOperationService:
                             ),
                             authority_digest=run.plan_digest,
                             now=now,
+                            workload_intent_ordinal=_bound_workload_intent(job),
                         )
                         cleanup_queued = True
                 else:
@@ -2391,7 +2436,11 @@ class RecipeOperationService:
                     recovery = recovery_start_plan(job.payload, now=now)
                 except DistributedLifecycleError as error:
                     recovery_error = error
-                if recovery is not None and not failed:
+                if (
+                    recovery is not None
+                    and not failed
+                    and _intent_is_current(session, _bound_workload_intent(job), job.targets)
+                ):
                     phases, marker = recovery
                     installation = session.get(RecipeInstallation, run.installation_id)
                     revision = (
@@ -2429,6 +2478,7 @@ class RecipeOperationService:
                         phases=phases,
                         authority_digest=revision.content_digest,
                         now=now,
+                        workload_intent_ordinal=_bound_workload_intent(job),
                         job_context={
                             "recovery": marker,
                             "start_deadline": marker["deadline"],
@@ -3265,6 +3315,27 @@ class RecipeOperationService:
         targets = sorted(
             {node_id for _operation_id, node_id, _payload in sum(phase_groups, ())}
         )
+        if kind in _WORKLOAD_INTENT_KINDS:
+            # Only a standalone request admits a new intent. A child carries
+            # its parent's exact ordinal and may not capture newer authority.
+            target_nodes = tuple(session.scalars(
+                select(AgentNode)
+                .where(AgentNode.node_id.in_(targets))
+                .order_by(AgentNode.node_id)
+                .with_for_update(of=AgentNode)
+            ))
+            if tuple(node.node_id for node in target_nodes) != tuple(targets):
+                raise RecipeOperationConflict("workload intent target disappeared")
+            if workload_intent_ordinal is None:
+                workload_intent_ordinal = max(node.workload_intent_ordinal for node in target_nodes) + 1
+                for node in target_nodes:
+                    node.workload_intent_ordinal = workload_intent_ordinal
+            elif (
+                type(workload_intent_ordinal) is not int
+                or workload_intent_ordinal < 1
+                or any(node.workload_intent_ordinal != workload_intent_ordinal for node in target_nodes)
+            ):
+                raise RecipeOperationConflict("workload intent was superseded")
         job_payload: dict[str, object] = {
             "schema_version": 1,
             "owner_kind": owner_kind,
