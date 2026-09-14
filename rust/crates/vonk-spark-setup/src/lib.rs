@@ -72,6 +72,7 @@ pub struct Command {
 pub enum CommandStderr {
     Inherit,
     Suppress,
+    CaptureAndForward,
 }
 
 impl Command {
@@ -102,12 +103,18 @@ impl Command {
         self.stderr = CommandStderr::Suppress;
         self
     }
+
+    pub fn capture_and_forward_stderr(mut self) -> Self {
+        self.stderr = CommandStderr::CaptureAndForward;
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
     pub success: bool,
     pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
 impl CommandOutput {
@@ -115,6 +122,7 @@ impl CommandOutput {
         Self {
             success: true,
             stdout,
+            stderr: Vec::new(),
         }
     }
 
@@ -1763,16 +1771,7 @@ fn install_package(
     if first.success {
         return Ok(());
     }
-    let reason = String::from_utf8_lossy(&first.stdout);
-    if ![
-        "unmet dependencies",
-        "Unable to locate package",
-        "has no installation candidate",
-        "not installable",
-    ]
-    .iter()
-    .any(|marker| reason.contains(marker))
-    {
+    if !apt_needs_index_refresh(&first) {
         return Err(SetupError::Command("/usr/bin/apt-get install".to_owned()));
     }
     run_checked(
@@ -1780,6 +1779,18 @@ fn install_package(
         Command::new("/usr/bin/apt-get", ["update"]).with_env("DEBIAN_FRONTEND", "noninteractive"),
     )?;
     apt_install(runner, staged)
+}
+
+fn apt_needs_index_refresh(output: &CommandOutput) -> bool {
+    let error = String::from_utf8_lossy(&output.stderr);
+    let detail = String::from_utf8_lossy(&output.stdout);
+    error.contains("Unable to locate package")
+        || error.contains("has no installation candidate")
+        || (error.contains("Unable to correct problems")
+            && detail.contains("packages have unmet dependencies"))
+        || (error.contains("Failed to fetch")
+            && error.contains("404")
+            && error.contains("Not Found"))
 }
 
 fn apt_install(runner: &mut dyn CommandRunner, staged: &StagedPackage) -> Result<(), SetupError> {
@@ -1799,6 +1810,7 @@ fn apt_install_command(staged: &StagedPackage) -> Command {
         ],
     )
     .with_env("DEBIAN_FRONTEND", "noninteractive")
+    .capture_and_forward_stderr()
 }
 
 fn ensure_package_installed(
@@ -2922,6 +2934,7 @@ fn run_process(command: Command, timeout: Duration) -> Result<CommandOutput, Str
     process.stderr(match command.stderr {
         CommandStderr::Inherit => Stdio::inherit(),
         CommandStderr::Suppress => Stdio::null(),
+        CommandStderr::CaptureAndForward => Stdio::piped(),
     });
     // Put every privileged command in its own process group.  A timed-out
     // sudo shell can otherwise leave apt/systemd descendants behind and
@@ -2941,6 +2954,26 @@ fn run_process(command: Command, timeout: Duration) -> Result<CommandOutput, Str
         let mut output = Vec::new();
         stdout.read_to_end(&mut output).map(|_| output)
     });
+    let stderr_reader = child.stderr.take().map(|mut stderr| {
+        thread::spawn(move || {
+            let mut captured = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let count = stderr.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                // Preserve the live diagnostic while keeping only a bounded
+                // tail for the install retry decision.
+                let _ = io::stderr().write_all(&buffer[..count]);
+                captured.extend_from_slice(&buffer[..count]);
+                if captured.len() > 64 * 1024 {
+                    captured.drain(..captured.len() - 64 * 1024);
+                }
+            }
+            Ok::<_, io::Error>(captured)
+        })
+    });
     let status = match child.wait_timeout(timeout) {
         Ok(Some(status)) => status,
         Ok(None) | Err(_) => {
@@ -2951,6 +2984,7 @@ fn run_process(command: Command, timeout: Duration) -> Result<CommandOutput, Str
             // bounded failure while the OS closes the descriptors on exit.
             drop(writer);
             drop(reader);
+            drop(stderr_reader);
             return Err(format!(
                 "{} exceeded its command deadline",
                 program.display()
@@ -2967,9 +3001,19 @@ fn run_process(command: Command, timeout: Duration) -> Result<CommandOutput, Str
         .join()
         .map_err(|_| program.display().to_string())?
         .map_err(|_| program.display().to_string())?;
+    let stderr = stderr_reader
+        .map(|reader| {
+            reader
+                .join()
+                .map_err(|_| program.display().to_string())?
+                .map_err(|_| program.display().to_string())
+        })
+        .transpose()?
+        .unwrap_or_default();
     Ok(CommandOutput {
         success: status.success(),
         stdout,
+        stderr,
     })
 }
 
@@ -3131,6 +3175,27 @@ mod tests {
 
     struct Values(VecDeque<String>);
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn real_apt_dependency_diagnostic_is_available_for_retry_decision() {
+        let output = run_process(
+            Command::new(
+                "/usr/bin/apt-get",
+                [
+                    "-s",
+                    "install",
+                    "vonk-forge-nonexistent-test-dependency-98765",
+                ],
+            )
+            .capture_and_forward_stderr(),
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        assert!(!output.success);
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Unable to locate package"));
+        assert!(apt_needs_index_refresh(&output));
+    }
+
     struct AptRunner {
         outcomes: VecDeque<CommandOutput>,
         commands: Vec<Command>,
@@ -3151,7 +3216,8 @@ mod tests {
         };
         let failed = CommandOutput {
             success: false,
-            stdout: b"dpkg returned an error code".to_vec(),
+            stdout: Vec::new(),
+            stderr: b"dpkg returned an error code".to_vec(),
         };
         let mut runner = AptRunner {
             outcomes: [failed].into(),
@@ -3163,6 +3229,7 @@ mod tests {
         let dependencies = CommandOutput {
             success: false,
             stdout: b"The following packages have unmet dependencies".to_vec(),
+            stderr: b"E: Unable to correct problems, you have held broken packages.".to_vec(),
         };
         let mut runner = AptRunner {
             outcomes: [
@@ -3182,6 +3249,14 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["install", "update", "install"]
         );
+        let failed_fetch = |status| CommandOutput {
+            success: false,
+            stdout: Vec::new(),
+            stderr: format!("E: Failed to fetch https://packages.example/dep.deb  {status}")
+                .into_bytes(),
+        };
+        assert!(apt_needs_index_refresh(&failed_fetch("404  Not Found")));
+        assert!(!apt_needs_index_refresh(&failed_fetch("401  Unauthorized")));
     }
 
     fn enrollment_bootstrap_document() -> serde_json::Value {
@@ -3238,6 +3313,7 @@ mod tests {
         let output = CommandOutput {
             success: false,
             stdout: b"ActiveState=failed\nreason=agent\xff\n".to_vec(),
+            stderr: Vec::new(),
         };
         assert_eq!(
             diagnostic_stdout(&output).as_deref(),
@@ -3271,6 +3347,7 @@ mod tests {
                 return Ok(CommandOutput {
                     success: self.readiness_checks > 30,
                     stdout: Vec::new(),
+                    stderr: Vec::new(),
                 });
             }
             if command.program == Path::new("/usr/bin/systemctl")
@@ -3346,6 +3423,7 @@ mod tests {
                 Ok(CommandOutput {
                     success: false,
                     stdout: Vec::new(),
+                    stderr: Vec::new(),
                 })
             } else {
                 Ok(CommandOutput::success_empty())

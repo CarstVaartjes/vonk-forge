@@ -224,6 +224,7 @@ impl CommandRunner for RecordingRunner {
             CommandOutput {
                 success: false,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
             }
         } else if command.program == std::path::Path::new("/usr/bin/systemctl")
             && command.args.first().map(String::as_str) == Some("show")
@@ -254,6 +255,7 @@ impl CommandRunner for FailingReadinessRunner {
             CommandOutput {
                 success: false,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
             }
         } else if command.program == std::path::Path::new("/usr/bin/systemctl")
             && command.args.first().map(String::as_str) == Some("show")
@@ -831,10 +833,12 @@ fn expired_sudo_ticket_fails_before_the_frame_can_be_applied() {
             CommandOutput {
                 success: false,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
             },
             CommandOutput {
                 success: false,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
             },
         ]
         .into(),
@@ -1774,6 +1778,7 @@ fn successful_pairing_enters_recovery_before_later_service_startup() {
             CommandOutput {
                 success: false,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
             },
         ]
         .into(),
