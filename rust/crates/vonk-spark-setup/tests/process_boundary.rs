@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use vonk_spark_setup::{
     CallerIdentity, Command, CommandOutput, CommandRunner, CommandStderr, InstallPaths, Prompt,
-    ReleaseAuthority, SetupRequest, SystemCommandRunner, TtyPrompt,
+    ReleaseAuthority, SetupError, SetupRequest, SystemCommandRunner, TtyPrompt,
     apply_setup_from_with_authority, handoff_to_root_with_authority, prepare_setup_with_authority,
 };
 
@@ -50,10 +50,38 @@ impl CommandRunner for NoCommands {
             command.program.display()
         )
     }
+
+    fn authenticate_sudo(&mut self, _sudo: &Path) -> Result<(), SetupError> {
+        Ok(())
+    }
+}
+
+struct ProcessRunner;
+
+impl CommandRunner for ProcessRunner {
+    fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
+        SystemCommandRunner.run(command)
+    }
+
+    fn authenticate_sudo(&mut self, _sudo: &Path) -> Result<(), SetupError> {
+        Ok(())
+    }
 }
 
 struct FreshPrompt {
     values: VecDeque<String>,
+}
+
+struct NoPrompt;
+
+impl Prompt for NoPrompt {
+    fn value(&mut self, _label: &str) -> Result<String, String> {
+        Err("unexpected recovery prompt".to_owned())
+    }
+
+    fn secret(&mut self, _label: &str) -> Result<String, String> {
+        Err("unexpected recovery token prompt".to_owned())
+    }
 }
 
 impl Prompt for FreshPrompt {
@@ -90,6 +118,10 @@ impl CommandRunner for ApplyRecordingRunner {
         Ok(output)
     }
 
+    fn authenticate_sudo(&mut self, _sudo: &Path) -> Result<(), SetupError> {
+        Ok(())
+    }
+
     fn sleep(&mut self, _duration: std::time::Duration) {}
 }
 
@@ -98,15 +130,31 @@ impl CommandRunner for BootstrapRunner {
         assert_eq!(command.program, Path::new("/usr/bin/curl"));
         Ok(CommandOutput::success(self.body.clone()))
     }
+
+    fn authenticate_sudo(&mut self, _sudo: &Path) -> Result<(), SetupError> {
+        Ok(())
+    }
 }
 
 fn package(path: &Path) {
     let architecture = native_release_identity().architecture;
     let root = path.parent().unwrap().join("package-root");
     fs::create_dir_all(root.join("DEBIAN")).unwrap();
+    fs::create_dir_all(root.join("usr/lib/vonk-forge")).unwrap();
+    fs::set_permissions(root.join("DEBIAN"), fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        root.join("usr/lib/vonk-forge/vonk-agent"),
+        b"installed agent",
+    )
+    .unwrap();
     fs::write(
         root.join("DEBIAN/control"),
         format!("Package: vonk-forge-agent\nVersion: 1.0.0\nArchitecture: {architecture}\nMaintainer: test <test@example.test>\nDescription: process test\n"),
+    )
+    .unwrap();
+    fs::set_permissions(
+        root.join("DEBIAN/control"),
+        fs::Permissions::from_mode(0o644),
     )
     .unwrap();
     assert!(
@@ -354,7 +402,7 @@ fn run_headless_upgrade_process(root: PathBuf) {
     .unwrap();
     handoff_to_root_with_authority(
         &prepared,
-        &mut SystemCommandRunner,
+        &mut ProcessRunner,
         &ReleaseAuthority::canonical(),
     )
     .unwrap();
@@ -416,7 +464,7 @@ fn run_fresh_handoff_process(root: PathBuf) {
     .unwrap();
     handoff_to_root_with_authority(
         &prepared,
-        &mut SystemCommandRunner,
+        &mut ProcessRunner,
         &ReleaseAuthority::canonical(),
     )
     .unwrap();
@@ -457,6 +505,109 @@ fn run_apply_process(root: PathBuf) {
         serde_json::to_vec(&commands).unwrap(),
     )
     .unwrap();
+}
+
+struct PtyApplyRunner {
+    paths: InstallPaths,
+    fail_readiness: bool,
+    commands: Vec<Command>,
+}
+
+impl CommandRunner for PtyApplyRunner {
+    fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
+        let output = if command.program == Path::new("/usr/bin/dpkg-query") {
+            CommandOutput {
+                success: self.paths.agent.exists(),
+                stdout: b"ii |1.0.0|arm64".to_vec(),
+                stderr: Vec::new(),
+            }
+        } else if command.program == Path::new("/usr/bin/apt-get")
+            && command.args.first().map(String::as_str) == Some("install")
+        {
+            fs::create_dir_all(self.paths.agent.parent().unwrap()).unwrap();
+            fs::write(&self.paths.agent, b"installed agent").unwrap();
+            CommandOutput::success_empty()
+        } else if command.program == Path::new("/usr/bin/systemctl")
+            && command.args.first().map(String::as_str) == Some("show")
+        {
+            CommandOutput::success(b"4242\n".to_vec())
+        } else if self.fail_readiness
+            && command
+                .args
+                .iter()
+                .any(|argument| argument == "verify-readiness")
+        {
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            }
+        } else {
+            CommandOutput::success_empty()
+        };
+        self.commands.push(command);
+        Ok(output)
+    }
+
+    fn authenticate_sudo(&mut self, _sudo: &Path) -> Result<(), SetupError> {
+        Ok(())
+    }
+
+    fn sleep(&mut self, _duration: std::time::Duration) {}
+}
+
+fn run_pty_apply_process(root: PathBuf, executable: PathBuf) {
+    let mut paths = install_paths(&root);
+    paths.sudo = PathBuf::from("/usr/bin/sudo");
+    paths.required_owner = Some(0);
+    let authority =
+        ReleaseAuthority::from_pem(fs::read(root.join("test-public.pem")).unwrap()).unwrap();
+    let first = !root.join("first-commands.json").exists();
+    let mut frame = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut frame).unwrap();
+    assert!(frame.starts_with(b"VONK-SPARK-APPLY-V1\0"));
+    assert!(
+        !frame
+            .windows(b"test-password".len())
+            .any(|part| part == b"test-password")
+    );
+    let contains_token = frame
+        .windows(TOKEN.len())
+        .any(|part| part == TOKEN.as_bytes());
+    assert_eq!(
+        contains_token, first,
+        "recovery must not transport another token"
+    );
+    let mut runner = PtyApplyRunner {
+        paths: paths.clone(),
+        fail_readiness: first,
+        commands: Vec::new(),
+    };
+    let result = apply_setup_from_with_authority(
+        frame.as_slice(),
+        &executable,
+        &paths,
+        &mut runner,
+        CallerIdentity::current().unwrap(),
+        &authority,
+    );
+    let label = if first { "first" } else { "retry" };
+    let summary = runner
+        .commands
+        .iter()
+        .map(|command| serde_json::json!({"program": command.program, "args": command.args}))
+        .collect::<Vec<_>>();
+    let log = root.join(format!("{label}-commands.json"));
+    fs::write(&log, serde_json::to_vec(&summary).unwrap()).unwrap();
+    fs::set_permissions(&log, fs::Permissions::from_mode(0o644)).unwrap();
+    if first {
+        assert!(
+            matches!(result, Err(SetupError::Command(ref message)) if message == "controller readiness was not sustained"),
+            "{result:?}"
+        );
+        std::process::exit(71);
+    }
+    result.unwrap();
 }
 
 #[test]
@@ -543,7 +694,7 @@ fn generated_root_handoff_executes_only_the_verified_staged_setup_with_argument_
     )
     .unwrap();
 
-    handoff_to_root_with_authority(&prepared, &mut SystemCommandRunner, &authority).unwrap();
+    handoff_to_root_with_authority(&prepared, &mut ProcessRunner, &authority).unwrap();
 
     let argv = fs::read(format!("{}.argv", receipt.display())).unwrap();
     let arguments = argv
@@ -591,7 +742,7 @@ fn generated_root_handoff_rejects_post_prepare_setup_replacement_before_payload_
     )
     .unwrap();
 
-    let result = handoff_to_root_with_authority(&prepared, &mut SystemCommandRunner, &authority);
+    let result = handoff_to_root_with_authority(&prepared, &mut ProcessRunner, &authority);
 
     assert!(result.is_err());
     assert!(!payload_marker.exists());
@@ -792,5 +943,203 @@ fn real_sudo_process_receives_the_pairing_token_only_in_the_bounded_stdin_frame(
         stdin
             .windows(TOKEN.len())
             .any(|part| part == TOKEN.as_bytes())
+    );
+}
+
+// Run this ignored test as an unprivileged, password-protected sudo user in
+// the disposable Linux ARM64 installer container. The ordinary suite cannot
+// establish an uncached sudo password prompt on its host runner.
+#[test]
+#[ignore = "requires a disposable Linux user with password-protected sudo"]
+fn real_sudo_pty_foreground_auth_then_recover_without_reinstall() {
+    const ROOT: &str = "VONK_REAL_SUDO_PTY_ROOT";
+    const CHILD: &str = "VONK_REAL_SUDO_PTY_CHILD";
+    const APPLY_SETUP: &str = "VONK_REAL_SUDO_PTY_APPLY_SETUP";
+    if let Ok(executable) = std::env::var(APPLY_SETUP) {
+        run_pty_apply_process(
+            PathBuf::from(std::env::var(ROOT).unwrap()),
+            PathBuf::from(executable),
+        );
+        return;
+    }
+    if let Some(root) = std::env::var(ROOT)
+        .ok()
+        .filter(|_| std::env::var_os(CHILD).is_some())
+    {
+        let root = PathBuf::from(root);
+        let mut paths = install_paths(&root);
+        paths.sudo = PathBuf::from("/usr/bin/sudo");
+        paths.required_owner = Some(0);
+        fs::create_dir_all(&paths.staging_root).unwrap();
+        fs::create_dir_all(paths.config.parent().unwrap()).unwrap();
+        assert!(
+            ProcessCommand::new(&paths.sudo)
+                .arg("-k")
+                .status()
+                .unwrap()
+                .success()
+        );
+        let test_binary = std::env::current_exe().unwrap();
+        let setup = format!(
+            "#!/bin/sh\nset -eu\nexport {ROOT}='{}'\nexport {APPLY_SETUP}=\"$0\"\nexec '{}' --exact real_sudo_pty_foreground_auth_then_recover_without_reinstall --ignored --nocapture\n",
+            root.display(),
+            test_binary.display(),
+        );
+        let (request, authority) = signed_request_with_setup(&root, setup.as_bytes());
+        let ca = rcgen::generate_simple_self_signed(vec!["controller.example.test".to_owned()])
+            .unwrap()
+            .cert
+            .pem()
+            .into_bytes();
+        let mut reader = std::io::BufReader::new(std::io::Cursor::new(&ca));
+        let certificate = rustls_pemfile::certs(&mut reader).next().unwrap().unwrap();
+        let fingerprint = hex::encode(Sha256::digest(certificate.as_ref()));
+        let bootstrap = serde_json::to_vec(&serde_json::json!({
+            "controller_endpoint": "https://controller.example.test",
+            "enrollment_endpoint": "https://enroll.example.test",
+            "ca_fingerprint": fingerprint,
+            "ca_pem": String::from_utf8(ca).unwrap(),
+            "host_helper_authority_public_key": "11".repeat(32),
+            "controller_address": null,
+            "service_hostnames": [],
+        }))
+        .unwrap();
+        let mut answers = FreshPrompt {
+            values: [
+                "https://enroll.example.test/".to_owned(),
+                fingerprint,
+                "192.168.1.231".to_owned(),
+                "192.168.1.211".to_owned(),
+                "192.168.100.10".to_owned(),
+                "192.168.100.11".to_owned(),
+            ]
+            .into(),
+        };
+        let prepared = prepare_setup_with_authority(
+            &request,
+            &paths,
+            &mut answers,
+            &mut BootstrapRunner { body: bootstrap },
+            CallerIdentity::current().unwrap(),
+            &authority,
+        )
+        .unwrap();
+        let failure =
+            handoff_to_root_with_authority(&prepared, &mut SystemCommandRunner, &authority);
+        assert!(
+            matches!(failure, Err(SetupError::Command(ref message)) if message == "privileged installer handoff failed"),
+            "{failure:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(paths.config.with_file_name("setup-state")).unwrap(),
+            "recovering-v1\n"
+        );
+        let retry = prepare_setup_with_authority(
+            &request,
+            &paths,
+            &mut NoPrompt,
+            &mut NoCommands,
+            CallerIdentity::current().unwrap(),
+            &authority,
+        )
+        .unwrap();
+        handoff_to_root_with_authority(&retry, &mut SystemCommandRunner, &authority).unwrap();
+        assert_eq!(
+            fs::read_to_string(paths.config.with_file_name("setup-state")).unwrap(),
+            "paired-v1\n"
+        );
+        let first: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.join("first-commands.json")).unwrap()).unwrap();
+        let second: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.join("retry-commands.json")).unwrap()).unwrap();
+        let count = |commands: &serde_json::Value, program: &str, argument: &str| {
+            commands
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|command| {
+                    command["program"] == program
+                        && command["args"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|value| value == argument)
+                })
+                .count()
+        };
+        assert_eq!(count(&first, "/usr/bin/apt-get", "install"), 1);
+        assert_eq!(count(&first, "/usr/bin/setpriv", "pair"), 1);
+        assert_eq!(count(&second, "/usr/bin/apt-get", "install"), 0);
+        assert_eq!(count(&second, "/usr/bin/apt-get", "update"), 0);
+        assert_eq!(count(&second, "/usr/bin/setpriv", "pair"), 0);
+        return;
+    }
+
+    if rustix::process::geteuid().as_raw() == 0 {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        fs::set_permissions(root, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(
+            ProcessCommand::new("/usr/bin/chown")
+                .args(["ubuntu:ubuntu"])
+                .arg(root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        for directory in [
+            root.join("etc/vonk-forge-agent"),
+            root.join("usr/lib/vonk-forge"),
+        ] {
+            fs::create_dir_all(&directory).unwrap();
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let command = format!(
+            "{ROOT}='{}' '{}' --exact real_sudo_pty_foreground_auth_then_recover_without_reinstall --ignored --nocapture",
+            root.display(),
+            std::env::current_exe().unwrap().display(),
+        );
+        let output = ProcessCommand::new("/usr/bin/su")
+            .args(["-s", "/bin/sh", "ubuntu", "-c", &command])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let root = std::env::var(ROOT).expect("root fixture must launch the unprivileged PTY test");
+    let command = format!(
+        "umask 077; {} --exact real_sudo_pty_foreground_auth_then_recover_without_reinstall --ignored --nocapture",
+        std::env::current_exe().unwrap().display(),
+    );
+    let mut process = ProcessCommand::new("/usr/bin/script")
+        .args(["-q", "-e", "-c", &command, "/dev/null"])
+        .env(ROOT, root)
+        .env(CHILD, "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    process
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"test-password\n")
+        .unwrap();
+    let output = process.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("password for"),
+        "an uncached real sudo password prompt was not observed"
     );
 }
