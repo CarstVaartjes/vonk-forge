@@ -1217,6 +1217,12 @@ class AgentJobService:
             == current_operation.current_attempt
             and "agent.lifecycle.resume.exact.v1" not in (capabilities or ())
         ):
+            current_operation.status_reason = (
+                "Spark agent update required before exact recovery; "
+                f"retry scheduled at {current_operation.retry_due_at.isoformat()}"
+                if current_operation.retry_due_at is not None
+                else "Spark agent update required before exact recovery"
+            )
             return False
         if (
             current_operation.node_id != node.node_id
@@ -1585,14 +1591,9 @@ class AgentJobService:
         operation.retry_disposition = _RETRY_DISPOSITION
         operation.retry_disposition_attempt = operation.current_attempt
         operation.retry_due_at = due
-        prerequisite = (
-            "current agent capability agent.lifecycle.resume.exact.v1 required; "
-            if operation.kind in _LIFECYCLE_RESTART_OPERATIONS
-            else ""
-        )
         previous_reason = operation.status_reason
         schedule_reason = (
-            f"exact {operation.kind} interrupted; {prerequisite}"
+            f"exact {operation.kind} interrupted; "
             f"retry scheduled at {due.isoformat()}"
         )
         operation.status_reason = (

@@ -267,6 +267,8 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
         else:
             assert due is not None
             assert parent_row.state == "queued"
+            assert stored.status_reason is not None
+            assert "agent.lifecycle.resume.exact.v1" not in stored.status_reason
     jobs = AgentJobService(sessions, clock=clock)
     assert claim_agent(
         jobs, NODE_A, "serial-a", 30,
@@ -283,7 +285,8 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
                 stored = session.get(AgentOperation, operation.id)
                 assert stored is not None
                 assert stored.status_reason is not None
-                assert "agent.lifecycle.resume.exact.v1" in stored.status_reason
+                assert "Spark agent update required before exact recovery" in stored.status_reason
+                assert stored.retry_due_at == due
         second = claim_agent(
             jobs, NODE_A, "serial-a", 30,
             protocol_version=3, capabilities=resume_capabilities,

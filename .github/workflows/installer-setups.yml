@@ -130,6 +130,21 @@ jobs:
             sha256sum -- $BINARIES | LC_ALL=C sort > SHA256SUMS
           )
 
+      - name: Exercise uncached sudo recovery in a disposable ARM64 terminal
+        if: matrix.platform == 'linux-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          test_binary="$(
+            cargo test --locked --release -p vonk-spark-setup \
+              --test process_boundary --no-run --message-format=json |
+              jq -r 'select(.reason == "compiler-artifact" and .target.name == "process_boundary") | .executable // empty' |
+              tail -n 1
+          )"
+          test -x "$test_binary"
+          scripts/tests/run_installer_pty_recovery.sh "$test_binary"
+
       - name: Upload accepted native setup programs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

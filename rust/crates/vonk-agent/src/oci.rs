@@ -2617,7 +2617,11 @@ mod tests {
             fs::read(installation.join("models/primary/config.json")).unwrap(),
             b"primary"
         );
-        assert!(installation.join(super::INSTALLATION_METADATA_FILE).is_file());
+        assert!(
+            installation
+                .join(super::INSTALLATION_METADATA_FILE)
+                .is_file()
+        );
         drop(first_runtime);
         let runtime = runtime(data.path(), &runner);
         let unavailable_full_copy_bytes =
