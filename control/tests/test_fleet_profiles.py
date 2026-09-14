@@ -159,6 +159,7 @@ def test_profile_application_read_rejects_malformed_persisted_plan_and_result() 
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
+        admitted_plan = deepcopy(row.plan)
         row.plan = {"steps": []}
     with pytest.raises(FleetProfileConflict, match="plan is invalid"):
         service.application(application.id)
@@ -166,7 +167,7 @@ def test_profile_application_read_rejects_malformed_persisted_plan_and_result() 
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
-        row.plan = preview.model_dump(mode="json")
+        row.plan = admitted_plan
         # A JSON array is never a valid stored result document; write it as the
         # driver would have persisted it rather than through the typed attribute.
         session.execute(

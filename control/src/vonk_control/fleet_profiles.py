@@ -1329,6 +1329,28 @@ class FleetProfileService:
         """Preview and bind one whole-fleet execution in one operator action."""
 
         profile = self.get_number(number)
+        recovery_id = None
+        with self._sessions() as session:
+            replay = session.scalar(select(FleetProfileApplication).where(
+                FleetProfileApplication.request_key == request_key
+            ))
+            if replay is not None:
+                if replay.profile_id != profile.id or replay.profile_digest != profile.profile_digest:
+                    raise FleetProfileConflict("Load request key was reused for another profile intent")
+                return self._application_view(replay)
+            latest = session.scalar(
+                select(FleetProfileApplication)
+                .where(FleetProfileApplication.profile_id == profile.id)
+                .order_by(FleetProfileApplication.created_at.desc(), FleetProfileApplication.id.desc())
+                .limit(1)
+            )
+            if latest is not None and latest.profile_digest == profile.profile_digest:
+                if latest.state in {"queued", "running"}:
+                    raise FleetProfileConflict("Profile load is already active; follow its progress")
+                if latest.state in {"failed", "waiting-for-operator"}:
+                    recovery_id = latest.id
+        if recovery_id is not None:
+            return self.retry(recovery_id, request_key=request_key, actor=actor)
         preview = self.preview(profile.id)
         if not preview.allowed:
             raise FleetProfileConflict("Fleet profile preview is blocked")
@@ -1931,6 +1953,14 @@ class FleetProfileService:
         retry_of_application_id: str | None = None,
     ) -> FleetProfileApplicationView:
         now = _aware(self._clock())
+        # The preview identifies the work; the request identifies its execution.
+        # The same reconciliation can be needed again after a failure or drift.
+        preview = preview.model_copy(update={"plan_digest": _digest({
+            "schema_version": 2,
+            "reconciliation_digest": preview.plan_digest,
+            "retry_of_application_id": retry_of_application_id,
+            "request_key": request_key,
+        })})
         with self._sessions.begin() as session:
             profile = session.get(FleetProfile, preview.profile_id, with_for_update=True)
             if profile is None:
@@ -1945,7 +1975,7 @@ class FleetProfileService:
                 if (
                     existing.profile_id != preview.profile_id
                     or existing_progress.retry_of_application_id != retry_of_application_id
-                    or (retry_of_application_id is None and existing.plan_digest != preview.plan_digest)
+                    or existing.plan_digest != preview.plan_digest
                 ):
                     raise FleetProfileConflict(
                         "Fleet profile request key was reused for another plan"
@@ -1971,6 +2001,13 @@ class FleetProfileService:
             )
             if intended.profile_digest != preview.profile_digest:
                 raise FleetProfileConflict("Fleet profile changed during application admission")
+            if retry_of_application_id is None:
+                active = session.scalar(select(FleetProfileApplication).where(
+                    FleetProfileApplication.profile_id == profile.id,
+                    FleetProfileApplication.state.in_(("queued", "running")),
+                ))
+                if active is not None:
+                    raise FleetProfileConflict("Profile load is already active; follow its progress")
             attempt = 1
             if retry_of_application_id is not None:
                 parent = session.get(FleetProfileApplication, retry_of_application_id, with_for_update=True)
@@ -2099,11 +2136,6 @@ class FleetProfileService:
             raise FleetProfileConflict("Application intent is obsolete because the saved profile changed")
         if not preview.allowed:
             raise FleetProfileConflict("Current Fleet state blocks application recovery")
-        # Attempt identity is distinct even when the remaining work is unchanged.
-        preview = preview.model_copy(update={"plan_digest": _digest({
-            "schema_version": 2, "reconciliation_digest": preview.plan_digest,
-            "retry_of_application_id": application_id, "request_key": request_key,
-        })})
         return self._queue_application(preview, request_key=request_key, actor=actor,
                                        operation_kind=operation_kind,
                                        retry_of_application_id=application_id)
