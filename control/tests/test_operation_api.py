@@ -80,7 +80,7 @@ def _profile_operation_plan(
         preparations=[],
         steps=[
             FleetProfilePlanStep(
-                index=0, kind="start", node_ids=node_ids, label="Start profile"
+                index=0, kind="switch", node_ids=node_ids, label="Apply profile"
             )
         ],
         reasons=[],

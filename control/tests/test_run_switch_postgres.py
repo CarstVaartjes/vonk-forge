@@ -203,7 +203,10 @@ def test_postgres_duplicate_apply_converges_under_target_lock(tmp_path, migrated
 
     def apply():
         barrier.wait(timeout=5)
-        return service._apply_plan(plan, request_key=key, actor="admin", kind="recipe.run-switch.v2")
+        return service._apply_plan(
+            plan, request_key=key, actor="admin", kind="recipe.run-switch.v2",
+            workload_intent_ordinal=None,
+        )
 
     with ThreadPoolExecutor(max_workers=2) as workers:
         futures = [workers.submit(apply) for _ in range(2)]

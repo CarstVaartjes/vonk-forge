@@ -348,9 +348,11 @@ def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
         "request_sha256": "e" * 64,
         "certificate_serial": "certificate-1",
     }
-    assert service.issue_grant(
+    operation = service.issue_grant(
         **arguments, action=ContainerRuntimeAction.STOP
-    ).claims.operation.action == "stop"
+    ).claims.operation
+    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+    assert operation.action == "stop"
     with pytest.raises(HostHelperAuthorityError, match="stale"):
         service.issue_grant(**arguments, action=ContainerRuntimeAction.RUN_INSPECT)
     expired = runtime_service(lease_seconds=0, cancel_requested=True, node_intent=2)

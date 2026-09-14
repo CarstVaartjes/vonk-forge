@@ -6318,12 +6318,13 @@ def _progress_view(
             })
         else:
             measurement = project_progress(measurement)
+    raw_start_deadline = raw.get("start_deadline")
     return RunSwitchProgress(
         operation=measurement,
         startup_budget_seconds=_progress_int(raw.get("startup_budget_seconds")),
         start_deadline=(
-            _aware(datetime.fromisoformat(raw["start_deadline"]))
-            if isinstance(raw.get("start_deadline"), str)
+            _aware(datetime.fromisoformat(raw_start_deadline))
+            if isinstance(raw_start_deadline, str)
             else None
         ),
         phase_index=phase_index,

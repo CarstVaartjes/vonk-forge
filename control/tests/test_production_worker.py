@@ -182,7 +182,8 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     assert maintenance_state["last_success_at"] == current.isoformat()
     fleet_profiles = worker._recipes._fleet_profiles
     assert isinstance(fleet_profiles, FleetProfileService)
-    assert fleet_profiles._recipe_operations is not None
+    assert fleet_profiles._switch_adapter is not None
+    assert fleet_profiles._switch_adapter._run_switch is run_switches
     assert run_switches._artifact_phase_executor is not None
     from vonk_control.failure_evidence import FailureEvidenceService
     assert any(isinstance(callback.__self__, FailureEvidenceService) for callback in worker._background_services)

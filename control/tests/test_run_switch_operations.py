@@ -3206,12 +3206,16 @@ def _parked_start_switch(tmp_path: Path, *, healthy: bool):
     )
     # The launch happens after admission, exactly as the real start phase would
     # have done it, and is then left parked by the interrupted agent.
+    assert operation.result is not None
+    ordinal = operation.result.workload_intent_ordinal
+    assert ordinal is not None
     run_plan = lifecycle.preview_run(installation.owner_id, "qwen")
     started = lifecycle.start(
         run_plan,
         plan_digest=run_plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
+        workload_intent_ordinal=ordinal,
     )
     with sessions.begin() as session:
         # The launch was interrupted: its operation is parked while the run it
@@ -3223,6 +3227,7 @@ def _parked_start_switch(tmp_path: Path, *, healthy: bool):
         assert row is not None
         row.state = "running"
         row.result = RunSwitchOperationResult(
+            workload_intent_ordinal=ordinal,
             phase_index=start_index,
             item_index=0,
             phase="start",
@@ -3295,6 +3300,7 @@ def test_parked_start_still_progressing_is_observed_before_final_success(
     assert held.result.observation_due_at is not None
 
     assert service.tick() is False
+    assert isinstance(service._lifecycle, _ObservingLifecycle)
     service._lifecycle._healthy = True
     now[0] += timedelta(seconds=5)
     for _ in range(4):
