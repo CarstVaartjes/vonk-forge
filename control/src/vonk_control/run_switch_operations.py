@@ -332,6 +332,7 @@ _PHASES: tuple[RunSwitchPhaseKind, ...] = (
     "prepare",
     "cleanup",
     "stop",
+    "uninstall",
     "start",
     "final_verify",
 )

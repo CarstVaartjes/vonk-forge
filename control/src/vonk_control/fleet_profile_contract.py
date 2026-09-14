@@ -80,6 +80,7 @@ FleetProfileChildPhase = Literal[
     "prepare",
     "cleanup",
     "stop",
+    "uninstall",
     "final_verify",
 ]
 FleetProfileAssignmentState = Literal[
