@@ -6,11 +6,13 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, select
 from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.models import AgentNode, CatalogDocumentRevision, Job, RecipeRun
 from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.runtime_preflight import mandatory_capabilities, request_digest
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_fleet_profiles import _uuid
@@ -46,13 +48,20 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             tmp_path, engine=engine
         )
         node_id = nodes[0]
+        fingerprint = "a" * 64
+        agent_capabilities = (
+            "agent.runtime.rust.v1",
+            "runtime.vonk.v1",
+            "recipe.install",
+            "recipe.start",
+            "recipe.stop",
+            "runtime.preflight.v1",
+            f"runtime.preflight.fingerprint.{fingerprint}",
+        )
         with sessions.begin() as session:
             node = session.get(AgentNode, node_id)
             assert node is not None
-            node.capabilities = sorted(
-                set(node.capabilities)
-                | {"recipe.install", "recipe.start", "recipe.stop"}
-            )
+            node.capabilities = sorted(set(node.capabilities) | set(agent_capabilities))
         agent_jobs = AgentJobService(sessions, clock=lifecycle._clock)
         agent_jobs.set_result_consumer(lifecycle.consume_agent_result)
         lifecycle._agent_jobs = agent_jobs
@@ -72,6 +81,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             node_id,
             "serial-0",
             30,
+            capabilities=agent_capabilities,
             runtime_identity=identity,
         )
         assert old_claim is not None and old_claim.job_id == old_start.id
@@ -154,6 +164,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             node_id,
             "serial-0",
             30,
+            capabilities=agent_capabilities,
             runtime_identity=identity,
         )
         assert stop_claim is not None and stop_claim.job_id == stop_job.id
@@ -175,8 +186,48 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
                         Job.kind == "recipe.start", Job.id != old_start.id
                     )
                 )
+                preflight = session.scalar(
+                    select(Job).where(
+                        Job.kind == "runtime.preflight.v1",
+                        Job.state.in_(("queued", "running")),
+                    )
+                )
             if replacement is not None:
                 break
+            if preflight is not None:
+                probe = RuntimePreflightRequest.model_validate(preflight.payload)
+                preflight_claim = claim_agent(
+                    agent_jobs,
+                    node_id,
+                    "serial-0",
+                    30,
+                    capabilities=agent_capabilities,
+                    runtime_identity=identity,
+                )
+                assert preflight_claim is not None
+                assert preflight_claim.job_id == preflight.id
+                agent_jobs.record_result(
+                    _result(
+                        preflight_claim,
+                        state="succeeded",
+                        evidence={
+                            "schema_version": 1,
+                            "fingerprint": fingerprint,
+                            "request_sha256": request_digest(probe),
+                            "observed_at": int(lifecycle._clock().timestamp()),
+                            "duration_ms": 1,
+                            "cached": False,
+                            "findings": [
+                                {
+                                    "capability": capability,
+                                    "status": "passed",
+                                    "code": "available",
+                                }
+                                for capability in mandatory_capabilities(probe)
+                            ],
+                        },
+                    )
+                )
         assert replacement is not None, profiles.application(
             application.id
         ).status_reason
@@ -185,6 +236,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             node_id,
             "serial-0",
             30,
+            capabilities=agent_capabilities,
             runtime_identity=identity,
         )
         assert new_claim is not None and new_claim.job_id == replacement.id

@@ -341,6 +341,7 @@ class _BuildSelection:
 
 
 _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
+_STOPPABLE_RUN_STATES = _ACTIVE_RUN_STATES | {"lost"}
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _OPERATION_KINDS = frozenset(
     {"recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"}
@@ -1755,7 +1756,7 @@ class RunSwitchOperationService:
                         plan_digest=stop_digest,
                     )
                 ]
-                if stop_digest is not None and run.state in _ACTIVE_RUN_STATES
+                if stop_digest is not None and run.state in _STOPPABLE_RUN_STATES
                 else []
             )
             # Stopping a live run must remain possible when catalog/cache
@@ -1763,7 +1764,7 @@ class RunSwitchOperationService:
             # findings remain diagnostics, but they do not block the stop.
             blockers: list[RunSwitchReason] = []
             warnings = [*fit_warnings, *inspection.warnings]
-            if run.state not in _ACTIVE_RUN_STATES:
+            if run.state not in _STOPPABLE_RUN_STATES:
                 blockers.append(
                     _as_reason(
                         "run-switch.run-not-active",
@@ -2573,8 +2574,37 @@ class RunSwitchOperationService:
                     )
                 else:
                     start_plan_digest = low_level_plan.plan_digest
+                    planned_stop_ids = {stop.run_id for stop in stops}
+                    deferred_port_reservations: set[tuple[str, str]] = set()
+                    if planned_stop_ids:
+                        deferred_port_reservations = {
+                            (reservation.node_id, reservation.resource_key)
+                            for reservation in session.scalars(
+                                select(ResourceReservation).where(
+                                    ResourceReservation.owner_kind == "run",
+                                    ResourceReservation.owner_id.in_(planned_stop_ids),
+                                    ResourceReservation.kind == "port",
+                                    ResourceReservation.state == "active",
+                                )
+                            )
+                        }
+                    remaining_admission_blockers = False
                     for item in low_level_plan.nodes:
                         for reason in item.blockers:
+                            if (
+                                reason.code == "run.port_occupied"
+                                and (item.node_id, str(item.port)) in deferred_port_reservations
+                            ) or (
+                                reason.code == "run.rendezvous_port_occupied"
+                                and item.rendezvous_port is not None
+                                and item.rendezvous_port != item.port
+                                and (item.node_id, str(item.rendezvous_port))
+                                in deferred_port_reservations
+                            ):
+                                # The exact Stop phase releases this reservation.
+                                # Start re-runs low-level admission after Stop.
+                                continue
+                            remaining_admission_blockers = True
                             blockers.append(
                                 _as_reason(
                                     reason.code,
@@ -2593,7 +2623,7 @@ class RunSwitchOperationService:
                                     node_ids=(item.node_id,),
                                 )
                             )
-                    if not low_level_plan.allowed:
+                    if remaining_admission_blockers:
                         blockers.append(
                             _as_reason(
                                 "run-switch.run_admission_blocked",
@@ -3802,7 +3832,7 @@ class RunSwitchOperationService:
                     RecipeRun.id.in_(
                         select(RunNode.run_id).where(RunNode.node_id.in_(node_ids))
                     ),
-                    RecipeRun.state.in_(_ACTIVE_RUN_STATES),
+                    RecipeRun.state.in_(_STOPPABLE_RUN_STATES),
                 )
                 .order_by(RecipeRun.created_at, RecipeRun.id)
             )
@@ -3841,7 +3871,7 @@ class RunSwitchOperationService:
                 stop_plan = self._lifecycle.preview_stop(run.id) if self._lifecycle else None
             except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError):
                 stop_plan = None
-            if stop_plan is None:
+            if stop_plan is None or not stop_plan.allowed:
                 reason = _as_reason(
                     "run-switch.stop_plan_unavailable",
                     "The existing workload cannot be represented by a safe stop plan.",
