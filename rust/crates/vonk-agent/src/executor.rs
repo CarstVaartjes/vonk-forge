@@ -4116,73 +4116,47 @@ mod tests {
         assert!(state.pending_results().unwrap().is_empty());
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test(start_paused = true)]
     async fn transient_heartbeat_failure_retries_inside_the_accepted_lease() {
-        // One lost renewal must not wait a whole renewal cadence before trying
-        // again: that is what scheduled the next attempt after the accepted
-        // lease had expired.  Comparing the same scenario with a short retry
-        // delay against one that waits the cadence isolates the scheduling
-        // decision from the constant cost of claiming, executing and recording.
-        async fn elapsed_with(
-            directory: &std::path::Path,
-            interval: Duration,
-            retry_interval: Duration,
-        ) -> Duration {
-            let heartbeats = Arc::new(Mutex::new(Vec::new()));
-            let client = RecordingClient {
-                cancel_requested: false,
-                claim: Arc::new(Mutex::new(Some(claim()))),
-                fail_heartbeat: true,
-                heartbeats: heartbeats.clone(),
-                results: Arc::new(Mutex::new(Vec::new())),
-            };
-            let executor = HeartbeatGatedExecutor {
-                heartbeats,
-                minimum: 2,
-                observed_deadline: Arc::new(Mutex::new(None)),
-            };
-            let mut state = StateStore::open(&directory.join("state.sqlite"), NODE_ID).unwrap();
-            let started = std::time::Instant::now();
-            run_once_with_heartbeat_interval(
-                &client,
-                &mut state,
-                &executor,
-                RunOncePolicy {
-                    capabilities: &["recipe.install"],
-                    wait_seconds: 0,
-                    runtime_identity: None,
-                    heartbeat_interval: interval,
-                    heartbeat_retry_interval: retry_interval,
-                },
-                || Ok(()),
-            )
-            .await
-            .unwrap();
-            assert!(client.heartbeats.lock().unwrap().len() >= 2);
-            started.elapsed()
-        }
-
         let directory = tempdir().unwrap();
-        std::fs::create_dir(directory.path().join("cadence")).unwrap();
-        std::fs::create_dir(directory.path().join("prompt")).unwrap();
-        let cadence_only = elapsed_with(
-            &directory.path().join("cadence"),
-            Duration::from_millis(800),
-            Duration::from_millis(800),
-        )
-        .await;
-        let prompt_retry = elapsed_with(
-            &directory.path().join("prompt"),
-            Duration::from_millis(800),
-            Duration::from_millis(10),
-        )
-        .await;
-
-        assert!(
-            prompt_retry + Duration::from_millis(300) < cadence_only,
-            "a lost renewal did not retry before the next cadence: \
-             prompt={prompt_retry:?} cadence={cadence_only:?}"
+        let heartbeats = Arc::new(Mutex::new(Vec::new()));
+        let client = RecordingClient {
+            cancel_requested: false,
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: true,
+            heartbeats: heartbeats.clone(),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let executor = HeartbeatGatedExecutor {
+            heartbeats: heartbeats.clone(),
+            minimum: 2,
+            observed_deadline: Arc::new(Mutex::new(None)),
+        };
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+        let run = run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &executor,
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(800),
+                heartbeat_retry_interval: Duration::from_millis(10),
+            },
+            || Ok(()),
         );
+        let drive_clock = async {
+            // Poll the operation first so its heartbeat timer is armed.
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_millis(800)).await;
+            assert_eq!(heartbeats.lock().unwrap().len(), 1);
+            tokio::time::advance(Duration::from_millis(10)).await;
+            assert_eq!(heartbeats.lock().unwrap().len(), 2);
+        };
+        let (result, ()) = tokio::join!(run, drive_clock);
+        result.unwrap();
+        assert_eq!(client.results.lock().unwrap().len(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
