@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .agent_jobs import AgentJobService
 from .bounded_json import require_integer, require_sequence
 from .cluster_mappings import (
     ClusterMappingError,
@@ -4634,11 +4635,7 @@ class RunSwitchOperationService:
     ) -> None:
         """Cancel exact older agent orders in the same ordinal-admission transaction."""
 
-        if self._lifecycle is None:
-            raise RunSwitchOperationConflict(
-                "run-switch lifecycle cancellation authority is unavailable"
-            )
-        self._lifecycle._agent_jobs.request_superseded_workload_cancellation_in_session(
+        AgentJobService.request_superseded_workload_cancellation_in_session(
             session, targets, ordinal, now
         )
 
