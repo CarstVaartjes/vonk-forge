@@ -1211,10 +1211,31 @@ class RecipeLifecyclePhaseExecutor:
                 "recipe.stop", target.run_id, ordinal
             )
             self._observe_older_issued("recipe.stop", target.run_id, ordinal)
+            stop_digest = target.plan_digest
+            if target.state == "stopping":
+                # This preview was made while an older Stop owned the run.
+                # Once its issued effect has definitive terminal evidence,
+                # use the same run's current stop authority or accept its
+                # completed stop.  The old digest described `stopping` and
+                # cannot authorize a fresh `lost` stop after cancellation.
+                with self._sessions() as session:
+                    run = session.get(RecipeRun, target.run_id)
+                    if run is None:
+                        raise RunSwitchOperationConflict(
+                            "run-switch.stop-target-disappeared"
+                        )
+                    if run.state == "stopped" and run.route_state == "withdrawn":
+                        return PhaseExecution(result={"run_id": target.run_id})
+                fresh = self._lifecycle.preview_stop(target.run_id)
+                if not fresh.allowed:
+                    raise RunSwitchOperationConflict(
+                        "run-switch.stop-still-unresolved-after-cancellation"
+                    )
+                stop_digest = fresh.plan_digest
             child_key = str(uuid.uuid5(uuid.UUID(request_key), f"stop:{target.run_id}"))
             value = self._lifecycle.stop(
                 target.run_id,
-                plan_digest=target.plan_digest,
+                plan_digest=stop_digest,
                 actor=actor,
                 request_id=child_key,
                 workload_intent_ordinal=ordinal,
