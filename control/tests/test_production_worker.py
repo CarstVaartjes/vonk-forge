@@ -11,6 +11,7 @@ from vonk_control import telemetry_maintenance
 from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.jobs import JobService
+from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
@@ -105,7 +106,7 @@ def test_recipe_worker_services_routes_while_coordinators_are_active(tmp_path, c
 
 
 def test_production_builder_wires_recipe_operations_and_housekeeping(
-    tmp_path,
+    tmp_path, request,
 ) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
     Base.metadata.create_all(engine)
@@ -127,6 +128,8 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
             return None
 
     agent_jobs = SignerBackedAgentJobs()
+    model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
+    request.addfinalizer(model_cache.close)
 
     worker = assemble_production_worker(
         jobs=jobs,
@@ -142,7 +145,7 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
         artifact_job_retention_seconds=7 * 24 * 60 * 60,
         artifact_job_reconcile_interval_seconds=3600,
         artifact_job_reconcile_batch_limit=1000,
-        model_cache=object(),
+        model_cache=model_cache,
         agent_artifact_root=tmp_path / "agent-artifacts",
         recipe_image_artifact_root=tmp_path / "agent-artifacts",
     )
