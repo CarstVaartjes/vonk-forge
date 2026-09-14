@@ -86,26 +86,8 @@ FleetProfileChildPhase = Literal[
 FleetProfileAssignmentState = Literal[
     "not-placed", "placed", "installing", "installed", "running", "degraded"
 ]
-FleetProfileAction = Literal[
-    "stop",
-    "create-placement",
-    "build",
-    "distribute-image",
-    "install",
-    "start",
-    "switch",
-    "keep",
-]
-FleetProfilePlanStepKind = Literal[
-    "stop",
-    "uninstall",
-    "create-placement",
-    "build",
-    "distribute-image",
-    "install",
-    "start",
-    "switch",
-]
+FleetProfileAction = Literal["switch", "keep"]
+FleetProfilePlanStepKind = Literal["switch"]
 FleetProfileOperationKind = Literal["fleet-profile.apply"]
 
 
@@ -323,9 +305,6 @@ class FleetProfileScopePreview(_StrictModel):
 class FleetProfilePlanStep(_StrictModel):
     index: int = Field(ge=0, le=1023)
     kind: FleetProfilePlanStepKind
-    assignment_id: UuidId | None = None
-    owner_id: UuidId | None = None
-    recipe_revision_id: UuidId | None = None
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     label: Annotated[str, StringConstraints(min_length=1, max_length=240)]
 
@@ -458,14 +437,6 @@ class FleetProfileVerificationResult(_StrictModel):
     verified: bool
 
 
-class FleetProfileAssignmentContext(_StrictModel):
-    """Persisted mapping and installation identities for one assignment."""
-
-    mapping_id: UuidId | None = None
-    mapping_generation: int | None = Field(default=None, ge=1)
-    installation_id: UuidId | None = None
-
-
 FleetProfileChildResult = (
     FleetProfileSwitchChildResult
     | FleetProfileSwitchAdapterResult
@@ -477,8 +448,7 @@ class FleetProfileStepResult(_StrictModel):
     """Result receipt for one completed profile plan step."""
 
     operation_id: UuidId
-    owner_id: UuidId | None = None
-    kind: Annotated[str, StringConstraints(min_length=1, max_length=80)] | None = None
+    kind: Literal["switch"]
     result: FleetProfileChildResult | None = None
 
 class FleetProfileIntendedConfiguration(_StrictModel):
@@ -501,11 +471,10 @@ class FleetProfileApplicationProgress(_StrictModel):
     completed_steps: int = Field(default=0, ge=0, le=1024)
     total_steps: int = Field(default=0, ge=0, le=1024)
     current_label: Annotated[str, StringConstraints(max_length=240)] | None = None
-    child_source: Literal["recipe", "switch-adapter"] | None = None
+    child_source: Literal["switch-adapter"] | None = None
     child_progress: FleetProfileChildProgress | None = None
     step_results: dict[str, FleetProfileStepResult] = Field(default_factory=dict)
     switch_adapter: FleetProfileSwitchAdapterState | None = None
-    assignments: dict[UuidId, FleetProfileAssignmentContext] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def progress_is_consistent(self) -> FleetProfileApplicationProgress:

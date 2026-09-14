@@ -1123,12 +1123,6 @@ class RecipeLifecyclePhaseExecutor:
         request_key: str,
         progress: Mapping[str, object],
     ) -> PhaseExecution:
-        ordinal = progress.get("workload_intent_ordinal")
-        if (
-            phase.kind in {"stop", "start", "uninstall"}
-            or phase.kind == "prepare" and phase.subphase == "runtime-install"
-        ) and (type(ordinal) is not int or ordinal < 1):
-            raise RunSwitchOperationConflict("run-switch workload intent is unbound")
         if phase.kind in {"transfer", "verify", "cleanup"}:
             if self._artifact_executor is None:
                 raise RunSwitchOperationConflict(
@@ -1181,6 +1175,10 @@ class RecipeLifecyclePhaseExecutor:
             if item_index >= len(plan.stops):
                 return PhaseExecution()
             target = plan.stops[item_index]
+            ordinal = _bound_workload_intent(progress)
+            self._lifecycle.reconcile_superseded_unissued(
+                "recipe.stop", target.run_id, ordinal
+            )
             child_key = str(uuid.uuid5(uuid.UUID(request_key), f"stop:{target.run_id}"))
             value = self._lifecycle.stop(
                 target.run_id,
@@ -1282,6 +1280,7 @@ class RecipeLifecyclePhaseExecutor:
                 }
             )
         if phase.kind == "prepare" and phase.subphase == "runtime-install":
+            ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
             phase_results = progress.get("phase_results")
             if installation_id is None and isinstance(phase_results, list):
@@ -1294,6 +1293,9 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     "run-switch.installation-preparation-unavailable"
                 )
+            self._lifecycle.reconcile_superseded_unissued(
+                "recipe.install", installation_id, ordinal
+            )
             start_installation = getattr(self._lifecycle, "start_installation", None)
             if not callable(start_installation):
                 raise RunSwitchOperationConflict(
@@ -1319,6 +1321,7 @@ class RecipeLifecyclePhaseExecutor:
                 "run-switch.prepare-subphase-unsupported"
             )
         if phase.kind == "start":
+            ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
             phase_results = progress.get("phase_results")
             if installation_id is None and isinstance(phase_results, list):
@@ -1342,6 +1345,9 @@ class RecipeLifecyclePhaseExecutor:
             )
             if adopted is not None:
                 return PhaseExecution(adopted.id, {"run_id": adopted.owner_id})
+            self._lifecycle.reconcile_superseded_unissued(
+                "recipe.uninstall", installation_id, ordinal
+            )
             low_level = self._lifecycle.preview_run(installation_id, plan.alias)
             value = self._lifecycle.start(
                 low_level,
@@ -1352,6 +1358,7 @@ class RecipeLifecyclePhaseExecutor:
             )
             return PhaseExecution(value.id, {"run_id": value.owner_id})
         if phase.kind == "uninstall":
+            ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
             if installation_id is None:
                 raise RunSwitchOperationConflict(
@@ -1373,6 +1380,9 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution(
                     adopted.id, {"installation_id": installation_id}
                 )
+            self._lifecycle.reconcile_superseded_unissued(
+                "recipe.uninstall", installation_id, ordinal
+            )
             try:
                 uninstall_plan = self._lifecycle.preview_uninstall(installation_id)
                 value = self._lifecycle.uninstall(
@@ -5541,6 +5551,13 @@ def _build_receipt_in_session(
         "image_bytes": build.image_bytes,
         "state": "succeeded",
     }
+
+
+def _bound_workload_intent(progress: Mapping[str, object]) -> int:
+    ordinal = progress.get("workload_intent_ordinal")
+    if type(ordinal) is not int or ordinal < 1:
+        raise RunSwitchOperationConflict("run-switch workload intent is unbound")
+    return ordinal
 
 
 def _progress_int(value: object) -> int | None:

@@ -6,9 +6,8 @@ import hashlib
 import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from collections.abc import Set as AbstractSet
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import String, cast, func, select
@@ -23,7 +22,6 @@ from .fleet_profile_contract import (
     FleetProfileApplicationResult,
     FleetProfileApplicationView,
     FleetProfileAssignment,
-    FleetProfileAssignmentContext,
     FleetProfileAssignmentInput,
     FleetProfileAssignmentPreparation,
     FleetProfileAssignmentPreview,
@@ -74,8 +72,7 @@ from .models import (
 from .operation_contract import OperationFailureEvidence
 from .operation_progress import project_progress
 from .preparation_contract import RolloutPreparation
-from .recipe_action_plans import ActionReason
-from .recipe_operations import RecipeOperationConflict, RecipeOperationService
+from .recipe_operations import RecipeOperationConflict
 from .recipe_runtime_specs import (
     recipe_topology,
     resolve_recipe_entities,
@@ -131,9 +128,6 @@ class _PlanStepDraftRequired(TypedDict):
 class _PlanStepDraft(_PlanStepDraftRequired, total=False):
     """Optional keys of one plan step before its index is assigned."""
 
-    assignment_id: str
-    owner_id: str
-    recipe_revision_id: str | None
     node_ids: list[str]
 
 
@@ -1054,82 +1048,6 @@ def _digest(value: object) -> str:
     return hashlib.sha256(canonical_message(value)).hexdigest()
 
 
-def _lifecycle_blocker_reason(
-    kind: str, owner_id: str, blocker: ActionReason
-) -> FleetProfileReason:
-    """Translate one lifecycle blocker into a profile preview reason."""
-
-    return FleetProfileReason(
-        code=f"profile.{kind}_blocked",
-        detail=f"{kind} of {owner_id} is blocked: [{blocker.code}] {blocker.detail}"[
-            :512
-        ],
-        severity="error",
-    )
-
-
-def _active_run_reasons(
-    assessment: Any,
-    step: Mapping[str, object],
-    scheduled_stops: AbstractSet[str],
-    switch_scope: AbstractSet[str],
-) -> list[FleetProfileReason]:
-    """Decide whether this plan itself clears the active-run prerequisite.
-
-    ``uninstall.active_run`` is the one uninstall blocker a plan can satisfy on
-    its own, and only when every active run is provably one this plan stops
-    first or converges inside its own switch scope.  An incomplete bounded list
-    proves nothing, so it stays a blocker rather than a promise.
-    """
-
-    active = tuple(assessment.active_runs)
-    if assessment.active_runs_truncated or assessment.active_run_count > len(active):
-        return [
-            FleetProfileReason(
-                code="profile.uninstall_active_run",
-                detail=(
-                    "Cleanup is blocked: the active-run list is incomplete, so "
-                    "this plan cannot prove every run stops first."
-                ),
-                severity="error",
-            )
-        ]
-    raw_nodes = step.get("node_ids")
-    node_ids = {
-        node_id
-        for node_id in (raw_nodes if isinstance(raw_nodes, list) else [])
-        if isinstance(node_id, str)
-    }
-    scope_resolves = bool(switch_scope) and node_ids <= switch_scope
-    unresolved = tuple(
-        run.run_id
-        for run in active
-        if run.run_id not in scheduled_stops and not scope_resolves
-    )
-    if unresolved:
-        return [
-            FleetProfileReason(
-                code="profile.uninstall_active_run",
-                detail=("Cleanup is blocked until these runs stop: " + ", ".join(unresolved))[
-                    :512
-                ],
-                severity="error",
-            )
-        ]
-    if not active:
-        return []
-    return [
-        FleetProfileReason(
-            code="profile.uninstall_prerequisite",
-            detail=(
-                "Cleanup follows this plan's own stop of "
-                + ", ".join(sorted(run.run_id for run in active))
-            )[:512],
-            severity="info",
-        )
-    ]
-
-
 def _choice_id(value: FleetProfileAssignmentInput) -> str:
     identity = ":".join(
         (
@@ -1191,7 +1109,6 @@ def build_production_fleet_profile_service(
     *,
     clock: Callable[[], datetime],
     run_switch_operations: RunSwitchOperationService,
-    recipe_operations: RecipeOperationService | None = None,
     cache_resolver: Callable[..., Mapping[str, object]] | None = None,
 ) -> FleetProfileService:
     """Compose the Controller's Fleet profile service and its authority.
@@ -1209,7 +1126,6 @@ def build_production_fleet_profile_service(
     return FleetProfileService(
         sessions,
         clock=clock,
-        recipe_operations=recipe_operations,
         switch_adapter=adapter,
         cache_resolver=cache_resolver,
         preparation_provider=adapter.preparation,
@@ -1222,7 +1138,6 @@ class FleetProfileService:
         sessions: sessionmaker[Session],
         *,
         clock: Callable[[], datetime],
-        recipe_operations: RecipeOperationService | None = None,
         switch_adapter: FleetProfileSwitchAdapter | None = None,
         cache_resolver: Callable[..., Mapping[str, object]] | None = None,
         preparation_provider: Callable[[
@@ -1231,7 +1146,6 @@ class FleetProfileService:
     ) -> None:
         self._sessions = sessions
         self._clock = clock
-        self._recipe_operations = recipe_operations
         self._switch_adapter = switch_adapter
         self._cache_resolver = cache_resolver
         self._preparation_provider = preparation_provider
@@ -1657,14 +1571,9 @@ class FleetProfileService:
                     .order_by(AgentNode.node_id)
                 )
             )
-            stop_steps: list[_PlanStepDraft] = []
-            uninstall_steps: list[_PlanStepDraft] = []
-            preparation_steps: list[_PlanStepDraft] = []
-            start_steps: list[_PlanStepDraft] = []
             switch_steps: list[_PlanStepDraft] = []
             desired_installation_ids: set[str] = set()
             desired_run_ids: set[str] = set()
-            managed_run_ids: set[str] = set()
             adapter_switch_needed = False
             preparation_unavailable_reported = False
             # Scope is the authoritative reconciliation boundary.  An idle
@@ -1806,107 +1715,12 @@ class FleetProfileService:
                     and state.current_state == "running"
                 ):
                     desired_run_ids.add(state.run.id)
-                if self._switch_adapter is not None and state.run is not None:
-                    managed_run_ids.add(state.run.id)
                 actions: list[FleetProfileAction] = []
-                if (
-                    self._switch_adapter is None
-                    and assignment.desired_state == "installed"
-                    and state.run is not None
-                ):
-                    actions.append("stop")
-                    stop_steps.append(
-                        {
-                            "kind": "stop",
-                            "assignment_id": assignment.id,
-                            "owner_id": state.run.id,
-                            "recipe_revision_id": assignment.recipe_revision_id,
-                            "node_ids": [node.node_id for node in assignment.nodes],
-                            "label": f"Stop {assignment.recipe_title}",
-                        }
-                    )
-                if self._switch_adapter is not None:
-                    already_desired = state.current_state == assignment.desired_state
-                    if already_desired:
-                        if not actions:
-                            actions.append("keep")
-                    else:
-                        actions.append("switch")
-                        adapter_switch_needed = True
+                if state.current_state == assignment.desired_state:
+                    actions.append("keep")
                 else:
-                    if state.current_state == assignment.desired_state or (
-                        assignment.desired_state == "installed"
-                        and state.current_state == "running"
-                    ):
-                        if not actions:
-                            actions.append("keep")
-                    else:
-                        if state.mapping is None:
-                            actions.append("create-placement")
-                            preparation_steps.append(
-                                {
-                                    "kind": "create-placement",
-                                    "assignment_id": assignment.id,
-                                    "recipe_revision_id": assignment.recipe_revision_id,
-                                    "node_ids": [node.node_id for node in assignment.nodes],
-                                    "label": f"Place {assignment.recipe_title}",
-                                }
-                            )
-                        if state.installation is None or state.current_state in {
-                            "not-placed",
-                            "placed",
-                            "degraded",
-                        }:
-                            if state.build is None:
-                                actions.append("build")
-                                preparation_steps.append(
-                                    {
-                                        "kind": "build",
-                                        "assignment_id": assignment.id,
-                                        "recipe_revision_id": assignment.recipe_revision_id,
-                                        "node_ids": [
-                                            node.node_id for node in assignment.nodes
-                                        ],
-                                        "label": f"Build {assignment.recipe_title}",
-                                    }
-                                )
-                            actions.extend(("distribute-image", "install"))
-                            preparation_steps.extend(
-                                (
-                                    {
-                                        "kind": "distribute-image",
-                                        "assignment_id": assignment.id,
-                                        "recipe_revision_id": assignment.recipe_revision_id,
-                                        "node_ids": [
-                                            node.node_id for node in assignment.nodes
-                                        ],
-                                        "label": f"Prepare {assignment.recipe_title} image",
-                                    },
-                                    {
-                                        "kind": "install",
-                                        "assignment_id": assignment.id,
-                                        "recipe_revision_id": assignment.recipe_revision_id,
-                                        "node_ids": [
-                                            node.node_id for node in assignment.nodes
-                                        ],
-                                        "label": f"Install {assignment.recipe_title}",
-                                    },
-                                )
-                            )
-                        if (
-                            assignment.desired_state == "running"
-                            and state.current_state != "running"
-                        ):
-                            actions.append("start")
-                            start_steps.append(
-                                {
-                                    "kind": "start",
-                                    "assignment_id": assignment.id,
-                                    "recipe_revision_id": assignment.recipe_revision_id,
-                                    "node_ids": [node.node_id for node in assignment.nodes],
-                                    "label": f"Run {assignment.recipe_title} as {assignment.alias}",
-                                }
-                            )
+                    actions.append("switch")
+                    adapter_switch_needed = True
                 assignment_previews.append(
                     FleetProfileAssignmentPreview(
                         assignment_id=assignment.id,
@@ -1933,7 +1747,7 @@ class FleetProfileService:
                 )
             )
             run_nodes = self._run_nodes(session, [run.id for run in active_runs])
-            if self._switch_adapter is not None and not resolved_assignments:
+            if not resolved_assignments:
                 # An empty assignment set is an explicit all-idle outcome.  If
                 # the scope currently contains a run, route reconciliation
                 # through the composite child so Run/Switch can stop the
@@ -1946,11 +1760,6 @@ class FleetProfileService:
                     if members & target_nodes:
                         adapter_switch_needed = True
                         break
-            scheduled_stops = {
-                str(step.get("owner_id"))
-                for step in stop_steps
-                if isinstance(step.get("owner_id"), str)
-            }
             for run in active_runs:
                 members = set(run_nodes.get(run.id, ()))
                 # Installation membership is the authoritative complete
@@ -1971,29 +1780,8 @@ class FleetProfileService:
                         )
                     )
                     continue
-                if self._switch_adapter is not None and adapter_switch_needed:
-                    # The composite child reconciles every runtime in its complete
-                    # profile scope. Keep cross-scope validation above, but do not
-                    # enqueue a second outer stop for the same conflict.
-                    continue
-                if (
-                    run.id in desired_run_ids
-                    or run.id in scheduled_stops
-                    or run.id in managed_run_ids
-                ):
-                    continue
-                stop_steps.append(
-                    {
-                        "kind": "stop",
-                        "owner_id": run.id,
-                        "recipe_revision_id": self._run_recipe_revision_id(
-                            session, run
-                        ),
-                        "node_ids": sorted(members),
-                        "label": f"Stop unlisted run {run.alias}",
-                    }
-                )
-                scheduled_stops.add(run.id)
+                if run.id not in desired_run_ids:
+                    adapter_switch_needed = True
 
             installation_policy = row.installation_policy if row is not None else "keep-cached"
             if installation_policy == "exact" and target_nodes:
@@ -2024,64 +1812,20 @@ class FleetProfileService:
                     # An all-idle exact profile still owns removal of scoped
                     # stopped residue. Without a switch step the adapter never
                     # receives this desired retention decision.
-                    if self._switch_adapter is not None:
-                        adapter_switch_needed = True
-                    runs = tuple(
-                        session.scalars(
-                            select(RecipeRun)
-                            .where(
-                                RecipeRun.installation_id == installation.id,
-                                RecipeRun.state.in_(_ACTIVE_RUN_STATES),
-                            )
-                            .order_by(RecipeRun.created_at, RecipeRun.id)
+                    adapter_switch_needed = True
+                    reasons.append(
+                        FleetProfileReason(
+                            code="profile.cleanup_delegated",
+                            detail=(
+                                "Run/Switch removes installation "
+                                f"{installation.id} under this profile's "
+                                "retention policy."
+                            )[:512],
+                            severity="info",
                         )
-                    )
-                    for run in runs:
-                        if (
-                            self._switch_adapter is not None
-                            and adapter_switch_needed
-                        ):
-                            continue
-                        if run.id in desired_run_ids or run.id in scheduled_stops:
-                            continue
-                        stop_steps.append(
-                            {
-                                "kind": "stop",
-                                "owner_id": run.id,
-                                "recipe_revision_id": installation.recipe_revision_id,
-                                "node_ids": sorted(node_ids),
-                                "label": f"Stop unlisted run {run.alias}",
-                            }
-                        )
-                        scheduled_stops.add(run.id)
-                    if self._switch_adapter is not None:
-                        # The orchestrator removes an installation the desired
-                        # state no longer references, so the profile states the
-                        # intent and keeps it visible instead of executing the
-                        # removal through its own state machine.
-                        reasons.append(
-                            FleetProfileReason(
-                                code="profile.cleanup_delegated",
-                                detail=(
-                                    "Run/Switch removes installation "
-                                    f"{installation.id} under this profile's "
-                                    "retention policy."
-                                )[:512],
-                                severity="info",
-                            )
-                        )
-                        continue
-                    uninstall_steps.append(
-                        {
-                            "kind": "uninstall",
-                            "owner_id": installation.id,
-                            "recipe_revision_id": installation.recipe_revision_id,
-                            "node_ids": sorted(node_ids),
-                            "label": "Remove an installation not listed in this profile",
-                        }
                     )
 
-            if stop_steps:
+            if adapter_switch_needed and active_runs:
                 reasons.append(
                     FleetProfileReason(
                         code="profile.interruption_expected",
@@ -2092,7 +1836,7 @@ class FleetProfileService:
                         severity="warning",
                     )
                 )
-            if self._switch_adapter is not None and adapter_switch_needed:
+            if adapter_switch_needed:
                 switch_steps.append(
                     {
                         "kind": "switch",
@@ -2100,35 +1844,13 @@ class FleetProfileService:
                         "label": f"Switch profile {resolved_name}",
                     }
                 )
-            # Prepare images and installations while the current profile can
-            # still serve traffic. Required stops then release runtime
-            # resources before final starts and verification.
-            if self._switch_adapter is not None and adapter_switch_needed:
-                raw_steps = (
-                    preparation_steps
-                    + stop_steps
-                    + switch_steps
-                    + uninstall_steps
-                    + start_steps
-                )
-            else:
-                raw_steps = (
-                    preparation_steps
-                    + stop_steps
-                    + uninstall_steps
-                    + switch_steps
-                    + start_steps
-                )
-            self._compose_lifecycle_assessments(
-                raw_steps,
-                scheduled_stops=scheduled_stops,
-                switch_scope=(
-                    set(target_nodes)
-                    if self._switch_adapter is not None and adapter_switch_needed
-                    else set()
-                ),
-                reasons=reasons,
-            )
+                if self._switch_adapter is None:
+                    reasons.append(FleetProfileReason(
+                        code="profile.switch_authority_unavailable",
+                        detail="Run/Switch authority is required to apply this profile.",
+                        severity="error",
+                    ))
+            raw_steps = switch_steps
             steps = [
                 FleetProfilePlanStep(index=index, **step)
                 for index, step in enumerate(raw_steps)
@@ -2198,88 +1920,6 @@ class FleetProfileService:
                 plan_digest=_digest(identity),
             )
 
-    def _compose_lifecycle_assessments(
-        self,
-        raw_steps: Sequence[Mapping[str, object]],
-        *,
-        scheduled_stops: AbstractSet[str],
-        switch_scope: AbstractSet[str],
-        reasons: list[FleetProfileReason],
-    ) -> None:
-        """Surface what the exact lifecycle assessment already knows.
-
-        The preview used to rebuild an uninstall or stop decision from
-        installation and run rows while execution invoked the lifecycle
-        planner, so an allowed preview could meet a blocker the operator never
-        saw.  Composing the same assessment here keeps one source of authority
-        for what each planned step will actually do.
-
-        A prerequisite this plan resolves is not a blocker: a run this plan
-        stops first, or a run inside the planned switch scope, is reported as a
-        named prerequisite so the operator sees the ordering instead of an
-        error the plan was always going to clear.
-        """
-
-        if self._recipe_operations is None:
-            return
-        for step in raw_steps:
-            kind = step.get("kind")
-            owner_id = step.get("owner_id")
-            if not isinstance(kind, str) or kind not in {"stop", "uninstall"}:
-                continue
-            if not isinstance(owner_id, str):
-                continue
-            assessment = self._assess_lifecycle_step(kind, owner_id, reasons)
-            if assessment is None:
-                continue
-            blockers = tuple(assessment.blockers)
-            if kind == "stop":
-                reasons.extend(
-                    _lifecycle_blocker_reason("stop", owner_id, blocker)
-                    for blocker in blockers
-                )
-                continue
-            reasons.extend(
-                _lifecycle_blocker_reason("uninstall", owner_id, blocker)
-                for blocker in blockers
-                if blocker.code != "uninstall.active_run"
-            )
-            if any(blocker.code == "uninstall.active_run" for blocker in blockers):
-                reasons.extend(
-                    _active_run_reasons(assessment, step, scheduled_stops, switch_scope)
-                )
-
-    def _assess_lifecycle_step(
-        self,
-        kind: str,
-        owner_id: str,
-        reasons: list[FleetProfileReason],
-    ) -> Any:
-        """Return the exact assessment for one planned step, or report why not."""
-
-        assert self._recipe_operations is not None
-        try:
-            if kind == "stop":
-                return self._recipe_operations.preview_stop(owner_id)
-            return self._recipe_operations.preview_uninstall(owner_id)
-        except (
-            KeyError,
-            RecipeOperationConflict,
-            RuntimeError,
-            TypeError,
-            ValueError,
-        ) as error:
-            reasons.append(
-                FleetProfileReason(
-                    code=f"profile.{kind}_assessment_unavailable",
-                    detail=(
-                        f"This plan's {kind} step could not be assessed: {error}"
-                    )[:512],
-                    severity="error",
-                )
-            )
-            return None
-
     def apply(
         self, profile_id: str, *, plan_digest: str, request_key: str, actor: str
     ) -> FleetProfileApplicationView:
@@ -2305,6 +1945,8 @@ class FleetProfileService:
         retry_of_application_id: str | None = None,
     ) -> FleetProfileApplicationView:
         now = _aware(self._clock())
+        if preview.steps and self._switch_adapter is None:
+            raise FleetProfileConflict("Fleet profile Run/Switch authority is unavailable")
         # The preview identifies the work; the request identifies its execution.
         # The same reconciliation can be needed again after a failure or drift.
         preview = preview.model_copy(update={"plan_digest": _digest({
@@ -2472,11 +2114,10 @@ class FleetProfileService:
             if progress.intended_profile is None:
                 raise FleetProfileConflict("Persisted application intent is unavailable")
             if parent.current_operation_id is not None:
-                provider = self._switch_adapter if progress.child_source == "switch-adapter" else self._recipe_operations
-                if provider is None:
+                if self._switch_adapter is None:
                     raise FleetProfileConflict("Current child operation authority is unavailable")
                 try:
-                    child = provider.get(parent.current_operation_id)
+                    child = self._switch_adapter.get(parent.current_operation_id)
                 except (KeyError, RuntimeError, ValueError) as error:
                     raise FleetProfileConflict("Current child operation state must be reconciled before retry") from error
                 if child.state not in {"succeeded", "failed", "cancelled", "expired", "waiting-for-operator"}:
@@ -2656,7 +2297,7 @@ class FleetProfileService:
     def tick(self) -> bool:
         """Advance at most one profile application step; safe to call repeatedly."""
 
-        if self._recipe_operations is None and self._switch_adapter is None:
+        if self._switch_adapter is None:
             return False
         now = _aware(self._clock())
         with self._sessions.begin() as session:
@@ -2687,37 +2328,27 @@ class FleetProfileService:
             steps = [step.model_dump(mode="json") for step in plan.steps]
             if row.current_operation_id:
                 try:
-                    child_source = progress.child_source
-                    if child_source == "switch-adapter":
-                        if self._switch_adapter is None:
-                            raise KeyError(row.current_operation_id)
-                        child = self._switch_adapter.get(
-                            row.current_operation_id, session=session
-                        )
-                    else:
-                        if self._recipe_operations is None:
-                            raise KeyError(row.current_operation_id)
-                        child = self._recipe_operations.get(row.current_operation_id)
+                    child = self._switch_adapter.get(
+                        row.current_operation_id, session=session
+                    )
                 except (KeyError, RuntimeError, ValueError) as error:
                     row.state = "failed"
                     row.status_reason = str(error)[:512] or "Child operation is unavailable"
                     row.updated_at = now
                     return True
-                if isinstance(child, FleetProfileChildOperation):
-                    # The adapter may have checkpointed its child in this same
-                    # row/transaction. Read that receipt before mirroring the
-                    # public progress so the mirror cannot erase it.
-                    progress = _persisted_profile_progress(row)
-                    progress_data = progress.model_dump(mode="json")
-                    if child.progress is not None:
-                        progress_data["child_progress"] = child.progress.model_dump(
-                            mode="json"
-                        )
-                    if progress_data != progress.model_dump(mode="json"):
-                        progress = FleetProfileApplicationProgress.model_validate_json(
-                            canonical_message(progress_data), strict=True
-                        )
-                        row.progress = progress.model_dump(mode="json")
+                # The adapter may have checkpointed its child in this same
+                # row/transaction. Read that receipt before mirroring progress.
+                progress = _persisted_profile_progress(row)
+                progress_data = progress.model_dump(mode="json")
+                if child.progress is not None:
+                    progress_data["child_progress"] = child.progress.model_dump(
+                        mode="json"
+                    )
+                if progress_data != progress.model_dump(mode="json"):
+                    progress = FleetProfileApplicationProgress.model_validate_json(
+                        canonical_message(progress_data), strict=True
+                    )
+                    row.progress = progress.model_dump(mode="json")
                 if child.state in _CHILD_PENDING_STATES:
                     if row.state == "running" and not session.is_modified(row):
                         return False
@@ -2730,11 +2361,7 @@ class FleetProfileService:
                         if child.state == "waiting-for-operator"
                         else "failed"
                     )
-                    child_reason = (
-                        child.status_reason
-                        if isinstance(child, FleetProfileChildOperation)
-                        else None
-                    )
+                    child_reason = child.status_reason
                     row.status_reason = child_reason or (
                         f"Profile step {row.current_step + 1} ended in {child.state}"
                     )
@@ -2755,16 +2382,8 @@ class FleetProfileService:
                 child_result = FleetProfileStepResult(
                     operation_id=child.id,
                     kind=completed_step["kind"],
-                    result=(
-                        child.result
-                        if isinstance(child, FleetProfileChildOperation)
-                        else None
-                    ),
+                    result=child.result,
                 )
-                if not isinstance(child, FleetProfileChildOperation):
-                    child_result = child_result.model_copy(
-                        update={"owner_id": child.owner_id}
-                    )
                 results[str(row.current_step)] = child_result.model_dump(mode="json")
                 progress_data["step_results"] = results
                 progress = FleetProfileApplicationProgress.model_validate_json(
@@ -2852,9 +2471,7 @@ class FleetProfileService:
                     progress_data["completed_steps"] = current.current_step
                 else:
                     current.current_operation_id = operation_id
-                    progress_data["child_source"] = (
-                        "switch-adapter" if step.get("kind") == "switch" else "recipe"
-                    )
+                    progress_data["child_source"] = "switch-adapter"
                     if (
                         isinstance(child, FleetProfileChildOperation)
                         and child.progress is not None
@@ -2912,13 +2529,6 @@ class FleetProfileService:
                 uuid.NAMESPACE_URL, f"vonk-forge:profile:{application_id}:{step_index}"
             )
         )
-        owner_id = step.get("owner_id")
-        assignment_id = step.get("assignment_id")
-        assignment = (
-            self._application_assignment(application_id, assignment_id)
-            if isinstance(assignment_id, str)
-            else None
-        )
         if kind == "switch":
             if self._switch_adapter is None:
                 raise FleetProfileConflict("Fleet profile switch adapter is unavailable")
@@ -2935,126 +2545,6 @@ class FleetProfileService:
                     "Fleet profile switch adapter returned an invalid child operation"
                 )
             return child.id, False, child
-        if self._recipe_operations is None:
-            raise FleetProfileConflict("Fleet profile recipe operations are unavailable")
-        if kind == "stop" and isinstance(owner_id, str):
-            # Replay the child this step already queued before re-previewing.
-            # A stop preview reads the run's live state, so once our own child
-            # is stopping the run the re-derived digest legitimately differs
-            # and re-admission would reject the durable child as a reused key.
-            adopted = self._recipe_operations.adopt_owned_operation(
-                request_id, kind="recipe.stop", owner_kind="run", owner_id=owner_id
-            )
-            if adopted is not None:
-                return adopted.id, False, None
-            plan = self._recipe_operations.preview_stop(owner_id)
-            operation = self._recipe_operations.stop(
-                owner_id,
-                plan_digest=plan.plan_digest,
-                actor=actor,
-                request_id=request_id,
-            )
-            return operation.id, False, None
-        if kind == "uninstall" and isinstance(owner_id, str):
-            # An active uninstall is itself part of the next uninstall plan, so
-            # the recovery path must adopt the recorded child before it reads
-            # that mutable admission.
-            adopted = self._recipe_operations.adopt_owned_operation(
-                request_id,
-                kind="recipe.uninstall",
-                owner_kind="installation",
-                owner_id=owner_id,
-            )
-            if adopted is not None:
-                return adopted.id, False, None
-            plan = self._recipe_operations.preview_uninstall(owner_id)
-            operation = self._recipe_operations.uninstall(
-                owner_id,
-                plan_digest=plan.plan_digest,
-                actor=actor,
-                request_id=request_id,
-            )
-            return operation.id, False, None
-        if assignment is None:
-            raise FleetProfileConflict("Fleet profile assignment is unavailable")
-        node_ids = tuple(node.node_id for node in assignment.nodes)
-        context = self._assignment_context(application_id, assignment.id)
-        if kind == "create-placement":
-            plan = self._recipe_operations.preview_mapping(
-                assignment.recipe_revision_id, node_ids, parameters={}, actor=actor
-            )
-            mapping_id = self._recipe_operations.create_mapping(plan, actor=actor)
-            self._store_assignment_context(
-                application_id,
-                assignment.id,
-                {
-                    **context,
-                    "mapping_id": mapping_id,
-                    "mapping_generation": plan.generation,
-                },
-            )
-            return None, True, None
-        if kind == "build":
-            builder_node_id = min(node_ids)
-            plan = self._recipe_operations.preview_build(
-                assignment.recipe_revision_id, builder_node_id
-            )
-            operation = self._recipe_operations.build(
-                plan,
-                build_input_sha256=plan.build_input_sha256,
-                actor=actor,
-                request_id=request_id,
-            )
-            return operation.id, False, None
-        mapping_id, generation = self._mapping_identity(assignment, context)
-        build_id = self._successful_build_id(assignment.recipe_revision_id)
-        if kind == "distribute-image":
-            preview = self._recipe_operations.preview_image_distribution(
-                build_id, mapping_id, mapping_generation=generation
-            )
-            if not preview.node_ids:
-                return None, True, None
-            operation = self._recipe_operations.distribute_image(
-                build_id,
-                mapping_id,
-                mapping_generation=generation,
-                plan_digest=preview.plan_digest,
-                actor=actor,
-                request_id=request_id,
-            )
-            return operation.id, False, None
-        if kind == "install":
-            plan = self._recipe_operations.preview_install(mapping_id, build_id)
-            operation = self._recipe_operations.install(
-                plan, plan_digest=plan.plan_digest, actor=actor, request_id=request_id
-            )
-            self._store_assignment_context(
-                application_id,
-                assignment.id,
-                {
-                    **context,
-                    "mapping_id": mapping_id,
-                    "mapping_generation": generation,
-                    "installation_id": operation.owner_id,
-                },
-            )
-            return operation.id, False, None
-        if kind == "start":
-            installation_id = self._installation_identity(assignment, context)
-            alias = assignment.alias or assignment.recipe_title.lower().replace(" ", "-")
-            # Run admission hashes live inventory observation time and current
-            # reservations, so a refreshed inventory changes the digest even
-            # though this step's child is unchanged.
-            adopted = self._recipe_operations.adopt_start(
-                installation_id, alias, request_id=request_id
-            )
-            if adopted is not None:
-                return adopted.id, False, None
-            plan = self._recipe_operations.preview_run(installation_id, alias)
-            operation = self._recipe_operations.start(
-                plan, plan_digest=plan.plan_digest, actor=actor, request_id=request_id
-            )
-            return operation.id, False, None
         raise FleetProfileConflict("Fleet profile step kind is unsupported")
 
     def _validated_assignments(
@@ -3465,14 +2955,6 @@ class FleetProfileService:
             )
         )
 
-    @staticmethod
-    def _run_recipe_revision_id(session: Session, run: RecipeRun) -> str | None:
-        return session.scalar(
-            select(RecipeInstallation.recipe_revision_id).where(
-                RecipeInstallation.id == run.installation_id
-            )
-        )
-
     def _application_view(
         self, row: FleetProfileApplication
     ) -> FleetProfileApplicationView:
@@ -3507,22 +2989,6 @@ class FleetProfileService:
             raise FleetProfileConflict("Persisted application intent digest is inconsistent")
         return progress.intended_profile
 
-    def _application_assignment(
-        self, application_id: str, assignment_id: object
-    ) -> FleetProfileAssignment | None:
-        with self._sessions() as session:
-            application = session.get(FleetProfileApplication, application_id)
-            if application is None:
-                raise KeyError(application_id)
-            return next(
-                (
-                    item
-                    for item in self._intended_profile(application).assignments
-                    if item.id == assignment_id
-                ),
-                None,
-            )
-
     def _application_scope(self, application_id: str) -> tuple[str, ...]:
         with self._sessions() as session:
             application = session.get(FleetProfileApplication, application_id)
@@ -3539,88 +3005,6 @@ class FleetProfileService:
                 raise KeyError(application_id)
             assignments = self._intended_profile(application).assignments
             return tuple(sorted(assignments, key=lambda item: item.id))
-
-    def _assignment_context(
-        self, application_id: str, assignment_id: str
-    ) -> dict[str, object]:
-        with self._sessions() as session:
-            application = session.get(FleetProfileApplication, application_id)
-            if application is None:
-                raise KeyError(application_id)
-            progress = _canonical_progress(
-                application.progress
-            )
-            value = progress.assignments.get(assignment_id)
-            return value.model_dump(mode="python") if value is not None else {}
-
-    def _store_assignment_context(
-        self, application_id: str, assignment_id: str, value: Mapping[str, object]
-    ) -> None:
-        with self._sessions.begin() as session:
-            application = session.get(
-                FleetProfileApplication, application_id, with_for_update=True
-            )
-            if application is None:
-                raise KeyError(application_id)
-            progress = _canonical_progress(
-                application.progress
-            ).model_dump(mode="python")
-            assignments = (
-                dict(progress.get("assignments", {}))
-                if isinstance(progress.get("assignments"), Mapping)
-                else {}
-            )
-            assignments[assignment_id] = FleetProfileAssignmentContext.model_validate(
-                value
-            ).model_dump(mode="json")
-            progress["assignments"] = assignments
-            application.progress = _canonical_progress(
-                progress
-            ).model_dump(mode="json")
-            application.updated_at = _aware(self._clock())
-
-    def _mapping_identity(
-        self, assignment: FleetProfileAssignment, context: Mapping[str, object]
-    ) -> tuple[str, int]:
-        mapping_id, generation = (
-            context.get("mapping_id"),
-            context.get("mapping_generation"),
-        )
-        if isinstance(mapping_id, str) and type(generation) is int:
-            return mapping_id, generation
-        with self._sessions() as session:
-            state = self._assignment_state(session, assignment)
-            if state.mapping is None:
-                raise FleetProfileConflict("Fleet profile placement is unavailable")
-            return state.mapping.id, state.mapping.generation
-
-    def _installation_identity(
-        self, assignment: FleetProfileAssignment, context: Mapping[str, object]
-    ) -> str:
-        installation_id = context.get("installation_id")
-        if isinstance(installation_id, str):
-            return installation_id
-        with self._sessions() as session:
-            state = self._assignment_state(session, assignment)
-            if state.installation is None:
-                raise FleetProfileConflict("Fleet profile installation is unavailable")
-            return state.installation.id
-
-    def _successful_build_id(self, recipe_revision_id: str) -> str:
-        with self._sessions() as session:
-            build_id = session.scalar(
-                select(RecipeBuild.id)
-                .where(
-                    RecipeBuild.recipe_revision_id == recipe_revision_id,
-                    RecipeBuild.state == "succeeded",
-                )
-                .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
-                .limit(1)
-            )
-            if build_id is None:
-                raise FleetProfileConflict("Fleet profile recipe build is unavailable")
-            return build_id
-
 
 __all__ = [
     "FleetProfileConflict",
