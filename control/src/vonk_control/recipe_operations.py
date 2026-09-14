@@ -340,14 +340,15 @@ def _workload_owner_scope(session: Session, kind: str, owner_id: str) -> tuple[s
 
 
 def _active_owned_workload_jobs(
-    session: Session, kind: str, owner_id: str, *, lock: bool = False
+    session: Session, kind: str, owner_id: str, *, lock: bool = False,
+    include_waiting_cancellation: bool = False,
 ) -> tuple[Job, ...]:
     owner_kind = "run" if kind in {"recipe.start", "recipe.stop"} else "installation"
     statement = (
         select(Job)
         .where(
             Job.kind == kind,
-            Job.state.in_(("queued", "running")),
+            Job.state.in_(("queued", "running", "waiting-for-operator") if include_waiting_cancellation else ("queued", "running")),
             Job.payload["owner_kind"].as_string() == owner_kind,
             Job.payload["owner_id"].as_string() == owner_id,
         )
@@ -355,7 +356,11 @@ def _active_owned_workload_jobs(
     )
     if lock:
         statement = statement.with_for_update(of=Job)
-    return tuple(session.scalars(statement))
+    return tuple(
+        job for job in session.scalars(statement)
+        if job.state != "waiting-for-operator"
+        or (isinstance(job.result, Mapping) and job.result.get("cancel_requested") is True)
+    )
 
 
 def _unissued_workload_children(
@@ -1587,7 +1592,9 @@ class RecipeOperationService:
             ):
                 raise RecipeOperationConflict("workload intent was superseded")
             pending: list[IssuedWorkloadReconciliation] = []
-            for job in _active_owned_workload_jobs(session, kind, owner_id):
+            for job in _active_owned_workload_jobs(
+                session, kind, owner_id, include_waiting_cancellation=True
+            ):
                 ordinal = job.payload.get("workload_intent_ordinal")
                 if tuple(sorted(job.targets)) != scope:
                     raise RecipeOperationConflict("workload owner scope changed")

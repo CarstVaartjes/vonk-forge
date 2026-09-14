@@ -233,26 +233,39 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     assert claim is not None
     with sessions.begin() as session:
         for node_id in (NODE_A, NODE_B):
-            session.get(AgentNode, node_id).workload_intent_ordinal = 2
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.workload_intent_ordinal = 2
         jobs.request_superseded_workload_cancellation_in_session(
             session, (NODE_A, NODE_B), 2, clock.now
         )
     with sessions() as session:
-        assert session.get(AgentOperation, queued.id).state == "cancelled"
-        assert session.get(AgentOperation, running.id).state == "running"
-        assert session.get(Job, job.id).result["cancel_requested"] is True
+        queued_row = session.get(AgentOperation, queued.id)
+        running_row = session.get(AgentOperation, running.id)
+        parent_row = session.get(Job, job.id)
+        assert queued_row is not None and queued_row.state == "cancelled"
+        assert running_row is not None and running_row.state == "running"
+        assert parent_row is not None and parent_row.result is not None
+        assert parent_row.result["cancel_requested"] is True
+        pending = AgentJobService.assess_superseded_agent_effects_in_session(
+            session, (NODE_A, NODE_B), 2, clock.now
+        )
+        assert tuple(item.operation_id for item in pending) == (running.id,)
+        assert pending[0].failure_kind.value == "uncertain-effect"
     directive = jobs.heartbeat(claim, None, 30)
     assert directive.cancel_requested is True
     assert directive.deadline <= clock.now + timedelta(seconds=660)
     replacement = parent(sessions, clock)
     with sessions.begin() as session:
-        session.get(Job, replacement.id).payload = {"workload_intent_ordinal": 2}
+        replacement_row = session.get(Job, replacement.id)
+        assert replacement_row is not None
+        replacement_row.payload = {"workload_intent_ordinal": 2}
     fresh = jobs.enqueue(replacement.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     fresh_claim = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert fresh_claim is not None and fresh_claim.operation_id == fresh.id
     with pytest.raises(StaleAgentAttempt):
         jobs.succeed(claim, STOP_RESULT)
-    jobs.record_result(AgentResult.model_validate({
+    cancelled = AgentResult.model_validate({
         "schema_version": 1,
         "job_id": job.id,
         "operation_id": running.id,
@@ -262,10 +275,19 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
         "deadline": directive.deadline,
         "state": "cancelled",
         "result": {"error_code": "operation_cancelled", "reason": "exact stop completed"},
-    }))
+    })
+    clock.advance(seconds=31)
+    with pytest.raises(StaleAgentAttempt):
+        jobs.record_result(cancelled)
+    assert jobs.record_late_result(cancelled)
     with sessions() as session:
-        assert session.get(AgentOperation, running.id).state == "cancelled"
-        assert session.get(Job, job.id).state == "cancelled"
+        running_row = session.get(AgentOperation, running.id)
+        parent_row = session.get(Job, job.id)
+        assert running_row is not None and running_row.state == "cancelled"
+        assert parent_row is not None and parent_row.state == "cancelled"
+        assert not AgentJobService.assess_superseded_agent_effects_in_session(
+            session, (NODE_A, NODE_B), 2, clock.now
+        )
     assert jobs.known_superseded_cancellation(AgentProgress.model_validate({
         "schema_version": 1,
         "job_id": job.id,

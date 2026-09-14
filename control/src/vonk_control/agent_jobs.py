@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -26,6 +27,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_payload
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
@@ -67,6 +69,17 @@ ContactConsumer = Callable[[Session, AgentSource], None]
 AgentResultState = Literal[
     "succeeded", "failed", "cancelled", "waiting-for-operator"
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class SupersededAgentEffect:
+    parent_job_id: str
+    operation_id: str
+    node_id: str
+    kind: str
+    failure_kind: FailureKind
+    observe_due_at: datetime
+    observation_deadline: datetime
 
 
 _RECIPE_CAPABILITIES = frozenset(
@@ -441,6 +454,61 @@ class AgentJobService:
             parent.status_reason = "superseded by newer workload intent"
             parent.updated_at = now
 
+    @staticmethod
+    def assess_superseded_agent_effects_in_session(
+        session: Session, targets: Sequence[str], current_ordinal: int, now: datetime
+    ) -> tuple[SupersededAgentEffect, ...]:
+        """Read only: identify older issued effects still awaiting a stop receipt."""
+        scope = tuple(sorted(set(targets)))
+        if not scope or len(scope) != len(targets) or type(current_ordinal) is not int or current_ordinal < 1:
+            raise ValueError("workload observation scope is invalid")
+        candidates = tuple(session.scalars(
+            select(StoredOperation)
+            .where(
+                StoredOperation.node_id.in_(scope),
+                StoredOperation.kind.in_(_WORKLOAD_INTENT_OPERATIONS),
+                StoredOperation.workload_intent_ordinal.is_not(None),
+                StoredOperation.workload_intent_ordinal < current_ordinal,
+                StoredOperation.current_attempt > 0,
+                StoredOperation.state.in_({"running", "waiting-for-operator"}),
+            )
+            .order_by(StoredOperation.parent_job_id, StoredOperation.id)
+        ))
+        pending = []
+        for operation in candidates:
+            parent = session.get(Job, operation.parent_job_id)
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
+                )
+            )
+            deadline = superseded_cancellation_deadline(
+                None if parent is None else parent.result
+            )
+            if (
+                parent is None or attempt is None or deadline is None
+                or operation.workload_intent_ordinal != parent.payload.get("workload_intent_ordinal")
+                or operation.node_id not in parent.targets
+                or AgentJobService._target_scope(parent.targets) is None
+            ):
+                raise ValueError("superseded agent effect identity is invalid")
+            observation_deadline = max(deadline, _aware(attempt.lease_deadline)) + timedelta(seconds=960)
+            observe_due_at = min(
+                observation_deadline,
+                max(_aware(now) + timedelta(seconds=2), min(_aware(attempt.lease_deadline), _aware(now) + timedelta(seconds=30))),
+            )
+            pending.append(SupersededAgentEffect(
+                parent_job_id=parent.id,
+                operation_id=operation.id,
+                node_id=operation.node_id,
+                kind=operation.kind,
+                failure_kind=FailureKind.UNCERTAIN_EFFECT,
+                observe_due_at=observe_due_at,
+                observation_deadline=observation_deadline,
+            ))
+        return tuple(pending)
+
     def set_result_consumer(self, consumer: ResultConsumer) -> None:
         """Bind projection consumption once, before the queue serves any work."""
         if not callable(consumer):
@@ -729,25 +797,46 @@ class AgentJobService:
                 )
                 return None
             if operation.kind in _MUTATING_OPERATIONS:
-                active_mutations = tuple(session.scalars(
+                candidates = tuple(session.scalars(
                     select(StoredOperation)
                     .where(
                         StoredOperation.node_id == node_id,
                         StoredOperation.id != operation.id,
                         StoredOperation.kind.in_(_MUTATING_OPERATIONS),
-                        StoredOperation.state == "running",
+                        StoredOperation.state.in_({"running", "waiting-for-operator"}),
                     )
                     .order_by(StoredOperation.id)
                 ))
+                active_mutations_list = []
+                for old in candidates:
+                    if old.state == "running":
+                        active_mutations_list.append(old)
+                    elif (
+                        operation.kind in _WORKLOAD_INTENT_OPERATIONS
+                        and old.kind in _WORKLOAD_INTENT_OPERATIONS
+                        and old.current_attempt > 0
+                        and old.workload_intent_ordinal is not None
+                        and operation.workload_intent_ordinal is not None
+                        and old.workload_intent_ordinal < operation.workload_intent_ordinal
+                    ):
+                        old_parent = session.get(Job, old.parent_job_id)
+                        if (
+                            old_parent is not None
+                            and isinstance(old_parent.result, Mapping)
+                            and old_parent.result.get("cancel_requested") is True
+                        ):
+                            active_mutations_list.append(old)
+                active_mutations = tuple(active_mutations_list)
                 # A current exact STOP is the cleanup action for an older
                 # cancelled workload. Do not let the old order's bookkeeping
                 # prevent that STOP from reaching the agent; every other
                 # mutation still waits for its prior effect to cease.
+                current_ordinal = operation.workload_intent_ordinal
                 stop_cleans_superseded = (
                     operation.kind == AgentOperation.RECIPE_STOP.value
-                    and operation.workload_intent_ordinal is not None
+                    and current_ordinal is not None
                 )
-                if stop_cleans_superseded:
+                if operation.kind == AgentOperation.RECIPE_STOP.value and current_ordinal is not None:
                     for old in active_mutations:
                         old_parent = session.get(Job, old.parent_job_id)
                         if (
@@ -756,7 +845,7 @@ class AgentJobService:
                                 AgentOperation.RECIPE_STOP.value,
                             }
                             or old.workload_intent_ordinal is None
-                            or old.workload_intent_ordinal >= operation.workload_intent_ordinal
+                            or old.workload_intent_ordinal >= current_ordinal
                             or old.payload.get("run_id") != operation.payload.get("run_id")
                             or old_parent is None
                             or not isinstance(old_parent.result, Mapping)
@@ -1440,14 +1529,14 @@ class AgentJobService:
     def record_late_result(
         self, message: AgentResult, *, source: AgentSource | None = None
     ) -> bool:
-        """Retain evidence for an expired attempt without applying its effect.
+        """Retain stale effects; close only a proved cancellation of the old order.
 
         Only the authenticated node may submit the exact historical fence.
         Certificate rotation may change its current TLS credential while the
-        durable receipt still names the original certificate. A completed
-        effect remains uncertain until a fresh authorized
-        observation reconciles it; this path never changes operation/job state
-        and never calls the result consumer.
+        durable receipt still names the original certificate. Old success and
+        failure stay diagnostic. A typed cancellation acknowledgement may
+        retire only the exact superseded order after the agent confirms its
+        host action has ceased; it never applies that order's desired effect.
         """
         self._mark_started()
         with self._sessions.begin() as session:
@@ -1509,6 +1598,43 @@ class AgentJobService:
                 operation.workload_intent_ordinal is not None
                 and operation.workload_intent_ordinal != node.workload_intent_ordinal
             )
+            if (
+                message.state == "cancelled"
+                and superseded_intent
+                and operation.kind in _WORKLOAD_INTENT_OPERATIONS
+                and operation.workload_intent_ordinal == parent.payload.get("workload_intent_ordinal")
+                and isinstance(parent.result, Mapping)
+                and superseded_cancellation_deadline(parent.result) is not None
+                and operation.current_attempt == attempt.attempt
+                and operation.state in {"running", "waiting-for-operator"}
+                and attempt.state in {"running", "expired"}
+                and attempt.result is None
+                and (
+                    (
+                        operation.kind == AgentOperation.RECIPE_JOB_RUN.value
+                        and isinstance(message.result, RecipeJobRunResult)
+                        and message.result.exit_code == 130
+                        and not message.result.outputs
+                    )
+                    or (
+                        operation.kind != AgentOperation.RECIPE_JOB_RUN.value
+                        and
+                        evidence.get("error_code") == "operation_cancelled"
+                        and evidence.get("uncertain") is not True
+                    )
+                )
+            ):
+                attempt.state = "cancelled"
+                attempt.result = evidence
+                operation.state = "cancelled"
+                operation.retry_disposition = None
+                operation.retry_disposition_attempt = None
+                operation.retry_due_at = None
+                operation.updated_at = now
+                if self._result_consumer is not None:
+                    self._result_consumer(session, operation, attempt, message)
+                self._aggregate_parent(session, operation.parent_job_id)
+                return True
             if attempt.state == "running" and (
                 _aware(attempt.lease_deadline) <= _aware(now) or superseded_intent
             ):

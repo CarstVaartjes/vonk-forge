@@ -1249,7 +1249,7 @@ def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) ->
         assert {item.kind for item in child_operations} == {"recipe.install"}
         assert jobs[0].payload["workload_intent_ordinal"] == 1
         assert all(item.workload_intent_ordinal == 1 for item in child_operations)
-        assert all(session.get(AgentNode, node_id).workload_intent_ordinal == 1 for node_id in nodes)
+        assert all(_required(session.get(AgentNode, node_id)).workload_intent_ordinal == 1 for node_id in nodes)
         assert all(
             "shell" not in json.dumps(item.payload).lower() for item in child_operations
         )
@@ -3024,7 +3024,7 @@ def test_new_install_intent_retires_only_unissued_older_install(tmp_path: Path) 
         plan, plan_digest=plan.plan_digest, actor="admin", request_id="old-install-intent"
     )
     with sessions.begin() as session:
-        session.get(AgentNode, nodes[0]).workload_intent_ordinal = 2
+        _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 2
     assert service.assess_superseded_unissued("recipe.install", old.owner_id)
     assert service.reconcile_superseded_unissued("recipe.install", old.owner_id, 2)
     new = service.start_installation(
@@ -3032,10 +3032,10 @@ def test_new_install_intent_retires_only_unissued_older_install(tmp_path: Path) 
         workload_intent_ordinal=2,
     )
     with sessions() as session:
-        assert session.get(Job, old.id).state == "cancelled"
+        assert _required(session.get(Job, old.id)).state == "cancelled"
         child = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == old.id))
         assert child is not None and child.state == "cancelled"
-        assert session.get(Job, new.id).payload["workload_intent_ordinal"] == 2
+        assert _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 2
 
 
 def test_new_stop_intent_replans_after_unissued_old_stop(tmp_path: Path) -> None:
@@ -3053,7 +3053,7 @@ def test_new_stop_intent_replans_after_unissued_old_stop(tmp_path: Path) -> None
         actor="admin", request_id="old-stop-intent",
     )
     with sessions.begin() as session:
-        session.get(AgentNode, nodes[0]).workload_intent_ordinal = 4
+        _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 4
     prospective = service.preview_stop(run.owner_id)
     assert prospective.allowed
     assert prospective.run_state == "stopping"
@@ -3065,9 +3065,9 @@ def test_new_stop_intent_replans_after_unissued_old_stop(tmp_path: Path) -> None
         actor="admin", request_id="new-stop-intent", workload_intent_ordinal=4,
     )
     with sessions() as session:
-        assert session.get(Job, old.id).state == "cancelled"
-        assert session.get(Job, new.id).payload["workload_intent_ordinal"] == 4
-        assert session.get(RecipeRun, run.owner_id).route_state == "withdrawn"
+        assert _required(session.get(Job, old.id)).state == "cancelled"
+        assert _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 4
+        assert _required(session.get(RecipeRun, run.owner_id)).route_state == "withdrawn"
         assert session.scalar(select(ResourceReservation.id).where(
             ResourceReservation.owner_kind == "run",
             ResourceReservation.owner_id == run.owner_id,
@@ -3102,7 +3102,7 @@ def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
             agent_certificate_serial="serial-0",
             state="running",
         ))
-        session.get(AgentNode, nodes[0]).workload_intent_ordinal = 4
+        _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 4
         AgentJobService.request_superseded_workload_cancellation_in_session(
             session, nodes, 4, NOW
         )
@@ -3120,10 +3120,11 @@ def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
         actor="admin", request_id="issued-new-stop", workload_intent_ordinal=4,
     )
     with sessions() as session:
-        assert session.get(Job, old.id).state == "running"
-        assert session.get(Job, old.id).result["cancel_requested"] is True
-        assert session.get(Job, replacement.id).payload["workload_intent_ordinal"] == 4
-        assert session.get(RecipeRun, run.owner_id).state == "stopping"
+        old_job = _required(session.get(Job, old.id))
+        assert old_job.state == "running"
+        assert old_job.result is not None and old_job.result["cancel_requested"] is True
+        assert _required(session.get(Job, replacement.id)).payload["workload_intent_ordinal"] == 4
+        assert _required(session.get(RecipeRun, run.owner_id)).state == "stopping"
 
 
 def test_new_uninstall_intent_replans_after_unissued_old_uninstall(tmp_path: Path) -> None:
@@ -3138,7 +3139,7 @@ def test_new_uninstall_intent_replans_after_unissued_old_uninstall(tmp_path: Pat
         actor="admin", request_id="old-uninstall-intent",
     )
     with sessions.begin() as session:
-        session.get(AgentNode, nodes[0]).workload_intent_ordinal = 3
+        _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 3
     prospective = service.preview_uninstall(installation.owner_id)
     assert prospective.allowed
     assert service.assess_superseded_unissued("recipe.uninstall", installation.owner_id)
@@ -3149,8 +3150,8 @@ def test_new_uninstall_intent_replans_after_unissued_old_uninstall(tmp_path: Pat
         actor="admin", request_id="new-uninstall-intent", workload_intent_ordinal=3,
     )
     with sessions() as session:
-        assert session.get(Job, old.id).state == "cancelled"
-        assert session.get(Job, new.id).payload["workload_intent_ordinal"] == 3
+        assert _required(session.get(Job, old.id)).state == "cancelled"
+        assert _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 3
 
 
 def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> None:
