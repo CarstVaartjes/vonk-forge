@@ -285,6 +285,18 @@
       "title": "AgentDirective",
       "type": "object"
     },
+    "AgentFailureKind": {
+      "enum": [
+        "temporary-dependency",
+        "uncertain-effect",
+        "invalid-authority",
+        "invalid-contract",
+        "integrity-failure",
+        "resource-prerequisite"
+      ],
+      "title": "AgentFailureKind",
+      "type": "string"
+    },
     "AgentFailureResult": {
       "additionalProperties": false,
       "properties": {
@@ -326,6 +338,17 @@
           ],
           "default": null,
           "title": "Error Code"
+        },
+        "failure_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentFailureKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "helper_error_code": {
           "anyOf": [
