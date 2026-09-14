@@ -1094,7 +1094,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 })
             }
             HostRuntimeAction::Start => {
-                self.runtime_start(&request.arguments)
+                self.runtime_start(&request.arguments, true)
                     .map(|exit_code| RuntimeRequestOutcome {
                         exit_code,
                         recipe_run_observation: None,
@@ -1102,7 +1102,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }
             HostRuntimeAction::Stop => {
                 if request.arguments.get(1).map(String::as_str) == Some("run") {
-                    self.runtime_start(&request.arguments)
+                    self.runtime_start(&request.arguments, false)
                         .map(|exit_code| RuntimeRequestOutcome {
                             exit_code,
                             recipe_run_observation: None,
@@ -1426,7 +1426,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         )
     }
 
-    fn runtime_start(&self, arguments: &[String]) -> Result<Option<i32>, OperationError> {
+    fn runtime_start(
+        &self,
+        arguments: &[String],
+        fence_start: bool,
+    ) -> Result<Option<i32>, OperationError> {
         let [
             archive_sha256,
             registry_index_digest,
@@ -1451,12 +1455,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        // A one-shot START remains registered from validation through attached container exit.
-        // Cancellation STOPs can therefore distinguish "not created yet" from "already gone"
-        // and retry until this exact job can no longer start late.
-        let _active_job = validated
-            .job_timeout_seconds
-            .map(|_| self.job_cancellation.begin(&validated.run_id))
+        // Every START, including a pre-start hook, remains registered through
+        // its Docker call. STOP hooks use the STOP action and do not acquire
+        // the start fence. An exact cancellation STOP must wait out active
+        // work before treating temporary container absence as quiescence.
+        let _active_start = fence_start
+            .then(|| self.job_cancellation.begin(&validated.run_id))
             .transpose()?;
         self.bind_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))?;
         let (inspected, operational_image) =
@@ -3849,6 +3853,60 @@ mod tests {
             ),
             Err(OperationError::StopUncertain)
         ));
+    }
+
+    #[test]
+    fn exact_cancel_stop_waits_for_active_start_then_blocks_late_start() {
+        let temp = tempfile::tempdir().unwrap();
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            MissingContainerRunner,
+            None,
+        )
+        .unwrap();
+        let active = executor.job_cancellation.begin(RUN_ID).unwrap();
+        let stop_arguments = [RUN_ID.to_owned(), "5".to_owned(), "job-cancel".to_owned()];
+        std::thread::scope(|scope| {
+            let stop = scope.spawn(|| {
+                executor
+                    .runtime_stop_until(&stop_arguments, Instant::now() + Duration::from_secs(10))
+            });
+            while !executor
+                .job_cancellation
+                .state
+                .lock()
+                .unwrap()
+                .cancelled
+                .contains(RUN_ID)
+            {
+                std::thread::yield_now();
+            }
+            assert!(!stop.is_finished(), "stop acknowledged an active START");
+            drop(active);
+            stop.join().unwrap().unwrap();
+        });
+        assert!(executor.job_cancellation.begin(RUN_ID).is_err());
+    }
+
+    #[test]
+    fn ordinary_recovery_stop_does_not_fence_a_same_run_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            MissingContainerRunner,
+            None,
+        )
+        .unwrap();
+
+        executor
+            .runtime_stop_until(
+                &[RUN_ID.to_owned(), "5".to_owned()],
+                Instant::now() + Duration::from_secs(1),
+            )
+            .unwrap();
+        assert!(executor.job_cancellation.begin(RUN_ID).is_ok());
     }
 
     #[test]
