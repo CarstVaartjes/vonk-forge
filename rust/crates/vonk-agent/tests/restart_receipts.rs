@@ -5,7 +5,9 @@ use serde_json::json;
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
-use vonk_agent_protocol::generated::{AgentClaimPayload, AgentOperation, RecipeStopPayload};
+use vonk_agent_protocol::generated::{
+    AgentClaimPayload, AgentFailureKind, AgentOperation, AgentResultResult, RecipeStopPayload,
+};
 use vonk_agent_protocol::{AgentClaim, canonical_json, hex_sha256};
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
@@ -77,6 +79,21 @@ fn interrupted_mutation_is_not_executed_twice_after_restart() {
     assert!(
         matches!(decision, BeginDecision::Replay(ref result) if result.state == "waiting-for-operator")
     );
+    let BeginDecision::Replay(result) = decision else {
+        panic!("an interrupted attempt must not execute without fresh Controller authority");
+    };
+    let AgentResultResult::AgentFailureResult(failure) = result.result else {
+        panic!("restart must report typed interrupted-effect evidence");
+    };
+    assert_eq!(
+        failure.error_code.as_deref(),
+        Some("agent_restart_interrupted")
+    );
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::UncertainEffect)
+    );
+    assert_eq!(failure.uncertain, Some(true));
 }
 
 #[test]
