@@ -800,6 +800,7 @@ class RunSwitchOperationResult(_StrictModel):
     """Exact durable result tree stored in ``Job.result``."""
 
     phase_index: int = Field(default=0, ge=0, le=31)
+    workload_intent_ordinal: int | None = Field(default=None, ge=1)
     item_index: int = Field(default=0, ge=0, le=31)
     phase: RunSwitchPhaseKind | None = None
     subphase: RunSwitchSubphase | None = None

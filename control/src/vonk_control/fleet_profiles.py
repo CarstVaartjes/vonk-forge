@@ -577,6 +577,7 @@ class RunSwitchFleetProfileAdapter:
             str(state["actor"]),
             str(state["request_id"]),
             integer(position) or 0,
+            _canonical_progress(application.progress).workload_intent_ordinal,
         )
         state["active_operation_id"] = operation.operation_id
         state["active_kind"] = item.get("kind")
@@ -593,7 +594,10 @@ class RunSwitchFleetProfileAdapter:
         actor: str,
         request_id: str,
         position: int,
+        workload_intent_ordinal: int | None,
     ) -> RunSwitchOperation:
+        if workload_intent_ordinal is None:
+            raise FleetProfileConflict("Profile workload intent is unbound")
         child_request_key = str(
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
@@ -607,6 +611,7 @@ class RunSwitchFleetProfileAdapter:
             item=item,
             assignments=assignments,
             scope_node_ids=scope_node_ids,
+            workload_intent_ordinal=workload_intent_ordinal,
         )
         if adopted is not None:
             return adopted
@@ -627,6 +632,7 @@ class RunSwitchFleetProfileAdapter:
                     request_key=child_request_key,
                 ),
                 actor=actor,
+                workload_intent_ordinal=workload_intent_ordinal,
             )
         if kind == "stop":
             run_id = item.get("id")
@@ -644,6 +650,7 @@ class RunSwitchFleetProfileAdapter:
                     request_key=child_request_key,
                 ),
                 actor=actor,
+                workload_intent_ordinal=workload_intent_ordinal,
             )
         assignment_id = item.get("id")
         assignment = next(
@@ -662,7 +669,9 @@ class RunSwitchFleetProfileAdapter:
                 + "; ".join(reason.code for reason in plan.blockers[:8])
             )
         return self._run_switch.apply(
-            request.model_copy(update={"plan_digest": plan.plan_digest}), actor=actor
+            request.model_copy(update={"plan_digest": plan.plan_digest}),
+            actor=actor,
+            workload_intent_ordinal=workload_intent_ordinal,
         )
 
     def _adopt_child(
@@ -672,6 +681,7 @@ class RunSwitchFleetProfileAdapter:
         item: Mapping[str, object],
         assignments: tuple[FleetProfileAssignment, ...],
         scope_node_ids: tuple[str, ...],
+        workload_intent_ordinal: int,
     ) -> RunSwitchOperation | None:
         """Read the exact committed child before any mutable preview is redone."""
 
@@ -689,6 +699,8 @@ class RunSwitchFleetProfileAdapter:
             }.get(kind)
             if job.kind != expected_kind:
                 raise FleetProfileConflict("Profile child request key belongs to another operation")
+            if job.payload.get("workload_intent_ordinal") != workload_intent_ordinal:
+                raise FleetProfileConflict("Profile child changed its bound workload intent")
             raw_plan = job.payload.get("plan")
             try:
                 plan = RunSwitchPlan.model_validate_json(
@@ -940,6 +952,8 @@ class RunSwitchFleetProfileAdapter:
         )
         progress = FleetProfileChildProgress(
             operation=child.progress.operation,
+            startup_budget_seconds=child.progress.startup_budget_seconds,
+            start_deadline=child.progress.start_deadline,
             phase=phase,
             node_ids=_string_items(
                 state.get("scope_node_ids", []),
@@ -1556,16 +1570,22 @@ class FleetProfileService:
                 if replay.profile_id != profile.id or replay.profile_digest != profile.profile_digest:
                     raise FleetProfileConflict("Load request key was reused for another profile intent")
                 return self._application_view(replay)
-            latest = session.scalar(
-                select(FleetProfileApplication)
-                .where(FleetProfileApplication.profile_id == profile.id)
-                .order_by(FleetProfileApplication.created_at.desc(), FleetProfileApplication.id.desc())
-                .limit(1)
+            latest = max(
+                session.scalars(select(FleetProfileApplication).where(
+                    FleetProfileApplication.profile_id == profile.id
+                )),
+                key=lambda item: (
+                    _canonical_progress(item.progress).workload_intent_ordinal or 0,
+                    _aware(item.created_at), item.id,
+                ),
+                default=None,
             )
             if latest is not None and latest.profile_digest == profile.profile_digest:
-                if latest.state in {"queued", "running"}:
+                if latest.state in {"queued", "running"} and not self._superseding_intent(
+                    session, latest, _canonical_progress(latest.progress)
+                ):
                     raise FleetProfileConflict("Profile load is already active; follow its progress")
-                if latest.state in {"failed", "waiting-for-operator"}:
+                if latest.state in {"failed", "waiting-for-operator"} and self._retry_eligible(session, latest):
                     recovery_id = latest.id
         if recovery_id is not None:
             return self.retry(recovery_id, request_key=request_key, actor=actor)
@@ -2315,14 +2335,13 @@ class FleetProfileService:
                 return self._application_view(existing)
             intended_view = self._view(session, profile)
             frozen_assignments = self._execution_assignments(session, profile)
-            frozen_nodes = tuple(
-                node.node_id
-                for node in session.scalars(
-                    select(AgentNode)
-                    .where(AgentNode.revoked_at.is_(None))
-                    .order_by(AgentNode.node_id)
-                )
-            )
+            scope_nodes = list(session.scalars(
+                select(AgentNode)
+                .where(AgentNode.revoked_at.is_(None))
+                .order_by(AgentNode.node_id)
+                .with_for_update()
+            ))
+            frozen_nodes = tuple(node.node_id for node in scope_nodes)
             intended = FleetProfileIntendedConfiguration(
                 profile_digest=intended_view.profile_digest,
                 installation_policy=_INSTALLATION_POLICY_ADAPTER.validate_python(
@@ -2333,12 +2352,6 @@ class FleetProfileService:
             )
             if intended.profile_digest != preview.profile_digest:
                 raise FleetProfileConflict("Fleet profile changed during application admission")
-            if retry_of_application_id is None:
-                active = session.scalar(select(FleetProfileApplication).where(
-                    FleetProfileApplication.state.in_(("queued", "running")),
-                ))
-                if active is not None:
-                    raise FleetProfileConflict("Profile load is already active; follow its progress")
             attempt = 1
             if retry_of_application_id is not None:
                 parent = session.get(FleetProfileApplication, retry_of_application_id, with_for_update=True)
@@ -2362,17 +2375,20 @@ class FleetProfileService:
                     other_progress = _canonical_progress(other.progress)
                     if (other_progress.retry_of_application_id == parent.id
                             or other.state in {"queued", "running"}
-                            or _aware(other.created_at) > _aware(parent.created_at)):
+                            or (other_progress.workload_intent_ordinal or 0) > (prior.workload_intent_ordinal or 0)):
                         raise FleetProfileConflict("Application has been superseded by another application")
                 if prior.intended_profile is None:
                     raise FleetProfileConflict("Persisted application intent is unavailable")
                 intended = prior.intended_profile
                 attempt = prior.attempt + 1
-                active = session.scalar(select(FleetProfileApplication).where(
-                    FleetProfileApplication.state.in_(("queued", "running")),
-                ))
-                if active is not None:
-                    raise FleetProfileConflict("Profile load is already active; follow its progress")
+                if self._superseding_intent(session, parent, prior):
+                    raise FleetProfileConflict("Application has been superseded by another workload intent")
+            workload_intent_ordinal = max(
+                (node.workload_intent_ordinal for node in scope_nodes), default=0
+            ) + 1 if scope_nodes else None
+            if workload_intent_ordinal is not None:
+                for node in scope_nodes:
+                    node.workload_intent_ordinal = workload_intent_ordinal
             row = FleetProfileApplication(
                 request_key=request_key,
                 profile_id=preview.profile_id,
@@ -2387,6 +2403,7 @@ class FleetProfileService:
                     attempt=attempt,
                     retry_of_application_id=retry_of_application_id,
                     intended_profile=intended,
+                    workload_intent_ordinal=workload_intent_ordinal,
                     completed_steps=0,
                     total_steps=len(preview.steps),
                 ).model_dump(mode="json"),
@@ -2418,6 +2435,7 @@ class FleetProfileService:
             progress.intended_profile is None
             or profile is None
             or self._view(session, profile).profile_digest != row.profile_digest
+            or self._superseding_intent(session, row, progress)
         ):
             return False
         others = session.scalars(select(FleetProfileApplication).where(
@@ -2427,7 +2445,8 @@ class FleetProfileService:
         return not any(
             _canonical_progress(other.progress).retry_of_application_id == row.id
             or other.state in {"queued", "running"}
-            or _aware(other.created_at) > _aware(row.created_at)
+            or (_canonical_progress(other.progress).workload_intent_ordinal or 0)
+            > (progress.workload_intent_ordinal or 0)
             for other in others
         )
 
@@ -2871,22 +2890,12 @@ class FleetProfileService:
         scope = set(intended.scope.node_ids)
         if not scope:
             return False
-        own_keys: set[str] = set()
-        adapter = progress.switch_adapter
-        if adapter is not None:
-            for position, item in enumerate(adapter.queue):
-                own_keys.add(str(uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    "vonk-forge:profile-run-switch:"
-                    f"{row.id}:{position}:{item.kind}:{item.id}",
-                )))
-        later = session.scalars(select(Job).where(
-            Job.kind.in_(("recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2")),
-            Job.created_at > row.created_at,
-        ))
-        return any(
-            job.request_id not in own_keys and scope.intersection(job.targets)
-            for job in later
+        ordinal = progress.workload_intent_ordinal
+        if ordinal is None:
+            return True
+        nodes = list(session.scalars(select(AgentNode).where(AgentNode.node_id.in_(scope))))
+        return len(nodes) != len(scope) or any(
+            node.workload_intent_ordinal != ordinal for node in nodes
         )
 
     def _start_step(

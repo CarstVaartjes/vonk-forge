@@ -1123,6 +1123,12 @@ class RecipeLifecyclePhaseExecutor:
         request_key: str,
         progress: Mapping[str, object],
     ) -> PhaseExecution:
+        ordinal = progress.get("workload_intent_ordinal")
+        if (
+            phase.kind in {"stop", "start", "uninstall"}
+            or phase.kind == "prepare" and phase.subphase == "runtime-install"
+        ) and (type(ordinal) is not int or ordinal < 1):
+            raise RunSwitchOperationConflict("run-switch workload intent is unbound")
         if phase.kind in {"transfer", "verify", "cleanup"}:
             if self._artifact_executor is None:
                 raise RunSwitchOperationConflict(
@@ -1181,6 +1187,7 @@ class RecipeLifecyclePhaseExecutor:
                 plan_digest=target.plan_digest,
                 actor=actor,
                 request_id=child_key,
+                workload_intent_ordinal=ordinal,
             )
             return PhaseExecution(value.id, {"run_id": target.run_id})
         if phase.kind == "prepare" and phase.subphase == "container-build":
@@ -1297,6 +1304,7 @@ class RecipeLifecyclePhaseExecutor:
                     installation_id,
                     actor=actor,
                     request_id=str(uuid.uuid5(uuid.UUID(request_key), "runtime-install")),
+                    workload_intent_ordinal=ordinal,
                 )
             except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
                 raise RunSwitchOperationConflict(
@@ -1340,6 +1348,7 @@ class RecipeLifecyclePhaseExecutor:
                 plan_digest=low_level.plan_digest,
                 actor=actor,
                 request_id=start_request_id,
+                workload_intent_ordinal=ordinal,
             )
             return PhaseExecution(value.id, {"run_id": value.owner_id})
         if phase.kind == "uninstall":
@@ -1371,6 +1380,7 @@ class RecipeLifecyclePhaseExecutor:
                     plan_digest=uninstall_plan.plan_digest,
                     actor=actor,
                     request_id=uninstall_request_id,
+                    workload_intent_ordinal=ordinal,
                 )
             except (
                 KeyError,
@@ -1977,6 +1987,7 @@ class RunSwitchOperationService:
         request: RunSwitchCleanupApplyRequest,
         *,
         actor: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
         if request.request_key is not None:
@@ -2002,6 +2013,7 @@ class RunSwitchOperationService:
             request_key=request_key,
             actor=actor,
             kind="recipe.cleanup.v2",
+            workload_intent_ordinal=workload_intent_ordinal,
         )
 
     def apply(
@@ -2009,6 +2021,7 @@ class RunSwitchOperationService:
         request: RunSwitchApplyRequest,
         *,
         actor: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
         if request.request_key is not None:
@@ -2034,6 +2047,7 @@ class RunSwitchOperationService:
             request_key=request_key,
             actor=actor,
             kind="recipe.run-switch.v2",
+            workload_intent_ordinal=workload_intent_ordinal,
         )
 
     def apply_run(
@@ -2049,6 +2063,7 @@ class RunSwitchOperationService:
         request: RunSwitchStopApplyRequest,
         *,
         actor: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
         if request.request_key is not None:
@@ -2074,6 +2089,7 @@ class RunSwitchOperationService:
             request_key=request_key,
             actor=actor,
             kind="recipe.stop.v2",
+            workload_intent_ordinal=workload_intent_ordinal,
         )
 
     def get(self, operation_id: str) -> RunSwitchOperation:
@@ -2154,7 +2170,25 @@ class RunSwitchOperationService:
                 or operator_retries >= _MAX_RETRY_ATTEMPTS
             ):
                 raise RunSwitchOperationConflict("run-switch operation is not retryable")
+            nodes = list(session.scalars(
+                select(AgentNode)
+                .where(AgentNode.node_id.in_(previous.targets))
+                .order_by(AgentNode.node_id)
+                .with_for_update()
+            ))
+            if len(nodes) != len(previous.targets) or any(
+                node.workload_intent_ordinal
+                != previous.payload.get("workload_intent_ordinal")
+                for node in nodes
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.superseded: retry belongs to an obsolete workload intent"
+                )
+            ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
+            for node in nodes:
+                node.workload_intent_ordinal = ordinal
             payload = dict(previous.payload)
+            payload["workload_intent_ordinal"] = ordinal
             payload["progress"] = progress
             payload["retry_of"] = previous.id
             payload["retry"] = {
@@ -2163,6 +2197,7 @@ class RunSwitchOperationService:
             }
             progress["child_operation_id"] = None
             progress["retryable"] = False
+            progress["workload_intent_ordinal"] = ordinal
             now = _now(self._clock)
             job = Job(
                 id=str(uuid.uuid4()),
@@ -4403,6 +4438,7 @@ class RunSwitchOperationService:
         request_key: str,
         actor: str,
         kind: str,
+        workload_intent_ordinal: int | None,
     ) -> RunSwitchOperation:
         now = _now(self._clock)
         total_bytes, member_totals = _planned_transfer_bytes(plan)
@@ -4442,7 +4478,9 @@ class RunSwitchOperationService:
             "retry": {"automatic_attempts": 1, "operator_retries": 0},
         }
         with self._sessions.begin() as session:
-            list(session.scalars(select(AgentNode).where(AgentNode.node_id.in_([node.node_id for node in plan.spark_group.nodes])).order_by(AgentNode.node_id).with_for_update()))
+            nodes = list(session.scalars(select(AgentNode).where(AgentNode.node_id.in_([node.node_id for node in plan.spark_group.nodes])).order_by(AgentNode.node_id).with_for_update()))
+            if len(nodes) != len(plan.spark_group.nodes):
+                raise RunSwitchOperationConflict("run-switch target Spark scope changed")
             existing = session.scalar(select(Job).where(Job.request_id == request_key))
             if existing is not None:
                 if (
@@ -4453,6 +4491,20 @@ class RunSwitchOperationService:
                         "run-switch.request_key_reused_differently"
                     )
                 return self._operation_view(existing)
+            if workload_intent_ordinal is None:
+                workload_intent_ordinal = max(
+                    (node.workload_intent_ordinal for node in nodes), default=0
+                ) + 1
+                for node in nodes:
+                    node.workload_intent_ordinal = workload_intent_ordinal
+            elif (
+                type(workload_intent_ordinal) is not int
+                or workload_intent_ordinal < 1
+                or any(node.workload_intent_ordinal != workload_intent_ordinal for node in nodes)
+            ):
+                raise RunSwitchOperationConflict("run-switch.superseded: Spark scope has a later workload intent")
+            payload["workload_intent_ordinal"] = workload_intent_ordinal
+            payload["progress"]["workload_intent_ordinal"] = workload_intent_ordinal
             job = Job(
                 id=str(uuid.uuid4()),
                 request_id=request_key,
@@ -4891,6 +4943,17 @@ class RunSwitchOperationService:
                 progress["child_operation_id"] = execution.operation_id
                 progress["phase"] = phase.kind
                 progress["subphase"] = phase.subphase
+                if phase.kind == "start":
+                    child = session.get(Job, execution.operation_id)
+                    raw_deadline = (
+                        child.payload.get("start_deadline") if child is not None else None
+                    )
+                    if child is not None and isinstance(raw_deadline, str):
+                        deadline = _aware(datetime.fromisoformat(raw_deadline))
+                        progress["start_deadline"] = deadline.isoformat()
+                        budget = int((deadline - _aware(child.created_at)).total_seconds())
+                        if budget > 0:
+                            progress["startup_budget_seconds"] = budget
                 if execution.result is not None:
                     results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     results.append(_phase_result(execution.result, phase=phase))
@@ -4943,17 +5006,16 @@ class RunSwitchOperationService:
 
     @staticmethod
     def _superseded_by_newer_scope_job(session: Session, job: Job) -> bool:
-        """A later scoped intent fences every still-unissued older phase."""
+        """The node authority fences phases regardless of wall-clock ordering."""
 
-        scope = set(job.targets)
-        if not scope:
-            return False
-        later = session.scalars(select(Job).where(
-            Job.kind.in_(_OPERATION_KINDS),
-            Job.created_at > job.created_at,
-            Job.id != job.id,
-        ))
-        return any(scope.intersection(other.targets) for other in later)
+        ordinal = job.payload.get("workload_intent_ordinal")
+        if type(ordinal) is not int or ordinal < 1:
+            return True
+        nodes = session.scalars(select(AgentNode).where(AgentNode.node_id.in_(job.targets)))
+        current = list(nodes)
+        return len(current) != len(job.targets) or any(
+            node.workload_intent_ordinal != ordinal for node in current
+        )
 
     def _hold_start_observation(
         self,
@@ -5625,21 +5687,21 @@ def _child_failure_kind(child: object) -> FailureKind:
     return FailureKind.INVALID_CONTRACT
 
 
-def _without_observation_time(value: object) -> object:
-    """Compare progress as state; elapsed time is projected on reads."""
+def _without_observation_time(value: Mapping[str, object]) -> dict[str, object]:
+    """Ignore only the clock/rate projection of the typed operation meter."""
 
-    if isinstance(value, Mapping):
-        return {
-            key: _without_observation_time(item)
-            for key, item in value.items()
+    result = dict(value)
+    operation = result.get("operation")
+    if isinstance(operation, Mapping):
+        result["operation"] = {
+            key: item
+            for key, item in operation.items()
             if key not in {
-                "observed_at", "last_progress_at", "elapsed_seconds", "activity",
+                "observed_at", "last_progress_at", "elapsed_seconds",
                 "bytes_per_second", "smoothed_bytes_per_second", "eta_seconds",
             }
         }
-    if isinstance(value, list):
-        return [_without_observation_time(item) for item in value]
-    return value
+    return result
 
 
 class _EstablishedEffect:
@@ -6082,6 +6144,12 @@ def _progress_view(
             measurement = project_progress(measurement)
     return RunSwitchProgress(
         operation=measurement,
+        startup_budget_seconds=_progress_int(raw.get("startup_budget_seconds")),
+        start_deadline=(
+            _aware(datetime.fromisoformat(raw["start_deadline"]))
+            if isinstance(raw.get("start_deadline"), str)
+            else None
+        ),
         phase_index=phase_index,
         phase_count=phase_count,
         phase=phase,

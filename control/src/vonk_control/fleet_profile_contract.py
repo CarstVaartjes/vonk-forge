@@ -357,6 +357,8 @@ class FleetProfileChildProgress(_StrictModel):
     """Typed progress emitted by the profile-owned Run switch adapter."""
 
     operation: OperationProgress | None = None
+    startup_budget_seconds: int | None = Field(default=None, ge=1)
+    start_deadline: datetime | None = None
 
     phase: FleetProfileChildPhase
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
@@ -494,6 +496,7 @@ class FleetProfileApplicationProgress(_StrictModel):
     attempt: int = Field(default=1, ge=1)
     retry_of_application_id: UuidId | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
+    workload_intent_ordinal: int | None = Field(default=None, ge=1)
     operation_kind: FleetProfileOperationKind | None = None
     completed_steps: int = Field(default=0, ge=0, le=1024)
     total_steps: int = Field(default=0, ge=0, le=1024)

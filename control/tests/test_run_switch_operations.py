@@ -685,6 +685,68 @@ def _service(
     )
 
 
+def test_same_clock_later_intent_fences_older_queued_work(tmp_path: Path) -> None:
+    """Database admission order, not timestamp spelling, owns the node."""
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    request = _request(sessions, nodes[0])
+    first = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    second = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    with sessions() as session:
+        old = session.get(Job, first.operation_id)
+        new = session.get(Job, second.operation_id)
+        assert old is not None and new is not None
+        assert old.created_at == new.created_at
+        assert old.payload["workload_intent_ordinal"] == 1
+        assert new.payload["workload_intent_ordinal"] == 2
+    assert service._advance(first.operation_id) is True
+    assert service.get(first.operation_id).state == "failed"
+    assert "superseded" in (service.get(first.operation_id).status_reason or "")
+    assert service.get(second.operation_id).state == "queued"
+
+
+def test_child_activity_change_persists_without_clock_only_writes(tmp_path: Path) -> None:
+    """An unchanged poll is quiet, but a changed stall signal is durable."""
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    executor = RecordingArtifactExecutor(child_transfer=True)
+    service = _service(
+        sessions, NOW, lifecycle, executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    for _ in range(8):
+        assert service.tick() is True
+        if _result(service.get(operation.operation_id)).child_operation_id is not None:
+            break
+    child = executor.children[_child_operation_id(service.get(operation.operation_id))]
+    child.result = {"operation": {
+        "phase": "transfer", "completed_bytes": 0,
+        "total_bytes_known": False, "activity": "active",
+        "observed_at": NOW.isoformat(),
+    }}
+    assert service.tick() is True
+    before = _result(service.get(operation.operation_id)).operation
+    assert before is not None and before.activity == "active"
+    child.result["operation"]["observed_at"] = (NOW + timedelta(seconds=1)).isoformat()
+    assert service.tick() is False
+    child.result["operation"]["activity"] = "waiting"
+    assert service.tick() is True
+    after = _result(service.get(operation.operation_id)).operation
+    assert after is not None and after.activity == "waiting"
+
+
 def test_default_run_switch_admission_uses_the_recipe_memory_reserve(tmp_path: Path) -> None:
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
     service = RunSwitchOperationService(
@@ -2511,7 +2573,15 @@ def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
     executor = RecipeLifecyclePhaseExecutor(
         counting, sessions, ClusterMappingService(sessions), lifecycle._clock()
     )
-    progress = {"phase_results": [{"installation_id": installation.owner_id}]}
+    with sessions.begin() as session:
+        for node_id in nodes:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.workload_intent_ordinal = 1
+    progress = {
+        "workload_intent_ordinal": 1,
+        "phase_results": [{"installation_id": installation.owner_id}],
+    }
     request_key = str(uuid.uuid4())
 
     first = executor.execute(
