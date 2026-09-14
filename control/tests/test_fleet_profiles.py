@@ -92,6 +92,7 @@ def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
             "total_steps": 1,
             "step_results": {
                 "0": {
+                    "kind": "switch",
                     "operation_id": operation_id,
                     "result": {"verified": True},
                 }
@@ -141,7 +142,9 @@ def test_profile_switch_state_rejects_malformed_persisted_progress() -> None:
 def test_profile_application_read_rejects_malformed_persisted_plan_and_result() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
-    service = FleetProfileService(sessions, clock=lambda: NOW)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
     profile = service.create(_input(revision_id), actor="admin")
     preview = service.preview(profile.id)
     application = service.apply(
@@ -241,7 +244,9 @@ def test_profile_worker_marks_malformed_persisted_progress_failed() -> None:
 def test_profile_application_read_requires_result_for_succeeded_state() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
-    service = FleetProfileService(sessions, clock=lambda: NOW)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
     profile = service.create(_input(revision_id), actor="admin")
     preview = service.preview(profile.id)
     application = service.apply(
@@ -660,6 +665,7 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
     service = FleetProfileService(
         sessions,
         clock=lambda: NOW,
+        switch_adapter=_SwitchAdapter(),
         preparation_provider=lambda _session, _assignment, node_ids: _exact_preparation(
             node_ids
         ),
@@ -784,12 +790,10 @@ def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> N
     assert first.created_at == second.created_at
     assert first.progress.workload_intent_ordinal == 1
     assert second.progress.workload_intent_ordinal == 2
-    for _ in range(2):
-        assert service.tick() is True
-        if service.application(first.id).state == "cancelled":
-            break
+    # Admission cancels the older logical order even if the worker selects
+    # the newer row first under a tied clock.
     assert service.application(first.id).state == "cancelled"
-    assert service.application(second.id).state in {"queued", "running"}
+    assert service.application(second.id).state == "queued"
 
 
 def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() -> None:
@@ -1124,6 +1128,15 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
             node.workload_intent_ordinal
             for node in session.scalars(select(AgentNode).order_by(AgentNode.node_id))
         ] == [0, 0]
+    assert application.result is not None
+    assert application.result.changed is False
+    assert application.result.completed_steps == 0
+    readback = service.application(application.id)
+    assert readback.result is not None
+    assert readback.result.model_dump(mode="json") == {
+        "changed": False,
+        "completed_steps": 0,
+    }
 
 
 def test_all_idle_profile_supersedes_a_queued_load_without_a_run() -> None:
@@ -1166,15 +1179,6 @@ def test_all_idle_profile_supersedes_a_queued_load_without_a_run() -> None:
         node = session.get(AgentNode, _node_id(1))
         assert node is not None
         assert node.workload_intent_ordinal == 2
-    assert application.result is not None
-    assert application.result.changed is False
-    assert application.result.completed_steps == 0
-    readback = service.application(application.id)
-    assert readback.result is not None
-    assert readback.result.model_dump(mode="json") == {
-        "changed": False,
-        "completed_steps": 0,
-    }
 
 
 def test_production_profile_adapter_binds_one_real_run_switch_child(
@@ -1648,8 +1652,9 @@ def test_profile_tick_advances_a_switch_child_on_postgres(
         assert started.progress.switch_adapter is not None
         child_id = started.progress.switch_adapter.active_operation_id
         assert isinstance(child_id, str)
-        # The next pass reads the child again while it holds the same row.
-        assert service.tick() is True
+        # The next pass reads the child under the same row lock; unchanged
+        # progress is not written again.
+        assert service.tick() is False
         resumed = service.application(application.id)
         assert resumed.progress.switch_adapter is not None
         assert resumed.progress.switch_adapter.active_operation_id == child_id

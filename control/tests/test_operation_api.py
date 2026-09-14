@@ -521,7 +521,7 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     assert detail.status_code == 200
     assert detail.json()["kind"] == "fleet-profile.apply"
     expected_progress = {
-        "phase": "start",
+        "phase": "prepare",
         "completed_bytes": 0,
         "total_bytes_known": False,
         "members": [],

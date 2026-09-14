@@ -498,10 +498,8 @@ class RunSwitchFleetProfileAdapter:
         if isinstance(active, str):
             try:
                 child = self._run_switch.get(active)
-            except KeyError:
-                return self._failed_in_session(
-                    session, application, state, "Run/Switch child is unavailable"
-                )
+            except KeyError as error:
+                raise RuntimeError("Run/Switch child is unavailable") from error
             if child.state in {"queued", "running"}:
                 view = self._view_from_child(application_id, state, child)
                 new_progress = (
@@ -1967,16 +1965,18 @@ class FleetProfileService:
                 )
             if adapter_switch_needed:
                 if not changed_nodes or not changed_nodes <= target_nodes:
-                    raise FleetProfileConflict(
-                        "Profile switch effect scope cannot be represented exactly"
+                    if not any(reason.severity == "error" for reason in reasons):
+                        raise FleetProfileConflict(
+                            "Profile switch effect scope cannot be represented exactly"
+                        )
+                else:
+                    switch_steps.append(
+                        {
+                            "kind": "switch",
+                            "node_ids": sorted(changed_nodes),
+                            "label": f"Switch profile {resolved_name}",
+                        }
                     )
-                switch_steps.append(
-                    {
-                        "kind": "switch",
-                        "node_ids": sorted(changed_nodes),
-                        "label": f"Switch profile {resolved_name}",
-                    }
-                )
                 if self._switch_adapter is None:
                     reasons.append(FleetProfileReason(
                         code="profile.switch_authority_unavailable",
@@ -2181,6 +2181,28 @@ class FleetProfileService:
                 self._switch_adapter.request_superseded_workload_cancellation_in_session(
                     session, tuple(sorted(execution_nodes)), workload_intent_ordinal, now
                 )
+                for prior_application in session.scalars(
+                    select(FleetProfileApplication)
+                    .where(FleetProfileApplication.state.in_(("queued", "running")))
+                    .with_for_update()
+                ):
+                    prior_progress = _canonical_progress(prior_application.progress)
+                    prior_ordinal = prior_progress.workload_intent_ordinal
+                    if prior_ordinal is None or prior_ordinal >= workload_intent_ordinal:
+                        continue
+                    prior_scope = {
+                        node_id
+                        for step in _persisted_profile_plan(prior_application).steps
+                        for node_id in step.node_ids
+                    }
+                    if not prior_scope & execution_nodes:
+                        continue
+                    prior_application.state = "cancelled"
+                    prior_application.status_reason = (
+                        "Profile order was replaced by a later scoped intent; "
+                        "issued effects retain their own cancellation receipts"
+                    )
+                    prior_application.updated_at = now
             row = FleetProfileApplication(
                 request_key=request_key,
                 profile_id=preview.profile_id,

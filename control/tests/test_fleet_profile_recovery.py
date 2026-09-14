@@ -6,6 +6,7 @@ import json
 
 import pytest
 from sqlalchemy import select
+from vonk_control.fleet_profiles import FleetProfileConflict
 
 from .test_fleet_profile_recovery_current import _failed_profile
 from .test_fleet_profiles import _uuid
@@ -31,8 +32,8 @@ def test_profile_edit_supersedes_unissued_assignment_after_failed_load(
     )
     service.update(profile.id, changed, actor="admin")
     assert service.tick()
-    assert service.application(retry.id).state == "failed"
-    assert "superseded" in (service.application(retry.id).status_reason or "")
+    assert service.application(retry.id).state == "cancelled"
+    assert "replaced" in (service.application(retry.id).status_reason or "")
     with sessions() as session:
         assert (
             len(
@@ -46,7 +47,7 @@ def test_profile_edit_supersedes_unissued_assignment_after_failed_load(
         )
 
 
-def test_retry_already_reconciled_fleet_returns_real_noop_receipt(tmp_path):
+def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
     from vonk_control.models import ClusterMapping, RecipeBuild
 
     from .test_recipe_operations import installed_recipe, started_recipe
@@ -69,12 +70,8 @@ def test_retry_already_reconciled_fleet_returns_real_noop_receipt(tmp_path):
         request_id=_uuid(810),
         alias="recover-chat",
     )
-    retry = service.retry(original.id, request_key=_uuid(801), actor="admin")
-    assert retry.state == "succeeded"
-    assert retry.total_steps == 0
-    assert retry.result is not None
-    assert retry.result.changed is False
-    assert service.retry(original.id, request_key=_uuid(801), actor="admin") == retry
+    with pytest.raises(FleetProfileConflict, match="superseded"):
+        service.retry(original.id, request_key=_uuid(801), actor="admin")
 
 
 def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):
