@@ -1449,7 +1449,8 @@ class AgentJobService:
                 or operation.parent_job_id != fence.job_id
                 or operation.node_id != fence.node_id
                 or attempt.attempt != fence.attempt
-                or _aware(attempt.lease_deadline) != _aware(fence.deadline)
+                or operation.current_attempt != attempt.attempt
+                or _aware(fence.deadline) > _aware(attempt.lease_deadline)
                 or operation.workload_intent_ordinal != parent.payload.get("workload_intent_ordinal")
                 or not isinstance(parent.result, Mapping)
                 or parent.result.get("cancel_requested") is not True
@@ -1603,13 +1604,37 @@ class AgentJobService:
                 or attempt.operation_id != operation.id
                 or attempt.attempt != message.attempt
                 or attempt.agent_certificate_serial != serial
-                or _aware(attempt.lease_deadline) != _aware(message.deadline)
+                or _aware(message.deadline) > _aware(attempt.lease_deadline)
             ):
                 raise StaleAgentAttempt("agent operation authority or expired attempt is stale")
             validate_result_for_operation(operation.kind, message.result, state=message.state)
             evidence = _document(message.result)
             if message.state in {"failed", "waiting-for-operator"}:
                 evidence = sanitize_failure_evidence(evidence)
+            if _aware(message.deadline) < _aware(attempt.lease_deadline):
+                # The agent may have lost a heartbeat renewal response before
+                # learning that this order was cancelled. Its original fence
+                # identifies the old order, but the old deadline cannot prove
+                # quiescence or replace a result under the renewed authority.
+                if (
+                    message.state == "cancelled"
+                    and operation.kind in _WORKLOAD_INTENT_OPERATIONS
+                    and operation.current_attempt == attempt.attempt
+                    and operation.workload_intent_ordinal
+                    == parent.payload.get("workload_intent_ordinal")
+                    and isinstance(parent.result, Mapping)
+                    and superseded_cancellation_deadline(parent.result) is not None
+                    and (
+                        operation.state == "cancelled"
+                        or (
+                            operation.workload_intent_ordinal is not None
+                            and operation.workload_intent_ordinal
+                            < node.workload_intent_ordinal
+                        )
+                    )
+                ):
+                    return False
+                raise StaleAgentAttempt("agent operation renewal deadline is stale")
             if attempt.state == message.state and attempt.result == evidence:
                 return False
             superseded_intent = (
@@ -1689,6 +1714,10 @@ class AgentJobService:
                 source=source,
                 allow_superseded_cancellation=state == "cancelled",
             )
+            if isinstance(fence, AgentResult) and _aware(fence.deadline) != _aware(
+                attempt.lease_deadline
+            ):
+                raise StaleAgentAttempt("agent operation renewal deadline is stale")
             now = self._clock()
             node = session.get(AgentNode, operation.node_id)
             parent = session.get(Job, operation.parent_job_id)

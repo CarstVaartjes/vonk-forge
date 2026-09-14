@@ -300,6 +300,71 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     }))
 
 
+def test_lost_heartbeat_renewal_ack_is_only_benign_old_cancellation(service) -> None:
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    operation = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+    renewed = jobs.heartbeat(claim, None, 60)
+    assert renewed.deadline > claim.deadline
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        node.workload_intent_ordinal = 2
+        jobs.request_superseded_workload_cancellation_in_session(
+            session, (NODE_A,), 2, clock.now
+        )
+    old_progress = AgentProgress.model_validate({
+        "schema_version": 1,
+        "job_id": job.id,
+        "operation_id": operation.id,
+        "attempt": claim.attempt,
+        "fence": claim.fence,
+        "node_id": NODE_A,
+        "deadline": claim.deadline,
+        "progress": None,
+    })
+    assert jobs.known_superseded_cancellation(old_progress)
+    assert not jobs.known_superseded_cancellation(
+        old_progress.model_copy(update={"deadline": renewed.deadline + timedelta(seconds=1)})
+    )
+    assert not jobs.known_superseded_cancellation(
+        old_progress.model_copy(update={"fence": str(uuid.uuid4())})
+    )
+    assert not jobs.known_superseded_cancellation(
+        old_progress.model_copy(update={"attempt": claim.attempt + 1})
+    )
+    old_cancel = AgentResult.model_validate({
+        "schema_version": 1,
+        "job_id": job.id,
+        "operation_id": operation.id,
+        "attempt": claim.attempt,
+        "fence": claim.fence,
+        "node_id": NODE_A,
+        "deadline": claim.deadline,
+        "state": "cancelled",
+        "result": {"error_code": "operation_cancelled", "reason": "exact stop completed"},
+    })
+    with pytest.raises(StaleAgentAttempt):
+        jobs.record_result(old_cancel)
+    with pytest.raises(StaleAgentAttempt):
+        jobs.record_late_result(
+            old_cancel.model_copy(update={"deadline": renewed.deadline + timedelta(seconds=1)})
+        )
+    assert jobs.record_late_result(old_cancel) is False
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        attempt = session.scalar(select(AgentOperationAttempt).where(
+            AgentOperationAttempt.fence == claim.fence
+        ))
+        assert stored is not None and stored.state == "running"
+        assert attempt is not None and attempt.state == "running" and attempt.result is None
+    current_cancel = old_cancel.model_copy(update={"deadline": renewed.deadline})
+    jobs.record_result(current_cancel)
+    assert jobs.record_late_result(old_cancel) is False
+
+
 def test_late_old_cancellation_never_retires_a_newer_attempt(service) -> None:
     jobs, sessions, clock = service
     job = parent(sessions, clock)
