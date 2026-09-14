@@ -1494,7 +1494,15 @@ impl AgentHttpClient {
         progress(offset, "copying");
         output.flush().await?;
         output.get_ref().sync_all().await?;
-        drop(output);
+        let output = output.into_inner();
+        let synced_metadata = output.metadata().await?;
+        let partial_metadata = tokio::fs::symlink_metadata(&partial).await?;
+        if !validate_trusted_metadata(&synced_metadata, expected_bytes)
+            || !validate_trusted_metadata(&partial_metadata, expected_bytes)
+            || !same_file_metadata(&synced_metadata, &partial_metadata)
+        {
+            return Err(ClientError::Protocol);
+        }
         // Prove the bytes we hold before they take the digest name.  Renaming
         // first and checking afterwards leaves a file at the digest name after
         // a mismatch, so every later attempt would trust its metadata and
@@ -1505,11 +1513,11 @@ impl AgentHttpClient {
             // Exactly-owned received bytes that are provably not the requested
             // object: discard this partial so the next authorized attempt
             // starts from empty rather than resuming bytes we cannot keep.
-            quarantine_proven_object(&partial, expected_bytes).await?;
+            quarantine_proven_object_matching(&partial, expected_bytes, &synced_metadata).await?;
             return Err(ClientError::Protocol);
         }
-        let partial_metadata = tokio::fs::symlink_metadata(&partial).await?;
-        if !validate_trusted_metadata(&partial_metadata, expected_bytes) {
+        let before_rename = tokio::fs::symlink_metadata(&partial).await?;
+        if !same_file_metadata(&synced_metadata, &before_rename) {
             return Err(ClientError::Protocol);
         }
         tokio::fs::rename(&partial, destination).await?;
@@ -1518,9 +1526,12 @@ impl AgentHttpClient {
             .await?
             .ok_or(ClientError::Protocol)?;
         let final_metadata = final_file.metadata().await?;
+        let output_after = output.metadata().await?;
         // Rename changes ctime but cannot change the already-synced content
         // of this private inode. Bind the receipt to its post-rename ctime.
-        if !same_file_content_identity(&partial_metadata, &final_metadata) {
+        if !same_file_content_identity(&synced_metadata, &output_after)
+            || !same_file_metadata(&output_after, &final_metadata)
+        {
             return Err(ClientError::Protocol);
         }
         self.distribution_receipts
@@ -2189,6 +2200,20 @@ async fn quarantine_proven_object(path: &Path, expected_bytes: u64) -> Result<()
         sync_parent(parent).await?;
     }
     Ok(())
+}
+
+async fn quarantine_proven_object_matching(
+    path: &Path,
+    expected_bytes: u64,
+    opened: &fs::Metadata,
+) -> Result<(), ClientError> {
+    let metadata = tokio::fs::symlink_metadata(path).await?;
+    if !validate_trusted_metadata(&metadata, expected_bytes)
+        || !same_file_metadata(opened, &metadata)
+    {
+        return Err(ClientError::Protocol);
+    }
+    quarantine_proven_object(path, expected_bytes).await
 }
 
 async fn sync_parent(parent: &Path) -> Result<(), ClientError> {
@@ -3620,6 +3645,53 @@ mod tests {
             .unwrap();
         assert_eq!(std::fs::read(destination).unwrap(), model);
         assert_eq!(server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn distribution_rejects_partial_replacement_after_stream_hash() {
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive);
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            1,
+            DistributionFixtureMode::Good,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("config.json");
+        let partial = partial_path(&destination);
+        let replacement = root.path().join("replacement");
+        let mut corrupt = model.to_vec();
+        corrupt[0] ^= 0xff;
+        let mut swapped = false;
+        let result = client
+            .download_trusted_distribution_object_with_progress(
+                &assignment.plan_digest,
+                &assignment.objects[0].sha256,
+                model.len() as u64,
+                &destination,
+                root.path(),
+                |_, phase| {
+                    if phase == "verifying" && !swapped {
+                        std::fs::write(&replacement, &corrupt).unwrap();
+                        std::fs::set_permissions(
+                            &replacement,
+                            std::fs::Permissions::from_mode(0o600),
+                        )
+                        .unwrap();
+                        std::fs::rename(&replacement, &partial).unwrap();
+                        swapped = true;
+                    }
+                },
+            )
+            .await;
+        assert!(matches!(result, Err(ClientError::Protocol)));
+        assert!(!destination.exists());
+        assert_eq!(server.join().unwrap().len(), 1);
     }
 
     #[tokio::test]

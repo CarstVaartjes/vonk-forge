@@ -1278,25 +1278,32 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let receipt_path = self.roots.runtime_image_receipts.join(archive_sha256);
         match fs::symlink_metadata(&receipt_path) {
             Ok(_) => {
-                let (inspected, _) = self.inspect_runtime_image_for_reference(image_reference)?;
-                if inspected.1 != "linux"
-                    || inspected.2 != "arm64"
-                    || inspected.3 != "v1"
-                    || !numeric_non_root_user(&inspected.4)
-                {
-                    return Err(OperationError::RuntimeImageIdentityInvalid);
-                }
+                let receipt = self.read_image_receipt(archive_sha256)?;
                 self.require_image_receipt(
                     archive_sha256,
                     registry_index_digest,
                     platform_manifest_digest,
                     image_reference,
-                    &inspected.0,
+                    &receipt.image_config_id,
                 )?;
-                if archive_identity != self.inspect_runtime_archive(archive, expected_bytes)? {
-                    return Err(OperationError::InvalidArtifact);
+                match self.inspect_runtime_image_for_reference(image_reference) {
+                    Ok((inspected, _)) => {
+                        if inspected.1 != "linux"
+                            || inspected.2 != "arm64"
+                            || inspected.3 != "v1"
+                            || !numeric_non_root_user(&inspected.4)
+                            || inspected.0 != receipt.image_config_id
+                            || archive_identity
+                                != self.inspect_runtime_archive(archive, expected_bytes)?
+                        {
+                            return Err(OperationError::RuntimeImageIdentityInvalid);
+                        }
+                        return Ok(());
+                    }
+                    Err(OperationError::InvalidArtifact)
+                        if self.runtime_image_missing(&local_image)? => {}
+                    Err(error) => return Err(error),
                 }
-                return Ok(());
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
@@ -1685,10 +1692,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             // Reapplying setfacl changes ctime even when the named runtime
             // entry already grants precisely the intended read access. That
             // invalidates the agent's immutable installation receipt before
-            // collective readiness. Inspect the exact ACL and skip only an
-            // already-correct regular file; directories keep the recursive
-            // path until every descendant has been checked.
-            if exact_runtime_read_file_acl(path, run.uid)? {
+            // collective readiness. Inspect the whole selected tree and skip
+            // the recursive write only when every ACL is already exact.
+            if runtime_read_tree_acl_ready(path, run.uid, self.required_owner_uid)? {
                 continue;
             }
             let output = self
@@ -1876,6 +1882,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
     }
 
+    fn runtime_image_missing(&self, local_image: &str) -> Result<bool, OperationError> {
+        let output = self.run_docker(&[
+            "image".to_owned(),
+            "ls".to_owned(),
+            "--quiet".to_owned(),
+            "--no-trunc".to_owned(),
+            "--filter".to_owned(),
+            format!("reference={local_image}"),
+        ])?;
+        if !output.success || output.exit_code != Some(0) {
+            return Err(OperationError::RuntimeImageInspectFailed);
+        }
+        let body = std::str::from_utf8(&output.stdout)
+            .map_err(|_| OperationError::RuntimeImageInspectFailed)?;
+        if body.trim().is_empty() {
+            return Ok(true);
+        }
+        if body.lines().all(|line| valid_oci_digest(line.trim())) {
+            return Ok(false);
+        }
+        Err(OperationError::RuntimeImageInspectFailed)
+    }
+
     fn write_image_receipt(&self, receipt: RuntimeImageReceipt) -> Result<(), OperationError> {
         fs::create_dir_all(&self.roots.runtime_image_receipts)?;
         fs::set_permissions(
@@ -1929,22 +1958,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        let path = self.roots.runtime_image_receipts.join(archive_sha256);
-        let metadata = fs::symlink_metadata(&path).map_err(|_| OperationError::InvalidArtifact)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_file()
-            || self
-                .required_owner_uid
-                .is_some_and(|uid| metadata.uid() != uid)
-            || metadata.nlink() != 1
-            || metadata.mode() & 0o022 != 0
-            || metadata.len() > 2048
-        {
-            return Err(OperationError::InvalidArtifact);
-        }
-        let receipt: RuntimeImageReceipt =
-            serde_json::from_slice(&fs::read(path).map_err(|_| OperationError::InvalidArtifact)?)
-                .map_err(|_| OperationError::InvalidArtifact)?;
+        let receipt = self.read_image_receipt(archive_sha256)?;
         if receipt.schema_version != RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION
             || receipt.archive_sha256 != archive_sha256
             || receipt.registry_index_digest != registry_index_digest
@@ -1963,6 +1977,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Err(OperationError::InvalidArtifact);
         }
         Ok(())
+    }
+
+    fn read_image_receipt(
+        &self,
+        archive_sha256: &str,
+    ) -> Result<RuntimeImageReceipt, OperationError> {
+        let path = self.roots.runtime_image_receipts.join(archive_sha256);
+        let metadata = fs::symlink_metadata(&path).map_err(|_| OperationError::InvalidArtifact)?;
+        if metadata.file_type().is_symlink()
+            || !metadata.is_file()
+            || self
+                .required_owner_uid
+                .is_some_and(|uid| metadata.uid() != uid)
+            || metadata.nlink() != 1
+            || metadata.mode() & 0o022 != 0
+            || metadata.len() > 2048
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
+        let receipt: RuntimeImageReceipt =
+            serde_json::from_slice(&fs::read(path).map_err(|_| OperationError::InvalidArtifact)?)
+                .map_err(|_| OperationError::InvalidArtifact)?;
+        Ok(receipt)
     }
 
     fn canonical_archive_root(&self) -> Result<(PathBuf, PathBuf), OperationError> {
@@ -2031,39 +2068,78 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 }
 
-fn exact_runtime_read_file_acl(path: &Path, runtime_uid: u32) -> Result<bool, OperationError> {
+fn runtime_read_tree_acl_ready(
+    path: &Path,
+    runtime_uid: u32,
+    required_owner_uid: Option<u32>,
+) -> Result<bool, OperationError> {
     let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Ok(false);
+    if metadata.file_type().is_symlink()
+        || !(metadata.is_file() || metadata.is_dir())
+        || metadata.mode() & 0o022 != 0
+        || required_owner_uid.is_some_and(|uid| metadata.uid() != uid)
+    {
+        return Err(OperationError::UnsafePath);
     }
+    if metadata.is_dir() && xattr::get(path, "system.posix_acl_default")?.is_some() {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let mut ready = exact_runtime_read_acl(path, &metadata, runtime_uid)?;
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)? {
+            ready &= runtime_read_tree_acl_ready(&entry?.path(), runtime_uid, required_owner_uid)?;
+        }
+    }
+    Ok(ready)
+}
+
+fn exact_runtime_read_acl(
+    path: &Path,
+    metadata: &fs::Metadata,
+    runtime_uid: u32,
+) -> Result<bool, OperationError> {
     let Some(value) = xattr::get(path, "system.posix_acl_access")? else {
         return Ok(false);
     };
-    if metadata.mode() & 0o777 != 0o640
-        || value.len() != 44
-        || u32::from_le_bytes(value[..4].try_into().unwrap()) != 2
-    {
+    if value.len() != 44 || u32::from_le_bytes(value[..4].try_into().unwrap()) != 2 {
         return Err(OperationError::InvalidArtifact);
     }
-    let mut user_object = false;
-    let mut runtime_user = false;
-    let mut group_object = false;
-    let mut mask = false;
-    let mut other = false;
+    let mut user_object = None;
+    let mut runtime_user = None;
+    let mut group_object = None;
+    let mut mask = None;
+    let mut other = None;
     for entry in value[4..].chunks_exact(8) {
         let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
         let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
         let identifier = u32::from_le_bytes(entry[4..8].try_into().unwrap());
         match tag {
-            0x0001 if identifier == u32::MAX => user_object = permissions == 0o6,
-            0x0002 if identifier == runtime_uid => runtime_user = permissions == 0o4,
-            0x0004 if identifier == u32::MAX => group_object = permissions == 0,
-            0x0010 if identifier == u32::MAX => mask = permissions == 0o4,
-            0x0020 if identifier == u32::MAX => other = permissions == 0,
+            0x0001 if identifier == u32::MAX && user_object.replace(permissions).is_none() => {}
+            0x0002 if identifier == runtime_uid && runtime_user.replace(permissions).is_none() => {}
+            0x0004 if identifier == u32::MAX && group_object.replace(permissions).is_none() => {}
+            0x0010 if identifier == u32::MAX && mask.replace(permissions).is_none() => {}
+            0x0020 if identifier == u32::MAX && other.replace(permissions).is_none() => {}
             _ => return Err(OperationError::InvalidArtifact),
         }
     }
-    if !(user_object && runtime_user && group_object && mask && other) {
+    let (Some(user_object), Some(runtime_user), Some(group_object), Some(mask), Some(other)) =
+        (user_object, runtime_user, group_object, mask, other)
+    else {
+        return Err(OperationError::InvalidArtifact);
+    };
+    let expected_runtime = if metadata.is_dir() || (user_object | group_object | other) & 0o1 != 0 {
+        0o5
+    } else {
+        0o4
+    };
+    if user_object > 0o7
+        || group_object & 0o2 != 0
+        || other & 0o2 != 0
+        || runtime_user != expected_runtime
+        || mask != (group_object | runtime_user)
+        || metadata.mode() & 0o777
+            != (u32::from(user_object) << 6 | u32::from(mask) << 3 | u32::from(other))
+    {
         return Err(OperationError::InvalidArtifact);
     }
     Ok(true)
@@ -3517,15 +3593,116 @@ mod tests {
     #[derive(Clone, Default)]
     struct CountingRuntimeImportRunner {
         loads: Arc<std::sync::atomic::AtomicUsize>,
+        image_missing: Arc<std::sync::atomic::AtomicBool>,
+        wrong_image: Arc<std::sync::atomic::AtomicBool>,
+        deny_listing: Arc<std::sync::atomic::AtomicBool>,
     }
 
     impl CommandRunner for CountingRuntimeImportRunner {
         fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            use std::sync::atomic::Ordering::SeqCst;
+            let inspect_compiled = arguments.first().map(String::as_str) == Some("image")
+                && arguments.get(1).map(String::as_str) == Some("inspect")
+                && arguments
+                    .last()
+                    .is_some_and(|image| image.contains("compiled-runtime-"));
+            if inspect_compiled && self.image_missing.load(SeqCst) {
+                return Ok(CommandOutput {
+                    success: false,
+                    stdout: Vec::new(),
+                    exit_code: Some(1),
+                });
+            }
+            if inspect_compiled && self.wrong_image.load(SeqCst) {
+                return Ok(CommandOutput {
+                    success: true,
+                    stdout: format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "c".repeat(64))
+                        .into_bytes(),
+                    exit_code: Some(0),
+                });
+            }
+            if arguments.first().map(String::as_str) == Some("image")
+                && arguments.get(1).map(String::as_str) == Some("ls")
+            {
+                if self.deny_listing.load(SeqCst) {
+                    return Err("docker access denied".to_owned());
+                }
+                return Ok(CommandOutput {
+                    success: true,
+                    stdout: if self.image_missing.load(SeqCst) {
+                        Vec::new()
+                    } else {
+                        format!("sha256:{}\n", "b".repeat(64)).into_bytes()
+                    },
+                    exit_code: Some(0),
+                });
+            }
             if arguments.first().map(String::as_str) == Some("load") {
-                self.loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.loads.fetch_add(1, SeqCst);
+                self.image_missing.store(false, SeqCst);
             }
             RuntimeImportRunner.run(executable, arguments)
         }
+    }
+
+    #[derive(Clone, Default)]
+    struct KernelAclRunner {
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl CommandRunner for KernelAclRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            if executable != Path::new("/usr/bin/setfacl") {
+                return Err("unexpected command".to_owned());
+            }
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            if arguments.first().map(String::as_str) == Some("-R") {
+                let uid = arguments
+                    .get(2)
+                    .and_then(|value| value.split(':').nth(1))
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .ok_or("invalid ACL user")?;
+                let root = Path::new(arguments.last().ok_or("missing ACL path")?);
+                apply_kernel_read_acl(root, uid)?;
+            }
+            Ok(CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                exit_code: Some(0),
+            })
+        }
+    }
+
+    fn apply_kernel_read_acl(path: &Path, uid: u32) -> Result<(), String> {
+        let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+        let mode = metadata.mode() & 0o777;
+        let user_object = ((mode >> 6) & 0o7) as u16;
+        let group_object = ((mode >> 3) & 0o7) as u16;
+        let other = (mode & 0o7) as u16;
+        let runtime = if metadata.is_dir() || mode & 0o111 != 0 {
+            0o5
+        } else {
+            0o4
+        };
+        let mut acl = 2_u32.to_le_bytes().to_vec();
+        for (tag, permissions, identifier) in [
+            (0x0001_u16, user_object, u32::MAX),
+            (0x0002, runtime, uid),
+            (0x0004, group_object, u32::MAX),
+            (0x0010, group_object | runtime, u32::MAX),
+            (0x0020, other, u32::MAX),
+        ] {
+            acl.extend_from_slice(&tag.to_le_bytes());
+            acl.extend_from_slice(&permissions.to_le_bytes());
+            acl.extend_from_slice(&identifier.to_le_bytes());
+        }
+        xattr::set(path, "system.posix_acl_access", &acl).map_err(|error| error.to_string())?;
+        if metadata.is_dir() {
+            for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
+                apply_kernel_read_acl(&entry.map_err(|error| error.to_string())?.path(), uid)?;
+            }
+        }
+        Ok(())
     }
 
     #[derive(Clone, Default)]
@@ -4475,6 +4652,59 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn repeated_model_and_input_prepare_reuses_kernel_acls() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        fs::write(&model, b"model").unwrap();
+        fs::set_permissions(&model, fs::Permissions::from_mode(0o600)).unwrap();
+        let inputs = roots.agent_data.join("runs").join(RUN_ID).join("inputs");
+        fs::set_permissions(&inputs, fs::Permissions::from_mode(0o700)).unwrap();
+        let data = inputs.join("data.bin");
+        let manifest = inputs.join("manifest.json");
+        let readable = inputs.join("readable.txt");
+        for (path, mode) in [(&data, 0o600), (&manifest, 0o400), (&readable, 0o644)] {
+            fs::write(path, b"input").unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+        }
+        let arguments = job_runtime_arguments(&roots, model.clone());
+        let validated = validate_docker_run(&arguments, &roots, None).unwrap();
+        let runner = KernelAclRunner::default();
+        let executor = OperationExecutor::new(roots, &[0; 32], runner.clone(), None).unwrap();
+        executor.prepare_runtime_access(&validated).unwrap();
+        let first_writes = runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call.first().map(String::as_str) == Some("-R"))
+            .count();
+        assert_eq!(first_writes, 2);
+        let before_second = [&model, &inputs, &data, &manifest, &readable].map(|path| {
+            let metadata = fs::metadata(path).unwrap();
+            (metadata.ctime(), metadata.ctime_nsec())
+        });
+        executor.prepare_runtime_access(&validated).unwrap();
+        let second_writes = runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call.first().map(String::as_str) == Some("-R"))
+            .count();
+        assert_eq!(second_writes, first_writes);
+        let after_second = [&model, &inputs, &data, &manifest, &readable].map(|path| {
+            let metadata = fs::metadata(path).unwrap();
+            (metadata.ctime(), metadata.ctime_nsec())
+        });
+        assert_eq!(after_second, before_second);
+        assert_eq!(fs::read(model).unwrap(), b"model");
+        for path in [&data, &manifest, &readable] {
+            assert_eq!(fs::read(path).unwrap(), b"input");
+        }
+    }
+
+    #[test]
     fn runtime_image_receipt_keeps_registry_archive_config_and_local_reference_distinct() {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(temp.path());
@@ -4676,6 +4906,50 @@ mod tests {
         fs::write(&archive, vec![0_u8; payload.len()]).unwrap();
         assert!(executor.runtime_image_import(&arguments).is_err());
         assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn runtime_image_import_rehydrates_only_proven_missing_image() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        fs::create_dir_all(&roots.data).unwrap();
+        let (payload, _config_id) = docker_save_archive(false);
+        let archive_sha256 = hex_sha256(&payload);
+        let registry_manifest = format!("sha256:{}", "b".repeat(64));
+        let local_reference =
+            format!("localhost/vonk/compiled-runtime-{archive_sha256}@{registry_manifest}");
+        let archive_root = roots.agent_data.join("oci-archives");
+        fs::create_dir_all(&archive_root).unwrap();
+        let archive = archive_root.join(&archive_sha256);
+        fs::write(&archive, &payload).unwrap();
+        fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
+        let runner = CountingRuntimeImportRunner::default();
+        let executor = OperationExecutor::new(roots, &[0; 32], runner.clone(), None).unwrap();
+        let arguments = [
+            archive.display().to_string(),
+            archive_sha256,
+            payload.len().to_string(),
+            format!("sha256:{}", "a".repeat(64)),
+            registry_manifest,
+            local_reference,
+        ];
+        executor.runtime_image_import(&arguments).unwrap();
+        assert_eq!(runner.loads.load(SeqCst), 1);
+
+        runner.image_missing.store(true, SeqCst);
+        executor.runtime_image_import(&arguments).unwrap();
+        executor.runtime_image_import(&arguments).unwrap();
+        assert_eq!(runner.loads.load(SeqCst), 2);
+
+        runner.wrong_image.store(true, SeqCst);
+        assert!(executor.runtime_image_import(&arguments).is_err());
+        assert_eq!(runner.loads.load(SeqCst), 2);
+        runner.wrong_image.store(false, SeqCst);
+        runner.image_missing.store(true, SeqCst);
+        runner.deny_listing.store(true, SeqCst);
+        assert!(executor.runtime_image_import(&arguments).is_err());
+        assert_eq!(runner.loads.load(SeqCst), 2);
     }
 
     #[test]
