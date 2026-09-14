@@ -343,7 +343,9 @@ def test_signed_update_installs_real_wheel_into_uv_venv(
 def test_interactive_notice_never_fetches_on_ordinary_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    key, _ = _signed_publication(tmp_path, source_sha="b" * 40)
     monkeypatch.setenv("VONK_CLI_UPDATE_NOTICES", "1")
+    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(key))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     monkeypatch.setattr(
         cli_update,
@@ -357,9 +359,127 @@ def test_interactive_notice_never_fetches_on_ordinary_command(
         json.dumps(
             {
                 "checked_at": int(time.time()),
+                "verified": True,
+                "channel": "stable",
+                "origin": "https://install.vonkforge.ai",
                 "update_available": True,
                 "source_sha": cli_update.current_build()["source_sha"],
+                "version": cli_update.current_build()["version"],
+                "key_sha256": hashlib.sha256(key.read_bytes()).hexdigest(),
             }
         )
     )
     assert cli_update.interactive_notice() is not None
+    (tmp_path / "other").mkdir()
+    other_key, _ = _signed_publication(tmp_path / "other", source_sha="d" * 40)
+    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(other_key))
+    assert cli_update.interactive_notice() is None
+
+
+def test_opted_in_interactive_command_schedules_without_blocking_controller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key, _ = _signed_publication(tmp_path, source_sha="b" * 40)
+    monkeypatch.setenv("VONK_CLI_UPDATE_NOTICES", "1")
+    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(key))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        cli_update, "run_update", lambda **kwargs: pytest.fail("network blocked CLI")
+    )
+    monkeypatch.setattr(
+        cli_update.subprocess,
+        "Popen",
+        lambda command, **kwargs: seen.append(command),
+    )
+    monkeypatch.setattr(cli, "run_controller", lambda *args: {"state": "ready"})
+    monkeypatch.setattr(cli, "result_exit_code", lambda result: 0)
+    monkeypatch.setattr(cli, "_emit", lambda *args: None)
+
+    class InteractiveError(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(cli.sys, "stderr", InteractiveError())
+    assert cli.main(("profile", "list"), control_client=object()) == 0
+    assert len(seen) == 1
+    assert seen[0][1:4] == ["-m", "cluster_profiles.cli_update", "--background-notice"]
+    assert cli.main(("profile", "list"), control_client=object()) == 0
+    assert len(seen) == 1
+    lock = tmp_path / "vonkctl" / "update-notice.lock"
+    stale = time.time() - 31
+    os.utime(lock, (stale, stale))
+    assert cli.main(("profile", "list"), control_client=object()) == 0
+    assert len(seen) == 2
+    lock.unlink()
+
+    def failed_spawn(command, **kwargs):
+        raise OSError("background process unavailable")
+
+    monkeypatch.setattr(cli_update.subprocess, "Popen", failed_spawn)
+    assert cli.main(("profile", "list"), control_client=object()) == 0
+    assert not lock.exists()
+
+
+def test_background_notice_accepts_only_signed_current_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
+    monkeypatch.setenv("VONK_CLI_UPDATE_NOTICES", "1")
+    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(key))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        cli_update,
+        "current_build",
+        lambda: {"version": "0.1.1", "source_sha": "c" * 40},
+    )
+    observed: list[str] = []
+
+    def download(url: str, maximum: int) -> bytes:
+        observed.append(url)
+        return objects[url]
+
+    cli_update.background_notice_check(download=download)
+    assert cli_update.interactive_notice() is not None
+    assert not any(url.endswith(".whl") for url in observed)
+
+    pointer = "https://install.vonkforge.ai/artifacts/stable/current.manifest"
+    objects[pointer] = objects[pointer].replace(b"channel=stable", b"channel=dev")
+    cli_update.background_notice_check(download=download)
+    assert cli_update.interactive_notice() is None
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        cli_update.subprocess,
+        "Popen",
+        lambda command, **kwargs: seen.append(command),
+    )
+    cli_update.begin_interactive_update_check()
+    assert not seen
+    cache = tmp_path / "vonkctl" / "update-notice.json"
+    failed = json.loads(cache.read_text())
+    failed["checked_at"] -= 901
+    cache.write_text(json.dumps(failed))
+    cli_update.begin_interactive_update_check()
+    assert len(seen) == 1
+
+
+def test_offline_version_and_json_command_do_not_schedule_notices(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key, _ = _signed_publication(tmp_path, source_sha="b" * 40)
+    monkeypatch.setenv("VONK_CLI_UPDATE_NOTICES", "1")
+    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(key))
+    monkeypatch.setattr(
+        cli, "begin_interactive_update_check", lambda: pytest.fail("scheduled check")
+    )
+    monkeypatch.setattr(cli, "run_controller", lambda *args: {"state": "ready"})
+    monkeypatch.setattr(cli, "result_exit_code", lambda result: 0)
+    monkeypatch.setattr(cli, "_emit", lambda *args: None)
+
+    class InteractiveError(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(cli.sys, "stderr", InteractiveError())
+    assert cli.main(("--version",)) == 0
+    assert cli.main(("--json", "profile", "list"), control_client=object()) == 0

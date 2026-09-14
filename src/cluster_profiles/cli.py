@@ -16,6 +16,7 @@ from .build_identity import current_build
 from .cli_render import render_payload
 from .cli_update import (
     CliUpdateError,
+    begin_interactive_update_check,
     cache_update_notice,
     interactive_notice,
     run_update,
@@ -222,7 +223,7 @@ def main(
                     origin=args.origin,
                     apply=args.apply,
                 )
-                cache_update_notice(result)
+                cache_update_notice(result, public_key=Path(key), origin=args.origin)
                 status = 0
             except (CliUpdateError, OSError) as error:
                 result = {"error": _sanitize_text(error), "error_type": "update"}
@@ -233,6 +234,14 @@ def main(
             for name, value in result.items():
                 print(f"{name.replace('_', ' ')}: {value}")
         return status
+
+    interactive = (
+        sys.stderr.isatty()
+        and not args.global_json
+        and not getattr(args, "json", False)
+    )
+    if interactive:
+        begin_interactive_update_check()
 
     try:
         client = control_client or ControlClient.from_environment()
@@ -258,11 +267,7 @@ def main(
         )
         if not watch_rendered or args.global_json or getattr(args, "json", False):
             _emit(result, args)
-        if (
-            sys.stderr.isatty()
-            and not args.global_json
-            and not getattr(args, "json", False)
-        ):
+        if interactive:
             notice = interactive_notice()
             if notice:
                 print(notice, file=sys.stderr)

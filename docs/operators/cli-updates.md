@@ -24,9 +24,13 @@ It does not update the Controller or Sparks. A failed verification leaves the
 installed CLI intact. The virtual environment must be writable; run the command
 from the environment you intend to update.
 
-Set `VONK_INSTALLER_PUBLIC_KEY_FILE` to avoid repeating `--public-key`. Set
-`VONK_CLI_UPDATE_NOTICES=1` to opt into an interactive notice after an explicit
-stable-channel `vonkctl update` check. Notices are cached for one day under the user cache directory,
-suppressed for JSON and noninteractive commands, and never install an update.
+Set `VONK_INSTALLER_PUBLIC_KEY_FILE` to the trusted public key to avoid repeating
+`--public-key`. With that path set, `VONK_CLI_UPDATE_NOTICES=1` opts ordinary
+interactive commands into a short-lived background check of the signed accepted
+stable release. The command itself does not wait for the network; a newly found
+update may appear on the next interactive command. Verified results are cached
+for one day under the user cache directory, and failed checks retry after 15
+minutes. JSON and noninteractive commands, including offline `--version`, never
+start a check. Notices never install an update.
 An accepted release without a CLI wheel is invalid under the current schema-2
 publication contract.
