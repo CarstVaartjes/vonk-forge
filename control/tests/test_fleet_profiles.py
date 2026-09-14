@@ -3,10 +3,8 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-from hashlib import sha256
 from importlib.resources import files
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TypedDict
 from uuid import uuid4
 
@@ -14,16 +12,13 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import Engine, Table, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control.cluster_mappings import ClusterMappingPlacement, ClusterMappingPlan
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
-    FleetProfileApplicationView,
     FleetProfileAssignmentInput,
     FleetProfileChildOperation,
     FleetProfileChildProgress,
     FleetProfileInput,
-    FleetProfileReason,
     FleetProfileScope,
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchAdapterState,
@@ -55,8 +50,6 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.preparation_contract import RolloutPreparation
-from vonk_control.recipe_action_plans import ActionReason
-from vonk_control.recipe_operations import RecipeOperationService
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
@@ -185,7 +178,7 @@ def test_profile_worker_marks_malformed_persisted_plan_failed() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, recipe_operations=_UnreachedOperations()
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
     preview = service.preview(profile.id)
@@ -213,15 +206,8 @@ def test_profile_worker_marks_malformed_persisted_progress_failed() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
 
-    class Operations(RecipeOperationService):
-        def __init__(self) -> None:
-            pass
-
-        def get(self, _operation_id):
-            return FleetProfileChildOperation(id=_uuid(704), state="running")
-
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, recipe_operations=Operations()
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
     preview = service.preview(profile.id)
@@ -442,13 +428,6 @@ class _SwitchAdapter:
         return states[index]
 
 
-class _UnreachedOperations(RecipeOperationService):
-    """Placeholder boundary a malformed persisted document must never reach."""
-
-    def __init__(self) -> None:
-        pass
-
-
 def _database() -> sessionmaker[Session]:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -573,352 +552,6 @@ def _input(revision_id: str, *, name: str = "Studio ready") -> FleetProfileInput
     )
 
 
-#: The production request-key kinds the coordinator adopts by, mapped onto the
-#: short names this double records in ``events``.
-_PRODUCTION_KIND = {
-    "recipe.start": "start",
-    "recipe.stop": "stop",
-    "recipe.uninstall": "uninstall",
-}
-
-
-class _ProfileLifecycleSimulator(RecipeOperationService):
-    """Small operation boundary that materializes each accepted lifecycle effect.
-
-    It replaces the whole operation surface, so it never initializes the
-    production service state and only implements the calls the profile
-    coordinator makes.
-    """
-
-    def __init__(self, sessions: sessionmaker[Session]) -> None:
-        self.sessions = sessions
-        self.operations: dict[str, SimpleNamespace] = {}
-        # The coordinator recognises a child it already queued by its
-        # deterministic request key, so the double has to keep that mapping
-        # rather than only the operation id.
-        self.by_request: dict[str, SimpleNamespace] = {}
-        self.events: list[str] = []
-        self._sequence = 100
-
-    def _id(self) -> str:
-        self._sequence += 1
-        return _uuid(self._sequence)
-
-    def _digest(self, value: object) -> str:
-        return sha256(repr(value).encode()).hexdigest()
-
-    def _operation(self, kind: str, owner_id: str) -> SimpleNamespace:
-        operation_id = str(uuid4())
-        operation = SimpleNamespace(
-            id=operation_id, owner_id=owner_id, kind=kind, state="succeeded"
-        )
-        self.operations[operation_id] = operation
-        self.events.append(kind)
-        return operation
-
-    def _queue(self, kind: str, owner_id: str, request_id: str) -> SimpleNamespace:
-        operation = self._operation(kind, owner_id)
-        self.by_request[request_id] = operation
-        return operation
-
-    def _adopted(
-        self, request_id: str, kind: str, owner_id: str
-    ) -> SimpleNamespace | None:
-        operation = self.by_request.get(request_id)
-        if (
-            operation is None
-            or operation.kind != _PRODUCTION_KIND.get(kind, kind)
-            or operation.owner_id != owner_id
-        ):
-            return None
-        return operation
-
-    def adopt_owned_operation(
-        self,
-        request_id: str,
-        *,
-        kind: str,
-        owner_kind: str,
-        owner_id: str,
-    ) -> SimpleNamespace | None:
-        return self._adopted(request_id, kind, owner_id)
-
-    def adopt_start(
-        self, installation_id: str, alias: str, *, request_id: str
-    ) -> SimpleNamespace | None:
-        operation = self.by_request.get(request_id)
-        if operation is None or operation.kind != "start":
-            return None
-        with self.sessions() as session:
-            run = session.get(RecipeRun, operation.owner_id)
-            if (
-                run is None
-                or run.installation_id != installation_id
-                or run.alias != alias
-            ):
-                return None
-        return operation
-
-    def get(self, operation_id: str, *, session: object = None) -> SimpleNamespace:
-        return self.operations[operation_id]
-
-    def preview_mapping(self, revision_id, node_ids, *, parameters, actor):
-        with self.sessions() as session:
-            revision = session.get(CatalogDocumentRevision, revision_id)
-            assert revision is not None
-            topology_name = RecipeDefinition.model_validate(
-                revision.document
-            ).topology.name
-        return ClusterMappingPlan(
-            recipe_revision_id=revision_id,
-            recipe_content_sha256="a" * 64,
-            topology_name=topology_name,
-            generation=1,
-            parameters=dict(parameters),
-            nodes=tuple(
-                ClusterMappingPlacement(
-                    node_id=node_id,
-                    rank=rank,
-                    role=("entrypoint" if rank == 0 else "worker"),
-                    endpoint_owner=rank == 0,
-                )
-                for rank, node_id in enumerate(node_ids)
-            ),
-            placement_digest=self._digest((revision_id, tuple(node_ids))),
-        )
-
-    def create_mapping(self, plan, *, actor):
-        self.events.append("create-placement")
-        mapping_id = self._id()
-        now = NOW
-        with self.sessions.begin() as session:
-            session.add(
-                ClusterMapping(
-                    id=mapping_id,
-                    recipe_revision_id=plan.recipe_revision_id,
-                    topology_name=plan.topology_name,
-                    generation=plan.generation,
-                    node_count=len(plan.nodes),
-                    state="ready",
-                    parameters=dict(plan.parameters),
-                    placement_digest=plan.placement_digest,
-                    endpoint_owner_node_id=plan.nodes[0].node_id,
-                    created_by=actor,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-            session.add_all(
-                ClusterMappingNode(
-                    id=self._id(),
-                    mapping_id=mapping_id,
-                    node_id=node.node_id,
-                    rank=node.rank,
-                    role=node.role,
-                    endpoint_owner=node.endpoint_owner,
-                    created_at=now,
-                )
-                for node in plan.nodes
-            )
-        return mapping_id
-
-    def preview_build(self, revision_id, builder_node_id):
-        build_input = self._digest(("build", revision_id))
-        return SimpleNamespace(
-            build_id=self._id(),
-            recipe_revision_id=revision_id,
-            builder_node_id=builder_node_id,
-            source_bundle_sha256=self._digest(("source", revision_id)),
-            build_input_sha256=build_input,
-        )
-
-    def build(self, plan, *, build_input_sha256, actor, request_id):
-        build_id = plan.build_id
-        image_digest = "sha256:" + self._digest(("image", plan.recipe_revision_id))
-        with self.sessions.begin() as session:
-            session.add(
-                RecipeBuild(
-                    id=build_id,
-                    recipe_revision_id=plan.recipe_revision_id,
-                    builder_node_id=plan.builder_node_id,
-                    source_bundle_sha256=plan.source_bundle_sha256,
-                    build_input_sha256=build_input_sha256,
-                    state="succeeded",
-                    policy_report={},
-                    plan={},
-                    image_digest=image_digest,
-                    oci_layout_sha256=self._digest(("oci", build_id)),
-                    image_bytes=1024,
-                    created_at=NOW,
-                    updated_at=NOW,
-                )
-            )
-        return self._operation("build", build_id)
-
-    def preview_image_distribution(self, build_id, mapping_id, *, mapping_generation):
-        self.events.append("distribute-image")
-        return SimpleNamespace(
-            recipe_build_id=build_id,
-            mapping_id=mapping_id,
-            mapping_generation=mapping_generation,
-            image_digest="sha256:" + self._digest(("image", build_id)),
-            node_ids=(),
-            plan_digest=self._digest(("distribution", build_id, mapping_id)),
-        )
-
-    def preview_install(self, mapping_id, build_id):
-        with self.sessions() as session:
-            mapping = session.get(ClusterMapping, mapping_id)
-            build = session.get(RecipeBuild, build_id)
-            assert mapping is not None and build is not None
-            nodes = tuple(
-                session.scalars(
-                    select(ClusterMappingNode).where(
-                        ClusterMappingNode.mapping_id == mapping_id
-                    ).order_by(ClusterMappingNode.rank)
-                )
-            )
-        return SimpleNamespace(
-            mapping_id=mapping_id,
-            mapping_generation=mapping.generation,
-            recipe_build_id=build_id,
-            recipe_revision_id=build.recipe_revision_id,
-            recipe_content_sha256="a" * 64,
-            image_digest=build.image_digest,
-            plan_digest=self._digest(("install", mapping_id, build_id)),
-            nodes=nodes,
-        )
-
-    def install(self, plan, *, plan_digest, actor, request_id):
-        installation_id = self._id()
-        with self.sessions.begin() as session:
-            session.add(
-                RecipeInstallation(
-                    id=installation_id,
-                    recipe_revision_id=plan.recipe_revision_id,
-                    mapping_id=plan.mapping_id,
-                    mapping_generation=plan.mapping_generation,
-                    recipe_build_id=plan.recipe_build_id,
-                    image_digest=plan.image_digest,
-                    plan_digest=plan_digest,
-                    plan={},
-                    state="installed",
-                    actor=actor,
-                    created_at=NOW,
-                    updated_at=NOW,
-                )
-            )
-            session.add_all(
-                InstallationNode(
-                    id=self._id(),
-                    installation_id=installation_id,
-                    node_id=node.node_id,
-                    rank=node.rank,
-                    role=node.role,
-                    state="installed",
-                    required_bytes=1,
-                    installed_bytes=1,
-                    updated_at=NOW,
-                )
-                for node in plan.nodes
-            )
-        return self._operation("install", installation_id)
-
-    def preview_run(self, installation_id, alias):
-        with self.sessions() as session:
-            installation = session.get(RecipeInstallation, installation_id)
-            assert installation is not None
-        return SimpleNamespace(
-            installation_id=installation_id,
-            alias=alias,
-            mapping_id=installation.mapping_id,
-            mapping_generation=installation.mapping_generation,
-            plan_digest=self._digest(("run", installation_id, alias)),
-        )
-
-    def start(self, plan, *, plan_digest, actor, request_id):
-        run_id = self._id()
-        with self.sessions.begin() as session:
-            installation = session.get(RecipeInstallation, plan.installation_id)
-            assert installation is not None
-            nodes = tuple(
-                session.scalars(
-                    select(InstallationNode).where(
-                        InstallationNode.installation_id == plan.installation_id
-                    ).order_by(InstallationNode.rank)
-                )
-            )
-            session.add(
-                RecipeRun(
-                    id=run_id,
-                    installation_id=plan.installation_id,
-                    mapping_id=installation.mapping_id,
-                    mapping_generation=installation.mapping_generation,
-                    alias=plan.alias,
-                    plan_digest=plan_digest,
-                    plan={},
-                    state="running",
-                    route_state="published",
-                    route_generation=1,
-                    route_digest=self._digest(("route", run_id)),
-                    actor=actor,
-                    created_at=NOW,
-                    updated_at=NOW,
-                )
-            )
-            session.add_all(
-                RunNode(
-                    id=self._id(),
-                    run_id=run_id,
-                    node_id=node.node_id,
-                    rank=node.rank,
-                    role=node.role,
-                    state="running",
-                    port=8000 + node.rank,
-                    reserved_memory_bytes=1,
-                    updated_at=NOW,
-                )
-                for node in nodes
-            )
-        return self._queue("start", run_id, request_id)
-
-    def preview_stop(self, run_id):
-        # The coordinator composes this assessment, so the double has to model
-        # its decision surface rather than only the digest it passes on.
-        return SimpleNamespace(
-            plan_digest=self._digest(("stop", run_id)),
-            allowed=True,
-            blockers=(),
-        )
-
-    def preview_uninstall(self, installation_id):
-        return SimpleNamespace(
-            installation_id=installation_id,
-            plan_digest=self._digest(("uninstall", installation_id)),
-            allowed=True,
-            blockers=(),
-            active_runs=(),
-            active_run_count=0,
-            active_runs_truncated=False,
-        )
-
-    def stop(self, run_id, *, plan_digest, actor, request_id):
-        with self.sessions.begin() as session:
-            run = session.get(RecipeRun, run_id)
-            assert run is not None
-            run.state = "stopped"
-            run.route_state = "withdrawn"
-            run.stopped_at = NOW
-            run.updated_at = NOW
-            for node in session.scalars(
-                select(RunNode).where(RunNode.run_id == run_id)
-            ):
-                node.state = "stopped"
-                node.updated_at = NOW
-        return self._queue("stop", run_id, request_id)
-
-
-
 def _seed_dual_solo_without_runtime_state(
     sessions: sessionmaker[Session],
 ) -> tuple[str, str]:
@@ -1013,182 +646,6 @@ def _seed_dual_solo_without_runtime_state(
             )
         )
     return dual_revision_id, solo_revision_id
-
-
-def _switch_profile(
-    service: FleetProfileService, profile_id: str, request_key: str
-) -> FleetProfileApplicationView:
-    preview = service.preview(profile_id)
-    assert preview.allowed
-    application = service.apply(
-        profile_id,
-        plan_digest=preview.plan_digest,
-        request_key=request_key,
-        actor="admin",
-    )
-    for _ in range(128):
-        if service.application(application.id).state == "succeeded":
-            return service.application(application.id)
-        assert service.tick() is True
-    raise AssertionError("profile application did not complete")
-
-
-def test_profile_apply_switches_dual_solo_idle_and_reuses_cached_installation() -> None:
-    sessions = _database()
-    dual_revision_id, solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
-    operations = _ProfileLifecycleSimulator(sessions)
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW, recipe_operations=operations
-    )
-    profile_a = service.create(
-        FleetProfileInput.model_validate(
-            {
-                "name": "Dual applied",
-                "assignments": [
-                    {
-                        "recipe_selector": "vonk-forge/synthetic-tiny-image",
-                        "spark_ids": [_node_id(1), _node_id(2)],
-                        "desired_state": "running",
-                        "assignment_name": "dual-chat",
-                    }
-                ],
-            }
-        ),
-        actor="admin",
-    )
-    profile_b = service.create(
-        FleetProfileInput.model_validate(
-            {
-                "name": "Solo applied",
-                "assignments": [
-                    {
-                        "recipe_selector": "vonk-forge/synthetic-tiny-solo",
-                        "spark_ids": [_node_id(1)],
-                        "desired_state": "running",
-                        "assignment_name": "solo-chat",
-                    }
-                ],
-            }
-        ),
-        actor="admin",
-    )
-
-    _switch_profile(service, profile_a.id, _uuid(200))
-    with sessions() as session:
-        dual_installation = session.scalar(
-            select(RecipeInstallation).where(
-                RecipeInstallation.recipe_revision_id == dual_revision_id
-            )
-        )
-        dual_build = session.scalar(
-            select(RecipeBuild).where(
-                RecipeBuild.recipe_revision_id == dual_revision_id
-            )
-        )
-        assert dual_installation is not None
-        dual_run = session.scalar(
-            select(RecipeRun).where(RecipeRun.installation_id == dual_installation.id)
-        )
-        assert dual_build is not None
-        assert dual_run is not None and dual_run.state == "running"
-        dual_installation_id = dual_installation.id
-        dual_build_id = dual_build.id
-        dual_run_id = dual_run.id
-    assert operations.events == [
-        "create-placement",
-        "build",
-        "distribute-image",
-        "install",
-        "start",
-    ]
-
-    operations.events.clear()
-    preview_b = service.preview(profile_b.id)
-    kinds_b = [step.kind for step in preview_b.steps]
-    assert kinds_b.index("create-placement") < kinds_b.index("stop")
-    assert kinds_b.index("install") < kinds_b.index("stop") < kinds_b.index("start")
-    assert any(
-        reason.code == "profile.interruption_expected"
-        for reason in preview_b.reasons
-    )
-    _switch_profile(service, profile_b.id, _uuid(201))
-
-    with sessions() as session:
-        dual_run = session.get(RecipeRun, dual_run_id)
-        assert dual_run is not None and dual_run.state == "stopped"
-        dual_nodes = tuple(
-            session.scalars(
-                select(RunNode)
-                .where(RunNode.run_id == dual_run_id)
-                .order_by(RunNode.rank)
-            )
-        )
-        assert {node.node_id for node in dual_nodes} == {_node_id(1), _node_id(2)}
-        assert {node.state for node in dual_nodes} == {"stopped"}
-        solo_installation = session.scalar(
-            select(RecipeInstallation).where(
-                RecipeInstallation.recipe_revision_id == solo_revision_id
-            )
-        )
-        assert solo_installation is not None
-        solo_run = session.scalar(
-            select(RecipeRun).where(RecipeRun.installation_id == solo_installation.id)
-        )
-        assert solo_run is not None and solo_run.state == "running"
-        solo_nodes = tuple(
-            session.scalars(
-                select(RunNode).where(RunNode.run_id == solo_run.id)
-            )
-        )
-        assert [node.node_id for node in solo_nodes] == [_node_id(1)]
-        assert session.scalar(
-            select(RunNode.id).where(
-                RunNode.run_id == solo_run.id, RunNode.node_id == _node_id(2)
-            )
-        ) is None
-        dual_installation = session.get(RecipeInstallation, dual_installation_id)
-        assert dual_installation is not None
-        assert dual_installation.state == "installed"
-        dual_build = session.get(RecipeBuild, dual_build_id)
-        assert dual_build is not None
-        assert dual_build.state == "succeeded"
-    assert operations.events == [
-        "create-placement",
-        "build",
-        "distribute-image",
-        "install",
-        "stop",
-        "start",
-    ]
-
-    operations.events.clear()
-    preview_a_again = service.preview(profile_a.id)
-    assert [step.kind for step in preview_a_again.steps] == ["stop", "start"]
-    _switch_profile(service, profile_a.id, _uuid(202))
-    with sessions() as session:
-        restored_installation = session.get(RecipeInstallation, dual_installation_id)
-        assert restored_installation is not None
-        assert restored_installation.state == "installed"
-        restored_build = session.get(RecipeBuild, dual_build_id)
-        assert restored_build is not None
-        assert restored_build.state == "succeeded"
-        restored = tuple(
-            session.scalars(
-                select(RecipeRun)
-                .where(
-                    RecipeRun.installation_id == dual_installation_id,
-                    RecipeRun.state == "running",
-                )
-            )
-        )
-        assert len(restored) == 1
-        assert {
-            node.node_id
-            for node in session.scalars(
-                select(RunNode).where(RunNode.run_id == restored[0].id)
-            )
-        } == {_node_id(1), _node_id(2)}
-    assert operations.events == ["stop", "start"]
 
 
 def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> None:
@@ -2449,60 +1906,16 @@ def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> N
 def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
-    service = FleetProfileService(sessions, clock=lambda: NOW)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
     profile = service.create(_input(revision_id), actor="admin")
-
-    build_plan = service.preview(profile.id)
-    assert build_plan.allowed is True
-    assert build_plan.summary.blockers == 0
-    assert build_plan.summary.builds == 1
-    assert build_plan.assignments[0].current_state == "not-placed"
-    assert build_plan.assignments[0].actions == [
-        "create-placement",
-        "build",
-        "distribute-image",
-        "install",
-        "start",
-    ]
-
-    with sessions.begin() as session:
-        session.add(
-            RecipeBuild(
-                id=_uuid(3),
-                recipe_revision_id=revision_id,
-                builder_node_id=_node_id(1),
-                source_bundle_sha256="a" * 64,
-                build_input_sha256="b" * 64,
-                state="succeeded",
-                policy_report={},
-                plan={},
-                image_digest=f"sha256:{'c' * 64}",
-                oci_layout_sha256="d" * 64,
-                image_bytes=1024,
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
 
     preview = service.preview(profile.id)
     assert preview.allowed is True
-    assert preview.summary.model_dump() == {
-        "already_correct": 0,
-        "placements": 1,
-        "builds": 0,
-        "distributions": 1,
-        "installs": 1,
-        "starts": 1,
-        "stops": 0,
-        "uninstalls": 0,
-        "blockers": 0,
-    }
-    assert [step.kind for step in preview.steps] == [
-        "create-placement",
-        "distribute-image",
-        "install",
-        "start",
-    ]
+    assert preview.assignments[0].current_state == "not-placed"
+    assert preview.assignments[0].actions == ["switch"]
+    assert [step.kind for step in preview.steps] == ["switch"]
     assert len(preview.plan_digest) == 64
 
     application = service.apply(
@@ -2519,7 +1932,7 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
     )
     assert application == replay
     assert application.state == "queued"
-    assert application.total_steps == 4
+    assert application.total_steps == 1
     assert application.profile_digest == preview.profile_digest
     with sessions() as session:
         stored = session.get(FleetProfileApplication, application.id)
@@ -2534,7 +1947,7 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
 def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
-    service = FleetProfileService(sessions, clock=lambda: NOW)
+    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter())
     profile = service.create(_input(revision_id), actor="admin")
 
     with pytest.raises(FleetProfileConflict, match="stale"):
@@ -2546,67 +1959,6 @@ def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
         profile.id, _input(revision_id, name="Studio exact"), actor="admin"
     )
     assert updated.profile_digest != profile.profile_digest
-
-
-def test_profile_application_resumes_from_persisted_step_context() -> None:
-    sessions = _database()
-    _recipe_id, revision_id = _seed(sessions)
-    with sessions.begin() as session:
-        session.add(
-            RecipeBuild(
-                id=_uuid(6),
-                recipe_revision_id=revision_id,
-                builder_node_id=_node_id(1),
-                source_bundle_sha256="a" * 64,
-                build_input_sha256="b" * 64,
-                state="succeeded",
-                policy_report={},
-                plan={},
-                image_digest=f"sha256:{'c' * 64}",
-                oci_layout_sha256="d" * 64,
-                image_bytes=1024,
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-    service = FleetProfileService(sessions, clock=lambda: NOW)
-    profile = service.create(_input(revision_id), actor="admin")
-    preview = service.preview(profile.id)
-    application = service.apply(
-        profile.id,
-        plan_digest=preview.plan_digest,
-        request_key=_uuid(7),
-        actor="admin",
-    )
-
-    class Operations(RecipeOperationService):
-        def __init__(self) -> None:
-            pass
-
-        def preview_mapping(self, *_args, **_kwargs):
-            return SimpleNamespace(generation=3)
-
-        def create_mapping(self, *_args, **_kwargs):
-            return _uuid(8)
-
-        def preview_image_distribution(self, *_args, **_kwargs):
-            return SimpleNamespace(node_ids=())
-
-    restarted = FleetProfileService(
-        sessions,
-        clock=lambda: NOW,
-        recipe_operations=Operations(),
-    )
-
-    assert restarted.tick() is True
-    after_mapping = restarted.application(application.id)
-    assert after_mapping.state == "running"
-    assert after_mapping.current_step == 1
-
-    assert restarted.tick() is True
-    after_distribution = restarted.application(application.id)
-    assert after_distribution.current_step == 2
-    assert after_distribution.current_operation_id is None
 
 
 def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation() -> None:
@@ -2783,7 +2135,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
             ]
         )
 
-    service = FleetProfileService(sessions, clock=lambda: NOW)
+    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter())
     profile_a = service.create(
         FleetProfileInput.model_validate(
             {
@@ -2816,7 +2168,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
     switch_to_b = service.preview(profile_b.id)
     assert switch_to_b.scope.node_ids == [_node_id(1), _node_id(2)]
     assert switch_to_b.scope.idle_node_ids == [_node_id(2)]
-    assert [step.kind for step in switch_to_b.steps].count("stop") == 1
+    assert [step.kind for step in switch_to_b.steps] == ["switch"]
     assert switch_to_b.scope.idle_node_ids == [_node_id(2)]
     assert switch_to_b.summary.uninstalls == 0
 
@@ -2826,7 +2178,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
         run.state = "stopped"
         run.route_state = "withdrawn"
     back_to_a = service.preview(profile_a.id)
-    assert [step.kind for step in back_to_a.steps] == ["start"]
+    assert [step.kind for step in back_to_a.steps] == ["switch"]
     assert back_to_a.summary.installs == 0
 
 
@@ -2999,249 +2351,8 @@ def test_child_operation_state_distinguishes_absence_from_corruption() -> None:
         _operation_state(7, default="running")
 
 
-class _AssessingSimulator(_ProfileLifecycleSimulator):
-    """Lifecycle double that reports a chosen exact assessment per step."""
-
-    def __init__(
-        self,
-        sessions: sessionmaker[Session],
-        *,
-        stop_blockers: tuple[ActionReason, ...] = (),
-        uninstall_blockers: tuple[ActionReason, ...] = (),
-        active_runs: tuple[SimpleNamespace, ...] = (),
-        active_run_count: int | None = None,
-        active_runs_truncated: bool = False,
-    ) -> None:
-        super().__init__(sessions)
-        self.stop_blockers = stop_blockers
-        self.uninstall_blockers = uninstall_blockers
-        self.active_runs = active_runs
-        self.active_run_count = (
-            len(active_runs) if active_run_count is None else active_run_count
-        )
-        self.active_runs_truncated = active_runs_truncated
-
-    def preview_stop(self, run_id):
-        return SimpleNamespace(
-            plan_digest=self._digest(("stop", run_id)),
-            allowed=not self.stop_blockers,
-            blockers=self.stop_blockers,
-        )
-
-    def preview_uninstall(self, installation_id):
-        return SimpleNamespace(
-            installation_id=installation_id,
-            plan_digest=self._digest(("uninstall", installation_id)),
-            allowed=not self.uninstall_blockers,
-            blockers=self.uninstall_blockers,
-            active_runs=self.active_runs,
-            active_run_count=self.active_run_count,
-            active_runs_truncated=self.active_runs_truncated,
-        )
-
-
-def _composed_reasons(
-    operations: _ProfileLifecycleSimulator,
-    steps: list[dict[str, object]],
-    *,
-    scheduled_stops: tuple[str, ...] = (),
-    switch_scope: tuple[str, ...] = (),
-) -> list[FleetProfileReason]:
-    """Run the coordinator's preview composition over exact step drafts."""
-
-    service = FleetProfileService(
-        operations.sessions, clock=lambda: NOW, recipe_operations=operations
-    )
-    reasons: list[FleetProfileReason] = []
-    service._compose_lifecycle_assessments(
-        steps,
-        scheduled_stops=set(scheduled_stops),
-        switch_scope=set(switch_scope),
-        reasons=reasons,
-    )
-    return reasons
-
-
-def _assessment_sessions() -> sessionmaker[Session]:
-    # The composition only consults the lifecycle double, so this sessionmaker
-    # never opens a connection.
-    return sessionmaker(create_engine("sqlite+pysqlite:///:memory:"))
-
-
-def test_preview_blocks_cleanup_the_plan_cannot_resolve() -> None:
-    """An allowed preview must not hide a blocker execution will meet.
-
-    The preview used to rebuild the uninstall decision from installation rows
-    while execution invoked the lifecycle planner, so a cleanup that could
-    never run was presented to the operator as an allowed plan.
-    """
-
-    operations = _AssessingSimulator(
-        _assessment_sessions(),
-        uninstall_blockers=(
-            ActionReason("uninstall.operation_active", "already uninstalling"),
-        ),
-    )
-    reasons = _composed_reasons(
-        operations,
-        [{"kind": "uninstall", "owner_id": _uuid(900), "node_ids": [_node_id(1)]}],
-    )
-
-    assert [(reason.code, reason.severity) for reason in reasons] == [
-        ("profile.uninstall_blocked", "error")
-    ]
-    assert "uninstall.operation_active" in reasons[0].detail
-
-
-def test_preview_accepts_a_prerequisite_the_plan_stops_first() -> None:
-    """A run this plan stops itself is ordering, not a blocker."""
-
-    run_id = _uuid(901)
-    operations = _AssessingSimulator(
-        _assessment_sessions(),
-        uninstall_blockers=(
-            ActionReason("uninstall.active_run", "1 active run(s) must stop first"),
-        ),
-        active_runs=(SimpleNamespace(run_id=run_id),),
-    )
-    reasons = _composed_reasons(
-        operations,
-        [{"kind": "uninstall", "owner_id": _uuid(900), "node_ids": [_node_id(1)]}],
-        scheduled_stops=(run_id,),
-    )
-
-    assert [(reason.code, reason.severity) for reason in reasons] == [
-        ("profile.uninstall_prerequisite", "info")
-    ]
-    assert run_id in reasons[0].detail
-
-
-def test_preview_accepts_a_prerequisite_inside_the_switch_scope() -> None:
-    """The adapter switch stops conflicting runs in its scope, so it resolves too."""
-
-    run_id = _uuid(902)
-    operations = _AssessingSimulator(
-        _assessment_sessions(),
-        uninstall_blockers=(
-            ActionReason("uninstall.active_run", "1 active run(s) must stop first"),
-        ),
-        active_runs=(SimpleNamespace(run_id=run_id),),
-    )
-    reasons = _composed_reasons(
-        operations,
-        [{"kind": "uninstall", "owner_id": _uuid(900), "node_ids": [_node_id(1)]}],
-        switch_scope=(_node_id(1),),
-    )
-
-    assert [(reason.code, reason.severity) for reason in reasons] == [
-        ("profile.uninstall_prerequisite", "info")
-    ]
-
-
-def test_preview_blocks_an_active_run_the_plan_does_not_stop() -> None:
-    """An unlisted run outside the plan's own stops stays a blocker."""
-
-    run_id = _uuid(903)
-    operations = _AssessingSimulator(
-        _assessment_sessions(),
-        uninstall_blockers=(
-            ActionReason("uninstall.active_run", "1 active run(s) must stop first"),
-        ),
-        active_runs=(SimpleNamespace(run_id=run_id),),
-    )
-    reasons = _composed_reasons(
-        operations,
-        [{"kind": "uninstall", "owner_id": _uuid(900), "node_ids": [_node_id(1)]}],
-        switch_scope=(_node_id(2),),
-    )
-
-    assert [(reason.code, reason.severity) for reason in reasons] == [
-        ("profile.uninstall_active_run", "error")
-    ]
-    assert run_id in reasons[0].detail
-
-
-def test_preview_blocks_an_incomplete_active_run_list() -> None:
-    """A bounded list that is incomplete cannot prove the prerequisite clears."""
-
-    operations = _AssessingSimulator(
-        _assessment_sessions(),
-        uninstall_blockers=(
-            ActionReason("uninstall.active_run", "1 active run(s) must stop first"),
-        ),
-        active_runs=(SimpleNamespace(run_id=_uuid(904)),),
-        active_runs_truncated=True,
-    )
-    reasons = _composed_reasons(
-        operations,
-        [{"kind": "uninstall", "owner_id": _uuid(900), "node_ids": [_node_id(1)]}],
-        scheduled_stops=(_uuid(904),),
-    )
-
-    assert [(reason.code, reason.severity) for reason in reasons] == [
-        ("profile.uninstall_active_run", "error")
-    ]
-    assert "incomplete" in reasons[0].detail
-
-
-def test_preview_surfaces_a_blocked_stop_step() -> None:
-    """A stop the lifecycle refuses is reported before the profile is applied."""
-
-    operations = _AssessingSimulator(
-        _assessment_sessions(),
-        stop_blockers=(ActionReason("stop.operation_active", "stop already running"),),
-    )
-    reasons = _composed_reasons(
-        operations,
-        [{"kind": "stop", "owner_id": _uuid(905), "node_ids": [_node_id(1)]}],
-    )
-
-    assert [(reason.code, reason.severity) for reason in reasons] == [
-        ("profile.stop_blocked", "error")
-    ]
-    assert "stop.operation_active" in reasons[0].detail
-
-
-def test_preview_composes_the_exact_lifecycle_assessment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The preview itself composes the assessment, not only the helper.
-
-    Without this the decision table below could pass while the preview never
-    consulted it, which is exactly the gap the composition closes.
-    """
-
-    engine = create_engine(f"sqlite:///{tmp_path / 'wiring.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    _recipe, revision = _seed(sessions)
-    operations = _AssessingSimulator(sessions)
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW, recipe_operations=operations
-    )
-    profile = service.create(_input(revision), actor="admin")
-
-    composed: list[tuple[set[str], set[str]]] = []
-    original = FleetProfileService._compose_lifecycle_assessments
-
-    def record(self, raw_steps, *, scheduled_stops, switch_scope, reasons):
-        composed.append((set(scheduled_stops), set(switch_scope)))
-        return original(
-            self,
-            raw_steps,
-            scheduled_stops=scheduled_stops,
-            switch_scope=switch_scope,
-            reasons=reasons,
-        )
-
-    monkeypatch.setattr(FleetProfileService, "_compose_lifecycle_assessments", record)
-    service.preview(profile.id)
-
-    assert composed == [(set(), set())]
-
-
 def _exact_cleanup_profile(tmp_path: Path):
-    """A production-wired profile that removes an installation it no longer lists."""
+    """A production-wired profile that removes an unlisted installation."""
 
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
@@ -3270,13 +2381,11 @@ def _exact_cleanup_profile(tmp_path: Path):
         sessions, clock=lifecycle._clock, switch_adapter=adapter
     )
     profile = service.create(
-        FleetProfileInput.model_validate(
-            {
-                "name": "Exact cleanup",
-                "installation_policy": "exact",
-                "assignments": [],
-            }
-        ),
+        FleetProfileInput.model_validate({
+            "name": "Exact cleanup",
+            "installation_policy": "exact",
+            "assignments": [],
+        }),
         actor="admin",
     )
     return sessions, lifecycle, adapter, service, profile, installed, nodes
@@ -3316,9 +2425,6 @@ def test_profile_preview_delegates_removal_to_the_orchestrator(
     preview = service.preview(profile.id)
 
     assert [step.kind for step in preview.steps] == ["switch"]
-    assert not any(step.kind == "uninstall" for step in preview.steps), [
-        step.kind for step in preview.steps
-    ]
     delegated = [
         reason for reason in preview.reasons if reason.code == "profile.cleanup_delegated"
     ]
