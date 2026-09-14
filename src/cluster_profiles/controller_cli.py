@@ -19,6 +19,7 @@ from typing import Protocol, runtime_checkable
 
 from .cli_render import progress_line
 from .cli_select import SelectorError
+from .control_client import ControlTransportError, ControlUnavailable
 
 FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
@@ -81,12 +82,23 @@ def _query(**values: object) -> dict[str, object]:
 
 
 def _request_key(args: argparse.Namespace, factory: Callable[[], str]) -> str:
+    """Resolve and retain the logical request key for this invocation.
+
+    The key has to exist before the mutation is submitted and stay on the
+    parsed arguments afterwards.  When the Controller accepts a submission and
+    the response is lost, the error path can only name the durable operation by
+    a key it can still read, and a following manual retry has to reconcile that
+    same request instead of submitting the same intent under a fresh one.
+    """
+
     value = getattr(args, "request_key", None) or factory()
     try:
         parsed = uuid.UUID(value)
     except (ValueError, AttributeError):
         raise ValueError("--request-key must be a UUID") from None
-    return str(parsed)
+    resolved = str(parsed)
+    args.request_key = resolved
+    return resolved
 
 
 def _bounded_int(value: str, *, label: str, minimum: int, maximum: int) -> int:
@@ -386,6 +398,28 @@ def _bounded_interval(args: argparse.Namespace) -> float:
     return max(0.01, min(float(getattr(args, "interval_seconds", 1.0)), 30.0))
 
 
+def _observation_delay(error: BaseException, fallback: float) -> float:
+    """Return the delay before the next observation attempt.
+
+    A Controller that answers ``Retry-After`` is trusted for the wait, bounded
+    like the ordinary poll interval so a hostile or mistaken header cannot stall
+    the observation past its own deadline.
+    """
+
+    retry_after = getattr(error, "retry_after_seconds", None)
+    if type(retry_after) is int and retry_after >= 0:
+        return max(0.01, min(float(retry_after), 30.0))
+    return fallback
+
+
+def _observation_reason(error: BaseException) -> str:
+    if isinstance(error, ControlUnavailable):
+        return "control API reported unavailable"
+    if isinstance(error, (ControlTransportError, OSError)):
+        return "control API connection was lost"
+    return type(error).__name__
+
+
 def _poll_path(
     client: ControllerClient,
     path: str,
@@ -393,21 +427,47 @@ def _poll_path(
     args: argparse.Namespace,
     *,
     query: Mapping[str, object] | None = None,
-    until_state: bool = True,
+    terminal: Callable[[Mapping[str, object]], bool] | None = None,
 ) -> dict[str, object]:
-    """Observe a bounded durable snapshot, retaining the last truthful value."""
+    """Observe a bounded durable snapshot, retaining the last truthful value.
+
+    A temporary loss of the Controller must not discard the observation.  The
+    last confirmed snapshot stays authoritative and polling continues to the
+    bounded deadline, reporting why it was reconnecting.  Authorization,
+    contract and not-found answers stay immediate errors: retrying them would
+    only delay the operator's decision.  The durable operation's own outcome is
+    never rewritten by an observation failure.
+    """
+
     callback = _watch_callback(args)
+    is_terminal = terminal or (lambda observed: _state(observed) in _TERMINAL_STATES)
     current = initial
     deadline = time.monotonic() + _bounded_timeout(args)
+    interval = _bounded_interval(args)
+    reconnecting: BaseException | None = None
     while True:
         if callback is not None:
             callback(current)
-        if until_state and _state(current) in _TERMINAL_STATES:
+        if is_terminal(current):
             return current
         if time.monotonic() >= deadline:
-            return {**current, "timed_out": True}
-        time.sleep(_bounded_interval(args))
-        current = client.request("GET", path, query=query)
+            if reconnecting is None:
+                return {**current, "timed_out": True}
+            return {
+                **current,
+                "timed_out": True,
+                "reconnecting": True,
+                "observation_error": _observation_reason(reconnecting),
+            }
+        time.sleep(interval)
+        try:
+            current = client.request("GET", path, query=query)
+        except (ControlUnavailable, ControlTransportError, OSError) as error:
+            reconnecting = error
+            interval = _observation_delay(error, interval)
+            continue
+        reconnecting = None
+        interval = _bounded_interval(args)
 
 
 def _follow_mutation(
@@ -439,6 +499,14 @@ def _watch_resource(
     return _poll_path(client, path, result, args, query=query)
 
 
+def _log_follow_complete(observed: Mapping[str, object]) -> bool:
+    return (
+        observed.get("complete") is True
+        or observed.get("closed") is True
+        or _state(observed) in _TERMINAL_STATES
+    )
+
+
 def _follow_loginfo(
     client: ControllerClient,
     path: str,
@@ -448,19 +516,17 @@ def _follow_loginfo(
 ) -> dict[str, object]:
     if not getattr(args, "follow", False):
         return result
-    current = result
-    callback = _watch_callback(args)
-    deadline = time.monotonic() + _bounded_timeout(args)
-    while True:
-        if callback is not None:
-            callback(current)
-        state = _state(current)
-        if current.get("complete") is True or current.get("closed") is True or state in _TERMINAL_STATES:
-            return current
-        if time.monotonic() >= deadline:
-            return {**current, "timed_out": True}
-        time.sleep(_bounded_interval(args))
-        current = client.request("GET", path, query=query)
+    # The log tail is the same bounded observation as every other follow path;
+    # keeping one loop means a dropped connection is tolerated identically here
+    # instead of being a second, weaker implementation.
+    return _poll_path(
+        client,
+        path,
+        result,
+        args,
+        query=query,
+        terminal=_log_follow_complete,
+    )
 
 
 def result_exit_code(result: Mapping[str, object]) -> int:
@@ -985,9 +1051,21 @@ def _profile(
             f"/api/profile/{number}/load",
             {"request_key": _request_key(args, factory)},
         )
-        if args.detach or not isinstance(result.get("operation_id"), str):
+        if args.detach:
             return result
-        return _poll_path(client, f"/api/profile/{number}/progress", result, args)
+        application_id = result.get("id")
+        if not isinstance(application_id, str) or not application_id:
+            # Without the durable application identity there is nothing to
+            # follow: the numbered progress route answers with the profile's
+            # latest application, which is a different operation as soon as
+            # anyone loads the profile again.
+            return result
+        return _poll_path(
+            client,
+            f"/api/profile/applications/{_quoted(application_id)}",
+            result,
+            args,
+        )
     raise ValueError(f"unsupported profile action: {action}")
 
 

@@ -79,6 +79,26 @@ class _ActivatedRecipeRouteError(RecipeRouteError):
         self.generation = generation
 
 
+def publication_is_temporary(error: BaseException) -> bool:
+    """Whether another publication attempt can genuinely resolve ``error``.
+
+    This is deliberately an allowlist.  When the Controller cannot tell a
+    dependency hiccup from an invalid contract it must keep the route
+    fail-closed and report the failure, not retry it forever; only the
+    conditions below are known to carry no authority decision of their own.
+    """
+
+    if isinstance(error, RecipeRouteNotReady):
+        # A fail-closed candidate is waiting for current rank evidence, which
+        # the next attempt re-reads.
+        return True
+    if isinstance(error, _ActivatedRecipeRouteError):
+        # The generation is activated but its supervisor acknowledgement was
+        # not confirmed, so a later attempt reconciles that same generation.
+        return True
+    return isinstance(error, OSError)
+
+
 @dataclass(frozen=True)
 class _RecipeEndpoint:
     node_id: str
@@ -507,6 +527,8 @@ class RecipeRouteService:
             included.route_generation = generation.generation
             included.route_digest = generation.route_digest
             included.route_error = None
+            included.route_attempts = 0
+            included.route_next_attempt_at = None
             included.observation_deadline_at = None
             included.updated_at = self._clock()
         return generation
@@ -667,6 +689,8 @@ class RecipeRouteService:
                 included.route_generation = generation.generation
                 included.route_digest = generation.route_digest
                 included.route_error = None
+                included.route_attempts = 0
+                included.route_next_attempt_at = None
                 included.updated_at = self._clock()
         for run_id in sorted(withdrawal.excluded):
             run = session.get(RecipeRun, run_id)
@@ -1231,4 +1255,5 @@ __all__ = [
     "RecipeRouteError",
     "RecipeRouteNotReady",
     "RecipeRouteService",
+    "publication_is_temporary",
 ]

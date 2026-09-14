@@ -2531,6 +2531,15 @@ class FleetProfileService:
         if self._recipe_operations is None:
             raise FleetProfileConflict("Fleet profile recipe operations are unavailable")
         if kind == "stop" and isinstance(owner_id, str):
+            # Replay the child this step already queued before re-previewing.
+            # A stop preview reads the run's live state, so once our own child
+            # is stopping the run the re-derived digest legitimately differs
+            # and re-admission would reject the durable child as a reused key.
+            adopted = self._recipe_operations.adopt_owned_operation(
+                request_id, kind="recipe.stop", owner_kind="run", owner_id=owner_id
+            )
+            if adopted is not None:
+                return adopted.id, False, None
             plan = self._recipe_operations.preview_stop(owner_id)
             operation = self._recipe_operations.stop(
                 owner_id,
@@ -2540,6 +2549,17 @@ class FleetProfileService:
             )
             return operation.id, False, None
         if kind == "uninstall" and isinstance(owner_id, str):
+            # An active uninstall is itself part of the next uninstall plan, so
+            # the recovery path must adopt the recorded child before it reads
+            # that mutable admission.
+            adopted = self._recipe_operations.adopt_owned_operation(
+                request_id,
+                kind="recipe.uninstall",
+                owner_kind="installation",
+                owner_id=owner_id,
+            )
+            if adopted is not None:
+                return adopted.id, False, None
             plan = self._recipe_operations.preview_uninstall(owner_id)
             operation = self._recipe_operations.uninstall(
                 owner_id,
@@ -2614,10 +2634,16 @@ class FleetProfileService:
             return operation.id, False, None
         if kind == "start":
             installation_id = self._installation_identity(assignment, context)
-            plan = self._recipe_operations.preview_run(
-                installation_id,
-                assignment.alias or assignment.recipe_title.lower().replace(" ", "-"),
+            alias = assignment.alias or assignment.recipe_title.lower().replace(" ", "-")
+            # Run admission hashes live inventory observation time and current
+            # reservations, so a refreshed inventory changes the digest even
+            # though this step's child is unchanged.
+            adopted = self._recipe_operations.adopt_start(
+                installation_id, alias, request_id=request_id
             )
+            if adopted is not None:
+                return adopted.id, False, None
+            plan = self._recipe_operations.preview_run(installation_id, alias)
             operation = self._recipe_operations.start(
                 plan, plan_digest=plan.plan_digest, actor=actor, request_id=request_id
             )

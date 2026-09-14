@@ -148,6 +148,7 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     )
 
     assert isinstance(worker._recipes, RecipeOperationWorker)
+    assert isinstance(worker._recipes._routes, RecipeRouteService)
     run_switches = worker._recipes._run_switches
     assert isinstance(run_switches, RunSwitchOperationService)
     assert run_switches._lifecycle is not None

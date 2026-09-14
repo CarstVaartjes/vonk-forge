@@ -15,6 +15,7 @@ from vonk_control.models import (
     Base,
     FleetProfileApplication,
     RecipeInstallation,
+    RecipeRun,
 )
 
 from .test_fleet_profiles import (
@@ -277,3 +278,51 @@ def test_numbered_load_repeated_noop_keeps_distinct_request_receipts(tmp_path):
     assert second.state == "succeeded"
     assert second.result is not None and not second.result.changed
     assert service.load(idle.number, request_key=_uuid(841), actor="admin") == second
+
+
+def test_restart_adopts_the_child_queued_before_the_parent_checkpoint(tmp_path):
+    """Recovery must not lose the child a crashed tick already queued.
+
+    The step records its child by deterministic request key before the parent
+    commits ``current_operation_id``.  A worker that dies inside that gap came
+    back, re-read mutable admission -- which its own active child has already
+    changed -- and then offered the unchanged request key to admission with a
+    changed digest.  Adoption binds the recorded child instead, so exactly one
+    authorized effect exists and the step still completes.
+    """
+
+    sessions, operations, service, _profile, original = setup_recovery(tmp_path)
+    operations.fail = False
+    retry = service.retry(original.id, request_key=_uuid(801), actor="admin")
+    assert retry.total_steps == 1
+    operations.events.clear()
+
+    assert service.tick() is True
+    queued = service.application(retry.id)
+    child_id = queued.current_operation_id
+    assert child_id is not None
+    assert operations.events == ["start"]
+
+    # Simulate the crash window: the child is durable but the parent never
+    # checkpointed it.
+    with sessions.begin() as session:
+        application = session.get(FleetProfileApplication, retry.id)
+        assert application is not None
+        application.current_operation_id = None
+    operations.events.clear()
+
+    restarted = FleetProfileService(
+        sessions,
+        clock=lambda: NOW + timedelta(seconds=1),
+        recipe_operations=operations,
+    )
+    assert restarted.tick() is True
+    finish(restarted, retry.id)
+
+    recovered = restarted.application(retry.id)
+    assert recovered.state == "succeeded"
+    assert recovered.progress.step_results["0"].operation_id == child_id
+    # No second child was queued for the adopted step.
+    assert operations.events == []
+    with sessions() as session:
+        assert len(list(session.scalars(select(RecipeRun)))) == 1

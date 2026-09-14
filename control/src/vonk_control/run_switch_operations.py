@@ -1322,12 +1322,23 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     "run-switch.start_installation_unavailable"
                 )
+            start_request_id = str(uuid.uuid5(uuid.UUID(request_key), "start"))
+            # Adopt the start this phase already queued before re-previewing.
+            # Run admission hashes inventory observation time and current
+            # reservations, so a refreshed inventory re-derives a different
+            # plan digest for the identical child and the idempotency check
+            # would have rejected our own durable request key.
+            adopted = self._lifecycle.adopt_start(
+                installation_id, plan.alias, request_id=start_request_id
+            )
+            if adopted is not None:
+                return PhaseExecution(adopted.id, {"run_id": adopted.owner_id})
             low_level = self._lifecycle.preview_run(installation_id, plan.alias)
             value = self._lifecycle.start(
                 low_level,
                 plan_digest=low_level.plan_digest,
                 actor=actor,
-                request_id=str(uuid.uuid5(uuid.UUID(request_key), "start")),
+                request_id=start_request_id,
             )
             return PhaseExecution(value.id, {"run_id": value.owner_id})
         if phase.kind == "final_verify":
@@ -4221,14 +4232,16 @@ class RunSwitchOperationService:
                 detail = evidence.get("reason") or evidence.get("status_reason")
                 if isinstance(detail, str) and detail:
                     reason += ": " + detail[:384]
-                if _transient_distribution_failure(child) and self._queue_transient_retry(
-                    operation_id, child, phase_index=phase_index, child_id=child_id
+                transient = _transient_distribution_failure(child)
+                if (
+                    transient
+                    and _automatic_retry_phase(plan.phases[phase_index])
+                    and self._queue_transient_retry(
+                        operation_id, child, phase_index=phase_index, child_id=child_id
+                    )
                 ):
                     return True
-                fail(
-                    reason,
-                    retryable=_transient_distribution_failure(child),
-                )
+                fail(reason, retryable=transient)
                 return True
             with self._sessions.begin() as session:
                 job = session.get(Job, operation_id, with_for_update=True)
@@ -5149,6 +5162,23 @@ def _child_progress_payload(child: object) -> Mapping[str, object]:
     if isinstance(child_reason, str) and child_reason:
         payload["status_reason"] = child_reason[:512]
     return payload
+
+
+def _automatic_retry_phase(phase: RunSwitchPhase) -> bool:
+    """Whether re-running this phase adopts the same child it queued before.
+
+    Only a content-addressed distribution phase qualifies.  ``transfer``
+    previews immutable model and image digests and derives its child request
+    key from the phase index, so a retry observes and resumes one durable
+    operation instead of inventing a second one.  ``start`` admission instead
+    hashes live inventory observation time and current reservations, so
+    automatically retrying it re-previewed a different plan and then offered
+    the unchanged request key to admission with a changed digest.  A failed
+    start is therefore reported for an explicit disposition, and the original
+    child is adopted by the executor before mutable admission is read again.
+    """
+
+    return phase.kind == "transfer"
 
 
 def _transient_distribution_failure(child: object) -> bool:

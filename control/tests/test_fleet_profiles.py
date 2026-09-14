@@ -571,6 +571,15 @@ def _input(revision_id: str, *, name: str = "Studio ready") -> FleetProfileInput
     )
 
 
+#: The production request-key kinds the coordinator adopts by, mapped onto the
+#: short names this double records in ``events``.
+_PRODUCTION_KIND = {
+    "recipe.start": "start",
+    "recipe.stop": "stop",
+    "recipe.uninstall": "uninstall",
+}
+
+
 class _ProfileLifecycleSimulator(RecipeOperationService):
     """Small operation boundary that materializes each accepted lifecycle effect.
 
@@ -582,6 +591,10 @@ class _ProfileLifecycleSimulator(RecipeOperationService):
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self.sessions = sessions
         self.operations: dict[str, SimpleNamespace] = {}
+        # The coordinator recognises a child it already queued by its
+        # deterministic request key, so the double has to keep that mapping
+        # rather than only the operation id.
+        self.by_request: dict[str, SimpleNamespace] = {}
         self.events: list[str] = []
         self._sequence = 100
 
@@ -599,6 +612,49 @@ class _ProfileLifecycleSimulator(RecipeOperationService):
         )
         self.operations[operation_id] = operation
         self.events.append(kind)
+        return operation
+
+    def _queue(self, kind: str, owner_id: str, request_id: str) -> SimpleNamespace:
+        operation = self._operation(kind, owner_id)
+        self.by_request[request_id] = operation
+        return operation
+
+    def _adopted(
+        self, request_id: str, kind: str, owner_id: str
+    ) -> SimpleNamespace | None:
+        operation = self.by_request.get(request_id)
+        if (
+            operation is None
+            or operation.kind != _PRODUCTION_KIND.get(kind, kind)
+            or operation.owner_id != owner_id
+        ):
+            return None
+        return operation
+
+    def adopt_owned_operation(
+        self,
+        request_id: str,
+        *,
+        kind: str,
+        owner_kind: str,
+        owner_id: str,
+    ) -> SimpleNamespace | None:
+        return self._adopted(request_id, kind, owner_id)
+
+    def adopt_start(
+        self, installation_id: str, alias: str, *, request_id: str
+    ) -> SimpleNamespace | None:
+        operation = self.by_request.get(request_id)
+        if operation is None or operation.kind != "start":
+            return None
+        with self.sessions() as session:
+            run = session.get(RecipeRun, operation.owner_id)
+            if (
+                run is None
+                or run.installation_id != installation_id
+                or run.alias != alias
+            ):
+                return None
         return operation
 
     def get(self, operation_id: str, *, session: object = None) -> SimpleNamespace:
@@ -822,7 +878,7 @@ class _ProfileLifecycleSimulator(RecipeOperationService):
                 )
                 for node in nodes
             )
-        return self._operation("start", run_id)
+        return self._queue("start", run_id, request_id)
 
     def preview_stop(self, run_id):
         return SimpleNamespace(plan_digest=self._digest(("stop", run_id)))
@@ -840,7 +896,7 @@ class _ProfileLifecycleSimulator(RecipeOperationService):
             ):
                 node.state = "stopped"
                 node.updated_at = NOW
-        return self._operation("stop", run_id)
+        return self._queue("stop", run_id, request_id)
 
 
 

@@ -2133,6 +2133,125 @@ def test_start_rejects_alias_mismatched_digest_before_side_effects_and_replays_e
     assert queue.available == 2
 
 
+def test_adopt_start_binds_the_durable_child_without_reproducing_its_digest(
+    tmp_path: Path,
+) -> None:
+    """Recovery adopts the queued start child before re-reading admission.
+
+    A second preflight of the same installation legitimately derives a
+    different digest, because the first start's own reservation is now part of
+    the node documents.  A coordinator resuming its own step therefore cannot
+    reproduce the digest it queued under, and re-admission would reject the
+    unchanged request key.  Adoption binds the durable identity instead:
+    request key, operation kind, owner kind, installation and alias.
+    """
+
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="0" * 35 + "1"
+    )
+    qwen = service.preview_run(installation.owner_id, "qwen")
+    started = service.start(
+        qwen,
+        plan_digest=qwen.plan_digest,
+        actor="admin",
+        request_id="0" * 35 + "3",
+    )
+    changed = service.preview_run(installation.owner_id, "qwen")
+    assert changed.plan_digest != qwen.plan_digest
+
+    adopted = service.adopt_start(
+        installation.owner_id, "qwen", request_id="0" * 35 + "3"
+    )
+
+    assert adopted == started
+    # Adoption is scoped to this exact child: another alias, another
+    # installation or another request key is not it.
+    assert (
+        service.adopt_start(
+            installation.owner_id, "qwen-alt", request_id="0" * 35 + "3"
+        )
+        is None
+    )
+    assert (
+        service.adopt_start(
+            "00000000-0000-4000-8000-000000000000",
+            "qwen",
+            request_id="0" * 35 + "3",
+        )
+        is None
+    )
+    assert (
+        service.adopt_start(installation.owner_id, "qwen", request_id="0" * 35 + "9")
+        is None
+    )
+    # Replay never queues a second effect for the same step.
+    with sessions() as session:
+        assert (
+            len(tuple(session.scalars(select(Job).where(Job.kind == "recipe.start"))))
+            == 1
+        )
+    assert queue.available == 2
+
+
+def test_adopt_owned_operation_requires_the_exact_kind_and_owner(
+    tmp_path: Path,
+) -> None:
+    """Scoped cleanup adoption cannot be redirected to another owner."""
+
+    _sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="0" * 35 + "1"
+    )
+    qwen = service.preview_run(installation.owner_id, "qwen")
+    started = service.start(
+        qwen,
+        plan_digest=qwen.plan_digest,
+        actor="admin",
+        request_id="0" * 35 + "3",
+    )
+    stop_plan = service.preview_stop(started.owner_id)
+    stopped = service.stop(
+        started.owner_id,
+        plan_digest=stop_plan.plan_digest,
+        actor="admin",
+        request_id="0" * 35 + "4",
+    )
+
+    assert (
+        service.adopt_owned_operation(
+            "0" * 35 + "4", kind="recipe.stop", owner_kind="run", owner_id=started.owner_id
+        )
+        == stopped
+    )
+    # The same request key is not this child for another operation kind or of
+    # another owner, so cleanup cannot adopt work that was never its own.
+    assert (
+        service.adopt_owned_operation(
+            "0" * 35 + "4",
+            kind="recipe.uninstall",
+            owner_kind="installation",
+            owner_id=installation.owner_id,
+        )
+        is None
+    )
+    assert (
+        service.adopt_owned_operation(
+            "0" * 35 + "4",
+            kind="recipe.stop",
+            owner_kind="run",
+            owner_id="00000000-0000-4000-8000-000000000000",
+        )
+        is None
+    )
+    assert (
+        service.adopt_owned_operation(
+            "0" * 35 + "3", kind="recipe.stop", owner_kind="run", owner_id=started.owner_id
+        )
+        is None
+    )
+
+
 def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> None:
     withdrawn: list[str] = []
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
