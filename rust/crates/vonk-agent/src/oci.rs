@@ -2607,22 +2607,23 @@ mod tests {
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
 
         let runner = NoProcess;
-        let first_runtime = runtime(data.path(), &runner);
-        // The first attempt really copies the verified distribution objects
-        // and persists the installation receipt. Its acknowledgement is lost.
-        first_runtime
-            .install_with_space_check(&plan, &installation_id, &recipe_digest, 16)
-            .unwrap();
-        assert_eq!(
-            fs::read(installation.join("models/primary/config.json")).unwrap(),
-            b"primary"
-        );
-        assert!(
-            installation
-                .join(super::INSTALLATION_METADATA_FILE)
-                .is_file()
-        );
-        drop(first_runtime);
+        {
+            let first_runtime = runtime(data.path(), &runner);
+            // The first attempt really copies the verified distribution objects
+            // and persists the installation receipt. Its acknowledgement is lost.
+            first_runtime
+                .install_with_space_check(&plan, &installation_id, &recipe_digest, 16)
+                .unwrap();
+            assert_eq!(
+                fs::read(installation.join("models/primary/config.json")).unwrap(),
+                b"primary"
+            );
+            assert!(
+                installation
+                    .join(super::INSTALLATION_METADATA_FILE)
+                    .is_file()
+            );
+        }
         let runtime = runtime(data.path(), &runner);
         let unavailable_full_copy_bytes =
             crate::inventory::available_disk_bytes(data.path()).unwrap();
