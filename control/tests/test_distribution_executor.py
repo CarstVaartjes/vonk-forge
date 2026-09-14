@@ -456,10 +456,13 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
     # The failure path is intentionally checked at the durable projection
     # boundary; no fabricated verification receipt can make it succeed.
     with services.sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        node.workload_intent_ordinal = 1
         child = Job(
             id=str(uuid4()), request_id=str(uuid4()), kind="artifact-distribution", state="queued",
             actor="test", authority_revision="f" * 64, targets=[NODE_A], payload_digest="0" * 64,
-            payload={"cached_nodes": [], "target_totals": {NODE_A: 26}}, result=None,
+            payload={"workload_intent_ordinal": 1, "cached_nodes": [], "target_totals": {NODE_A: 26}}, result=None,
             created_at=clock.now, updated_at=clock.now,
         )
         session.add(child)

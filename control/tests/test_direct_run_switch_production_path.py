@@ -288,8 +288,9 @@ class _TargetExecutor(CompositeDistributionPhaseExecutor):
         assignments,
         target_order,
         target_bytes=None,
+        workload_intent_ordinal,
     ) -> str:
-        del plan, phase, actor, request_key, cached, target_order, target_bytes
+        del plan, phase, actor, request_key, cached, target_order, target_bytes, workload_intent_ordinal
         child_id = str(uuid.uuid4())
         self.assignments.update(
             {node_id: value.to_mapping() for node_id, value in assignments.items()}

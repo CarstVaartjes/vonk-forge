@@ -25,14 +25,15 @@ from vonk_agent_protocol import (
     validate_schema_message,
 )
 from vonk_agent_protocol.contracts import RESULT_MODELS, _validate_safe_keys
+from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
 
 def valid_claim() -> dict[str, object]:
-    payload = {
-        "schema_version": 1,
-        "run_id": "00000000-0000-4000-8000-000000000004",
-        "plan_digest": "a" * 64,
-    }
+    payload = RecipeStopPayload(
+        schema_version=1,
+        run_id="00000000-0000-4000-8000-000000000004",
+        plan_digest="a" * 64,
+    ).model_dump(mode="json")
     return {
         "schema_version": 1,
         "job_id": "00000000-0000-4000-8000-000000000001",
