@@ -403,6 +403,29 @@ impl StateStore {
         Ok(())
     }
 
+    /// Stop re-sending a result the Controller refused as no longer current.
+    ///
+    /// The recorded outcome is retained with its attempt and fence so the work
+    /// this agent actually performed stays observable, but it is never sent
+    /// again: the Controller refused it, so re-sending it cannot make it commit
+    /// workload state and would only spin the loop.
+    pub fn supersede(&mut self, result: &AgentResult) -> Result<(), StateError> {
+        result.validate()?;
+        let changed = self.connection.execute(
+            "UPDATE operations SET result_acknowledged=1
+             WHERE operation_id=?1 AND attempt=?2 AND fence=?3 AND state='completed'",
+            params![
+                result.operation_id.to_string(),
+                result.attempt,
+                result.fence.to_string()
+            ],
+        )?;
+        if changed != 1 {
+            return Err(StateError::Stale);
+        }
+        Ok(())
+    }
+
     pub fn recover_interrupted(&mut self) -> Result<(), StateError> {
         let claims = {
             let mut statement = self.connection.prepare(

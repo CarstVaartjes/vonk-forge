@@ -2518,8 +2518,15 @@ where
         result
             .validate_for_operation(&operation)
             .map_err(StateError::from)?;
-        client.submit_result(&result).await?;
-        state.acknowledge(&result)?;
+        match client.submit_result(&result).await {
+            Ok(()) => state.acknowledge(&result)?,
+            // The Controller refused this attempt's outcome as no longer
+            // current.  The evidence never landed, so keep it in local custody
+            // instead of discarding it, and stop re-sending an outcome that
+            // already cannot be applied.
+            Err(ClientError::ResultSuperseded) => state.supersede(&result)?,
+            Err(error) => return Err(error.into()),
+        }
     }
     let claim = client
         .claim(
@@ -2586,8 +2593,11 @@ where
     result
         .validate_for_operation(&claim.operation)
         .map_err(StateError::from)?;
-    client.submit_result(&result).await?;
-    state.acknowledge(&result)?;
+    match client.submit_result(&result).await {
+        Ok(()) => state.acknowledge(&result)?,
+        Err(ClientError::ResultSuperseded) => state.supersede(&result)?,
+        Err(error) => return Err(error.into()),
+    }
     Ok(())
 }
 
@@ -2803,18 +2813,18 @@ fn remaining_lease(deadline: DateTime<FixedOffset>) -> Duration {
 mod tests {
     use super::{
         ExecutionResult, Executor, InterruptibleJob, LoopClient, RecipeExecutor,
-        RecipeObservationError, RunOncePolicy, distribution_success_evidence,
+        RecipeObservationError, RejectingExecutor, RunOncePolicy, distribution_success_evidence,
         normalize_execution_result, output_media_type, parse_compiled_execution_plan,
-        readiness_identity, report_complete_recipe_run_observations, run_interruptible_job,
-        run_once_with_claim_hook, run_once_with_heartbeat_interval, wait_for_launch_stability,
-        wait_ready_with_runtime_guard,
+        readiness_identity, recipe_install_success_body, report_complete_recipe_run_observations,
+        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
+        wait_for_launch_stability, wait_ready_with_runtime_guard,
     };
     use crate::{
         client::{AgentHttpClient, ClientError, DistributionDownloadEvidence},
         oci::OciRuntime,
         process::{ProcessError, ProcessOutput, ProcessRunner, Program},
         runtime_identity::AgentRuntimeIdentity,
-        state::StateStore,
+        state::{BeginDecision, StateStore},
     };
     use async_trait::async_trait;
     use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Utc};
@@ -3866,6 +3876,132 @@ mod tests {
         assert!(results[0].deadline > original.deadline);
         assert!(observed_deadline.lock().unwrap().unwrap() > original.deadline);
         assert!(state.pending_results().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_conflicting_result_response_is_not_an_acknowledgement() {
+        // The real client has to separate "the Controller already holds this
+        // outcome" (204) from "the Controller refused it because the attempt is
+        // no longer current" (409).  Treating both as accepted is what let a
+        // refused result be deleted locally as though it had landed.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            while !request.windows(4).any(|value| value == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).unwrap();
+                assert_ne!(read, 0);
+                request.extend_from_slice(&buffer[..read]);
+            }
+            stream
+                .write_all(
+                    b"HTTP/1.1 409 Conflict\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+            request
+        });
+        let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), NODE_ID);
+
+        let directory = tempdir().unwrap();
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+        let claim = claim();
+        assert!(matches!(
+            state.begin(&claim, Utc::now()).unwrap(),
+            BeginDecision::Execute
+        ));
+        let result = state
+            .finish(&claim, "succeeded", recipe_install_success_body(0))
+            .unwrap();
+
+        assert!(matches!(
+            client.submit_result(&result).await,
+            Err(ClientError::ResultSuperseded)
+        ));
+        let request = String::from_utf8_lossy(&server.join().unwrap()).to_ascii_lowercase();
+        assert!(request.starts_with("post /agent/result"));
+    }
+
+    #[derive(Clone)]
+    struct RefusingResultClient {
+        submitted: Arc<Mutex<Vec<AgentResult>>>,
+    }
+
+    #[async_trait]
+    impl LoopClient for RefusingResultClient {
+        async fn claim(
+            &self,
+            _capabilities: &[&str],
+            _wait_seconds: u64,
+            _runtime_identity: Option<&AgentRuntimeIdentity>,
+        ) -> Result<Option<AgentClaim>, ClientError> {
+            Ok(None)
+        }
+
+        async fn heartbeat(
+            &self,
+            _progress: &AgentProgress,
+        ) -> Result<AgentDirective, ClientError> {
+            Err(ClientError::Protocol)
+        }
+
+        async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+            self.submitted.lock().unwrap().push(result.clone());
+            Err(ClientError::ResultSuperseded)
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_refused_result_is_kept_instead_of_discarded() {
+        // A result the Controller refuses because the attempt is no longer
+        // current never reached durable storage.  Treating that refusal as an
+        // acknowledgement discarded the only evidence of the work this agent
+        // performed, so the outcome stays in local custody instead.
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.sqlite");
+        let mut state = StateStore::open(&path, NODE_ID).unwrap();
+        let claim = claim();
+        assert!(matches!(
+            state.begin(&claim, Utc::now()).unwrap(),
+            BeginDecision::Execute
+        ));
+        let result = state
+            .finish(&claim, "succeeded", recipe_install_success_body(0))
+            .unwrap();
+        assert_eq!(state.pending_results().unwrap().len(), 1);
+
+        let client = RefusingResultClient {
+            submitted: Arc::new(Mutex::new(Vec::new())),
+        };
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &RejectingExecutor,
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(10),
+                heartbeat_retry_interval: Duration::from_millis(1),
+            },
+            || Ok(()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(client.submitted.lock().unwrap().len(), 1);
+        // It is not retried, and its recorded outcome is still readable.
+        assert!(state.pending_results().unwrap().is_empty());
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let stored: Option<Vec<u8>> = connection
+            .query_row(
+                "SELECT result_json FROM operations WHERE operation_id=?1 AND attempt=?2",
+                rusqlite::params![result.operation_id.to_string(), result.attempt],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(stored.is_some());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

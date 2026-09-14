@@ -136,6 +136,35 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+def _lease_expiry_reason(
+    operation: StoredOperation,
+    previous: AgentOperationAttempt | None,
+    node: AgentNode,
+    now: datetime,
+) -> str:
+    """Return one durable reason for an attempt that stopped renewing.
+
+    The lease deadline, the last accepted contact and the expiry instant are
+    the facts that separate "the agent went away mid-effect" from "the agent is
+    still working".  A late result can never be applied to an expired attempt,
+    so these facts are what an operator or a recovery owner has to reconcile
+    against the actual effect.
+    """
+
+    parts = [f"attempt {max(1, operation.current_attempt)} lease expired"]
+    if previous is not None:
+        parts.append(
+            f"lease deadline {_aware(previous.lease_deadline).isoformat()}"
+        )
+    parts.append(
+        "last accepted contact never observed"
+        if node.last_seen_at is None
+        else f"last accepted contact {_aware(node.last_seen_at).isoformat()}"
+    )
+    parts.append(f"expired at {_aware(now).isoformat()}")
+    return ("; ".join(parts) + "; the effect is unobserved")[:512]
+
+
 def _document(value: Mapping[str, object]) -> dict[str, object]:
     """Return the protocol's validated, deterministic JSON representation."""
     return json.loads(canonical_message(value))
@@ -604,6 +633,14 @@ class AgentJobService:
                     previous.state = "expired"
             if operation.state == "running":
                 operation.state = "waiting-for-operator"
+                # An expiry parks the operation without an attempt result, so
+                # record why it stopped and the last facts describing the
+                # interruption.  Without this an uncertain operation carries no
+                # evidence at all and no operator can tell a lost connection
+                # from an effect that may already have happened.
+                operation.status_reason = _lease_expiry_reason(
+                    operation, previous, node, now
+                )
                 operation.retry_disposition = None
                 operation.retry_disposition_attempt = None
                 operation.updated_at = now
@@ -626,6 +663,9 @@ class AgentJobService:
                 operation.payload_digest = hashlib.sha256(payload_bytes).hexdigest()
             operation.current_attempt += 1
             operation.state = "running"
+            # A live attempt has no interrupted reason: keeping the previous
+            # one would describe work that is running again.
+            operation.status_reason = None
             operation.updated_at = now
             fence = str(uuid.uuid4())
             deadline = now + timedelta(seconds=lease_seconds)

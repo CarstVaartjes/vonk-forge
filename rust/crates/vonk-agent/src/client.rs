@@ -72,6 +72,13 @@ pub enum ClientError {
     Retryable,
     #[error("controller protocol response is invalid")]
     Protocol,
+    // The Controller did not accept this result: the attempt is no longer
+    // current, or its outcome was already consumed.  It is deliberately
+    // distinct from an accepted result and from a transport failure, because
+    // the agent must keep evidence the Controller never confirmed rather than
+    // treat the refusal as an acknowledgement.
+    #[error("controller did not accept the result for this attempt")]
+    ResultSuperseded,
     #[error("exact recipe run observation is not ready for authorization")]
     ObservationNotReady,
     #[error("controller CA pin is invalid")]
@@ -472,14 +479,17 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        if matches!(
-            response.status(),
-            StatusCode::NO_CONTENT | StatusCode::CONFLICT
-        ) {
-            Ok(())
-        } else {
-            classify_response(&response)?;
-            Err(ClientError::Protocol)
+        match response.status() {
+            StatusCode::NO_CONTENT => Ok(()),
+            // A 409 fences this result: the attempt is no longer current, or
+            // its outcome was already consumed.  Either way the Controller did
+            // not acknowledge this submission, so the caller keeps the evidence
+            // instead of deleting it on the strength of a refusal.
+            StatusCode::CONFLICT => Err(ClientError::ResultSuperseded),
+            _ => {
+                classify_response(&response)?;
+                Err(ClientError::Protocol)
+            }
         }
     }
 

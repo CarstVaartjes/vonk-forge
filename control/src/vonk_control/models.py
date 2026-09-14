@@ -774,6 +774,10 @@ class AgentOperation(Base):
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     authority_revision: Mapped[str] = mapped_column(String(128), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    #: Why this operation is not currently progressing.  A lease expiry parks an
+    #: operation without any attempt result, so without this the operator sees
+    #: an interrupted operation and no evidence of what actually happened.
+    status_reason: Mapped[str | None] = mapped_column(String(512))
     current_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     retry_disposition: Mapped[str | None] = mapped_column(String(32))
     retry_disposition_attempt: Mapped[int | None] = mapped_column(Integer)
