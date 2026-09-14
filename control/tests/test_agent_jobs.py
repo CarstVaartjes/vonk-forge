@@ -814,6 +814,91 @@ def test_expired_attempt_cannot_publish_success(service) -> None:
         assert stored is not None and stored.state == "waiting-for-operator"
 
 
+def test_lease_expiry_records_reason_and_last_contact_facts(service) -> None:
+    """An expiry parks the operation with the facts that describe it.
+
+    The transition records no attempt result, so without a reason and the last
+    accepted contact an operator sees an interrupted operation carrying no
+    evidence at all and cannot tell a lost connection from an effect that may
+    already have happened.
+    """
+
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(
+        parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert first is not None
+    with sessions() as session:
+        running = session.get(AgentOperation, operation.id)
+        assert running is not None and running.status_reason is None
+
+    clock.advance(seconds=31)
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        assert attempt is not None
+        deadline = attempt.lease_deadline
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        last_seen = node.last_seen_at
+
+    assert stored is not None and stored.state == "waiting-for-operator"
+    reason = stored.status_reason
+    assert reason is not None
+    assert "attempt 1 lease expired" in reason
+    assert "the effect is unobserved" in reason
+    assert f"lease deadline {deadline.isoformat()}" in reason
+    assert (
+        "last accepted contact never observed"
+        if last_seen is None
+        else f"last accepted contact {last_seen.isoformat()}"
+    ) in reason
+
+
+def test_replayed_result_stays_fenced_and_records_no_second_outcome(service) -> None:
+    """A replayed result is still fenced; the agent keeps the evidence instead.
+
+    The Controller deliberately refuses a duplicate outcome rather than
+    acknowledging it, so the agent must not treat the refusal as acceptance.
+    This pins that contract while the agent keeps what it observed.
+    """
+
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(
+        parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert first is not None
+    jobs.succeed(first, STOP_RESULT)
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+    assert stored is not None and stored.state == "succeeded"
+    assert attempt is not None and attempt.state == "succeeded"
+
+    clock.advance(seconds=31)
+    with pytest.raises(StaleAgentAttempt):
+        jobs.succeed(first, STOP_RESULT)
+
+    with sessions() as session:
+        unchanged = session.get(AgentOperation, operation.id)
+    assert unchanged is not None and unchanged.state == "succeeded"
+
+
 def test_revoked_expired_or_node_mismatched_certificate_cannot_claim(service) -> None:
     jobs, sessions, clock = service
     jobs.enqueue(parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
