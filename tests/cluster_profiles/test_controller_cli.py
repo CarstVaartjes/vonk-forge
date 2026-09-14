@@ -11,22 +11,28 @@ from io import StringIO
 import pytest
 
 from cluster_profiles import cli
+from cluster_profiles.cli_render import render_payload
 from cluster_profiles.cli_select import SelectorError, select_exact
 from cluster_profiles.control_client import (
     ControlForbidden,
+    ControlNotFound,
     ControlTransportError,
     ControlUnavailable,
 )
 from cluster_profiles.controller_cli import _operation_progress_line
 
 
-def _subparser_choices(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
+def _subparser_choices(
+    parser: argparse.ArgumentParser,
+) -> dict[str, argparse.ArgumentParser]:
     """Return the parser's subcommands through the argparse group it created."""
 
     group = parser._subparsers
     assert group is not None, "parser has no subcommands"
     action = group._group_actions[0]
-    assert isinstance(action, argparse._SubParsersAction), "parser subcommands are unavailable"
+    assert isinstance(action, argparse._SubParsersAction), (
+        "parser subcommands are unavailable"
+    )
     return action.choices
 
 
@@ -51,9 +57,16 @@ class FakeClient:
         return response
 
     def _validate_request(self, method, path, payload, query):
-        profile_path = re.fullmatch(r"/api/profile/(\d+)(?:/(preview|load|progress))?", path)
+        profile_path = re.fullmatch(
+            r"/api/profile/(\d+)(?:/(preview|load|progress))?", path
+        )
         application_path = re.fullmatch(
             r"/api/profile/applications/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            path,
+        )
+        request_path = re.fullmatch(
+            r"/api/profile/\d+/requests/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
             r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
             path,
         )
@@ -73,32 +86,60 @@ class FakeClient:
             path in known_get
             or profile_path is not None
             or application_path is not None
+            or request_path is not None
             or selector_path is not None
             or operation_path is not None
         )
-        known = known or re.fullmatch(r"/api/fleet/[^/]+(?:/loginfo)?", path) is not None
+        known = (
+            known or re.fullmatch(r"/api/fleet/[^/]+(?:/loginfo)?", path) is not None
+        )
         known = known or path in {
             "/api/fleet/enroll",
             "/api/fleet/upgrade",
             "/api/recipe/update",
         }
-        known = known or re.fullmatch(r"/api/fleet/[^/]+/(rename|re-enroll|remove)", path) is not None
+        known = (
+            known
+            or re.fullmatch(r"/api/fleet/[^/]+/(rename|re-enroll|remove)", path)
+            is not None
+        )
         if not known:
-            raise AssertionError(f"CLI emitted retired or invented route: {method} {path}")
+            raise AssertionError(
+                f"CLI emitted retired or invented route: {method} {path}"
+            )
 
         if method == "GET":
             if path.endswith("/library"):
                 assert query is None or set(query) <= {
-                    "search", "usage", "family", "version", "quantization",
-                    "updated_since", "sort", "limit", "cursor", "model", "all_models",
+                    "search",
+                    "usage",
+                    "family",
+                    "version",
+                    "quantization",
+                    "updated_since",
+                    "sort",
+                    "limit",
+                    "cursor",
+                    "model",
+                    "all_models",
                 }
             elif path.startswith("/api/fleet/") and not path.endswith("/loginfo"):
                 assert query is None or set(query) <= {
-                    "metrics", "range", "device", "interface", "run", "capabilities", "technical",
+                    "metrics",
+                    "range",
+                    "device",
+                    "interface",
+                    "run",
+                    "capabilities",
+                    "technical",
                 }
             elif path.endswith("/loginfo"):
                 assert query is None or set(query) <= {
-                    "since", "lines", "recipe", "source", "follow",
+                    "since",
+                    "lines",
+                    "recipe",
+                    "source",
+                    "follow",
                 }
             elif selector_path is not None and selector_path.group(2) is None:
                 assert query is None or set(query) <= {"technical"}
@@ -115,7 +156,11 @@ class FakeClient:
             assert isinstance(payload.get("assignments"), list)
             for assignment in payload["assignments"]:
                 assert set(assignment) <= {
-                    "recipe_selector", "spark_ids", "assignment_name", "model_variant", "desired_state",
+                    "recipe_selector",
+                    "spark_ids",
+                    "assignment_name",
+                    "model_variant",
+                    "desired_state",
                 }
                 assert isinstance(assignment["recipe_selector"], str)
                 assert isinstance(assignment["spark_ids"], list)
@@ -131,7 +176,10 @@ class FakeClient:
             assert set(payload) <= {"request_key", "dry_run"}
             assert "request_key" in payload
             uuid.UUID(payload["request_key"])
-        elif selector_path is not None and selector_path.group(2) in {"download", "remove"}:
+        elif selector_path is not None and selector_path.group(2) in {
+            "download",
+            "remove",
+        }:
             assert isinstance(payload, dict)
             assert set(payload) <= {"schema_version", "request_key", "with_model"}
             assert payload["schema_version"] == 2
@@ -148,7 +196,9 @@ class FakeClient:
             assert isinstance(payload["selectors"], list)
             assert isinstance(payload["all"], bool)
         elif path == "/api/fleet/upgrade":
-            assert {"all", "strategy"} <= set(payload) <= {"selectors", "all", "strategy"}
+            assert (
+                {"all", "strategy"} <= set(payload) <= {"selectors", "all", "strategy"}
+            )
             if "selectors" in payload:
                 assert isinstance(payload["selectors"], list) and payload["selectors"]
         elif path == "/api/fleet/enroll":
@@ -172,13 +222,14 @@ def run(argv: tuple[str, ...], client: FakeClient) -> tuple[int, dict[str, objec
     return status, json.loads(output.getvalue())
 
 
-def test_parser_exposes_only_current_singular_operator_roots() -> None:
+def test_parser_exposes_current_singular_operator_roots_and_update() -> None:
     parser = cli._parser()
     assert set(_subparser_choices(parser)) == {
         "fleet",
         "model",
         "recipe",
         "profile",
+        "update",
     }
     for argv in (
         ("models", "list"),
@@ -207,7 +258,9 @@ def test_fleet_loginfo_line_count_is_bounded_without_enumerating_choices() -> No
             loginfo.parse_args(["Atlas", "--lines", rejected])
         output = StringIO()
         with redirect_stdout(output):
-            status = cli.main(("fleet", "loginfo", "Atlas", "--lines", rejected, "--json"))
+            status = cli.main(
+                ("fleet", "loginfo", "Atlas", "--lines", rejected, "--json")
+            )
         assert status == 2
         assert json.loads(output.getvalue())["error_type"] == "arguments"
 
@@ -260,13 +313,19 @@ def test_download_is_one_step_and_repeated_calls_keep_server_operation_states() 
             },
         }
     )
-    assert run(("model", "download", "qwen", "--json"), client)[1]["action"] == "Following"
+    assert (
+        run(("model", "download", "qwen", "--json"), client)[1]["action"] == "Following"
+    )
     assert run(("model", "download", "qwen", "--json"), client)[0] == 0
     assert run(("recipe", "download", "qwen-code", "--json"), client)[0] == 0
-    assert client.calls[0][2] == client.calls[1][2] == {
-        "schema_version": 2,
-        "request_key": "11111111-1111-4111-8111-111111111111",
-    }
+    assert (
+        client.calls[0][2]
+        == client.calls[1][2]
+        == {
+            "schema_version": 2,
+            "request_key": "11111111-1111-4111-8111-111111111111",
+        }
+    )
     assert client.calls[2][2] == {
         "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
@@ -330,9 +389,12 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
         "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
     }
-    assert run(
-        ("recipe", "remove", "vision", "--with-model", "--yes", "--json"), client
-    )[0] == 0
+    assert (
+        run(("recipe", "remove", "vision", "--with-model", "--yes", "--json"), client)[
+            0
+        ]
+        == 0
+    )
     assert client.calls[1][1] == "/api/recipe/vision/remove"
     recipe_remove = client.calls[1][2]
     assert recipe_remove is not None
@@ -542,12 +604,12 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
         "/api/profile/1/load",
         f"/api/profile/applications/{application_id}",
     ]
-    assert client.calls[0][2] == {
-        "request_key": "11111111-1111-4111-8111-111111111111"
-    }
+    assert client.calls[0][2] == {"request_key": "11111111-1111-4111-8111-111111111111"}
 
 
-def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route() -> None:
+def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route() -> (
+    None
+):
     client = FakeClient(
         {
             ("POST", "/api/profile/1/load"): {"state": "queued"},
@@ -664,9 +726,7 @@ def test_lost_mutation_response_still_names_the_request_key() -> None:
 
     client = FakeClient(
         {
-            ("POST", "/api/profile/1/load"): ControlTransportError(
-                "connection reset"
-            ),
+            ("POST", "/api/profile/1/load"): ControlTransportError("connection reset"),
         }
     )
     status, payload = run(("profile", "load", "--json"), client)
@@ -678,13 +738,93 @@ def test_lost_mutation_response_still_names_the_request_key() -> None:
     assert reconcile["request_key"] == payload["request_key"]
 
 
+def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None:
+    key = "11111111-1111-4111-8111-111111111111"
+    operation = "33333333-3333-4333-8333-333333333333"
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): ControlTransportError("connection reset"),
+            ("GET", f"/api/profile/1/requests/{key}"): {
+                "id": operation,
+                "state": "succeeded",
+            },
+        }
+    )
+
+    status, payload = run(("profile", "load", "--json"), client)
+
+    assert status == 0
+    assert payload["id"] == operation
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
+
+
+def test_lost_load_response_retries_only_with_original_request_key() -> None:
+    key = "11111111-1111-4111-8111-111111111111"
+    operation = "33333333-3333-4333-8333-333333333333"
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): [
+                ControlTransportError("connection reset"),
+                {"id": operation, "state": "succeeded"},
+            ],
+            ("GET", f"/api/profile/1/requests/{key}"): ControlNotFound(
+                404, "not committed"
+            ),
+        }
+    )
+
+    status, payload = run(("profile", "load", "--json"), client)
+
+    assert status == 0
+    assert payload["id"] == operation
+    post_keys = [
+        call[2]["request_key"]
+        for call in client.calls
+        if call[0] == "POST" and call[2] is not None
+    ]
+    assert post_keys == [key, key]
+
+
 def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
-    assert _operation_progress_line(
-        {"state": "building", "progress": {"step": 4, "steps": 7}}
-    ) == "building · step 4/7"
-    assert _operation_progress_line(
-        {"state": "copying", "progress": {"completed_bytes": 20}}
-    ) == "copying · progress unavailable"
+    assert (
+        _operation_progress_line(
+            {"state": "building", "progress": {"step": 4, "steps": 7}}
+        )
+        == "building · step 4/7"
+    )
+    assert (
+        _operation_progress_line(
+            {"state": "copying", "progress": {"completed_bytes": 20}}
+        )
+        == "copying · progress unavailable"
+    )
+
+
+def test_profile_terminal_render_shows_effective_initial_budget_and_runtime_phase() -> (
+    None
+):
+    output = StringIO()
+    with redirect_stdout(output):
+        render_payload(
+            {
+                "state": "running",
+                "progress": {
+                    "current_label": "start Mia",
+                    "child_progress": {
+                        "phase": "runtime-install",
+                        "operation": {"phase": "jit"},
+                        "startup_budget_seconds": 1800,
+                        "start_deadline": "2026-09-14T20:00:00Z",
+                    },
+                },
+            },
+            "profile",
+        )
+    rendered = output.getvalue()
+    assert "start Mia" in rendered
+    assert "load/JIT phase: jit" in rendered
+    assert "initial start budget: 1800 seconds" in rendered
+    assert "initial start deadline: 2026-09-14T20:00:00Z" in rendered
 
 
 def test_selector_requires_exact_unique_match_for_local_selection() -> None:
@@ -713,9 +853,10 @@ def test_removal_flags_are_scoped_to_recipe_model_dependency() -> None:
             pass
         else:
             raise AssertionError(f"invalid dependency flag accepted: {argv}")
-    assert parser.parse_args(
-        ("recipe", "remove", "qwen-code", "--keep-model")
-    ).keep_model is True
+    assert (
+        parser.parse_args(("recipe", "remove", "qwen-code", "--keep-model")).keep_model
+        is True
+    )
     for argv in (
         ("model", "download", "qwen", "--force"),
         ("recipe", "download", "qwen-code", "--force"),
@@ -749,7 +890,9 @@ def test_explicit_request_key_is_forwarded_for_retry_reconciliation() -> None:
 
 def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
     class ConflictClient(FakeClient):
-        def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+        def request(
+            self, method, path, payload=None, *, extra_headers=None, query=None
+        ):
             self._validate_request(method, path, payload, query)
             self.calls.append((method, path, payload, query))
             if method == "PUT":
@@ -777,7 +920,9 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
 
 def test_ambiguous_mutation_error_is_not_retried_or_fuzzily_resolved() -> None:
     class AmbiguousClient(FakeClient):
-        def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+        def request(
+            self, method, path, payload=None, *, extra_headers=None, query=None
+        ):
             self._validate_request(method, path, payload, query)
             self.calls.append((method, path, payload, query))
             raise ValueError("ambiguous model selector; choose an exact selector")
@@ -824,19 +969,22 @@ def test_fleet_actions_use_readable_selectors_and_avoid_legacy_agent_routes() ->
     )
     assert run(("fleet", "detail", "Atlas", "--json"), client)[0] == 0
     assert run(("fleet", "rename", "Atlas", "Studio", "--json"), client)[0] == 0
-    assert run(
-        (
-            "fleet",
-            "loginfo",
-            "Atlas",
-            "--since",
-            "1h",
-            "--source",
-            "runtime",
-            "--json",
-        ),
-        client,
-    )[0] == 0
+    assert (
+        run(
+            (
+                "fleet",
+                "loginfo",
+                "Atlas",
+                "--since",
+                "1h",
+                "--source",
+                "runtime",
+                "--json",
+            ),
+            client,
+        )[0]
+        == 0
+    )
     assert [call[1] for call in client.calls] == [
         "/api/fleet/Atlas",
         "/api/fleet/Atlas/rename",
@@ -847,7 +995,9 @@ def test_fleet_actions_use_readable_selectors_and_avoid_legacy_agent_routes() ->
 
 def test_error_output_redacts_request_secrets_and_keeps_json_clean() -> None:
     class FailingClient(FakeClient):
-        def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+        def request(
+            self, method, path, payload=None, *, extra_headers=None, query=None
+        ):
             raise ValueError("authorization: Bearer secret-value")
 
     status, payload = run(("model", "detail", "qwen", "--json"), FailingClient({}))
@@ -957,9 +1107,7 @@ def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() 
     assert model.calls == []
 
     recipe = FakeClient({})
-    status, payload = run(
-        ("recipe", "remove", "qwen-code", "--yes", "--json"), recipe
-    )
+    status, payload = run(("recipe", "remove", "qwen-code", "--yes", "--json"), recipe)
     model_choice_error = payload["error"]
     assert isinstance(model_choice_error, str)
     assert status == 2 and "--with-model or --keep-model" in model_choice_error

@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import event, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import (
     AgentCertificate,
@@ -44,6 +45,7 @@ def queue(postgres_engine):
                     state="active",
                     protocol_version=3,
                     capabilities=list(CAPABILITIES),
+                    workload_intent_ordinal=1,
                 )
             )
         session.flush()
@@ -57,6 +59,7 @@ def queue(postgres_engine):
                     fingerprint=f"fingerprint-{index}",
                 )
             )
+        payload = {"workload_intent_ordinal": 1}
         parent = Job(
             request_id=str(uuid.uuid4()),
             kind="agent.operations",
@@ -64,8 +67,8 @@ def queue(postgres_engine):
             actor="operator",
             authority_revision=REVISION,
             targets=list(NODES),
-            payload_digest=hashlib.sha256(b"{}").hexdigest(),
-            payload={},
+            payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+            payload=payload,
             current_attempt=0,
             created_at=NOW,
             updated_at=NOW,

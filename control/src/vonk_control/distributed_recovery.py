@@ -559,6 +559,38 @@ def _enqueue_recovery_stop(
         },
     }
     targets = sorted(node_id for group in stop_phases for node_id, _payload in group)
+    start_jobs = tuple(
+        session.scalars(
+            select(Job)
+            .where(
+                Job.kind == "recipe.start",
+                Job.payload["owner_kind"].as_string() == "run",
+                Job.payload["owner_id"].as_string() == run.id,
+                Job.payload["recovery"].as_string().is_(None),
+            )
+            .order_by(Job.created_at, Job.id)
+            .limit(2)
+        )
+    )
+    if len(start_jobs) != 1:
+        raise DistributedLifecycleError("distributed recovery lacks its start authority")
+    start_ordinal = start_jobs[0].payload.get("workload_intent_ordinal")
+    target_nodes = tuple(
+        session.scalars(
+            select(AgentNode)
+            .where(AgentNode.node_id.in_(targets))
+            .order_by(AgentNode.node_id)
+            .with_for_update(of=AgentNode)
+        )
+    )
+    if (
+        type(start_ordinal) is not int
+        or start_ordinal < 1
+        or tuple(node.node_id for node in target_nodes) != tuple(targets)
+        or any(node.workload_intent_ordinal != start_ordinal for node in target_nodes)
+    ):
+        raise DistributedLifecycleError("distributed recovery start authority was superseded")
+    job_payload["workload_intent_ordinal"] = start_ordinal
     job = Job(
         id=job_id,
         request_id=request_id,

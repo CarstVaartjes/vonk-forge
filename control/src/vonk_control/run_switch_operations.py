@@ -15,12 +15,12 @@ import json
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, TypeGuard, runtime_checkable
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionAssignment,
@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .agent_jobs import AgentJobService
 from .bounded_json import require_integer, require_sequence
 from .cluster_mappings import (
     ClusterMappingError,
@@ -74,11 +75,18 @@ from .recipe_execution_contract import (
     run_plan_document,
 )
 from .recipe_operations import (
+    RecipeArtifactJobCancellationPending,
     RecipeInstallPreflightExpired,
     RecipeOperationConflict,
     RecipeOperationService,
 )
 from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
+from .recovery_policy import (
+    FailureKind,
+    RecoveryDecision,
+    classify,
+    kind_for_agent_error,
+)
 from .resource_planning import (
     CapacitySnapshot,
     PlannedStopRelease,
@@ -158,6 +166,25 @@ _REASON_SEVERITY_ADAPTER = TypeAdapter(RunSwitchReasonSeverity)
 
 class RunSwitchOperationConflict(RuntimeError):
     """The selected outcome is stale, unsupported, or unsafe to execute."""
+
+
+class RunSwitchIssuedWorkloadPending(RunSwitchOperationConflict):
+    """An older issued lifecycle effect needs observation, never blind replay."""
+
+    def __init__(
+        self,
+        *,
+        kind: str,
+        owner_id: str,
+        job_id: str,
+        observe_due_at: datetime,
+        observation_deadline: datetime,
+    ) -> None:
+        super().__init__(f"run-switch.{kind}-issued-pending: {owner_id} ({job_id})")
+        self.kind = kind
+        self.job_id = job_id
+        self.observe_due_at = observe_due_at
+        self.observation_deadline = observation_deadline
 
 
 class RunSwitchInstallPreflightExpired(RunSwitchOperationConflict):
@@ -314,28 +341,20 @@ class _BuildSelection:
 
 
 _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
+_STOPPABLE_RUN_STATES = _ACTIVE_RUN_STATES | {"lost"}
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _OPERATION_KINDS = frozenset(
     {"recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"}
 )
 _MAX_RETRY_ATTEMPTS = 3
 _INSTALL_PREFLIGHT_REFRESH_REASON = "runtime preflight expired during install compilation"
-_TERMINAL_RETRY_MARKERS = (
-    "digest",
-    "integrity",
-    "auth",
-    "credential",
-    "permission",
-    "denied",
-    "revoked",
-    "receipt",
-)
 _PHASES: tuple[RunSwitchPhaseKind, ...] = (
     "transfer",
     "verify",
     "prepare",
     "cleanup",
     "stop",
+    "uninstall",
     "start",
     "final_verify",
 )
@@ -1116,6 +1135,19 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution(result=result)
         return PhaseExecution(_started_operation_id(value), result)
 
+    def _observe_older_issued(
+        self, kind: str, owner_id: str, ordinal: int
+    ) -> None:
+        pending = self._lifecycle.assess_superseded_issued(kind, owner_id, ordinal)
+        if pending is not None:
+            raise RunSwitchIssuedWorkloadPending(
+                kind=kind,
+                owner_id=owner_id,
+                job_id=pending.job_id,
+                observe_due_at=pending.observe_due_at,
+                observation_deadline=pending.observation_deadline,
+            )
+
     def execute(
         self,
         plan: RunSwitchPlan,
@@ -1178,13 +1210,48 @@ class RecipeLifecyclePhaseExecutor:
             if item_index >= len(plan.stops):
                 return PhaseExecution()
             target = plan.stops[item_index]
-            child_key = str(uuid.uuid5(uuid.UUID(request_key), f"stop:{target.run_id}"))
-            value = self._lifecycle.stop(
-                target.run_id,
-                plan_digest=target.plan_digest,
-                actor=actor,
-                request_id=child_key,
+            ordinal = _bound_workload_intent(progress)
+            self._lifecycle.reconcile_superseded_unissued(
+                "recipe.stop", target.run_id, ordinal
             )
+            stop_digest = target.plan_digest
+            if target.state in {"starting", "stopping"}:
+                # A newer explicit Stop can cancel an older same-run command
+                # under the current node ordinal.  Re-preview this exact run
+                # because its prior Start/Stop may have changed state after
+                # the high-level plan was reviewed.  The low-level Stop
+                # authority validates current membership and reservations.
+                with self._sessions() as session:
+                    run = session.get(RecipeRun, target.run_id)
+                    if run is None:
+                        raise RunSwitchOperationConflict(
+                            "run-switch.stop-target-disappeared"
+                        )
+                    if run.state == "stopped" and run.route_state == "withdrawn":
+                        return PhaseExecution(result={"run_id": target.run_id})
+                fresh = self._lifecycle.preview_stop(target.run_id)
+                if not fresh.allowed:
+                    raise RunSwitchOperationConflict(
+                        "run-switch.stop-still-unresolved-after-cancellation"
+                    )
+                stop_digest = fresh.plan_digest
+            child_key = str(uuid.uuid5(uuid.UUID(request_key), f"stop:{target.run_id}"))
+            try:
+                value = self._lifecycle.stop(
+                    target.run_id,
+                    plan_digest=stop_digest,
+                    actor=actor,
+                    request_id=child_key,
+                    workload_intent_ordinal=ordinal,
+                )
+            except RecipeArtifactJobCancellationPending as pending:
+                raise RunSwitchIssuedWorkloadPending(
+                    kind="artifact-job-cancellation",
+                    owner_id=target.run_id,
+                    job_id=pending.job_id,
+                    observe_due_at=pending.observe_due_at,
+                    observation_deadline=pending.observation_deadline,
+                ) from pending
             return PhaseExecution(value.id, {"run_id": target.run_id})
         if phase.kind == "prepare" and phase.subphase == "container-build":
             return self._execute_container_build(
@@ -1278,6 +1345,7 @@ class RecipeLifecyclePhaseExecutor:
                 }
             )
         if phase.kind == "prepare" and phase.subphase == "runtime-install":
+            ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
             phase_results = progress.get("phase_results")
             if installation_id is None and isinstance(phase_results, list):
@@ -1290,6 +1358,10 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     "run-switch.installation-preparation-unavailable"
                 )
+            self._lifecycle.reconcile_superseded_unissued(
+                "recipe.install", installation_id, ordinal
+            )
+            self._observe_older_issued("recipe.install", installation_id, ordinal)
             start_installation = getattr(self._lifecycle, "start_installation", None)
             if not callable(start_installation):
                 raise RunSwitchOperationConflict(
@@ -1300,6 +1372,7 @@ class RecipeLifecyclePhaseExecutor:
                     installation_id,
                     actor=actor,
                     request_id=str(uuid.uuid5(uuid.UUID(request_key), "runtime-install")),
+                    workload_intent_ordinal=ordinal,
                 )
             except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
                 raise RunSwitchOperationConflict(
@@ -1314,6 +1387,7 @@ class RecipeLifecyclePhaseExecutor:
                 "run-switch.prepare-subphase-unsupported"
             )
         if phase.kind == "start":
+            ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
             phase_results = progress.get("phase_results")
             if installation_id is None and isinstance(phase_results, list):
@@ -1337,15 +1411,21 @@ class RecipeLifecyclePhaseExecutor:
             )
             if adopted is not None:
                 return PhaseExecution(adopted.id, {"run_id": adopted.owner_id})
+            self._lifecycle.reconcile_superseded_unissued(
+                "recipe.uninstall", installation_id, ordinal
+            )
+            self._observe_older_issued("recipe.uninstall", installation_id, ordinal)
             low_level = self._lifecycle.preview_run(installation_id, plan.alias)
             value = self._lifecycle.start(
                 low_level,
                 plan_digest=low_level.plan_digest,
                 actor=actor,
                 request_id=start_request_id,
+                workload_intent_ordinal=ordinal,
             )
             return PhaseExecution(value.id, {"run_id": value.owner_id})
         if phase.kind == "uninstall":
+            ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
             if installation_id is None:
                 raise RunSwitchOperationConflict(
@@ -1367,6 +1447,10 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution(
                     adopted.id, {"installation_id": installation_id}
                 )
+            self._lifecycle.reconcile_superseded_unissued(
+                "recipe.uninstall", installation_id, ordinal
+            )
+            self._observe_older_issued("recipe.uninstall", installation_id, ordinal)
             try:
                 uninstall_plan = self._lifecycle.preview_uninstall(installation_id)
                 value = self._lifecycle.uninstall(
@@ -1374,6 +1458,7 @@ class RecipeLifecyclePhaseExecutor:
                     plan_digest=uninstall_plan.plan_digest,
                     actor=actor,
                     request_id=uninstall_request_id,
+                    workload_intent_ordinal=ordinal,
                 )
             except (
                 KeyError,
@@ -1550,6 +1635,7 @@ class RunSwitchOperationService:
         )
         self._inventory_max_age = inventory_max_age_seconds
         self._memory_floor = memory_floor_bytes
+        self._tick_cursor: str | None = None
 
     def preview(
         self,
@@ -1670,7 +1756,7 @@ class RunSwitchOperationService:
                         plan_digest=stop_digest,
                     )
                 ]
-                if stop_digest is not None and run.state in _ACTIVE_RUN_STATES
+                if stop_digest is not None and run.state in _STOPPABLE_RUN_STATES
                 else []
             )
             # Stopping a live run must remain possible when catalog/cache
@@ -1678,7 +1764,7 @@ class RunSwitchOperationService:
             # findings remain diagnostics, but they do not block the stop.
             blockers: list[RunSwitchReason] = []
             warnings = [*fit_warnings, *inspection.warnings]
-            if run.state not in _ACTIVE_RUN_STATES:
+            if run.state not in _STOPPABLE_RUN_STATES:
                 blockers.append(
                     _as_reason(
                         "run-switch.run-not-active",
@@ -1901,15 +1987,35 @@ class RunSwitchOperationService:
                         )
                     )
                 elif not assessment.allowed:
+                    issued = self._lifecycle.assess_superseded_issued(
+                        "recipe.uninstall", installation_id
+                    )
                     for blocker in assessment.blockers:
-                        blockers.append(
-                            _as_reason(
-                                "run-switch.uninstall-blocked",
-                                f"{blocker.code}: {blocker.detail}",
-                                scope="operation",
-                                node_ids=node_ids,
-                            )
+                        reason = _as_reason(
+                            "run-switch.uninstall-issued-prerequisite"
+                            if issued is not None
+                            and blocker.code == "uninstall.operation_active"
+                            else "run-switch.uninstall-blocked",
+                            (
+                                "The prior issued uninstall will be cancelled and "
+                                "observed before this cleanup starts."
+                                if issued is not None
+                                and blocker.code == "uninstall.operation_active"
+                                else f"{blocker.code}: {blocker.detail}"
+                            ),
+                            scope="operation",
+                            node_ids=node_ids,
+                            severity=(
+                                "warning"
+                                if issued is not None
+                                and blocker.code == "uninstall.operation_active"
+                                else "blocker"
+                            ),
                         )
+                        if reason.severity == "warning":
+                            warnings.append(reason)
+                        else:
+                            blockers.append(reason)
             phases = self._phases(
                 action="cleanup",
                 group=group,
@@ -1979,6 +2085,7 @@ class RunSwitchOperationService:
         request: RunSwitchCleanupApplyRequest,
         *,
         actor: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
         if request.request_key is not None:
@@ -2004,6 +2111,7 @@ class RunSwitchOperationService:
             request_key=request_key,
             actor=actor,
             kind="recipe.cleanup.v2",
+            workload_intent_ordinal=workload_intent_ordinal,
         )
 
     def apply(
@@ -2011,6 +2119,7 @@ class RunSwitchOperationService:
         request: RunSwitchApplyRequest,
         *,
         actor: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
         if request.request_key is not None:
@@ -2036,6 +2145,7 @@ class RunSwitchOperationService:
             request_key=request_key,
             actor=actor,
             kind="recipe.run-switch.v2",
+            workload_intent_ordinal=workload_intent_ordinal,
         )
 
     def apply_run(
@@ -2051,6 +2161,7 @@ class RunSwitchOperationService:
         request: RunSwitchStopApplyRequest,
         *,
         actor: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
         if request.request_key is not None:
@@ -2076,6 +2187,7 @@ class RunSwitchOperationService:
             request_key=request_key,
             actor=actor,
             kind="recipe.stop.v2",
+            workload_intent_ordinal=workload_intent_ordinal,
         )
 
     def get(self, operation_id: str) -> RunSwitchOperation:
@@ -2156,7 +2268,28 @@ class RunSwitchOperationService:
                 or operator_retries >= _MAX_RETRY_ATTEMPTS
             ):
                 raise RunSwitchOperationConflict("run-switch operation is not retryable")
+            nodes = list(session.scalars(
+                select(AgentNode)
+                .where(AgentNode.node_id.in_(previous.targets))
+                .order_by(AgentNode.node_id)
+                .with_for_update()
+            ))
+            if len(nodes) != len(previous.targets) or any(
+                node.workload_intent_ordinal
+                != previous.payload.get("workload_intent_ordinal")
+                for node in nodes
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.superseded: retry belongs to an obsolete workload intent"
+                )
+            ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
+            for node in nodes:
+                node.workload_intent_ordinal = ordinal
+            self.request_superseded_workload_cancellation_in_session(
+                session, tuple(previous.targets), ordinal, _now(self._clock)
+            )
             payload = dict(previous.payload)
+            payload["workload_intent_ordinal"] = ordinal
             payload["progress"] = progress
             payload["retry_of"] = previous.id
             payload["retry"] = {
@@ -2165,6 +2298,7 @@ class RunSwitchOperationService:
             }
             progress["child_operation_id"] = None
             progress["retryable"] = False
+            progress["workload_intent_ordinal"] = ordinal
             now = _now(self._clock)
             job = Job(
                 id=str(uuid.uuid4()),
@@ -2207,18 +2341,35 @@ class RunSwitchOperationService:
         binder(model_cache)
 
     def tick(self) -> bool:
-        """Advance at most one high-level phase, safely after a restart."""
+        """Give every due independent operation a bounded chance to advance."""
 
+        # Canonical JSON emits UTC as Z; the clock's isoformat uses +00:00.
+        # Compare the same spelling so an exactly due operation is eligible.
+        due_at = func.replace(Job.result["observation_due_at"].as_string(), "Z", "+00:00")
         with self._sessions() as session:
-            job_id = session.scalar(
+            active = (
                 select(Job.id)
-                .where(Job.kind.in_(_OPERATION_KINDS), Job.state.in_(("queued", "running")))
-                .order_by(Job.created_at, Job.id)
-                .limit(1)
+                .where(
+                    Job.kind.in_(_OPERATION_KINDS),
+                    Job.state.in_(("queued", "running")),
+                    or_(due_at.is_(None), due_at <= _now(self._clock).isoformat()),
+                )
+                .order_by(Job.id)
+                .limit(16)
             )
-        if job_id is None:
-            return False
-        return self._advance(str(job_id))
+            if self._tick_cursor is None:
+                job_ids = tuple(session.scalars(active))
+            else:
+                following = tuple(session.scalars(active.where(Job.id > self._tick_cursor)))
+                job_ids = following + tuple(session.scalars(
+                    active.where(Job.id <= self._tick_cursor).limit(16 - len(following))
+                ))
+        if job_ids:
+            self._tick_cursor = str(job_ids[-1])
+        advanced = False
+        for job_id in job_ids:
+            advanced = self._advance(str(job_id)) or advanced
+        return advanced
 
     def _preview_run(
         self,
@@ -2423,8 +2574,37 @@ class RunSwitchOperationService:
                     )
                 else:
                     start_plan_digest = low_level_plan.plan_digest
+                    planned_stop_ids = {stop.run_id for stop in stops}
+                    deferred_port_reservations: set[tuple[str, str]] = set()
+                    if planned_stop_ids:
+                        deferred_port_reservations = {
+                            (reservation.node_id, reservation.resource_key)
+                            for reservation in session.scalars(
+                                select(ResourceReservation).where(
+                                    ResourceReservation.owner_kind == "run",
+                                    ResourceReservation.owner_id.in_(planned_stop_ids),
+                                    ResourceReservation.kind == "port",
+                                    ResourceReservation.state == "active",
+                                )
+                            )
+                        }
+                    remaining_admission_blockers = False
                     for item in low_level_plan.nodes:
                         for reason in item.blockers:
+                            if (
+                                reason.code == "run.port_occupied"
+                                and (item.node_id, str(item.port)) in deferred_port_reservations
+                            ) or (
+                                reason.code == "run.rendezvous_port_occupied"
+                                and item.rendezvous_port is not None
+                                and item.rendezvous_port != item.port
+                                and (item.node_id, str(item.rendezvous_port))
+                                in deferred_port_reservations
+                            ):
+                                # The exact Stop phase releases this reservation.
+                                # Start re-runs low-level admission after Stop.
+                                continue
+                            remaining_admission_blockers = True
                             blockers.append(
                                 _as_reason(
                                     reason.code,
@@ -2443,7 +2623,7 @@ class RunSwitchOperationService:
                                     node_ids=(item.node_id,),
                                 )
                             )
-                    if not low_level_plan.allowed:
+                    if remaining_admission_blockers:
                         blockers.append(
                             _as_reason(
                                 "run-switch.run_admission_blocked",
@@ -3652,7 +3832,7 @@ class RunSwitchOperationService:
                     RecipeRun.id.in_(
                         select(RunNode.run_id).where(RunNode.node_id.in_(node_ids))
                     ),
-                    RecipeRun.state.in_(_ACTIVE_RUN_STATES),
+                    RecipeRun.state.in_(_STOPPABLE_RUN_STATES),
                 )
                 .order_by(RecipeRun.created_at, RecipeRun.id)
             )
@@ -3691,7 +3871,7 @@ class RunSwitchOperationService:
                 stop_plan = self._lifecycle.preview_stop(run.id) if self._lifecycle else None
             except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError):
                 stop_plan = None
-            if stop_plan is None:
+            if stop_plan is None or not stop_plan.allowed:
                 reason = _as_reason(
                     "run-switch.stop_plan_unavailable",
                     "The existing workload cannot be represented by a safe stop plan.",
@@ -4395,6 +4575,7 @@ class RunSwitchOperationService:
         request_key: str,
         actor: str,
         kind: str,
+        workload_intent_ordinal: int | None,
     ) -> RunSwitchOperation:
         now = _now(self._clock)
         total_bytes, member_totals = _planned_transfer_bytes(plan)
@@ -4434,7 +4615,9 @@ class RunSwitchOperationService:
             "retry": {"automatic_attempts": 1, "operator_retries": 0},
         }
         with self._sessions.begin() as session:
-            list(session.scalars(select(AgentNode).where(AgentNode.node_id.in_([node.node_id for node in plan.spark_group.nodes])).order_by(AgentNode.node_id).with_for_update()))
+            nodes = list(session.scalars(select(AgentNode).where(AgentNode.node_id.in_([node.node_id for node in plan.spark_group.nodes])).order_by(AgentNode.node_id).with_for_update()))
+            if len(nodes) != len(plan.spark_group.nodes):
+                raise RunSwitchOperationConflict("run-switch target Spark scope changed")
             existing = session.scalar(select(Job).where(Job.request_id == request_key))
             if existing is not None:
                 if (
@@ -4445,6 +4628,26 @@ class RunSwitchOperationService:
                         "run-switch.request_key_reused_differently"
                     )
                 return self._operation_view(existing)
+            if workload_intent_ordinal is None:
+                workload_intent_ordinal = max(
+                    (node.workload_intent_ordinal for node in nodes), default=0
+                ) + 1
+                for node in nodes:
+                    node.workload_intent_ordinal = workload_intent_ordinal
+                self.request_superseded_workload_cancellation_in_session(
+                    session,
+                    tuple(node.node_id for node in nodes),
+                    workload_intent_ordinal,
+                    now,
+                )
+            elif (
+                type(workload_intent_ordinal) is not int
+                or workload_intent_ordinal < 1
+                or any(node.workload_intent_ordinal != workload_intent_ordinal for node in nodes)
+            ):
+                raise RunSwitchOperationConflict("run-switch.superseded: Spark scope has a later workload intent")
+            payload["workload_intent_ordinal"] = workload_intent_ordinal
+            payload["progress"]["workload_intent_ordinal"] = workload_intent_ordinal
             job = Job(
                 id=str(uuid.uuid4()),
                 request_id=request_key,
@@ -4462,6 +4665,19 @@ class RunSwitchOperationService:
             session.add(job)
             session.flush()
             return self._operation_view(job)
+
+    def request_superseded_workload_cancellation_in_session(
+        self,
+        session: Session,
+        targets: Sequence[str],
+        ordinal: int,
+        now: datetime,
+    ) -> None:
+        """Cancel exact older agent orders in the same ordinal-admission transaction."""
+
+        AgentJobService.request_superseded_workload_cancellation_in_session(
+            session, targets, ordinal, now
+        )
 
     def _existing_request_operation(
         self,
@@ -4508,6 +4724,33 @@ class RunSwitchOperationService:
                 return True
             plan = _load_plan(raw_plan)
             progress = _read_progress(job.result)
+            intent_status = self._scope_intent_status(session, job)
+            if intent_status == "invalid":
+                self._mark_failed(
+                    job,
+                    "run-switch workload authority or Spark scope is invalid",
+                    now=now,
+                    progress=progress,
+                )
+                session.commit()
+                return True
+            if intent_status == "superseded":
+                job.state = "cancelled"
+                job.status_reason = (
+                    "run-switch.superseded: the logical order was cancelled by "
+                    "a later authorized Spark intent; issued effects still "
+                    "require their own cancellation receipts"
+                )
+                progress["retryable"] = False
+                job.result = _persisted_result(progress)
+                job.updated_at = now
+                session.commit()
+                return True
+            observation_due = progress.get("observation_due_at")
+            if isinstance(observation_due, str) and now < _aware(
+                datetime.fromisoformat(observation_due)
+            ):
+                return False
             raw_phase_index = progress.get("phase_index", 0)
             raw_item_index = progress.get("item_index", 0)
             child_id = progress.get("child_operation_id")
@@ -4554,7 +4797,8 @@ class RunSwitchOperationService:
                     job = session.get(Job, operation_id, with_for_update=True)
                     if job is None:
                         return False
-                    progress = _read_progress(job.result)
+                    original = _read_progress(job.result)
+                    progress = dict(original)
                     if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
                         return False
                     persisted_plan = _load_plan(job.payload["plan"])
@@ -4573,6 +4817,12 @@ class RunSwitchOperationService:
                     )
                     progress["phase"] = persisted_phase.kind
                     progress["subphase"] = persisted_phase.subphase
+                    if (
+                        job.state == "running"
+                        and _without_observation_time(progress)
+                        == _without_observation_time(original)
+                    ):
+                        return False
                     job.state = "running"
                     job.result = _persisted_result(progress)
                     job.updated_at = now
@@ -4593,25 +4843,30 @@ class RunSwitchOperationService:
                     # ordinary success path records the checkpoint the missing
                     # acknowledgement would have produced.
                     child = _EstablishedEffect(child, established)
+                elif _start_still_progressing(
+                    self._lifecycle, plan.phases[phase_index], child
+                ):
+                    return self._hold_start_observation(
+                        operation_id, child_id=child_id,
+                        phase_index=phase_index, item_index=item_index,
+                    )
                 else:
                     reason = f"run-switch phase operation failed: {child.state if child else 'unknown'}"
                     evidence = _child_progress_payload(child)
                     detail = evidence.get("reason") or evidence.get("status_reason")
                     if isinstance(detail, str) and detail:
                         reason += ": " + detail[:384]
-                    transient = _transient_distribution_failure(child)
-                    if (
-                        transient
-                        and _automatic_retry_phase(plan.phases[phase_index])
-                        and self._queue_transient_retry(
-                            operation_id,
-                            child,
-                            phase_index=phase_index,
-                            child_id=child_id,
-                        )
-                    ):
-                        return True
-                    fail(reason, retryable=transient)
+                    kind = _child_failure_kind(child)
+                    # The agent authority owns exact transfer retry/observation
+                    # and its durable attempt budget. A terminal child is not
+                    # replayed by a second parent-level automatic retry loop.
+                    self._fail(
+                        operation_id,
+                        reason,
+                        retryable=classify(kind) is RecoveryDecision.RETRY,
+                        checkpoint=(phase_index, item_index, child_id),
+                        child_evidence=evidence,
+                    )
                     return True
             with self._sessions.begin() as session:
                 job = session.get(Job, operation_id, with_for_update=True)
@@ -4620,6 +4875,9 @@ class RunSwitchOperationService:
                 progress = _read_progress(job.result)
                 if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
                     return False
+                progress["observation_due_at"] = None
+                progress["observation_deadline_at"] = None
+                job.status_reason = None
                 phase_index = require_integer(progress.get("phase_index", 0), "phase index")
                 item_index = require_integer(progress.get("item_index", 0), "item index") + 1
                 persisted_plan = _load_plan(job.payload["plan"])
@@ -4785,6 +5043,13 @@ class RunSwitchOperationService:
                 return self._hold_for_preflight_refresh(
                     operation_id, phase_index, item_index
                 )
+            except RunSwitchIssuedWorkloadPending as pending:
+                return self._hold_issued_observation(
+                    operation_id,
+                    phase_index=phase_index,
+                    item_index=item_index,
+                    pending=pending,
+                )
             except RunSwitchOperationConflict as error:
                 fail(str(error))
                 return True
@@ -4821,6 +5086,10 @@ class RunSwitchOperationService:
             progress = _read_progress(job.result)
             if not _checkpoint_matches(job, progress, phase_index, item_index, None):
                 return False
+            if progress.get("observation_due_at") is not None:
+                progress["observation_due_at"] = None
+                progress["observation_deadline_at"] = None
+                job.status_reason = None
             _merge_progress_evidence(
                 progress,
                 plan,
@@ -4854,6 +5123,17 @@ class RunSwitchOperationService:
                 progress["child_operation_id"] = execution.operation_id
                 progress["phase"] = phase.kind
                 progress["subphase"] = phase.subphase
+                if phase.kind == "start":
+                    child = session.get(Job, execution.operation_id)
+                    raw_deadline = (
+                        child.payload.get("start_deadline") if child is not None else None
+                    )
+                    if child is not None and isinstance(raw_deadline, str):
+                        deadline = _aware(datetime.fromisoformat(raw_deadline))
+                        progress["start_deadline"] = deadline.isoformat()
+                        budget = int((deadline - _aware(child.created_at)).total_seconds())
+                        if budget > 0:
+                            progress["startup_budget_seconds"] = budget
                 if execution.result is not None:
                     results = list(require_sequence(progress.get("phase_results", []), "phase results"))
                     results.append(_phase_result(execution.result, phase=phase))
@@ -4902,6 +5182,121 @@ class RunSwitchOperationService:
             job.updated_at = now
             if progress.get("cancellation") and not progress.get("child_operation_id"):
                 _complete_cancellation(job, progress, now)
+        return True
+
+    @staticmethod
+    def _scope_intent_status(session: Session, job: Job) -> str:
+        """Distinguish malformed authority from a later authorized node head."""
+
+        ordinal = job.payload.get("workload_intent_ordinal")
+        if type(ordinal) is not int or ordinal < 1:
+            return "invalid"
+        nodes = session.scalars(select(AgentNode).where(AgentNode.node_id.in_(job.targets)))
+        current = list(nodes)
+        if len(current) != len(job.targets):
+            return "invalid"
+        if any(
+            node.workload_intent_ordinal != ordinal for node in current
+        ):
+            return "superseded"
+        return "current"
+
+    def _hold_start_observation(
+        self,
+        operation_id: str,
+        *,
+        child_id: str,
+        phase_index: int,
+        item_index: int,
+    ) -> bool:
+        """Observe a progressing uncertain start until its immutable deadline."""
+
+        now = _now(self._clock)
+        with self._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None:
+                return False
+            progress = _read_progress(job.result)
+            if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
+                return False
+            raw_deadline = progress.get("observation_deadline_at")
+            if isinstance(raw_deadline, str):
+                deadline = _aware(datetime.fromisoformat(raw_deadline))
+            else:
+                child = session.get(Job, child_id)
+                child_deadline = child.payload.get("start_deadline") if child is not None else None
+                deadline = (
+                    _aware(datetime.fromisoformat(child_deadline))
+                    if isinstance(child_deadline, str)
+                    else now + timedelta(seconds=120)
+                )
+            if now >= deadline:
+                self._mark_failed(
+                    job, "run-switch.start-observation-expired: runtime did not establish before its deadline",
+                    now=now, progress=progress,
+                )
+                return True
+            progress["observation_deadline_at"] = deadline.isoformat()
+            progress["observation_due_at"] = min(
+                deadline, now + timedelta(seconds=5)
+            ).isoformat()
+            job.state = "running"
+            job.status_reason = "Start result uncertain; observing the existing run."
+            job.result = _persisted_result(progress)
+            job.updated_at = now
+        return True
+
+    def _hold_issued_observation(
+        self,
+        operation_id: str,
+        *,
+        phase_index: int,
+        item_index: int,
+        pending: RunSwitchIssuedWorkloadPending,
+    ) -> bool:
+        """Bound polling of an issued older effect without authorizing replay."""
+
+        now = _now(self._clock)
+        with self._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None:
+                return False
+            progress = _read_progress(job.result)
+            if not _checkpoint_matches(job, progress, phase_index, item_index, None):
+                return False
+            deadline = _aware(pending.observation_deadline)
+            if now >= deadline:
+                if pending.kind == "artifact-job-cancellation":
+                    job.state = "waiting-for-operator"
+                    job.status_reason = (
+                        "run-switch.artifact-cancellation-unresolved: "
+                        f"{pending.job_id} has no definitive cancellation receipt"
+                    )
+                    progress["observation_due_at"] = None
+                    progress["observation_deadline_at"] = deadline.isoformat()
+                    job.result = _persisted_result(progress)
+                    job.updated_at = now
+                else:
+                    self._mark_failed(
+                        job,
+                        "run-switch.issued-observation-expired: an older issued effect has no definitive outcome",
+                        now=now,
+                        progress=progress,
+                    )
+                return True
+            due = min(
+                deadline,
+                max(now + timedelta(seconds=5), _aware(pending.observe_due_at)),
+            )
+            progress["observation_due_at"] = due.isoformat()
+            progress["observation_deadline_at"] = deadline.isoformat()
+            job.state = "running"
+            job.status_reason = (
+                f"Observing older issued lifecycle operation {pending.job_id}; "
+                "its effect has not been proven finished."
+            )
+            job.result = _persisted_result(progress)
+            job.updated_at = now
         return True
 
     def _hold_for_preflight_refresh(
@@ -4983,59 +5378,32 @@ class RunSwitchOperationService:
             return self._lifecycle.get(operation_id)
         return None
 
-    def _queue_transient_retry(
+    def _fail(
         self,
         operation_id: str,
-        child: object,
+        reason: str,
         *,
-        phase_index: int,
-        child_id: str,
-    ) -> bool:
-        """Requeue one parent attempt while preserving child progress receipts."""
-
-        now = _now(self._clock)
-        with self._sessions.begin() as session:
-            job = session.get(Job, operation_id, with_for_update=True)
-            if job is None:
-                return False
-            attempt = max(1, int(job.current_attempt or 0))
-            progress = _read_progress(job.result)
-            if job.state not in {"queued", "running"} or progress.get("phase_index") != phase_index or progress.get("child_operation_id") != child_id:
-                return False
-            plan = _load_plan(job.payload["plan"])
-            raw_retry = job.payload.get("retry", {})
-            retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
-            automatic_attempts = retry.get("automatic_attempts")
-            automatic_attempts = (
-                automatic_attempts
-                if type(automatic_attempts) is int and automatic_attempts >= 1
-                else attempt
-            )
-            if phase_index >= len(plan.phases) or automatic_attempts >= _MAX_RETRY_ATTEMPTS:
-                return False
-            phase = plan.phases[phase_index]
-            _merge_progress_evidence(progress, plan, phase, _child_progress_payload(child), now)
-            progress["child_operation_id"] = None
-            progress["retryable"] = True
-            progress["retry_attempt"] = attempt + 1
-            progress["retry_reason"] = "transient distribution failure"
-            retry["automatic_attempts"] = automatic_attempts + 1
-            job.payload = dict(job.payload) | {"retry": retry}
-            job.current_attempt = attempt + 1
-            job.state = "queued"
-            job.status_reason = None
-            job.result = _persisted_result(progress)
-            job.updated_at = _now(self._clock)
-            return True
-
-    def _fail(self, operation_id: str, reason: str, *, retryable: bool = False, checkpoint: tuple[int, int, object] | None = None) -> None:
+        retryable: bool = False,
+        checkpoint: tuple[int, int, object] | None = None,
+        child_evidence: object | None = None,
+    ) -> None:
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.state not in {"queued", "running"}:
                 return
-            if checkpoint is not None and not _checkpoint_matches(job, _read_progress(job.result), *checkpoint):
+            progress = _read_progress(job.result)
+            if checkpoint is not None and not _checkpoint_matches(job, progress, *checkpoint):
                 return
-            self._mark_failed(job, reason, now=_now(self._clock), retryable=retryable)
+            now = _now(self._clock)
+            if child_evidence is not None and checkpoint is not None:
+                plan = _load_plan(job.payload["plan"])
+                if checkpoint[0] < len(plan.phases):
+                    _merge_progress_evidence(
+                        progress, plan, plan.phases[checkpoint[0]], child_evidence, now
+                    )
+            self._mark_failed(
+                job, reason, now=now, retryable=retryable, progress=progress
+            )
 
     @staticmethod
     def _mark_failed(
@@ -5405,6 +5773,13 @@ def _build_receipt_in_session(
     }
 
 
+def _bound_workload_intent(progress: Mapping[str, object]) -> int:
+    ordinal = progress.get("workload_intent_ordinal")
+    if type(ordinal) is not int or ordinal < 1:
+        raise RunSwitchOperationConflict("run-switch workload intent is unbound")
+    return ordinal
+
+
 def _progress_int(value: object) -> int | None:
     return value if type(value) is int and value >= 0 else None
 
@@ -5534,6 +5909,45 @@ def _child_progress_payload(child: object) -> Mapping[str, object]:
     return payload
 
 
+def _child_failure_kind(child: object) -> FailureKind:
+    """Read typed child evidence; an unknown mixed result stays blocked."""
+
+    payload = _child_progress_payload(child)
+    if "failure_kind" in payload or "error_code" in payload or payload.get("uncertain") is True:
+        return kind_for_agent_error(payload)
+    kinds: list[FailureKind] = []
+    for field in ("node_evidence", "launch_evidence"):
+        evidence = payload.get(field)
+        if isinstance(evidence, Mapping):
+            kinds.extend(
+                kind_for_agent_error(item)
+                for item in evidence.values()
+                if isinstance(item, Mapping)
+            )
+    if kinds and all(kind is FailureKind.TEMPORARY_DEPENDENCY for kind in kinds):
+        return FailureKind.TEMPORARY_DEPENDENCY
+    if kinds and all(kind is FailureKind.UNCERTAIN_EFFECT for kind in kinds):
+        return FailureKind.UNCERTAIN_EFFECT
+    return FailureKind.INVALID_CONTRACT
+
+
+def _without_observation_time(value: Mapping[str, object]) -> dict[str, object]:
+    """Ignore only the clock/rate projection of the typed operation meter."""
+
+    result = dict(value)
+    operation = result.get("operation")
+    if isinstance(operation, Mapping):
+        result["operation"] = {
+            key: item
+            for key, item in operation.items()
+            if key not in {
+                "observed_at", "last_progress_at", "elapsed_seconds",
+                "bytes_per_second", "smoothed_bytes_per_second", "eta_seconds",
+            }
+        }
+    return result
+
+
 class _EstablishedEffect:
     """Present a parked child whose effect the lifecycle owner has observed.
 
@@ -5577,67 +5991,33 @@ def _established_start_effect(
         status: Any = getter(run_id)
     except (KeyError, RuntimeError, TypeError, ValueError):
         return None
-    if status.healthy and status.route_state == "published":
+    if status.healthy:
         return run_id
     return None
 
 
-def _automatic_retry_phase(phase: RunSwitchPhase) -> bool:
-    """Whether re-running this phase adopts the same child it queued before.
-
-    Only a content-addressed distribution phase qualifies.  ``transfer``
-    previews immutable model and image digests and derives its child request
-    key from the phase index, so a retry observes and resumes one durable
-    operation instead of inventing a second one.  ``start`` admission instead
-    hashes live inventory observation time and current reservations, so
-    automatically retrying it re-previewed a different plan and then offered
-    the unchanged request key to admission with a changed digest.  A failed
-    start is therefore reported for an explicit disposition, and the original
-    child is adopted by the executor before mutable admission is read again.
-    """
-
-    return phase.kind == "transfer"
-
-
-def _transient_distribution_failure(child: object) -> bool:
-    """Retry transport uncertainty while keeping receipt failures terminal."""
-
-    payload = _child_progress_payload(child)
-    if getattr(child, "state", None) in {"waiting-for-operator", "uncertain"}:
-        return True
-    raw_uncertain = payload.get("uncertain")
-    text = " ".join(
-        str(payload.get(key, ""))
-        for key in ("error_code", "code", "reason", "detail", "summary", "error")
-    ).casefold()
-    if any(marker in text for marker in _TERMINAL_RETRY_MARKERS):
+def _start_still_progressing(
+    lifecycle: object,
+    phase: RunSwitchPhase,
+    child: object,
+) -> bool:
+    if phase.kind != "start" or getattr(child, "state", None) != "waiting-for-operator":
         return False
-    if raw_uncertain is True:
-        return True
-    return any(
-        marker in text
-        for marker in (
-            "http",
-            "timeout",
-            "timed out",
-            "connection",
-            "network",
-            "transport",
-            "copy",
-            "unavailable",
-            "temporary",
-            "oserror",
-        )
+    run_id = getattr(child, "owner_id", None)
+    getter = getattr(lifecycle, "run_status", None)
+    if not isinstance(run_id, str) or not callable(getter):
+        return False
+    try:
+        status: Any = getter(run_id)
+    except (KeyError, RuntimeError, TypeError, ValueError):
+        return False
+    return status.state in _ACTIVE_RUN_STATES and any(
+        rank.fresh and rank.state in {"planned", "starting", "running"}
+        for rank in status.ranks
     )
 
 
 def _transient_distribution_exception(error: BaseException) -> bool:
-    text = str(error).casefold()
-    if any(
-        marker in text
-        for marker in _TERMINAL_RETRY_MARKERS
-    ):
-        return False
     if isinstance(error, httpx.HTTPError):
         response = getattr(error, "response", None)
         status = getattr(response, "status_code", None)
@@ -6006,8 +6386,15 @@ def _progress_view(
             })
         else:
             measurement = project_progress(measurement)
+    raw_start_deadline = raw.get("start_deadline")
     return RunSwitchProgress(
         operation=measurement,
+        startup_budget_seconds=_progress_int(raw.get("startup_budget_seconds")),
+        start_deadline=(
+            _aware(datetime.fromisoformat(raw_start_deadline))
+            if isinstance(raw_start_deadline, str)
+            else None
+        ),
         phase_index=phase_index,
         phase_count=phase_count,
         phase=phase,

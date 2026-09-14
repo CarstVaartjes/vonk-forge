@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -196,6 +197,18 @@ def _inputs(
             "schema_version": 2,
         },
     )
+    cli_wheel = tmp_path / "vonk_cluster_profiles-0.1.1-py3-none-any.whl"
+    with zipfile.ZipFile(cli_wheel, "w") as archive:
+        archive.writestr(
+            "cluster_profiles/build-identity.json",
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "source_sha": SOURCE_SHA,
+                    "release_version": version,
+                }
+            ),
+        )
     return {
         "nas": nas,
         "spark": spark,
@@ -203,6 +216,7 @@ def _inputs(
         "baseline_packages": baseline_packages,
         "baseline_version": baseline_version,
         "payload": payload,
+        "cli_wheel": cli_wheel,
         "signing_key": signing_key,
         "signing_public_key": signing_public_key,
         "version": version,
@@ -245,6 +259,8 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
         f"ghcr.io/carstvaartjes/vonk-forge-litellm:{image_tag}@sha256:{DIGEST}",
         "--nas-payload",
         str(inputs["payload"]),
+        "--cli-wheel",
+        str(inputs["cli_wheel"]),
         "--output",
         str(tmp_path / "publication"),
     ]
@@ -2123,7 +2139,9 @@ def test_bootstraps_pin_final_digests_and_immutable_generation_urls(
     for path in _input_mapping(inputs, "packages").values():
         assert isinstance(path, Path)
         assert hashlib.sha256(path.read_bytes()).hexdigest() in spark
-    assert hashlib.sha256(_input_path(inputs, "payload").read_bytes()).hexdigest() in nas
+    assert (
+        hashlib.sha256(_input_path(inputs, "payload").read_bytes()).hexdigest() in nas
+    )
 
 
 def test_development_uses_the_same_signed_channel_flow_under_dev_paths(
@@ -2620,6 +2638,9 @@ def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
         extra_root["retired_schema"] = 1
         mutations.append(extra_root)
         if not document.get("acceptance_only"):
+            missing_cli = copy.deepcopy(document)
+            del missing_cli["artifacts"]["cli-wheel"]
+            mutations.append(missing_cli)
             missing_package_identity = copy.deepcopy(document)
             del missing_package_identity["artifacts"]["agent-package-linux-arm64"][
                 "target_binary_digest"

@@ -73,6 +73,8 @@ FROM ${PYTHON_IMAGE} AS build
 WORKDIR /build
 COPY pyproject.toml /vonk-cluster-profiles/
 COPY src/cluster_profiles /vonk-cluster-profiles/src/cluster_profiles
+COPY tools/hatch_build.py /vonk-cluster-profiles/tools/hatch_build.py
+COPY schemas/install-release-manifest.schema.json /vonk-cluster-profiles/schemas/install-release-manifest.schema.json
 COPY control/pyproject.toml ./
 COPY control/uv.lock ./uv.lock
 COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock

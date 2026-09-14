@@ -146,7 +146,7 @@ fn install_error(stage: &'static str, source: OciError) -> OciError {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct InstallationMetadataReceipt {
     schema_version: u8,
@@ -164,6 +164,15 @@ struct InstallationMetadataEntry {
     ino: u64,
     mtime_ns: i128,
     ctime_ns: i128,
+}
+
+/// Open descriptors bind the agent's verified model custody across one
+/// authorized helper Start call. This token is process-local and never grants
+/// access to a different installation or helper operation.
+pub struct InstallationAclTransition {
+    installation_id: String,
+    receipt: InstallationMetadataReceipt,
+    files: Vec<(PathBuf, File, fs::Metadata)>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -431,6 +440,81 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .and_then(|file| file.sync_all().map_err(OciError::Io))
             .map_err(|error| install_error("installation-metadata", error))?;
         Ok(())
+    }
+
+    /// A lost install acknowledgement may be retried after the model has
+    /// already consumed the admitted space. Only the exact completed,
+    /// receipt-backed installation can bypass another full-copy reservation.
+    pub fn install_with_space_check(
+        &self,
+        spec: &CompiledExecutionPlan,
+        installation_id: &str,
+        recipe_content_sha256: &str,
+        expected_bytes: u64,
+    ) -> Result<(), OciError> {
+        if self.reuse_completed_install(spec, installation_id, recipe_content_sha256)? {
+            return Ok(());
+        }
+        self.ensure_disk_available(expected_bytes)?;
+        self.install(spec, installation_id, recipe_content_sha256)
+    }
+
+    fn reuse_completed_install(
+        &self,
+        spec: &CompiledExecutionPlan,
+        installation_id: &str,
+        recipe_content_sha256: &str,
+    ) -> Result<bool, OciError> {
+        self.verify_image(spec)?;
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        let metadata = match fs::symlink_metadata(&installation) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.file_type().is_dir()
+            || metadata.file_type().is_symlink()
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.mode() & 0o777 != 0o700
+        {
+            return Err(OciError::Artifact);
+        }
+        let mut incomplete = false;
+        for name in [
+            "spec.json",
+            "recipe-content.sha256",
+            INSTALLATION_METADATA_FILE,
+        ] {
+            match fs::symlink_metadata(installation.join(name)) {
+                Ok(metadata) if trusted_receipt_metadata(&metadata) => match name {
+                    "spec.json" if self.load_spec(installation_id)? == *spec => {}
+                    "recipe-content.sha256"
+                        if self.recipe_digest(installation_id)? == recipe_content_sha256 => {}
+                    INSTALLATION_METADATA_FILE
+                        if read_installation_metadata(&installation)?
+                            .is_some_and(|receipt| receipt_matches_plan(&receipt, spec)) => {}
+                    _ => return Err(OciError::Artifact),
+                },
+                Ok(_) => return Err(OciError::Artifact),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => incomplete = true,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if incomplete {
+            return Ok(false);
+        }
+        let cache = installation.join("runtime-cache");
+        let cache_metadata = fs::symlink_metadata(&cache)?;
+        if !cache_metadata.file_type().is_dir()
+            || cache_metadata.file_type().is_symlink()
+            || cache_metadata.uid() != rustix::process::geteuid().as_raw()
+            || cache_metadata.mode() & 0o777 != 0o700
+        {
+            return Err(OciError::Artifact);
+        }
+        self.verify_installation(installation_id)?;
+        self.verify_compiled_image_archive(spec)?;
+        Ok(true)
     }
 
     /// Materialize only the model files authorized by a compiled Controller
@@ -1264,6 +1348,84 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(())
     }
 
+    pub fn begin_installation_acl_transition(
+        &self,
+        installation_id: &str,
+    ) -> Result<InstallationAclTransition, OciError> {
+        let (_, plan) = self.load_persisted_spec(installation_id)?;
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        let receipt = read_installation_metadata(&installation)?
+            .filter(|receipt| receipt_matches_plan(receipt, &plan))
+            .ok_or(OciError::Artifact)?;
+        let models = installation.join("models");
+        let mut files = Vec::with_capacity(receipt.entries.len());
+        for entry in &receipt.entries {
+            let path = models.join(&entry.selection_id).join(&entry.path);
+            let (file, metadata) = open_trusted_model_file(&path, entry.size_bytes)?;
+            if !metadata_matches_receipt(&metadata, entry) {
+                return Err(OciError::Artifact);
+            }
+            files.push((path, file, metadata));
+        }
+        Ok(InstallationAclTransition {
+            installation_id: installation_id.to_owned(),
+            receipt,
+            files,
+        })
+    }
+
+    pub fn finish_installation_acl_transition(
+        &self,
+        installation_id: &str,
+        mut transition: InstallationAclTransition,
+    ) -> Result<(), OciError> {
+        if transition.installation_id != installation_id {
+            return Err(OciError::Artifact);
+        }
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        if read_installation_metadata(&installation)? != Some(transition.receipt.clone()) {
+            return Err(OciError::Artifact);
+        }
+        let previous_receipt = transition.receipt.clone();
+        for (entry, (path, file, before)) in transition
+            .receipt
+            .entries
+            .iter_mut()
+            .zip(transition.files.iter())
+        {
+            let after = file.metadata()?;
+            let (reopened, path_after) = open_trusted_model_file(path, entry.size_bytes)?;
+            if before.dev() != after.dev()
+                || before.ino() != after.ino()
+                || before.len() != after.len()
+                || before.mtime() != after.mtime()
+                || before.mtime_nsec() != after.mtime_nsec()
+                || after.dev() != path_after.dev()
+                || after.ino() != path_after.ino()
+                || after.len() != path_after.len()
+                || after.mtime() != path_after.mtime()
+                || after.mtime_nsec() != path_after.mtime_nsec()
+                || after.ctime() != path_after.ctime()
+                || after.ctime_nsec() != path_after.ctime_nsec()
+                || !trusted_model_file(file, &after, entry.size_bytes)
+                || !trusted_model_file(&reopened, &path_after, entry.size_bytes)
+            {
+                return Err(OciError::Artifact);
+            }
+            entry.ctime_ns = timestamp_ns(after.ctime(), after.ctime_nsec());
+        }
+        if transition.receipt == previous_receipt {
+            return Ok(());
+        }
+        atomic_write(
+            &installation,
+            INSTALLATION_METADATA_FILE,
+            &serde_json::to_vec(&transition.receipt)?,
+        )?;
+        File::open(&installation)?.sync_all()?;
+        Ok(())
+    }
+
     pub fn recipe_digest(&self, installation_id: &str) -> Result<String, OciError> {
         let path = managed_path(self.data_root, "installations", installation_id)?
             .join("recipe-content.sha256");
@@ -1734,10 +1896,6 @@ fn materialize_compiled_models(
         }
         let (mut source_file, source_metadata) =
             open_trusted_model_file(&source, artifact.size_bytes)?;
-        if sha256_open_file(&mut source_file, &source_metadata)? != artifact.sha256 {
-            return Err(OciError::Artifact);
-        }
-        source_file.seek(SeekFrom::Start(0))?;
         let temporary = destination.with_extension(format!(
             "{}.{}.{}.partial",
             std::process::id(),
@@ -1753,11 +1911,30 @@ fn materialize_compiled_models(
             )
             .open(&temporary)?;
         let mut temporary_guard = TemporaryArtifact::new(temporary.clone());
-        let copied = std::io::copy(&mut source_file, &mut output)?;
+        // The source is an immutable managed distribution object. Hash the
+        // bytes in the same pass that writes the private installation; the
+        // retained source handle and stable metadata bind that read to the
+        // exact object opened above. A failed digest never publishes a model.
+        let mut hasher = Sha256::new();
+        let mut copied = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = source_file.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            output.write_all(&buffer[..read])?;
+            hasher.update(&buffer[..read]);
+            copied = copied.checked_add(read as u64).ok_or(OciError::Artifact)?;
+            if copied > artifact.size_bytes {
+                return Err(OciError::Artifact);
+            }
+        }
         output.sync_all()?;
         let source_after = source_file.metadata()?;
         let output_metadata = output.metadata()?;
         if copied != artifact.size_bytes
+            || hex::encode(hasher.finalize()) != artifact.sha256
             || !trusted_model_file(&source_file, &source_after, artifact.size_bytes)
             || !metadata_stable(&source_metadata, &source_after)
             || !trusted_model_metadata(&output_metadata, artifact.size_bytes)
@@ -2239,6 +2416,76 @@ mod tests {
     }
 
     #[test]
+    fn completed_install_retry_reuses_exact_receipt_without_another_space_reservation_or_copy() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, plan) = persisted_installation(data.path());
+        let recipe_digest = plan.identity.recipe_revision_sha256.clone();
+        authorize_installation(&installation, &recipe_digest);
+        for name in ["spec.json", "recipe-content.sha256"] {
+            fs::set_permissions(installation.join(name), fs::Permissions::from_mode(0o600))
+                .unwrap();
+        }
+        fs::set_permissions(&installation, fs::Permissions::from_mode(0o700)).unwrap();
+        let cache = installation.join("runtime-cache");
+        fs::create_dir(&cache).unwrap();
+        fs::set_permissions(&cache, fs::Permissions::from_mode(0o700)).unwrap();
+        let archive = data
+            .path()
+            .join("oci-archives")
+            .join(&plan.runtime_image.oci_layout_sha256);
+        fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        fs::write(&archive, vec![0; plan.runtime_image.image_bytes as usize]).unwrap();
+        fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let unavailable_full_copy_bytes =
+            crate::inventory::available_disk_bytes(data.path()).unwrap();
+        assert!(matches!(
+            runtime.ensure_disk_available(unavailable_full_copy_bytes),
+            Err(OciError::Capacity)
+        ));
+        let model = installation.join("models/primary/config.json");
+        let before = fs::metadata(&model).unwrap();
+        let hashes_before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+
+        runtime
+            .install_with_space_check(
+                &plan,
+                &installation_id,
+                &recipe_digest,
+                unavailable_full_copy_bytes,
+            )
+            .unwrap();
+
+        let after = fs::metadata(&model).unwrap();
+        assert_eq!(
+            (after.dev(), after.ino(), after.ctime_nsec()),
+            (before.dev(), before.ino(), before.ctime_nsec())
+        );
+        assert_eq!(
+            SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()),
+            hashes_before
+        );
+        assert!(!data.path().join("distribution/models").exists());
+
+        fs::write(
+            installation.join(super::INSTALLATION_METADATA_FILE),
+            b"invalid receipt",
+        )
+        .unwrap();
+        assert!(matches!(
+            runtime.install_with_space_check(
+                &plan,
+                &installation_id,
+                &recipe_digest,
+                unavailable_full_copy_bytes,
+            ),
+            Err(OciError::Artifact)
+        ));
+    }
+
+    #[test]
     fn installation_metadata_deduplicates_physical_projection_entries() {
         let data = tempdir().unwrap();
         let mut value = compiled_plan();
@@ -2298,7 +2545,7 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "linux")]
-    fn trusted_installation_verification_reuses_exact_runtime_acl_receipt_after_metadata_refresh() {
+    fn authorized_runtime_acl_transition_preserves_receipt_without_model_rehash() {
         let data = tempdir().unwrap();
         let (installation_id, installation, _) = persisted_installation(data.path());
         let primary = installation.join("models/primary/config.json");
@@ -2308,6 +2555,9 @@ mod tests {
         runtime.verify_installation(&installation_id).unwrap();
         assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
 
+        let transition = runtime
+            .begin_installation_acl_transition(&installation_id)
+            .unwrap();
         apply_acl(
             &primary,
             &[
@@ -2318,12 +2568,34 @@ mod tests {
                 (0x0020, 0, u32::MAX),
             ],
         );
+        runtime
+            .finish_installation_acl_transition(&installation_id, transition)
+            .unwrap();
         runtime.verify_installation(&installation_id).unwrap();
         let after_acl = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
-        assert_eq!(after_acl, before + 1);
+        assert_eq!(after_acl, before);
 
         runtime.verify_installation(&installation_id).unwrap();
         assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), after_acl);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn runtime_acl_transition_refuses_same_size_content_change() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, _) = persisted_installation(data.path());
+        let primary = installation.join("models/primary/config.json");
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let transition = runtime
+            .begin_installation_acl_transition(&installation_id)
+            .unwrap();
+        fs::write(&primary, b"changed").unwrap();
+        assert!(
+            runtime
+                .finish_installation_acl_transition(&installation_id, transition)
+                .is_err()
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@ these concrete models.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -24,6 +25,7 @@ from vonk_agent_protocol import (
     RecipeStartSingleEvidence,
     RecipeStopResult,
     RecipeUninstallResult,
+    canonical_message,
 )
 from vonk_agent_protocol.contracts import TensorParallelStartEvidence
 
@@ -101,6 +103,7 @@ class RecipeOperationCancellationResult(LifecycleModel):
     """Cancellation metadata merged into a pending lifecycle result."""
 
     cancel_requested: Literal[True]
+    cancel_requested_at: datetime | None = None
     cancel_request_id: UuidId
     cancel_actor: str = Field(min_length=1, max_length=256)
     reason: str = Field(min_length=1, max_length=512)
@@ -151,9 +154,10 @@ def parse_recipe_lifecycle_result(kind: str, value: object) -> object:
     else:
         raise ValueError("recipe operation kind has no result contract")
     _validate_evidence_for_kind(kind, value)
+    document = canonical_message(value)
     for model in models:
         try:
-            return model.model_validate(value)
+            return model.model_validate_json(document)
         except (TypeError, ValueError):
             continue
     raise ValueError("recipe operation result does not match its kind")
@@ -226,7 +230,7 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
 
 def _model_accepts(model: type[BaseModel], value: Mapping[str, object]) -> bool:
     try:
-        model.model_validate(value)
+        model.model_validate_json(canonical_message(value))
     except (TypeError, ValueError):
         return False
     return True

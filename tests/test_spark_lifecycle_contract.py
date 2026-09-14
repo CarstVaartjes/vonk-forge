@@ -214,6 +214,11 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
     candidate_artifacts["nas-payload"] = _record(
         objects, f"{prefix}/nas/current/payload.json", b"payload"
     )
+    candidate_artifacts["cli-wheel"] = _record(
+        objects,
+        f"{prefix}/cli/vonk_cluster_profiles-0.1.1-py3-none-any.whl",
+        b"candidate CLI wheel fixture",
+    )
     candidate_bootstraps = {
         kind: _record(objects, f"{prefix}/bootstraps/{kind}", kind.encode())
         for kind in ("nas", "spark")

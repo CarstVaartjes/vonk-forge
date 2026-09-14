@@ -76,6 +76,7 @@ def test_persisted_agent_failure_survives_activity(sessions, tmp_path, failure):
                 build_digest="sha256:" + "f" * 64,
                 binary_digest="f" * 64,
                 self_test_passed=True,
+                workload_intent_ordinal=1,
             )
         )
         session.flush()

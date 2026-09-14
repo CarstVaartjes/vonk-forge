@@ -168,7 +168,7 @@ class Settings:
     # configured.
     recipe_library_package_url: str | None = None
     recipe_library_sync_interval_seconds: int = 900
-    distributed_start_timeout_seconds: int = 60
+    distributed_start_timeout_seconds: int = 1800
     agent_release_api_url: str = "https://install.vonkforge.ai"
     agent_controller_address: str | None = None
     agent_service_hostnames: tuple[str, ...] = ()
@@ -604,7 +604,7 @@ class WorkerSettings:
     artifact_job_retention_seconds: int
     artifact_job_reconcile_interval_seconds: int
     artifact_job_reconcile_batch_limit: int
-    distributed_start_timeout_seconds: int = 60
+    distributed_start_timeout_seconds: int = 1800
     model_cache_root: Path = Path("/state/model-cache")
     model_cache_reserve_bytes: int = 10 * 1024**3
     model_cache_parallel_downloads: int = 8
@@ -741,7 +741,7 @@ class WorkerSettings:
 def _distributed_start_timeout() -> int:
     try:
         distributed_start_timeout_seconds = int(
-            os.environ.get("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", "60")
+            os.environ.get("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", "1800")
         )
     except ValueError as error:
         raise SettingsError(

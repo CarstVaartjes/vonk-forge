@@ -35,12 +35,18 @@ from vonk_control.artifact_jobs import (
     _validate_parameter_definition,
 )
 from vonk_control.models import (
+    AgentNode,
     AgentOperation,
     ArtifactJob,
     ArtifactJobBlob,
     CatalogDocumentRevision,
+    Job,
     RecipeInstallation,
     RecipeRun,
+)
+from vonk_control.recipe_operations import (
+    RecipeArtifactJobCancellationPending,
+    RecipeOperationConflict,
 )
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
@@ -50,6 +56,49 @@ from .test_recipe_operations import (
     installed_recipe,
     setup_services,
 )
+
+
+def test_one_shot_job_inherits_activation_intent(
+    tmp_path,
+) -> None:
+    sessions, _operations, _queue, service, run_id, node_id = (
+        running_artifact_service(tmp_path)
+    )
+    submitted = submitted_artifact_job(service, run_id, request_suffix=150)
+    with sessions() as session:
+        activation = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.job.activate.v1",
+                Job.payload["owner_id"].as_string() == run_id,
+            )
+        )
+        parent = session.get(Job, submitted.operation_id)
+        child = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == submitted.operation_id
+            )
+        )
+        node = session.get(AgentNode, node_id)
+        assert activation is not None and parent is not None
+        assert child is not None and node is not None
+        ordinal = activation.payload["workload_intent_ordinal"]
+        assert type(ordinal) is int and ordinal > 0
+        assert parent.payload["workload_intent_ordinal"] == ordinal
+        assert child.workload_intent_ordinal == ordinal
+        assert node.workload_intent_ordinal == ordinal
+
+
+
+def test_one_shot_job_rejects_submission_after_newer_workload_intent(tmp_path) -> None:
+    sessions, _operations, _queue, service, run_id, node_id = (
+        running_artifact_service(tmp_path)
+    )
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.workload_intent_ordinal += 1
+    with pytest.raises(RecipeOperationConflict, match="superseded"):
+        submitted_artifact_job(service, run_id, request_suffix=152)
 
 
 class _ArtifactCreateRequest(TypedDict):
@@ -989,8 +1038,7 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
         return service.finalize(job.id)
 
     first = create("00000000-0000-4000-8000-000000000107")
-    with pytest.raises(Exception, match="active job"):
-        operations.preview_stop(run_id)
+    assert operations.preview_stop(run_id).allowed
     submitted = service.submit(
         first.id,
         actor="operator",
@@ -1020,8 +1068,7 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
         ).state
         == "cancelling"
     )
-    with pytest.raises(Exception, match="active job"):
-        operations.preview_stop(run_id)
+    assert operations.preview_stop(run_id).allowed
     second = create("00000000-0000-4000-8000-000000000109")
     with pytest.raises(ArtifactJobError, match="owns this run reservation"):
         service.submit(
@@ -1059,8 +1106,28 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
     assert cancelling.state == "cancelling"
     directive = agent_jobs.heartbeat(claim, {"phase": "running"}, 30)
     assert directive.cancel_requested is True
-    with pytest.raises(Exception, match="active job"):
-        recipe_operations.preview_stop(run_id)
+    stop_plan = recipe_operations.preview_stop(run_id)
+    assert stop_plan.allowed
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.workload_intent_ordinal += 1
+        ordinal = node.workload_intent_ordinal
+        agent_jobs.request_superseded_workload_cancellation_in_session(
+            session, (node_id,), ordinal, NOW
+        )
+    with pytest.raises(RecipeArtifactJobCancellationPending) as pending:
+        recipe_operations.stop(
+            run_id,
+            plan_digest=stop_plan.plan_digest,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000154",
+            workload_intent_ordinal=ordinal,
+        )
+    assert pending.value.job_id == submitted.operation_id
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == "running" and run.stopped_at is None
 
     acknowledged = cancellation_result(
         claim,
@@ -1070,7 +1137,14 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
     )
     agent_jobs.record_result(acknowledged)
     assert service.get(submitted.id).state == "cancelled"
-    recipe_operations.preview_stop(run_id)
+    stopped = recipe_operations.stop(
+        run_id,
+        plan_digest=stop_plan.plan_digest,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000154",
+        workload_intent_ordinal=ordinal,
+    )
+    assert stopped.state == "succeeded"
     with pytest.raises(StaleAgentAttempt):
         agent_jobs.record_result(acknowledged)
 
@@ -1117,8 +1191,7 @@ def test_artifact_cancel_stop_failure_remains_recoverable_and_blocks_release(
             "elapsed_milliseconds": 10,
         }
     )
-    with pytest.raises(Exception, match="active job"):
-        recipe_operations.preview_stop(run_id)
+    assert recipe_operations.preview_stop(run_id).allowed
 
 
 def test_unsafe_artifact_lease_expiry_is_terminal_recoverable_and_fences_result(
@@ -1144,7 +1217,17 @@ def test_unsafe_artifact_lease_expiry_is_terminal_recoverable_and_fences_result(
         "recoverable": True,
         "late_results_accepted": False,
     }
-    recipe_operations.preview_stop(run_id)
+    stop_plan = recipe_operations.preview_stop(run_id)
+    with pytest.raises(RecipeArtifactJobCancellationPending):
+        recipe_operations.stop(
+            run_id,
+            plan_digest=stop_plan.plan_digest,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000155",
+        )
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == "running" and run.stopped_at is None
     with pytest.raises(StaleAgentAttempt):
         agent_jobs.record_result(
             cancellation_result(

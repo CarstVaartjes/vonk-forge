@@ -2,6 +2,7 @@
 
 from .agent_deployment_evidence import AgentDeploymentEvidence
 from .agent_deployment_evidence_connectivity import AgentDeploymentEvidenceConnectivity
+from .agent_failure_kind import AgentFailureKind
 from .agent_failure_result import AgentFailureResult
 from .agent_operation import AgentOperation
 from .agent_operation_change import AgentOperationChange
@@ -87,14 +88,11 @@ from .fleet_node_detail_response_labels import FleetNodeDetailResponseLabels
 from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
 from .fleet_profile_application_progress import FleetProfileApplicationProgress
-from .fleet_profile_application_progress_assignments import FleetProfileApplicationProgressAssignments
-from .fleet_profile_application_progress_child_source_type_0 import FleetProfileApplicationProgressChildSourceType0
 from .fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
 from .fleet_profile_application_result import FleetProfileApplicationResult
 from .fleet_profile_application_view import FleetProfileApplicationView
 from .fleet_profile_application_view_state import FleetProfileApplicationViewState
 from .fleet_profile_assignment import FleetProfileAssignment
-from .fleet_profile_assignment_context import FleetProfileAssignmentContext
 from .fleet_profile_assignment_desired_state import FleetProfileAssignmentDesiredState
 from .fleet_profile_assignment_input import FleetProfileAssignmentInput
 from .fleet_profile_assignment_input_desired_state import FleetProfileAssignmentInputDesiredState
@@ -118,7 +116,6 @@ from .fleet_profile_list import FleetProfileList
 from .fleet_profile_load_request import FleetProfileLoadRequest
 from .fleet_profile_node import FleetProfileNode
 from .fleet_profile_plan_step import FleetProfilePlanStep
-from .fleet_profile_plan_step_kind import FleetProfilePlanStepKind
 from .fleet_profile_plan_summary import FleetProfilePlanSummary
 from .fleet_profile_preview import FleetProfilePreview
 from .fleet_profile_reason import FleetProfileReason
@@ -454,6 +451,7 @@ from .workload_provenance_rank_agreement import WorkloadProvenanceRankAgreement
 __all__ = (
     "AgentDeploymentEvidence",
     "AgentDeploymentEvidenceConnectivity",
+    "AgentFailureKind",
     "AgentFailureResult",
     "AgentOperation",
     "AgentOperationChange",
@@ -539,14 +537,11 @@ __all__ = (
     "FleetNodeIdentity",
     "FleetNodeLabels",
     "FleetProfileApplicationProgress",
-    "FleetProfileApplicationProgressAssignments",
-    "FleetProfileApplicationProgressChildSourceType0",
     "FleetProfileApplicationProgressStepResults",
     "FleetProfileApplicationResult",
     "FleetProfileApplicationView",
     "FleetProfileApplicationViewState",
     "FleetProfileAssignment",
-    "FleetProfileAssignmentContext",
     "FleetProfileAssignmentDesiredState",
     "FleetProfileAssignmentInput",
     "FleetProfileAssignmentInputDesiredState",
@@ -570,7 +565,6 @@ __all__ = (
     "FleetProfileLoadRequest",
     "FleetProfileNode",
     "FleetProfilePlanStep",
-    "FleetProfilePlanStepKind",
     "FleetProfilePlanSummary",
     "FleetProfilePreview",
     "FleetProfileReason",

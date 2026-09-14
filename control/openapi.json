@@ -95,6 +95,18 @@
         "title": "AgentDeploymentEvidence",
         "type": "object"
       },
+      "AgentFailureKind": {
+        "enum": [
+          "temporary-dependency",
+          "uncertain-effect",
+          "invalid-authority",
+          "invalid-contract",
+          "integrity-failure",
+          "resource-prerequisite"
+        ],
+        "title": "AgentFailureKind",
+        "type": "string"
+      },
       "AgentFailureResult": {
         "additionalProperties": false,
         "properties": {
@@ -133,6 +145,16 @@
               }
             ],
             "title": "Error Code"
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentFailureKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "helper_error_code": {
             "anyOf": [
@@ -205,6 +227,19 @@
               }
             ],
             "title": "Recovery"
+          },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "maximum": 4294967295.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After Seconds"
           },
           "stage": {
             "anyOf": [
@@ -3603,15 +3638,6 @@
         "additionalProperties": false,
         "description": "Typed progress tree persisted with every profile application.",
         "properties": {
-          "assignments": {
-            "patternProperties": {
-              "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$": {
-                "$ref": "#/components/schemas/FleetProfileAssignmentContext"
-              }
-            },
-            "title": "Assignments",
-            "type": "object"
-          },
           "attempt": {
             "default": 1,
             "minimum": 1.0,
@@ -3631,10 +3657,7 @@
           "child_source": {
             "anyOf": [
               {
-                "enum": [
-                  "recipe",
-                  "switch-adapter"
-                ],
+                "const": "switch-adapter",
                 "type": "string"
               },
               {
@@ -3719,6 +3742,18 @@
             "minimum": 0.0,
             "title": "Total Steps",
             "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workload Intent Ordinal"
           }
         },
         "title": "FleetProfileApplicationProgress",
@@ -3970,50 +4005,6 @@
         "title": "FleetProfileAssignment",
         "type": "object"
       },
-      "FleetProfileAssignmentContext": {
-        "additionalProperties": false,
-        "description": "Persisted mapping and installation identities for one assignment.",
-        "properties": {
-          "installation_id": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Installation Id"
-          },
-          "mapping_generation": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mapping Generation"
-          },
-          "mapping_id": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mapping Id"
-          }
-        },
-        "title": "FleetProfileAssignmentContext",
-        "type": "object"
-      },
       "FleetProfileAssignmentInput": {
         "additionalProperties": false,
         "description": "Permissive autosaved recipe choice, not an execution assignment.\n\nA logical model variant is selected by its canonical identity.  The\ncontent digest is resolved from that identity for a load and is never a\nprofile-pinned execution revision.  Topology/rank validation belongs to\npreview/load, so incomplete distributed drafts can be saved.",
@@ -4104,12 +4095,6 @@
           "actions": {
             "items": {
               "enum": [
-                "stop",
-                "create-placement",
-                "build",
-                "distribute-image",
-                "install",
-                "start",
                 "switch",
                 "keep"
               ],
@@ -4332,10 +4317,35 @@
               "prepare",
               "cleanup",
               "stop",
+              "uninstall",
               "final_verify"
             ],
             "title": "Phase",
             "type": "string"
+          },
+          "start_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Deadline"
+          },
+          "startup_budget_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startup Budget Seconds"
           },
           "total_bytes": {
             "anyOf": [
@@ -4555,18 +4565,6 @@
       "FleetProfilePlanStep": {
         "additionalProperties": false,
         "properties": {
-          "assignment_id": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assignment Id"
-          },
           "index": {
             "maximum": 1023.0,
             "minimum": 0.0,
@@ -4574,16 +4572,7 @@
             "type": "integer"
           },
           "kind": {
-            "enum": [
-              "stop",
-              "uninstall",
-              "create-placement",
-              "build",
-              "distribute-image",
-              "install",
-              "start",
-              "switch"
-            ],
+            "const": "switch",
             "title": "Kind",
             "type": "string"
           },
@@ -4601,30 +4590,6 @@
             "maxItems": 32,
             "title": "Node Ids",
             "type": "array"
-          },
-          "owner_id": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Owner Id"
-          },
-          "recipe_revision_id": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recipe Revision Id"
           }
         },
         "required": [
@@ -4888,34 +4853,14 @@
         "description": "Result receipt for one completed profile plan step.",
         "properties": {
           "kind": {
-            "anyOf": [
-              {
-                "maxLength": 80,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Kind"
+            "const": "switch",
+            "title": "Kind",
+            "type": "string"
           },
           "operation_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Operation Id",
             "type": "string"
-          },
-          "owner_id": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Owner Id"
           },
           "result": {
             "anyOf": [
@@ -4936,7 +4881,8 @@
           }
         },
         "required": [
-          "operation_id"
+          "operation_id",
+          "kind"
         ],
         "title": "FleetProfileStepResult",
         "type": "object"
@@ -4979,7 +4925,8 @@
               {
                 "enum": [
                   "run",
-                  "stop"
+                  "stop",
+                  "cleanup"
                 ],
                 "type": "string"
               },
@@ -5045,6 +4992,39 @@
             },
             "maxItems": 128,
             "title": "Children",
+            "type": "array"
+          },
+          "observation_deadline_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Deadline At"
+          },
+          "observation_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Due At"
+          },
+          "pending_operation_ids": {
+            "items": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "maxItems": 128,
+            "title": "Pending Operation Ids",
             "type": "array"
           },
           "position": {
@@ -5157,7 +5137,8 @@
           "kind": {
             "enum": [
               "run",
-              "stop"
+              "stop",
+              "cleanup"
             ],
             "title": "Kind",
             "type": "string"
@@ -5207,7 +5188,8 @@
           "kind": {
             "enum": [
               "run",
-              "stop"
+              "stop",
+              "cleanup"
             ],
             "title": "Kind",
             "type": "string"
@@ -14862,6 +14844,30 @@
             "title": "Members",
             "type": "array"
           },
+          "observation_deadline_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Deadline At"
+          },
+          "observation_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Due At"
+          },
           "operation": {
             "anyOf": [
               {
@@ -15011,6 +15017,30 @@
             "title": "Retryable",
             "type": "boolean"
           },
+          "start_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Deadline"
+          },
+          "startup_budget_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startup Budget Seconds"
+          },
           "subphase": {
             "anyOf": [
               {
@@ -15046,6 +15076,18 @@
             "default": false,
             "title": "Total Bytes Known",
             "type": "boolean"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workload Intent Ordinal"
           }
         },
         "title": "RunSwitchOperationResult",
@@ -23073,6 +23115,94 @@
           }
         ],
         "summary": "Profile Progress"
+      }
+    },
+    "/api/profile/{number}/requests/{request_key}": {
+      "get": {
+        "operationId": "getProfileApplicationByRequest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "request_key",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Request Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetProfileApplicationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Profile Application By Request"
       }
     },
     "/api/recipe": {

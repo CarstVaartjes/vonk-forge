@@ -216,6 +216,69 @@ pub struct AgentDirective {
     pub operation_id: ::uuid::Uuid,
     pub schema_version: u8,
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AgentFailureKind {
+    #[serde(rename = "temporary-dependency")]
+    TemporaryDependency,
+    #[serde(rename = "uncertain-effect")]
+    UncertainEffect,
+    #[serde(rename = "invalid-authority")]
+    InvalidAuthority,
+    #[serde(rename = "invalid-contract")]
+    InvalidContract,
+    #[serde(rename = "integrity-failure")]
+    IntegrityFailure,
+    #[serde(rename = "resource-prerequisite")]
+    ResourcePrerequisite,
+}
+impl ::std::fmt::Display for AgentFailureKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::TemporaryDependency => f.write_str("temporary-dependency"),
+            Self::UncertainEffect => f.write_str("uncertain-effect"),
+            Self::InvalidAuthority => f.write_str("invalid-authority"),
+            Self::InvalidContract => f.write_str("invalid-contract"),
+            Self::IntegrityFailure => f.write_str("integrity-failure"),
+            Self::ResourcePrerequisite => f.write_str("resource-prerequisite"),
+        }
+    }
+}
+impl ::std::str::FromStr for AgentFailureKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "temporary-dependency" => Ok(Self::TemporaryDependency),
+            "uncertain-effect" => Ok(Self::UncertainEffect),
+            "invalid-authority" => Ok(Self::InvalidAuthority),
+            "invalid-contract" => Ok(Self::InvalidContract),
+            "integrity-failure" => Ok(Self::IntegrityFailure),
+            "resource-prerequisite" => Ok(Self::ResourcePrerequisite),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AgentFailureKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for AgentFailureKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AgentFailureKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Default, Eq)]
@@ -226,6 +289,8 @@ pub struct AgentFailureResult {
     pub diagnostics: ::std::option::Option<FailureDiagnostics>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub error_code: ::std::option::Option<::std::string::String>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub failure_kind: ::std::option::Option<AgentFailureKind>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub helper_error_code: ::std::option::Option<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -238,6 +303,8 @@ pub struct AgentFailureResult {
     pub reason: ::std::option::Option<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub recovery: ::std::option::Option<::std::string::String>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub retry_after_seconds: ::std::option::Option<u32>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub stage: ::std::option::Option<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -2529,6 +2596,8 @@ pub struct InstallerCandidateArtifacts {
     pub agent_package_linux_arm64: InstallerPackageArtifact,
     #[serde(rename = "agent-package-signature-linux-arm64")]
     pub agent_package_signature_linux_arm64: InstallerReleaseObject,
+    #[serde(rename = "cli-wheel")]
+    pub cli_wheel: InstallerReleaseObject,
     #[serde(rename = "nas-payload")]
     pub nas_payload: InstallerReleaseObject,
     #[serde(rename = "nas-setup-darwin-amd64")]
@@ -4494,6 +4563,7 @@ pub struct RecipeStartSingleEvidence {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RecipeStopPayload {
+    pub cancel_pending_start: bool,
     pub plan_digest: ::std::string::String,
     pub run_id: ::uuid::Uuid,
     pub schema_version: u8,
@@ -6259,6 +6329,76 @@ impl<'de> ::serde::Deserialize<'de> for AgentDirective {
         })
     }
 }
+impl AgentFailureKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::TemporaryDependency => "temporary-dependency",
+            Self::UncertainEffect => "uncertain-effect",
+            Self::InvalidAuthority => "invalid-authority",
+            Self::InvalidContract => "invalid-contract",
+            Self::IntegrityFailure => "integrity-failure",
+            Self::ResourcePrerequisite => "resource-prerequisite",
+        }
+    }
+}
+impl ::std::ops::Deref for AgentFailureKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for AgentFailureKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for AgentFailureKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AgentFailureKind {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("AgentFailureKind", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "temporary-dependency")]
+            TemporaryDependency,
+            #[serde(rename = "uncertain-effect")]
+            UncertainEffect,
+            #[serde(rename = "invalid-authority")]
+            InvalidAuthority,
+            #[serde(rename = "invalid-contract")]
+            InvalidContract,
+            #[serde(rename = "integrity-failure")]
+            IntegrityFailure,
+            #[serde(rename = "resource-prerequisite")]
+            ResourcePrerequisite,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::TemporaryDependency => Self::TemporaryDependency,
+            Raw::UncertainEffect => Self::UncertainEffect,
+            Raw::InvalidAuthority => Self::InvalidAuthority,
+            Raw::InvalidContract => Self::InvalidContract,
+            Raw::IntegrityFailure => Self::IntegrityFailure,
+            Raw::ResourcePrerequisite => Self::ResourcePrerequisite,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -6275,6 +6415,8 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub error_code: ::std::option::Option<::std::string::String>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub failure_kind: ::std::option::Option<AgentFailureKind>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub helper_error_code: ::std::option::Option<::std::string::String>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub helper_exit_code: ::std::option::Option<u32>,
@@ -6286,6 +6428,8 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
             pub reason: ::std::option::Option<::std::string::String>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub recovery: ::std::option::Option<::std::string::String>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub retry_after_seconds: ::std::option::Option<u32>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub stage: ::std::option::Option<::std::string::String>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -6300,12 +6444,14 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
             diagnostic: raw.diagnostic,
             diagnostics: raw.diagnostics,
             error_code: raw.error_code,
+            failure_kind: raw.failure_kind,
             helper_error_code: raw.helper_error_code,
             helper_exit_code: raw.helper_exit_code,
             operation: raw.operation,
             package_activation: raw.package_activation,
             reason: raw.reason,
             recovery: raw.recovery,
+            retry_after_seconds: raw.retry_after_seconds,
             stage: raw.stage,
             status: raw.status,
             summary: raw.summary,
@@ -8593,6 +8739,8 @@ impl<'de> ::serde::Deserialize<'de> for InstallerCandidateArtifacts {
             pub agent_package_linux_arm64: InstallerPackageArtifact,
             #[serde(rename = "agent-package-signature-linux-arm64")]
             pub agent_package_signature_linux_arm64: InstallerReleaseObject,
+            #[serde(rename = "cli-wheel")]
+            pub cli_wheel: InstallerReleaseObject,
             #[serde(rename = "nas-payload")]
             pub nas_payload: InstallerReleaseObject,
             #[serde(rename = "nas-setup-darwin-amd64")]
@@ -8612,6 +8760,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerCandidateArtifacts {
         Ok(Self {
             agent_package_linux_arm64: raw.agent_package_linux_arm64,
             agent_package_signature_linux_arm64: raw.agent_package_signature_linux_arm64,
+            cli_wheel: raw.cli_wheel,
             nas_payload: raw.nas_payload,
             nas_setup_darwin_amd64: raw.nas_setup_darwin_amd64,
             nas_setup_darwin_arm64: raw.nas_setup_darwin_arm64,
@@ -11266,12 +11415,14 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStopPayload {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
+            pub cancel_pending_start: bool,
             pub plan_digest: ::std::string::String,
             pub run_id: ::uuid::Uuid,
             pub schema_version: u8,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
+            cancel_pending_start: raw.cancel_pending_start,
             plan_digest: raw.plan_digest,
             run_id: raw.run_id,
             schema_version: raw.schema_version,

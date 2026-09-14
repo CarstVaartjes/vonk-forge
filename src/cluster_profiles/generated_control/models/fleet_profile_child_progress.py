@@ -9,9 +9,11 @@ from ..types import UNSET, Unset
 from ..models.fleet_profile_child_progress_phase import check_fleet_profile_child_progress_phase
 from ..models.fleet_profile_child_progress_phase import FleetProfileChildProgressPhase
 from ..types import UNSET, Unset
+from dateutil.parser import isoparse
 from typing import cast
 from typing import cast, Union
 from typing import Union
+import datetime
 
 if TYPE_CHECKING:
   from ..models.operation_progress import OperationProgress
@@ -33,6 +35,8 @@ class FleetProfileChildProgress:
             bytes_ (Union[None, Unset, int]):
             node_ids (Union[Unset, list[str]]):
             operation (Union['OperationProgress', None, Unset]):
+            start_deadline (Union[None, Unset, datetime.datetime]):
+            startup_budget_seconds (Union[None, Unset, int]):
             total_bytes (Union[None, Unset, int]):
      """
 
@@ -40,6 +44,8 @@ class FleetProfileChildProgress:
     bytes_: Union[None, Unset, int] = UNSET
     node_ids: Union[Unset, list[str]] = UNSET
     operation: Union['OperationProgress', None, Unset] = UNSET
+    start_deadline: Union[None, Unset, datetime.datetime] = UNSET
+    startup_budget_seconds: Union[None, Unset, int] = UNSET
     total_bytes: Union[None, Unset, int] = UNSET
 
 
@@ -70,6 +76,20 @@ class FleetProfileChildProgress:
         else:
             operation = self.operation
 
+        start_deadline: Union[None, Unset, str]
+        if isinstance(self.start_deadline, Unset):
+            start_deadline = UNSET
+        elif isinstance(self.start_deadline, datetime.datetime):
+            start_deadline = self.start_deadline.isoformat()
+        else:
+            start_deadline = self.start_deadline
+
+        startup_budget_seconds: Union[None, Unset, int]
+        if isinstance(self.startup_budget_seconds, Unset):
+            startup_budget_seconds = UNSET
+        else:
+            startup_budget_seconds = self.startup_budget_seconds
+
         total_bytes: Union[None, Unset, int]
         if isinstance(self.total_bytes, Unset):
             total_bytes = UNSET
@@ -88,6 +108,10 @@ class FleetProfileChildProgress:
             field_dict["node_ids"] = node_ids
         if operation is not UNSET:
             field_dict["operation"] = operation
+        if start_deadline is not UNSET:
+            field_dict["start_deadline"] = start_deadline
+        if startup_budget_seconds is not UNSET:
+            field_dict["startup_budget_seconds"] = startup_budget_seconds
         if total_bytes is not UNSET:
             field_dict["total_bytes"] = total_bytes
 
@@ -137,6 +161,36 @@ class FleetProfileChildProgress:
         operation = _parse_operation(d.pop("operation", UNSET))
 
 
+        def _parse_start_deadline(data: object) -> Union[None, Unset, datetime.datetime]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                start_deadline_type_0 = isoparse(data)
+
+
+
+                return start_deadline_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, Unset, datetime.datetime], data)
+
+        start_deadline = _parse_start_deadline(d.pop("start_deadline", UNSET))
+
+
+        def _parse_startup_budget_seconds(data: object) -> Union[None, Unset, int]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, int], data)
+
+        startup_budget_seconds = _parse_startup_budget_seconds(d.pop("startup_budget_seconds", UNSET))
+
+
         def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
             if data is None:
                 return data
@@ -152,6 +206,8 @@ class FleetProfileChildProgress:
             bytes_=bytes_,
             node_ids=node_ids,
             operation=operation,
+            start_deadline=start_deadline,
+            startup_budget_seconds=startup_budget_seconds,
             total_bytes=total_bytes,
         )
 

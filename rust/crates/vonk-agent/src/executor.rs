@@ -452,16 +452,57 @@ impl<R> RecipeExecutor<'_, R> {
             }
         })
     }
-}
 
-async fn wait_ready_with_runtime_guard<R, G>(readiness: R, runtime_guard: G) -> bool
-where
-    R: Future<Output = Result<(), crate::health::HealthError>>,
-    G: Future<Output = bool>,
-{
-    tokio::select! {
-        result = readiness => result.is_ok(),
-        running = runtime_guard => running,
+    async fn stop_start_run(
+        &self,
+        claim: &AgentClaim,
+        run_id: &str,
+        stop_timeout_seconds: u32,
+        cancel_pending_start: bool,
+    ) -> Result<(), ExecutionResult>
+    where
+        R: ProcessRunner,
+    {
+        // The helper's exact run fence keeps an in-flight Docker START from
+        // creating this run after STOP has observed temporary absence.
+        let mut arguments = vec![run_id.to_owned(), stop_timeout_seconds.to_string()];
+        if cancel_pending_start {
+            arguments.push("job-cancel".to_owned());
+        }
+        if self
+            .execute_host_runtime(claim, HostRuntimeAction::Stop, arguments)
+            .await
+            .is_err()
+        {
+            return Err(waiting_for_operator("workload stop remains unconfirmed"));
+        }
+        if self.runtime.complete_stop(run_id).is_err() {
+            return Err(waiting_for_operator(
+                "workload local cleanup remains unconfirmed",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn cancel_start_run(
+        &self,
+        claim: &AgentClaim,
+        run_id: &str,
+        stop_timeout_seconds: u32,
+    ) -> ExecutionResult
+    where
+        R: ProcessRunner,
+    {
+        if let Err(uncertain) = self
+            .stop_start_run(claim, run_id, stop_timeout_seconds, true)
+            .await
+        {
+            return uncertain;
+        }
+        ExecutionResult {
+            state: "cancelled",
+            body: json!({"reason": "controller cancellation confirmed after exact workload stop", "error_code": "operation_cancelled"}),
+        }
     }
 }
 
@@ -789,7 +830,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             result = Some(Ok(value));
                             break;
                         }
-                        Err(error) if error.retryable() && attempt < 2 => {
+                        Err(error)
+                            if error.retryable()
+                                && error.retry_after_seconds().is_none()
+                                && attempt < 2 =>
+                        {
                             tokio::time::sleep(Duration::from_millis(100 * (attempt + 1) as u64))
                                 .await;
                         }
@@ -849,7 +894,25 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         body: distribution_success_evidence(evidence),
                     }
                 }
-                Err(_) => failed("Controller distribution could not be verified and retained"),
+                Err(error) => {
+                    let mut body = json!({
+                        "reason": "Controller distribution could not be verified and retained",
+                        "failure_kind": if error.retryable() {
+                            "temporary-dependency"
+                        } else if matches!(error.status(), Some(401 | 403)) {
+                            "invalid-authority"
+                        } else {
+                            "integrity-failure"
+                        },
+                    });
+                    if let Some(seconds) = error.retry_after_seconds() {
+                        body["retry_after_seconds"] = json!(seconds);
+                    }
+                    ExecutionResult {
+                        state: "failed",
+                        body,
+                    }
+                }
             };
         }
         let request = match RecipeOperationRequest::parse(claim) {
@@ -1523,6 +1586,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             }
             RecipeOperationRequest::Install(request) => {
                 self.report_phase(claim, "installing").await;
+                if *cancellation.borrow() {
+                    return cancelled("controller cancelled before installation began");
+                }
                 let inline_spec = request.compiled_execution_plan.clone();
                 if inline_spec.validate().is_err() {
                     return failed("compiled execution plan is invalid");
@@ -1568,19 +1634,19 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     return failed("accepted container image is unavailable to the host runtime");
                 }
-                if self
-                    .runtime
-                    .ensure_disk_available(request.expected_bytes)
-                    .is_err()
-                {
-                    return failed("local disk capacity changed after install admission");
+                if *cancellation.borrow() {
+                    return cancelled("controller cancelled before model installation began");
                 }
-                match self.runtime.install(
+                match self.runtime.install_with_space_check(
                     &spec,
                     &request.installation_id.to_string(),
                     &spec.identity.recipe_revision_sha256,
+                    request.expected_bytes,
                 ) {
                     Ok(()) => {}
+                    Err(OciError::Capacity) => {
+                        return failed("local disk capacity changed after install admission");
+                    }
                     Err(error) => {
                         let (stage, category) = error.safe_install_context();
                         return failed_owned(format!(
@@ -1592,6 +1658,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .runtime
                     .installed_bytes(&request.installation_id.to_string())
                     .unwrap_or(request.expected_bytes);
+                if *cancellation.borrow() {
+                    return cancelled(
+                        "controller cancellation observed after installation settled",
+                    );
+                }
                 ExecutionResult {
                     state: "succeeded",
                     body: recipe_install_success_body(installed_bytes),
@@ -1734,41 +1805,161 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if collective_readiness && !plan.pre_start.is_empty() {
                     return failed("retained workload unexpectedly contains start hooks");
                 }
+                if *cancellation.borrow() {
+                    return self
+                        .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
+                        .await;
+                }
                 for hook in &plan.pre_start {
                     let arguments = runtime_arguments_for_plan(&plan, hook);
-                    if let Err(error) = self
-                        .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
-                        .await
+                    let mut cancellation_observer = cancellation.clone();
+                    match run_until_cancelled(
+                        self.execute_host_runtime(claim, HostRuntimeAction::Start, arguments),
+                        &mut cancellation_observer,
+                    )
+                    .await
                     {
-                        let _ = self.runtime.complete_stop(&run_id);
-                        return runtime_failure("container runtime pre-start hook failed", &error);
+                        None => {
+                            return self
+                                .cancel_start_run(
+                                    claim,
+                                    &run_id,
+                                    spec.lifecycle.stop_timeout_seconds,
+                                )
+                                .await;
+                        }
+                        Some(Err(error)) => {
+                            if *cancellation.borrow() {
+                                return self
+                                    .cancel_start_run(
+                                        claim,
+                                        &run_id,
+                                        spec.lifecycle.stop_timeout_seconds,
+                                    )
+                                    .await;
+                            }
+                            let _ = self.runtime.complete_stop(&run_id);
+                            return runtime_failure(
+                                "container runtime pre-start hook failed",
+                                &error,
+                            );
+                        }
+                        Some(Ok(())) => {}
                     }
                 }
                 let arguments = runtime_arguments_for_plan(&plan, &plan.main);
                 let runtime_guard_arguments = arguments.clone();
-                if collective_readiness {
-                    if let Err(error) = self
-                        .execute_host_runtime(
-                            claim,
-                            HostRuntimeAction::RunInspect,
-                            runtime_guard_arguments.clone(),
-                        )
-                        .await
+                let mut acl_transition = if collective_readiness {
+                    None
+                } else {
+                    match self
+                        .runtime
+                        .begin_installation_acl_transition(&installation_id)
                     {
+                        Ok(transition) => Some(transition),
+                        Err(_) => {
+                            return failed("installed model custody changed before runtime start");
+                        }
+                    }
+                };
+                let mut cancellation_observer = cancellation.clone();
+                let runtime_action = if collective_readiness {
+                    HostRuntimeAction::RunInspect
+                } else {
+                    HostRuntimeAction::Start
+                };
+                let runtime_arguments = if collective_readiness {
+                    runtime_guard_arguments.clone()
+                } else {
+                    arguments
+                };
+                match run_until_cancelled(
+                    self.execute_host_runtime(claim, runtime_action, runtime_arguments),
+                    &mut cancellation_observer,
+                )
+                .await
+                {
+                    None => {
+                        let stopped = self
+                            .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
+                            .await;
+                        if let Some(transition) = acl_transition.take()
+                            && self
+                                .runtime
+                                .finish_installation_acl_transition(&installation_id, transition)
+                                .is_err()
+                        {
+                            return waiting_for_operator(
+                                "cancelled workload model custody remains unconfirmed",
+                            );
+                        }
+                        return stopped;
+                    }
+                    Some(Err(error)) => {
+                        if *cancellation.borrow() {
+                            let stopped = self
+                                .cancel_start_run(
+                                    claim,
+                                    &run_id,
+                                    spec.lifecycle.stop_timeout_seconds,
+                                )
+                                .await;
+                            if let Some(transition) = acl_transition.take()
+                                && self
+                                    .runtime
+                                    .finish_installation_acl_transition(
+                                        &installation_id,
+                                        transition,
+                                    )
+                                    .is_err()
+                            {
+                                return waiting_for_operator(
+                                    "cancelled workload model custody remains unconfirmed",
+                                );
+                            }
+                            return stopped;
+                        }
+                        if !collective_readiness
+                            && let Err(uncertain) = self
+                                .stop_start_run(
+                                    claim,
+                                    &run_id,
+                                    spec.lifecycle.stop_timeout_seconds,
+                                    false,
+                                )
+                                .await
+                        {
+                            return uncertain;
+                        }
                         return runtime_failure(
-                            "collective workload is not running with exact identity",
+                            if collective_readiness {
+                                "collective workload is not running with exact identity"
+                            } else {
+                                "container runtime could not start the workload"
+                            },
                             &error,
                         );
                     }
-                } else if let Err(error) = self
-                    .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
-                    .await
+                    Some(Ok(())) => {}
+                }
+                if let Some(transition) = acl_transition.take()
+                    && self
+                        .runtime
+                        .finish_installation_acl_transition(&installation_id, transition)
+                        .is_err()
                 {
-                    let _ = self.runtime.complete_stop(&run_id);
-                    return runtime_failure(
-                        "container runtime could not start the workload",
-                        &error,
-                    );
+                    if let Err(uncertain) = self
+                        .stop_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds, false)
+                        .await
+                    {
+                        return uncertain;
+                    }
+                    return failed("installed model custody changed during runtime start");
+                }
+                if *cancellation.borrow() {
+                    return self
+                        .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
+                        .await;
                 }
                 if rank_launch {
                     let first_inspect = self
@@ -1806,17 +1997,26 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         false
                     };
                     if !stable {
-                        let _ = self
-                            .execute_host_runtime(
+                        if *cancellation.borrow() {
+                            return self
+                                .cancel_start_run(
+                                    claim,
+                                    &run_id,
+                                    spec.lifecycle.stop_timeout_seconds,
+                                )
+                                .await;
+                        }
+                        if let Err(uncertain) = self
+                            .stop_start_run(
                                 claim,
-                                HostRuntimeAction::Stop,
-                                vec![
-                                    run_id.clone(),
-                                    spec.lifecycle.stop_timeout_seconds.to_string(),
-                                ],
+                                &run_id,
+                                spec.lifecycle.stop_timeout_seconds,
+                                false,
                             )
-                            .await;
-                        let _ = self.runtime.complete_stop(&run_id);
+                            .await
+                        {
+                            return uncertain;
+                        }
                         return match launch_failure {
                             Some(error) => runtime_failure(
                                 "rank process did not remain stable after launch",
@@ -1829,17 +2029,17 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         match self.runtime.artifact_set_digest(&installation_id) {
                             Ok(digest) => digest,
                             Err(_) => {
-                                let _ = self
-                                    .execute_host_runtime(
+                                if let Err(uncertain) = self
+                                    .stop_start_run(
                                         claim,
-                                        HostRuntimeAction::Stop,
-                                        vec![
-                                            run_id.clone(),
-                                            spec.lifecycle.stop_timeout_seconds.to_string(),
-                                        ],
+                                        &run_id,
+                                        spec.lifecycle.stop_timeout_seconds,
+                                        false,
                                     )
-                                    .await;
-                                let _ = self.runtime.complete_stop(&run_id);
+                                    .await
+                                {
+                                    return uncertain;
+                                }
                                 return failed("rank launch evidence is unavailable");
                             }
                         };
@@ -1850,8 +2050,26 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         &runtime_guard_arguments,
                     ) {
                         Ok(body) => body,
-                        Err(_) => return failed("rank launch evidence is unavailable"),
+                        Err(_) => {
+                            if let Err(uncertain) = self
+                                .stop_start_run(
+                                    claim,
+                                    &run_id,
+                                    spec.lifecycle.stop_timeout_seconds,
+                                    false,
+                                )
+                                .await
+                            {
+                                return uncertain;
+                            }
+                            return failed("rank launch evidence is unavailable");
+                        }
                     };
+                    if *cancellation.borrow() {
+                        return self
+                            .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
+                            .await;
+                    }
                     return ExecutionResult {
                         state: "succeeded",
                         body,
@@ -1887,7 +2105,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     )
                     .await
                 } else {
-                    wait_ready_with_runtime_guard(
+                    wait_ready_with_runtime_guard_and_cancellation(
                         wait_ready(
                             request.endpoint_address,
                             request.port,
@@ -1895,22 +2113,27 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             lease_deadline,
                         ),
                         runtime_guard,
+                        cancellation.clone(),
                     )
                     .await
                 };
                 if !ready {
-                    if !collective_readiness {
-                        let _ = self
-                            .execute_host_runtime(
-                                claim,
-                                HostRuntimeAction::Stop,
-                                vec![
-                                    run_id.clone(),
-                                    spec.lifecycle.stop_timeout_seconds.to_string(),
-                                ],
-                            )
+                    if *cancellation.borrow() {
+                        return self
+                            .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
                             .await;
-                        let _ = self.runtime.complete_stop(&run_id);
+                    }
+                    if !collective_readiness
+                        && let Err(uncertain) = self
+                            .stop_start_run(
+                                claim,
+                                &run_id,
+                                spec.lifecycle.stop_timeout_seconds,
+                                false,
+                            )
+                            .await
+                    {
+                        return uncertain;
                     }
                     return failed("workload did not become ready before its deadline");
                 }
@@ -1931,6 +2154,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         Ok(body) => body,
                         Err(_) => return failed("collective readiness evidence is unavailable"),
                     };
+                    if *cancellation.borrow() {
+                        return self
+                            .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
+                            .await;
+                    }
                     return ExecutionResult {
                         state: "succeeded",
                         body,
@@ -1949,6 +2177,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(body) => body,
                     Err(_) => return failed("readiness evidence is unavailable"),
                 };
+                if *cancellation.borrow() {
+                    return self
+                        .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
+                        .await;
+                }
                 ExecutionResult {
                     state: "succeeded",
                     body,
@@ -1961,12 +2194,20 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(plan) => plan,
                     Err(_) => return failed("container runtime could not prepare workload stop"),
                 };
+                let mut cancel_remove = plan.remove.clone();
+                cancel_remove.push("job-cancel".to_owned());
+                let fenced_stop = request.cancel_pending_start || *cancellation.borrow();
+                let remove = if fenced_stop {
+                    cancel_remove.clone()
+                } else {
+                    plan.remove
+                };
                 if self
-                    .execute_host_runtime(claim, HostRuntimeAction::Stop, plan.remove)
+                    .execute_host_runtime(claim, HostRuntimeAction::Stop, remove)
                     .await
                     .is_err()
                 {
-                    failed("container runtime could not stop the workload")
+                    waiting_for_operator("container runtime stop remains unconfirmed")
                 } else {
                     if let (
                         Some(archive_sha256),
@@ -1980,6 +2221,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         plan.image_reference,
                     ) {
                         for hook in plan.post_stop {
+                            if *cancellation.borrow() {
+                                break;
+                            }
                             let mut arguments = vec![
                                 archive_sha256.clone(),
                                 registry_index_digest.clone(),
@@ -1996,21 +2240,47 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             }
                         }
                     }
-                    if self.runtime.complete_stop(&run_id).is_err() {
-                        return failed("container runtime stop metadata could not be finalized");
+                    if *cancellation.borrow()
+                        && !fenced_stop
+                        && self
+                            .execute_host_runtime(claim, HostRuntimeAction::Stop, cancel_remove)
+                            .await
+                            .is_err()
+                    {
+                        return waiting_for_operator("cancelled workload stop remains unconfirmed");
                     }
-                    ExecutionResult {
-                        state: "succeeded",
-                        body: recipe_stop_success_body(),
+                    if self.runtime.complete_stop(&run_id).is_err() {
+                        return waiting_for_operator(
+                            "container runtime stop metadata remains unconfirmed",
+                        );
+                    }
+                    if *cancellation.borrow() {
+                        ExecutionResult {
+                            state: "cancelled",
+                            body: json!({"reason": "controller cancellation confirmed after exact workload stop", "error_code": "operation_cancelled"}),
+                        }
+                    } else {
+                        ExecutionResult {
+                            state: "succeeded",
+                            body: recipe_stop_success_body(),
+                        }
                     }
                 }
             }
             RecipeOperationRequest::Uninstall(request) => {
                 self.report_phase(claim, "uninstalling").await;
+                if *cancellation.borrow() {
+                    return cancelled("controller cancelled before uninstallation began");
+                }
                 let installation_uuid = request.installation_id;
                 let installation_id = installation_uuid.to_string();
                 match self.runtime.recipe_digest_if_present(&installation_id) {
                     Ok(None) => {
+                        if *cancellation.borrow() {
+                            return cancelled(
+                                "controller cancellation observed with installation absent",
+                            );
+                        }
                         return ExecutionResult {
                             state: "succeeded",
                             body: recipe_uninstall_success_body(0),
@@ -2046,6 +2316,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 };
+                if *cancellation.borrow() {
+                    return cancelled("controller cancelled before installation cleanup began");
+                }
                 match self.runtime.runtime_cache_present(&installation_id) {
                     Ok(false) => {}
                     Ok(true) => {
@@ -2068,6 +2341,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 }
+                if *cancellation.borrow() {
+                    return cancelled(
+                        "controller cancellation observed after runtime cache cleanup",
+                    );
+                }
                 if let Err(error) = self
                     .runtime
                     .finalize_uninstall(&installation_id, &request.recipe_content_sha256)
@@ -2076,6 +2354,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "installed recipe could not be safely removed",
                         "installation-removal",
                         error.safe_category(),
+                    );
+                }
+                if *cancellation.borrow() {
+                    return cancelled(
+                        "controller cancellation observed after uninstallation settled",
                     );
                 }
                 ExecutionResult {
@@ -2090,6 +2373,20 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
 fn failed(reason: &'static str) -> ExecutionResult {
     ExecutionResult {
         state: "failed",
+        body: json!({"reason": reason}),
+    }
+}
+
+fn cancelled(reason: &'static str) -> ExecutionResult {
+    ExecutionResult {
+        state: "cancelled",
+        body: json!({"reason": reason, "error_code": "operation_cancelled"}),
+    }
+}
+
+fn waiting_for_operator(reason: &'static str) -> ExecutionResult {
+    ExecutionResult {
+        state: "waiting-for-operator",
         body: json!({"reason": reason}),
     }
 }
@@ -2514,6 +2811,15 @@ where
     E: Executor,
     F: FnOnce() -> Result<(), LoopError>,
 {
+    for (operation, result) in state.unreconciled_results()? {
+        result
+            .validate_for_operation(&operation)
+            .map_err(StateError::from)?;
+        match client.submit_result(&result).await {
+            Ok(()) | Err(ClientError::ResultSuperseded) => state.mark_reconciled(&result)?,
+            Err(error) => return Err(error.into()),
+        }
+    }
     for (operation, result) in state.pending_results()? {
         result
             .validate_for_operation(&operation)
@@ -2572,17 +2878,10 @@ where
                 .await
                 .map_err(|_| LoopError::HeartbeatTask)
                 .and_then(|result| result);
-            let cancelled = heartbeat_result.as_ref().copied().unwrap_or(false);
-            let (result_state, result_body) = if cancelled && claim.operation != "recipe.job.run.v1"
-            {
-                (
-                    "waiting-for-operator",
-                    json!({"reason": "controller cancellation was observed during execution"}),
-                )
-            } else {
-                (executed.state, executed.body)
-            };
-            let result = state.finish(&claim, result_state, result_body)?;
+            // The executor owns the effect and its quiescence proof. Preserve
+            // its exact cancelled or uncertain outcome; a heartbeat alone
+            // cannot turn an in-flight runtime effect into a terminal result.
+            let result = state.finish(&claim, executed.state, executed.body)?;
             heartbeat_result?;
             result
         }
@@ -2653,6 +2952,16 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         "reason": reason,
         "status": "failed",
     });
+    if let Some(kind) = executed.body.get("failure_kind").and_then(Value::as_str) {
+        body["failure_kind"] = Value::String(kind.to_owned());
+    }
+    if let Some(seconds) = executed
+        .body
+        .get("retry_after_seconds")
+        .and_then(Value::as_u64)
+    {
+        body["retry_after_seconds"] = json!(seconds);
+    }
     for field in ["stage", "diagnostic"] {
         if let Some(value) = executed.body.get(field).and_then(Value::as_str) {
             body[field] = Value::String(crate::failure_evidence::sanitize_text(value));
@@ -2775,6 +3084,19 @@ async fn run_heartbeats<C: LoopClient>(
         };
         let directive = match client.heartbeat(&progress).await {
             Ok(directive) => directive,
+            Err(ClientError::Controller(error))
+                if error.status == 409 && error.code == "superseded_operation_cancelled" =>
+            {
+                // The Controller has already invalidated this exact old
+                // command. It is an expected cancellation, not an agent loop
+                // failure; preserve the executor's eventual stop evidence.
+                eprintln!(
+                    "vonk-agent: superseded operation cancellation observed for {}",
+                    claim.operation_id
+                );
+                cancellation.send_replace(true);
+                return Ok(true);
+            }
             Err(error) if error.retryable() && Utc::now() < deadline => {
                 // Retry promptly while the accepted lease still authorises a
                 // renewal.  Waiting the whole renewal cadence here is what
@@ -2812,15 +3134,16 @@ fn remaining_lease(deadline: DateTime<FixedOffset>) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionResult, Executor, InterruptibleJob, LoopClient, RecipeExecutor,
-        RecipeObservationError, RejectingExecutor, RunOncePolicy, distribution_success_evidence,
-        normalize_execution_result, output_media_type, parse_compiled_execution_plan,
-        readiness_identity, recipe_install_success_body, report_complete_recipe_run_observations,
-        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
-        wait_for_launch_stability, wait_ready_with_runtime_guard,
+        ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, InterruptibleJob, LoopClient,
+        RecipeExecutor, RecipeObservationError, RejectingExecutor, RunOncePolicy,
+        distribution_success_evidence, normalize_execution_result, output_media_type,
+        parse_compiled_execution_plan, readiness_identity, recipe_install_success_body,
+        report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
+        run_once_with_heartbeat_interval, wait_for_launch_stability,
+        wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
-        client::{AgentHttpClient, ClientError, DistributionDownloadEvidence},
+        client::{AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence},
         oci::OciRuntime,
         process::{ProcessError, ProcessOutput, ProcessRunner, Program},
         runtime_identity::AgentRuntimeIdentity,
@@ -3471,14 +3794,46 @@ mod tests {
     async fn exited_runtime_ends_a_still_pending_readiness_probe() {
         let readiness = std::future::pending::<Result<(), crate::health::HealthError>>();
 
-        assert!(!wait_ready_with_runtime_guard(readiness, async { false }).await);
+        let (_sender, cancellation) = tokio::sync::watch::channel(false);
+        assert!(
+            !wait_ready_with_runtime_guard_and_cancellation(
+                readiness,
+                async { false },
+                cancellation
+            )
+            .await
+        );
     }
 
     #[tokio::test]
     async fn successful_readiness_ends_a_still_running_runtime_guard() {
         let runtime_guard = std::future::pending::<bool>();
 
-        assert!(wait_ready_with_runtime_guard(async { Ok(()) }, runtime_guard).await);
+        let (_sender, cancellation) = tokio::sync::watch::channel(false);
+        assert!(
+            wait_ready_with_runtime_guard_and_cancellation(
+                async { Ok(()) },
+                runtime_guard,
+                cancellation,
+            )
+            .await
+        );
+    }
+
+    #[tokio::test]
+    async fn collective_readiness_exits_when_the_controller_cancels() {
+        let (sender, cancellation) = tokio::sync::watch::channel(false);
+        let wait = wait_ready_with_runtime_guard_and_cancellation(
+            std::future::pending::<Result<(), crate::health::HealthError>>(),
+            std::future::pending::<bool>(),
+            cancellation,
+        );
+        let trigger = async {
+            tokio::task::yield_now().await;
+            sender.send_replace(true);
+        };
+        let (ready, ()) = tokio::join!(wait, trigger);
+        assert!(!ready);
     }
 
     #[tokio::test]
@@ -3541,6 +3896,40 @@ mod tests {
         async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
             self.results.lock().unwrap().push(result.clone());
             Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct SupersededCancellationClient(RecordingClient);
+
+    #[async_trait]
+    impl LoopClient for SupersededCancellationClient {
+        async fn claim(
+            &self,
+            capabilities: &[&str],
+            wait_seconds: u64,
+            runtime_identity: Option<&AgentRuntimeIdentity>,
+        ) -> Result<Option<AgentClaim>, ClientError> {
+            self.0
+                .claim(capabilities, wait_seconds, runtime_identity)
+                .await
+        }
+
+        async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+            self.0.heartbeats.lock().unwrap().push(progress.clone());
+            Err(ClientError::Controller(Box::new(ControllerError {
+                operation: "controller.request /agent/heartbeat".to_owned(),
+                endpoint: "/agent/heartbeat".to_owned(),
+                status: 409,
+                code: "superseded_operation_cancelled".to_owned(),
+                request_id: None,
+                decision: "exit",
+                retry_after_seconds: None,
+            })))
+        }
+
+        async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+            self.0.submit_result(result).await
         }
     }
 
@@ -3609,6 +3998,23 @@ mod tests {
         heartbeats: Arc<Mutex<Vec<AgentProgress>>>,
         minimum: usize,
         observed_deadline: Arc<Mutex<Option<DateTime<FixedOffset>>>>,
+    }
+
+    struct CancelledHeartbeatExecutor(HeartbeatGatedExecutor);
+
+    #[async_trait(?Send)]
+    impl Executor for CancelledHeartbeatExecutor {
+        async fn execute(
+            &self,
+            claim: &AgentClaim,
+            lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+            cancellation: tokio::sync::watch::Receiver<bool>,
+        ) -> ExecutionResult {
+            let mut result = self.0.execute(claim, lease_deadline, cancellation).await;
+            result.state = "cancelled";
+            result.body = json!({"reason": "exact workload stop confirmed", "error_code": "operation_cancelled"});
+            result
+        }
     }
 
     #[async_trait(?Send)]
@@ -3991,8 +4397,27 @@ mod tests {
         .unwrap();
 
         assert_eq!(client.submitted.lock().unwrap().len(), 1);
-        // It is not retried, and its recorded outcome is still readable.
+        // The execution is not retried. Its recorded outcome remains readable
+        // and is offered once more as diagnostic evidence after restart.
         assert!(state.pending_results().unwrap().is_empty());
+        assert_eq!(state.unreconciled_results().unwrap().len(), 1);
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &RejectingExecutor,
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(10),
+                heartbeat_retry_interval: Duration::from_millis(1),
+            },
+            || Ok(()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(client.submitted.lock().unwrap().len(), 2);
+        assert!(state.unreconciled_results().unwrap().is_empty());
         let connection = rusqlite::Connection::open(&path).unwrap();
         let stored: Option<Vec<u8>> = connection
             .query_row(
@@ -4043,73 +4468,144 @@ mod tests {
         assert!(state.pending_results().unwrap().is_empty());
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn transient_heartbeat_failure_retries_inside_the_accepted_lease() {
-        // One lost renewal must not wait a whole renewal cadence before trying
-        // again: that is what scheduled the next attempt after the accepted
-        // lease had expired.  Comparing the same scenario with a short retry
-        // delay against one that waits the cadence isolates the scheduling
-        // decision from the constant cost of claiming, executing and recording.
-        async fn elapsed_with(
-            directory: &std::path::Path,
-            interval: Duration,
-            retry_interval: Duration,
-        ) -> Duration {
-            let heartbeats = Arc::new(Mutex::new(Vec::new()));
-            let client = RecordingClient {
-                cancel_requested: false,
-                claim: Arc::new(Mutex::new(Some(claim()))),
-                fail_heartbeat: true,
-                heartbeats: heartbeats.clone(),
-                results: Arc::new(Mutex::new(Vec::new())),
-            };
-            let executor = HeartbeatGatedExecutor {
-                heartbeats,
-                minimum: 2,
-                observed_deadline: Arc::new(Mutex::new(None)),
-            };
-            let mut state = StateStore::open(&directory.join("state.sqlite"), NODE_ID).unwrap();
-            let started = std::time::Instant::now();
-            run_once_with_heartbeat_interval(
-                &client,
-                &mut state,
-                &executor,
-                RunOncePolicy {
-                    capabilities: &["recipe.install"],
-                    wait_seconds: 0,
-                    runtime_identity: None,
-                    heartbeat_interval: interval,
-                    heartbeat_retry_interval: retry_interval,
-                },
-                || Ok(()),
-            )
-            .await
-            .unwrap();
-            assert!(client.heartbeats.lock().unwrap().len() >= 2);
-            started.elapsed()
-        }
-
+    #[tokio::test]
+    async fn cancelled_heartbeat_preserves_the_executors_confirmed_stop_result() {
         let directory = tempdir().unwrap();
-        std::fs::create_dir(directory.path().join("cadence")).unwrap();
-        std::fs::create_dir(directory.path().join("prompt")).unwrap();
-        let cadence_only = elapsed_with(
-            &directory.path().join("cadence"),
-            Duration::from_millis(800),
-            Duration::from_millis(800),
-        )
-        .await;
-        let prompt_retry = elapsed_with(
-            &directory.path().join("prompt"),
-            Duration::from_millis(800),
-            Duration::from_millis(10),
-        )
-        .await;
+        let heartbeats = Arc::new(Mutex::new(Vec::new()));
+        let client = RecordingClient {
+            cancel_requested: true,
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: false,
+            heartbeats: heartbeats.clone(),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let executor = CancelledHeartbeatExecutor(HeartbeatGatedExecutor {
+            heartbeats,
+            minimum: 1,
+            observed_deadline: Arc::new(Mutex::new(None)),
+        });
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
 
-        assert!(
-            prompt_retry + Duration::from_millis(300) < cadence_only,
-            "a lost renewal did not retry before the next cadence: \
-             prompt={prompt_retry:?} cadence={cadence_only:?}"
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &executor,
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(1),
+                heartbeat_retry_interval: Duration::from_millis(1),
+            },
+            || Ok(()),
+        )
+        .await
+        .unwrap();
+
+        let results = client.results.lock().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].state.as_str(), "cancelled");
+        let vonk_agent_protocol::generated::AgentResultResult::AgentFailureResult(body) =
+            &results[0].result
+        else {
+            panic!("cancelled start outcome lost its typed failure result");
+        };
+        assert_eq!(
+            body.reason.as_deref(),
+            Some("exact workload stop confirmed")
         );
+        assert_eq!(body.error_code.as_deref(), Some("operation_cancelled"));
+    }
+
+    #[tokio::test]
+    async fn exact_superseded_cancellation_heartbeat_is_an_expected_loop_outcome() {
+        let directory = tempdir().unwrap();
+        let heartbeats = Arc::new(Mutex::new(Vec::new()));
+        let client = SupersededCancellationClient(RecordingClient {
+            cancel_requested: false,
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: false,
+            heartbeats: heartbeats.clone(),
+            results: Arc::new(Mutex::new(Vec::new())),
+        });
+        let executor = CancelledHeartbeatExecutor(HeartbeatGatedExecutor {
+            heartbeats,
+            minimum: 1,
+            observed_deadline: Arc::new(Mutex::new(None)),
+        });
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &executor,
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(1),
+                heartbeat_retry_interval: Duration::from_millis(1),
+            },
+            || Ok(()),
+        )
+        .await
+        .unwrap();
+
+        let results = client.0.results.lock().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].state.as_str(), "cancelled");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn transient_heartbeat_failure_retries_inside_the_accepted_lease() {
+        let directory = tempdir().unwrap();
+        let heartbeats = Arc::new(Mutex::new(Vec::new()));
+        let client = RecordingClient {
+            cancel_requested: false,
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: true,
+            heartbeats: heartbeats.clone(),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let executor = HeartbeatGatedExecutor {
+            heartbeats: heartbeats.clone(),
+            minimum: 2,
+            observed_deadline: Arc::new(Mutex::new(None)),
+        };
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+        let run = run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &executor,
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(800),
+                heartbeat_retry_interval: HEARTBEAT_RETRY_FLOOR,
+            },
+            || Ok(()),
+        );
+        let drive_clock = async {
+            // Claim persistence and heartbeat task startup take an arbitrary
+            // number of polls. Advance virtual time in small steps until the
+            // first request, then measure the retry against that request.
+            for _ in 0..100 {
+                if !heartbeats.lock().unwrap().is_empty() {
+                    break;
+                }
+                tokio::time::advance(Duration::from_millis(10)).await;
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(heartbeats.lock().unwrap().len(), 1);
+            tokio::task::yield_now().await;
+            tokio::time::advance(HEARTBEAT_RETRY_FLOOR).await;
+            tokio::task::yield_now().await;
+            assert_eq!(heartbeats.lock().unwrap().len(), 2);
+        };
+        let (result, ()) = tokio::join!(run, drive_clock);
+        result.unwrap();
+        assert_eq!(client.results.lock().unwrap().len(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

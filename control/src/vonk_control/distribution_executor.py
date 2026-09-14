@@ -210,6 +210,14 @@ class DurableDistributionPhaseExecutor:
                 )
             )
         targets = tuple(phase.node_ids)
+        intent_ordinal = progress.get("workload_intent_ordinal")
+        if type(intent_ordinal) is int and intent_ordinal > 0:
+            adopted = self._adopt_child(
+                plan, phase, actor=actor, request_key=request_key,
+                workload_intent_ordinal=intent_ordinal,
+            )
+            if adopted is not None:
+                return adopted
         cached = self._cached_targets(plan, targets)
         missing = tuple(node_id for node_id in targets if node_id not in cached)
         if not missing:
@@ -234,6 +242,8 @@ class DurableDistributionPhaseExecutor:
                     for node_id in targets
                 },
             }, phase=phase))
+        if type(intent_ordinal) is not int or intent_ordinal < 1:
+            raise RuntimeError("distribution requires its authorized workload intent")
         model_objects, model_set_digest, model_set_bytes = self._model_objects(
             plan, progress
         )
@@ -267,6 +277,7 @@ class DurableDistributionPhaseExecutor:
             assignments=assignments,
             target_order=targets,
             target_bytes=model_set_bytes + image_bytes,
+            workload_intent_ordinal=intent_ordinal,
         )
         return PhaseExecution(
             operation_id=child_id,
@@ -478,6 +489,51 @@ class DurableDistributionPhaseExecutor:
         )
         return result.model_dump(mode="json")
 
+    def _adopt_child(
+        self,
+        plan: RunSwitchPlan,
+        phase: RunSwitchPhase,
+        *,
+        actor: str,
+        request_key: str,
+        workload_intent_ordinal: int,
+    ) -> PhaseExecution | None:
+        """Adopt persisted work before consulting mutable cache availability."""
+        child_request = str(uuid.uuid5(uuid.UUID(request_key), f"artifact-distribution:{phase.kind}:{phase.index}"))
+        with self._sessions() as session:
+            child = session.scalar(select(Job).where(Job.request_id == child_request))
+            if child is None:
+                return None
+            if (
+                child.kind != "artifact-distribution"
+                or child.actor != actor
+                or child.authority_revision != plan.plan_digest
+                or child.payload.get("plan_digest") != plan.plan_digest
+                or child.payload.get("phase") != phase.kind
+                or child.payload.get("target_order") != list(phase.node_ids)
+                or child.payload.get("workload_intent_ordinal") != workload_intent_ordinal
+            ):
+                raise RuntimeError("distribution child request key was reused")
+            receipt = _phase_receipt({
+                "cached_nodes": child.payload.get("cached_nodes"),
+                "assignments": child.payload.get("assignments"),
+            }, phase=phase)
+            assignments = child.payload.get("assignments")
+            cached = child.payload.get("cached_nodes")
+            if (
+                not isinstance(assignments, dict)
+                or not isinstance(cached, list)
+                or child.targets != list(assignments)
+                or set(assignments).intersection(cached)
+                or set(assignments).union(cached) != set(phase.node_ids)
+                or any(
+                    DistributionAssignment.parse(raw).node_id != node_id
+                    for node_id, raw in assignments.items()
+                )
+            ):
+                raise RuntimeError("distribution child target scope changed")
+            return PhaseExecution(operation_id=child.id, result=receipt)
+
     def _ensure_child(
         self,
         plan: RunSwitchPlan,
@@ -488,6 +544,7 @@ class DurableDistributionPhaseExecutor:
         cached: tuple[str, ...],
         assignments: Mapping[str, DistributionAssignment],
         target_order: tuple[str, ...],
+        workload_intent_ordinal: int,
         target_bytes: int | None = None,
     ) -> str:
         child_request = str(uuid.uuid5(uuid.UUID(request_key), f"artifact-distribution:{phase.kind}:{phase.index}"))
@@ -495,7 +552,11 @@ class DurableDistributionPhaseExecutor:
         with self._sessions() as session:
             existing = session.scalar(select(Job).where(Job.request_id == child_request))
             if existing is not None:
-                if existing.kind != "artifact-distribution" or existing.payload.get("plan_digest") != plan.plan_digest:
+                if (
+                    existing.kind != "artifact-distribution"
+                    or existing.payload.get("plan_digest") != plan.plan_digest
+                    or existing.payload.get("workload_intent_ordinal") != workload_intent_ordinal
+                ):
                     raise RuntimeError("distribution child request key was reused")
                 return existing.id
         # Register immutable assignments before opening the child transaction;
@@ -552,9 +613,10 @@ class DurableDistributionPhaseExecutor:
                 actor=actor,
                 authority_revision=plan.plan_digest,
                 targets=list(assignments),
-                payload_digest=self._digest({"plan_digest": plan.plan_digest, "phase": phase.kind}),
+                payload_digest=self._digest({"plan_digest": plan.plan_digest, "phase": phase.kind, "workload_intent_ordinal": workload_intent_ordinal}),
                 payload={
                     "plan_digest": plan.plan_digest,
+                    "workload_intent_ordinal": workload_intent_ordinal,
                     "phase": phase.kind,
                     "progress": progress,
                     "cached_nodes": list(cached),

@@ -449,6 +449,8 @@ class RunSwitchMemberProgress(_StrictModel):
 
 class RunSwitchProgress(_StrictModel):
     operation: OperationProgress | None = None
+    startup_budget_seconds: int | None = Field(default=None, ge=1)
+    start_deadline: datetime | None = None
     phase_index: int = Field(ge=0, le=31)
     phase_count: int = Field(ge=1, le=32)
     phase: RunSwitchPhaseKind | None
@@ -798,6 +800,7 @@ class RunSwitchOperationResult(_StrictModel):
     """Exact durable result tree stored in ``Job.result``."""
 
     phase_index: int = Field(default=0, ge=0, le=31)
+    workload_intent_ordinal: int | None = Field(default=None, ge=1)
     item_index: int = Field(default=0, ge=0, le=31)
     phase: RunSwitchPhaseKind | None = None
     subphase: RunSwitchSubphase | None = None
@@ -815,6 +818,10 @@ class RunSwitchOperationResult(_StrictModel):
     retryable: bool = False
     retry_attempt: int | None = Field(default=None, ge=2)
     retry_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
+    observation_due_at: datetime | None = None
+    observation_deadline_at: datetime | None = None
+    startup_budget_seconds: int | None = Field(default=None, ge=1)
+    start_deadline: datetime | None = None
     failed_phase: RunSwitchPhaseKind | None = None
     final_verify_started_at: float | None = Field(default=None, ge=0)
     final_observation: RunSwitchPhaseResult | None = None

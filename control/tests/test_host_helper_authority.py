@@ -120,6 +120,7 @@ def runtime_service(
     operation_kind: str = "recipe.start",
     operation_payload: dict[str, object] | None = None,
     cancel_requested: bool = False,
+    node_intent: int = 1,
 ) -> HostRuntimeAuthorityService:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -129,13 +130,16 @@ def runtime_service(
     operation_id = "30000000-0000-4000-8000-000000000003"
     fence = "40000000-0000-4000-8000-000000000004"
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
+        session.add(AgentNode(
+            node_id=node_id, state="active", capabilities=[operation_kind],
+            workload_intent_ordinal=node_intent,
+        ))
         session.add(
             AgentCertificate(
                 serial="certificate-1",
                 node_id=node_id,
                 not_before=NOW,
-                not_after=NOW,
+                not_after=NOW + timedelta(minutes=5),
                 fingerprint="fingerprint-1",
             )
         )
@@ -149,8 +153,11 @@ def runtime_service(
                 authority_revision="b" * 64,
                 targets=[node_id],
                 payload_digest="c" * 64,
-                payload={},
-                result={"cancel_requested": True} if cancel_requested else None,
+                payload={"workload_intent_ordinal": 1},
+                result={
+                    "cancel_requested": True,
+                    "cancel_requested_at": NOW.isoformat(),
+                } if cancel_requested else None,
                 created_at=NOW,
                 updated_at=NOW,
             )
@@ -164,6 +171,7 @@ def runtime_service(
                 payload_digest="d" * 64,
                 payload=operation_payload or {},
                 authority_revision="b" * 64,
+                workload_intent_ordinal=1,
                 state="running",
                 current_attempt=2,
                 created_at=NOW,
@@ -279,28 +287,99 @@ def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
             service.issue_grant(**common, action=action)
 
 
-@pytest.mark.parametrize(
-    "action", (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP)
-)
-def test_job_run_cancellation_keeps_exact_start_and_stop_authority_live(
-    action: ContainerRuntimeAction,
+@pytest.mark.parametrize("operation_kind", ["recipe.start", "recipe.job.run.v1"])
+@pytest.mark.parametrize("node_intent", [1, 2])
+def test_cancellation_permits_only_stop_under_the_original_live_fence(
+    operation_kind: str, node_intent: int,
 ) -> None:
-    service = runtime_service(operation_kind="recipe.job.run.v1", cancel_requested=True)
-
-    grant = service.issue_grant(
-        node_id="spk_" + "1" * 32,
-        job_id="20000000-0000-4000-8000-000000000002",
-        operation_id="30000000-0000-4000-8000-000000000003",
-        attempt=2,
-        fence="40000000-0000-4000-8000-000000000004",
-        action=action,
-        request_sha256="e" * 64,
-        certificate_serial="certificate-1",
+    service = runtime_service(
+        operation_kind=operation_kind, cancel_requested=True, node_intent=node_intent,
     )
+
+    arguments = {
+        "node_id": "spk_" + "1" * 32,
+        "job_id": "20000000-0000-4000-8000-000000000002",
+        "operation_id": "30000000-0000-4000-8000-000000000003",
+        "attempt": 2,
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "request_sha256": "e" * 64,
+        "certificate_serial": "certificate-1",
+    }
+    grant = service.issue_grant(**arguments, action=ContainerRuntimeAction.STOP)
 
     operation = grant.claims.operation
     assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
-    assert operation.action == action.value
+    assert operation.action == ContainerRuntimeAction.STOP.value
+    for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.RUN_INSPECT):
+        with pytest.raises(HostHelperAuthorityError, match="stale"):
+            service.issue_grant(**arguments, action=action)
+    for changes in ({"fence": "0" * 36}, {"certificate_serial": "wrong-certificate"}):
+        with pytest.raises(HostHelperAuthorityError, match="stale"):
+            service.issue_grant(**{**arguments, **changes}, action=ContainerRuntimeAction.STOP)
+
+
+def test_superseded_attempt_needs_recorded_cancellation_even_for_stop() -> None:
+    service = runtime_service(node_intent=2)
+    for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP):
+        with pytest.raises(HostHelperAuthorityError, match="stale"):
+            service.issue_grant(
+                node_id="spk_" + "1" * 32,
+                job_id="20000000-0000-4000-8000-000000000002",
+                operation_id="30000000-0000-4000-8000-000000000003",
+                attempt=2,
+                fence="40000000-0000-4000-8000-000000000004",
+                action=action,
+                request_sha256="e" * 64,
+                certificate_serial="certificate-1",
+            )
+
+
+def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
+    service = runtime_service(
+        operation_payload={"phase": "collective-readiness"},
+        cancel_requested=True, node_intent=2,
+    )
+    arguments = {
+        "node_id": "spk_" + "1" * 32,
+        "job_id": "20000000-0000-4000-8000-000000000002",
+        "operation_id": "30000000-0000-4000-8000-000000000003",
+        "attempt": 2,
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "request_sha256": "e" * 64,
+        "certificate_serial": "certificate-1",
+    }
+    operation = service.issue_grant(
+        **arguments, action=ContainerRuntimeAction.STOP
+    ).claims.operation
+    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+    assert operation.action == "stop"
+    with pytest.raises(HostHelperAuthorityError, match="stale"):
+        service.issue_grant(**arguments, action=ContainerRuntimeAction.RUN_INSPECT)
+    expired = runtime_service(lease_seconds=0, cancel_requested=True, node_intent=2)
+    with pytest.raises(HostHelperAuthorityError, match="stale"):
+        expired.issue_grant(**arguments, action=ContainerRuntimeAction.STOP)
+
+
+def test_long_attempt_lease_does_not_extend_the_cancellation_deadline() -> None:
+    service = runtime_service(lease_seconds=1200, cancel_requested=True, node_intent=2)
+    with service._sessions.begin() as session:
+        job = session.get(Job, "20000000-0000-4000-8000-000000000002")
+        assert job is not None
+        job.result = {
+            "cancel_requested": True,
+            "cancel_requested_at": (NOW - timedelta(seconds=660)).isoformat(),
+        }
+    with pytest.raises(HostHelperAuthorityError, match="stale"):
+        service.issue_grant(
+            node_id="spk_" + "1" * 32,
+            job_id="20000000-0000-4000-8000-000000000002",
+            operation_id="30000000-0000-4000-8000-000000000003",
+            attempt=2,
+            fence="40000000-0000-4000-8000-000000000004",
+            action=ContainerRuntimeAction.STOP,
+            request_sha256="e" * 64,
+            certificate_serial="certificate-1",
+        )
 
 
 def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> None:

@@ -62,7 +62,6 @@ from vonk_control.run_switch_contract import (
     RunSwitchOperation,
     RunSwitchOperationResult,
     RunSwitchPhase,
-    RunSwitchPhaseKind,
     RunSwitchPhaseResult,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
@@ -79,7 +78,6 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationProvider,
     RunSwitchOperationService,
-    _automatic_retry_phase,
     _phase_result,
     _transient_distribution_exception,
     effective_build_receipt,
@@ -399,11 +397,6 @@ class SynchronousPhaseExecutor:
         return PhaseExecution(result={"phase": phase.kind})
 
 
-class StopOnlyLifecycle:
-    def preview_stop(self, _run_id: str):
-        return SimpleNamespace(plan_digest="e" * 64)
-
-
 class PendingBuilds(RecipeBuildService):
     """Small build planner double that preserves the real build contract."""
 
@@ -685,6 +678,106 @@ def _service(
         phase_executor=phase_executor,
         memory_floor_bytes=50,
     )
+
+
+def test_same_clock_later_intent_fences_older_queued_work(tmp_path: Path) -> None:
+    """Database admission order, not timestamp spelling, owns the node."""
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    request = _request(sessions, nodes[0])
+    first = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    second = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    with sessions() as session:
+        old = session.get(Job, first.operation_id)
+        new = session.get(Job, second.operation_id)
+        assert old is not None and new is not None
+        assert old.created_at == new.created_at
+        assert old.payload["workload_intent_ordinal"] == 1
+        assert new.payload["workload_intent_ordinal"] == 2
+    assert service._advance(first.operation_id) is True
+    assert service.get(first.operation_id).state == "cancelled"
+    assert "superseded" in (service.get(first.operation_id).status_reason or "")
+    assert service.get(second.operation_id).state == "queued"
+
+
+def test_child_activity_change_persists_without_clock_only_writes(tmp_path: Path) -> None:
+    """An unchanged poll is quiet, but a changed stall signal is durable."""
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    executor = RecordingArtifactExecutor(child_transfer=True)
+    service = _service(
+        sessions, NOW, lifecycle, executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    for _ in range(8):
+        assert service.tick() is True
+        if _result(service.get(operation.operation_id)).child_operation_id is not None:
+            break
+    child = executor.children[_child_operation_id(service.get(operation.operation_id))]
+    child.result = {"operation": {
+        "phase": "transfer", "completed_bytes": 0,
+        "total_bytes_known": False, "activity": "active",
+        "observed_at": NOW.isoformat(),
+    }}
+    assert service.tick() is True
+    before = _result(service.get(operation.operation_id)).operation
+    assert before is not None and before.activity == "active"
+    child.result["operation"]["observed_at"] = (NOW + timedelta(seconds=1)).isoformat()
+    assert service.tick() is False
+    child.result["operation"]["activity"] = "waiting"
+    assert service.tick() is True
+    after = _result(service.get(operation.operation_id)).operation
+    assert after is not None and after.activity == "waiting"
+
+
+def test_due_scheduler_reaches_work_past_a_full_parked_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sixteen parked scopes must not starve a seventeenth due scope."""
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, _nodes = setup_services(tmp_path)
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    due_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        for index in range(17):
+            job_id = f"00000000-0000-4000-8000-{index:012x}"
+            session.add(Job(
+                id=job_id,
+                request_id=str(uuid.uuid4()),
+                kind="recipe.run-switch.v2",
+                state="running",
+                actor="admin",
+                authority_revision="a" * 64,
+                targets=[f"spk_{index:032x}"],
+                payload_digest="a" * 64,
+                payload={},
+                result={"observation_due_at": (
+                    NOW if index == 16
+                    else NOW + timedelta(minutes=1)
+                ).isoformat().replace("+00:00", "Z")},
+                created_at=NOW,
+                updated_at=NOW,
+            ))
+            if index == 16:
+                due_id = job_id
+    seen: list[str] = []
+    monkeypatch.setattr(service, "_advance", lambda job_id: seen.append(job_id) or True)
+    assert service.tick() is True
+    assert seen == [due_id]
+    assert service.tick() is True
+    assert seen == [due_id, due_id]
 
 
 def test_default_run_switch_admission_uses_the_recipe_memory_reserve(tmp_path: Path) -> None:
@@ -1811,7 +1904,8 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         artifact_phase_executor=executor,
         memory_floor_bytes=50,
     )
-    assert restarted.tick() is True
+    # Polling an unchanged build child does not rewrite durable progress.
+    assert restarted.tick() is False
     assert build_preview_calls == []
     assert build_start_calls == ["start"]
 
@@ -2134,7 +2228,7 @@ def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_befo
     service = _service(
         sessions,
         lifecycle._clock(),
-        StopOnlyLifecycle(),
+        lifecycle,
         RecordingArtifactExecutor(),
         phase_executor=SynchronousPhaseExecutor(),
     )
@@ -2314,7 +2408,7 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert "verify" in _result(verified).completed_phases
 
 
-def test_transient_distribution_failure_requeues_exact_plan_and_progress(
+def test_transient_distribution_child_is_not_replayed_by_parent(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -2348,7 +2442,7 @@ def test_transient_distribution_failure_requeues_exact_plan_and_progress(
     artifact_executor.children[child_id].state = "failed"
     artifact_executor.children[child_id].result = {
         "error_code": "agent.copy.timeout",
-        "uncertain": True,
+        "failure_kind": "temporary-dependency",
         "progress": {
             "completed_bytes": 512,
             "total_bytes": 1024,
@@ -2361,26 +2455,21 @@ def test_transient_distribution_failure_requeues_exact_plan_and_progress(
         },
     }
     assert service.tick() is True
-    queued = service.get(operation.operation_id)
-    assert queued.state == "queued"
-    assert queued.plan_digest == plan.plan_digest
-    assert queued.progress.completed_bytes == 512
+    failed = service.get(operation.operation_id)
+    assert failed.state == "failed"
+    assert failed.plan_digest == plan.plan_digest
+    assert failed.progress.completed_bytes == 512
+    assert failed.result is not None and failed.result.retryable
     with sessions() as session:
         row = session.get(Job, operation.operation_id)
         assert row is not None
-        assert row.current_attempt == 2
+        assert row.current_attempt <= 1
         assert row.result is not None
-        assert row.result["child_operation_id"] is None
-
-    assert service.tick() is True
-    retried = service.get(operation.operation_id)
-    assert retried.state == "running"
-    assert retried.plan_digest == plan.plan_digest
-    assert retried.result is not None
-    assert retried.result.child_operation_id != child_id
+        assert row.result["child_operation_id"] == child_id
+    assert service.tick() is False
 
 
-def test_exhausted_transient_distribution_allows_bounded_operator_retry(
+def test_operator_retry_uses_a_new_request_after_typed_transient_failure(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -2411,16 +2500,13 @@ def test_exhausted_transient_distribution_allows_bounded_operator_retry(
     )
 
     assert service.tick() is True
-    for attempt in range(3):
-        child_id = _child_operation_id(service.get(operation.operation_id))
-        artifact_executor.children[child_id].state = "failed"
-        artifact_executor.children[child_id].result = {
-            "error_code": "agent.copy.timeout",
-            "uncertain": True,
-        }
-        assert service.tick() is True
-        if attempt < 2:
-            assert service.tick() is True
+    child_id = _child_operation_id(service.get(operation.operation_id))
+    artifact_executor.children[child_id].state = "failed"
+    artifact_executor.children[child_id].result = {
+        "error_code": "agent.copy.timeout",
+        "failure_kind": "temporary-dependency",
+    }
+    assert service.tick() is True
     exhausted = service.get(operation.operation_id)
     assert exhausted.state == "failed"
     retry = service.retry(
@@ -2473,30 +2559,6 @@ def test_run_switch_retry_classification_rejects_terminal_http_and_storage_error
     assert _transient_distribution_exception(OSError(errno.ECONNRESET, "reset")) is True
 
 
-def test_automatic_retry_is_scoped_to_replay_stable_transfer_phases() -> None:
-    """Automatic retry must not re-plan a phase whose preview is volatile.
-
-    A ``transfer`` previews immutable model and image digests and derives its
-    child request key from the phase index, so a retry adopts the same durable
-    operation.  ``start`` admission instead hashes live inventory observation
-    time and current reservations, so automatically retrying it offered the
-    unchanged request key to admission with a changed digest -- the reported
-    ``request key was already used differently`` conflict.
-    """
-
-    def phase(kind: RunSwitchPhaseKind, index: int = 0) -> RunSwitchPhase:
-        return RunSwitchPhase(
-            index=index,
-            kind=kind,
-            state="planned",
-            detail=f"{kind} phase",
-        )
-
-    assert _automatic_retry_phase(phase("transfer")) is True
-    for kind in ("start", "stop", "prepare", "cleanup", "verify", "final_verify"):
-        assert _automatic_retry_phase(phase(kind)) is False
-
-
 class _CountingPreviewLifecycle(RecipeOperationService):
     """Real lifecycle service that counts how often admission is re-derived.
 
@@ -2544,7 +2606,15 @@ def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
     executor = RecipeLifecyclePhaseExecutor(
         counting, sessions, ClusterMappingService(sessions), lifecycle._clock()
     )
-    progress = {"phase_results": [{"installation_id": installation.owner_id}]}
+    with sessions.begin() as session:
+        for node_id in nodes:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.workload_intent_ordinal = 1
+    progress = {
+        "workload_intent_ordinal": 1,
+        "phase_results": [{"installation_id": installation.owner_id}],
+    }
     request_key = str(uuid.uuid4())
 
     first = executor.execute(
@@ -3131,12 +3201,16 @@ def _parked_start_switch(tmp_path: Path, *, healthy: bool):
     )
     # The launch happens after admission, exactly as the real start phase would
     # have done it, and is then left parked by the interrupted agent.
+    assert operation.result is not None
+    ordinal = operation.result.workload_intent_ordinal
+    assert ordinal is not None
     run_plan = lifecycle.preview_run(installation.owner_id, "qwen")
     started = lifecycle.start(
         run_plan,
         plan_digest=run_plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
+        workload_intent_ordinal=ordinal,
     )
     with sessions.begin() as session:
         # The launch was interrupted: its operation is parked while the run it
@@ -3148,6 +3222,7 @@ def _parked_start_switch(tmp_path: Path, *, healthy: bool):
         assert row is not None
         row.state = "running"
         row.result = RunSwitchOperationResult(
+            workload_intent_ordinal=ordinal,
             phase_index=start_index,
             item_index=0,
             phase="start",
@@ -3188,23 +3263,44 @@ def test_parked_start_with_an_established_run_completes_without_an_operator(
     assert start_index < len(completed)
 
 
-def test_parked_start_without_an_established_effect_still_fails(tmp_path: Path) -> None:
-    """An unobserved effect keeps its real failure.
-
-    A retry policy must never conceal a permanently bad model or runtime, so a
-    parked start whose run is not established stays a reported failure.
-    """
+def test_parked_start_without_an_established_effect_expires(tmp_path: Path) -> None:
+    """Read-only observation has a finite budget and cannot invent success."""
 
     service, operation, _start_index = _parked_start_switch(tmp_path, healthy=False)
-
-    for _ in range(4):
-        if service.get(operation.operation_id).state not in {"queued", "running"}:
-            break
-        service.tick()
+    now = [NOW]
+    service._clock = lambda: now[0]
+    assert service.tick() is True
+    now[0] += timedelta(seconds=121)
+    assert service.tick() is True
 
     view = service.get(operation.operation_id)
     assert view.state == "failed"
-    assert "waiting-for-operator" in (view.status_reason or "")
+    assert "start-observation-expired" in (view.status_reason or "")
+
+
+def test_parked_start_still_progressing_is_observed_before_final_success(
+    tmp_path: Path,
+) -> None:
+    """A lost start result during a real load is not a failed launch."""
+
+    service, operation, _ = _parked_start_switch(tmp_path, healthy=False)
+    now = [NOW]
+    service._clock = lambda: now[0]
+
+    assert service.tick() is True
+    held = service.get(operation.operation_id)
+    assert held.state == "running"
+    assert held.result is not None
+    assert held.result.child_operation_id is not None
+    assert held.result.observation_due_at is not None
+
+    assert service.tick() is False
+    assert isinstance(service._lifecycle, _ObservingLifecycle)
+    service._lifecycle._healthy = True
+    now[0] += timedelta(seconds=5)
+    for _ in range(4):
+        service.tick()
+    assert service.get(operation.operation_id).state == "succeeded"
 
 
 def test_scoped_cleanup_is_allowed_without_launch_readiness(tmp_path: Path) -> None:

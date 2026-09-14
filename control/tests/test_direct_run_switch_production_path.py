@@ -203,6 +203,8 @@ class _Queue:
     ):
         from vonk_control.models import AgentOperation
 
+        parent = session.get(Job, parent_job_id)
+        assert parent is not None
         value = AgentOperation(
             id=operation_id,
             parent_job_id=parent_job_id,
@@ -211,6 +213,7 @@ class _Queue:
             payload_digest=hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest(),
             payload=dict(payload),
             authority_revision=authority_revision,
+            workload_intent_ordinal=parent.payload.get("workload_intent_ordinal"),
             state="queued",
             current_attempt=0,
             created_at=NOW,
@@ -285,8 +288,9 @@ class _TargetExecutor(CompositeDistributionPhaseExecutor):
         assignments,
         target_order,
         target_bytes=None,
+        workload_intent_ordinal,
     ) -> str:
-        del plan, phase, actor, request_key, cached, target_order, target_bytes
+        del plan, phase, actor, request_key, cached, target_order, target_bytes, workload_intent_ordinal
         child_id = str(uuid.uuid4())
         self.assignments.update(
             {node_id: value.to_mapping() for node_id, value in assignments.items()}

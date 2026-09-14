@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, delete, event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.enrollment import (
@@ -734,6 +734,7 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
     jobs = AgentJobService(
         sessions, clock=clock, contact_consumer=observe_contact
     )
+    payload = {"workload_intent_ordinal": 1}
     parent = Job(
         request_id=str(uuid.uuid4()),
         kind="agent.operations",
@@ -741,13 +742,16 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
         actor="operator",
         authority_revision="a" * 64,
         targets=[NODE_ID],
-        payload_digest=hashlib.sha256(b"{}").hexdigest(),
-        payload={},
+        payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+        payload=payload,
         current_attempt=0,
         created_at=clock.now,
         updated_at=clock.now,
     )
     with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_ID)
+        assert node is not None
+        node.workload_intent_ordinal = 1
         session.add(parent)
     jobs.enqueue(
         parent.id,

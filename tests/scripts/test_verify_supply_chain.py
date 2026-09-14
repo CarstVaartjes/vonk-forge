@@ -33,6 +33,7 @@ def _copy(tmp_path: Path) -> Path:
         "Cargo.toml",
         "Cargo.lock",
         "pyproject.toml",
+        "tools/hatch_build.py",
         "schemas/install-release-manifest.schema.json",
         "schemas/workload-artifact-build.schema.json",
         "agent_protocol/pyproject.toml",

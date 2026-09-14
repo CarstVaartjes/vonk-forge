@@ -24,6 +24,7 @@ from .operation_api import bounded_error_responses
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _PROFILE_PATH = "/api/profile/{number}"
 _APPLICATION_PATH = "/api/profile/applications/{application_id}"
+_REQUEST_PATH = "/api/profile/{number}/requests/{request_key}"
 FLEET_PROFILE_OPERATION_IDS = {
     ("get", "/api/profile"): "listProfiles",
     ("get", _PROFILE_PATH): "getProfile",
@@ -32,6 +33,7 @@ FLEET_PROFILE_OPERATION_IDS = {
     ("post", "/api/profile/{number}/load"): "loadProfile",
     ("get", "/api/profile/{number}/progress"): "getProfileProgress",
     ("get", _APPLICATION_PATH): "getProfileApplication",
+    ("get", _REQUEST_PATH): "getProfileApplicationByRequest",
 }
 
 
@@ -56,7 +58,9 @@ def install_fleet_profile_routes(
         if actor.role not in MUTATION_ROLES[(method, route)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
-    def audit(request: Request, actor: Actor, action: str, targets: tuple[str, ...]) -> None:
+    def audit(
+        request: Request, actor: Actor, action: str, targets: tuple[str, ...]
+    ) -> None:
         audits.append(
             AuditRecord(request.state.request_id, actor.subject, action, None, targets)
         )
@@ -73,7 +77,9 @@ def install_fleet_profile_routes(
         except HTTPException:
             raise
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(status_code=503, detail="Profiles unavailable") from None
+            raise HTTPException(
+                status_code=503, detail="Profiles unavailable"
+            ) from None
 
     @app.get(
         _PROFILE_PATH,
@@ -109,9 +115,13 @@ def install_fleet_profile_routes(
         except FleetProfileConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
         except KeyError:
-            raise HTTPException(status_code=422, detail="invalid profile number") from None
+            raise HTTPException(
+                status_code=422, detail="invalid profile number"
+            ) from None
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(status_code=503, detail="Profile save unavailable") from None
+            raise HTTPException(
+                status_code=503, detail="Profile save unavailable"
+            ) from None
         audit(request, actor, "profile.autosave", (str(number),))
         return result
 
@@ -132,7 +142,9 @@ def install_fleet_profile_routes(
         except FleetProfileConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(status_code=503, detail="Profile preview unavailable") from None
+            raise HTTPException(
+                status_code=503, detail="Profile preview unavailable"
+            ) from None
 
     @app.post(
         "/api/profile/{number}/load",
@@ -150,13 +162,17 @@ def install_fleet_profile_routes(
         require_mutation(actor, "POST", "/api/profile/{number}/load")
         request_key = body.request_key or str(uuid.uuid4())
         try:
-            result = service().load(number, actor=actor.subject, request_key=request_key)
+            result = service().load(
+                number, actor=actor.subject, request_key=request_key
+            )
         except KeyError:
             raise HTTPException(status_code=404, detail="Profile not found") from None
         except FleetProfileConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(status_code=503, detail="Profile load unavailable") from None
+            raise HTTPException(
+                status_code=503, detail="Profile load unavailable"
+            ) from None
         audit(request, actor, "profile.load", (str(number), result.id))
         return result
 
@@ -186,6 +202,32 @@ def install_fleet_profile_routes(
             ) from None
 
     @app.get(
+        _REQUEST_PATH,
+        response_model=FleetProfileApplicationView,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="getProfileApplicationByRequest",
+    )
+    def profile_application_by_request(
+        number: Annotated[int, Path(ge=1)],
+        request_key: str = Path(pattern=_UUID),
+        _actor: Actor = authenticated,
+    ) -> FleetProfileApplicationView:
+        try:
+            profile = service().get_number(number)
+            application = service().application_by_request_key(request_key)
+            if application.profile_id != profile.id:
+                raise KeyError(request_key)
+            return application
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Profile request not found"
+            ) from None
+        except (OSError, RuntimeError, TypeError, ValueError):
+            raise HTTPException(
+                status_code=503, detail="Profile request unavailable"
+            ) from None
+
+    @app.get(
         "/api/profile/{number}/progress",
         response_model=FleetProfileApplicationView,
         responses=bounded_error_responses(401, 404, 422, 503),
@@ -197,9 +239,13 @@ def install_fleet_profile_routes(
         try:
             return service().progress_number(number)
         except KeyError:
-            raise HTTPException(status_code=404, detail="Profile progress not found") from None
+            raise HTTPException(
+                status_code=404, detail="Profile progress not found"
+            ) from None
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(status_code=503, detail="Profile progress unavailable") from None
+            raise HTTPException(
+                status_code=503, detail="Profile progress unavailable"
+            ) from None
 
 
 __all__ = ["FLEET_PROFILE_OPERATION_IDS", "install_fleet_profile_routes"]

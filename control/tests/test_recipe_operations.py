@@ -28,12 +28,14 @@ from vonk_agent_protocol import (
     RecipeInstallPayload,
     RecipeRunObservationReceiptClaims,
     RecipeStartPayload,
+    RecipeStopPayload,
     SignedRecipeRunObservationReceipt,
     canonical_message,
     format_model_identity,
     recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.host_helper import HostHelperSignature
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
@@ -41,7 +43,7 @@ from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
 )
 from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
@@ -62,6 +64,7 @@ from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
+    AgentOperationAttempt,
     AgentPresence,
     Base,
     CatalogDocument,
@@ -100,6 +103,7 @@ from vonk_control.route_runtime import (
     verify_active_route_bundle,
 )
 from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -134,6 +138,7 @@ class RecordingQueue:
             payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
             payload=dict(payload),
             authority_revision=authority_revision,
+            workload_intent_ordinal=session.get(Job, parent_job_id).payload.get("workload_intent_ordinal"),
             state="queued",
             current_attempt=0,
             created_at=NOW,
@@ -144,6 +149,13 @@ class RecordingQueue:
 
     def notify_available(self) -> None:
         self.available += 1
+
+    def request_superseded_workload_cancellation_in_session(
+        self, session, targets, ordinal, now
+    ) -> None:
+        AgentJobService.request_superseded_workload_cancellation_in_session(
+            session, targets, ordinal, now
+        )
 
 
 class FailingQueue(RecordingQueue):
@@ -1236,6 +1248,9 @@ def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) ->
         child_operations = list(session.scalars(select(AgentOperation).where(AgentOperation.kind == "recipe.install")))
         assert len(jobs) == 1
         assert {item.kind for item in child_operations} == {"recipe.install"}
+        assert jobs[0].payload["workload_intent_ordinal"] == 1
+        assert all(item.workload_intent_ordinal == 1 for item in child_operations)
+        assert all(_required(session.get(AgentNode, node_id)).workload_intent_ordinal == 1 for node_id in nodes)
         assert all(
             "shell" not in json.dumps(item.payload).lower() for item in child_operations
         )
@@ -1347,11 +1362,12 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
             )
         )
         assert [item.node_id for item in first_stop] == [nodes[0]]
-        assert set(first_stop[0].payload) == {
-            "schema_version",
-            "run_id",
-            "plan_digest",
-        }
+        first_stop_payload = RecipeStopPayload.model_validate_json(
+            canonical_message(first_stop[0].payload), strict=True
+        )
+        assert first_stop_payload.run_id == start.owner_id
+        assert first_stop_payload.plan_digest == start.plan_digest
+        assert first_stop_payload.cancel_pending_start is True
     recovered.record_node_result(
         stop.id, first_stop[0].node_id, succeeded=True, evidence={"stopped": True}
     )
@@ -2620,11 +2636,12 @@ def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
         )
         assert len(children) == 1
         assert children[0].node_id == nodes[0]
-        assert set(children[0].payload) == {
-            "schema_version",
-            "run_id",
-            "plan_digest",
-        }
+        stop_payload = RecipeStopPayload.model_validate_json(
+            canonical_message(children[0].payload), strict=True
+        )
+        assert stop_payload.run_id == first_run.owner_id
+        assert stop_payload.plan_digest == first_run.plan_digest
+        assert stop_payload.cancel_pending_start is True
         assert {child.authority_revision for child in children} == {
             first_run.plan_digest
         }
@@ -3003,6 +3020,155 @@ def test_failed_install_retry_state_rolls_back_when_queue_write_fails(
         assert after == before
 
 
+def test_new_install_intent_retires_only_unissued_older_install(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    plan = service.preview_install(mapping_id, build_id)
+    old = service.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="old-install-intent"
+    )
+    with sessions.begin() as session:
+        _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 2
+    assert service.assess_superseded_unissued("recipe.install", old.owner_id)
+    assert service.reconcile_superseded_unissued("recipe.install", old.owner_id, 2)
+    new = service.start_installation(
+        old.owner_id, actor="admin", request_id="new-install-intent",
+        workload_intent_ordinal=2,
+    )
+    with sessions() as session:
+        assert _required(session.get(Job, old.id)).state == "cancelled"
+        child = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == old.id))
+        assert child is not None and child.state == "cancelled"
+        assert _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 2
+
+
+def test_new_stop_intent_replans_after_unissued_old_stop(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="installed-for-stop-intent"
+    )
+    run = started_recipe(
+        sessions, service, installation.owner_id, nodes,
+        request_id="running-for-stop-intent",
+    )
+    old_plan = service.preview_stop(run.owner_id)
+    old = service.stop(
+        run.owner_id, plan_digest=old_plan.plan_digest,
+        actor="admin", request_id="old-stop-intent",
+    )
+    with sessions.begin() as session:
+        _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 4
+    prospective = service.preview_stop(run.owner_id)
+    assert prospective.allowed
+    assert prospective.run_state == "stopping"
+    assert service.assess_superseded_unissued("recipe.stop", run.owner_id)
+    assert service.reconcile_superseded_unissued("recipe.stop", run.owner_id, 4)
+    assert service.preview_stop(run.owner_id).plan_digest == prospective.plan_digest
+    new = service.stop(
+        run.owner_id, plan_digest=prospective.plan_digest,
+        actor="admin", request_id="new-stop-intent", workload_intent_ordinal=4,
+    )
+    with sessions() as session:
+        assert _required(session.get(Job, old.id)).state == "cancelled"
+        assert _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 4
+        assert _required(session.get(RecipeRun, run.owner_id)).route_state == "withdrawn"
+        assert session.scalar(select(ResourceReservation.id).where(
+            ResourceReservation.owner_kind == "run",
+            ResourceReservation.owner_id == run.owner_id,
+            ResourceReservation.state == "active",
+        )) is not None
+    obsolete = service.cancel(
+        old.id, actor="admin", request_id=str(uuid.uuid4()), reason="new request owns the run"
+    )
+    assert obsolete.state == "cancelled"
+    with pytest.raises(RecipeOperationConflict, match="request key was already used differently"):
+        service.cancel(
+            old.id, actor="admin", request_id="new-stop-intent", reason="new request owns the run"
+        )
+    with pytest.raises(RecipeOperationConflict, match="cancellation request identity is invalid"):
+        service.cancel(
+            old.id, actor="admin", request_id="not-a-uuid", reason="new request owns the run"
+        )
+
+
+def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="installed-for-issued-stop"
+    )
+    run = started_recipe(
+        sessions, service, installation.owner_id, nodes,
+        request_id="running-for-issued-stop",
+    )
+    plan = service.preview_stop(run.owner_id)
+    old = service.stop(
+        run.owner_id, plan_digest=plan.plan_digest,
+        actor="admin", request_id="issued-old-stop",
+    )
+    with sessions.begin() as session:
+        child = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == old.id))
+        assert child is not None
+        child.state = "running"
+        child.current_attempt = 1
+        session.add(AgentOperationAttempt(
+            operation_id=child.id,
+            attempt=1,
+            fence=str(uuid.uuid4()),
+            lease_deadline=NOW + timedelta(minutes=1),
+            agent_certificate_serial="serial-0",
+            state="running",
+        ))
+        _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 4
+        AgentJobService.request_superseded_workload_cancellation_in_session(
+            session, nodes, 4, NOW
+        )
+    assert not service.assess_superseded_unissued("recipe.stop", run.owner_id)
+    assert not service.reconcile_superseded_unissued("recipe.stop", run.owner_id, 4)
+    pending = service.assess_superseded_issued("recipe.stop", run.owner_id, 4)
+    assert pending is not None
+    assert pending.job_id == old.id
+    assert pending.failure_kind.value == "uncertain-effect"
+    assert pending.observe_due_at <= pending.observation_deadline
+    fresh = service.preview_stop(run.owner_id)
+    assert fresh.allowed and fresh.run_state == "stopping"
+    replacement = service.stop(
+        run.owner_id, plan_digest=fresh.plan_digest,
+        actor="admin", request_id="issued-new-stop", workload_intent_ordinal=4,
+    )
+    with sessions() as session:
+        old_job = _required(session.get(Job, old.id))
+        assert old_job.state == "running"
+        assert old_job.result is not None and old_job.result["cancel_requested"] is True
+        assert _required(session.get(Job, replacement.id)).payload["workload_intent_ordinal"] == 4
+        assert _required(session.get(RecipeRun, run.owner_id)).state == "stopping"
+
+
+def test_new_uninstall_intent_replans_after_unissued_old_uninstall(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes,
+        request_id="installed-for-uninstall-intent",
+    )
+    old_plan = service.preview_uninstall(installation.owner_id)
+    old = service.uninstall(
+        installation.owner_id, plan_digest=old_plan.plan_digest,
+        actor="admin", request_id="old-uninstall-intent",
+    )
+    with sessions.begin() as session:
+        _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 3
+    prospective = service.preview_uninstall(installation.owner_id)
+    assert prospective.allowed
+    assert service.assess_superseded_unissued("recipe.uninstall", installation.owner_id)
+    assert service.reconcile_superseded_unissued("recipe.uninstall", installation.owner_id, 3)
+    assert service.preview_uninstall(installation.owner_id).plan_digest == prospective.plan_digest
+    new = service.uninstall(
+        installation.owner_id, plan_digest=prospective.plan_digest,
+        actor="admin", request_id="new-uninstall-intent", workload_intent_ordinal=3,
+    )
+    with sessions() as session:
+        assert _required(session.get(Job, old.id)).state == "cancelled"
+        assert _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 3
+
+
 def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     install_plan = service.preview_install(mapping_id, build_id)
@@ -3061,16 +3227,18 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         request_id="7" * 36,
     )
     assert service.get(stop.id).state == "running"
-    blocked_stop = service.preview_stop(start.owner_id)
-    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
-        service.stop(
-            start.owner_id,
-            plan_digest=blocked_stop.plan_digest,
-            actor="admin",
-            request_id="7" * 35 + "a",
-        )
+    next_stop_plan = service.preview_stop(start.owner_id)
+    replacement_stop = service.stop(
+        start.owner_id,
+        plan_digest=next_stop_plan.plan_digest,
+        actor="admin",
+        request_id="7" * 35 + "a",
+    )
+    assert replacement_stop.id != stop.id
+    assert service.get(stop.id).state == "cancelled"
+    assert service.get(replacement_stop.id).state == "running"
     service.record_node_result(
-        stop.id, nodes[0], succeeded=True, evidence={"stopped": True}
+        replacement_stop.id, nodes[0], succeeded=True, evidence={"stopped": True}
     )
     with sessions() as session:
         run = _required(session.get(RecipeRun, start.owner_id))
@@ -3395,46 +3563,84 @@ def test_profile_cleanup_recovers_failed_uninstall_and_only_retries_remaining_no
     tmp_path: Path,
     first_node_removed: bool,
 ) -> None:
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+        _child_operation_id,
+    )
+
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
     installation = installed_recipe(
         operations, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
     )
-    profiles = FleetProfileService(
-        sessions, clock=lambda: NOW, recipe_operations=operations
+
+    def run_switch():
+        return RunSwitchOperationService(
+            sessions,
+            lifecycle=operations,
+            clock=operations._clock,
+            artifacts=CompleteArtifactInspector(),
+            artifact_phase_executor=RecordingArtifactExecutor(),
+            memory_floor_bytes=50,
+        )
+
+    switch = run_switch()
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=operations._clock, run_switch_operations=switch
     )
     profile = profiles.create(
         FleetProfileInput(name="Idle", installation_policy="exact"), actor="admin"
     )
     first = profiles.load(profile.number, request_key=str(uuid.uuid4()), actor="admin")
     assert profiles.tick()
-    first_job = profiles.application(first.id).current_operation_id
+    first_application = profiles.application(first.id)
+    assert first_application.current_operation_id == first.id
+    first_adapter = first_application.progress.switch_adapter
+    assert first_adapter is not None
+    first_switch = first_adapter.active_operation_id
+    assert first_switch is not None
+    assert switch.tick()
+    first_job = _child_operation_id(switch.get(first_switch))
     assert first_job is not None
     operations.record_node_result(
         first_job,
         nodes[0],
         succeeded=first_node_removed,
-        evidence={"removed": True}
+        evidence={"uninstalled": True, "removed_model_bytes": 1}
         if first_node_removed
         else {"code": "cleanup.failed"},
     )
     operations.record_node_result(
         first_job, nodes[1], succeeded=False, evidence={"code": "cleanup.failed"}
     )
+    for _ in range(4):
+        if switch.get(first_switch).state == "failed":
+            break
+        switch.tick()
+    assert switch.get(first_switch).state == "failed"
     assert profiles.tick()
     assert profiles.application(first.id).state == "failed"
 
     # A new coordinator resumes persisted progress through the normal load path.
-    profiles = FleetProfileService(
-        sessions, clock=lambda: NOW + timedelta(seconds=1), recipe_operations=operations
+    switch = run_switch()
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=lambda: NOW + timedelta(seconds=1), run_switch_operations=switch
     )
     request_key = str(uuid.uuid4())
     retry = profiles.load(profile.number, request_key=request_key, actor="admin")
     assert retry.retry_of_application_id == first.id
     assert profiles.tick()
-    second_job = profiles.application(retry.id).current_operation_id
-    assert second_job is not None, profiles.application(retry.id).status_reason
+    second_application = profiles.application(retry.id)
+    assert second_application.current_operation_id == retry.id
+    second_adapter = second_application.progress.switch_adapter
+    assert second_adapter is not None
+    second_switch = second_adapter.active_operation_id
+    assert second_switch is not None, profiles.application(retry.id).status_reason
+    assert switch.tick()
+    second_job = _child_operation_id(switch.get(second_switch))
+    assert second_job is not None
     with sessions() as session:
         retried_nodes = set(
             session.scalars(
@@ -3446,8 +3652,16 @@ def test_profile_cleanup_recovers_failed_uninstall_and_only_retries_remaining_no
     assert retried_nodes == set(nodes[1:] if first_node_removed else nodes)
     for node_id in retried_nodes:
         operations.record_node_result(
-            second_job, node_id, succeeded=True, evidence={"removed": True}
+            second_job,
+            node_id,
+            succeeded=True,
+            evidence={"uninstalled": True, "removed_model_bytes": 1},
         )
+    for _ in range(4):
+        if switch.get(second_switch).state == "succeeded":
+            break
+        switch.tick()
+    assert switch.get(second_switch).state == "succeeded"
     assert profiles.tick()
     final = profiles.application(retry.id)
     assert final.state == "succeeded"

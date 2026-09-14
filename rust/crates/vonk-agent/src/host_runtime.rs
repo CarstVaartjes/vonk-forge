@@ -545,9 +545,9 @@ mod tests {
                 "helper_grant_invalid",
             ),
             (
-                HostRuntimeError::Controller(ClientError::Controller(
+                HostRuntimeError::Controller(ClientError::Controller(Box::new(
                     crate::client::ControllerError::from_status(403),
-                )),
+                ))),
                 "helper_grant_unauthorized",
             ),
             (

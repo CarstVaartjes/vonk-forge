@@ -1094,7 +1094,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 })
             }
             HostRuntimeAction::Start => {
-                self.runtime_start(&request.arguments)
+                self.runtime_start(&request.arguments, true)
                     .map(|exit_code| RuntimeRequestOutcome {
                         exit_code,
                         recipe_run_observation: None,
@@ -1102,7 +1102,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }
             HostRuntimeAction::Stop => {
                 if request.arguments.get(1).map(String::as_str) == Some("run") {
-                    self.runtime_start(&request.arguments)
+                    self.runtime_start(&request.arguments, false)
                         .map(|exit_code| RuntimeRequestOutcome {
                             exit_code,
                             recipe_run_observation: None,
@@ -1271,6 +1271,42 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // boundary checks here, but do not hash a potentially multi-terabyte
         // archive again before loading it.
         let archive_identity = self.inspect_runtime_archive(archive, expected_bytes)?;
+        // A previous authorized import is reusable only when the exact
+        // archive, image reference, Docker config and receipt still agree.
+        // A present but invalid receipt is an integrity failure, not a cache
+        // miss that can silently trigger another import.
+        let receipt_path = self.roots.runtime_image_receipts.join(archive_sha256);
+        match fs::symlink_metadata(&receipt_path) {
+            Ok(_) => {
+                let receipt = self.read_image_receipt(archive_sha256)?;
+                self.require_image_receipt(
+                    archive_sha256,
+                    registry_index_digest,
+                    platform_manifest_digest,
+                    image_reference,
+                    &receipt.image_config_id,
+                )?;
+                match self.inspect_runtime_image_for_reference_if_present(image_reference)? {
+                    Some((inspected, _)) => {
+                        if inspected.1 != "linux"
+                            || inspected.2 != "arm64"
+                            || inspected.3 != "v1"
+                            || !numeric_non_root_user(&inspected.4)
+                            || inspected.0 != receipt.image_config_id
+                            || archive_identity
+                                != self.inspect_runtime_archive(archive, expected_bytes)?
+                        {
+                            return Err(OperationError::RuntimeImageIdentityInvalid);
+                        }
+                        return Ok(());
+                    }
+                    None if self.runtime_image_missing(&local_image)? => {}
+                    None => return Err(OperationError::InvalidArtifact),
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         let archive_config_id = runtime_archive_config_digest(archive)?;
         if archive_identity != self.inspect_runtime_archive(archive, expected_bytes)? {
             return Err(OperationError::InvalidArtifact);
@@ -1390,7 +1426,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         )
     }
 
-    fn runtime_start(&self, arguments: &[String]) -> Result<Option<i32>, OperationError> {
+    fn runtime_start(
+        &self,
+        arguments: &[String],
+        fence_start: bool,
+    ) -> Result<Option<i32>, OperationError> {
         let [
             archive_sha256,
             registry_index_digest,
@@ -1415,12 +1455,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        // A one-shot START remains registered from validation through attached container exit.
-        // Cancellation STOPs can therefore distinguish "not created yet" from "already gone"
-        // and retry until this exact job can no longer start late.
-        let _active_job = validated
-            .job_timeout_seconds
-            .map(|_| self.job_cancellation.begin(&validated.run_id))
+        // Every START, including a pre-start hook, remains registered through
+        // its Docker call. STOP hooks use the STOP action and do not acquire
+        // the start fence. An exact cancellation STOP must wait out active
+        // work before treating temporary container absence as quiescence.
+        let _active_start = fence_start
+            .then(|| self.job_cancellation.begin(&validated.run_id))
             .transpose()?;
         self.bind_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))?;
         let (inspected, operational_image) =
@@ -1652,6 +1692,17 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
     fn prepare_runtime_access(&self, run: &ValidatedDockerRun) -> Result<(), OperationError> {
         for path in run.models.iter().chain(run.inputs.iter()) {
+            // Reapplying setfacl changes ctime even when the named runtime
+            // entry already grants precisely the intended read access. That
+            // invalidates the agent's immutable installation receipt before
+            // collective readiness. Inspect the whole selected tree and skip
+            // the recursive write only when every ACL is already exact.
+            // Installation and run inputs are owned by the unprivileged
+            // agent, as checked while validating the signed Docker run.
+            // The helper's own root-owned custody is a separate boundary.
+            if runtime_read_tree_acl_ready(path, run.uid, self.runtime_request_owner_uid)? {
+                continue;
+            }
             let output = self
                 .runner
                 .run(
@@ -1793,6 +1844,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn inspect_runtime_image(&self, image: &str) -> Result<RuntimeImageInspection, OperationError> {
+        self.inspect_runtime_image_if_present(image)?
+            .ok_or(OperationError::InvalidArtifact)
+    }
+
+    fn inspect_runtime_image_if_present(
+        &self,
+        image: &str,
+    ) -> Result<Option<RuntimeImageInspection>, OperationError> {
         let output = self.run_docker(&[
             "image".to_owned(),
             "inspect".to_owned(),
@@ -1800,41 +1859,85 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "{{.Id}}\t{{.Os}}\t{{.Architecture}}\t{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t{{.Config.User}}".to_owned(),
             image.to_owned(),
         ])?;
+        if !output.success {
+            // Docker writes a newline to stdout for some missing image
+            // references. A miss remains provisional here: receipt reuse
+            // additionally requires a successful empty image listing.
+            return if output.exit_code == Some(1)
+                && output.stdout.iter().all(u8::is_ascii_whitespace)
+            {
+                Ok(None)
+            } else {
+                Err(OperationError::RuntimeImageInspectFailed)
+            };
+        }
         let fields = std::str::from_utf8(&output.stdout)
             .ok()
             .map(str::trim)
             .map(|value| value.split('\t').map(str::to_owned).collect::<Vec<_>>())
             .unwrap_or_default();
-        if !output.success || fields.len() != 5 || !valid_oci_digest(&fields[0]) {
+        if output.exit_code != Some(0) || fields.len() != 5 || !valid_oci_digest(&fields[0]) {
             return Err(OperationError::InvalidArtifact);
         }
-        Ok((
+        Ok(Some((
             fields[0].clone(),
             fields[1].clone(),
             fields[2].clone(),
             fields[3].clone(),
             fields[4].clone(),
-        ))
+        )))
     }
 
     fn inspect_runtime_image_for_reference(
         &self,
         image_reference: &str,
     ) -> Result<(RuntimeImageInspection, String), OperationError> {
+        self.inspect_runtime_image_for_reference_if_present(image_reference)?
+            .ok_or(OperationError::InvalidArtifact)
+    }
+
+    fn inspect_runtime_image_for_reference_if_present(
+        &self,
+        image_reference: &str,
+    ) -> Result<Option<(RuntimeImageInspection, String)>, OperationError> {
         let (local_image, _) = parse_local_image_reference(image_reference)?;
-        match self.inspect_runtime_image(image_reference) {
-            Ok(inspected) => Ok((inspected, image_reference.to_owned())),
-            Err(OperationError::InvalidArtifact) => {
+        match self.inspect_runtime_image_if_present(image_reference)? {
+            Some(inspected) => Ok(Some((inspected, image_reference.to_owned()))),
+            None => {
                 // Classic Docker may discard RepoDigests while loading an OCI
                 // archive. The signed logical reference remains receipt-bound;
                 // use the verified local config ID as the daemon reference so
                 // launch stays pinned to the inspected image object.
-                let inspected = self.inspect_runtime_image(&local_image)?;
+                let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)? else {
+                    return Ok(None);
+                };
                 let operational_image = inspected.0.clone();
-                Ok((inspected, operational_image))
+                Ok(Some((inspected, operational_image)))
             }
-            Err(error) => Err(error),
         }
+    }
+
+    fn runtime_image_missing(&self, local_image: &str) -> Result<bool, OperationError> {
+        let output = self.run_docker(&[
+            "image".to_owned(),
+            "ls".to_owned(),
+            "--quiet".to_owned(),
+            "--no-trunc".to_owned(),
+            "--filter".to_owned(),
+            format!("reference={local_image}"),
+        ])?;
+        if !output.success || output.exit_code != Some(0) {
+            return Err(OperationError::RuntimeImageInspectFailed);
+        }
+        let body = std::str::from_utf8(&output.stdout)
+            .map_err(|_| OperationError::RuntimeImageInspectFailed)?;
+        if body.trim().is_empty() {
+            return Ok(true);
+        }
+        if body.lines().all(|line| valid_oci_digest(line.trim())) {
+            return Ok(false);
+        }
+        Err(OperationError::RuntimeImageInspectFailed)
     }
 
     fn write_image_receipt(&self, receipt: RuntimeImageReceipt) -> Result<(), OperationError> {
@@ -1890,22 +1993,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        let path = self.roots.runtime_image_receipts.join(archive_sha256);
-        let metadata = fs::symlink_metadata(&path).map_err(|_| OperationError::InvalidArtifact)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_file()
-            || self
-                .required_owner_uid
-                .is_some_and(|uid| metadata.uid() != uid)
-            || metadata.nlink() != 1
-            || metadata.mode() & 0o022 != 0
-            || metadata.len() > 2048
-        {
-            return Err(OperationError::InvalidArtifact);
-        }
-        let receipt: RuntimeImageReceipt =
-            serde_json::from_slice(&fs::read(path).map_err(|_| OperationError::InvalidArtifact)?)
-                .map_err(|_| OperationError::InvalidArtifact)?;
+        let receipt = self.read_image_receipt(archive_sha256)?;
         if receipt.schema_version != RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION
             || receipt.archive_sha256 != archive_sha256
             || receipt.registry_index_digest != registry_index_digest
@@ -1924,6 +2012,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Err(OperationError::InvalidArtifact);
         }
         Ok(())
+    }
+
+    fn read_image_receipt(
+        &self,
+        archive_sha256: &str,
+    ) -> Result<RuntimeImageReceipt, OperationError> {
+        let path = self.roots.runtime_image_receipts.join(archive_sha256);
+        let metadata = fs::symlink_metadata(&path).map_err(|_| OperationError::InvalidArtifact)?;
+        if metadata.file_type().is_symlink()
+            || !metadata.is_file()
+            || self
+                .required_owner_uid
+                .is_some_and(|uid| metadata.uid() != uid)
+            || metadata.nlink() != 1
+            || metadata.mode() & 0o022 != 0
+            || metadata.len() > 2048
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
+        let receipt: RuntimeImageReceipt =
+            serde_json::from_slice(&fs::read(path).map_err(|_| OperationError::InvalidArtifact)?)
+                .map_err(|_| OperationError::InvalidArtifact)?;
+        Ok(receipt)
     }
 
     fn canonical_archive_root(&self) -> Result<(PathBuf, PathBuf), OperationError> {
@@ -1990,6 +2101,83 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn require_directory(&self, path: &Path) -> Result<(), OperationError> {
         require_safe_directory(path, self.required_owner_uid)
     }
+}
+
+fn runtime_read_tree_acl_ready(
+    path: &Path,
+    runtime_uid: u32,
+    required_owner_uid: Option<u32>,
+) -> Result<bool, OperationError> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink()
+        || !(metadata.is_file() || metadata.is_dir())
+        || metadata.mode() & 0o022 != 0
+        || required_owner_uid.is_some_and(|uid| metadata.uid() != uid)
+    {
+        return Err(OperationError::UnsafePath);
+    }
+    if metadata.is_dir() && xattr::get(path, "system.posix_acl_default")?.is_some() {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let mut ready = exact_runtime_read_acl(path, &metadata, runtime_uid)?;
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)? {
+            ready &= runtime_read_tree_acl_ready(&entry?.path(), runtime_uid, required_owner_uid)?;
+        }
+    }
+    Ok(ready)
+}
+
+fn exact_runtime_read_acl(
+    path: &Path,
+    metadata: &fs::Metadata,
+    runtime_uid: u32,
+) -> Result<bool, OperationError> {
+    let Some(value) = xattr::get(path, "system.posix_acl_access")? else {
+        return Ok(false);
+    };
+    if value.len() != 44 || u32::from_le_bytes(value[..4].try_into().unwrap()) != 2 {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let mut user_object = None;
+    let mut runtime_user = None;
+    let mut group_object = None;
+    let mut mask = None;
+    let mut other = None;
+    for entry in value[4..].chunks_exact(8) {
+        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
+        let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
+        let identifier = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+        match tag {
+            0x0001 if identifier == u32::MAX && user_object.replace(permissions).is_none() => {}
+            0x0002 if identifier == runtime_uid && runtime_user.replace(permissions).is_none() => {}
+            0x0004 if identifier == u32::MAX && group_object.replace(permissions).is_none() => {}
+            0x0010 if identifier == u32::MAX && mask.replace(permissions).is_none() => {}
+            0x0020 if identifier == u32::MAX && other.replace(permissions).is_none() => {}
+            _ => return Err(OperationError::InvalidArtifact),
+        }
+    }
+    let (Some(user_object), Some(runtime_user), Some(group_object), Some(mask), Some(other)) =
+        (user_object, runtime_user, group_object, mask, other)
+    else {
+        return Err(OperationError::InvalidArtifact);
+    };
+    let expected_runtime = if metadata.is_dir() || (user_object | group_object | other) & 0o1 != 0 {
+        0o5
+    } else {
+        0o4
+    };
+    if user_object > 0o7
+        || group_object & 0o2 != 0
+        || other & 0o2 != 0
+        || runtime_user != expected_runtime
+        || mask != (group_object | runtime_user)
+        || metadata.mode() & 0o777
+            != (u32::from(user_object) << 6 | u32::from(mask) << 3 | u32::from(other))
+    {
+        return Err(OperationError::InvalidArtifact);
+    }
+    Ok(true)
 }
 
 fn runtime_archive_config_digest(path: &Path) -> Result<String, OperationError> {
@@ -3365,7 +3553,7 @@ mod tests {
     use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use tar::Builder;
     use tempfile::TempDir;
@@ -3426,6 +3614,8 @@ mod tests {
                 stdout: if arguments.first().map(String::as_str) == Some("load") {
                     b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest\n"
                         .to_vec()
+                } else if digest_lookup {
+                    b"\n".to_vec()
                 } else if inspect && !digest_lookup {
                     format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "b".repeat(64))
                         .into_bytes()
@@ -3435,6 +3625,130 @@ mod tests {
                 exit_code: Some(if digest_lookup { 1 } else { 0 }),
             })
         }
+    }
+
+    #[derive(Clone, Default)]
+    struct CountingRuntimeImportRunner {
+        loads: Arc<std::sync::atomic::AtomicUsize>,
+        image_missing: Arc<std::sync::atomic::AtomicBool>,
+        wrong_image: Arc<std::sync::atomic::AtomicBool>,
+        malformed_image: Arc<std::sync::atomic::AtomicBool>,
+        empty_listing: Arc<std::sync::atomic::AtomicBool>,
+        deny_listing: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl CommandRunner for CountingRuntimeImportRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            use std::sync::atomic::Ordering::SeqCst;
+            let inspect_compiled = arguments.first().map(String::as_str) == Some("image")
+                && arguments.get(1).map(String::as_str) == Some("inspect")
+                && arguments
+                    .last()
+                    .is_some_and(|image| image.contains("compiled-runtime-"));
+            if inspect_compiled && self.image_missing.load(SeqCst) {
+                return Ok(CommandOutput {
+                    success: false,
+                    stdout: b"\n".to_vec(),
+                    exit_code: Some(1),
+                });
+            }
+            if inspect_compiled && self.wrong_image.load(SeqCst) {
+                return Ok(CommandOutput {
+                    success: true,
+                    stdout: format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "c".repeat(64))
+                        .into_bytes(),
+                    exit_code: Some(0),
+                });
+            }
+            if inspect_compiled && self.malformed_image.load(SeqCst) {
+                return Ok(CommandOutput {
+                    success: true,
+                    stdout: b"malformed\n".to_vec(),
+                    exit_code: Some(0),
+                });
+            }
+            if arguments.first().map(String::as_str) == Some("image")
+                && arguments.get(1).map(String::as_str) == Some("ls")
+            {
+                if self.deny_listing.load(SeqCst) {
+                    return Err("docker access denied".to_owned());
+                }
+                return Ok(CommandOutput {
+                    success: true,
+                    stdout: if self.image_missing.load(SeqCst) || self.empty_listing.load(SeqCst) {
+                        Vec::new()
+                    } else {
+                        format!("sha256:{}\n", "b".repeat(64)).into_bytes()
+                    },
+                    exit_code: Some(0),
+                });
+            }
+            if arguments.first().map(String::as_str) == Some("load") {
+                self.loads.fetch_add(1, SeqCst);
+                self.image_missing.store(false, SeqCst);
+            }
+            RuntimeImportRunner.run(executable, arguments)
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct KernelAclRunner {
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl CommandRunner for KernelAclRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            if executable != Path::new("/usr/bin/setfacl") {
+                return Err("unexpected command".to_owned());
+            }
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            if arguments.first().map(String::as_str) == Some("-R") {
+                let uid = arguments
+                    .get(2)
+                    .and_then(|value| value.split(':').nth(1))
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .ok_or("invalid ACL user")?;
+                let root = Path::new(arguments.last().ok_or("missing ACL path")?);
+                apply_kernel_read_acl(root, uid)?;
+            }
+            Ok(CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                exit_code: Some(0),
+            })
+        }
+    }
+
+    fn apply_kernel_read_acl(path: &Path, uid: u32) -> Result<(), String> {
+        let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+        let mode = metadata.mode() & 0o777;
+        let user_object = ((mode >> 6) & 0o7) as u16;
+        let group_object = ((mode >> 3) & 0o7) as u16;
+        let other = (mode & 0o7) as u16;
+        let runtime = if metadata.is_dir() || mode & 0o111 != 0 {
+            0o5
+        } else {
+            0o4
+        };
+        let mut acl = 2_u32.to_le_bytes().to_vec();
+        for (tag, permissions, identifier) in [
+            (0x0001_u16, user_object, u32::MAX),
+            (0x0002, runtime, uid),
+            (0x0004, group_object, u32::MAX),
+            (0x0010, group_object | runtime, u32::MAX),
+            (0x0020, other, u32::MAX),
+        ] {
+            acl.extend_from_slice(&tag.to_le_bytes());
+            acl.extend_from_slice(&permissions.to_le_bytes());
+            acl.extend_from_slice(&identifier.to_le_bytes());
+        }
+        xattr::set(path, "system.posix_acl_access", &acl).map_err(|error| error.to_string())?;
+        if metadata.is_dir() {
+            for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
+                apply_kernel_read_acl(&entry.map_err(|error| error.to_string())?.path(), uid)?;
+            }
+        }
+        Ok(())
     }
 
     #[derive(Clone, Default)]
@@ -3549,6 +3863,60 @@ mod tests {
             ),
             Err(OperationError::StopUncertain)
         ));
+    }
+
+    #[test]
+    fn exact_cancel_stop_waits_for_active_start_then_blocks_late_start() {
+        let temp = tempfile::tempdir().unwrap();
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            MissingContainerRunner,
+            None,
+        )
+        .unwrap();
+        let active = executor.job_cancellation.begin(RUN_ID).unwrap();
+        let stop_arguments = [RUN_ID.to_owned(), "5".to_owned(), "job-cancel".to_owned()];
+        std::thread::scope(|scope| {
+            let stop = scope.spawn(|| {
+                executor
+                    .runtime_stop_until(&stop_arguments, Instant::now() + Duration::from_secs(10))
+            });
+            while !executor
+                .job_cancellation
+                .state
+                .lock()
+                .unwrap()
+                .cancelled
+                .contains(RUN_ID)
+            {
+                std::thread::yield_now();
+            }
+            assert!(!stop.is_finished(), "stop acknowledged an active START");
+            drop(active);
+            stop.join().unwrap().unwrap();
+        });
+        assert!(executor.job_cancellation.begin(RUN_ID).is_err());
+    }
+
+    #[test]
+    fn ordinary_recovery_stop_does_not_fence_a_same_run_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            MissingContainerRunner,
+            None,
+        )
+        .unwrap();
+
+        executor
+            .runtime_stop_until(
+                &[RUN_ID.to_owned(), "5".to_owned()],
+                Instant::now() + Duration::from_secs(1),
+            )
+            .unwrap();
+        assert!(executor.job_cancellation.begin(RUN_ID).is_ok());
     }
 
     #[test]
@@ -4337,6 +4705,114 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn runtime_access_skips_exact_model_acl_and_rejects_unexpected_acl() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        fs::write(&model, b"model").unwrap();
+        fs::set_permissions(&model, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut acl = 2_u32.to_le_bytes().to_vec();
+        for (tag, permissions, identifier) in [
+            (0x0001_u16, 0o6_u16, u32::MAX),
+            (0x0002, 0o4, 10_001),
+            (0x0004, 0, u32::MAX),
+            (0x0010, 0o4, u32::MAX),
+            (0x0020, 0, u32::MAX),
+        ] {
+            acl.extend_from_slice(&tag.to_le_bytes());
+            acl.extend_from_slice(&permissions.to_le_bytes());
+            acl.extend_from_slice(&identifier.to_le_bytes());
+        }
+        xattr::set(&model, "system.posix_acl_access", &acl).unwrap();
+        let arguments = runtime_arguments(&roots, &[(model.clone(), "/models", true)]);
+        let validated = validate_docker_run(&arguments, &roots, None).unwrap();
+        let runner = RecordingAclRunner::default();
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
+        executor.prepare_runtime_access(&validated).unwrap();
+        assert!(
+            !runner
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|call| call.last() == Some(&model.display().to_string()))
+        );
+
+        // An additional named ACL entry cannot be silently transformed into
+        // a runtime grant by the helper.
+        let mut unexpected = acl[..4].to_vec();
+        unexpected.extend_from_slice(&acl[4..20]);
+        unexpected.extend_from_slice(&0x0002_u16.to_le_bytes());
+        unexpected.extend_from_slice(&0o4_u16.to_le_bytes());
+        unexpected.extend_from_slice(&10_002_u32.to_le_bytes());
+        unexpected.extend_from_slice(&acl[20..]);
+        xattr::set(&model, "system.posix_acl_access", &unexpected).unwrap();
+        assert!(executor.prepare_runtime_access(&validated).is_err());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn repeated_model_and_input_prepare_reuses_kernel_acls() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        fs::write(&model, b"model").unwrap();
+        fs::set_permissions(&model, fs::Permissions::from_mode(0o600)).unwrap();
+        let inputs = roots.agent_data.join("runs").join(RUN_ID).join("inputs");
+        fs::set_permissions(&inputs, fs::Permissions::from_mode(0o700)).unwrap();
+        let data = inputs.join("data.bin");
+        let manifest = inputs.join("manifest.json");
+        let readable = inputs.join("readable.txt");
+        for (path, mode) in [(&data, 0o600), (&manifest, 0o400), (&readable, 0o644)] {
+            fs::write(path, b"input").unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+        }
+        let arguments = job_runtime_arguments(&roots, model.clone());
+        let agent_uid = fs::metadata(&model).unwrap().uid();
+        let validated = validate_docker_run(&arguments, &roots, Some(agent_uid)).unwrap();
+        let runner = KernelAclRunner::default();
+        let executor = OperationExecutor::new(
+            roots,
+            &[0; 32],
+            runner.clone(),
+            Some(agent_uid.wrapping_add(1)),
+        )
+        .unwrap()
+        .with_runtime_request_owner(agent_uid);
+        executor.prepare_runtime_access(&validated).unwrap();
+        let first_writes = runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call.first().map(String::as_str) == Some("-R"))
+            .count();
+        assert_eq!(first_writes, 2);
+        let before_second = [&model, &inputs, &data, &manifest, &readable].map(|path| {
+            let metadata = fs::metadata(path).unwrap();
+            (metadata.ctime(), metadata.ctime_nsec())
+        });
+        executor.prepare_runtime_access(&validated).unwrap();
+        let second_writes = runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call.first().map(String::as_str) == Some("-R"))
+            .count();
+        assert_eq!(second_writes, first_writes);
+        let after_second = [&model, &inputs, &data, &manifest, &readable].map(|path| {
+            let metadata = fs::metadata(path).unwrap();
+            (metadata.ctime(), metadata.ctime_nsec())
+        });
+        assert_eq!(after_second, before_second);
+        assert_eq!(fs::read(model).unwrap(), b"model");
+        for path in [&data, &manifest, &readable] {
+            assert_eq!(fs::read(path).unwrap(), b"input");
+        }
+    }
+
+    #[test]
     fn runtime_image_receipt_keeps_registry_archive_config_and_local_reference_distinct() {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(temp.path());
@@ -4501,18 +4977,20 @@ mod tests {
         let archive = archive_root.join(&archive_sha256);
         fs::write(&archive, &payload).unwrap();
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
-        let executor =
-            OperationExecutor::new(roots.clone(), &[0; 32], RuntimeImportRunner, None).unwrap();
-        executor
-            .runtime_image_import(&[
-                archive.display().to_string(),
-                archive_sha256.clone(),
-                payload.len().to_string(),
-                format!("sha256:{}", "a".repeat(64)),
-                registry_manifest.clone(),
-                local_reference.clone(),
-            ])
-            .unwrap();
+        let runner = CountingRuntimeImportRunner::default();
+        let loads = runner.loads.clone();
+        let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner, None).unwrap();
+        let arguments = [
+            archive.display().to_string(),
+            archive_sha256.clone(),
+            payload.len().to_string(),
+            format!("sha256:{}", "a".repeat(64)),
+            registry_manifest.clone(),
+            local_reference.clone(),
+        ];
+        executor.runtime_image_import(&arguments).unwrap();
+        executor.runtime_image_import(&arguments).unwrap();
+        assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
         executor
             .require_image_receipt(
                 &archive_sha256,
@@ -4531,6 +5009,61 @@ mod tests {
             receipt.image_config_id,
             format!("sha256:{}", "b".repeat(64))
         );
+        // A digest-named archive changed in place cannot turn a stale image
+        // receipt into another load request.
+        fs::write(&archive, vec![0_u8; payload.len()]).unwrap();
+        assert!(executor.runtime_image_import(&arguments).is_err());
+        assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn runtime_image_import_rehydrates_only_proven_missing_image() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        fs::create_dir_all(&roots.data).unwrap();
+        let (payload, _config_id) = docker_save_archive(false);
+        let archive_sha256 = hex_sha256(&payload);
+        let registry_manifest = format!("sha256:{}", "b".repeat(64));
+        let local_reference =
+            format!("localhost/vonk/compiled-runtime-{archive_sha256}@{registry_manifest}");
+        let archive_root = roots.agent_data.join("oci-archives");
+        fs::create_dir_all(&archive_root).unwrap();
+        let archive = archive_root.join(&archive_sha256);
+        fs::write(&archive, &payload).unwrap();
+        fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
+        let runner = CountingRuntimeImportRunner::default();
+        let executor = OperationExecutor::new(roots, &[0; 32], runner.clone(), None).unwrap();
+        let arguments = [
+            archive.display().to_string(),
+            archive_sha256,
+            payload.len().to_string(),
+            format!("sha256:{}", "a".repeat(64)),
+            registry_manifest,
+            local_reference,
+        ];
+        executor.runtime_image_import(&arguments).unwrap();
+        assert_eq!(runner.loads.load(SeqCst), 1);
+
+        runner.image_missing.store(true, SeqCst);
+        executor.runtime_image_import(&arguments).unwrap();
+        executor.runtime_image_import(&arguments).unwrap();
+        assert_eq!(runner.loads.load(SeqCst), 2);
+
+        runner.wrong_image.store(true, SeqCst);
+        assert!(executor.runtime_image_import(&arguments).is_err());
+        assert_eq!(runner.loads.load(SeqCst), 2);
+        runner.wrong_image.store(false, SeqCst);
+        runner.malformed_image.store(true, SeqCst);
+        runner.empty_listing.store(true, SeqCst);
+        assert!(executor.runtime_image_import(&arguments).is_err());
+        assert_eq!(runner.loads.load(SeqCst), 2);
+        runner.malformed_image.store(false, SeqCst);
+        runner.empty_listing.store(false, SeqCst);
+        runner.image_missing.store(true, SeqCst);
+        runner.deny_listing.store(true, SeqCst);
+        assert!(executor.runtime_image_import(&arguments).is_err());
+        assert_eq!(runner.loads.load(SeqCst), 2);
     }
 
     #[test]

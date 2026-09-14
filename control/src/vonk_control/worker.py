@@ -254,7 +254,7 @@ def assemble_production_worker(
     artifact_job_retention_seconds: int,
     artifact_job_reconcile_interval_seconds: int,
     artifact_job_reconcile_batch_limit: int,
-    distributed_start_timeout_seconds: int = 60,
+    distributed_start_timeout_seconds: int = 1800,
     model_cache=None,
     background_services: Sequence[Callable[[], object]] = (),
     background_closers: Sequence[Callable[[], object]] = (),
@@ -276,7 +276,7 @@ def assemble_production_worker(
     from .distribution import build_distribution_service_from_components
     from .distribution_executor import CompositeDistributionPhaseExecutor
     from .failure_evidence import FailureEvidenceService
-    from .fleet_profiles import FleetProfileService, RunSwitchFleetProfileAdapter
+    from .fleet_profiles import build_production_fleet_profile_service
     from .install_admission import InstallAdmissionService
     from .recipe_builds import RecipeBuildService
     from .recipe_operation_worker import RecipeOperationWorker
@@ -353,12 +353,12 @@ def assemble_production_worker(
         recipe_routes,
         clock=clock,
         build_cleanup=lifecycle.reconcile_cancelled_builds,
-        fleet_profiles=FleetProfileService(
+        fleet_profiles=build_production_fleet_profile_service(
             sessions,
             clock=clock,
-            recipe_operations=lifecycle,
-            switch_adapter=RunSwitchFleetProfileAdapter(
-                sessions, run_switch_operations
+            run_switch_operations=run_switch_operations,
+            cache_resolver=(
+                model_cache.resolve_latest_cached if model_cache is not None else None
             ),
         ),
         run_switches=run_switch_operations,

@@ -80,31 +80,14 @@ FleetProfileChildPhase = Literal[
     "prepare",
     "cleanup",
     "stop",
+    "uninstall",
     "final_verify",
 ]
 FleetProfileAssignmentState = Literal[
     "not-placed", "placed", "installing", "installed", "running", "degraded"
 ]
-FleetProfileAction = Literal[
-    "stop",
-    "create-placement",
-    "build",
-    "distribute-image",
-    "install",
-    "start",
-    "switch",
-    "keep",
-]
-FleetProfilePlanStepKind = Literal[
-    "stop",
-    "uninstall",
-    "create-placement",
-    "build",
-    "distribute-image",
-    "install",
-    "start",
-    "switch",
-]
+FleetProfileAction = Literal["switch", "keep"]
+FleetProfilePlanStepKind = Literal["switch"]
 FleetProfileOperationKind = Literal["fleet-profile.apply"]
 
 
@@ -322,9 +305,6 @@ class FleetProfileScopePreview(_StrictModel):
 class FleetProfilePlanStep(_StrictModel):
     index: int = Field(ge=0, le=1023)
     kind: FleetProfilePlanStepKind
-    assignment_id: UuidId | None = None
-    owner_id: UuidId | None = None
-    recipe_revision_id: UuidId | None = None
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     label: Annotated[str, StringConstraints(min_length=1, max_length=240)]
 
@@ -356,6 +336,8 @@ class FleetProfileChildProgress(_StrictModel):
     """Typed progress emitted by the profile-owned Run switch adapter."""
 
     operation: OperationProgress | None = None
+    startup_budget_seconds: int | None = Field(default=None, ge=1)
+    start_deadline: datetime | None = None
 
     phase: FleetProfileChildPhase
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
@@ -379,7 +361,7 @@ class FleetProfileChildProgress(_StrictModel):
 class FleetProfileSwitchQueueItem(_StrictModel):
     """One durable Run/Switch child in the profile reconciliation queue."""
 
-    kind: Literal["run", "stop"]
+    kind: Literal["run", "stop", "cleanup"]
     id: UuidId
 
 
@@ -387,7 +369,7 @@ class FleetProfileSwitchChildState(_StrictModel):
     """Terminal receipt for a child already completed by the adapter."""
 
     operation_id: UuidId
-    kind: Literal["run", "stop"]
+    kind: Literal["run", "stop", "cleanup"]
     state: Literal["succeeded", "failed", "cancelled"]
     result: FleetProfileSwitchChildResult | None = None
 
@@ -416,13 +398,16 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     queue: list[FleetProfileSwitchQueueItem] = Field(max_length=128)
     position: int = Field(default=0, ge=0, le=128)
     active_operation_id: UuidId | None = None
-    active_kind: Literal["run", "stop"] | None = None
+    active_kind: Literal["run", "stop", "cleanup"] | None = None
     children: list[FleetProfileSwitchChildState] = Field(default_factory=list, max_length=128)
     actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     request_id: UuidId
     state: FleetProfileOperationState = "queued"
     child_progress: FleetProfileChildProgress | None = None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
+    observation_due_at: datetime | None = None
+    observation_deadline_at: datetime | None = None
+    pending_operation_ids: list[UuidId] = Field(default_factory=list, max_length=128)
     result: FleetProfileSwitchAdapterResult | None = None
 
     @model_validator(mode="after")
@@ -455,14 +440,6 @@ class FleetProfileVerificationResult(_StrictModel):
     verified: bool
 
 
-class FleetProfileAssignmentContext(_StrictModel):
-    """Persisted mapping and installation identities for one assignment."""
-
-    mapping_id: UuidId | None = None
-    mapping_generation: int | None = Field(default=None, ge=1)
-    installation_id: UuidId | None = None
-
-
 FleetProfileChildResult = (
     FleetProfileSwitchChildResult
     | FleetProfileSwitchAdapterResult
@@ -474,8 +451,7 @@ class FleetProfileStepResult(_StrictModel):
     """Result receipt for one completed profile plan step."""
 
     operation_id: UuidId
-    owner_id: UuidId | None = None
-    kind: Annotated[str, StringConstraints(min_length=1, max_length=80)] | None = None
+    kind: Literal["switch"]
     result: FleetProfileChildResult | None = None
 
 class FleetProfileIntendedConfiguration(_StrictModel):
@@ -493,15 +469,15 @@ class FleetProfileApplicationProgress(_StrictModel):
     attempt: int = Field(default=1, ge=1)
     retry_of_application_id: UuidId | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
+    workload_intent_ordinal: int | None = Field(default=None, ge=1)
     operation_kind: FleetProfileOperationKind | None = None
     completed_steps: int = Field(default=0, ge=0, le=1024)
     total_steps: int = Field(default=0, ge=0, le=1024)
     current_label: Annotated[str, StringConstraints(max_length=240)] | None = None
-    child_source: Literal["recipe", "switch-adapter"] | None = None
+    child_source: Literal["switch-adapter"] | None = None
     child_progress: FleetProfileChildProgress | None = None
     step_results: dict[str, FleetProfileStepResult] = Field(default_factory=dict)
     switch_adapter: FleetProfileSwitchAdapterState | None = None
-    assignments: dict[UuidId, FleetProfileAssignmentContext] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def progress_is_consistent(self) -> FleetProfileApplicationProgress:
@@ -528,6 +504,17 @@ class FleetProfileChildOperation(_StrictModel):
 
 class FleetProfileSwitchAdapter(Protocol):
     """Profile boundary for the integrated automatic Run switch service."""
+
+    def request_superseded_workload_cancellation_in_session(
+        self,
+        session: Session,
+        targets: tuple[str, ...],
+        ordinal: int,
+        now: datetime,
+    ) -> None:
+        """Cancel older exact agent orders in the profile admission transaction."""
+
+        ...
 
     def start(
         self,

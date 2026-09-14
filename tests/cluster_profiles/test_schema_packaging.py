@@ -36,7 +36,7 @@ def test_cluster_profile_schema_identifiers_use_the_vonk_forge_namespace() -> No
 
 def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:
     subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
+        ["uv", "build", "--wheel", "--offline", "--out-dir", str(tmp_path)],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -48,15 +48,22 @@ def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:
         packaged_names = set(archive.namelist())
         assert {
             "cluster_profiles/schemas/control-openapi.json",
+            "cluster_profiles/schemas/install-release-manifest.schema.json",
             "cluster_profiles/schemas/qualification-manifest-v2.schema.json",
         } <= packaged_names
-        assert not {
-            "cluster_profiles/schemas/workload.schema.json",
-            "cluster_profiles/schemas/cluster-profile.schema.json",
-        } & packaged_names
+        assert (
+            not {
+                "cluster_profiles/schemas/workload.schema.json",
+                "cluster_profiles/schemas/cluster-profile.schema.json",
+            }
+            & packaged_names
+        )
         for schema in sorted(CANONICAL.glob("*.json")):
             assert (
                 archive.read(f"cluster_profiles/schemas/{schema.name}")
                 == schema.read_bytes()
             )
-        assert "cluster_profiles/resources/custom-recipe-presets.json" not in archive.namelist()
+        assert (
+            "cluster_profiles/resources/custom-recipe-presets.json"
+            not in archive.namelist()
+        )

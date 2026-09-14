@@ -15,9 +15,11 @@ from ..models.run_switch_operation_result_phase_type_0 import RunSwitchOperation
 from ..models.run_switch_operation_result_subphase_type_0 import check_run_switch_operation_result_subphase_type_0
 from ..models.run_switch_operation_result_subphase_type_0 import RunSwitchOperationResultSubphaseType0
 from ..types import UNSET, Unset
+from dateutil.parser import isoparse
 from typing import cast
 from typing import cast, Union
 from typing import Union
+import datetime
 
 if TYPE_CHECKING:
   from ..models.run_switch_model_download_result import RunSwitchModelDownloadResult
@@ -69,6 +71,8 @@ class RunSwitchOperationResult:
             final_verify_started_at (Union[None, Unset, float]):
             item_index (Union[Unset, int]):  Default: 0.
             members (Union[Unset, list['RunSwitchMemberReceipt']]):
+            observation_deadline_at (Union[None, Unset, datetime.datetime]):
+            observation_due_at (Union[None, Unset, datetime.datetime]):
             operation (Union['OperationProgress', None, Unset]):
             operation_phase_index (Union[None, Unset, int]):
             phase (Union[None, RunSwitchOperationResultPhaseType0, Unset]):
@@ -83,9 +87,12 @@ class RunSwitchOperationResult:
             retry_attempt (Union[None, Unset, int]):
             retry_reason (Union[None, Unset, str]):
             retryable (Union[Unset, bool]):  Default: False.
+            start_deadline (Union[None, Unset, datetime.datetime]):
+            startup_budget_seconds (Union[None, Unset, int]):
             subphase (Union[None, RunSwitchOperationResultSubphaseType0, Unset]):
             total_bytes (Union[None, Unset, int]):
             total_bytes_known (Union[Unset, bool]):  Default: False.
+            workload_intent_ordinal (Union[None, Unset, int]):
      """
 
     cancellation: Union['RunSwitchCancellation', None, Unset] = UNSET
@@ -97,6 +104,8 @@ class RunSwitchOperationResult:
     final_verify_started_at: Union[None, Unset, float] = UNSET
     item_index: Union[Unset, int] = 0
     members: Union[Unset, list['RunSwitchMemberReceipt']] = UNSET
+    observation_deadline_at: Union[None, Unset, datetime.datetime] = UNSET
+    observation_due_at: Union[None, Unset, datetime.datetime] = UNSET
     operation: Union['OperationProgress', None, Unset] = UNSET
     operation_phase_index: Union[None, Unset, int] = UNSET
     phase: Union[None, RunSwitchOperationResultPhaseType0, Unset] = UNSET
@@ -106,9 +115,12 @@ class RunSwitchOperationResult:
     retry_attempt: Union[None, Unset, int] = UNSET
     retry_reason: Union[None, Unset, str] = UNSET
     retryable: Union[Unset, bool] = False
+    start_deadline: Union[None, Unset, datetime.datetime] = UNSET
+    startup_budget_seconds: Union[None, Unset, int] = UNSET
     subphase: Union[None, RunSwitchOperationResultSubphaseType0, Unset] = UNSET
     total_bytes: Union[None, Unset, int] = UNSET
     total_bytes_known: Union[Unset, bool] = False
+    workload_intent_ordinal: Union[None, Unset, int] = UNSET
 
 
 
@@ -226,6 +238,22 @@ class RunSwitchOperationResult:
 
 
 
+        observation_deadline_at: Union[None, Unset, str]
+        if isinstance(self.observation_deadline_at, Unset):
+            observation_deadline_at = UNSET
+        elif isinstance(self.observation_deadline_at, datetime.datetime):
+            observation_deadline_at = self.observation_deadline_at.isoformat()
+        else:
+            observation_deadline_at = self.observation_deadline_at
+
+        observation_due_at: Union[None, Unset, str]
+        if isinstance(self.observation_due_at, Unset):
+            observation_due_at = UNSET
+        elif isinstance(self.observation_due_at, datetime.datetime):
+            observation_due_at = self.observation_due_at.isoformat()
+        else:
+            observation_due_at = self.observation_due_at
+
         operation: Union[None, Unset, dict[str, Any]]
         if isinstance(self.operation, Unset):
             operation = UNSET
@@ -316,6 +344,20 @@ class RunSwitchOperationResult:
 
         retryable = self.retryable
 
+        start_deadline: Union[None, Unset, str]
+        if isinstance(self.start_deadline, Unset):
+            start_deadline = UNSET
+        elif isinstance(self.start_deadline, datetime.datetime):
+            start_deadline = self.start_deadline.isoformat()
+        else:
+            start_deadline = self.start_deadline
+
+        startup_budget_seconds: Union[None, Unset, int]
+        if isinstance(self.startup_budget_seconds, Unset):
+            startup_budget_seconds = UNSET
+        else:
+            startup_budget_seconds = self.startup_budget_seconds
+
         subphase: Union[None, Unset, str]
         if isinstance(self.subphase, Unset):
             subphase = UNSET
@@ -331,6 +373,12 @@ class RunSwitchOperationResult:
             total_bytes = self.total_bytes
 
         total_bytes_known = self.total_bytes_known
+
+        workload_intent_ordinal: Union[None, Unset, int]
+        if isinstance(self.workload_intent_ordinal, Unset):
+            workload_intent_ordinal = UNSET
+        else:
+            workload_intent_ordinal = self.workload_intent_ordinal
 
 
         field_dict: dict[str, Any] = {}
@@ -355,6 +403,10 @@ class RunSwitchOperationResult:
             field_dict["item_index"] = item_index
         if members is not UNSET:
             field_dict["members"] = members
+        if observation_deadline_at is not UNSET:
+            field_dict["observation_deadline_at"] = observation_deadline_at
+        if observation_due_at is not UNSET:
+            field_dict["observation_due_at"] = observation_due_at
         if operation is not UNSET:
             field_dict["operation"] = operation
         if operation_phase_index is not UNSET:
@@ -373,12 +425,18 @@ class RunSwitchOperationResult:
             field_dict["retry_reason"] = retry_reason
         if retryable is not UNSET:
             field_dict["retryable"] = retryable
+        if start_deadline is not UNSET:
+            field_dict["start_deadline"] = start_deadline
+        if startup_budget_seconds is not UNSET:
+            field_dict["startup_budget_seconds"] = startup_budget_seconds
         if subphase is not UNSET:
             field_dict["subphase"] = subphase
         if total_bytes is not UNSET:
             field_dict["total_bytes"] = total_bytes
         if total_bytes_known is not UNSET:
             field_dict["total_bytes_known"] = total_bytes_known
+        if workload_intent_ordinal is not UNSET:
+            field_dict["workload_intent_ordinal"] = workload_intent_ordinal
 
         return field_dict
 
@@ -672,6 +730,46 @@ class RunSwitchOperationResult:
             members.append(members_item)
 
 
+        def _parse_observation_deadline_at(data: object) -> Union[None, Unset, datetime.datetime]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                observation_deadline_at_type_0 = isoparse(data)
+
+
+
+                return observation_deadline_at_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, Unset, datetime.datetime], data)
+
+        observation_deadline_at = _parse_observation_deadline_at(d.pop("observation_deadline_at", UNSET))
+
+
+        def _parse_observation_due_at(data: object) -> Union[None, Unset, datetime.datetime]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                observation_due_at_type_0 = isoparse(data)
+
+
+
+                return observation_due_at_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, Unset, datetime.datetime], data)
+
+        observation_due_at = _parse_observation_due_at(d.pop("observation_due_at", UNSET))
+
+
         def _parse_operation(data: object) -> Union['OperationProgress', None, Unset]:
             if data is None:
                 return data
@@ -943,6 +1041,36 @@ class RunSwitchOperationResult:
 
         retryable = d.pop("retryable", UNSET)
 
+        def _parse_start_deadline(data: object) -> Union[None, Unset, datetime.datetime]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                start_deadline_type_0 = isoparse(data)
+
+
+
+                return start_deadline_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, Unset, datetime.datetime], data)
+
+        start_deadline = _parse_start_deadline(d.pop("start_deadline", UNSET))
+
+
+        def _parse_startup_budget_seconds(data: object) -> Union[None, Unset, int]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, int], data)
+
+        startup_budget_seconds = _parse_startup_budget_seconds(d.pop("startup_budget_seconds", UNSET))
+
+
         def _parse_subphase(data: object) -> Union[None, RunSwitchOperationResultSubphaseType0, Unset]:
             if data is None:
                 return data
@@ -975,6 +1103,16 @@ class RunSwitchOperationResult:
 
         total_bytes_known = d.pop("total_bytes_known", UNSET)
 
+        def _parse_workload_intent_ordinal(data: object) -> Union[None, Unset, int]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, int], data)
+
+        workload_intent_ordinal = _parse_workload_intent_ordinal(d.pop("workload_intent_ordinal", UNSET))
+
+
         run_switch_operation_result = cls(
             cancellation=cancellation,
             child_operation_id=child_operation_id,
@@ -985,6 +1123,8 @@ class RunSwitchOperationResult:
             final_verify_started_at=final_verify_started_at,
             item_index=item_index,
             members=members,
+            observation_deadline_at=observation_deadline_at,
+            observation_due_at=observation_due_at,
             operation=operation,
             operation_phase_index=operation_phase_index,
             phase=phase,
@@ -994,9 +1134,12 @@ class RunSwitchOperationResult:
             retry_attempt=retry_attempt,
             retry_reason=retry_reason,
             retryable=retryable,
+            start_deadline=start_deadline,
+            startup_budget_seconds=startup_budget_seconds,
             subphase=subphase,
             total_bytes=total_bytes,
             total_bytes_known=total_bytes_known,
+            workload_intent_ordinal=workload_intent_ordinal,
         )
 
         return run_switch_operation_result

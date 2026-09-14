@@ -103,6 +103,9 @@
         "agent-package-signature-linux-arm64": {
           "$ref": "#/$defs/InstallerReleaseObject"
         },
+        "cli-wheel": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
         "nas-payload": {
           "$ref": "#/$defs/InstallerReleaseObject"
         },
@@ -126,6 +129,7 @@
         }
       },
       "required": [
+        "cli-wheel",
         "agent-package-linux-arm64",
         "agent-package-signature-linux-arm64",
         "spark-setup-linux-arm64",

@@ -438,6 +438,7 @@ def test_active_legacy_helper_bridge_blocks_retry_until_full_budget(
         assert [attempt.result for attempt in attempts] == [
             {
                 "error_code": "operation_failed",
+                "failure_kind": "invalid-contract",
                 "reason": "agent upgrade request is invalid",
                 "recovery": "retry-or-inspect",
                 "status": "failed",
@@ -446,6 +447,7 @@ def test_active_legacy_helper_bridge_blocks_retry_until_full_budget(
             },
             {
                 "error_code": "operation_failed",
+                "failure_kind": "invalid-contract",
                 "reason": "agent upgrade request is invalid",
                 "recovery": "retry-or-inspect",
                 "status": "failed",
@@ -1344,6 +1346,7 @@ def test_exact_identity_after_current_retry_continues_to_second_target(tmp_path)
         assert failed_retry is not None and failed_retry.state == "failed"
         assert failed_retry.result == {
             "error_code": "operation_failed",
+            "failure_kind": "invalid-contract",
             "reason": "agent upgrade helper is unavailable",
             "recovery": "retry-or-inspect",
             "status": "failed",

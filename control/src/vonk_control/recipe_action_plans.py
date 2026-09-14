@@ -126,7 +126,7 @@ def stop_plan(
 
     ordered_nodes = tuple(sorted(nodes, key=lambda item: (item.rank, item.node_id)))
     blockers: list[ActionReason] = []
-    if run_state not in {"starting", "running", "failed", "lost"}:
+    if run_state not in {"starting", "running", "stopping", "failed", "lost"}:
         blockers.append(
             ActionReason(
                 "stop.run_not_stoppable",

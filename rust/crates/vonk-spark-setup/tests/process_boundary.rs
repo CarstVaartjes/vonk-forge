@@ -510,7 +510,11 @@ fn canonical_release_anchor_has_the_audited_identity() {
 
 fn install_executing_sudo(paths: &InstallPaths) {
     fs::create_dir_all(&paths.staging_root).unwrap();
-    fs::write(&paths.sudo, "#!/bin/sh\nset -eu\nexec \"$@\"\n").unwrap();
+    fs::write(
+        &paths.sudo,
+        "#!/bin/sh\nset -eu\n[ \"$1\" = -n ]\nshift\nexec \"$@\"\n",
+    )
+    .unwrap();
     fs::set_permissions(&paths.sudo, fs::Permissions::from_mode(0o700)).unwrap();
 }
 

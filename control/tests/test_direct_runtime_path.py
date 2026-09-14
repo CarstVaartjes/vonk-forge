@@ -118,7 +118,7 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(tmp_path: Path
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress={"phase_results": [runtime_result, runtime_plan_result]},
+        progress={"workload_intent_ordinal": 1, "phase_results": [runtime_result, runtime_plan_result]},
     )
     assert first.operation_id == "child-direct"
     assignment = next(iter(captured.values())).to_mapping()

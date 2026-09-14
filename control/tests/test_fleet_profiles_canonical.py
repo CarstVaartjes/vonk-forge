@@ -332,7 +332,11 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
             "blockers": [],
         }
 
-    service = FleetProfileService(sessions, clock=lambda: NOW, cache_resolver=resolve)
+    from .test_fleet_profiles import _SwitchAdapter
+
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, cache_resolver=resolve, switch_adapter=_SwitchAdapter()
+    )
     profile = service.create(
         FleetProfileInput(
             name="Cached",

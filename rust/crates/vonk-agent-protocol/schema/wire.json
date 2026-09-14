@@ -285,6 +285,18 @@
       "title": "AgentDirective",
       "type": "object"
     },
+    "AgentFailureKind": {
+      "enum": [
+        "temporary-dependency",
+        "uncertain-effect",
+        "invalid-authority",
+        "invalid-contract",
+        "integrity-failure",
+        "resource-prerequisite"
+      ],
+      "title": "AgentFailureKind",
+      "type": "string"
+    },
     "AgentFailureResult": {
       "additionalProperties": false,
       "properties": {
@@ -326,6 +338,17 @@
           ],
           "default": null,
           "title": "Error Code"
+        },
+        "failure_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentFailureKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "helper_error_code": {
           "anyOf": [
@@ -404,6 +427,20 @@
           ],
           "default": null,
           "title": "Recovery"
+        },
+        "retry_after_seconds": {
+          "anyOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry After Seconds"
         },
         "stage": {
           "anyOf": [
@@ -3636,6 +3673,9 @@
         "agent-package-signature-linux-arm64": {
           "$ref": "#/$defs/InstallerReleaseObject"
         },
+        "cli-wheel": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
         "nas-payload": {
           "$ref": "#/$defs/InstallerReleaseObject"
         },
@@ -3659,6 +3699,7 @@
         }
       },
       "required": [
+        "cli-wheel",
         "agent-package-linux-arm64",
         "agent-package-signature-linux-arm64",
         "spark-setup-linux-arm64",
@@ -8308,6 +8349,11 @@
     "RecipeStopPayload": {
       "additionalProperties": false,
       "properties": {
+        "cancel_pending_start": {
+          "default": false,
+          "title": "Cancel Pending Start",
+          "type": "boolean"
+        },
         "plan_digest": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Plan Digest",

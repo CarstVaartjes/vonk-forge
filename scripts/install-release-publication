@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -643,6 +644,27 @@ def assemble(arguments: argparse.Namespace) -> str:
     if ordering.returncode != 0:
         raise PublicationError("acceptance baseline package is not strictly older")
     payload_content = _safe_bytes(arguments.nas_payload, "NAS payload")
+    cli_wheel = _safe_bytes(arguments.cli_wheel, "CLI wheel")
+    if not re.fullmatch(
+        r"vonk_cluster_profiles-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any[.]whl",
+        arguments.cli_wheel.name,
+    ):
+        raise PublicationError("CLI wheel filename is invalid")
+    try:
+        with zipfile.ZipFile(arguments.cli_wheel) as archive:
+            build_identity = json.loads(
+                archive.read("cluster_profiles/build-identity.json")
+            )
+            if build_identity != {
+                "schema_version": 1,
+                "source_sha": source_sha,
+                "release_version": version,
+            }:
+                raise PublicationError(
+                    "CLI wheel build identity does not match release source"
+                )
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as error:
+        raise PublicationError("CLI wheel is invalid") from error
     identity = {
         "artifacts": {
             name: _record(content) for name, content in sorted(source_contents.items())
@@ -651,6 +673,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         "baseline_version": baseline_version,
         "images": images,
         "nas_payload": _record(payload_content),
+        "cli_wheel": _record(cli_wheel),
         "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
         "source_sha": source_sha,
         "version": version,
@@ -720,6 +743,9 @@ def assemble(arguments: argparse.Namespace) -> str:
                 "path": key,
                 **_record(content),
             }
+        cli_key = f"{immutable_prefix}/cli/{arguments.cli_wheel.name}"
+        add_immutable(cli_key, cli_wheel)
+        release_artifacts["cli-wheel"] = {"path": cli_key, **_record(cli_wheel)}
         payload_key = f"{immutable_prefix}/nas/current/payload.json"
         add_immutable(payload_key, payload_content)
         release_artifacts["nas-payload"] = {
@@ -1961,6 +1987,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--agent-package", action="append", default=[])
     build.add_argument("--agent-baseline-package", action="append", default=[])
     build.add_argument("--nas-payload", type=Path, required=True)
+    build.add_argument("--cli-wheel", type=Path, required=True)
     build.add_argument("--output", type=Path, required=True)
     approval = commands.add_parser("accept")
     approval.add_argument("--channel", choices=("dev", "stable"), required=True)

@@ -9,8 +9,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
 from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profiles import (
+    FleetProfileService,
+    RunSwitchFleetProfileAdapter,
+)
 from vonk_control.jobs import JobService
+from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
@@ -105,7 +109,7 @@ def test_recipe_worker_services_routes_while_coordinators_are_active(tmp_path, c
 
 
 def test_production_builder_wires_recipe_operations_and_housekeeping(
-    tmp_path,
+    tmp_path, request,
 ) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
     Base.metadata.create_all(engine)
@@ -127,6 +131,8 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
             return None
 
     agent_jobs = SignerBackedAgentJobs()
+    model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
+    request.addfinalizer(model_cache.close)
 
     worker = assemble_production_worker(
         jobs=jobs,
@@ -142,7 +148,7 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
         artifact_job_retention_seconds=7 * 24 * 60 * 60,
         artifact_job_reconcile_interval_seconds=3600,
         artifact_job_reconcile_batch_limit=1000,
-        model_cache=object(),
+        model_cache=model_cache,
         agent_artifact_root=tmp_path / "agent-artifacts",
         recipe_image_artifact_root=tmp_path / "agent-artifacts",
     )
@@ -179,7 +185,8 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     assert maintenance_state["last_success_at"] == current.isoformat()
     fleet_profiles = worker._recipes._fleet_profiles
     assert isinstance(fleet_profiles, FleetProfileService)
-    assert fleet_profiles._recipe_operations is not None
+    assert isinstance(fleet_profiles._switch_adapter, RunSwitchFleetProfileAdapter)
+    assert fleet_profiles._switch_adapter._run_switch is run_switches
     assert run_switches._artifact_phase_executor is not None
     from vonk_control.failure_evidence import FailureEvidenceService
     assert any(isinstance(callback.__self__, FailureEvidenceService) for callback in worker._background_services)

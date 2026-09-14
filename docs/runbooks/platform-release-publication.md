@@ -1,10 +1,12 @@
 # Platform release publication
 
 Vonk Forge publishes one immutable release from a signed tag. The release contains
-digest-pinned API and worker images, the rendered production Compose file, a
-digest-pinned optional Hermes image, and the native `arm64` Spark agent
+digest-pinned API, worker, Hermes, and LiteLLM images, the rendered production
+Compose file, and the native `arm64` Spark agent
 package with checksums, SBOMs, provenance, and Sigstore bundles. A signed
 installer-channel manifest binds those assets to the stable curl endpoints.
+The same signed candidate includes a source-stamped `vonkctl` wheel; operators
+[check and install it explicitly](../operators/cli-updates.md).
 
 Operators prepare a NAS upgrade by rerunning the same stable installer from the
 directory containing the existing bundle:
@@ -23,7 +25,7 @@ through the existing agent relay without SSH. The default one-at-a-time
 strategy requires the exact new agent and helper activation evidence before it
 queues the next Spark. Rerunning the Spark installer remains the package repair,
 fresh-install, and explicit re-enrollment path; there is no A/B rollback slot or
-offline wheel bundle.
+offline Spark rollback bundle.
 
 ## CI authority boundary
 

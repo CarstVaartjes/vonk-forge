@@ -62,7 +62,9 @@ def _row_value(row: Mapping[str, object], key: str) -> object:
     return None
 
 
-def render_payload(payload: Mapping[str, object], noun: str, *, wide: bool = False) -> None:
+def render_payload(
+    payload: Mapping[str, object], noun: str, *, wide: bool = False
+) -> None:
     """Render an adaptive snapshot without cursor control or color assumptions."""
     title = payload.get("title") or payload.get("heading") or noun.title()
     print(str(title))
@@ -111,7 +113,9 @@ def render_payload(payload: Mapping[str, object], noun: str, *, wide: bool = Fal
         print("  ".join("─" * width for width in widths))
         for index, row in enumerate(rendered):
             print("  ".join(value.ljust(widths[i]) for i, value in enumerate(row)))
-            selector = selector_for(rows[index]) if noun in {"model", "recipe"} else None
+            selector = (
+                selector_for(rows[index]) if noun in {"model", "recipe"} else None
+            )
             if selector and noun in {"model", "recipe"}:
                 print(f"  USE {selector}")
     else:
@@ -126,11 +130,42 @@ def render_payload(payload: Mapping[str, object], noun: str, *, wide: bool = Fal
             "next_action",
         )
         keys = [key for key in priority if key in payload]
-        keys.extend(sorted(set(payload) - set(keys)))
+        keys.extend(
+            sorted(
+                set(payload)
+                - set(keys)
+                - ({"progress"} if noun == "profile" else set())
+            )
+        )
         for key in keys:
             if key in {"title", "heading"}:
                 continue
             print(f"{key.replace('_', ' ')}: {_cell(payload[key], 120)}")
+        if noun == "profile":
+            progress = payload.get("progress")
+            if isinstance(progress, Mapping):
+                label = progress.get("current_label")
+                if isinstance(label, str) and label:
+                    print(f"current step: {_cell(label, 120)}")
+                child = progress.get("child_progress")
+                if isinstance(child, Mapping):
+                    phase = child.get("phase")
+                    operation = child.get("operation")
+                    if isinstance(operation, Mapping):
+                        phase = operation.get("phase") or phase
+                    if isinstance(phase, str) and phase:
+                        print(f"load/JIT phase: {_cell(phase, 120)}")
+                    budget = child.get("startup_budget_seconds")
+                    if type(budget) is int:
+                        print(f"initial start budget: {budget} seconds")
+                    for key, label in (
+                        ("start_deadline", "initial start deadline"),
+                        ("recovery_deadline", "rank-loss recovery deadline"),
+                        ("route_publication_deadline", "route publication deadline"),
+                    ):
+                        value = child.get(key)
+                        if isinstance(value, str) and value:
+                            print(f"{label}: {_cell(value, 120)}")
     warnings = payload.get("warnings")
     if isinstance(warnings, list) and warnings:
         print("Info: " + "; ".join(_cell(item, 140) for item in warnings))

@@ -99,6 +99,11 @@ impl StateStore {
                result_json BLOB,
                result_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK (result_acknowledged IN (0,1)),
                CHECK ((state = 'running' AND result_json IS NULL) OR (state = 'completed' AND result_json IS NOT NULL))
+             ) STRICT;
+             CREATE TABLE IF NOT EXISTS result_reconciliation (
+               operation_id TEXT PRIMARY KEY NOT NULL,
+               attempt INTEGER NOT NULL,
+               fence TEXT NOT NULL
              ) STRICT;",
         )?;
         let operation_column = {
@@ -384,6 +389,49 @@ impl StateStore {
                 Ok((operation, result))
             })
             .collect()
+    }
+
+    /// Results acknowledged by older agents may include a refused 409. Offer
+    /// each retained receipt once to the Controller's diagnostic-only path.
+    /// The Controller deduplicates an outcome it already accepted and retains
+    /// an expired exact-fence outcome without applying it to live workload state.
+    pub fn unreconciled_results(&self) -> Result<Vec<(AgentOperation, AgentResult)>, StateError> {
+        let mut statement = self.connection.prepare(
+            "SELECT o.operation,o.result_json FROM operations o
+             LEFT JOIN result_reconciliation r ON r.operation_id=o.operation_id
+             WHERE o.state='completed' AND o.result_acknowledged=1
+               AND r.operation_id IS NULL ORDER BY o.rowid LIMIT 16",
+        )?;
+        let values = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        values
+            .into_iter()
+            .map(|(operation, value)| {
+                let operation = operation.parse().map_err(|_| StateError::ResultState)?;
+                let result: AgentResult = parse_strict(&value)?;
+                result.validate_for_operation(&operation)?;
+                Ok((operation, result))
+            })
+            .collect()
+    }
+
+    pub fn mark_reconciled(&mut self, result: &AgentResult) -> Result<(), StateError> {
+        result.validate()?;
+        self.connection.execute(
+            "INSERT OR IGNORE INTO result_reconciliation(operation_id,attempt,fence)
+             SELECT operation_id,attempt,fence FROM operations
+             WHERE operation_id=?1 AND attempt=?2 AND fence=?3
+               AND state='completed' AND result_acknowledged=1",
+            params![
+                result.operation_id.to_string(),
+                result.attempt,
+                result.fence.to_string()
+            ],
+        )?;
+        Ok(())
     }
 
     pub fn acknowledge(&mut self, result: &AgentResult) -> Result<(), StateError> {

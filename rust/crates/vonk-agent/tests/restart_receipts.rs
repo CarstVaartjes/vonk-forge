@@ -12,6 +12,7 @@ const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
 fn claim() -> AgentClaim {
     let payload = RecipeStopPayload {
+        cancel_pending_start: false,
         plan_digest: "a".repeat(64),
         run_id: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
         schema_version: 1,
