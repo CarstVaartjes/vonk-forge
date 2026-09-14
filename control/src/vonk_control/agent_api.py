@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import stat
@@ -1995,7 +1996,18 @@ def install_agent_routes(
                 30,
                 source=source,
             )
-        except (StaleAgentAttempt, ValueError) as error:
+        except StaleAgentAttempt as error:
+            if required.operations.known_superseded_cancellation(message, source=source):
+                logging.getLogger(__name__).info(
+                    "ignored heartbeat for superseded cancelled operation %s", message.operation_id
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail="superseded operation was cancelled",
+                    headers={"x-vonk-error-code": "superseded_operation_cancelled"},
+                ) from None
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
         return _json_response(AgentDirective.model_validate(response))
 

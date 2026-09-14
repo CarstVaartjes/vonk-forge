@@ -729,17 +729,42 @@ class AgentJobService:
                 )
                 return None
             if operation.kind in _MUTATING_OPERATIONS:
-                active_mutation = session.scalar(
-                    select(StoredOperation.id)
+                active_mutations = tuple(session.scalars(
+                    select(StoredOperation)
                     .where(
                         StoredOperation.node_id == node_id,
                         StoredOperation.id != operation.id,
                         StoredOperation.kind.in_(_MUTATING_OPERATIONS),
                         StoredOperation.state == "running",
                     )
-                    .limit(1)
+                    .order_by(StoredOperation.id)
+                ))
+                # A current exact STOP is the cleanup action for an older
+                # cancelled workload. Do not let the old order's bookkeeping
+                # prevent that STOP from reaching the agent; every other
+                # mutation still waits for its prior effect to cease.
+                stop_cleans_superseded = (
+                    operation.kind == AgentOperation.RECIPE_STOP.value
+                    and operation.workload_intent_ordinal is not None
                 )
-                if active_mutation is not None:
+                if stop_cleans_superseded:
+                    for old in active_mutations:
+                        old_parent = session.get(Job, old.parent_job_id)
+                        if (
+                            old.kind not in {
+                                AgentOperation.RECIPE_START.value,
+                                AgentOperation.RECIPE_STOP.value,
+                            }
+                            or old.workload_intent_ordinal is None
+                            or old.workload_intent_ordinal >= operation.workload_intent_ordinal
+                            or old.payload.get("run_id") != operation.payload.get("run_id")
+                            or old_parent is None
+                            or not isinstance(old_parent.result, Mapping)
+                            or old_parent.result.get("cancel_requested") is not True
+                        ):
+                            stop_cleans_superseded = False
+                            break
+                if active_mutations and not stop_cleans_superseded:
                     return None
             resumable_progress = None
             if operation.current_attempt:
@@ -1292,6 +1317,58 @@ class AgentJobService:
                 node_id=message.node_id,
                 deadline=deadline,
                 cancel_requested=cancel_requested,
+            )
+
+    def known_superseded_cancellation(
+        self, fence: AgentProgress, *, source: AgentSource | None = None
+    ) -> bool:
+        """Identify an exact old cancellation for a benign heartbeat response."""
+        with self._sessions() as session:
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(AgentOperationAttempt.fence == fence.fence)
+            )
+            operation = (
+                session.get(StoredOperation, attempt.operation_id)
+                if attempt is not None else None
+            )
+            parent = (
+                session.get(Job, operation.parent_job_id)
+                if operation is not None else None
+            )
+            if (
+                attempt is None or operation is None or parent is None
+                or operation.kind not in _WORKLOAD_INTENT_OPERATIONS
+                or operation.id != fence.operation_id
+                or operation.parent_job_id != fence.job_id
+                or operation.node_id != fence.node_id
+                or attempt.attempt != fence.attempt
+                or _aware(attempt.lease_deadline) != _aware(fence.deadline)
+                or operation.workload_intent_ordinal != parent.payload.get("workload_intent_ordinal")
+                or not isinstance(parent.result, Mapping)
+                or parent.result.get("cancel_requested") is not True
+                or self._target_scope(parent.targets) is None
+                or operation.node_id not in parent.targets
+            ):
+                return False
+            contact_serial = (
+                source.identity.certificate_serial
+                if source is not None else attempt.agent_certificate_serial
+            )
+            identity = self._lock_identity(session, operation.node_id, contact_serial)
+            now = self._clock()
+            if identity is None or not self._identity_is_active(*identity, now):
+                return False
+            node, _certificate = identity
+            return bool(
+                node.state == "active"
+                and node.revoked_at is None
+                and (
+                    operation.state == "cancelled"
+                    or (
+                        operation.workload_intent_ordinal is not None
+                        and operation.workload_intent_ordinal < node.workload_intent_ordinal
+                    )
+                )
             )
 
     def succeed(self, fence: AgentFence, result: Mapping[str, object]) -> None:

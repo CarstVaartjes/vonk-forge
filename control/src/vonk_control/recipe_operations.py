@@ -30,6 +30,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
+from .agent_jobs import AgentJobService
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
 from .compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -136,9 +137,6 @@ class AgentJobQueue(Protocol):
 
     def notify_available(self) -> None: ...
 
-    def request_superseded_workload_cancellation_in_session(
-        self, session: Session, targets: Sequence[str], ordinal: int, now: datetime
-    ) -> None: ...
 
 
 class RecipeOperationConflict(RuntimeError):
@@ -303,7 +301,7 @@ def _intent_is_current(session: Session, ordinal: int, targets: Sequence[str]) -
 
 
 def _workload_owner_scope(session: Session, kind: str, owner_id: str) -> tuple[str, ...]:
-    if kind == "recipe.stop":
+    if kind in {"recipe.start", "recipe.stop"}:
         if session.get(RecipeRun, owner_id) is None:
             raise RecipeOperationConflict("recipe run does not exist")
         statement = select(RunNode.node_id).where(RunNode.run_id == owner_id)
@@ -324,7 +322,7 @@ def _workload_owner_scope(session: Session, kind: str, owner_id: str) -> tuple[s
 def _active_owned_workload_jobs(
     session: Session, kind: str, owner_id: str, *, lock: bool = False
 ) -> tuple[Job, ...]:
-    owner_kind = "run" if kind == "recipe.stop" else "installation"
+    owner_kind = "run" if kind in {"recipe.start", "recipe.stop"} else "installation"
     statement = (
         select(Job)
         .where(
@@ -1753,6 +1751,7 @@ class RecipeOperationService:
                                 "schema_version": 1,
                                 "run_id": run_id,
                                 "plan_digest": admitted.authority_digest,
+                                "cancel_pending_start": True,
                             },
                         )
                         for node in admitted.nodes
@@ -1766,6 +1765,7 @@ class RecipeOperationService:
                                     "schema_version": 1,
                                     "run_id": run_id,
                                     "plan_digest": admitted.authority_digest,
+                                    "cancel_pending_start": True,
                                     "role": node.role,
                                 },
                             )
@@ -3631,7 +3631,7 @@ class RecipeOperationService:
                 workload_intent_ordinal = max(node.workload_intent_ordinal for node in target_nodes) + 1
                 for node in target_nodes:
                     node.workload_intent_ordinal = workload_intent_ordinal
-                self._agent_jobs.request_superseded_workload_cancellation_in_session(
+                AgentJobService.request_superseded_workload_cancellation_in_session(
                     session, targets, workload_intent_ordinal, now
                 )
             elif (

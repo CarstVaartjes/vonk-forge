@@ -145,6 +145,7 @@ class RecipeStopPayload(_StrictPayload):
     schema_version: Literal[1]
     run_id: CanonicalUuid
     plan_digest: Digest
+    cancel_pending_start: bool = False
 
 
 class RecipeUninstallPayload(_StrictPayload):

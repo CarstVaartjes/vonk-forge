@@ -17,6 +17,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
+    AgentProgress,
     AgentResult,
     DistributionAssignment,
     RecipeOperationRequest,
@@ -243,6 +244,12 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     directive = jobs.heartbeat(claim, None, 30)
     assert directive.cancel_requested is True
     assert directive.deadline <= clock.now + timedelta(seconds=660)
+    replacement = parent(sessions, clock)
+    with sessions.begin() as session:
+        session.get(Job, replacement.id).payload = {"workload_intent_ordinal": 2}
+    fresh = jobs.enqueue(replacement.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    fresh_claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert fresh_claim is not None and fresh_claim.operation_id == fresh.id
     with pytest.raises(StaleAgentAttempt):
         jobs.succeed(claim, STOP_RESULT)
     jobs.record_result(AgentResult.model_validate({
@@ -259,6 +266,16 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     with sessions() as session:
         assert session.get(AgentOperation, running.id).state == "cancelled"
         assert session.get(Job, job.id).state == "cancelled"
+    assert jobs.known_superseded_cancellation(AgentProgress.model_validate({
+        "schema_version": 1,
+        "job_id": job.id,
+        "operation_id": running.id,
+        "attempt": claim.attempt,
+        "fence": claim.fence,
+        "node_id": NODE_A,
+        "deadline": directive.deadline,
+        "progress": None,
+    }))
 
 
 def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
