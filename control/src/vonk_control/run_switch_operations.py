@@ -1954,15 +1954,35 @@ class RunSwitchOperationService:
                         )
                     )
                 elif not assessment.allowed:
+                    issued = self._lifecycle.assess_superseded_issued(
+                        "recipe.uninstall", installation_id
+                    )
                     for blocker in assessment.blockers:
-                        blockers.append(
-                            _as_reason(
-                                "run-switch.uninstall-blocked",
-                                f"{blocker.code}: {blocker.detail}",
-                                scope="operation",
-                                node_ids=node_ids,
-                            )
+                        reason = _as_reason(
+                            "run-switch.uninstall-issued-prerequisite"
+                            if issued is not None
+                            and blocker.code == "uninstall.operation_active"
+                            else "run-switch.uninstall-blocked",
+                            (
+                                "The prior issued uninstall will be cancelled and "
+                                "observed before this cleanup starts."
+                                if issued is not None
+                                and blocker.code == "uninstall.operation_active"
+                                else f"{blocker.code}: {blocker.detail}"
+                            ),
+                            scope="operation",
+                            node_ids=node_ids,
+                            severity=(
+                                "warning"
+                                if issued is not None
+                                and blocker.code == "uninstall.operation_active"
+                                else "blocker"
+                            ),
                         )
+                        if reason.severity == "warning":
+                            warnings.append(reason)
+                        else:
+                            blockers.append(reason)
             phases = self._phases(
                 action="cleanup",
                 group=group,
