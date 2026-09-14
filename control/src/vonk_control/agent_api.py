@@ -2020,7 +2020,13 @@ def install_agent_routes(
                     raise ValueError("stable failure error code is required")
             required.operations.record_result(message, source=source)
         except StaleAgentAttempt as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
+            try:
+                required.operations.record_late_result(message, source=source)
+            except StaleAgentAttempt:
+                raise HTTPException(status_code=409, detail=str(error)) from None
+            except ValueError as invalid:
+                raise HTTPException(status_code=422, detail=str(invalid)) from None
+            return Response(status_code=status.HTTP_202_ACCEPTED)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)

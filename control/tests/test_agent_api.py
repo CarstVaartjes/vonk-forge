@@ -2346,6 +2346,26 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
     )
 
 
+def test_expired_exact_result_is_retained_as_diagnostic_without_completing_job(agent_system) -> None:
+    client, services, _, clock = agent_system
+    job = parent(services.sessions, clock)
+    services.operations.enqueue(job.id, NODE_A, "recipe.stop", "a" * 64, STOP_PAYLOAD)
+    claim = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a")).json()
+    clock.now += timedelta(seconds=61)
+    result = {
+        key: claim[key]
+        for key in ("schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "deadline")
+    } | {"state": "succeeded", "result": {"stopped": True}}
+
+    response = client.post("/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result)
+    assert response.status_code == 202
+    with services.sessions() as session:
+        attempt = session.scalar(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == claim["fence"]))
+        assert attempt.state == "expired"
+        assert attempt.result == {"stopped": True}
+        assert session.get(Job, job.id).state != "succeeded"
+
+
 def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_public_trust(
     agent_system,
 ) -> None:

@@ -7,10 +7,11 @@ request-level HTTP retry is deliberately outside this budget.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from enum import StrEnum
 from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
+
 from vonk_agent_protocol import AgentFailureKind
 
 FailureKind = AgentFailureKind
@@ -87,7 +88,7 @@ class RecoveryPolicy:
             hashlib.sha256(f"{operation_id}:{failed_attempts}".encode()).digest()[:8],
             "big",
         )
-        scheduled = now.astimezone(timezone.utc) + timedelta(seconds=lower + entropy % (upper - lower + 1))
+        scheduled = now.astimezone(UTC) + timedelta(seconds=lower + entropy % (upper - lower + 1))
         if retry_after is not None:
-            scheduled = max(scheduled, retry_after.astimezone(timezone.utc))
+            scheduled = max(scheduled, retry_after.astimezone(UTC))
         return scheduled

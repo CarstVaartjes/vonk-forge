@@ -380,6 +380,9 @@ class AgentNode(Base):
         ),
     )
     node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workload_intent_ordinal: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     protocol_version: Mapped[int | None] = mapped_column(Integer)
     architecture: Mapped[str | None] = mapped_column(String(16))
@@ -773,6 +776,7 @@ class AgentOperation(Base):
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     authority_revision: Mapped[str] = mapped_column(String(128), nullable=False)
+    workload_intent_ordinal: Mapped[int | None] = mapped_column(Integer)
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     #: Why this operation is not currently progressing.  A lease expiry parks an
     #: operation without any attempt result, so without this the operator sees
@@ -781,6 +785,7 @@ class AgentOperation(Base):
     current_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     retry_disposition: Mapped[str | None] = mapped_column(String(32))
     retry_disposition_attempt: Mapped[int | None] = mapped_column(Integer)
+    retry_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )

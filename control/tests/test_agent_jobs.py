@@ -186,6 +186,27 @@ def test_agent_can_claim_only_its_node_operation(service) -> None:
     assert claim.node_id == NODE_A
 
 
+def test_newer_workload_intent_fences_old_enqueues_renewals_and_results(service) -> None:
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    with sessions.begin() as session:
+        session.get(Job, job.id).payload = {"workload_intent_ordinal": 1}
+        session.get(AgentNode, NODE_A).workload_intent_ordinal = 2
+    with pytest.raises(ValueError, match="superseded"):
+        jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    with sessions.begin() as session:
+        session.get(AgentNode, NODE_A).workload_intent_ordinal = 1
+    jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+    with sessions.begin() as session:
+        session.get(AgentNode, NODE_A).workload_intent_ordinal = 2
+    with pytest.raises(StaleAgentAttempt):
+        jobs.heartbeat(claim, None, 30)
+    with pytest.raises(StaleAgentAttempt):
+        jobs.succeed(claim, STOP_RESULT)
+
+
 def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
     service,
 ) -> None:
@@ -1375,6 +1396,74 @@ def test_distribution_retry_preserves_durable_progress_and_accepts_object_replay
         assert current.progress["completed_bytes"] == 100
         assert current.progress["completed_items"] == 1
         assert current.progress["phase"] == "verifying"
+
+
+def test_late_result_is_retained_under_expired_fence_without_completing_operation(service) -> None:
+    jobs, sessions, clock = service
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+    clock.advance(seconds=31)
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    from vonk_agent_protocol import AgentResult
+
+    late = AgentResult.model_validate({
+        **{key: claim.model_dump(mode="json")[key] for key in (
+            "schema_version", "job_id", "operation_id", "attempt", "fence",
+            "node_id", "deadline",
+        )},
+        "state": "succeeded",
+        "result": STOP_RESULT,
+    })
+    assert jobs.record_late_result(late) is True
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        attempt = session.scalar(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == claim.fence))
+        assert stored.state == "waiting-for-operator"
+        assert attempt.state == "expired"
+        assert attempt.result == STOP_RESULT
+    assert jobs.record_late_result(late) is True
+
+
+def test_transient_distribution_failure_backs_off_across_restart_then_blocks(service) -> None:
+    from vonk_agent_protocol import AgentResult
+
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT,
+                             {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT})
+    capabilities = ["agent.runtime.rust.v1", kind]
+    for attempt_number in range(1, 6):
+        claim = claim_agent(jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities)
+        assert claim is not None and claim.attempt == attempt_number, attempt_number
+        body = {key: claim.model_dump(mode="json")[key] for key in (
+            "schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "deadline",
+        )}
+        jobs.record_result(AgentResult.model_validate_json(json.dumps({
+            **body,
+            "state": "failed",
+            "result": {
+                "status": "failed", "error_code": "artifact_distribution_failed",
+                "reason": "controller transport failed", "failure_kind": "temporary-dependency",
+                **({"retry_after_seconds": 120} if attempt_number == 1 else {}),
+            },
+        })))
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation.id)
+            due = stored.retry_due_at
+            assert stored.current_attempt == attempt_number
+            assert stored.state == "waiting-for-operator"
+        jobs = AgentJobService(sessions, clock=clock)
+        assert claim_agent(jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities) is None
+        if attempt_number < 5:
+            assert due is not None
+            if attempt_number == 1:
+                assert due.replace(tzinfo=UTC) >= clock.now + timedelta(seconds=120)
+            clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
+        else:
+            assert due is None
+            with sessions() as session:
+                assert "budget exhausted" in session.get(AgentOperation, operation.id).status_reason
 
 
 def test_successful_distribution_receipt_closes_coalesced_final_counters(service) -> None:

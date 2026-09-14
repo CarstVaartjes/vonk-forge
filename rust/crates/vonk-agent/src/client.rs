@@ -103,6 +103,7 @@ pub struct ControllerError {
     pub code: String,
     pub request_id: Option<String>,
     pub decision: &'static str,
+    pub retry_after_seconds: Option<u32>,
 }
 
 impl fmt::Display for ControllerError {
@@ -136,6 +137,13 @@ impl ClientError {
     pub fn retryable(&self) -> bool {
         matches!(self, Self::Transport(_) | Self::Retryable)
             || matches!(self, Self::Controller(error) if error.retryable())
+    }
+
+    pub fn retry_after_seconds(&self) -> Option<u32> {
+        match self {
+            Self::Controller(error) => error.retry_after_seconds,
+            _ => None,
+        }
     }
 
     pub fn status(&self) -> Option<u16> {
@@ -527,7 +535,7 @@ impl AgentHttpClient {
             .send()
             .await?;
         match response.status() {
-            StatusCode::NO_CONTENT => Ok(()),
+            StatusCode::NO_CONTENT | StatusCode::ACCEPTED => Ok(()),
             // A 409 fences this result: the attempt is no longer current, or
             // its outcome was already consumed.  Either way the Controller did
             // not acknowledge this submission, so the caller keeps the evidence
@@ -1939,13 +1947,25 @@ fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
         .and_then(|value| value.to_str().ok())
         .filter(|value| valid_error_code(value))
         .map(str::to_owned);
-    Err(ClientError::Controller(controller_error(
+    let mut error = controller_error(
         response.status(),
         endpoint,
         &operation,
         request_id,
         code,
-    )))
+    );
+    error.retry_after_seconds = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value.parse::<u32>().ok().or_else(|| {
+                let deadline = chrono::DateTime::parse_from_rfc2822(value).ok()?;
+                let delay = (deadline.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
+                u32::try_from(delay.max(0)).ok()
+            })
+        });
+    Err(ClientError::Controller(error))
 }
 
 fn controller_error(
@@ -1976,6 +1996,7 @@ fn controller_error(
         code,
         request_id,
         decision,
+        retry_after_seconds: None,
     }
 }
 

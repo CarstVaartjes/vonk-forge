@@ -789,7 +789,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             result = Some(Ok(value));
                             break;
                         }
-                        Err(error) if error.retryable() && attempt < 2 => {
+                        Err(error) if error.retryable()
+                            && error.retry_after_seconds().is_none()
+                            && attempt < 2 => {
                             tokio::time::sleep(Duration::from_millis(100 * (attempt + 1) as u64))
                                 .await;
                         }
@@ -849,7 +851,23 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         body: distribution_success_evidence(evidence),
                     }
                 }
-                Err(_) => failed("Controller distribution could not be verified and retained"),
+                Err(error) => {
+                    let mut body = json!({
+                        "reason": "Controller distribution could not be verified and retained",
+                        "failure_kind": if error.retryable() {
+                            "temporary-dependency"
+                        } else if matches!(error.status(), Some(401 | 403)) {
+                            "invalid-authority"
+                        } else {
+                            "integrity-failure"
+                        },
+                    });
+                    if let Some(seconds) = error.retry_after_seconds() {
+                        body["retry_after_seconds"] = json!(seconds);
+                    }
+                    ExecutionResult { state: "failed", body }
+                },
+                },
             };
         }
         let request = match RecipeOperationRequest::parse(claim) {
@@ -1746,6 +1764,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
                 let arguments = runtime_arguments_for_plan(&plan, &plan.main);
                 let runtime_guard_arguments = arguments.clone();
+                let acl_transition = if collective_readiness {
+                    None
+                } else {
+                    match self.runtime.begin_installation_acl_transition(&installation_id) {
+                        Ok(transition) => Some(transition),
+                        Err(_) => return failed("installed model custody changed before runtime start"),
+                    }
+                };
                 if collective_readiness {
                     if let Err(error) = self
                         .execute_host_runtime(
@@ -1769,6 +1795,19 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "container runtime could not start the workload",
                         &error,
                     );
+                }
+                if let Some(transition) = acl_transition {
+                    if self.runtime.finish_installation_acl_transition(&installation_id, transition).is_err() {
+                        let _ = self
+                            .execute_host_runtime(
+                                claim,
+                                HostRuntimeAction::Stop,
+                                vec![run_id.clone(), spec.lifecycle.stop_timeout_seconds.to_string()],
+                            )
+                            .await;
+                        let _ = self.runtime.complete_stop(&run_id);
+                        return failed("installed model custody changed during runtime start");
+                    }
                 }
                 if rank_launch {
                     let first_inspect = self
@@ -2514,6 +2553,15 @@ where
     E: Executor,
     F: FnOnce() -> Result<(), LoopError>,
 {
+    for (operation, result) in state.unreconciled_results()? {
+        result
+            .validate_for_operation(&operation)
+            .map_err(StateError::from)?;
+        match client.submit_result(&result).await {
+            Ok(()) | Err(ClientError::ResultSuperseded) => state.mark_reconciled(&result)?,
+            Err(error) => return Err(error.into()),
+        }
+    }
     for (operation, result) in state.pending_results()? {
         result
             .validate_for_operation(&operation)
@@ -2653,6 +2701,12 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         "reason": reason,
         "status": "failed",
     });
+    if let Some(kind) = executed.body.get("failure_kind").and_then(Value::as_str) {
+        body["failure_kind"] = Value::String(kind.to_owned());
+    }
+    if let Some(seconds) = executed.body.get("retry_after_seconds").and_then(Value::as_u64) {
+        body["retry_after_seconds"] = json!(seconds);
+    }
     for field in ["stage", "diagnostic"] {
         if let Some(value) = executed.body.get(field).and_then(Value::as_str) {
             body[field] = Value::String(crate::failure_evidence::sanitize_text(value));
@@ -3991,8 +4045,27 @@ mod tests {
         .unwrap();
 
         assert_eq!(client.submitted.lock().unwrap().len(), 1);
-        // It is not retried, and its recorded outcome is still readable.
+        // The execution is not retried. Its recorded outcome remains readable
+        // and is offered once more as diagnostic evidence after restart.
         assert!(state.pending_results().unwrap().is_empty());
+        assert_eq!(state.unreconciled_results().unwrap().len(), 1);
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &RejectingExecutor,
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(10),
+                heartbeat_retry_interval: Duration::from_millis(1),
+            },
+            || Ok(()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(client.submitted.lock().unwrap().len(), 2);
+        assert!(state.unreconciled_results().unwrap().is_empty());
         let connection = rusqlite::Connection::open(&path).unwrap();
         let stored: Option<Vec<u8>> = connection
             .query_row(

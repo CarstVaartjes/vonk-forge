@@ -287,6 +287,7 @@ class AgentFailureKind(StrEnum):
 
 class AgentFailureResult(WireModel):
     failure_kind: AgentFailureKind | None = None
+    retry_after_seconds: int | None = Field(default=None, strict=True, ge=0, le=2**32 - 1)
     diagnostics: FailureDiagnostics | None = None
     package_activation: PackageActivationReceipt | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=1024)

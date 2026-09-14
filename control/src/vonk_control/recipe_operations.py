@@ -585,6 +585,7 @@ class RecipeOperationService:
         *,
         actor: str,
         request_id: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
         """Queue the already prepared installation after target verification."""
 
@@ -635,6 +636,13 @@ class RecipeOperationService:
                 .limit(1)
             )
             if active is not None:
+                if (
+                    workload_intent_ordinal is not None
+                    and active.payload.get("workload_intent_ordinal") != workload_intent_ordinal
+                ):
+                    raise RecipeOperationConflict(
+                        "prior installation intent requires exact observation before replacement"
+                    )
                 return self._view(active)
             if installation.state not in {"planned", "partial", "failed", "installing"}:
                 raise RecipeOperationConflict("recipe installation is not launchable")
@@ -693,6 +701,7 @@ class RecipeOperationService:
                 ),
                 authority_digest=revision.content_digest,
                 now=now,
+                workload_intent_ordinal=workload_intent_ordinal,
             )
         self._agent_jobs.notify_available()
         return self.get(job.id)
@@ -738,6 +747,7 @@ class RecipeOperationService:
         plan_digest: str,
         actor: str,
         request_id: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
         if self._builds is None:
             raise RecipeOperationConflict("recipe build service is unavailable")
@@ -776,6 +786,7 @@ class RecipeOperationService:
             request_id=request_id,
             node_payloads=plan.targets,
             authority_digest=plan_digest,
+            workload_intent_ordinal=workload_intent_ordinal,
         )
 
     def preview_run(self, installation_id: str, alias: str) -> RunPlan:
@@ -954,6 +965,7 @@ class RecipeOperationService:
         plan_digest: str,
         actor: str,
         request_id: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
         existing = self._idempotent(request_id, "recipe.install", plan_digest)
         if existing is not None:
@@ -1004,6 +1016,7 @@ class RecipeOperationService:
                 ),
                 authority_digest=plan.recipe_content_sha256,
                 now=now,
+                workload_intent_ordinal=workload_intent_ordinal,
             )
         self._agent_jobs.notify_available()
         return self.get(job.id)
@@ -1015,6 +1028,7 @@ class RecipeOperationService:
         plan_digest: str,
         actor: str,
         request_id: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
         if plan_digest != plan.plan_digest:
             raise RecipeOperationConflict(
@@ -1222,6 +1236,7 @@ class RecipeOperationService:
                 phases=phases,
                 authority_digest=recipe_digest,
                 now=now,
+                workload_intent_ordinal=workload_intent_ordinal,
                 job_context=(
                     {"start_deadline": start_deadline}
                     if start_deadline is not None
@@ -1390,6 +1405,7 @@ class RecipeOperationService:
         plan_digest: str,
         actor: str,
         request_id: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
         existing = self._idempotent(
             request_id,
@@ -1481,6 +1497,7 @@ class RecipeOperationService:
                     ),
                     authority_digest=admitted.authority_digest,
                     now=now,
+                    workload_intent_ordinal=workload_intent_ordinal,
                 )
                 session.flush()
                 if self._route_publications is not None:
@@ -1519,6 +1536,7 @@ class RecipeOperationService:
         plan_digest: str,
         actor: str,
         request_id: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
         existing = self._idempotent(
             request_id,
@@ -1590,6 +1608,7 @@ class RecipeOperationService:
                     ),
                     authority_digest=plan.installation_authority_digest,
                     now=now,
+                    workload_intent_ordinal=workload_intent_ordinal,
                 )
         except IntegrityError as error:
             raced = self._idempotent(
@@ -3169,6 +3188,7 @@ class RecipeOperationService:
         request_id: str,
         node_payloads: Sequence[tuple[str, Mapping[str, object]]],
         authority_digest: str,
+        workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
         now = self._clock()
         with self._sessions.begin() as session:
@@ -3183,6 +3203,7 @@ class RecipeOperationService:
                 node_payloads=node_payloads,
                 authority_digest=authority_digest,
                 now=now,
+                workload_intent_ordinal=workload_intent_ordinal,
             )
         self._agent_jobs.notify_available()
         return self.get(job.id)
@@ -3202,6 +3223,7 @@ class RecipeOperationService:
         now: datetime,
         phases: Sequence[Sequence[tuple[str, Mapping[str, object]]]] | None = None,
         job_context: Mapping[str, object] | None = None,
+        workload_intent_ordinal: int | None = None,
     ) -> Job:
         if not node_payloads:
             raise RecipeOperationConflict("operation group has no target nodes")
@@ -3249,6 +3271,10 @@ class RecipeOperationService:
             "owner_id": owner_id,
             "plan_digest": plan_digest,
         }
+        if workload_intent_ordinal is not None:
+            if type(workload_intent_ordinal) is not int or workload_intent_ordinal < 1:
+                raise RecipeOperationConflict("workload intent ordinal is invalid")
+            job_payload["workload_intent_ordinal"] = workload_intent_ordinal
         if phases is not None:
             job_payload["phases"] = [
                 [
