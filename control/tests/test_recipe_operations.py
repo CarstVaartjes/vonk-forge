@@ -149,6 +149,13 @@ class RecordingQueue:
     def notify_available(self) -> None:
         self.available += 1
 
+    def request_superseded_workload_cancellation_in_session(
+        self, session, targets, ordinal, now
+    ) -> None:
+        AgentJobService.request_superseded_workload_cancellation_in_session(
+            session, targets, ordinal, now
+        )
+
 
 class FailingQueue(RecordingQueue):
     def enqueue_in_session(self, *args, **kwargs):

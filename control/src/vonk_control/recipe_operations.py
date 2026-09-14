@@ -30,7 +30,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
-from .agent_jobs import AgentJobService
+from .agent_jobs import AgentJobService, superseded_cancellation_deadline
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
 from .compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -141,6 +141,18 @@ class AgentJobQueue(Protocol):
 
 class RecipeOperationConflict(RuntimeError):
     """A lifecycle request is stale, conflicting, or unsafe to execute."""
+
+
+class RecipeArtifactJobCancellationPending(RecipeOperationConflict):
+    """An issued one-shot job still needs its exact cancellation receipt."""
+
+    def __init__(
+        self, *, job_id: str, observe_due_at: datetime, observation_deadline: datetime
+    ) -> None:
+        super().__init__(f"artifact job cancellation is pending: {job_id}")
+        self.job_id = job_id
+        self.observe_due_at = observe_due_at
+        self.observation_deadline = observation_deadline
 
 
 class RecipeInstallPreflightExpired(RecipeOperationConflict):
@@ -258,7 +270,7 @@ _MAX_ACTION_NODES = 1024
 _MAX_ACTIVE_RUNS = 128
 _WORKLOAD_INTENT_KINDS = frozenset({
     "recipe.install", "recipe.start", "recipe.stop", "recipe.uninstall",
-    "recipe.image.import.v1",
+    "recipe.image.import.v1", "recipe.job.run.v1",
 })
 
 
@@ -270,11 +282,19 @@ def _bound_workload_intent(job: Job) -> int:
 
 
 def _run_start_intent(session: Session, run_id: str) -> int:
+    run = session.get(RecipeRun, run_id)
+    if run is None:
+        raise RecipeOperationConflict("recipe run does not exist")
+    root_kind = (
+        "recipe.job.activate.v1"
+        if _stored_run_plan(run.plan).get("execution_mode") == "one-shot-jobs"
+        else "recipe.start"
+    )
     starts = tuple(
         session.scalars(
             select(Job)
             .where(
-                Job.kind == "recipe.start",
+                Job.kind == root_kind,
                 Job.payload["owner_kind"].as_string() == "run",
                 Job.payload["owner_id"].as_string() == run_id,
                 Job.payload["recovery"].as_string().is_(None),
@@ -284,7 +304,7 @@ def _run_start_intent(session: Session, run_id: str) -> int:
         )
     )
     if len(starts) != 1:
-        raise RecipeOperationConflict("recipe run lacks its original start authority")
+        raise RecipeOperationConflict("recipe run lacks its original workload authority")
     return _bound_workload_intent(starts[0])
 
 
@@ -1497,12 +1517,30 @@ class RecipeOperationService:
             for node in nodes:
                 node.state = "running"
                 node.updated_at = now
+            targets = sorted(node.node_id for node in nodes)
+            target_nodes = tuple(session.scalars(
+                select(AgentNode)
+                .where(AgentNode.node_id.in_(targets))
+                .order_by(AgentNode.node_id)
+                .with_for_update(of=AgentNode)
+            ))
+            if tuple(node.node_id for node in target_nodes) != tuple(targets):
+                raise RecipeOperationConflict("artifact workload target disappeared")
+            workload_intent_ordinal = max(
+                node.workload_intent_ordinal for node in target_nodes
+            ) + 1
+            for node in target_nodes:
+                node.workload_intent_ordinal = workload_intent_ordinal
+            self._agent_jobs.request_superseded_workload_cancellation_in_session(
+                session, targets, workload_intent_ordinal, now
+            )
             payload = {
                 "schema_version": 1,
                 "owner_kind": "run",
                 "owner_id": run_id,
                 "plan_digest": plan.plan_digest,
                 "execution_mode": "one-shot-jobs",
+                "workload_intent_ordinal": workload_intent_ordinal,
             }
             job = Job(
                 id=str(uuid.uuid4()),
@@ -1511,7 +1549,7 @@ class RecipeOperationService:
                 state="succeeded",
                 actor=actor,
                 authority_revision=revision.content_digest or "",
-                targets=sorted(node.node_id for node in nodes),
+                targets=targets,
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
                 result=_validated_result("recipe.job.activate.v1", {"activated": True}),
@@ -1681,14 +1719,20 @@ class RecipeOperationService:
             owner_kind="run",
             owner_id=run_id,
         )
-        if existing is not None:
+        if existing is not None and not (
+            existing.state == "running"
+            and self._one_shot_stop_is_pending(request_id)
+        ):
             return existing
         logical = self._stop_logical_job_run(
             run_id,
             plan_digest=plan_digest,
             actor=actor,
             request_id=request_id,
+            workload_intent_ordinal=workload_intent_ordinal,
         )
+        if isinstance(logical, RecipeArtifactJobCancellationPending):
+            raise logical
         if logical is not None:
             return logical
         now = self._clock()
@@ -3024,7 +3068,8 @@ class RecipeOperationService:
         plan_digest: str,
         actor: str,
         request_id: str,
-    ) -> RecipeOperationView | None:
+        workload_intent_ordinal: int | None,
+    ) -> RecipeOperationView | RecipeArtifactJobCancellationPending | None:
         now = self._clock()
         with self._sessions() as session:
             existing_run = session.get(RecipeRun, run_id)
@@ -3035,6 +3080,22 @@ class RecipeOperationService:
             ):
                 return None
         with self._sessions.begin() as session:
+            pending_job = session.scalar(
+                select(Job).where(Job.request_id == request_id).with_for_update(of=Job)
+            )
+            if pending_job is not None:
+                if (
+                    pending_job.kind != "recipe.stop"
+                    or pending_job.state != "running"
+                    or pending_job.payload.get("owner_id") != run_id
+                    or pending_job.payload.get("plan_digest") != plan_digest
+                    or pending_job.payload.get("execution_mode") != "one-shot-jobs"
+                ):
+                    raise RecipeOperationConflict("request key was already used differently")
+                bound = _bound_workload_intent(pending_job)
+                if workload_intent_ordinal is not None and workload_intent_ordinal != bound:
+                    raise RecipeOperationConflict("workload intent was superseded")
+                workload_intent_ordinal = bound
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None or _stored_run_plan(run.plan).get("execution_mode") != "one-shot-jobs":
                 raise RecipeOperationConflict(
@@ -3058,6 +3119,60 @@ class RecipeOperationService:
                     .order_by(RunNode.rank)
                 )
             )
+            targets = tuple(sorted(node.node_id for node in nodes))
+            target_nodes = tuple(session.scalars(
+                select(AgentNode)
+                .where(AgentNode.node_id.in_(targets))
+                .order_by(AgentNode.node_id)
+                .with_for_update(of=AgentNode)
+            ))
+            if tuple(node.node_id for node in target_nodes) != targets:
+                raise RecipeOperationConflict("artifact workload target disappeared")
+            if workload_intent_ordinal is None:
+                workload_intent_ordinal = max(
+                    node.workload_intent_ordinal for node in target_nodes
+                ) + 1
+                for node in target_nodes:
+                    node.workload_intent_ordinal = workload_intent_ordinal
+                self._agent_jobs.request_superseded_workload_cancellation_in_session(
+                    session, targets, workload_intent_ordinal, now
+                )
+            elif (
+                type(workload_intent_ordinal) is not int
+                or workload_intent_ordinal < 1
+                or any(
+                    node.workload_intent_ordinal != workload_intent_ordinal
+                    for node in target_nodes
+                )
+            ):
+                raise RecipeOperationConflict("workload intent was superseded")
+            payload = {
+                "schema_version": 1,
+                "owner_kind": "run",
+                "owner_id": run_id,
+                "plan_digest": plan_digest,
+                "execution_mode": "one-shot-jobs",
+                "workload_intent_ordinal": workload_intent_ordinal,
+            }
+            pending = self._one_shot_stop_prerequisite(session, run_id, now)
+            if pending is not None:
+                if pending_job is None:
+                    session.add(Job(
+                        id=str(uuid.uuid4()),
+                        request_id=request_id,
+                        kind="recipe.stop",
+                        state="running",
+                        actor=actor,
+                        authority_revision=revision.content_digest,
+                        targets=list(targets),
+                        payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+                        payload=payload,
+                        result=None,
+                        created_at=now,
+                        updated_at=now,
+                    ))
+                    session.flush()
+                return pending
             for node in nodes:
                 node.state = "stopped"
                 node.updated_at = now
@@ -3066,30 +3181,121 @@ class RecipeOperationService:
             run.stopped_at = now
             run.updated_at = now
             self._release(session, "run", run_id, now)
-            payload = {
-                "schema_version": 1,
-                "owner_kind": "run",
-                "owner_id": run_id,
-                "plan_digest": plan_digest,
-                "execution_mode": "one-shot-jobs",
-            }
-            job = Job(
+            job = pending_job or Job(
                 id=str(uuid.uuid4()),
                 request_id=request_id,
                 kind="recipe.stop",
                 state="succeeded",
                 actor=actor,
                 authority_revision=revision.content_digest,
-                targets=sorted(node.node_id for node in nodes),
+                targets=list(targets),
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
                 result=_validated_result("recipe.stop", {"stopped": True}),
                 created_at=now,
                 updated_at=now,
             )
-            session.add(job)
+            if pending_job is not None:
+                pending_job.state = "succeeded"
+                pending_job.result = _validated_result("recipe.stop", {"stopped": True})
+                pending_job.updated_at = now
+            else:
+                session.add(job)
             session.flush()
             return self._view(job)
+
+    def _one_shot_stop_is_pending(self, request_id: str) -> bool:
+        with self._sessions() as session:
+            job = session.scalar(select(Job).where(Job.request_id == request_id))
+            return bool(
+                job is not None
+                and job.kind == "recipe.stop"
+                and job.state == "running"
+                and job.payload.get("execution_mode") == "one-shot-jobs"
+            )
+
+    @staticmethod
+    def _one_shot_stop_prerequisite(
+        session: Session, run_id: str, now: datetime
+    ) -> RecipeArtifactJobCancellationPending | None:
+        uncertain = tuple(session.scalars(
+            select(ArtifactJob)
+            .where(ArtifactJob.run_id == run_id, ArtifactJob.state == "failed")
+            .order_by(ArtifactJob.created_at, ArtifactJob.id)
+            .with_for_update(of=ArtifactJob)
+        ))
+        for artifact in uncertain:
+            evidence = artifact.result_evidence
+            if isinstance(evidence, Mapping) and (
+                evidence.get("active_scope_may_remain") is True
+                or evidence.get("failure_kind") == "agent-lease-expired"
+            ):
+                if artifact.operation_id is None:
+                    raise RecipeOperationConflict("uncertain artifact job has no operation")
+                return RecipeArtifactJobCancellationPending(
+                    job_id=artifact.operation_id,
+                    observe_due_at=now,
+                    observation_deadline=now,
+                )
+        active = tuple(session.scalars(
+            select(ArtifactJob)
+            .where(
+                ArtifactJob.run_id == run_id,
+                ArtifactJob.state.in_({
+                    "draft", "ready", "queued", "running", "cancelling",
+                    "waiting-for-operator",
+                }),
+            )
+            .order_by(ArtifactJob.created_at, ArtifactJob.id)
+            .with_for_update(of=ArtifactJob)
+        ))
+        pending: RecipeArtifactJobCancellationPending | None = None
+        for artifact in active:
+            if artifact.operation_id is None:
+                if artifact.state not in {"draft", "ready"}:
+                    raise RecipeOperationConflict("artifact job operation identity is missing")
+                artifact.state = "cancelled"
+                artifact.status_reason = "superseded by newer workload intent"
+                artifact.completed_at = now
+                artifact.updated_at = now
+                continue
+            parent = session.get(Job, artifact.operation_id, with_for_update=True)
+            children = tuple(session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == artifact.operation_id)
+                .with_for_update(of=AgentOperation)
+            ))
+            if (
+                parent is None
+                or parent.kind != "recipe.job.run.v1"
+                or parent.payload.get("owner_id") != artifact.id
+                or len(children) != 1
+                or children[0].node_id not in parent.targets
+            ):
+                raise RecipeOperationConflict("artifact job cancellation authority changed")
+            if (
+                parent.state == "cancelled"
+                and children[0].state == "cancelled"
+                and children[0].current_attempt == 0
+            ):
+                artifact.state = "cancelled"
+                artifact.status_reason = "superseded before agent dispatch"
+                artifact.completed_at = now
+                artifact.updated_at = now
+                continue
+            deadline = superseded_cancellation_deadline(parent.result)
+            if deadline is None:
+                raise RecipeOperationConflict("artifact job has no cancellation authority")
+            artifact.state = "cancelling" if artifact.state != "waiting-for-operator" else artifact.state
+            artifact.status_reason = "waiting for exact artifact cancellation receipt"
+            artifact.updated_at = now
+            if pending is None:
+                pending = RecipeArtifactJobCancellationPending(
+                    job_id=parent.id,
+                    observe_due_at=now + timedelta(seconds=5),
+                    observation_deadline=deadline,
+                )
+        return pending
 
     def _stop_plan_in_session(
         self, session: Session, run_id: str, *, lock: bool
@@ -3100,29 +3306,6 @@ class RecipeOperationService:
         run = session.scalar(run_statement)
         if run is None:
             raise RecipeOperationConflict("recipe run does not exist")
-        if _stored_run_plan(run.plan).get("execution_mode") == "one-shot-jobs":
-            active_artifact_job = session.scalar(
-                select(ArtifactJob.id)
-                .where(
-                    ArtifactJob.run_id == run_id,
-                    ArtifactJob.state.in_(
-                        {
-                            "draft",
-                            "ready",
-                            "queued",
-                            "running",
-                            "cancelling",
-                            "waiting-for-operator",
-                        }
-                    ),
-                )
-                .limit(1)
-            )
-            if active_artifact_job is not None:
-                raise RecipeOperationConflict(
-                    "artifact job session has an active job; cancel or finish it before stopping"
-                )
-
         installation_statement = select(RecipeInstallation).where(
             RecipeInstallation.id == run.installation_id
         )
