@@ -723,7 +723,12 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
     progress = service.application(application.id).progress
     assert progress.child_progress is not None
     assert progress.child_progress.phase == "model-download"
-    assert adapter.starts[0]["scope_node_ids"] == (_node_id(1), _node_id(2))
+    assert adapter.starts[0]["scope_node_ids"] == (_node_id(1),)
+    with sessions() as session:
+        assert [
+            node.workload_intent_ordinal
+            for node in session.scalars(select(AgentNode).order_by(AgentNode.node_id))
+        ] == [1, 0]
 
     observed_phases = [progress.child_progress.phase]
     for _ in range(8):

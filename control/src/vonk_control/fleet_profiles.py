@@ -1586,6 +1586,7 @@ class FleetProfileService:
             desired_installation_ids: set[str] = set()
             desired_run_ids: set[str] = set()
             adapter_switch_needed = False
+            changed_nodes: set[str] = set()
             preparation_unavailable_reported = False
             # Scope is the authoritative reconciliation boundary.  An idle
             # member has no assignment and must still participate in the plan.
@@ -1732,6 +1733,7 @@ class FleetProfileService:
                 else:
                     actions.append("switch")
                     adapter_switch_needed = True
+                    changed_nodes.update(expected_nodes)
                 assignment_previews.append(
                     FleetProfileAssignmentPreview(
                         assignment_id=assignment.id,
@@ -1770,7 +1772,7 @@ class FleetProfileService:
                     )
                     if members & target_nodes:
                         adapter_switch_needed = True
-                        break
+                        changed_nodes.update(members & target_nodes)
             for run in active_runs:
                 members = set(run_nodes.get(run.id, ()))
                 # Installation membership is the authoritative complete
@@ -1793,6 +1795,7 @@ class FleetProfileService:
                     continue
                 if run.id not in desired_run_ids:
                     adapter_switch_needed = True
+                    changed_nodes.update(members)
 
             installation_policy = row.installation_policy if row is not None else "keep-cached"
             if installation_policy == "exact" and target_nodes:
@@ -1824,6 +1827,7 @@ class FleetProfileService:
                     # stopped residue. Without a switch step the adapter never
                     # receives this desired retention decision.
                     adapter_switch_needed = True
+                    changed_nodes.update(node_ids)
                     reasons.append(
                         FleetProfileReason(
                             code="profile.cleanup_delegated",
@@ -1848,10 +1852,14 @@ class FleetProfileService:
                     )
                 )
             if adapter_switch_needed:
+                if not changed_nodes or not changed_nodes <= target_nodes:
+                    raise FleetProfileConflict(
+                        "Profile switch effect scope cannot be represented exactly"
+                    )
                 switch_steps.append(
                     {
                         "kind": "switch",
-                        "node_ids": sorted(target_nodes),
+                        "node_ids": sorted(changed_nodes),
                         "label": f"Switch profile {resolved_name}",
                     }
                 )
@@ -2005,6 +2013,11 @@ class FleetProfileService:
             )
             if intended.profile_digest != preview.profile_digest:
                 raise FleetProfileConflict("Fleet profile changed during application admission")
+            execution_nodes = {
+                node_id for step in preview.steps for node_id in step.node_ids
+            }
+            if not execution_nodes <= set(frozen_nodes):
+                raise FleetProfileConflict("Profile switch scope changed during admission")
             attempt = 1
             if retry_of_application_id is not None:
                 parent = session.get(FleetProfileApplication, retry_of_application_id, with_for_update=True)
@@ -2036,20 +2049,23 @@ class FleetProfileService:
                 attempt = prior.attempt + 1
                 if self._superseding_intent(session, parent, prior):
                     raise FleetProfileConflict("Application has been superseded by another workload intent")
+            affected_nodes = [
+                node for node in scope_nodes if node.node_id in execution_nodes
+            ]
             workload_intent_ordinal = (
-                max((node.workload_intent_ordinal for node in scope_nodes), default=0) + 1
-                if scope_nodes and preview.steps
+                max(node.workload_intent_ordinal for node in affected_nodes) + 1
+                if affected_nodes
                 else None
             )
             if workload_intent_ordinal is not None:
-                for node in scope_nodes:
+                for node in affected_nodes:
                     node.workload_intent_ordinal = workload_intent_ordinal
                 if self._switch_adapter is None:
                     raise FleetProfileConflict(
                         "Profile switch cancellation authority is unavailable"
                     )
                 self._switch_adapter.request_superseded_workload_cancellation_in_session(
-                    session, frozen_nodes, workload_intent_ordinal, now
+                    session, tuple(sorted(execution_nodes)), workload_intent_ordinal, now
                 )
             row = FleetProfileApplication(
                 request_key=request_key,
@@ -2524,7 +2540,8 @@ class FleetProfileService:
             or self._view(session, profile).profile_digest != intended.profile_digest
         ):
             return True
-        scope = set(intended.scope.node_ids)
+        plan = _persisted_profile_plan(row)
+        scope = {node_id for step in plan.steps for node_id in step.node_ids}
         if not scope:
             return False
         ordinal = progress.workload_intent_ordinal
@@ -2552,11 +2569,18 @@ class FleetProfileService:
         if kind == "switch":
             if self._switch_adapter is None:
                 raise FleetProfileConflict("Fleet profile switch adapter is unavailable")
-            assignments = self._application_assignments(application_id)
+            execution_scope = tuple(FleetProfilePlanStep.model_validate(step).node_ids)
+            if not execution_scope:
+                raise FleetProfileConflict("Profile switch effect scope is empty")
+            assignments = tuple(
+                assignment
+                for assignment in self._application_assignments(application_id)
+                if {node.node_id for node in assignment.nodes} <= set(execution_scope)
+            )
             child = self._switch_adapter.start(
                 application_id=application_id,
                 assignments=assignments,
-                scope_node_ids=self._application_scope(application_id),
+                scope_node_ids=execution_scope,
                 actor=actor,
                 request_id=request_id,
             )
@@ -3008,13 +3032,6 @@ class FleetProfileService:
         if progress.intended_profile.profile_digest != application.profile_digest:
             raise FleetProfileConflict("Persisted application intent digest is inconsistent")
         return progress.intended_profile
-
-    def _application_scope(self, application_id: str) -> tuple[str, ...]:
-        with self._sessions() as session:
-            application = session.get(FleetProfileApplication, application_id)
-            if application is None:
-                raise KeyError(application_id)
-            return self._operation_scope(application)
 
     def _application_assignments(
         self, application_id: str
