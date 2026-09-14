@@ -15,6 +15,9 @@ pub fn candidate_release(mut document: Value) -> InstallerCandidateRelease {
             object(format!("{prefix}/nas/current/{platform}/vonk-nas-setup"));
     }
     document["artifacts"]["nas-payload"] = object(format!("{prefix}/nas/current/payload.json"));
+    document["artifacts"]["cli-wheel"] = object(format!(
+        "{prefix}/cli/vonk_cluster_profiles-0.1.1-py3-none-any.whl"
+    ));
     document["artifacts"]["agent-package-signature-linux-arm64"] = object(format!(
         "{prefix}/spark/current/linux-arm64/vonk-forge-agent.deb.host.sig"
     ));

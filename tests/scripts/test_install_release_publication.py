@@ -2638,6 +2638,9 @@ def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
         extra_root["retired_schema"] = 1
         mutations.append(extra_root)
         if not document.get("acceptance_only"):
+            missing_cli = copy.deepcopy(document)
+            del missing_cli["artifacts"]["cli-wheel"]
+            mutations.append(missing_cli)
             missing_package_identity = copy.deepcopy(document)
             del missing_package_identity["artifacts"]["agent-package-linux-arm64"][
                 "target_binary_digest"
