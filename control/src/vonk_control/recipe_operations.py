@@ -96,6 +96,7 @@ from .recipe_start_payloads import (
     RecipeStartPlacement,
     build_recipe_start_payload,
 )
+from .recovery_policy import FailureKind
 from .run_admission import RunAdmissionService, RunNodePlan, RunPlan
 from .source_policy import SourcePolicyReport
 
@@ -199,6 +200,18 @@ class RecipeOperationView:
     plan_digest: str
     nodes: tuple[str, ...]
     result: dict[str, object] | None
+
+
+@dataclass(frozen=True, slots=True)
+class IssuedWorkloadReconciliation:
+    job_id: str
+    kind: str
+    owner_id: str
+    plan_digest: str
+    payload_digests: tuple[str, ...]
+    failure_kind: FailureKind
+    observe_due_at: datetime
+    observation_deadline: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -1517,6 +1530,84 @@ class RecipeOperationService:
                 and _unissued_workload_children(session, job) is not None
                 for job in active
             )
+
+    def assess_superseded_issued(
+        self, kind: str, owner_id: str, workload_intent_ordinal: int | None = None
+    ) -> IssuedWorkloadReconciliation | None:
+        """Name exact issued work that needs fresh observation before resumption."""
+        if workload_intent_ordinal is not None and (
+            type(workload_intent_ordinal) is not int or workload_intent_ordinal < 1
+        ):
+            raise RecipeOperationConflict("workload intent ordinal is invalid")
+        now = _aware(self._clock())
+        with self._sessions() as session:
+            scope = _workload_owner_scope(session, kind, owner_id)
+            if workload_intent_ordinal is not None and not _intent_is_current(
+                session, workload_intent_ordinal, scope
+            ):
+                raise RecipeOperationConflict("workload intent was superseded")
+            pending: list[IssuedWorkloadReconciliation] = []
+            for job in _active_owned_workload_jobs(session, kind, owner_id):
+                ordinal = job.payload.get("workload_intent_ordinal")
+                if tuple(sorted(job.targets)) != scope:
+                    raise RecipeOperationConflict("workload owner scope changed")
+                if type(ordinal) is not int or ordinal < 1:
+                    raise RecipeOperationConflict("issued workload authority is invalid")
+                if workload_intent_ordinal is not None and ordinal >= workload_intent_ordinal:
+                    continue
+                if _unissued_workload_children(session, job) is not None:
+                    continue
+                children = tuple(
+                    session.scalars(
+                        select(AgentOperation)
+                        .where(AgentOperation.parent_job_id == job.id)
+                        .order_by(AgentOperation.id)
+                    )
+                )
+                if not children or any(
+                    child.node_id not in scope
+                    or child.workload_intent_ordinal != ordinal
+                    for child in children
+                ):
+                    raise RecipeOperationConflict("issued workload children are invalid")
+                attempts = tuple(
+                    session.scalars(
+                        select(AgentOperationAttempt).where(
+                            AgentOperationAttempt.operation_id.in_(
+                                tuple(child.id for child in children)
+                            )
+                        )
+                    )
+                )
+                if not attempts:
+                    raise RecipeOperationConflict("issued workload attempt evidence is missing")
+                latest_lease = max(_aware(attempt.lease_deadline) for attempt in attempts)
+                # The helper grant is bounded to 300 seconds; stop/cleanup
+                # helpers can run for up to 645 seconds after admission.
+                # This is a polling budget, never permission to replay.
+                observation_deadline = latest_lease + timedelta(seconds=960)
+                observe_due_at = min(
+                    observation_deadline,
+                    max(now + timedelta(seconds=2), min(latest_lease, now + timedelta(seconds=30))),
+                )
+                plan_digest = job.payload.get("plan_digest")
+                if not isinstance(plan_digest, str):
+                    raise RecipeOperationConflict("issued workload plan is invalid")
+                pending.append(
+                    IssuedWorkloadReconciliation(
+                        job_id=job.id,
+                        kind=kind,
+                        owner_id=owner_id,
+                        plan_digest=plan_digest,
+                        payload_digests=tuple(child.payload_digest for child in children),
+                        failure_kind=FailureKind.UNCERTAIN_EFFECT,
+                        observe_due_at=observe_due_at,
+                        observation_deadline=observation_deadline,
+                    )
+                )
+            if len(pending) > 1:
+                raise RecipeOperationConflict("multiple issued workload effects need observation")
+            return pending[0] if pending else None
 
     def reconcile_superseded_unissued(
         self, kind: str, owner_id: str, workload_intent_ordinal: int

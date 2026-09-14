@@ -3096,6 +3096,11 @@ def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
         session.get(AgentNode, nodes[0]).workload_intent_ordinal = 4
     assert not service.assess_superseded_unissued("recipe.stop", run.owner_id)
     assert not service.reconcile_superseded_unissued("recipe.stop", run.owner_id, 4)
+    pending = service.assess_superseded_issued("recipe.stop", run.owner_id, 4)
+    assert pending is not None
+    assert pending.job_id == old.id
+    assert pending.failure_kind.value == "uncertain-effect"
+    assert pending.observe_due_at <= pending.observation_deadline
     assert not service.preview_stop(run.owner_id).allowed
     with sessions() as session:
         assert session.get(Job, old.id).state == "running"
