@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-_COMMANDS = (("uv", "sync"), ("skopeo", "inspect"), ("docker", "buildx", "imagetools", "inspect"))
+_COMMANDS = (("uv", "sync"), ("skopeo", "inspect"), ("docker", "pull"), ("docker", "buildx", "imagetools", "inspect"))
 _PERMANENT = re.compile(
     r"authentication failed|unauthorized|forbidden|permission denied|access denied|"
     r"repository(?: [^\n]+)? not found|not our ref|couldn't find remote ref|"
@@ -20,7 +20,7 @@ _TRANSIENT = re.compile(
     r"connection reset by peer|connection timed out|operation timed out|"
     r"temporary failure in name resolution|unexpected eof|tls handshake timeout|"
     r"\b(?:429|500|502|503|504) (?:too many requests|internal server error|"
-    r"bad gateway|service unavailable|gateway timeout)\b",
+    r"bad gateway|service unavailable|gateway time-?out)\b",
     re.IGNORECASE,
 )
 
@@ -36,7 +36,7 @@ def retryable(output: str) -> bool:
 def main(command: list[str] | None = None) -> int:
     command = sys.argv[1:] if command is None else command
     if not any(tuple(command[:len(prefix)]) == prefix for prefix in _COMMANDS):
-        print("Only uv sync, skopeo inspect and docker buildx imagetools inspect may be retried.", file=sys.stderr)
+        print("Only uv sync, skopeo inspect, docker pull and docker buildx imagetools inspect may be retried.", file=sys.stderr)
         return 64
     for attempt in range(1, 4):
         result = subprocess.run(command, capture_output=True, text=True, check=False)

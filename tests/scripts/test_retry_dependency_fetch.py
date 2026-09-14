@@ -20,8 +20,8 @@ def _module():
     return module
 
 
-def _fetcher(tmp_path, monkeypatch, messages):
-    executable = tmp_path / "uv"
+def _fetcher(tmp_path, monkeypatch, messages, executable_name="uv"):
+    executable = tmp_path / executable_name
     state = tmp_path / "attempts.json"
     state.write_text(json.dumps(messages))
     executable.write_text(
@@ -42,17 +42,19 @@ def _fetcher(tmp_path, monkeypatch, messages):
     return state
 
 
-@pytest.mark.parametrize("error", [
-    "read: connection reset by peer",
-    "Git operation failed: failed to fetch commit from https://github.com/example/repo",
-    "unexpected status from registry: 503 Service Unavailable",
+@pytest.mark.parametrize(("command", "error"), [
+    (["uv", "sync", "--frozen"], "read: connection reset by peer"),
+    (["uv", "sync", "--frozen"], "Git operation failed: failed to fetch commit from https://github.com/example/repo"),
+    (["skopeo", "inspect", "docker://example"], "unexpected status from registry: 503 Service Unavailable"),
+    (["docker", "pull", "example@sha256:" + "a" * 64], "unexpected status from HEAD request: 500 Internal Server Error"),
+    (["docker", "pull", "example@sha256:" + "a" * 64], "failed to copy: unexpected status code: 504 Gateway Time-out"),
 ])
-def test_transient_fetch_retries_without_publishing_partial_stdout(tmp_path, monkeypatch, capsys, error):
+def test_transient_fetch_retries_without_publishing_partial_stdout(tmp_path, monkeypatch, capsys, error, command):
     module = _module()
-    state = _fetcher(tmp_path, monkeypatch, [error, error, ""])
+    state = _fetcher(tmp_path, monkeypatch, [error, error, ""], command[0])
     delays = []
     monkeypatch.setattr(module.time, "sleep", delays.append)
-    assert module.main(["uv", "sync", "--frozen"]) == 0
+    assert module.main(command) == 0
     assert json.loads(state.read_text()) == []
     assert delays == [2, 4]
     captured = capsys.readouterr()
@@ -60,18 +62,19 @@ def test_transient_fetch_retries_without_publishing_partial_stdout(tmp_path, mon
     assert error in captured.err
 
 
-@pytest.mark.parametrize("error", [
-    "Git operation failed: failed to fetch: Authentication failed",
-    "Git operation failed: failed to fetch: not our ref 1234",
-    "No solution found when resolving dependencies",
-    "manifest unknown",
-    "x509: certificate signed by unknown authority",
-    "digest mismatch",
+@pytest.mark.parametrize(("command", "error"), [
+    (["uv", "sync", "--frozen"], "Git operation failed: failed to fetch: Authentication failed"),
+    (["uv", "sync", "--frozen"], "Git operation failed: failed to fetch: not our ref 1234"),
+    (["uv", "sync", "--frozen"], "No solution found when resolving dependencies"),
+    (["docker", "pull", "example@sha256:" + "a" * 64], "manifest unknown"),
+    (["docker", "pull", "example@sha256:" + "a" * 64], "x509: certificate signed by unknown authority"),
+    (["docker", "pull", "example@sha256:" + "a" * 64], "digest mismatch"),
+    (["docker", "pull", "example@sha256:" + "a" * 64], "503 Service Unavailable: unauthorized"),
 ])
-def test_permanent_fetch_failure_is_not_retried(tmp_path, monkeypatch, error):
+def test_permanent_fetch_failure_is_not_retried(tmp_path, monkeypatch, error, command):
     module = _module()
-    state = _fetcher(tmp_path, monkeypatch, [error, ""])
-    assert module.main(["uv", "sync", "--frozen"]) == 17
+    state = _fetcher(tmp_path, monkeypatch, [error, ""], command[0])
+    assert module.main(command) == 17
     assert json.loads(state.read_text()) == [""]
 
 
@@ -83,8 +86,9 @@ def test_transient_failure_stops_at_attempt_limit(tmp_path, monkeypatch):
     assert len(json.loads(state.read_text())) == 1
 
 
-def test_cannot_wrap_test_execution(tmp_path, monkeypatch):
+@pytest.mark.parametrize("command", [["uv", "run", "pytest"], ["docker", "build", "."], ["docker", "run", "example"]])
+def test_cannot_wrap_build_or_test_execution(tmp_path, monkeypatch, command):
     module = _module()
-    state = _fetcher(tmp_path, monkeypatch, [""])
-    assert module.main(["uv", "run", "pytest"]) == 64
+    state = _fetcher(tmp_path, monkeypatch, [""], command[0])
+    assert module.main(command) == 64
     assert json.loads(state.read_text()) == [""]
