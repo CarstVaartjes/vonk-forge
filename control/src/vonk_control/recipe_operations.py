@@ -136,6 +136,10 @@ class AgentJobQueue(Protocol):
 
     def notify_available(self) -> None: ...
 
+    def request_superseded_workload_cancellation_in_session(
+        self, session: Session, targets: Sequence[str], ordinal: int, now: datetime
+    ) -> None: ...
+
 
 class RecipeOperationConflict(RuntimeError):
     """A lifecycle request is stale, conflicting, or unsafe to execute."""
@@ -2217,6 +2221,44 @@ class RecipeOperationService:
             return
         state = getattr(message, "state", None)
         result = getattr(message, "result", None)
+        if state == "cancelled" and job.kind in _WORKLOAD_INTENT_KINDS:
+            if not isinstance(job.result, Mapping) or job.result.get("cancel_requested") is not True:
+                raise RecipeOperationConflict("recipe cancellation was not requested")
+            owner_id = _required_string(job.payload, "owner_id")
+            now = self._clock()
+            if job.kind in {"recipe.install", "recipe.uninstall"}:
+                node = session.scalar(
+                    select(InstallationNode)
+                    .where(
+                        InstallationNode.installation_id == owner_id,
+                        InstallationNode.node_id == operation.node_id,
+                    )
+                    .with_for_update(of=InstallationNode)
+                )
+                installation = session.get(RecipeInstallation, owner_id, with_for_update=True)
+                if node is None or installation is None:
+                    raise RecipeOperationConflict("installation cancellation scope changed")
+                node.state = "failed"
+                node.updated_at = now
+                installation.state = "partial"
+                installation.updated_at = now
+            elif job.kind in {"recipe.start", "recipe.stop"}:
+                node = session.scalar(
+                    select(RunNode)
+                    .where(RunNode.run_id == owner_id, RunNode.node_id == operation.node_id)
+                    .with_for_update(of=RunNode)
+                )
+                run = session.get(RecipeRun, owner_id, with_for_update=True)
+                if node is None or run is None:
+                    raise RecipeOperationConflict("run cancellation scope changed")
+                # The agent sends cancelled only after its exact host STOP has
+                # returned. Keep reservations for the current intent's stop.
+                node.state = "stopped"
+                node.updated_at = now
+                run.state = "lost"
+                run.route_state = "withdrawn"
+                run.updated_at = now
+            return
         if state not in {"succeeded", "failed"} or not isinstance(result, Mapping):
             raise RecipeOperationConflict("recipe agent result is invalid")
         if state == "succeeded" and job.kind in {
@@ -2802,23 +2844,22 @@ class RecipeOperationService:
                     .with_for_update(of=AgentOperation)
                 )
             )
-            if job.kind == "recipe.job.run.v1" and any(
-                child.state == "running" for child in children
-            ):
+            for child in children:
+                if child.state == "queued" and child.current_attempt == 0:
+                    child.state = "cancelled"
+                    child.updated_at = now
+            if any(child.state in {"running", "waiting-for-operator"} for child in children):
                 job.result = _validated_result(job.kind, {
                     **previous,
                     "cancel_requested": True,
                     "cancel_request_id": request_id,
                     "cancel_actor": actor,
+                    "cancel_requested_at": _aware(now).isoformat(),
                     "reason": cancellation_reason,
                 })
                 job.status_reason = cancellation_reason
                 job.updated_at = now
                 return self._view(job)
-            for child in children:
-                if child.state not in _TERMINAL_JOB_STATES:
-                    child.state = "cancelled"
-                    child.updated_at = now
             job.state = "cancelled"
             job.status_reason = cancellation_reason
             job.result = _validated_result(job.kind, {
@@ -2827,6 +2868,7 @@ class RecipeOperationService:
                 "cancel_requested": True,
                 "cancel_request_id": request_id,
                 "cancel_actor": actor,
+                "cancel_requested_at": _aware(now).isoformat(),
                 "reason": cancellation_reason,
                 "recovery": "retry creates a new operation",
             })
@@ -3589,6 +3631,9 @@ class RecipeOperationService:
                 workload_intent_ordinal = max(node.workload_intent_ordinal for node in target_nodes) + 1
                 for node in target_nodes:
                     node.workload_intent_ordinal = workload_intent_ordinal
+                self._agent_jobs.request_superseded_workload_cancellation_in_session(
+                    session, targets, workload_intent_ordinal, now
+                )
             elif (
                 type(workload_intent_ordinal) is not int
                 or workload_intent_ordinal < 1

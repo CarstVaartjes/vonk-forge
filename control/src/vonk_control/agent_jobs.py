@@ -112,6 +112,23 @@ _TERMINAL_PARENT_STATES = frozenset(
 )
 _RETRY_DISPOSITION = "retry"
 _DATABASE_REPOLL_SECONDS = 0.25
+_SUPERSEDED_CANCELLATION_SECONDS = 660
+
+
+def superseded_cancellation_deadline(result: object) -> datetime | None:
+    """Fixed cap for an old fence's cancellation-only STOP authority."""
+    if not isinstance(result, Mapping) or result.get("cancel_requested") is not True:
+        return None
+    value = result.get("cancel_requested_at")
+    if not isinstance(value, str):
+        return None
+    try:
+        requested_at = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if requested_at.tzinfo is None:
+        return None
+    return requested_at + timedelta(seconds=_SUPERSEDED_CANCELLATION_SECONDS)
 _RUNTIME_CAPABILITIES = frozenset({"agent.runtime.rust.v1", "runtime.vonk.v1"})
 _NEXT_CAPABILITIES = _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
 _OPTIONAL_CAPABILITIES = frozenset(
@@ -349,6 +366,80 @@ class AgentJobService:
         """Wake long polls after a caller-managed enqueue transaction commits."""
         with self._available:
             self._available.notify_all()
+
+    @staticmethod
+    def request_superseded_workload_cancellation_in_session(
+        session: Session, targets: Sequence[str], ordinal: int, now: datetime
+    ) -> None:
+        """Cancel older overlapping orders without declaring issued effects finished."""
+        scope = tuple(sorted(set(targets)))
+        if not scope or len(scope) != len(targets) or type(ordinal) is not int or ordinal < 1:
+            raise ValueError("workload cancellation scope is invalid")
+        parent_ids = tuple(
+            session.scalars(
+                select(StoredOperation.parent_job_id)
+                .join(Job, Job.id == StoredOperation.parent_job_id)
+                .where(
+                    StoredOperation.node_id.in_(scope),
+                    StoredOperation.kind.in_(_WORKLOAD_INTENT_OPERATIONS),
+                    StoredOperation.workload_intent_ordinal.is_not(None),
+                    StoredOperation.workload_intent_ordinal < ordinal,
+                    Job.state.in_({"queued", "running"}),
+                )
+                .distinct()
+                .order_by(StoredOperation.parent_job_id)
+            )
+        )
+        for parent_id in parent_ids:
+            parent = session.scalar(
+                select(Job).where(Job.id == parent_id).with_for_update(of=Job)
+            )
+            if parent is None or parent.state not in {"queued", "running"}:
+                continue
+            children = tuple(
+                session.scalars(
+                    select(StoredOperation)
+                    .where(StoredOperation.parent_job_id == parent_id)
+                    .order_by(StoredOperation.id)
+                    .with_for_update(of=StoredOperation)
+                )
+            )
+            bound = parent.payload.get("workload_intent_ordinal")
+            if (
+                type(bound) is not int
+                or bound >= ordinal
+                or not children
+                or any(
+                    child.kind not in _WORKLOAD_INTENT_OPERATIONS
+                    or child.workload_intent_ordinal != bound
+                    or child.node_id not in parent.targets
+                    for child in children
+                )
+            ):
+                raise ValueError("superseded workload order identity is invalid")
+            for child in children:
+                if child.state == "queued" and child.current_attempt == 0:
+                    child.state = "cancelled"
+                    child.status_reason = "superseded by newer workload intent"
+                    child.updated_at = now
+            if any(child.state in {"running", "waiting-for-operator"} for child in children):
+                previous = dict(parent.result) if isinstance(parent.result, Mapping) else {}
+                if previous.get("cancel_requested") is not True:
+                    parent.result = {
+                        **previous,
+                        "cancel_requested": True,
+                        "cancel_request_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{parent.id}:{ordinal}")),
+                        "cancel_actor": "controller",
+                        "cancel_requested_at": _aware(now).isoformat(),
+                        "reason": "superseded by newer workload intent",
+                    }
+                elif "cancel_requested_at" not in previous:
+                    parent.result = {**previous, "cancel_requested_at": _aware(now).isoformat()}
+                parent.state = "running"
+            elif all(child.state == "cancelled" for child in children):
+                parent.state = "cancelled"
+            parent.status_reason = "superseded by newer workload intent"
+            parent.updated_at = now
 
     def set_result_consumer(self, consumer: ResultConsumer) -> None:
         """Bind projection consumption once, before the queue serves any work."""
@@ -1096,8 +1187,40 @@ class AgentJobService:
         if lease_seconds <= 0:
             raise ValueError("lease must be positive")
         with self._sessions.begin() as session:
-            operation, attempt = self._active(session, fence, source=source)
+            operation, attempt = self._active(
+                session, fence, source=source, allow_superseded_cancellation=True
+            )
             now = self._clock()
+            parent = session.get(Job, operation.parent_job_id)
+            node = session.get(AgentNode, operation.node_id)
+            superseded = bool(
+                node is not None
+                and operation.workload_intent_ordinal is not None
+                and operation.workload_intent_ordinal != node.workload_intent_ordinal
+            )
+            if superseded:
+                cancellation_deadline = superseded_cancellation_deadline(
+                    None if parent is None else parent.result
+                )
+                if cancellation_deadline is None:
+                    raise StaleAgentAttempt("superseded cancellation authority is invalid")
+                if _aware(now) >= cancellation_deadline:
+                    raise StaleAgentAttempt("superseded cancellation authority expired")
+                deadline = min(
+                    cancellation_deadline,
+                    max(_aware(attempt.lease_deadline), _aware(now) + timedelta(seconds=lease_seconds)),
+                )
+                attempt.lease_deadline = deadline
+                return AgentDirective(
+                    schema_version=1,
+                    job_id=operation.parent_job_id,
+                    operation_id=operation.id,
+                    attempt=attempt.attempt,
+                    fence=attempt.fence,
+                    node_id=operation.node_id,
+                    deadline=deadline,
+                    cancel_requested=True,
+                )
             deadline = max(
                 _aware(attempt.lease_deadline),
                 _aware(now) + timedelta(seconds=lease_seconds),
@@ -1339,8 +1462,30 @@ class AgentJobService:
     ) -> None:
         self._mark_started()
         with self._sessions.begin() as session:
-            operation, attempt = self._active(session, fence, source=source)
+            operation, attempt = self._active(
+                session,
+                fence,
+                source=source,
+                allow_superseded_cancellation=state == "cancelled",
+            )
             now = self._clock()
+            node = session.get(AgentNode, operation.node_id)
+            parent = session.get(Job, operation.parent_job_id)
+            superseded = bool(
+                node is not None
+                and operation.workload_intent_ordinal is not None
+                and operation.workload_intent_ordinal != node.workload_intent_ordinal
+            )
+            if superseded:
+                cancellation_deadline = superseded_cancellation_deadline(
+                    None if parent is None else parent.result
+                )
+                if (
+                    state != "cancelled"
+                    or cancellation_deadline is None
+                    or _aware(now) >= cancellation_deadline
+                ):
+                    raise StaleAgentAttempt("superseded operation has no completion authority")
             if isinstance(fence, AgentResult):
                 if fence.state != state or (
                     result is not None and _document(fence.result) != _document(result)
@@ -1438,6 +1583,7 @@ class AgentJobService:
         fence: AgentFence,
         *,
         source: AgentSource | None = None,
+        allow_superseded_cancellation: bool = False,
     ) -> tuple[StoredOperation, AgentOperationAttempt]:
         token = self._fence_token(fence)
         identity_hint = session.execute(
@@ -1505,6 +1651,13 @@ class AgentJobService:
             or (
                 operation.workload_intent_ordinal is not None
                 and operation.workload_intent_ordinal != node.workload_intent_ordinal
+                and not (
+                    allow_superseded_cancellation
+                    and operation.kind in _WORKLOAD_INTENT_OPERATIONS
+                    and operation.workload_intent_ordinal < node.workload_intent_ordinal
+                    and isinstance(parent.result, Mapping)
+                    and parent.result.get("cancel_requested") is True
+                )
             )
             or node.state != "active"
             or node.revoked_at is not None

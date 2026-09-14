@@ -9,6 +9,7 @@ these concrete models.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -101,6 +102,7 @@ class RecipeOperationCancellationResult(LifecycleModel):
     """Cancellation metadata merged into a pending lifecycle result."""
 
     cancel_requested: Literal[True]
+    cancel_requested_at: datetime | None = None
     cancel_request_id: UuidId
     cancel_actor: str = Field(min_length=1, max_length=256)
     reason: str = Field(min_length=1, max_length=512)

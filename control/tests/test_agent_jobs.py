@@ -17,6 +17,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
+    AgentResult,
     DistributionAssignment,
     RecipeOperationRequest,
     canonical_message,
@@ -220,6 +221,44 @@ def test_newer_workload_intent_fences_old_enqueues_renewals_and_results(service)
         jobs.heartbeat(claim, None, 30)
     with pytest.raises(StaleAgentAttempt):
         jobs.succeed(claim, STOP_RESULT)
+
+
+def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) -> None:
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    running = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    queued = jobs.enqueue(job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+    with sessions.begin() as session:
+        for node_id in (NODE_A, NODE_B):
+            session.get(AgentNode, node_id).workload_intent_ordinal = 2
+        jobs.request_superseded_workload_cancellation_in_session(
+            session, (NODE_A, NODE_B), 2, clock.now
+        )
+    with sessions() as session:
+        assert session.get(AgentOperation, queued.id).state == "cancelled"
+        assert session.get(AgentOperation, running.id).state == "running"
+        assert session.get(Job, job.id).result["cancel_requested"] is True
+    directive = jobs.heartbeat(claim, None, 30)
+    assert directive.cancel_requested is True
+    assert directive.deadline <= clock.now + timedelta(seconds=660)
+    with pytest.raises(StaleAgentAttempt):
+        jobs.succeed(claim, STOP_RESULT)
+    jobs.record_result(AgentResult.model_validate({
+        "schema_version": 1,
+        "job_id": job.id,
+        "operation_id": running.id,
+        "attempt": claim.attempt,
+        "fence": claim.fence,
+        "node_id": NODE_A,
+        "deadline": directive.deadline,
+        "state": "cancelled",
+        "result": {"error_code": "operation_cancelled", "reason": "exact stop completed"},
+    }))
+    with sessions() as session:
+        assert session.get(AgentOperation, running.id).state == "cancelled"
+        assert session.get(Job, job.id).state == "cancelled"
 
 
 def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
