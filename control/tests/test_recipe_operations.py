@@ -874,6 +874,139 @@ def installed_recipe(
     return operation
 
 
+@pytest.mark.parametrize("retry_state", ["succeeded", "waiting-for-operator"])
+def test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry(
+    tmp_path: Path, retry_state: str,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    plan = service.preview_install(mapping_id, build_id)
+    installation_operation = service.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid.uuid4())
+    )
+    with sessions.begin() as session:
+        child = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == installation_operation.id
+            )
+        )
+        assert child is not None
+        child.state = "waiting-for-operator"
+        child.retry_disposition = "retry"
+        child.retry_disposition_attempt = child.current_attempt
+        child.retry_due_at = NOW + timedelta(seconds=2)
+        child.status_reason = "exact lifecycle retry scheduled"
+        service.consume_agent_result(
+            session,
+            child,
+            object(),
+            SimpleNamespace(
+                state="waiting-for-operator",
+                result={
+                    "reason": "agent restarted during install",
+                    "error_code": "agent_restart_interrupted",
+                    "failure_kind": "uncertain-effect",
+                    "uncertain": True,
+                },
+            ),
+        )
+    with sessions() as session:
+        job = session.get(Job, installation_operation.id)
+        installation = session.get(RecipeInstallation, installation_operation.owner_id)
+        node = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation_operation.owner_id,
+                InstallationNode.node_id == nodes[0],
+            )
+        )
+        assert job is not None and job.state == "running"
+        assert installation is not None and installation.state == "installing"
+        assert node is not None and node.state != "failed"
+    view = service.get(installation_operation.id)
+    assert view.retry_due_at == NOW + timedelta(seconds=2)
+    assert view.status_reason == "exact lifecycle retry scheduled"
+
+    with sessions.begin() as session:
+        child = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == installation_operation.id
+            )
+        )
+        assert child is not None
+        child.state = retry_state
+        service.consume_agent_result(
+            session,
+            child,
+            object(),
+            SimpleNamespace(
+                state=retry_state,
+                result=(
+                    {"installed_bytes": 120}
+                    if retry_state == "succeeded"
+                    else {
+                        "error_code": "exact_install_effect_unproven",
+                        "failure_kind": "uncertain-effect",
+                        "uncertain": True,
+                    }
+                ),
+            ),
+        )
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, installation_operation.owner_id)
+        node = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation_operation.owner_id,
+                InstallationNode.node_id == nodes[0],
+            )
+        )
+        assert installation is not None and node is not None
+        if retry_state == "succeeded":
+            assert installation.state == "installed"
+            assert node.state == "installed"
+        else:
+            assert installation.state == "installing"
+            assert node.state != "failed"
+
+
+def test_retry_scheduled_start_observation_failure_keeps_the_run_pending(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    plan = service.preview_run(installation.owner_id, "restart-recovery")
+    started = service.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid.uuid4())
+    )
+    with sessions.begin() as session:
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
+        )
+        assert child is not None
+        child.state = "waiting-for-operator"
+        child.retry_disposition = "retry"
+        child.retry_disposition_attempt = child.current_attempt
+        child.retry_due_at = NOW + timedelta(seconds=2)
+        service.consume_agent_result(
+            session,
+            child,
+            object(),
+            SimpleNamespace(
+                state="failed",
+                result={
+                    "error_code": "runtime_observation_unavailable",
+                    "failure_kind": "temporary-dependency",
+                },
+            ),
+        )
+    with sessions() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        node = session.scalar(select(RunNode).where(RunNode.run_id == started.owner_id))
+        assert run is not None and run.state == "starting"
+        assert node is not None and node.state != "failed"
+    assert service.get(started.id).retry_due_at == NOW + timedelta(seconds=2)
+
+
 def test_canonical_recipe_revision_drives_install_and_schema2_payload(
     tmp_path: Path,
 ) -> None:

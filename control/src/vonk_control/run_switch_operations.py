@@ -4817,13 +4817,22 @@ class RunSwitchOperationService:
                     )
                     progress["phase"] = persisted_phase.kind
                     progress["subphase"] = persisted_phase.subphase
+                    retry_due_at = getattr(child, "retry_due_at", None)
+                    if child.state == "queued" and isinstance(retry_due_at, datetime):
+                        progress["observation_due_at"] = _aware(retry_due_at).isoformat()
+                    else:
+                        progress.pop("observation_due_at", None)
+                    child_reason = getattr(child, "status_reason", None)
+                    status_reason = child_reason[:512] if isinstance(child_reason, str) else None
                     if (
                         job.state == "running"
+                        and job.status_reason == status_reason
                         and _without_observation_time(progress)
                         == _without_observation_time(original)
                     ):
                         return False
                     job.state = "running"
+                    job.status_reason = status_reason
                     job.result = _persisted_result(progress)
                     job.updated_at = now
                 return True
@@ -4850,6 +4859,24 @@ class RunSwitchOperationService:
                         operation_id, child_id=child_id,
                         phase_index=phase_index, item_index=item_index,
                     )
+                elif child.state == "waiting-for-operator":
+                    # The lifecycle child owns the uncertain effect. Keep its
+                    # exact identity and capacity reservation instead of
+                    # turning an agent restart into a terminal parent failure.
+                    with self._sessions.begin() as session:
+                        job = session.get(Job, operation_id, with_for_update=True)
+                        if job is None:
+                            return False
+                        progress = _read_progress(job.result)
+                        if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
+                            return False
+                        job.state = "waiting-for-operator"
+                        job.status_reason = (
+                            getattr(child, "status_reason", None)
+                            or "Lifecycle effect is uncertain; exact child remains pending"
+                        )[:512]
+                        job.updated_at = now
+                    return True
                 else:
                     reason = f"run-switch phase operation failed: {child.state if child else 'unknown'}"
                     evidence = _child_progress_payload(child)

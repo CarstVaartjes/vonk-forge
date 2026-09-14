@@ -120,6 +120,20 @@ _WORKLOAD_INTENT_OPERATIONS = frozenset(
         AgentOperation.RECIPE_UNINSTALL.value,
     }
 )
+_LIFECYCLE_RESTART_OPERATIONS = frozenset(
+    {
+        AgentOperation.RECIPE_INSTALL.value,
+        AgentOperation.RECIPE_START.value,
+        AgentOperation.RECIPE_STOP.value,
+        AgentOperation.RECIPE_UNINSTALL.value,
+    }
+)
+_RESTART_REISSUE_OPERATIONS = _LIFECYCLE_RESTART_OPERATIONS | frozenset(
+    {
+        AgentOperation.ARTIFACT_DISTRIBUTION.value,
+        AgentOperation.RUNTIME_PREFLIGHT.value,
+    }
+)
 _TERMINAL_PARENT_STATES = frozenset(
     {"succeeded", "failed", "waiting-for-operator", "expired", "cancelled"}
 )
@@ -151,6 +165,7 @@ _OPTIONAL_CAPABILITIES = frozenset(
         "recipe.start.two-phase.v1",
         "recipe.run.inspect.exact.v1",
         "recipe.run.inspect.receipt.v1",
+        "agent.lifecycle.resume.exact.v1",
     }
 )
 _KNOWN_CAPABILITIES = _NEXT_CAPABILITIES | _OPTIONAL_CAPABILITIES
@@ -397,7 +412,7 @@ class AgentJobService:
                     StoredOperation.kind.in_(_WORKLOAD_INTENT_OPERATIONS),
                     StoredOperation.workload_intent_ordinal.is_not(None),
                     StoredOperation.workload_intent_ordinal < ordinal,
-                    Job.state.in_({"queued", "running"}),
+                    Job.state.in_({"queued", "running", "waiting-for-operator"}),
                 )
                 .distinct()
                 .order_by(StoredOperation.parent_job_id)
@@ -407,7 +422,7 @@ class AgentJobService:
             parent = session.scalar(
                 select(Job).where(Job.id == parent_id).with_for_update(of=Job)
             )
-            if parent is None or parent.state not in {"queued", "running"}:
+            if parent is None or parent.state not in {"queued", "running", "waiting-for-operator"}:
                 continue
             children = tuple(
                 session.scalars(
@@ -431,6 +446,9 @@ class AgentJobService:
             ):
                 raise ValueError("superseded workload order identity is invalid")
             for child in children:
+                child.retry_disposition = None
+                child.retry_disposition_attempt = None
+                child.retry_due_at = None
                 if child.state == "queued" and child.current_attempt == 0:
                     child.state = "cancelled"
                     child.status_reason = "superseded by newer workload intent"
@@ -658,8 +676,15 @@ class AgentJobService:
         )
         return (
             select(StoredOperation)
+            .join(Job, Job.id == StoredOperation.parent_job_id)
+            .join(AgentNode, AgentNode.node_id == StoredOperation.node_id)
             .where(
                 StoredOperation.node_id == node_id,
+                or_(
+                    StoredOperation.workload_intent_ordinal.is_(None),
+                    StoredOperation.workload_intent_ordinal == AgentNode.workload_intent_ordinal,
+                ),
+                Job.result["cancel_requested"].as_boolean().is_not(True),
                 or_(
                     and_(
                         StoredOperation.state == "queued",
@@ -906,8 +931,8 @@ class AgentJobService:
                 operation.retry_disposition = None
                 operation.retry_disposition_attempt = None
                 operation.retry_due_at = None
-                if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
-                    self._schedule_distribution_retry(operation, now)
+                if operation.kind in _RESTART_REISSUE_OPERATIONS:
+                    self._schedule_safe_retry(operation, now)
                 operation.updated_at = now
                 self._project_artifact_job_expiry(session, operation, now)
                 self._aggregate_parent(session, operation.parent_job_id)
@@ -1185,6 +1210,15 @@ class AgentJobService:
         if current_operation is None:
             return False
         if (
+            current_operation.kind in _LIFECYCLE_RESTART_OPERATIONS
+            and current_operation.current_attempt > 0
+            and current_operation.retry_disposition == _RETRY_DISPOSITION
+            and current_operation.retry_disposition_attempt
+            == current_operation.current_attempt
+            and "agent.lifecycle.resume.exact.v1" not in (capabilities or ())
+        ):
+            return False
+        if (
             current_operation.node_id != node.node_id
             or current_operation.node_id not in job.targets
             or current_operation.authority_revision != job.authority_revision
@@ -1205,6 +1239,10 @@ class AgentJobService:
             or current_operation.kind not in capabilities
             or not isinstance(node.capabilities, list)
             or current_operation.kind not in node.capabilities
+            or (
+                isinstance(job.result, Mapping)
+                and job.result.get("cancel_requested") is True
+            )
         ):
             return False
         if (
@@ -1524,9 +1562,11 @@ class AgentJobService:
         )
 
     @staticmethod
-    def _schedule_distribution_retry(
+    def _schedule_safe_retry(
         operation: StoredOperation, now: datetime, retry_after_seconds: int | None = None
     ) -> None:
+        if operation.kind not in _RESTART_REISSUE_OPERATIONS:
+            raise ValueError("operation cannot be reissued without effect reconciliation")
         retry_after = (
             None if retry_after_seconds is None
             else _aware(now) + timedelta(seconds=retry_after_seconds)
@@ -1538,12 +1578,30 @@ class AgentJobService:
             operation.retry_disposition = None
             operation.retry_disposition_attempt = None
             operation.retry_due_at = None
-            operation.status_reason = "exact distribution retry budget exhausted; inspect the last attempt and cache authority"
+            operation.status_reason = (
+                f"exact {operation.kind} retry budget exhausted; inspect the last attempt"
+            )
             return
         operation.retry_disposition = _RETRY_DISPOSITION
         operation.retry_disposition_attempt = operation.current_attempt
         operation.retry_due_at = due
-        operation.status_reason = f"exact distribution transfer interrupted; retry scheduled at {due.isoformat()}"
+        prerequisite = (
+            "current agent capability agent.lifecycle.resume.exact.v1 required; "
+            if operation.kind in _LIFECYCLE_RESTART_OPERATIONS
+            else ""
+        )
+        previous_reason = operation.status_reason
+        schedule_reason = (
+            f"exact {operation.kind} interrupted; {prerequisite}"
+            f"retry scheduled at {due.isoformat()}"
+        )
+        operation.status_reason = (
+            f"{previous_reason}; {schedule_reason}"
+            if isinstance(previous_reason, str)
+            and previous_reason.startswith("attempt ")
+            and "lease expired" in previous_reason
+            else schedule_reason
+        )
 
     def record_late_result(
         self, message: AgentResult, *, source: AgentSource | None = None
@@ -1721,6 +1779,8 @@ class AgentJobService:
             now = self._clock()
             node = session.get(AgentNode, operation.node_id)
             parent = session.get(Job, operation.parent_job_id)
+            if parent is None:
+                raise StaleAgentAttempt("agent operation lacks its parent job")
             superseded = bool(
                 node is not None
                 and operation.workload_intent_ordinal is not None
@@ -1810,12 +1870,43 @@ class AgentJobService:
                 state == "failed"
                 and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
                 and classify(kind_for_agent_error(message_result)) is RecoveryDecision.RETRY
+                and not (
+                    isinstance(parent.result, Mapping)
+                    and parent.result.get("cancel_requested") is True
+                )
             )
-            operation.state = "waiting-for-operator" if distribution_retry else state
+            start_observation_retry = (
+                state == "failed"
+                and operation.kind == AgentOperation.RECIPE_START.value
+                and message_result.get("error_code") == "runtime_observation_unavailable"
+                and message_result.get("failure_kind")
+                == FailureKind.TEMPORARY_DEPENDENCY.value
+                and not (
+                    isinstance(parent.result, Mapping)
+                    and parent.result.get("cancel_requested") is True
+                )
+            )
+            restart_retry = (
+                state == "waiting-for-operator"
+                and operation.kind in _RESTART_REISSUE_OPERATIONS
+                and message_result.get("error_code") == "agent_restart_interrupted"
+                and message_result.get("failure_kind")
+                == FailureKind.UNCERTAIN_EFFECT.value
+                and message_result.get("uncertain") is True
+                and not (
+                    isinstance(parent.result, Mapping)
+                    and parent.result.get("cancel_requested") is True
+                )
+            )
+            operation.state = (
+                "waiting-for-operator"
+                if distribution_retry or start_observation_retry
+                else state
+            )
             operation.updated_at = now
-            if distribution_retry:
+            if distribution_retry or start_observation_retry or restart_retry:
                 retry_after_seconds = message_result.get("retry_after_seconds")
-                self._schedule_distribution_retry(
+                self._schedule_safe_retry(
                     operation,
                     now,
                     retry_after_seconds if type(retry_after_seconds) is int else None,
@@ -2209,6 +2300,29 @@ class AgentJobService:
                 .order_by(StoredOperation.created_at, StoredOperation.id)
             )
         )
+        retrying = [
+            operation
+            for operation in operations
+            if operation.state == "waiting-for-operator"
+            and operation.retry_disposition == _RETRY_DISPOSITION
+            and operation.retry_disposition_attempt == operation.current_attempt
+            and operation.retry_due_at is not None
+        ]
+        if (
+            retrying
+            and all(
+                operation.state == "succeeded" or operation in retrying
+                for operation in operations
+            )
+            and not (
+                isinstance(job.result, Mapping)
+                and job.result.get("cancel_requested") is True
+            )
+        ):
+            job.state = "queued"
+            job.status_reason = retrying[0].status_reason
+            job.updated_at = self._clock()
+            return
         if (
             job.kind == "agent-upgrade"
             and job.state == "waiting-for-operator"

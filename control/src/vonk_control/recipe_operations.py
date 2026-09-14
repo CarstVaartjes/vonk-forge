@@ -16,9 +16,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
-    AgentOperation as ProtocolAgentOperation,
-)
-from vonk_agent_protocol import (
+    AgentFailureKind,
+    AgentFailureResult,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
     RecipeInstallPayload,
@@ -28,6 +27,10 @@ from vonk_agent_protocol import (
     canonical_message,
     format_model_identity,
     parse_recipe_operation_result,
+    validate_result_for_operation,
+)
+from vonk_agent_protocol import (
+    AgentOperation as ProtocolAgentOperation,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
@@ -215,6 +218,8 @@ class RecipeOperationView:
     plan_digest: str
     nodes: tuple[str, ...]
     result: dict[str, object] | None
+    retry_due_at: datetime | None = None
+    status_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2302,6 +2307,34 @@ class RecipeOperationService:
                 run.route_state = "withdrawn"
                 run.updated_at = now
             return
+        if state == "waiting-for-operator" and isinstance(result, Mapping):
+            parsed = validate_result_for_operation(operation.kind, result, state=state)
+            if (
+                isinstance(parsed, AgentFailureResult)
+                and parsed.failure_kind is AgentFailureKind.UNCERTAIN_EFFECT
+                and parsed.uncertain is True
+            ):
+                # Typed uncertain evidence proves neither failure nor
+                # completion. The same child, owner state, and reservations
+                # remain authoritative while its retry is assessed. This
+                # also covers a fresh guarded attempt that still cannot
+                # establish whether a hook or runtime effect completed.
+                return
+        if (
+            job.kind == "recipe.start"
+            and state == "failed"
+            and operation.state == "waiting-for-operator"
+            and operation.retry_disposition == "retry"
+            and operation.retry_disposition_attempt == operation.current_attempt
+            and isinstance(result, Mapping)
+        ):
+            parsed = validate_result_for_operation(operation.kind, result, state=state)
+            if (
+                isinstance(parsed, AgentFailureResult)
+                and parsed.error_code == "runtime_observation_unavailable"
+                and parsed.failure_kind is AgentFailureKind.TEMPORARY_DEPENDENCY
+            ):
+                return
         if state not in {"succeeded", "failed"} or not isinstance(result, Mapping):
             raise RecipeOperationConflict("recipe agent result is invalid")
         if state == "succeeded" and job.kind in {
@@ -2838,7 +2871,7 @@ class RecipeOperationService:
             job = session.get(Job, operation_id)
             if job is None or not job.kind.startswith("recipe."):
                 raise KeyError(operation_id)
-            return self._view(job)
+            return self._view(job, session=session)
 
     def cancel(
         self, operation_id: str, *, actor: str, request_id: str, reason: str
@@ -3928,8 +3961,28 @@ class RecipeOperationService:
             )
         return job
 
-    def _view(self, job: Job) -> RecipeOperationView:
+    def _view(self, job: Job, *, session: Session | None = None) -> RecipeOperationView:
         validate_recipe_lifecycle_terminal(job.kind, job.state, job.result)
+        waiting_children = (
+            tuple(session.scalars(
+                select(AgentOperation)
+                .where(
+                    AgentOperation.parent_job_id == job.id,
+                    AgentOperation.state == "waiting-for-operator",
+                )
+                .order_by(AgentOperation.node_id, AgentOperation.id)
+            ))
+            if session is not None and job.state in {"queued", "running", "waiting-for-operator"}
+            else ()
+        )
+        retry_due_at = min(
+            (_aware(child.retry_due_at) for child in waiting_children if child.retry_due_at is not None),
+            default=None,
+        )
+        child_reason = next(
+            (child.status_reason for child in waiting_children if child.status_reason),
+            None,
+        )
         return RecipeOperationView(
             id=job.id,
             kind=job.kind,
@@ -3938,6 +3991,8 @@ class RecipeOperationService:
             plan_digest=_required_string(job.payload, "plan_digest"),
             nodes=tuple(job.targets),
             result=_validated_result(job.kind, job.result),
+            retry_due_at=retry_due_at,
+            status_reason=child_reason or job.status_reason,
         )
 
     @staticmethod

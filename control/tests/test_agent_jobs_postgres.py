@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import event, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import TokenCodec
 from vonk_control.enrollment import EnrollmentService
@@ -191,6 +191,129 @@ def test_postgres_claim_locks_only_operations_without_nullable_join(
     )
 
 
+@pytest.mark.parametrize(
+    ("kind", "payload", "error_code", "auto_retry"),
+    (
+        (
+            "artifact.distribution.v1",
+            {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+            "agent_restart_interrupted",
+            True,
+        ),
+        (
+            "runtime.preflight.v1",
+            {
+                "schema_version": 1,
+                "architecture": "linux-arm64",
+                "source_build": False,
+                "minimum_free_bytes": 0,
+                "fabric_connectivity": "none",
+                "fabric_minimum_mbps": 0,
+                "mandatory_capabilities": [],
+            },
+            "agent_restart_interrupted",
+            True,
+        ),
+        ("recipe.stop", STOP_PAYLOAD, "agent_restart_interrupted", True),
+        (
+            "artifact.distribution.v1",
+            {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+            "operation_outcome_uncertain",
+            False,
+        ),
+    ),
+)
+def test_postgres_restart_receipt_retries_only_exact_safe_operation(
+    service, kind: str, payload: dict[str, object], error_code: str, auto_retry: bool
+) -> None:
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, kind, COMMIT, payload)
+    capabilities = ["agent.runtime.rust.v1", kind]
+    resume_capabilities = (
+        [*capabilities, "agent.lifecycle.resume.exact.v1"]
+        if kind == "recipe.stop" else capabilities
+    )
+    first = claim_agent(
+        jobs, NODE_A, "serial-a", 30,
+        protocol_version=3, capabilities=capabilities,
+    )
+    assert first is not None
+    def restart_receipt(claim) -> AgentResult:
+        return AgentResult.model_validate_json(canonical_message({
+            **{key: getattr(claim, key) for key in (
+                "schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "deadline"
+            )},
+            "state": "waiting-for-operator",
+            "result": {
+                "error_code": error_code,
+                "failure_kind": "uncertain-effect",
+                "uncertain": True,
+                "reason": "agent process restarted",
+            },
+        }))
+
+    jobs.record_result(restart_receipt(first))
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        parent_row = session.get(Job, parent_job.id)
+        assert stored is not None and parent_row is not None
+        assert stored.state == "waiting-for-operator"
+        due = stored.retry_due_at
+        if not auto_retry:
+            assert due is None
+            assert parent_row.state == "waiting-for-operator"
+        else:
+            assert due is not None
+            assert parent_row.state == "queued"
+    jobs = AgentJobService(sessions, clock=clock)
+    assert claim_agent(
+        jobs, NODE_A, "serial-a", 30,
+        protocol_version=3, capabilities=resume_capabilities,
+    ) is None
+    if due is not None:
+        clock.now = due.replace(tzinfo=UTC)
+        if kind == "recipe.stop":
+            assert claim_agent(
+                jobs, NODE_A, "serial-a", 30,
+                protocol_version=3, capabilities=capabilities,
+            ) is None
+            with sessions() as session:
+                stored = session.get(AgentOperation, operation.id)
+                assert stored is not None
+                assert stored.status_reason is not None
+                assert "agent.lifecycle.resume.exact.v1" in stored.status_reason
+        second = claim_agent(
+            jobs, NODE_A, "serial-a", 30,
+            protocol_version=3, capabilities=resume_capabilities,
+        )
+        assert second is not None
+        assert second.operation_id == operation.id
+        assert second.attempt == first.attempt + 1
+        assert second.payload == first.payload
+        for attempt_number in range(2, 6):
+            jobs.record_result(restart_receipt(second))
+            with sessions() as session:
+                stored = session.get(AgentOperation, operation.id)
+                parent_row = session.get(Job, parent_job.id)
+                assert stored is not None and parent_row is not None
+                assert stored.current_attempt == attempt_number
+                if attempt_number == 5:
+                    assert stored.retry_due_at is None
+                    assert parent_row.state == "waiting-for-operator"
+                    break
+                assert stored.retry_due_at is not None
+                assert parent_row.state == "queued"
+                due = stored.retry_due_at
+            clock.now = due.replace(tzinfo=UTC)
+            second = claim_agent(
+                jobs, NODE_A, "serial-a", 30,
+                protocol_version=3, capabilities=resume_capabilities,
+            )
+            assert second is not None and second.attempt == attempt_number + 1
+
+
 def test_postgres_separate_services_cannot_claim_the_same_operation(service) -> None:
     sessions, clock = service
     first_service = AgentJobService(sessions, clock=clock)
@@ -331,7 +454,7 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
             assert attempt.progress is None and attempt.result is None
 
 
-def test_postgres_expired_mutating_operation_requires_persisted_retry_disposition(
+def test_postgres_expired_mutating_operation_schedules_bounded_exact_retry(
     service,
 ) -> None:
     sessions, clock = service
@@ -343,12 +466,15 @@ def test_postgres_expired_mutating_operation_requires_persisted_retry_dispositio
 
     clock.advance(seconds=30)
     assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
     with sessions() as session:
         gated = session.get(AgentOperation, operation.id)
         assert gated is not None
         assert gated.state == "waiting-for-operator"
-        assert gated.retry_disposition is None
-        assert gated.retry_disposition_attempt is None
+        assert gated.retry_disposition == "retry"
+        assert gated.retry_disposition_attempt == 1
+        assert gated.retry_due_at is not None
+        due = gated.retry_due_at
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
@@ -356,21 +482,74 @@ def test_postgres_expired_mutating_operation_requires_persisted_retry_dispositio
             )
         )
         assert attempt is not None and attempt.state == "expired"
-        assert session.get(Job, parent_job.id).state == "waiting-for-operator"  # type: ignore[union-attr]
+        assert session.get(Job, parent_job.id).state == "queued"  # type: ignore[union-attr]
 
-    with sessions.begin() as session:
-        gated = session.get(AgentOperation, operation.id)
-        assert gated is not None
-        gated.retry_disposition = "retry"
-        gated.retry_disposition_attempt = 1
-
-    second = claim_agent(jobs, NODE_A, "serial-a", 30)
+    clock.now = due.replace(tzinfo=UTC)
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    second = claim_agent(
+        jobs, NODE_A, "serial-a", 30,
+        protocol_version=3,
+        capabilities=["agent.runtime.rust.v1", "recipe.stop", "agent.lifecycle.resume.exact.v1"],
+    )
     assert second is not None
     assert second.operation_id == first.operation_id
     assert second.attempt == 2
 
     clock.advance(seconds=30)
     assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+
+@pytest.mark.parametrize("exhausted", (False, True))
+def test_postgres_new_stop_supersedes_parked_old_retry_without_starvation(
+    service, exhausted: bool
+) -> None:
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    old_parent = parent(sessions, clock)
+    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert first is not None
+    jobs.record_result(AgentResult.model_validate_json(canonical_message({
+        **{key: getattr(first, key) for key in (
+            "schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "deadline"
+        )},
+        "state": "waiting-for-operator",
+        "result": {
+            "error_code": "agent_restart_interrupted",
+            "failure_kind": "uncertain-effect",
+            "uncertain": True,
+            "reason": "agent process restarted",
+        },
+    })))
+    with sessions.begin() as session:
+        old_row = session.get(AgentOperation, old.id)
+        old_job = session.get(Job, old_parent.id)
+        node = session.get(AgentNode, NODE_A)
+        assert old_row is not None and old_job is not None and node is not None
+        old_row.retry_due_at = clock.now
+        if exhausted:
+            old_row.retry_disposition = None
+            old_row.retry_disposition_attempt = None
+            old_job.state = "waiting-for-operator"
+        node.workload_intent_ordinal = 2
+    new_parent = parent(sessions, clock)
+    with sessions.begin() as session:
+        new_job = session.get(Job, new_parent.id)
+        assert new_job is not None
+        new_job.payload = {"workload_intent_ordinal": 2}
+        new_job.payload_digest = hashlib.sha256(canonical_message(new_job.payload)).hexdigest()
+        AgentJobService.request_superseded_workload_cancellation_in_session(
+            session, [NODE_A], 2, clock.now
+        )
+    current = jobs.enqueue(new_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    with sessions() as session:
+        old_row = session.get(AgentOperation, old.id)
+        old_job = session.get(Job, old_parent.id)
+        assert old_row is not None and old_job is not None
+        assert old_row.retry_disposition is None and old_row.retry_due_at is None
+        assert isinstance(old_job.result, dict) and old_job.result.get("cancel_requested") is True
+    claimed = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claimed is not None and claimed.operation_id == current.id
 
 
 @pytest.mark.parametrize(
