@@ -1290,11 +1290,17 @@ impl AgentHttpClient {
         if let Some(file) = inspect_trusted_final(destination, expected_bytes).await? {
             drop(file);
             progress(expected_bytes, "verifying");
-            if sha256_path(destination, expected_bytes).await? != sha256 {
-                return Err(ClientError::Protocol);
+            match sha256_path(destination, expected_bytes).await {
+                Ok(observed) if observed == sha256 => return Ok(()),
+                // The object sits at its exact digest name with exact custody
+                // and still fails its content check, so this is a proven
+                // mismatch inside the managed cache.  Quarantine only that
+                // object: leaving it in place makes every later attempt trust
+                // the metadata and re-report the same failure without ever
+                // rehydrating the bytes from the authorized assignment.
+                Ok(_) => quarantine_proven_object(destination, expected_bytes).await?,
+                Err(error) => return Err(error),
             }
-            progress(expected_bytes, "verifying");
-            return Ok(());
         }
 
         let partial = partial_path(destination);
@@ -1393,13 +1399,25 @@ impl AgentHttpClient {
         output.flush().await?;
         output.get_ref().sync_all().await?;
         drop(output);
+        // Prove the bytes we hold before they take the digest name.  Renaming
+        // first and checking afterwards leaves a file at the digest name after
+        // a mismatch, so every later attempt would trust its metadata and
+        // re-report the same failure instead of transferring the object again.
+        progress(expected_bytes, "verifying");
+        match sha256_path(&partial, expected_bytes).await {
+            Ok(observed) if observed == sha256 => {}
+            // Exactly-owned received bytes that are provably not the requested
+            // object: discard this partial so the next authorized attempt
+            // starts from empty rather than resuming bytes we cannot keep.
+            Ok(_) => {
+                quarantine_proven_object(&partial, expected_bytes).await?;
+                return Err(ClientError::Protocol);
+            }
+            Err(error) => return Err(error),
+        }
         tokio::fs::rename(&partial, destination).await?;
         sync_parent(parent).await?;
         validate_trusted_file(destination, expected_bytes).await?;
-        progress(expected_bytes, "verifying");
-        if sha256_path(destination, expected_bytes).await? != sha256 {
-            return Err(ClientError::Protocol);
-        }
         Ok(())
     }
 
@@ -2022,6 +2040,26 @@ async fn validate_trusted_file(path: &Path, expected_bytes: u64) -> Result<(), C
         .await?
         .map(|_| ())
         .ok_or(ClientError::Protocol)
+}
+
+/// Remove one managed cache object whose content check already failed.
+///
+/// The caller has proven both the digest mismatch and the exact custody of the
+/// file, so this never reaches an unrelated path.  Custody is re-validated
+/// immediately before removal, and a file whose ownership, link count, type or
+/// mode is not exactly ours is refused rather than deleted: a permission
+/// problem, a symlink or an ambiguous hardlink is a failure to report, never a
+/// reason to widen what this agent is willing to remove.
+async fn quarantine_proven_object(path: &Path, expected_bytes: u64) -> Result<(), ClientError> {
+    let metadata = tokio::fs::symlink_metadata(path).await?;
+    if !validate_trusted_metadata(&metadata, expected_bytes) {
+        return Err(ClientError::Protocol);
+    }
+    tokio::fs::remove_file(path).await?;
+    if let Some(parent) = path.parent() {
+        sync_parent(parent).await?;
+    }
+    Ok(())
 }
 
 async fn sync_parent(parent: &Path) -> Result<(), ClientError> {
@@ -2822,6 +2860,9 @@ mod tests {
     enum DistributionFixtureMode {
         Good,
         WrongEtagFirstObject,
+        /// Serve the requested range with the correct length and ETag but
+        /// different bytes, so only the content check can reject it.
+        WrongBodyFirstObject,
         InterruptFirstObject,
         UnavailableFirstObject,
     }
@@ -2932,6 +2973,18 @@ mod tests {
                 assert!(end >= start && end < source.len());
                 assert!(end - start < 8 * 1024 * 1024);
                 let body = source[start..=end].to_vec();
+                let body = if matches!(mode, DistributionFixtureMode::WrongBodyFirstObject)
+                    && digest == assignment.objects[0].sha256
+                {
+                    // Same length, same range, same ETag: the transfer contract
+                    // holds while the bytes are not the requested object, so the
+                    // client can only reject this on its own content check.
+                    let mut mutated = body;
+                    *mutated.first_mut().expect("non-empty object body") ^= 0xff;
+                    mutated
+                } else {
+                    body
+                };
                 let response_digest =
                     if matches!(mode, DistributionFixtureMode::WrongEtagFirstObject)
                         && digest == assignment.objects[0].sha256
@@ -3345,6 +3398,130 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn direct_distribution_repairs_a_corrupt_owned_object_from_the_source() {
+        // A cache object can carry the exact digest name, the exact expected
+        // length and exact custody and still hold the wrong bytes.  Leaving it
+        // in place made every later attempt re-report the mismatch without ever
+        // transferring the object again, so the cache stayed poisoned forever.
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive);
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            1,
+            DistributionFixtureMode::Good,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("config.json");
+        let mut corrupt = model.to_vec();
+        corrupt[0] ^= 0xff;
+        std::fs::write(&destination, &corrupt).unwrap();
+        std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        client
+            .download_distribution_object(
+                &assignment.plan_digest,
+                &assignment.objects[0].sha256,
+                model.len() as u64,
+                &destination,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&destination).unwrap(), model);
+        assert!(!partial_path(&destination).exists());
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn direct_distribution_discards_bytes_that_fail_their_content_check() {
+        // The received bytes are proven before they take the digest name.  A
+        // file renamed with the digest name first and checked afterwards would
+        // keep that name after the mismatch and poison later attempts.
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive);
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            1,
+            DistributionFixtureMode::WrongBodyFirstObject,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("config.json");
+
+        assert!(matches!(
+            client
+                .download_distribution_object(
+                    &assignment.plan_digest,
+                    &assignment.objects[0].sha256,
+                    model.len() as u64,
+                    &destination,
+                )
+                .await,
+            Err(ClientError::Protocol)
+        ));
+
+        assert!(!destination.exists());
+        assert!(!partial_path(&destination).exists());
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn direct_distribution_refuses_an_object_whose_custody_is_not_exactly_ours() {
+        // A symlink at the digest name is a failure to report, never a reason
+        // to widen what this agent removes: the linked file must survive.
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive);
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            0,
+            DistributionFixtureMode::Good,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let linked = root.path().join("linked");
+        let mut corrupt = model.to_vec();
+        corrupt[0] ^= 0xff;
+        std::fs::write(&linked, &corrupt).unwrap();
+        std::fs::set_permissions(&linked, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let destination = root.path().join("config.json");
+        std::os::unix::fs::symlink(&linked, &destination).unwrap();
+
+        assert!(matches!(
+            client
+                .download_distribution_object(
+                    &assignment.plan_digest,
+                    &assignment.objects[0].sha256,
+                    model.len() as u64,
+                    &destination,
+                )
+                .await,
+            Err(ClientError::Protocol)
+        ));
+
+        assert!(
+            std::fs::symlink_metadata(&destination)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read(&linked).unwrap(), corrupt);
+        assert_eq!(server.join().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
     async fn direct_distribution_retries_interrupted_body_from_appended_offset() {
         let model = b"small model object";
         let (archive, image_digest) = oci_archive_fixture();
@@ -3426,7 +3603,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn distribution_acceptance_rejects_unauthorized_and_wrong_complete_destination() {
+    async fn distribution_acceptance_rejects_an_unauthorized_destination() {
         let model = b"small model object";
         let (archive, image_digest) = oci_archive_fixture();
         let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
@@ -3450,43 +3627,48 @@ mod tests {
             Err(ClientError::Controller(error)) if error.status == 401
         ));
         assert_eq!(authorized_server.join().unwrap().len(), 1);
+    }
 
+    #[tokio::test]
+    async fn distribution_acceptance_repairs_a_corrupt_owned_archive_from_the_source() {
+        // This used to stay a permanent failure.  A corrupt object at its exact
+        // digest name with exact custody is repairable inside the managed cache,
+        // so the authorized assignment rehydrates it instead of leaving every
+        // later acceptance run blocked on the same object.
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive.clone());
         let root = tempfile::tempdir().unwrap();
         let model_path = root
             .path()
             .join("models")
             .join(&assignment.objects[0].sha256);
         std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
-        std::fs::write(model_path, model).unwrap();
-        std::fs::set_permissions(
-            root.path()
-                .join("models")
-                .join(&assignment.objects[0].sha256),
-            std::fs::Permissions::from_mode(0o600),
-        )
-        .unwrap();
-        let destination = root
-            .path()
-            .join("oci-archives")
-            .join(&assignment.oci_archive_sha256);
+        std::fs::write(&model_path, model).unwrap();
+        std::fs::set_permissions(&model_path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let archive_root = root.path().join("oci-archives");
-        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        let destination = archive_root.join(&assignment.oci_archive_sha256);
+        std::fs::create_dir_all(&archive_root).unwrap();
         std::fs::write(&destination, vec![0_u8; archive.len()]).unwrap();
         std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600)).unwrap();
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects,
-            1,
+            2,
             DistributionFixtureMode::Good,
         );
-        assert!(matches!(
-            client
-                .download_distribution(&assignment.plan_digest, root.path(), &archive_root)
-                .await,
-            Err(ClientError::Protocol)
-        ));
-        assert_eq!(server.join().unwrap().len(), 1);
-        assert_ne!(std::fs::read(destination).unwrap(), archive);
+
+        client
+            .download_distribution(&assignment.plan_digest, root.path(), &archive_root)
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&destination).unwrap(), archive);
+        assert_eq!(std::fs::read(&model_path).unwrap(), model);
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 
     fn job_input_client(
