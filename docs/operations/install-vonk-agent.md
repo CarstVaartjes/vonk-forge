@@ -10,7 +10,9 @@ curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.
 
 Do not prefix `curl` or the shell with `sudo`. The installer downloads the
 published package as the current user, verifies its release identity and exact
-digest, and only then asks `sudo` to install it.
+digest, and then authenticates `sudo` in the foreground terminal. The framed
+privileged handoff runs noninteractively; an expired sudo ticket fails clearly
+without treating the enrollment frame as a password prompt.
 
 For a new Spark, the wizard asks for the enrollment endpoint, controller CA
 fingerprint, one-use pairing token, Spark management IPv4 address, this Spark's
@@ -59,9 +61,12 @@ Spark networking or SSH step is needed.
 
 Rerun the channel command without `--enroll` for a local package repair or when
 the controller-managed path is unavailable. It preserves configuration and
-identity, replaces the Debian package directly, restarts the services, and
-requires sustained readiness. There is no A/B slot, supervisor, rollback state,
-migration command, or follow-up setup step.
+identity, verifies the installed package version, architecture, and agent binary
+against the accepted signed package, installs only when they differ, restarts the
+services, and requires sustained readiness. APT indexes are refreshed only if
+the package install cannot complete with the indexes already present. There is
+no A/B slot, supervisor, rollback state, migration command, or follow-up setup
+step.
 
 Healthy connected agents rotate their 24-hour client certificate before it
 expires; operators should not normally need to re-enroll them. A package upgrade
@@ -75,9 +80,10 @@ An ordinary rerun is only an upgrade. Enrollment commands use the generic
 `--enroll` intent through the signed channel bootstrap. On a fresh Spark that
 creates the identity; on an existing Spark the controller-authorized grant
 automatically replaces the certificate. If pairing succeeded but readiness did
-not, rerunning resumes recovery without consuming another token. The generated
+not, rerun the channel command without `--enroll` to resume recovery without
+consuming another token. The generated
 URL is `/dev/spark` for a development NAS and `/spark` for a stable NAS.
 
-If the command fails, read its final error and rerun the same command after
-correcting that condition. It fails before privilege escalation when release
-verification does not pass.
+If the command fails, read its final error and retry after correcting that
+condition. A readiness failure preserves pairing; retry without `--enroll`.
+Release verification failures stop before privilege escalation.

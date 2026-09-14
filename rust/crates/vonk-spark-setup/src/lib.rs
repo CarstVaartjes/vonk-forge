@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, Stdio},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -694,7 +694,29 @@ pub fn handoff_to_root(
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
     validate_native_architecture(std::env::consts::ARCH)?;
+    authenticate_sudo_foreground(&prepared.sudo)?;
     handoff_to_root_with_authority(prepared, runner, &ReleaseAuthority::canonical())
+}
+
+fn authenticate_sudo_foreground(sudo: &Path) -> Result<(), SetupError> {
+    // The framed apply request owns stdin. Authenticate before starting it,
+    // while sudo can still read the controlling terminal itself.
+    let terminal = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|_| SetupError::Command("sudo authentication requires a terminal".to_owned()))?;
+    let status = ProcessCommand::new(sudo)
+        .arg("-v")
+        .stdin(terminal)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|_| SetupError::Command("could not start sudo authentication".to_owned()))?;
+    if !status.success() {
+        return Err(SetupError::Command("sudo authentication failed".to_owned()));
+    }
+    Ok(())
 }
 
 pub fn handoff_to_root_with_authority(
@@ -706,6 +728,7 @@ pub fn handoff_to_root_with_authority(
     let command = Command::new(
         &prepared.sudo,
         [
+            "-n".to_owned(),
             "/bin/sh".to_owned(),
             "-ceu".to_owned(),
             root_handoff,
@@ -716,7 +739,18 @@ pub fn handoff_to_root_with_authority(
         ],
     )
     .with_stdin(prepared.frame.clone());
-    run_checked(runner, command).map(|_| ())
+    if run_checked(runner, command).is_ok() {
+        return Ok(());
+    }
+    if run_checked(runner, Command::new(&prepared.sudo, ["-n", "-v"])).is_err() {
+        return Err(SetupError::Command(
+            "sudo authorization expired before privileged apply; rerun setup from a terminal"
+                .to_owned(),
+        ));
+    }
+    Err(SetupError::Command(
+        "privileged installer handoff failed".to_owned(),
+    ))
 }
 
 fn root_handoff_script(
@@ -853,6 +887,7 @@ pub fn validate_system_host(_request: &SetupRequest) -> Result<(), SetupError> {
         "/usr/bin/cat",
         "/usr/bin/curl",
         "/usr/bin/dpkg-deb",
+        "/usr/bin/dpkg-query",
         "/usr/bin/install",
         "/usr/bin/mktemp",
         "/usr/bin/openssl",
@@ -1343,7 +1378,13 @@ pub fn apply_setup_from_with_authority(
             if config.enrollment_url != enrollment_url || config.ca_sha256 != ca_sha256 {
                 return Err(SetupError::PrivilegedInput);
             }
-            install_package(runner, &staged)?;
+            ensure_package_installed(
+                paths,
+                runner,
+                &staged,
+                &release.version,
+                &release.architecture,
+            )?;
             pair_agent(
                 paths,
                 runner,
@@ -1366,7 +1407,13 @@ pub fn apply_setup_from_with_authority(
             if config.enrollment_url != enrollment_url || config.ca_sha256 != ca_sha256 {
                 return Err(SetupError::PrivilegedInput);
             }
-            install_package(runner, &staged)?;
+            ensure_package_installed(
+                paths,
+                runner,
+                &staged,
+                &release.version,
+                &release.architecture,
+            )?;
             pair_agent(paths, runner, &enrollment_url, &ca_sha256, pairing_token)?;
             write_setup_state(paths, b"recovering-v1\n", owner)?;
             stop_agent_for_identity_reload(paths, runner)?;
@@ -1377,7 +1424,13 @@ pub fn apply_setup_from_with_authority(
             let config = paired_configuration(&paths.config, paths)?;
             let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
             verify_ca(&ca, &config.ca_sha256)?;
-            install_package(runner, &staged)?;
+            ensure_package_installed(
+                paths,
+                runner,
+                &staged,
+                &release.version,
+                &release.architecture,
+            )?;
             stop_agent_for_identity_reload(paths, runner)?;
             start_and_verify(paths, runner)?;
             write_setup_state(paths, b"paired-v1\n", owner)
@@ -1386,7 +1439,13 @@ pub fn apply_setup_from_with_authority(
             let config = paired_configuration(&paths.config, paths)?;
             let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
             verify_ca(&ca, &config.ca_sha256)?;
-            upgrade_existing(paths, runner, &staged)
+            upgrade_existing(
+                paths,
+                runner,
+                &staged,
+                &release.version,
+                &release.architecture,
+            )
         }
     }
 }
@@ -1620,9 +1679,13 @@ fn start_and_verify(
     paths: &InstallPaths,
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
+    eprintln!("vonk-spark-setup: phase=start-services elapsed=0s");
     reset_agent_failure(paths, runner)?;
     enable_runtime_units(paths, runner)?;
-    verify_sustained_readiness(paths, runner)
+    eprintln!("vonk-spark-setup: phase=readiness elapsed=0s");
+    verify_sustained_readiness(paths, runner).inspect_err(|_| {
+        eprintln!("vonk-spark-setup: pairing is preserved; rerun setup without --enroll to resume readiness, or use --enroll only to replace this Spark identity");
+    })
 }
 
 fn stop_agent_for_identity_reload(
@@ -1691,34 +1754,149 @@ fn install_package(
     runner: &mut dyn CommandRunner,
     staged: &StagedPackage,
 ) -> Result<(), SetupError> {
+    eprintln!("vonk-spark-setup: phase=package-install elapsed=0s");
+    // APT's index is only needed when dependency resolution cannot complete
+    // against the indexes already present. Retry once after refreshing it.
+    let first = runner
+        .run(apt_install_command(staged))
+        .map_err(SetupError::Command)?;
+    if first.success {
+        return Ok(());
+    }
+    let reason = String::from_utf8_lossy(&first.stdout);
+    if ![
+        "unmet dependencies",
+        "Unable to locate package",
+        "has no installation candidate",
+        "not installable",
+    ]
+    .iter()
+    .any(|marker| reason.contains(marker))
+    {
+        return Err(SetupError::Command("/usr/bin/apt-get install".to_owned()));
+    }
     run_checked(
         runner,
         Command::new("/usr/bin/apt-get", ["update"]).with_env("DEBIAN_FRONTEND", "noninteractive"),
     )?;
-    run_checked(
-        runner,
-        Command::new(
-            "/usr/bin/apt-get",
-            [
-                "install".to_owned(),
-                "--yes".to_owned(),
-                "--no-install-recommends".to_owned(),
-                "-o".to_owned(),
-                "Dpkg::Options::=--force-confold".to_owned(),
-                staged.path().display().to_string(),
-            ],
-        )
-        .with_env("DEBIAN_FRONTEND", "noninteractive"),
+    apt_install(runner, staged)
+}
+
+fn apt_install(runner: &mut dyn CommandRunner, staged: &StagedPackage) -> Result<(), SetupError> {
+    run_checked(runner, apt_install_command(staged)).map(|_| ())
+}
+
+fn apt_install_command(staged: &StagedPackage) -> Command {
+    Command::new(
+        "/usr/bin/apt-get",
+        [
+            "install".to_owned(),
+            "--yes".to_owned(),
+            "--no-install-recommends".to_owned(),
+            "-o".to_owned(),
+            "Dpkg::Options::=--force-confold".to_owned(),
+            staged.path().display().to_string(),
+        ],
     )
-    .map(|_| ())
+    .with_env("DEBIAN_FRONTEND", "noninteractive")
+}
+
+fn ensure_package_installed(
+    paths: &InstallPaths,
+    runner: &mut dyn CommandRunner,
+    staged: &StagedPackage,
+    version: &str,
+    architecture: &str,
+) -> Result<(), SetupError> {
+    if installed_package_matches(paths, runner, staged, version, architecture)? {
+        eprintln!(
+            "vonk-spark-setup: accepted package and agent binary already installed; resuming"
+        );
+        return Ok(());
+    }
+    install_package(runner, staged)
+}
+
+fn installed_package_matches(
+    paths: &InstallPaths,
+    runner: &mut dyn CommandRunner,
+    staged: &StagedPackage,
+    version: &str,
+    architecture: &str,
+) -> Result<bool, SetupError> {
+    let query = runner
+        .run(Command::new(
+            "/usr/bin/dpkg-query",
+            [
+                "-W",
+                "-f=${db:Status-Abbrev}|${Version}|${Architecture}",
+                "vonk-forge-agent",
+            ],
+        ))
+        .map_err(SetupError::Command)?;
+    let expected = format!("ii |{version}|{architecture}");
+    if !query.success || String::from_utf8_lossy(&query.stdout).trim_end() != expected {
+        return Ok(false);
+    }
+    if !safe_existing_file(&paths.agent, paths.required_owner)? {
+        return Ok(false);
+    }
+    let extracted = secure_tempdir("vonk-spark-package-check.")?;
+    let status = ProcessCommand::new("/usr/bin/dpkg-deb")
+        .arg("--extract")
+        .arg(staged.path())
+        .arg(extracted.path())
+        .env_clear()
+        .env("LANG", "C.UTF-8")
+        .env("LC_ALL", "C.UTF-8")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|_| SetupError::PackageFormat)?;
+    if !status.success() {
+        return Err(SetupError::PackageFormat);
+    }
+    let relative_agent = Path::new(AGENT_PATH)
+        .strip_prefix("/")
+        .map_err(|_| SetupError::PrivilegedInput)?;
+    let packaged_agent = extracted.path().join(relative_agent);
+    if !matches!(fs::symlink_metadata(&packaged_agent), Ok(metadata) if metadata.file_type().is_file())
+    {
+        return Ok(false);
+    }
+    let expected_digest = file_digest(&packaged_agent)?;
+    match verify_regular_file_digest(&paths.agent, &expected_digest, MAX_PACKAGE_BYTES) {
+        Ok(()) => Ok(true),
+        Err(SetupError::PackageDigest | SetupError::UnsafePackage) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn file_digest(path: &Path) -> Result<String, SetupError> {
+    let mut file = File::open(path).map_err(|_| SetupError::PackageFormat)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|_| SetupError::PackageFormat)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(hex::encode(digest.finalize()))
 }
 
 fn upgrade_existing(
     paths: &InstallPaths,
     runner: &mut dyn CommandRunner,
     staged: &StagedPackage,
+    version: &str,
+    architecture: &str,
 ) -> Result<(), SetupError> {
-    install_package(runner, staged)?;
+    ensure_package_installed(paths, runner, staged, version, architecture)?;
     reset_agent_failure(paths, runner)?;
     enable_runtime_units(paths, runner)?;
     run_checked(
@@ -1749,12 +1927,19 @@ fn verify_sustained_readiness(
     paths: &InstallPaths,
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
+    let started = Instant::now();
     let mut healthy = 0_u8;
     let mut pid = None;
     let attempts = READINESS_MAX_WAIT
         .as_secs()
         .div_ceil(READINESS_SAMPLE_INTERVAL.as_secs());
     for attempt in 0..attempts {
+        if attempt > 0 && attempt % 5 == 0 {
+            eprintln!(
+                "vonk-spark-setup: phase=readiness elapsed={}s",
+                started.elapsed().as_secs()
+            );
+        }
         let active = run_checked(
             runner,
             Command::new(
@@ -2896,12 +3081,108 @@ impl Prompt for TtyPrompt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn foreground_sudo_authentication_uses_controlling_terminal() {
+        if let Ok(sudo) = std::env::var("VONK_SUDO_PTY_CHILD") {
+            authenticate_sudo_foreground(Path::new(&sudo)).unwrap();
+            if std::env::var_os("VONK_SUDO_PTY_VERIFY_NONINTERACTIVE").is_some() {
+                assert!(
+                    ProcessCommand::new(&sudo)
+                        .args(["-n", "/usr/bin/true"])
+                        .stdin(Stdio::null())
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+            }
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let sudo = directory.path().join("sudo");
+        let ticket = directory.path().join("ticket");
+        fs::write(&sudo, format!("#!/bin/sh\n[ \"$1\" = -v ] || exit 20\n[ -t 0 ] || exit 21\nIFS= read -r password </dev/tty\n[ \"$password\" = test-password ] || exit 22\nprintf ready > '{}'\n", ticket.display())).unwrap();
+        fs::set_permissions(&sudo, fs::Permissions::from_mode(0o700)).unwrap();
+        let command = format!(
+            "{} --exact tests::foreground_sudo_authentication_uses_controlling_terminal",
+            std::env::current_exe().unwrap().display()
+        );
+        let mut child = ProcessCommand::new("/usr/bin/script")
+            .args(["-q", "-e", "-c", &command, "/dev/null"])
+            .env("VONK_SUDO_PTY_CHILD", &sudo)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"test-password\n")
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        assert_eq!(fs::read(&ticket).unwrap(), b"ready");
+    }
     use std::collections::VecDeque;
     use std::os::unix::fs::PermissionsExt;
     use std::time::Instant;
     use tempfile::tempdir;
 
     struct Values(VecDeque<String>);
+
+    struct AptRunner {
+        outcomes: VecDeque<CommandOutput>,
+        commands: Vec<Command>,
+    }
+
+    impl CommandRunner for AptRunner {
+        fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
+            self.commands.push(command);
+            Ok(self.outcomes.pop_front().unwrap())
+        }
+    }
+
+    #[test]
+    fn apt_refreshes_indexes_only_for_dependency_resolution_failure() {
+        let staged = StagedPackage {
+            _directory: tempdir().unwrap(),
+            path: PathBuf::from("/tmp/accepted.deb"),
+        };
+        let failed = CommandOutput {
+            success: false,
+            stdout: b"dpkg returned an error code".to_vec(),
+        };
+        let mut runner = AptRunner {
+            outcomes: [failed].into(),
+            commands: Vec::new(),
+        };
+        assert!(install_package(&mut runner, &staged).is_err());
+        assert_eq!(runner.commands.len(), 1);
+
+        let dependencies = CommandOutput {
+            success: false,
+            stdout: b"The following packages have unmet dependencies".to_vec(),
+        };
+        let mut runner = AptRunner {
+            outcomes: [
+                dependencies,
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+            ]
+            .into(),
+            commands: Vec::new(),
+        };
+        install_package(&mut runner, &staged).unwrap();
+        assert_eq!(
+            runner
+                .commands
+                .iter()
+                .map(|command| command.args[0].as_str())
+                .collect::<Vec<_>>(),
+            ["install", "update", "install"]
+        );
+    }
 
     fn enrollment_bootstrap_document() -> serde_json::Value {
         serde_json::json!({

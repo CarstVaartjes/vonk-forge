@@ -44,9 +44,9 @@ still exists, start the flow from that node's details so the grant is bound to
 its ID. After a complete controller database reset, use the Fleet-header action;
 the grant is then bound to the node ID in the Spark's signed CSR. Do not rename
 credential files, edit `setup-state`, or manually restart the service.
-If readiness fails after certificate replacement, rerun the command: the setup
-marker remains in recovery state and the installer repairs the service without
-asking for another pairing token.
+If readiness fails after certificate replacement, rerun the channel command
+without `--enroll`: the setup marker remains in recovery state and the
+installer repairs the service without asking for another pairing token.
 
 ## Forensic identity evidence
 

@@ -208,11 +208,16 @@ struct RecordingRunner {
     commands: Vec<Command>,
     outputs: VecDeque<CommandOutput>,
     fail_reset_failed: bool,
+    installed_identity: bool,
 }
 
 impl CommandRunner for RecordingRunner {
     fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
-        let default = if self.fail_reset_failed
+        let default = if self.installed_identity
+            && command.program == std::path::Path::new("/usr/bin/dpkg-query")
+        {
+            CommandOutput::success(b"ii |1.0.0|arm64".to_vec())
+        } else if self.fail_reset_failed
             && command.program == std::path::Path::new("/usr/bin/systemctl")
             && command.args.first().map(String::as_str) == Some("reset-failed")
         {
@@ -352,6 +357,12 @@ fn package_with_identity(
 ) {
     let root = path.parent().unwrap().join("package");
     fs::create_dir_all(root.join("DEBIAN")).unwrap();
+    fs::create_dir_all(root.join("usr/lib/vonk-forge")).unwrap();
+    fs::write(
+        root.join("usr/lib/vonk-forge/vonk-agent"),
+        b"installed agent",
+    )
+    .unwrap();
     fs::write(
         root.join("DEBIAN/control"),
         format!(
@@ -778,6 +789,7 @@ fn fresh_preparation_discovers_and_prompts_before_a_stdin_only_sudo_handoff() {
     assert_eq!(root_runner.commands.len(), 1);
     let sudo = &root_runner.commands[0];
     assert_eq!(sudo.program, std::path::Path::new("/usr/bin/sudo"));
+    assert_eq!(sudo.args.first().map(String::as_str), Some("-n"));
     assert!(sudo.args.iter().all(|argument| argument != TOKEN));
     assert!(sudo.env.values().all(|value| value != TOKEN));
     assert!(
@@ -807,6 +819,35 @@ fn fresh_preparation_discovers_and_prompts_before_a_stdin_only_sudo_handoff() {
             .all(|argument| !argument.contains("/dev/tty"))
     );
     assert!(sudo.args.iter().all(|argument| !argument.contains("curl")));
+}
+
+#[test]
+fn expired_sudo_ticket_fails_before_the_frame_can_be_applied() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let (prepared, _) = fresh_prepared(temporary.path(), &install_paths);
+    let mut runner = RecordingRunner {
+        outputs: [
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+            },
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+            },
+        ]
+        .into(),
+        ..Default::default()
+    };
+    let result =
+        handoff_to_root_with_authority(&prepared, &mut runner, &ReleaseAuthority::canonical());
+    assert!(
+        matches!(result, Err(SetupError::Command(message)) if message.contains("sudo authorization expired"))
+    );
+    assert_eq!(runner.commands.len(), 2);
+    assert_eq!(runner.commands[1].args, ["-n", "-v"]);
+    assert!(runner.commands[1].stdin.is_empty());
 }
 
 #[test]
@@ -868,12 +909,17 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
         apply_runner.commands[0].program,
         std::path::Path::new("/usr/bin/apt-get")
     );
-    assert_eq!(apply_runner.commands[0].args, ["update"]);
     assert!(
-        apply_runner.commands[1]
+        apply_runner.commands[0]
             .args
             .iter()
             .any(|argument| argument == "install")
+    );
+    assert!(
+        apply_runner
+            .commands
+            .iter()
+            .all(|command| command.args != ["update"])
     );
     let pair = apply_runner
         .commands
@@ -992,6 +1038,37 @@ fn pairing_recovery_prompts_once_before_sudo_and_uses_the_same_narrow_apply_path
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
         "paired-v1\n"
     );
+
+    // A matching dpkg version alone is insufficient: a changed installed
+    // binary must make the next run repair the accepted package.
+    fs::write(&install_paths.agent, b"changed installed agent").unwrap();
+    let repair = prepare_setup(
+        &request(temporary.path()),
+        &install_paths,
+        &mut NoPrompt,
+        &mut RecordingRunner::default(),
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+    let mut repair_handoff = RecordingRunner::default();
+    handoff_to_root_with_authority(&repair, &mut repair_handoff, &ReleaseAuthority::canonical())
+        .unwrap();
+    let mut repair_runner = RecordingRunner {
+        installed_identity: true,
+        ..Default::default()
+    };
+    apply_setup_from(
+        repair_handoff.commands[0].stdin.as_slice(),
+        repair.package_path(),
+        repair.executable_path(),
+        &install_paths,
+        &mut repair_runner,
+        CallerIdentity::sudo_root(1000),
+    )
+    .unwrap();
+    assert!(repair_runner.commands.iter().any(|command| command.program
+        == std::path::Path::new("/usr/bin/apt-get")
+        && command.args.first().map(String::as_str) == Some("install")));
 }
 
 #[test]
@@ -1236,7 +1313,10 @@ fn failed_post_pair_readiness_is_resumed_without_another_token() {
             .windows(TOKEN.len())
             .any(|value| value == TOKEN.as_bytes())
     );
-    let mut retry_apply_runner = RecordingRunner::default();
+    let mut retry_apply_runner = RecordingRunner {
+        installed_identity: true,
+        ..Default::default()
+    };
     apply_setup_from(
         retry_handoff_runner.commands[0].stdin.as_slice(),
         retry.package_path(),
@@ -1252,6 +1332,12 @@ fn failed_post_pair_readiness_is_resumed_without_another_token() {
             .commands
             .iter()
             .all(|command| !command.args.iter().any(|argument| argument == "pair"))
+    );
+    assert!(
+        retry_apply_runner
+            .commands
+            .iter()
+            .all(|command| command.program != std::path::Path::new("/usr/bin/apt-get"))
     );
     assert_eq!(
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
@@ -1681,6 +1767,7 @@ fn successful_pairing_enters_recovery_before_later_service_startup() {
     let mut runner = RecordingRunner {
         commands: Vec::new(),
         outputs: [
+            CommandOutput::success_empty(),
             CommandOutput::success_empty(),
             CommandOutput::success_empty(),
             CommandOutput::success_empty(),
