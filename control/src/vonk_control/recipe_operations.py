@@ -1659,15 +1659,6 @@ class RecipeOperationService:
                     child.retry_due_at = None
                     child.updated_at = now
                 retired = True
-            if kind == "recipe.stop" and retired and not _active_owned_workload_jobs(
-                session, kind, owner_id
-            ):
-                run = session.get(RecipeRun, owner_id, with_for_update=True)
-                if run is not None and run.state == "stopping" and run.route_state == "withdrawn":
-                    # Keep route withdrawn and reservations until an exact new
-                    # stop observes/finishes the live workload.
-                    run.state = "lost"
-                    run.updated_at = now
         return retired
 
     def preview_stop(self, run_id: str) -> StopPlan:
@@ -3234,22 +3225,12 @@ class RecipeOperationService:
             }
             for reservation in reservations
         )
-        prospective_run_state = run.state
-        if not lock and run.state == "stopping" and run.route_state == "withdrawn":
-            active_stops = _active_owned_workload_jobs(session, "recipe.stop", run_id)
-            scope = tuple(sorted(node.node_id for node in nodes))
-            if active_stops and all(
-                tuple(sorted(job.targets)) == scope
-                and _unissued_workload_children(session, job) is not None
-                for job in active_stops
-            ):
-                prospective_run_state = "lost"
         return stop_plan(
             run_id=run.id,
             installation_id=run.installation_id,
             recipe_revision_id=revision.id,
             alias=run.alias,
-            run_state=prospective_run_state,
+            run_state=run.state,
             route_state=run.route_state,
             route_generation=run.route_generation,
             route_digest=run.route_digest,

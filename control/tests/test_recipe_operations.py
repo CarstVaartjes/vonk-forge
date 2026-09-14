@@ -34,6 +34,7 @@ from vonk_agent_protocol import (
     recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.host_helper import HostHelperSignature
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
@@ -3048,7 +3049,7 @@ def test_new_stop_intent_replans_after_unissued_old_stop(tmp_path: Path) -> None
         session.get(AgentNode, nodes[0]).workload_intent_ordinal = 4
     prospective = service.preview_stop(run.owner_id)
     assert prospective.allowed
-    assert prospective.run_state == "lost"
+    assert prospective.run_state == "stopping"
     assert service.assess_superseded_unissued("recipe.stop", run.owner_id)
     assert service.reconcile_superseded_unissued("recipe.stop", run.owner_id, 4)
     assert service.preview_stop(run.owner_id).plan_digest == prospective.plan_digest
@@ -3095,6 +3096,9 @@ def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
             state="running",
         ))
         session.get(AgentNode, nodes[0]).workload_intent_ordinal = 4
+        AgentJobService.request_superseded_workload_cancellation_in_session(
+            session, nodes, 4, NOW
+        )
     assert not service.assess_superseded_unissued("recipe.stop", run.owner_id)
     assert not service.reconcile_superseded_unissued("recipe.stop", run.owner_id, 4)
     pending = service.assess_superseded_issued("recipe.stop", run.owner_id, 4)
@@ -3102,9 +3106,16 @@ def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
     assert pending.job_id == old.id
     assert pending.failure_kind.value == "uncertain-effect"
     assert pending.observe_due_at <= pending.observation_deadline
-    assert not service.preview_stop(run.owner_id).allowed
+    fresh = service.preview_stop(run.owner_id)
+    assert fresh.allowed and fresh.run_state == "stopping"
+    replacement = service.stop(
+        run.owner_id, plan_digest=fresh.plan_digest,
+        actor="admin", request_id="issued-new-stop", workload_intent_ordinal=4,
+    )
     with sessions() as session:
         assert session.get(Job, old.id).state == "running"
+        assert session.get(Job, old.id).result["cancel_requested"] is True
+        assert session.get(Job, replacement.id).payload["workload_intent_ordinal"] == 4
         assert session.get(RecipeRun, run.owner_id).state == "stopping"
 
 
