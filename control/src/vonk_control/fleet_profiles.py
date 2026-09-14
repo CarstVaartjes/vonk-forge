@@ -2036,9 +2036,11 @@ class FleetProfileService:
                 attempt = prior.attempt + 1
                 if self._superseding_intent(session, parent, prior):
                     raise FleetProfileConflict("Application has been superseded by another workload intent")
-            workload_intent_ordinal = max(
-                (node.workload_intent_ordinal for node in scope_nodes), default=0
-            ) + 1 if scope_nodes else None
+            workload_intent_ordinal = (
+                max((node.workload_intent_ordinal for node in scope_nodes), default=0) + 1
+                if scope_nodes and preview.steps
+                else None
+            )
             if workload_intent_ordinal is not None:
                 for node in scope_nodes:
                     node.workload_intent_ordinal = workload_intent_ordinal

@@ -1113,7 +1113,12 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
         actor="admin",
     )
     assert application.state == "succeeded"
-    assert adapter.cancellations == [((_node_id(1), _node_id(2)), 1)]
+    assert adapter.cancellations == []
+    with sessions() as session:
+        assert [
+            node.workload_intent_ordinal
+            for node in session.scalars(select(AgentNode).order_by(AgentNode.node_id))
+        ] == [0, 0]
     assert application.result is not None
     assert application.result.changed is False
     assert application.result.completed_steps == 0
@@ -2174,7 +2179,20 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
         ),
         actor="admin",
     )
-    assert service.preview(profile_a.id).steps == []
+    no_op = service.preview(profile_a.id)
+    assert no_op.steps == []
+    retained = service.apply(
+        profile_a.id,
+        plan_digest=no_op.plan_digest,
+        request_key=_uuid(802),
+        actor="admin",
+    )
+    assert retained.state == "succeeded"
+    with sessions() as session:
+        assert [
+            node.workload_intent_ordinal
+            for node in session.scalars(select(AgentNode).order_by(AgentNode.node_id))
+        ] == [0, 0]
     switch_to_b = service.preview(profile_b.id)
     assert switch_to_b.scope.node_ids == [_node_id(1), _node_id(2)]
     assert switch_to_b.scope.idle_node_ids == [_node_id(2)]
