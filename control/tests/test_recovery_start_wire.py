@@ -252,6 +252,6 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         assert placement["local_address"] == child.payload["local_address"]
         assert placement["master_address"] == child.payload["master_address"]
         assert placement["master_port"] == child.payload["master_port"]
-        assert parsed.compiled_execution_plan["security"]["network_mode"] == "bridge"
+        assert parsed.compiled_execution_plan["security"]["network_mode"] == "host"
         assert "expected_bytes" not in child.payload
         assert "kind" not in child.payload

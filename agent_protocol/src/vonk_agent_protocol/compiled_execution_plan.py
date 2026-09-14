@@ -352,7 +352,7 @@ class CompiledSecurityMount(_Strict):
 class CompiledSecurity(_Strict):
     devices: list[str]
     capabilities: list[str]
-    network_mode: Literal["none", "bridge"]
+    network_mode: Literal["none", "bridge", "host"]
     host_network: StrictBool
     privileged: StrictBool
     user: str
@@ -363,7 +363,7 @@ class CompiledSecurity(_Strict):
     @model_validator(mode="after")
     def security_is_bounded(self) -> CompiledSecurity:
         if (
-            self.host_network
+            self.host_network != (self.network_mode == "host")
             or self.privileged
             or not self.read_only_root
             or not self.no_new_privileges
@@ -625,10 +625,20 @@ class CompiledExecutionPlan(_Strict):
                 raise ValueError("compiled artifact digest sizes conflict")
         if sum(by_digest.values()) != self.identity.model_artifact_bytes:
             raise ValueError("compiled artifact bytes do not match identity")
+        native_fabric = placement.world_size > 1 and placement.master_port is not None
+        if native_fabric and (
+            self.topology.node_count < 2
+            or placement.local_address is None
+            or placement.master_address is None
+            or self.endpoint is None
+            or self.security.devices != ["nvidia.com/gpu=all"]
+        ):
+            raise ValueError("native fabric placement is incomplete")
         expected_network = (
-            "bridge"
+            "host"
+            if native_fabric
+            else "bridge"
             if placement.endpoint_address is not None
-            or placement.master_port is not None
             else "none"
         )
         if self.security.network_mode != expected_network:

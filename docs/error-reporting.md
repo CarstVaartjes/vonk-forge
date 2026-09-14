@@ -79,6 +79,12 @@ log access. Startup failures also preserve the helper's stable rejection code
 when no container output is available. These diagnostics do not alter launch
 timing, authorization, or cleanup behavior.
 
+Native fabric launch failures preserve `runtime_fabric_firewall_rejected` when
+the configured firewall does not authorize the placement, and
+`runtime_fabric_unavailable` when there is no unique active RoCE v2 binding.
+These are terminal launch rejections, not permission to select another network
+interface. Kernel observation I/O failures retain the helper I/O classification.
+
 ## Implementation plan
 
 1. Use `ErrorContext` in the Python client for generated and direct HTTP

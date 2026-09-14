@@ -123,9 +123,13 @@ def _bind_compiled_execution_plan(
     )
     security = payload.get("security")
     if isinstance(security, dict):
+        native_fabric = world_size > 1 and master_port is not None
+        security["host_network"] = native_fabric
         security["network_mode"] = (
-            "bridge"
-            if endpoint_address is not None or master_port is not None
+            "host"
+            if native_fabric
+            else "bridge"
+            if endpoint_address is not None
             else "none"
         )
     topology = payload.get("topology")

@@ -118,6 +118,10 @@ impl HelperRejection {
             OperationError::RuntimeImageIdentityInvalid => ("runtime_image_identity_invalid", None),
             OperationError::RuntimeImageReceiptFailed => ("runtime_image_receipt_failed", None),
             OperationError::RuntimeProcessExited { .. } => ("runtime_process_exited", None),
+            OperationError::RuntimeFabricUnavailable => ("runtime_fabric_unavailable", None),
+            OperationError::RuntimeFabricFirewallRejected => {
+                ("runtime_fabric_firewall_rejected", None)
+            }
             OperationError::InvalidOperation => ("operation_invalid", None),
             OperationError::UnsafePath => ("operation_unsafe_path", None),
             OperationError::InvalidArtifact => ("operation_invalid_artifact", None),

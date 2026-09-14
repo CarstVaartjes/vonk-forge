@@ -406,7 +406,9 @@ def _placement(
         "world_size": world_size,
         "local_address": None,
         "master_address": None,
-        "master_port": 29500 if world_size > 1 else None,
+        # Installation has no rendezvous authority. Bind the complete fabric
+        # placement together in the signed start request.
+        "master_port": None,
         "port": port,
         "reserved_memory_bytes": reserved,
     }

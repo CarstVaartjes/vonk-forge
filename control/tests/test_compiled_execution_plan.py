@@ -673,6 +673,47 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
     assert validate_compiled_launch_payload(started)["schema_version"] == 2
 
 
+@pytest.mark.parametrize("rank", [0, 1])
+def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) -> None:
+    payload = _compile().to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    _mapping(payload["topology"]).update(
+        name="dual", mode="distributed", node_count=2, backend="mp"
+    )
+    _mapping(payload["security"])["devices"] = ["nvidia.com/gpu=all"]
+    started = _bind_compiled_execution_plan(
+        payload,
+        placement=RecipeStartPlacement(
+            node_id="spk_" + "a" * 32,
+            rank=rank,
+            role="entrypoint" if rank == 0 else "worker",
+            port=8000,
+            reserved_memory_bytes=4096,
+            fabric_address=f"192.168.100.{10 + rank}",
+        ),
+        endpoint_address="192.0.2.10" if rank == 0 else None,
+        master_address="192.168.100.10",
+        master_port=29500,
+        world_size=2,
+    )
+    wire = WireCompiledExecutionPlan.parse(started)
+    assert wire.security.network_mode == "host"
+    assert wire.security.host_network is True
+    assert wire.runtime.placement.local_address == f"192.168.100.{10 + rank}"
+
+
 def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
     tmp_path: Path,
 ) -> None:

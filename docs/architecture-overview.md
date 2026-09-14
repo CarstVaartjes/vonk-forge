@@ -178,12 +178,19 @@ instead, the controller signs an expiring grant bound to one canonical runtime
 request, and a root helper compiles only the allow-listed Docker operation.
 The helper verifies the imported image, Linux/ARM64 platform, numeric non-root
 user, runtime-interface label, resource limits, mounts, ports, and optional
-`--device nvidia.com/gpu=all` request. Bridge mode remains the default. A connected multi-node
-recipe may select one compiled direct-fabric shape with host networking, host
-IPC, `/dev/infiniband`, and fixed memlock/stack limits; the helper requires the
-complete shape plus the host-firewall preflight. It rejects every partial or
-additional host privilege, arbitrary devices, privileged containers,
-additional capabilities, and socket mounts.
+`--device nvidia.com/gpu=all` request. Single-node endpoints use bridge mode.
+A signed distributed serving placement uses one native fabric shape: host
+networking, the exact `/dev/infiniband` device mount, fixed memlock/stack limits,
+private IPC, and bounded shared memory. It has no Docker port publications.
+The helper first checks the root-owned firewall configuration against the
+requested local address, master, rendezvous port and endpoint port.
+It then resolves the unique active RoCE v2 GID for that address and interface
+from kernel sysfs and supplies the NCCL, Gloo and tensor-parallel interface
+settings. Those derived arguments participate in the container identity used
+by both startup and later inspection. Recipes cannot override the selected
+fabric. Missing or ambiguous observations and firewall failures reject launch;
+permission errors remain errors. Privileged containers, host IPC, arbitrary
+devices, added capabilities, and socket mounts remain rejected.
 
 Public builds use a per-build hostname-aware egress boundary. The build joins
 only an internal rootless Podman network. On Podman 4.9 the build enters
@@ -237,8 +244,9 @@ child, measured from its persisted creation time. Progress updates and worker
 restarts do not reset that deadline. A completed probe still undergoes the
 normal freshness, fingerprint and requirements checks; a pending probe that
 times out fails the parent before any expensive phase is dispatched.
-Multi-node v1 uses ordinary TCP over the declared direct-fabric
-addresses; it does not claim GPUDirect RDMA support. The resulting workload
+Distributed serving exposes the declared native fabric to NCCL/RoCE.
+This is an execution contract, not proof of physical NCCL performance or
+GPUDirect RDMA support; those require the matching hardware acceptance. The resulting workload
 route is published to LiteLLM only after every
 mapped node has acknowledged the same build and run evidence. The global
 catalog, when enabled, stores recipe metadata and source bundles; it does not

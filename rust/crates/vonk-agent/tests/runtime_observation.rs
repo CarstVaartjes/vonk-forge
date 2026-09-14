@@ -18,17 +18,22 @@ impl ProcessRunner for NoProcess {
     }
 }
 
-fn schema2_dual_plan() -> CompiledExecutionPlan {
-    let mut value: Value = serde_json::from_str(include_str!(
+fn schema2_single_plan() -> CompiledExecutionPlan {
+    serde_json::from_str(include_str!(
         "../../../../control/tests/fixtures/compiled_workload_v2.json"
     ))
-    .unwrap();
+    .unwrap()
+}
+
+fn schema2_dual_plan() -> CompiledExecutionPlan {
+    let mut value = serde_json::to_value(schema2_single_plan()).unwrap();
     value["runtime"]["placement"] = json!({
         "endpoint_address": null, "rank": 1, "role": "worker", "world_size": 2,
         "local_address": "192.168.100.11", "master_address": "192.168.100.10",
         "master_port": 29500, "port": 8000, "reserved_memory_bytes": 68719476736_u64
     });
-    value["security"]["network_mode"] = json!("bridge");
+    value["security"]["network_mode"] = json!("host");
+    value["security"]["host_network"] = json!(true);
     value["topology"] = json!({
         "name": "dual", "mode": "distributed", "backend": "nccl",
         "node_count": 2, "world_size": 2, "rank": 1, "role": "worker"
@@ -69,30 +74,27 @@ fn identity(plan: &CompiledExecutionPlan) -> RecipeRunStartIdentity {
 
 #[test]
 fn unbound_install_to_bound_start_retains_exact_inspection_arguments() {
+    assert_unbound_install_retains_inspection(schema2_single_plan());
+    assert_unbound_install_retains_inspection(schema2_dual_plan());
+}
+
+fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan) {
     let root = tempdir().unwrap();
-    let mut installed = schema2_dual_plan();
-    installed.topology.name = "solo".into();
-    installed.topology.mode = "single".parse().unwrap();
-    installed.topology.backend = "local".into();
-    installed.topology.node_count = 1;
-    installed.topology.world_size = 1;
-    installed.topology.rank = 0;
-    installed.topology.role = "entrypoint".into();
-    installed.runtime.placement.rank = 0;
-    installed.runtime.placement.role = "entrypoint".into();
-    installed.runtime.placement.world_size = 1;
+    if started.topology.world_size == 1 {
+        started.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+        started.security.network_mode = "bridge".parse().unwrap();
+    }
+    let mut installed = started.clone();
     installed.runtime.placement.endpoint_address = None;
     installed.runtime.placement.local_address = None;
     installed.runtime.placement.master_address = None;
     installed.runtime.placement.master_port = None;
     installed.security.network_mode = "none".parse().unwrap();
+    installed.security.host_network = false;
     installed.validate().unwrap();
     persist_plan(root.path(), &installed);
 
-    let mut started = installed.clone();
-    started.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
     started.runtime.placement.reserved_memory_bytes += 1024;
-    started.security.network_mode = "bridge".parse().unwrap();
     started.validate().unwrap();
     let runtime = OciRuntime {
         runner: &NoProcess,
@@ -249,7 +251,7 @@ fn observation_errors_preserve_safe_category_without_storage_details() {
 #[test]
 fn retained_job_stop_accepts_only_a_timeout_within_installed_limit() {
     let root = tempdir().unwrap();
-    let mut installed = schema2_dual_plan();
+    let mut installed = schema2_single_plan();
     installed.endpoint = None;
     installed.runtime.placement.port = None;
     installed.security.mounts.push(
@@ -353,6 +355,7 @@ fn unbound_compiled_placement_requires_addresses_only_at_execution() {
     plan.runtime.placement.master_address = None;
     plan.runtime.placement.master_port = None;
     plan.security.network_mode = "none".parse().unwrap();
+    plan.security.host_network = false;
     plan.validate().unwrap();
     assert!(plan.runtime.placement.validate_bound().is_err());
     let bound = schema2_dual_plan();
