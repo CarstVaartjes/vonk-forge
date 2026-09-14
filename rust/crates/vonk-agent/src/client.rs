@@ -1947,13 +1947,7 @@ fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
         .and_then(|value| value.to_str().ok())
         .filter(|value| valid_error_code(value))
         .map(str::to_owned);
-    let mut error = controller_error(
-        response.status(),
-        endpoint,
-        &operation,
-        request_id,
-        code,
-    );
+    let mut error = controller_error(response.status(), endpoint, &operation, request_id, code);
     error.retry_after_seconds = response
         .headers()
         .get(reqwest::header::RETRY_AFTER)
@@ -1961,7 +1955,8 @@ fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
         .and_then(|value| {
             value.parse::<u32>().ok().or_else(|| {
                 let deadline = chrono::DateTime::parse_from_rfc2822(value).ok()?;
-                let delay = (deadline.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
+                let delay =
+                    (deadline.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
                 u32::try_from(delay.max(0)).ok()
             })
         });

@@ -789,9 +789,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             result = Some(Ok(value));
                             break;
                         }
-                        Err(error) if error.retryable()
-                            && error.retry_after_seconds().is_none()
-                            && attempt < 2 => {
+                        Err(error)
+                            if error.retryable()
+                                && error.retry_after_seconds().is_none()
+                                && attempt < 2 =>
+                        {
                             tokio::time::sleep(Duration::from_millis(100 * (attempt + 1) as u64))
                                 .await;
                         }
@@ -865,9 +867,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     if let Some(seconds) = error.retry_after_seconds() {
                         body["retry_after_seconds"] = json!(seconds);
                     }
-                    ExecutionResult { state: "failed", body }
-                },
-                },
+                    ExecutionResult {
+                        state: "failed",
+                        body,
+                    }
+                }
             };
         }
         let request = match RecipeOperationRequest::parse(claim) {
@@ -1767,9 +1771,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let acl_transition = if collective_readiness {
                     None
                 } else {
-                    match self.runtime.begin_installation_acl_transition(&installation_id) {
+                    match self
+                        .runtime
+                        .begin_installation_acl_transition(&installation_id)
+                    {
                         Ok(transition) => Some(transition),
-                        Err(_) => return failed("installed model custody changed before runtime start"),
+                        Err(_) => {
+                            return failed("installed model custody changed before runtime start");
+                        }
                     }
                 };
                 if collective_readiness {
@@ -1797,12 +1806,19 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     );
                 }
                 if let Some(transition) = acl_transition {
-                    if self.runtime.finish_installation_acl_transition(&installation_id, transition).is_err() {
+                    if self
+                        .runtime
+                        .finish_installation_acl_transition(&installation_id, transition)
+                        .is_err()
+                    {
                         let _ = self
                             .execute_host_runtime(
                                 claim,
                                 HostRuntimeAction::Stop,
-                                vec![run_id.clone(), spec.lifecycle.stop_timeout_seconds.to_string()],
+                                vec![
+                                    run_id.clone(),
+                                    spec.lifecycle.stop_timeout_seconds.to_string(),
+                                ],
                             )
                             .await;
                         let _ = self.runtime.complete_stop(&run_id);
@@ -2704,7 +2720,11 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
     if let Some(kind) = executed.body.get("failure_kind").and_then(Value::as_str) {
         body["failure_kind"] = Value::String(kind.to_owned());
     }
-    if let Some(seconds) = executed.body.get("retry_after_seconds").and_then(Value::as_u64) {
+    if let Some(seconds) = executed
+        .body
+        .get("retry_after_seconds")
+        .and_then(Value::as_u64)
+    {
         body["retry_after_seconds"] = json!(seconds);
     }
     for field in ["stage", "diagnostic"] {

@@ -403,14 +403,19 @@ impl StateStore {
                AND r.operation_id IS NULL ORDER BY o.rowid LIMIT 16",
         )?;
         let values = statement
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })?
             .collect::<Result<Vec<_>, _>>()?;
-        values.into_iter().map(|(operation, value)| {
-            let operation = operation.parse().map_err(|_| StateError::ResultState)?;
-            let result: AgentResult = parse_strict(&value)?;
-            result.validate_for_operation(&operation)?;
-            Ok((operation, result))
-        }).collect()
+        values
+            .into_iter()
+            .map(|(operation, value)| {
+                let operation = operation.parse().map_err(|_| StateError::ResultState)?;
+                let result: AgentResult = parse_strict(&value)?;
+                result.validate_for_operation(&operation)?;
+                Ok((operation, result))
+            })
+            .collect()
     }
 
     pub fn mark_reconciled(&mut self, result: &AgentResult) -> Result<(), StateError> {
@@ -420,7 +425,11 @@ impl StateStore {
              SELECT operation_id,attempt,fence FROM operations
              WHERE operation_id=?1 AND attempt=?2 AND fence=?3
                AND state='completed' AND result_acknowledged=1",
-            params![result.operation_id.to_string(), result.attempt, result.fence.to_string()],
+            params![
+                result.operation_id.to_string(),
+                result.attempt,
+                result.fence.to_string()
+            ],
         )?;
         Ok(())
     }
