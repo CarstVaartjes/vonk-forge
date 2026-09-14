@@ -3155,23 +3155,43 @@ def test_parked_start_with_an_established_run_completes_without_an_operator(
     assert start_index < len(completed)
 
 
-def test_parked_start_without_an_established_effect_still_fails(tmp_path: Path) -> None:
-    """An unobserved effect keeps its real failure.
-
-    A retry policy must never conceal a permanently bad model or runtime, so a
-    parked start whose run is not established stays a reported failure.
-    """
+def test_parked_start_without_an_established_effect_expires(tmp_path: Path) -> None:
+    """Read-only observation has a finite budget and cannot invent success."""
 
     service, operation, _start_index = _parked_start_switch(tmp_path, healthy=False)
-
-    for _ in range(4):
-        if service.get(operation.operation_id).state not in {"queued", "running"}:
-            break
-        service.tick()
+    now = [NOW]
+    service._clock = lambda: now[0]
+    assert service.tick() is True
+    now[0] += timedelta(seconds=121)
+    assert service.tick() is True
 
     view = service.get(operation.operation_id)
     assert view.state == "failed"
-    assert "waiting-for-operator" in (view.status_reason or "")
+    assert "start-observation-expired" in (view.status_reason or "")
+
+
+def test_parked_start_still_progressing_is_observed_before_final_success(
+    tmp_path: Path,
+) -> None:
+    """A lost start result during a real load is not a failed launch."""
+
+    service, operation, _ = _parked_start_switch(tmp_path, healthy=False)
+    now = [NOW]
+    service._clock = lambda: now[0]
+
+    assert service.tick() is True
+    held = service.get(operation.operation_id)
+    assert held.state == "running"
+    assert held.result is not None
+    assert held.result.child_operation_id is not None
+    assert held.result.observation_due_at is not None
+
+    assert service.tick() is False
+    service._lifecycle._healthy = True
+    now[0] += timedelta(seconds=5)
+    for _ in range(4):
+        service.tick()
+    assert service.get(operation.operation_id).state == "succeeded"
 
 
 def test_scoped_cleanup_is_allowed_without_launch_readiness(tmp_path: Path) -> None:

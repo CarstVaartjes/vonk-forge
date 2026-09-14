@@ -15,7 +15,7 @@ import json
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, TypeGuard, runtime_checkable
 
 import httpx
@@ -4525,6 +4525,11 @@ class RunSwitchOperationService:
                 )
                 session.commit()
                 return True
+            observation_due = progress.get("observation_due_at")
+            if isinstance(observation_due, str) and now < _aware(
+                datetime.fromisoformat(observation_due)
+            ):
+                return False
             raw_phase_index = progress.get("phase_index", 0)
             raw_item_index = progress.get("item_index", 0)
             child_id = progress.get("child_operation_id")
@@ -4617,6 +4622,13 @@ class RunSwitchOperationService:
                     # ordinary success path records the checkpoint the missing
                     # acknowledgement would have produced.
                     child = _EstablishedEffect(child, established)
+                elif _start_still_progressing(
+                    self._lifecycle, plan.phases[phase_index], child
+                ):
+                    return self._hold_start_observation(
+                        operation_id, child_id=child_id,
+                        phase_index=phase_index, item_index=item_index,
+                    )
                 else:
                     reason = f"run-switch phase operation failed: {child.state if child else 'unknown'}"
                     evidence = _child_progress_payload(child)
@@ -4642,6 +4654,9 @@ class RunSwitchOperationService:
                 progress = _read_progress(job.result)
                 if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
                     return False
+                progress["observation_due_at"] = None
+                progress["observation_deadline_at"] = None
+                job.status_reason = None
                 phase_index = require_integer(progress.get("phase_index", 0), "phase index")
                 item_index = require_integer(progress.get("item_index", 0), "item index") + 1
                 persisted_plan = _load_plan(job.payload["plan"])
@@ -4939,6 +4954,51 @@ class RunSwitchOperationService:
             Job.id != job.id,
         ))
         return any(scope.intersection(other.targets) for other in later)
+
+    def _hold_start_observation(
+        self,
+        operation_id: str,
+        *,
+        child_id: str,
+        phase_index: int,
+        item_index: int,
+    ) -> bool:
+        """Observe a progressing uncertain start until its immutable deadline."""
+
+        now = _now(self._clock)
+        with self._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None:
+                return False
+            progress = _read_progress(job.result)
+            if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
+                return False
+            raw_deadline = progress.get("observation_deadline_at")
+            if isinstance(raw_deadline, str):
+                deadline = _aware(datetime.fromisoformat(raw_deadline))
+            else:
+                child = session.get(Job, child_id)
+                child_deadline = child.payload.get("start_deadline") if child is not None else None
+                deadline = (
+                    _aware(datetime.fromisoformat(child_deadline))
+                    if isinstance(child_deadline, str)
+                    else now + timedelta(seconds=120)
+                )
+            if now >= deadline:
+                self._mark_failed(
+                    job, "run-switch.start-observation-expired: runtime did not establish before its deadline",
+                    now=now, progress=progress,
+                )
+                return True
+            progress["observation_deadline_at"] = deadline.isoformat()
+            progress["observation_due_at"] = min(
+                deadline, now + timedelta(seconds=5)
+            ).isoformat()
+            job.state = "running"
+            job.status_reason = "Start result uncertain; observing the existing run."
+            job.result = _persisted_result(progress)
+            job.updated_at = now
+        return True
 
     def _hold_for_preflight_refresh(
         self,
@@ -5625,9 +5685,30 @@ def _established_start_effect(
         status: Any = getter(run_id)
     except (KeyError, RuntimeError, TypeError, ValueError):
         return None
-    if status.healthy and status.route_state == "published":
+    if status.healthy:
         return run_id
     return None
+
+
+def _start_still_progressing(
+    lifecycle: object,
+    phase: RunSwitchPhase,
+    child: object,
+) -> bool:
+    if phase.kind != "start" or getattr(child, "state", None) != "waiting-for-operator":
+        return False
+    run_id = getattr(child, "owner_id", None)
+    getter = getattr(lifecycle, "run_status", None)
+    if not isinstance(run_id, str) or not callable(getter):
+        return False
+    try:
+        status: Any = getter(run_id)
+    except (KeyError, RuntimeError, TypeError, ValueError):
+        return False
+    return status.state in _ACTIVE_RUN_STATES and any(
+        rank.fresh and rank.state in {"planned", "starting", "running"}
+        for rank in status.ranks
+    )
 
 
 def _transient_distribution_exception(error: BaseException) -> bool:

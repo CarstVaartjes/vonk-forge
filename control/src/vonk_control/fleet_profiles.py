@@ -680,6 +680,8 @@ class RunSwitchFleetProfileAdapter:
             if job is None:
                 return None
             kind = item.get("kind")
+            if not isinstance(kind, str):
+                raise FleetProfileConflict("Profile child kind is invalid")
             expected_kind = {
                 "cleanup": "recipe.cleanup.v2",
                 "stop": "recipe.stop.v2",
