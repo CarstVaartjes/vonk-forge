@@ -291,12 +291,13 @@ def test_signed_update_installs_real_wheel_into_uv_venv(
     )
     python = environment / "bin" / "python"
     installed_environment = {**os.environ, "PYTHONPATH": ""}
-    subprocess.run(
-        [uv, "pip", "install", "--offline", "--python", str(python), str(old_wheel)],
-        check=True,
+    initial_install = subprocess.run(
+        [uv, "pip", "install", "--python", str(python), str(old_wheel)],
+        check=False,
         capture_output=True,
         text=True,
     )
+    assert initial_install.returncode == 0, initial_install.stderr
     assert (
         subprocess.run(
             [str(python), "-m", "pip", "--version"], capture_output=True, check=False

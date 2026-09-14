@@ -27,6 +27,10 @@ schemas/*
 !schemas/global/
 schemas/global/*
 !schemas/global/test-report-v1.schema.json
+!schemas/install-release-manifest.schema.json
+!tools/
+tools/*
+!tools/hatch_build.py
 !config/
 config/*
 !inventory/
