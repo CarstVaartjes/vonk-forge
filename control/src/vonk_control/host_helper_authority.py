@@ -40,6 +40,10 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
+from .agent_jobs import (
+    _WORKLOAD_INTENT_OPERATIONS,
+    superseded_cancellation_deadline,
+)
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -705,6 +709,18 @@ class HostRuntimeAuthorityService:
         now = self._clock()
         with self._sessions() as session:
             operation = session.get(StoredAgentOperation, operation_id)
+            parent = session.get(Job, job_id)
+            node = session.get(AgentNode, node_id)
+            certificate = session.get(AgentCertificate, certificate_serial)
+            cancellation_requested = bool(
+                parent is not None
+                and isinstance(parent.result, Mapping)
+                and parent.result.get("cancel_requested") is True
+            )
+            cancellation_stop = cancellation_requested and action is ContainerRuntimeAction.STOP
+            cancellation_deadline = superseded_cancellation_deadline(
+                parent.result if parent is not None else None
+            )
             current = session.scalar(
                 select(AgentOperationAttempt).where(
                     AgentOperationAttempt.operation_id == operation_id,
@@ -721,8 +737,22 @@ class HostRuntimeAuthorityService:
             if (
                 operation is None
                 or current is None
+                or parent is None
+                or node is None
+                or certificate is None
+                or parent.state not in {"queued", "running"}
+                or node_id not in parent.targets
+                or node.state != "active"
+                or node.revoked_at is not None
+                or certificate.node_id != node_id
+                or certificate.state != "active"
+                or certificate.revoked_at is not None
+                or certificate.ca_revoked_at is not None
+                or _aware(certificate.not_before) > _aware(now)
+                or _aware(certificate.not_after) <= _aware(now)
                 or operation.node_id != node_id
                 or operation.parent_job_id != job_id
+                or operation.authority_revision != parent.authority_revision
                 or operation.kind not in self._ACTION_KINDS[action]
                 or operation.state != "running"
                 or operation.current_attempt != attempt
@@ -731,9 +761,30 @@ class HostRuntimeAuthorityService:
                 or current.agent_certificate_serial != certificate_serial
                 or lease_deadline is None
                 or lease_deadline <= now
+                or (cancellation_requested and not cancellation_stop)
+                or (
+                    cancellation_requested
+                    and (
+                        cancellation_deadline is None
+                        or _aware(now) >= cancellation_deadline
+                    )
+                )
+                or (
+                    operation.kind in _WORKLOAD_INTENT_OPERATIONS
+                    and (
+                        type(operation.workload_intent_ordinal) is not int
+                        or operation.workload_intent_ordinal < 1
+                        or operation.workload_intent_ordinal != parent.payload.get("workload_intent_ordinal")
+                        or (
+                            operation.workload_intent_ordinal != node.workload_intent_ordinal
+                            and not cancellation_stop
+                        )
+                    )
+                )
                 or (
                     operation.payload.get("phase") == "collective-readiness"
                     and action is not ContainerRuntimeAction.RUN_INSPECT
+                    and not cancellation_stop
                 )
             ):
                 raise HostHelperAuthorityError(
@@ -758,4 +809,8 @@ class HostRuntimeAuthorityService:
                 raise HostHelperAuthorityError(
                     "container runtime installation binding is invalid"
                 )
-            return lease_deadline
+            return (
+                min(lease_deadline, cancellation_deadline)
+                if cancellation_stop and cancellation_deadline is not None
+                else lease_deadline
+            )
