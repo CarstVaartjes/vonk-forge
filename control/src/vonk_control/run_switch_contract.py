@@ -43,7 +43,7 @@ Alias = Annotated[
 # annotations and by the Run/Switch operation helpers that build those fields.
 # A shared alias is what keeps a helper signature from drifting away from the
 # set the model will accept, so the two cannot disagree without a type error.
-RunSwitchAction = Literal["run", "switch", "stop"]
+RunSwitchAction = Literal["run", "switch", "stop", "cleanup"]
 RunSwitchRetention = Literal["retain-cached", "reclaim-unreferenced"]
 RunSwitchReasonSeverity = Literal["blocker", "warning", "info"]
 RunSwitchReasonScope = Literal[
@@ -77,6 +77,7 @@ RunSwitchPhaseKind = Literal[
     "cleanup",
     "stop",
     "start",
+    "uninstall",
     "final_verify",
 ]
 RunSwitchSubphase = Literal[
@@ -91,7 +92,11 @@ RunSwitchMemberState = Literal["pending", "running", "succeeded", "failed", "unk
 RunSwitchProgressState = Literal[
     "queued", "running", "succeeded", "failed", "cancelled", "unknown"
 ]
-RunSwitchOperationKind = Literal["recipe.run-switch.v2", "recipe.stop.v2"]
+RunSwitchOperationKind = Literal[
+    "recipe.run-switch.v2",
+    "recipe.stop.v2",
+    "recipe.cleanup.v2",
+]
 
 
 class _StrictModel(StrictJSONModel):
@@ -168,6 +173,25 @@ class RunSwitchStopPreviewRequest(_StrictModel):
 
 
 class RunSwitchStopApplyRequest(RunSwitchStopPreviewRequest):
+    plan_digest: Digest | None = None
+    request_key: UuidId | None = None
+
+
+class RunSwitchCleanupPreviewRequest(_StrictModel):
+    """Ask Run/Switch to remove one installation that is no longer desired.
+
+    Cleanup is authorized by the installation's own uninstall assessment, so it
+    never requires launch readiness: removing work must not depend on being able
+    to start work.  Run/Switch still owns the sequencing, the child reference
+    and the retry budget for the removal.
+    """
+
+    schema_version: Literal[2] = 2
+    installation_id: UuidId
+    invocation: InvocationMetadata = Field(default_factory=InvocationMetadata)
+
+
+class RunSwitchCleanupApplyRequest(RunSwitchCleanupPreviewRequest):
     plan_digest: Digest | None = None
     request_key: UuidId | None = None
 
@@ -692,6 +716,28 @@ class RunSwitchStartResult(_RunSwitchPhaseBase):
     run_id: UuidId
 
 
+class RunSwitchUninstallResult(_RunSwitchPhaseBase):
+    """The removal of one installation that is no longer desired."""
+
+    phase: Literal["uninstall"]
+    subphase: RunSwitchSubphase | None = None
+    installation_id: UuidId
+
+
+class RunSwitchCleanupVerifyResult(_RunSwitchPhaseBase):
+    """Observed removal of the installation, derived from durable state."""
+
+    phase: Literal["final_verify"]
+    subphase: RunSwitchSubphase | None = None
+    final_verified: bool
+    installation_id: UuidId
+    removed: bool
+    active_runs: int = Field(default=0, ge=0)
+    installation_state: Annotated[
+        str, StringConstraints(min_length=1, max_length=24)
+    ] | None = None
+
+
 class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):
     phase: Literal["final_verify"]
     subphase: RunSwitchSubphase | None = None
@@ -735,7 +781,9 @@ RunSwitchPhaseResult = (
     | RunSwitchRuntimeInstallResult
     | RunSwitchStopResult
     | RunSwitchStartResult
+    | RunSwitchUninstallResult
     | RunSwitchFinalVerifyResult
+    | RunSwitchCleanupVerifyResult
 )
 
 

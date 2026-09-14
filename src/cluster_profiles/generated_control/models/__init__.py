@@ -372,6 +372,8 @@ from .run_switch_child_progress import RunSwitchChildProgress
 from .run_switch_child_progress_phase_type_0 import RunSwitchChildProgressPhaseType0
 from .run_switch_cleanup_result import RunSwitchCleanupResult
 from .run_switch_cleanup_result_subphase_type_0 import RunSwitchCleanupResultSubphaseType0
+from .run_switch_cleanup_verify_result import RunSwitchCleanupVerifyResult
+from .run_switch_cleanup_verify_result_subphase_type_0 import RunSwitchCleanupVerifyResultSubphaseType0
 from .run_switch_container_build_result import RunSwitchContainerBuildResult
 from .run_switch_container_build_result_state import RunSwitchContainerBuildResultState
 from .run_switch_final_verify_result import RunSwitchFinalVerifyResult
@@ -398,6 +400,8 @@ from .run_switch_stop_result_subphase_type_0 import RunSwitchStopResultSubphaseT
 from .run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
 from .run_switch_target_transfer_result import RunSwitchTargetTransferResult
 from .run_switch_target_transfer_result_assignments import RunSwitchTargetTransferResultAssignments
+from .run_switch_uninstall_result import RunSwitchUninstallResult
+from .run_switch_uninstall_result_subphase_type_0 import RunSwitchUninstallResultSubphaseType0
 from .run_switch_verify_result import RunSwitchVerifyResult
 from .run_switch_verify_result_cached_target_totals import RunSwitchVerifyResultCachedTargetTotals
 from .runtime_image_preparation import RuntimeImagePreparation
@@ -820,6 +824,8 @@ __all__ = (
     "RunSwitchChildProgressPhaseType0",
     "RunSwitchCleanupResult",
     "RunSwitchCleanupResultSubphaseType0",
+    "RunSwitchCleanupVerifyResult",
+    "RunSwitchCleanupVerifyResultSubphaseType0",
     "RunSwitchContainerBuildResult",
     "RunSwitchContainerBuildResultState",
     "RunSwitchFinalVerifyResult",
@@ -846,6 +852,8 @@ __all__ = (
     "RunSwitchTargetTransferEvidenceResult",
     "RunSwitchTargetTransferResult",
     "RunSwitchTargetTransferResultAssignments",
+    "RunSwitchUninstallResult",
+    "RunSwitchUninstallResultSubphaseType0",
     "RunSwitchVerifyResult",
     "RunSwitchVerifyResultCachedTargetTotals",
     "RuntimeImagePreparation",

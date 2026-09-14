@@ -106,6 +106,8 @@ from .run_switch_contract import (
     RunSwitchCancellation,
     RunSwitchCapabilityEvidenceState,
     RunSwitchChangeEffect,
+    RunSwitchCleanupApplyRequest,
+    RunSwitchCleanupPreviewRequest,
     RunSwitchContainerBuildResult,
     RunSwitchContainerBuildState,
     RunSwitchCoverage,
@@ -313,7 +315,9 @@ class _BuildSelection:
 
 _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
-_OPERATION_KINDS = frozenset({"recipe.run-switch.v2", "recipe.stop.v2"})
+_OPERATION_KINDS = frozenset(
+    {"recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"}
+)
 _MAX_RETRY_ATTEMPTS = 3
 _INSTALL_PREFLIGHT_REFRESH_REASON = "runtime preflight expired during install compilation"
 _TERMINAL_RETRY_MARKERS = (
@@ -1341,7 +1345,52 @@ class RecipeLifecyclePhaseExecutor:
                 request_id=start_request_id,
             )
             return PhaseExecution(value.id, {"run_id": value.owner_id})
+        if phase.kind == "uninstall":
+            installation_id = plan.installation_id
+            if installation_id is None:
+                raise RunSwitchOperationConflict(
+                    "run-switch.uninstall_target_unavailable"
+                )
+            uninstall_request_id = str(
+                uuid.uuid5(uuid.UUID(request_key), "uninstall")
+            )
+            # Reconnect to the removal this operation already queued before
+            # asking for a fresh assessment, so a restart never creates a
+            # second removal for the same installation.
+            adopted = self._lifecycle.adopt_owned_operation(
+                uninstall_request_id,
+                kind="recipe.uninstall",
+                owner_kind="installation",
+                owner_id=installation_id,
+            )
+            if adopted is not None:
+                return PhaseExecution(
+                    adopted.id, {"installation_id": installation_id}
+                )
+            try:
+                uninstall_plan = self._lifecycle.preview_uninstall(installation_id)
+                value = self._lifecycle.uninstall(
+                    installation_id,
+                    plan_digest=uninstall_plan.plan_digest,
+                    actor=actor,
+                    request_id=uninstall_request_id,
+                )
+            except (
+                KeyError,
+                RecipeOperationConflict,
+                RuntimeError,
+                TypeError,
+                ValueError,
+            ) as error:
+                raise RunSwitchOperationConflict(
+                    f"run-switch.uninstall-start-failed: {error}"
+                ) from error
+            return PhaseExecution(
+                value.id, {"installation_id": installation_id}
+            )
         if phase.kind == "final_verify":
+            if plan.action == "cleanup":
+                return self._verify_cleanup(plan)
             run_id = plan.run_id
             phase_results = progress.get("phase_results")
             if run_id is None and isinstance(phase_results, list):
@@ -1396,6 +1445,49 @@ class RecipeLifecyclePhaseExecutor:
                 "run-switch.final-verification-failed"
             )
         return PhaseExecution()
+
+    def _verify_cleanup(self, plan: RunSwitchPlan) -> PhaseExecution:
+        """Observe whether the scoped removal has actually taken effect.
+
+        The installation row and its active runs are the authority, so the
+        result is derived from durable state rather than from the removal
+        child's own report.
+        """
+
+        installation_id = plan.installation_id
+        if installation_id is None:
+            raise RunSwitchOperationConflict(
+                "run-switch.uninstall_target_unavailable"
+            )
+        with self._sessions() as session:
+            installation = session.get(RecipeInstallation, installation_id)
+            active_runs = (
+                int(
+                    session.scalar(
+                        select(func.count())
+                        .select_from(RecipeRun)
+                        .where(
+                            RecipeRun.installation_id == installation_id,
+                            RecipeRun.state.in_(_ACTIVE_RUN_STATES),
+                        )
+                    )
+                    or 0
+                )
+                if installation is not None
+                else 0
+            )
+        removed = installation is None or installation.state == "uninstalled"
+        evidence = {
+            "installation_id": installation_id,
+            "installation_state": (
+                installation.state if installation is not None else None
+            ),
+            "removed": removed,
+            "active_runs": active_runs,
+        }
+        if removed and not active_runs:
+            return PhaseExecution(result={"final_verified": True, **evidence})
+        return PhaseExecution(result={"final_verified": False, **evidence}, waiting=True)
 
     def get(self, operation_id: str) -> Any:
         """Resolve an artifact child first, then an existing recipe child."""
@@ -1671,6 +1763,248 @@ class RunSwitchOperationService:
                 "stop_before_prepare": False,
             }
             return self._finalize_plan(plan_data)
+
+    def preview_cleanup(
+        self,
+        request: RunSwitchCleanupPreviewRequest | str,
+        *,
+        actor: str,
+    ) -> RunSwitchPlan:
+        """Plan one scoped removal without consulting launch readiness.
+
+        The installation's own uninstall assessment is the only authority for
+        whether the removal may proceed.  Capacity, freshness, catalog and
+        cache findings stay diagnostics, because being unable to start work must
+        never prevent removing work.
+        """
+
+        installation_id = (
+            request if isinstance(request, str) else request.installation_id
+        )
+        invocation = (
+            InvocationMetadata() if isinstance(request, str) else request.invocation
+        )
+        now = _now(self._clock)
+        with self._sessions() as session:
+            installation = session.get(RecipeInstallation, installation_id)
+            if installation is None:
+                raise KeyError(installation_id)
+            revision = _active_recipe_revision(
+                session, installation.recipe_revision_id
+            )
+            mapping = session.get(ClusterMapping, installation.mapping_id)
+            mapping_nodes = tuple(
+                session.scalars(
+                    select(ClusterMappingNode)
+                    .where(ClusterMappingNode.mapping_id == installation.mapping_id)
+                    .order_by(ClusterMappingNode.rank)
+                )
+            )
+            group = SparkGroup(
+                nodes=[
+                    SparkGroupNode(
+                        node_id=node.node_id,
+                        rank=node.rank,
+                        role=node.role,
+                        endpoint_owner=node.endpoint_owner,
+                    )
+                    for node in mapping_nodes
+                ]
+            )
+            model_digest = installation.model_content_sha256
+            recipe_digest = revision.content_digest if revision is not None else None
+            (
+                _model_document,
+                _model_documents,
+                model_caps,
+                recipe_caps,
+                document_warnings,
+            ) = self._resolve_documents(
+                session,
+                revision,
+                model_digest,
+                requested_recipe_digest=recipe_digest,
+            )
+            freshness, fit_current, _fit_blockers, fit_warnings = self._fit(
+                session,
+                revision,
+                group,
+                now=now,
+                # The installation's own runs are being removed, so they are not
+                # capacity this plan has to fit alongside.
+                excluded_run_ids=tuple(
+                    session.scalars(
+                        select(RecipeRun.id).where(
+                            RecipeRun.installation_id == installation_id
+                        )
+                    )
+                ),
+            )
+            inspection = self._inspect_artifacts(
+                session,
+                model_digest,
+                revision.id if revision is not None else None,
+                group,
+                retention="retain-cached",
+                now=now,
+            )
+            build = (
+                session.get(RecipeBuild, installation.recipe_build_id)
+                if installation.recipe_build_id is not None
+                else None
+            )
+            build_candidate = build or (
+                self._latest_build(session, revision.id)
+                if revision is not None
+                else None
+            )
+            build_evidence, runtime_storage, _build_blockers, _build_warnings = (
+                self._build_evidence(
+                    session,
+                    revision,
+                    build,
+                    build_candidate,
+                    group,
+                    require_available=False,
+                )
+            )
+            node_ids = [node.node_id for node in group.nodes]
+            blockers: list[RunSwitchReason] = []
+            warnings = [*document_warnings, *fit_warnings, *inspection.warnings]
+            if self._lifecycle is None:
+                blockers.append(
+                    _as_reason(
+                        "run-switch.uninstall-assessment-unavailable",
+                        "Cleanup cannot be assessed without the lifecycle service.",
+                        scope="operation",
+                        node_ids=node_ids,
+                    )
+                )
+            else:
+                try:
+                    assessment = self._lifecycle.preview_uninstall(installation_id)
+                except (
+                    KeyError,
+                    RecipeOperationConflict,
+                    RuntimeError,
+                    TypeError,
+                    ValueError,
+                ):
+                    assessment = None
+                if assessment is None:
+                    blockers.append(
+                        _as_reason(
+                            "run-switch.uninstall-assessment-unavailable",
+                            "The installation cannot be represented by a safe uninstall plan.",
+                            scope="operation",
+                            node_ids=node_ids,
+                        )
+                    )
+                elif not assessment.allowed:
+                    for blocker in assessment.blockers:
+                        blockers.append(
+                            _as_reason(
+                                "run-switch.uninstall-blocked",
+                                f"{blocker.code}: {blocker.detail}",
+                                scope="operation",
+                                node_ids=node_ids,
+                            )
+                        )
+            phases = self._phases(
+                action="cleanup",
+                group=group,
+                installation_id=installation.id,
+                installation_state=installation.state,
+                starts=False,
+                stops=[],
+                inspection=inspection,
+                runtime_storage=runtime_storage,
+                retention="retain-cached",
+                blockers=blockers,
+                stop_before_transfer=False,
+                stop_before_prepare=False,
+            )
+            storage = self._storage(inspection, retention="retain-cached")
+            preparation = self._preparation(
+                revision=revision,
+                group=group,
+                inspection=inspection,
+                build=build,
+                build_candidate=build_candidate,
+                runtime_storage=runtime_storage,
+                now=now,
+                reasons=[*blockers, *warnings],
+            )
+            plan_data: dict[str, object] = {
+                "schema_version": 2,
+                "generated_at": now,
+                "action": "cleanup",
+                "model_content_sha256": model_digest,
+                "recipe_revision_id": revision.id if revision is not None else None,
+                "recipe_content_sha256": recipe_digest,
+                "alias": None,
+                "run_id": None,
+                "spark_group": group,
+                "mapping": self._mapping_selection(mapping, mapping_nodes),
+                "installation_id": installation.id,
+                "installation_state": installation.state,
+                "recipe_build_id": installation.recipe_build_id,
+                "image_digest": installation.image_digest,
+                "start_plan_digest": None,
+                "model_capabilities": model_caps,
+                "recipe_capabilities": recipe_caps,
+                "freshness": freshness,
+                "fit_current": fit_current,
+                "fit_after_stop": None,
+                "fit": fit_current,
+                "storage": storage,
+                "runtime_storage": runtime_storage,
+                "build": build_evidence,
+                "preparation": preparation,
+                "conflicts": [],
+                "stops": [],
+                "reclaimed_bytes": 0,
+                "phases": phases,
+                "allowed": not blockers,
+                "blockers": blockers,
+                "warnings": warnings,
+                "invocation": invocation,
+                "plan_digest": "0" * 64,
+                "stop_before_prepare": False,
+            }
+            return self._finalize_plan(plan_data)
+
+    def apply_cleanup(
+        self,
+        request: RunSwitchCleanupApplyRequest,
+        *,
+        actor: str,
+    ) -> RunSwitchOperation:
+        request_key = request.request_key or str(uuid.uuid4())
+        if request.request_key is not None:
+            existing = self._existing_request_operation(
+                request.request_key,
+                kind="recipe.cleanup.v2",
+                plan_digest=request.plan_digest,
+            )
+            if existing is not None:
+                return existing
+        preview = self.preview_cleanup(request, actor=actor)
+        if request.plan_digest is not None and preview.plan_digest != request.plan_digest:
+            raise RunSwitchOperationConflict(
+                "run-switch.stale_plan: current evidence no longer matches preview"
+            )
+        if not preview.allowed:
+            raise RunSwitchOperationConflict(
+                "run-switch.plan_blocked: "
+                + "; ".join(reason.code for reason in preview.blockers[:8])
+            )
+        return self._apply_plan(
+            preview,
+            request_key=request_key,
+            actor=actor,
+            kind="recipe.cleanup.v2",
+        )
 
     def apply(
         self,
@@ -3826,6 +4160,30 @@ class RunSwitchOperationService:
     ) -> list[RunSwitchPhase]:
         node_ids = [node.node_id for node in group.nodes]
         phases: list[RunSwitchPhase] = []
+        if action == "cleanup":
+            # Removal is authorized by the installation's own uninstall
+            # assessment, so the phase sequence never consults launch
+            # readiness: being unable to start work must not prevent removing
+            # work.
+            phases.append(
+                RunSwitchPhase(
+                    index=0,
+                    kind="uninstall",
+                    state="planned" if not blockers else "blocked",
+                    node_ids=node_ids,
+                    detail="Remove the installation that is no longer desired, scoped to its authorized membership.",
+                )
+            )
+            phases.append(
+                RunSwitchPhase(
+                    index=len(phases),
+                    kind="final_verify",
+                    state="planned" if not blockers else "blocked",
+                    node_ids=node_ids,
+                    detail="Verify the installation and its runtime are removed.",
+                )
+            )
+            return phases
         if action == "stop":
             if stops:
                 phases.append(

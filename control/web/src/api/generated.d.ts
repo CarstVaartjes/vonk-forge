@@ -5455,6 +5455,32 @@ export interface components {
             /** Subphase */
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
         };
+        /**
+         * RunSwitchCleanupVerifyResult
+         * @description Observed removal of the installation, derived from durable state.
+         */
+        RunSwitchCleanupVerifyResult: {
+            /**
+             * Active Runs
+             * @default 0
+             */
+            active_runs: number;
+            /** Final Verified */
+            final_verified: boolean;
+            /** Installation Id */
+            installation_id: string;
+            /** Installation State */
+            installation_state?: string | null;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "final_verify";
+            /** Removed */
+            removed: boolean;
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
+        };
         /** RunSwitchContainerBuildResult */
         RunSwitchContainerBuildResult: {
             /** Build Id */
@@ -5525,7 +5551,7 @@ export interface components {
             /** Node Id */
             node_id: string;
             /** Phase */
-            phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
+            phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify") | null;
             /**
              * State
              * @enum {string}
@@ -5615,11 +5641,11 @@ export interface components {
              */
             completed_bytes: number;
             /** Completed Phases */
-            completed_phases?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify")[];
+            completed_phases?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify")[];
             /** Failed Phase */
-            failed_phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
+            failed_phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify") | null;
             /** Final Observation */
-            final_observation?: components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | null;
+            final_observation?: components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | null;
             /** Final Verify Started At */
             final_verify_started_at?: number | null;
             /**
@@ -5633,14 +5659,14 @@ export interface components {
             /** Operation Phase Index */
             operation_phase_index?: number | null;
             /** Phase */
-            phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
+            phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify") | null;
             /**
              * Phase Index
              * @default 0
              */
             phase_index: number;
             /** Phase Results */
-            phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchFinalVerifyResult"])[];
+            phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"])[];
             preflight?: components["schemas"]["LifecyclePreflightCheckpoint"] | null;
             /** Retry Attempt */
             retry_attempt?: number | null;
@@ -5833,6 +5859,21 @@ export interface components {
              * @constant
              */
             subphase: "target-copy";
+        };
+        /**
+         * RunSwitchUninstallResult
+         * @description The removal of one installation that is no longer desired.
+         */
+        RunSwitchUninstallResult: {
+            /** Installation Id */
+            installation_id: string;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "uninstall";
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
         };
         /** RunSwitchVerifyResult */
         RunSwitchVerifyResult: {
