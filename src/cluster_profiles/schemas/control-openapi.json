@@ -14178,6 +14178,76 @@
         "title": "RunSwitchCleanupResult",
         "type": "object"
       },
+      "RunSwitchCleanupVerifyResult": {
+        "additionalProperties": false,
+        "description": "Observed removal of the installation, derived from durable state.",
+        "properties": {
+          "active_runs": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Active Runs",
+            "type": "integer"
+          },
+          "final_verified": {
+            "title": "Final Verified",
+            "type": "boolean"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "installation_state": {
+            "anyOf": [
+              {
+                "maxLength": 24,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation State"
+          },
+          "phase": {
+            "const": "final_verify",
+            "title": "Phase",
+            "type": "string"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "boolean"
+          },
+          "subphase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "container-build",
+                  "model-download",
+                  "runtime-image",
+                  "runtime-plan",
+                  "target-copy",
+                  "runtime-install"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subphase"
+          }
+        },
+        "required": [
+          "phase",
+          "final_verified",
+          "installation_id",
+          "removed"
+        ],
+        "title": "RunSwitchCleanupVerifyResult",
+        "type": "object"
+      },
       "RunSwitchContainerBuildResult": {
         "additionalProperties": false,
         "properties": {
@@ -14372,6 +14442,7 @@
                   "cleanup",
                   "stop",
                   "start",
+                  "uninstall",
                   "final_verify"
                 ],
                 "type": "string"
@@ -14610,6 +14681,7 @@
                 "cleanup",
                 "stop",
                 "start",
+                "uninstall",
                 "final_verify"
               ],
               "type": "string"
@@ -14628,6 +14700,7 @@
                   "cleanup",
                   "stop",
                   "start",
+                  "uninstall",
                   "final_verify"
                 ],
                 "type": "string"
@@ -14683,7 +14756,13 @@
                 "$ref": "#/components/schemas/RunSwitchStartResult"
               },
               {
+                "$ref": "#/components/schemas/RunSwitchUninstallResult"
+              },
+              {
                 "$ref": "#/components/schemas/RunSwitchFinalVerifyResult"
+              },
+              {
+                "$ref": "#/components/schemas/RunSwitchCleanupVerifyResult"
               },
               {
                 "type": "null"
@@ -14751,6 +14830,7 @@
                   "cleanup",
                   "stop",
                   "start",
+                  "uninstall",
                   "final_verify"
                 ],
                 "type": "string"
@@ -14814,7 +14894,13 @@
                   "$ref": "#/components/schemas/RunSwitchStartResult"
                 },
                 {
+                  "$ref": "#/components/schemas/RunSwitchUninstallResult"
+                },
+                {
                   "$ref": "#/components/schemas/RunSwitchFinalVerifyResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchCleanupVerifyResult"
                 }
               ]
             },
@@ -15342,6 +15428,47 @@
           "assignments"
         ],
         "title": "RunSwitchTargetTransferResult",
+        "type": "object"
+      },
+      "RunSwitchUninstallResult": {
+        "additionalProperties": false,
+        "description": "The removal of one installation that is no longer desired.",
+        "properties": {
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "phase": {
+            "const": "uninstall",
+            "title": "Phase",
+            "type": "string"
+          },
+          "subphase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "container-build",
+                  "model-download",
+                  "runtime-image",
+                  "runtime-plan",
+                  "target-copy",
+                  "runtime-install"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subphase"
+          }
+        },
+        "required": [
+          "phase",
+          "installation_id"
+        ],
+        "title": "RunSwitchUninstallResult",
         "type": "object"
       },
       "RunSwitchVerifyResult": {

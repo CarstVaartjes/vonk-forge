@@ -26,12 +26,14 @@ if TYPE_CHECKING:
   from ..models.run_switch_start_result import RunSwitchStartResult
   from ..models.run_switch_verify_result import RunSwitchVerifyResult
   from ..models.run_switch_runtime_plan_result import RunSwitchRuntimePlanResult
+  from ..models.run_switch_cleanup_verify_result import RunSwitchCleanupVerifyResult
   from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
   from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult
   from ..models.run_switch_cleanup_result import RunSwitchCleanupResult
   from ..models.run_switch_final_verify_result import RunSwitchFinalVerifyResult
   from ..models.run_switch_runtime_install_result import RunSwitchRuntimeInstallResult
   from ..models.run_switch_runtime_image_result import RunSwitchRuntimeImageResult
+  from ..models.run_switch_uninstall_result import RunSwitchUninstallResult
   from ..models.run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
   from ..models.run_switch_target_transfer_result import RunSwitchTargetTransferResult
   from ..models.run_switch_prepared_result import RunSwitchPreparedResult
@@ -59,11 +61,11 @@ class RunSwitchOperationResult:
             completed_phases (Union[Unset, list[RunSwitchOperationResultCompletedPhasesItem]]):
             failed_phase (Union[None, RunSwitchOperationResultFailedPhaseType0, Unset]):
             final_observation (Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult',
-                'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult',
-                'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult',
-                'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult',
-                'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchVerifyResult', None,
-                Unset]):
+                'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult',
+                'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult',
+                'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult',
+                'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult',
+                'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult', None, Unset]):
             final_verify_started_at (Union[None, Unset, float]):
             item_index (Union[Unset, int]):  Default: 0.
             members (Union[Unset, list['RunSwitchMemberReceipt']]):
@@ -72,10 +74,11 @@ class RunSwitchOperationResult:
             phase (Union[None, RunSwitchOperationResultPhaseType0, Unset]):
             phase_index (Union[Unset, int]):  Default: 0.
             phase_results (Union[Unset, list[Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult',
-                'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult',
-                'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult',
-                'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult',
-                'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchVerifyResult']]]):
+                'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult',
+                'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult',
+                'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult',
+                'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult',
+                'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult']]]):
             preflight (Union['LifecyclePreflightCheckpoint', None, Unset]):
             retry_attempt (Union[None, Unset, int]):
             retry_reason (Union[None, Unset, str]):
@@ -90,7 +93,7 @@ class RunSwitchOperationResult:
     completed_bytes: Union[Unset, int] = 0
     completed_phases: Union[Unset, list[RunSwitchOperationResultCompletedPhasesItem]] = UNSET
     failed_phase: Union[None, RunSwitchOperationResultFailedPhaseType0, Unset] = UNSET
-    final_observation: Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchVerifyResult', None, Unset] = UNSET
+    final_observation: Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult', None, Unset] = UNSET
     final_verify_started_at: Union[None, Unset, float] = UNSET
     item_index: Union[Unset, int] = 0
     members: Union[Unset, list['RunSwitchMemberReceipt']] = UNSET
@@ -98,7 +101,7 @@ class RunSwitchOperationResult:
     operation_phase_index: Union[None, Unset, int] = UNSET
     phase: Union[None, RunSwitchOperationResultPhaseType0, Unset] = UNSET
     phase_index: Union[Unset, int] = 0
-    phase_results: Union[Unset, list[Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchVerifyResult']]] = UNSET
+    phase_results: Union[Unset, list[Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult']]] = UNSET
     preflight: Union['LifecyclePreflightCheckpoint', None, Unset] = UNSET
     retry_attempt: Union[None, Unset, int] = UNSET
     retry_reason: Union[None, Unset, str] = UNSET
@@ -118,12 +121,14 @@ class RunSwitchOperationResult:
         from ..models.run_switch_start_result import RunSwitchStartResult
         from ..models.run_switch_verify_result import RunSwitchVerifyResult
         from ..models.run_switch_runtime_plan_result import RunSwitchRuntimePlanResult
+        from ..models.run_switch_cleanup_verify_result import RunSwitchCleanupVerifyResult
         from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
         from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult
         from ..models.run_switch_cleanup_result import RunSwitchCleanupResult
         from ..models.run_switch_final_verify_result import RunSwitchFinalVerifyResult
         from ..models.run_switch_runtime_install_result import RunSwitchRuntimeInstallResult
         from ..models.run_switch_runtime_image_result import RunSwitchRuntimeImageResult
+        from ..models.run_switch_uninstall_result import RunSwitchUninstallResult
         from ..models.run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
         from ..models.run_switch_target_transfer_result import RunSwitchTargetTransferResult
         from ..models.run_switch_prepared_result import RunSwitchPreparedResult
@@ -195,7 +200,11 @@ class RunSwitchOperationResult:
             final_observation = self.final_observation.to_dict()
         elif isinstance(self.final_observation, RunSwitchStartResult):
             final_observation = self.final_observation.to_dict()
+        elif isinstance(self.final_observation, RunSwitchUninstallResult):
+            final_observation = self.final_observation.to_dict()
         elif isinstance(self.final_observation, RunSwitchFinalVerifyResult):
+            final_observation = self.final_observation.to_dict()
+        elif isinstance(self.final_observation, RunSwitchCleanupVerifyResult):
             final_observation = self.final_observation.to_dict()
         else:
             final_observation = self.final_observation
@@ -273,6 +282,10 @@ class RunSwitchOperationResult:
                 elif isinstance(phase_results_item_data, RunSwitchStopResult):
                     phase_results_item = phase_results_item_data.to_dict()
                 elif isinstance(phase_results_item_data, RunSwitchStartResult):
+                    phase_results_item = phase_results_item_data.to_dict()
+                elif isinstance(phase_results_item_data, RunSwitchUninstallResult):
+                    phase_results_item = phase_results_item_data.to_dict()
+                elif isinstance(phase_results_item_data, RunSwitchFinalVerifyResult):
                     phase_results_item = phase_results_item_data.to_dict()
                 else:
                     phase_results_item = phase_results_item_data.to_dict()
@@ -379,12 +392,14 @@ class RunSwitchOperationResult:
         from ..models.run_switch_start_result import RunSwitchStartResult
         from ..models.run_switch_verify_result import RunSwitchVerifyResult
         from ..models.run_switch_runtime_plan_result import RunSwitchRuntimePlanResult
+        from ..models.run_switch_cleanup_verify_result import RunSwitchCleanupVerifyResult
         from ..models.run_switch_member_receipt import RunSwitchMemberReceipt
         from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult
         from ..models.run_switch_cleanup_result import RunSwitchCleanupResult
         from ..models.run_switch_final_verify_result import RunSwitchFinalVerifyResult
         from ..models.run_switch_runtime_install_result import RunSwitchRuntimeInstallResult
         from ..models.run_switch_runtime_image_result import RunSwitchRuntimeImageResult
+        from ..models.run_switch_uninstall_result import RunSwitchUninstallResult
         from ..models.run_switch_target_transfer_evidence_result import RunSwitchTargetTransferEvidenceResult
         from ..models.run_switch_target_transfer_result import RunSwitchTargetTransferResult
         from ..models.run_switch_prepared_result import RunSwitchPreparedResult
@@ -455,7 +470,7 @@ class RunSwitchOperationResult:
         failed_phase = _parse_failed_phase(d.pop("failed_phase", UNSET))
 
 
-        def _parse_final_observation(data: object) -> Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchVerifyResult', None, Unset]:
+        def _parse_final_observation(data: object) -> Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult', None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -603,14 +618,34 @@ class RunSwitchOperationResult:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                final_observation_type_14 = RunSwitchFinalVerifyResult.from_dict(data)
+                final_observation_type_14 = RunSwitchUninstallResult.from_dict(data)
 
 
 
                 return final_observation_type_14
             except: # noqa: E722
                 pass
-            return cast(Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchVerifyResult', None, Unset], data)
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                final_observation_type_15 = RunSwitchFinalVerifyResult.from_dict(data)
+
+
+
+                return final_observation_type_15
+            except: # noqa: E722
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                final_observation_type_16 = RunSwitchCleanupVerifyResult.from_dict(data)
+
+
+
+                return final_observation_type_16
+            except: # noqa: E722
+                pass
+            return cast(Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult', None, Unset], data)
 
         final_observation = _parse_final_observation(d.pop("final_observation", UNSET))
 
@@ -692,7 +727,7 @@ class RunSwitchOperationResult:
         phase_results = []
         _phase_results = d.pop("phase_results", UNSET)
         for phase_results_item_data in (_phase_results or []):
-            def _parse_phase_results_item(data: object) -> Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchVerifyResult']:
+            def _parse_phase_results_item(data: object) -> Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult']:
                 try:
                     if not isinstance(data, dict):
                         raise TypeError()
@@ -833,13 +868,33 @@ class RunSwitchOperationResult:
                     return phase_results_item_type_13
                 except: # noqa: E722
                     pass
+                try:
+                    if not isinstance(data, dict):
+                        raise TypeError()
+                    phase_results_item_type_14 = RunSwitchUninstallResult.from_dict(data)
+
+
+
+                    return phase_results_item_type_14
+                except: # noqa: E722
+                    pass
+                try:
+                    if not isinstance(data, dict):
+                        raise TypeError()
+                    phase_results_item_type_15 = RunSwitchFinalVerifyResult.from_dict(data)
+
+
+
+                    return phase_results_item_type_15
+                except: # noqa: E722
+                    pass
                 if not isinstance(data, dict):
                     raise TypeError()
-                phase_results_item_type_14 = RunSwitchFinalVerifyResult.from_dict(data)
+                phase_results_item_type_16 = RunSwitchCleanupVerifyResult.from_dict(data)
 
 
 
-                return phase_results_item_type_14
+                return phase_results_item_type_16
 
             phase_results_item = _parse_phase_results_item(phase_results_item_data)
 

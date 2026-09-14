@@ -58,6 +58,7 @@ from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract import (
     InvocationMetadata,
     RunSwitchApplyRequest,
+    RunSwitchCleanupApplyRequest,
     RunSwitchOperation,
     RunSwitchOperationResult,
     RunSwitchPhase,
@@ -3204,3 +3205,118 @@ def test_parked_start_without_an_established_effect_still_fails(tmp_path: Path) 
     view = service.get(operation.operation_id)
     assert view.state == "failed"
     assert "waiting-for-operator" in (view.status_reason or "")
+
+
+def test_scoped_cleanup_is_allowed_without_launch_readiness(tmp_path: Path) -> None:
+    """Removing work must not depend on being able to start work.
+
+    The launch planner is made unavailable, so a removal plan that consulted
+    launch readiness would fail here exactly as it would on a Spark whose
+    admission evidence has aged out.
+    """
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+    )
+
+    def unavailable(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("launch admission is unavailable")
+
+    lifecycle.preview_run = unavailable  # type: ignore[method-assign]
+    try:
+        cleanup = service.preview_cleanup(installation.owner_id, actor="admin")
+    finally:
+        del lifecycle.preview_run
+
+    assert cleanup.allowed is True, [reason.code for reason in cleanup.blockers]
+    assert cleanup.action == "cleanup"
+    assert [phase.kind for phase in cleanup.phases] == ["uninstall", "final_verify"]
+    assert not any(
+        reason.code.startswith(("run-switch.run_admission", "run-switch.insufficient"))
+        for reason in cleanup.blockers
+    )
+
+
+def test_scoped_cleanup_is_blocked_while_a_run_is_active(tmp_path: Path) -> None:
+    """The uninstall assessment stays the authority for whether removal may run."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    run_plan = lifecycle.preview_run(installation.owner_id, "qwen")
+    lifecycle.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+    )
+
+    cleanup = service.preview_cleanup(installation.owner_id, actor="admin")
+
+    assert cleanup.allowed is False
+    assert any(
+        "uninstall.active_run" in reason.detail for reason in cleanup.blockers
+    ), [reason.detail for reason in cleanup.blockers]
+
+
+def test_scoped_cleanup_removes_the_installation_through_run_switch(
+    tmp_path: Path,
+) -> None:
+    """Run/Switch owns the removal, its child reference and its verification."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+    )
+    operation = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation.owner_id,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert service.tick() is True
+    view = service.get(operation.operation_id)
+    assert view.state == "running"
+    child_id = _child_operation_id(view)
+    assert child_id is not None
+
+    for node_id in nodes:
+        lifecycle.record_node_result(
+            child_id,
+            node_id,
+            succeeded=True,
+            evidence={"uninstalled": True, "removed_model_bytes": 1},
+        )
+
+    for _ in range(4):
+        if service.get(operation.operation_id).state not in {"queued", "running"}:
+            break
+        service.tick()
+
+    completed = service.get(operation.operation_id)
+    assert completed.state == "succeeded", completed.status_reason
+    assert "uninstall" in _result(completed).completed_phases
+    with sessions() as session:
+        row = session.get(RecipeInstallation, installation.owner_id)
+        assert row is None or row.state == "uninstalled"
