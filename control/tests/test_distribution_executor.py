@@ -35,6 +35,7 @@ from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_api import model_cache_operation_provider
 from vonk_control.model_cache_progress import cache_progress
 from vonk_control.models import (
+    AgentNode,
     AgentOperation,
     AgentOperationAttempt,
     Base,
@@ -165,6 +166,11 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
 
 def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> None:  # noqa: F811
     _client, services, _tokens, clock = agent_system
+    with services.sessions.begin() as session:
+        for node_id in (NODE_A, NODE_B):
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.workload_intent_ordinal = 7
     model = DistributionObject(name="weights/model.bin", sha256="a" * 64, bytes=10, kind="model")
     config = DistributionObject(name="config/tokenizer.json", sha256="b" * 64, bytes=5, kind="model")
     archive = DistributionObject(name="image.oci.tar", sha256="c" * 64, bytes=11, kind="oci-archive")
@@ -174,7 +180,11 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
 
     class StubExecutor(DurableDistributionPhaseExecutor):
+        source_available = True
+
         def _model_objects(self, _plan, _progress):
+            if not self.source_available:
+                raise RuntimeError("NAS source is temporarily unavailable")
             return (model, config), "d" * 64, 15
 
         def _archive(self, _plan, **_kwargs):
@@ -207,7 +217,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         mapping=None,
     )
     phase = _phase(kind="transfer", node_ids=[NODE_A, NODE_B], index=0)
-    build_progress = {"phase_results": [{"build_id": str(uuid4()), "image_digest": "sha256:" + "e" * 64, "oci_layout_sha256": "c" * 64, "image_bytes": 11}]}
+    build_progress = {"workload_intent_ordinal": 7, "phase_results": [{"build_id": str(uuid4()), "image_digest": "sha256:" + "e" * 64, "oci_layout_sha256": "c" * 64, "image_bytes": 11}]}
     first = executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress=build_progress)
     assert first.operation_id is not None
     pending = executor.get(first.operation_id)
@@ -216,9 +226,11 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     with services.sessions.begin() as session:
         child = session.get(Job, first.operation_id)
         assert child is not None
+        assert child.payload["workload_intent_ordinal"] == 7
         operation = next(iter(child.payload["assignments"].values()))
         assert operation["assignment_id"]
         stored = session.query(AgentOperation).filter_by(parent_job_id=child.id).one()
+        assert stored.workload_intent_ordinal == 7
         # Exercise the actual privileged-action consumer contract with IDs
         # emitted by the transfer producer, rather than hand-written UUIDs.
         ExecuteContainerRuntimeRequestOperation(
@@ -269,8 +281,11 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         assert persisted is not None and persisted.result is not None
         assert persisted.result["progress"]["completed_bytes"] == 52
         assert persisted.result["progress"]["members"][0]["state"] == "succeeded"
+    executor.source_available = False
     replay = executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress=build_progress)
     assert replay.operation_id == first.operation_id
+    with pytest.raises(RuntimeError, match="distribution child request key was reused"):
+        executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress={**build_progress, "workload_intent_ordinal": 8})
     verify = executor.execute(plan, _phase(kind="verify", node_ids=[NODE_A, NODE_B], index=1), item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress={"cached_nodes": [NODE_B], "evidence": view.result["evidence"]})
     assert verify.result is not None
     assert verify.result["verified"] is True
@@ -939,13 +954,18 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     )
 
     copy_phase = _phase(kind="transfer", subphase="target-copy", index=1, node_ids=list(nodes))
+    with services.sessions.begin() as session:
+        for node_id in nodes:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.workload_intent_ordinal = 1
     copy_child = executor.execute(
         plan,
         copy_phase,
         item_index=0,
         actor="operator",
         request_key=parent_request,
-        progress={},
+        progress={"workload_intent_ordinal": 1},
     )
     assert copy_child.operation_id
     with services.sessions.begin() as session:
@@ -1027,7 +1047,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         item_index=0,
         actor="operator",
         request_key=parent_request,
-        progress={},
+        progress={"workload_intent_ordinal": 1},
     )
     assert replay.operation_id == copy_child.operation_id
 
