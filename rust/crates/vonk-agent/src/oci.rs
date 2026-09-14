@@ -2583,17 +2583,21 @@ mod tests {
     #[test]
     fn completed_install_retry_reuses_exact_receipt_without_another_space_reservation_or_copy() {
         let data = tempdir().unwrap();
-        let (installation_id, installation, plan) = persisted_installation(data.path());
+        let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f".to_owned();
+        let installation = data.path().join("installations").join(&installation_id);
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
         let recipe_digest = plan.identity.recipe_revision_sha256.clone();
-        authorize_installation(&installation, &recipe_digest);
-        for name in ["spec.json", "recipe-content.sha256"] {
-            fs::set_permissions(installation.join(name), fs::Permissions::from_mode(0o600))
-                .unwrap();
+        let model_root = data.path().join("distribution/models");
+        fs::create_dir_all(&model_root).unwrap();
+        for (bytes, digest) in [
+            (b"primary".as_slice(), &plan.artifacts[0].sha256),
+            (b"secondary".as_slice(), &plan.artifacts[1].sha256),
+        ] {
+            let path = model_root.join(digest);
+            fs::write(&path, bytes).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
         }
-        fs::set_permissions(&installation, fs::Permissions::from_mode(0o700)).unwrap();
-        let cache = installation.join("runtime-cache");
-        fs::create_dir(&cache).unwrap();
-        fs::set_permissions(&cache, fs::Permissions::from_mode(0o700)).unwrap();
         let archive = data
             .path()
             .join("oci-archives")
@@ -2603,6 +2607,18 @@ mod tests {
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
 
         let runner = NoProcess;
+        let first_runtime = runtime(data.path(), &runner);
+        // The first attempt really copies the verified distribution objects
+        // and persists the installation receipt. Its acknowledgement is lost.
+        first_runtime
+            .install_with_space_check(&plan, &installation_id, &recipe_digest, 16)
+            .unwrap();
+        assert_eq!(
+            fs::read(installation.join("models/primary/config.json")).unwrap(),
+            b"primary"
+        );
+        assert!(installation.join(super::INSTALLATION_METADATA_FILE).is_file());
+        drop(first_runtime);
         let runtime = runtime(data.path(), &runner);
         let unavailable_full_copy_bytes =
             crate::inventory::available_disk_bytes(data.path()).unwrap();
@@ -2632,7 +2648,7 @@ mod tests {
             SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()),
             hashes_before
         );
-        assert!(!data.path().join("distribution/models").exists());
+        assert!(model_root.is_dir());
 
         fs::write(
             installation.join(super::INSTALLATION_METADATA_FILE),

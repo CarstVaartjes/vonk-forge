@@ -30,6 +30,7 @@ PROBES = {
         "recipe_observation_wire_probe",
     ),
     "VONK_COMPILED_PLAN_WIRE_PROBE": ("vonk-agent", "compiled_plan_wire_probe"),
+    "VONK_RESTART_RECOVERY_PROBE": ("vonk-agent", "restart_recovery_probe"),
 }
 
 

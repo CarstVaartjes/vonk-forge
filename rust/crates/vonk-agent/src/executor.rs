@@ -676,7 +676,7 @@ pub fn recipe_start_success_body(
     })
 }
 
-fn distribution_success_evidence(evidence: DistributionDownloadEvidence) -> Value {
+pub fn distribution_success_evidence(evidence: DistributionDownloadEvidence) -> Value {
     evidence_with_digest(json!({
         "assignment_id": evidence.assignment_id,
         "model_artifact_set_sha256": evidence.model_artifact_set_sha256,
