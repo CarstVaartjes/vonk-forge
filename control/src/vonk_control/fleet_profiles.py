@@ -81,6 +81,8 @@ from .recipe_runtime_specs import (
 )
 from .run_switch_contract import (
     RunSwitchApplyRequest,
+    RunSwitchCleanupApplyRequest,
+    RunSwitchCleanupPreviewRequest,
     RunSwitchOperation,
     RunSwitchOperationResult,
     RunSwitchStopApplyRequest,
@@ -302,7 +304,17 @@ class RunSwitchFleetProfileAdapter:
                         "bound scope or assignments"
                     )
                 return self._view_from_state(application, existing)
-            queue = self._plan_queue(session, ordered_assignments, scope_node_ids)
+            profile = session.get(FleetProfile, application.profile_id)
+            queue = self._plan_queue(
+                session,
+                ordered_assignments,
+                scope_node_ids,
+                installation_policy=(
+                    profile.installation_policy
+                    if profile is not None
+                    else "keep-cached"
+                ),
+            )
             state: dict[str, object] = {
                 "schema_version": 2,
                 "child_id": application_id,
@@ -583,6 +595,24 @@ class RunSwitchFleetProfileAdapter:
             )
         )
         kind = item.get("kind")
+        if kind == "cleanup":
+            installation_id = item.get("id")
+            if not isinstance(installation_id, str):
+                raise FleetProfileConflict(
+                    "Profile switch cleanup item has no installation identity"
+                )
+            cleanup_preview = self._run_switch.preview_cleanup(
+                RunSwitchCleanupPreviewRequest(installation_id=installation_id),
+                actor=actor,
+            )
+            return self._run_switch.apply_cleanup(
+                RunSwitchCleanupApplyRequest(
+                    installation_id=installation_id,
+                    plan_digest=cleanup_preview.plan_digest,
+                    request_key=child_request_key,
+                ),
+                actor=actor,
+            )
         if kind == "stop":
             run_id = item.get("id")
             if not isinstance(run_id, str):
@@ -625,6 +655,8 @@ class RunSwitchFleetProfileAdapter:
         session: Session,
         assignments: tuple[FleetProfileAssignment, ...],
         scope_node_ids: tuple[str, ...],
+        *,
+        installation_policy: str,
     ) -> list[dict[str, object]]:
         scope = set(scope_node_ids)
         desired = {
@@ -670,6 +702,28 @@ class RunSwitchFleetProfileAdapter:
             )
             if assignment.desired_state == "running" and identity not in preserved:
                 queue.append({"kind": "run", "id": assignment.id})
+        # An installation the desired state no longer references is removed by
+        # the orchestrator under the same retention decision, so the profile
+        # layer never executes a removal itself.  Retention decides whether it
+        # is removed at all: ``keep-cached`` retains it.  The scope is
+        # authoritative too -- an installation that reaches outside it is not
+        # this profile's to remove.
+        for installation in (
+            session.scalars(
+            select(RecipeInstallation)
+            .where(RecipeInstallation.state.in_(_ACTIVE_INSTALL_STATES))
+            .order_by(RecipeInstallation.created_at, RecipeInstallation.id)
+            )
+            if installation_policy == "exact"
+            else ()
+        ):
+            members = frozenset(_installation_member_ids(session, installation.id))
+            if not members or not members <= scope:
+                continue
+            identity = (installation.recipe_revision_id, members)
+            if identity in desired:
+                continue
+            queue.append({"kind": "cleanup", "id": installation.id})
         return queue
 
     @staticmethod
@@ -887,6 +941,21 @@ def _state_receipt(state: Mapping[str, object]) -> FleetProfileChildResult | Non
         )
         if isinstance(summary, Mapping)
         else None
+    )
+
+
+def _installation_member_ids(session: Session, installation_id: str) -> tuple[str, ...]:
+    """The authoritative complete placement of one installation."""
+
+    return tuple(
+        sorted(
+            node.node_id
+            for node in session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
     )
 
 
@@ -1889,6 +1958,23 @@ class FleetProfileService:
                             }
                         )
                         scheduled_stops.add(run.id)
+                    if self._switch_adapter is not None:
+                        # The orchestrator removes an installation the desired
+                        # state no longer references, so the profile states the
+                        # intent and keeps it visible instead of executing the
+                        # removal through its own state machine.
+                        reasons.append(
+                            FleetProfileReason(
+                                code="profile.cleanup_delegated",
+                                detail=(
+                                    "Run/Switch removes installation "
+                                    f"{installation.id} under this profile's "
+                                    "retention policy."
+                                )[:512],
+                                severity="info",
+                            )
+                        )
+                        continue
                     uninstall_steps.append(
                         {
                             "kind": "uninstall",

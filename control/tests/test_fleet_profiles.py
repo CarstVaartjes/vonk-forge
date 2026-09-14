@@ -3203,3 +3203,88 @@ def test_preview_composes_the_exact_lifecycle_assessment(
     service.preview(profile.id)
 
     assert composed == [(set(), set())]
+
+
+def _exact_cleanup_profile(tmp_path: Path):
+    """A production-wired profile that removes an installation it no longer lists."""
+
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import installed_recipe, setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installed = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    )
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions, clock=lifecycle._clock, switch_adapter=adapter
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Exact cleanup",
+                "installation_policy": "exact",
+                "assignments": [],
+            }
+        ),
+        actor="admin",
+    )
+    return sessions, lifecycle, adapter, service, profile, installed, nodes
+
+
+def test_switch_queue_removes_an_installation_the_profile_no_longer_references(
+    tmp_path: Path,
+) -> None:
+    """The orchestrator, not the profile layer, performs the removal."""
+
+    sessions, _lifecycle, adapter, _service, _profile, installed, nodes = (
+        _exact_cleanup_profile(tmp_path)
+    )
+
+    with sessions() as session:
+        exact = adapter._plan_queue(
+            session, (), tuple(nodes), installation_policy="exact"
+        )
+        retained = adapter._plan_queue(
+            session, (), tuple(nodes), installation_policy="keep-cached"
+        )
+
+    assert {"kind": "cleanup", "id": installed.owner_id} in exact
+    # Retention decides whether it is removed at all: keep-cached retains it.
+    assert retained == []
+
+
+def test_profile_preview_delegates_removal_to_the_orchestrator(
+    tmp_path: Path,
+) -> None:
+    """The profile states the intent and keeps it visible; Run/Switch removes it."""
+
+    _sessions, _lifecycle, _adapter, service, profile, installed, _nodes = (
+        _exact_cleanup_profile(tmp_path)
+    )
+
+    preview = service.preview(profile.id)
+
+    assert not any(step.kind == "uninstall" for step in preview.steps), [
+        step.kind for step in preview.steps
+    ]
+    delegated = [
+        reason for reason in preview.reasons if reason.code == "profile.cleanup_delegated"
+    ]
+    assert delegated, [reason.code for reason in preview.reasons]
+    assert installed.owner_id in delegated[0].detail

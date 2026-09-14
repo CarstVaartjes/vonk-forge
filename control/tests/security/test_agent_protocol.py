@@ -401,14 +401,7 @@ def test_control_environment_preserves_the_canonical_zero_byte_model_contract() 
 
 
 @pytest.mark.lane  # Builds the root-context control image.
-def test_root_context_image_installs_contracts_and_protocol_from_build_inputs() -> None:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker CLI is unavailable")
-    if (
-        subprocess.run(["docker", "info"], capture_output=True, check=False).returncode
-        != 0
-    ):
-        pytest.skip("Docker daemon is unavailable")
+def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(control_image_build_args: list[str]) -> None:
     image = "vonk-control:test-packaging-contracts"
     build = subprocess.run(
         [
@@ -416,10 +409,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs() 
             "build",
             "--file",
             "control/Dockerfile",
-            "--build-arg",
-            "NODE_IMAGE=node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553",
-            "--build-arg",
-            "PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254",
+            *control_image_build_args,
             "--tag",
             image,
             ".",

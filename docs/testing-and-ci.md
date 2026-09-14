@@ -142,11 +142,14 @@ is required.
 
 ## Dependency acquisition failures
 
-`scripts/retry-dependency-fetch` permits only `uv sync`, `skopeo inspect`, and
-`docker buildx imagetools inspect`. The Controller and wire jobs resolve locked
-dependencies before running checks. Published-image verification uses the same
-helper around remote reads, leaving digest, revision, platform, provenance and
-SBOM validation outside the retry boundary.
+`scripts/retry-dependency-fetch` permits only `uv sync`, `skopeo inspect`,
+`docker pull`, and `docker buildx imagetools inspect`. The Controller and wire
+jobs resolve locked dependencies before running checks. Controller image tests
+reuse local base images or pull missing inputs from `images.lock.json` through
+the helper before building; they pass those same pins as build arguments.
+Published-image verification uses the same helper around remote reads, leaving
+digest, revision, platform, provenance and SBOM validation outside the retry
+boundary.
 
 A recognized transient network or Git-fetch failure gets at most three
 attempts, with two- and four-second delays. Authentication, certificate, missing

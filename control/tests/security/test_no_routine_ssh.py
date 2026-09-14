@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -104,15 +103,7 @@ def test_production_worker_has_no_cluster_egress_network() -> None:
 
 
 @pytest.mark.lane  # Builds and runs the worker image.
-def test_built_worker_image_contains_no_direct_transport_executable() -> None:
-    if shutil.which("docker") is None:
-        pytest.skip("Docker CLI is unavailable")
-    if subprocess.run(
-        ["docker", "info"],
-        capture_output=True,
-        check=False,
-    ).returncode != 0:
-        pytest.skip("Docker daemon is unavailable")
+def test_built_worker_image_contains_no_direct_transport_executable(control_image_build_args: list[str]) -> None:
     image = "vonk-control-worker:test-no-routine-ssh"
     build = subprocess.run(
         [
@@ -120,6 +111,7 @@ def test_built_worker_image_contains_no_direct_transport_executable() -> None:
             "build",
             "--file",
             "control/Dockerfile",
+            *control_image_build_args,
             "--target",
             "worker",
             "--tag",
