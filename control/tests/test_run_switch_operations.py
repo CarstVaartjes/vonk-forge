@@ -1811,7 +1811,8 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         artifact_phase_executor=executor,
         memory_floor_bytes=50,
     )
-    assert restarted.tick() is True
+    # Polling an unchanged build child does not rewrite durable progress.
+    assert restarted.tick() is False
     assert build_preview_calls == []
     assert build_start_calls == ["start"]
 

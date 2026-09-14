@@ -1550,6 +1550,7 @@ class RunSwitchOperationService:
         )
         self._inventory_max_age = inventory_max_age_seconds
         self._memory_floor = memory_floor_bytes
+        self._tick_cursor: str | None = None
 
     def preview(
         self,
@@ -2207,18 +2208,28 @@ class RunSwitchOperationService:
         binder(model_cache)
 
     def tick(self) -> bool:
-        """Advance at most one high-level phase, safely after a restart."""
+        """Give every due independent operation a bounded chance to advance."""
 
         with self._sessions() as session:
-            job_id = session.scalar(
+            active = (
                 select(Job.id)
                 .where(Job.kind.in_(_OPERATION_KINDS), Job.state.in_(("queued", "running")))
-                .order_by(Job.created_at, Job.id)
-                .limit(1)
+                .order_by(Job.id)
+                .limit(16)
             )
-        if job_id is None:
-            return False
-        return self._advance(str(job_id))
+            if self._tick_cursor is None:
+                job_ids = tuple(session.scalars(active))
+            else:
+                following = tuple(session.scalars(active.where(Job.id > self._tick_cursor)))
+                job_ids = following + tuple(session.scalars(
+                    active.where(Job.id <= self._tick_cursor).limit(16 - len(following))
+                ))
+        if job_ids:
+            self._tick_cursor = str(job_ids[-1])
+        advanced = False
+        for job_id in job_ids:
+            advanced = self._advance(str(job_id)) or advanced
+        return advanced
 
     def _preview_run(
         self,
@@ -4508,6 +4519,15 @@ class RunSwitchOperationService:
                 return True
             plan = _load_plan(raw_plan)
             progress = _read_progress(job.result)
+            if self._superseded_by_newer_scope_job(session, job):
+                self._mark_failed(
+                    job,
+                    "run-switch.superseded: a later authorized operation owns this Spark scope",
+                    now=now,
+                    progress=progress,
+                )
+                session.commit()
+                return True
             raw_phase_index = progress.get("phase_index", 0)
             raw_item_index = progress.get("item_index", 0)
             child_id = progress.get("child_operation_id")
@@ -4554,7 +4574,8 @@ class RunSwitchOperationService:
                     job = session.get(Job, operation_id, with_for_update=True)
                     if job is None:
                         return False
-                    progress = _read_progress(job.result)
+                    original = _read_progress(job.result)
+                    progress = dict(original)
                     if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
                         return False
                     persisted_plan = _load_plan(job.payload["plan"])
@@ -4573,6 +4594,12 @@ class RunSwitchOperationService:
                     )
                     progress["phase"] = persisted_phase.kind
                     progress["subphase"] = persisted_phase.subphase
+                    if (
+                        job.state == "running"
+                        and _without_observation_time(progress)
+                        == _without_observation_time(original)
+                    ):
+                        return False
                     job.state = "running"
                     job.result = _persisted_result(progress)
                     job.updated_at = now
@@ -4903,6 +4930,20 @@ class RunSwitchOperationService:
             if progress.get("cancellation") and not progress.get("child_operation_id"):
                 _complete_cancellation(job, progress, now)
         return True
+
+    @staticmethod
+    def _superseded_by_newer_scope_job(session: Session, job: Job) -> bool:
+        """A later scoped intent fences every still-unissued older phase."""
+
+        scope = set(job.targets)
+        if not scope:
+            return False
+        later = session.scalars(select(Job).where(
+            Job.kind.in_(_OPERATION_KINDS),
+            Job.created_at > job.created_at,
+            Job.id != job.id,
+        ))
+        return any(scope.intersection(other.targets) for other in later)
 
     def _hold_for_preflight_refresh(
         self,
@@ -5532,6 +5573,23 @@ def _child_progress_payload(child: object) -> Mapping[str, object]:
     if isinstance(child_reason, str) and child_reason:
         payload["status_reason"] = child_reason[:512]
     return payload
+
+
+def _without_observation_time(value: object) -> object:
+    """Compare progress as state; elapsed time is projected on reads."""
+
+    if isinstance(value, Mapping):
+        return {
+            key: _without_observation_time(item)
+            for key, item in value.items()
+            if key not in {
+                "observed_at", "last_progress_at", "elapsed_seconds", "activity",
+                "bytes_per_second", "smoothed_bytes_per_second", "eta_seconds",
+            }
+        }
+    if isinstance(value, list):
+        return [_without_observation_time(item) for item in value]
+    return value
 
 
 class _EstablishedEffect:

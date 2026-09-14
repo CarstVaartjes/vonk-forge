@@ -146,7 +146,7 @@ def test_recovery_rejects_obsolete_intent_and_revoked_scope(tmp_path):
         service.retry(original.id, request_key=_uuid(801), actor="admin")
 
 
-def test_admitted_application_executes_immutable_assignment_after_profile_edit(
+def test_profile_edit_supersedes_unissued_assignment_after_failed_load(
     tmp_path,
 ):
     _sessions, operations, service, profile, original = setup_recovery(tmp_path)
@@ -162,8 +162,11 @@ def test_admitted_application_executes_immutable_assignment_after_profile_edit(
     )
     service.update(profile.id, changed, actor="admin")
     operations.fail = False
+    operations.events.clear()
     finish(service, retry.id)
-    assert service.application(retry.id).state == "succeeded"
+    assert service.application(retry.id).state == "failed"
+    assert "superseded" in (service.application(retry.id).status_reason or "")
+    assert operations.events == []
     assert service._application_assignments(retry.id)[0].alias == "studio-chat"
 
 

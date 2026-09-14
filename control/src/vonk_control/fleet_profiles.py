@@ -65,6 +65,7 @@ from .models import (
     FleetProfile,
     FleetProfileApplication,
     InstallationNode,
+    Job,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -85,6 +86,7 @@ from .run_switch_contract import (
     RunSwitchCleanupPreviewRequest,
     RunSwitchOperation,
     RunSwitchOperationResult,
+    RunSwitchPlan,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
     SparkGroup,
@@ -496,11 +498,16 @@ class RunSwitchFleetProfileAdapter:
                 )
             if child.state in {"queued", "running"}:
                 view = self._view_from_child(application_id, state, child)
-                state["state"] = view.state
-                if view.progress is not None:
-                    state["child_progress"] = view.progress.model_dump(mode="json")
-                self._write_state(session, application, state)
-                session.flush()
+                new_progress = (
+                    view.progress.model_dump(mode="json")
+                    if view.progress is not None
+                    else None
+                )
+                if state.get("state") != view.state or state.get("child_progress") != new_progress:
+                    state["state"] = view.state
+                    state["child_progress"] = new_progress
+                    self._write_state(session, application, state)
+                    session.flush()
                 return view
             if child.state in {"failed", "cancelled"}:
                 reason = child.status_reason or (
@@ -595,6 +602,14 @@ class RunSwitchFleetProfileAdapter:
             )
         )
         kind = item.get("kind")
+        adopted = self._adopt_child(
+            child_request_key,
+            item=item,
+            assignments=assignments,
+            scope_node_ids=scope_node_ids,
+        )
+        if adopted is not None:
+            return adopted
         if kind == "cleanup":
             installation_id = item.get("id")
             if not isinstance(installation_id, str):
@@ -649,6 +664,60 @@ class RunSwitchFleetProfileAdapter:
         return self._run_switch.apply(
             request.model_copy(update={"plan_digest": plan.plan_digest}), actor=actor
         )
+
+    def _adopt_child(
+        self,
+        request_key: str,
+        *,
+        item: Mapping[str, object],
+        assignments: tuple[FleetProfileAssignment, ...],
+        scope_node_ids: tuple[str, ...],
+    ) -> RunSwitchOperation | None:
+        """Read the exact committed child before any mutable preview is redone."""
+
+        with self._sessions() as session:
+            job = session.scalar(select(Job).where(Job.request_id == request_key))
+            if job is None:
+                return None
+            kind = item.get("kind")
+            expected_kind = {
+                "cleanup": "recipe.cleanup.v2",
+                "stop": "recipe.stop.v2",
+                "run": "recipe.run-switch.v2",
+            }.get(kind)
+            if job.kind != expected_kind:
+                raise FleetProfileConflict("Profile child request key belongs to another operation")
+            raw_plan = job.payload.get("plan")
+            try:
+                plan = RunSwitchPlan.model_validate_json(
+                    canonical_message(raw_plan), strict=True
+                )
+            except (TypeError, ValueError) as error:
+                raise FleetProfileConflict("Persisted Run/Switch child plan is invalid") from error
+            child_nodes = tuple(sorted(node.node_id for node in plan.spark_group.nodes))
+            if (
+                child_nodes != tuple(sorted(job.targets))
+                or not set(child_nodes) <= set(scope_node_ids)
+            ):
+                raise FleetProfileConflict("Profile child changed its bound Spark scope")
+            owner_id = item.get("id")
+            if kind == "cleanup":
+                valid = plan.action == "cleanup" and plan.installation_id == owner_id
+            elif kind == "stop":
+                valid = plan.action == "stop" and plan.run_id == owner_id
+            else:
+                assignment = next((value for value in assignments if value.id == owner_id), None)
+                valid = (
+                    assignment is not None
+                    and plan.action == "switch"
+                    and plan.recipe_revision_id == assignment.recipe_revision_id
+                    and plan.alias == assignment.alias
+                    and child_nodes == tuple(sorted(node.node_id for node in assignment.nodes))
+                )
+            if not valid:
+                raise FleetProfileConflict("Profile child changed its bound owner or assignment")
+            operation_id = job.id
+        return self._run_switch.get(operation_id)
 
     def _plan_queue(
         self,
@@ -2259,7 +2328,6 @@ class FleetProfileService:
                 raise FleetProfileConflict("Fleet profile changed during application admission")
             if retry_of_application_id is None:
                 active = session.scalar(select(FleetProfileApplication).where(
-                    FleetProfileApplication.profile_id == profile.id,
                     FleetProfileApplication.state.in_(("queued", "running")),
                 ))
                 if active is not None:
@@ -2293,6 +2361,11 @@ class FleetProfileService:
                     raise FleetProfileConflict("Persisted application intent is unavailable")
                 intended = prior.intended_profile
                 attempt = prior.attempt + 1
+                active = session.scalar(select(FleetProfileApplication).where(
+                    FleetProfileApplication.state.in_(("queued", "running")),
+                ))
+                if active is not None:
+                    raise FleetProfileConflict("Profile load is already active; follow its progress")
             row = FleetProfileApplication(
                 request_key=request_key,
                 profile_id=preview.profile_id,
@@ -2541,6 +2614,19 @@ class FleetProfileService:
                 raise KeyError(application_id)
             return self._application_view(row)
 
+    def application_by_request_key(self, request_key: str) -> FleetProfileApplicationView:
+        """Resolve one accepted submission after its response was lost."""
+
+        with self._sessions() as session:
+            row = session.scalar(
+                select(FleetProfileApplication).where(
+                    FleetProfileApplication.request_key == request_key
+                )
+            )
+            if row is None:
+                raise KeyError(request_key)
+            return self._application_view(row)
+
     def tick(self) -> bool:
         """Advance at most one profile application step; safe to call repeatedly."""
 
@@ -2567,6 +2653,11 @@ class FleetProfileService:
                 row.status_reason = str(error)[:512]
                 row.updated_at = now
                 return True
+            if self._superseding_intent(session, row, progress):
+                row.state = "failed"
+                row.status_reason = "Profile intent was superseded by a changed profile or later scoped operation"
+                row.updated_at = now
+                return True
             steps = [step.model_dump(mode="json") for step in plan.steps]
             if row.current_operation_id:
                 try:
@@ -2587,16 +2678,23 @@ class FleetProfileService:
                     row.updated_at = now
                     return True
                 if isinstance(child, FleetProfileChildOperation):
+                    # The adapter may have checkpointed its child in this same
+                    # row/transaction. Read that receipt before mirroring the
+                    # public progress so the mirror cannot erase it.
+                    progress = _persisted_profile_progress(row)
                     progress_data = progress.model_dump(mode="json")
                     if child.progress is not None:
                         progress_data["child_progress"] = child.progress.model_dump(
                             mode="json"
                         )
-                    progress = FleetProfileApplicationProgress.model_validate_json(
-                        canonical_message(progress_data), strict=True
-                    )
-                    row.progress = progress.model_dump(mode="json")
+                    if progress_data != progress.model_dump(mode="json"):
+                        progress = FleetProfileApplicationProgress.model_validate_json(
+                            canonical_message(progress_data), strict=True
+                        )
+                        row.progress = progress.model_dump(mode="json")
                 if child.state in _CHILD_PENDING_STATES:
+                    if row.state == "running" and not session.is_modified(row):
+                        return False
                     row.state = "running"
                     row.updated_at = now
                     return True
@@ -2746,6 +2844,43 @@ class FleetProfileService:
                 current.status_reason = str(error)[:512]
             current.updated_at = _aware(self._clock())
         return True
+
+    def _superseding_intent(
+        self,
+        session: Session,
+        row: FleetProfileApplication,
+        progress: FleetProfileApplicationProgress,
+    ) -> bool:
+        """Fence unissued profile effects after a newer authorized intent."""
+
+        profile = session.get(FleetProfile, row.profile_id)
+        intended = progress.intended_profile
+        if (
+            profile is None
+            or intended is None
+            or self._view(session, profile).profile_digest != intended.profile_digest
+        ):
+            return True
+        scope = set(intended.scope.node_ids)
+        if not scope:
+            return False
+        own_keys: set[str] = set()
+        adapter = progress.switch_adapter
+        if adapter is not None:
+            for position, item in enumerate(adapter.queue):
+                own_keys.add(str(uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    "vonk-forge:profile-run-switch:"
+                    f"{row.id}:{position}:{item.kind}:{item.id}",
+                )))
+        later = session.scalars(select(Job).where(
+            Job.kind.in_(("recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2")),
+            Job.created_at > row.created_at,
+        ))
+        return any(
+            job.request_id not in own_keys and scope.intersection(job.targets)
+            for job in later
+        )
 
     def _start_step(
         self,

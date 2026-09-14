@@ -1734,7 +1734,7 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
         clock=lifecycle._clock,
         switch_adapter=restarted_adapter,
     )
-    assert restarted_service.tick() is True
+    assert restarted_service.tick() is False
     resumed = restarted_service.application(application.id)
     assert resumed.current_operation_id == application.id
     assert resumed.progress.switch_adapter is not None
