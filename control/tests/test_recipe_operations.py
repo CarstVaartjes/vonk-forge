@@ -40,6 +40,8 @@ from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
 )
+from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
@@ -3207,7 +3209,7 @@ def test_uninstall_cleans_model_per_spark_when_dependency_is_node_local(
     ]
 
 
-def test_uninstall_unknown_bytes_and_active_runs_block_without_implicit_stop(
+def test_uninstall_warns_on_unknown_bytes_but_blocks_active_runs_without_implicit_stop(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -3262,10 +3264,89 @@ def test_uninstall_unknown_bytes_and_active_runs_block_without_implicit_stop(
         stored_installation.state = "partial"
         failed_node.state = "failed"
     unknown = service.preview_uninstall(installation.owner_id)
-    assert unknown.allowed is False
+    assert unknown.allowed is True
     assert unknown.bytes_removed is None
-    assert [reason.code for reason in unknown.blockers] == ["uninstall.bytes_unknown"]
+    assert unknown.blockers == ()
+    assert [reason.code for reason in unknown.warnings] == ["uninstall.bytes_unknown"]
     assert unknown.nodes[1].installed_bytes is None
+
+
+@pytest.mark.parametrize("first_node_removed", [False, True])
+def test_profile_cleanup_recovers_failed_uninstall_and_only_retries_remaining_nodes(
+    tmp_path: Path,
+    first_node_removed: bool,
+) -> None:
+    sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        operations, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    profiles = FleetProfileService(
+        sessions, clock=lambda: NOW, recipe_operations=operations
+    )
+    profile = profiles.create(
+        FleetProfileInput(name="Idle", installation_policy="exact"), actor="admin"
+    )
+    first = profiles.load(profile.number, request_key=str(uuid.uuid4()), actor="admin")
+    assert profiles.tick()
+    first_job = profiles.application(first.id).current_operation_id
+    assert first_job is not None
+    operations.record_node_result(
+        first_job,
+        nodes[0],
+        succeeded=first_node_removed,
+        evidence={"removed": True}
+        if first_node_removed
+        else {"code": "cleanup.failed"},
+    )
+    operations.record_node_result(
+        first_job, nodes[1], succeeded=False, evidence={"code": "cleanup.failed"}
+    )
+    assert profiles.tick()
+    assert profiles.application(first.id).state == "failed"
+
+    # A new coordinator resumes persisted progress through the normal load path.
+    profiles = FleetProfileService(
+        sessions, clock=lambda: NOW + timedelta(seconds=1), recipe_operations=operations
+    )
+    request_key = str(uuid.uuid4())
+    retry = profiles.load(profile.number, request_key=request_key, actor="admin")
+    assert retry.retry_of_application_id == first.id
+    assert profiles.tick()
+    second_job = profiles.application(retry.id).current_operation_id
+    assert second_job is not None, profiles.application(retry.id).status_reason
+    with sessions() as session:
+        retried_nodes = set(
+            session.scalars(
+                select(AgentOperation.node_id).where(
+                    AgentOperation.parent_job_id == second_job
+                )
+            )
+        )
+    assert retried_nodes == set(nodes[1:] if first_node_removed else nodes)
+    for node_id in retried_nodes:
+        operations.record_node_result(
+            second_job, node_id, succeeded=True, evidence={"removed": True}
+        )
+    assert profiles.tick()
+    final = profiles.application(retry.id)
+    assert final.state == "succeeded"
+    assert (
+        profiles.load(profile.number, request_key=request_key, actor="admin") == final
+    )
+    with sessions() as session:
+        assert (
+            _required(session.get(RecipeInstallation, installation.owner_id)).state
+            == "uninstalled"
+        )
+        assert set(
+            session.scalars(
+                select(InstallationNode.state).where(
+                    InstallationNode.installation_id == installation.owner_id
+                )
+            )
+        ) == {"uninstalled"}
 
 
 def test_uninstall_rejects_stale_bytes_before_transactional_full_group_queue(

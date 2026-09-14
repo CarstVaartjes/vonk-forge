@@ -227,7 +227,7 @@ def uninstall_plan(
     model_title: str,
     dependent_recipe_ids_by_node: Mapping[str, Sequence[str]],
 ) -> UninstallPlan:
-    """Build one uninstall impact plan with fail-closed byte semantics."""
+    """Bind exact cleanup authority while reporting unknown reclaimable bytes."""
 
     ordered_nodes = tuple(sorted(nodes, key=lambda item: (item.rank, item.node_id)))
     ordered_runs = tuple(sorted(active_runs, key=lambda item: item.run_id))
@@ -304,13 +304,6 @@ def uninstall_plan(
                 "The bounded active-run list is incomplete; uninstall remains blocked.",
             )
         )
-    if not bytes_known:
-        blockers.append(
-            ActionReason(
-                "uninstall.bytes_unknown",
-                "Exact removable bytes are unknown for failed or partial installation residue.",
-            )
-        )
     if active_operation:
         blockers.append(
             ActionReason(
@@ -380,7 +373,16 @@ def uninstall_plan(
         active_run_count=active_run_count,
         active_runs_truncated=active_runs_truncated,
         blockers=tuple(blockers),
-        warnings=(),
+        warnings=(
+            (
+                ActionReason(
+                    "uninstall.bytes_unknown",
+                    "Reclaimable bytes are unknown; cleanup remains scoped to this installation.",
+                ),
+            )
+            if not bytes_known
+            else ()
+        ),
         consequences=UninstallConsequences(),
         model_impact=UninstallModelImpact(
             model_content_sha256=model_content_sha256,

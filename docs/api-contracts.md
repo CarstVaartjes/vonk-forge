@@ -372,6 +372,10 @@ that Controller reader supplies a process-local storage-validation context;
 JSON cannot select it. Schema, path, artifact-byte, topology and security checks
 remain enforced. Install, start and ordinary persisted-plan reads retain full
 launch validation, and teardown never rewrites a stored plan to make it pass.
+Unknown reclaimable bytes are reported as unknown with a warning; they do not
+block removal of an exactly identified, stopped installation. A retry retains
+completed per-node removal receipts and queues only the unfinished nodes. Active
+runs, active cleanup operations and changed immutable membership still block it.
 
 Structure validation does not replace transaction semantics. Cache workers
 refresh the database row when acquiring its lock, so a prior cooldown scan
