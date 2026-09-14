@@ -300,6 +300,55 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     }))
 
 
+def test_late_old_cancellation_never_retires_a_newer_attempt(service) -> None:
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    operation = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert first is not None
+    second_fence = str(uuid.uuid4())
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        row = session.get(AgentOperation, operation.id)
+        first_attempt = session.scalar(
+            select(AgentOperationAttempt).where(AgentOperationAttempt.fence == first.fence)
+        )
+        assert node is not None and row is not None and first_attempt is not None
+        node.workload_intent_ordinal = 2
+        jobs.request_superseded_workload_cancellation_in_session(
+            session, (NODE_A,), 2, clock.now
+        )
+        first_attempt.state = "expired"
+        row.current_attempt = 2
+        session.add(AgentOperationAttempt(
+            operation_id=operation.id,
+            attempt=2,
+            fence=second_fence,
+            lease_deadline=clock.now + timedelta(minutes=1),
+            agent_certificate_serial="serial-a",
+            state="running",
+        ))
+    late = AgentResult.model_validate({
+        "schema_version": 1,
+        "job_id": job.id,
+        "operation_id": operation.id,
+        "attempt": first.attempt,
+        "fence": first.fence,
+        "node_id": NODE_A,
+        "deadline": first.deadline,
+        "state": "cancelled",
+        "result": {"error_code": "operation_cancelled", "reason": "old helper stopped"},
+    })
+    assert jobs.record_late_result(late)
+    with sessions() as session:
+        row = session.get(AgentOperation, operation.id)
+        newer = session.scalar(
+            select(AgentOperationAttempt).where(AgentOperationAttempt.fence == second_fence)
+        )
+        assert row is not None and row.current_attempt == 2 and row.state == "running"
+        assert newer is not None and newer.state == "running" and newer.result is None
+
+
 def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
     service,
 ) -> None:

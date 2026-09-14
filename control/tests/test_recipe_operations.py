@@ -3073,6 +3073,18 @@ def test_new_stop_intent_replans_after_unissued_old_stop(tmp_path: Path) -> None
             ResourceReservation.owner_id == run.owner_id,
             ResourceReservation.state == "active",
         )) is not None
+    obsolete = service.cancel(
+        old.id, actor="admin", request_id=str(uuid.uuid4()), reason="new request owns the run"
+    )
+    assert obsolete.state == "cancelled"
+    with pytest.raises(RecipeOperationConflict, match="request key was already used differently"):
+        service.cancel(
+            old.id, actor="admin", request_id="new-stop-intent", reason="new request owns the run"
+        )
+    with pytest.raises(RecipeOperationConflict, match="cancellation request identity is invalid"):
+        service.cancel(
+            old.id, actor="admin", request_id="not-a-uuid", reason="new request owns the run"
+        )
 
 
 def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:

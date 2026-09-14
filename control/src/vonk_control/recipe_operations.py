@@ -5,13 +5,14 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -2855,6 +2856,52 @@ class RecipeOperationService:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or not job.kind.startswith("recipe."):
                 raise RecipeOperationConflict("recipe operation is not cancellable")
+            bound_ordinal = job.payload.get("workload_intent_ordinal")
+            superseded = False
+            if job.kind in _WORKLOAD_INTENT_KINDS | {"recipe.job.run.v1"} and type(bound_ordinal) is int:
+                nodes = tuple(session.scalars(
+                    select(AgentNode)
+                    .where(AgentNode.node_id.in_(job.targets))
+                    .order_by(AgentNode.node_id)
+                ))
+                superseded = (
+                    len(nodes) == len(job.targets)
+                    and tuple(node.node_id for node in nodes) == tuple(sorted(set(job.targets)))
+                    and any(node.workload_intent_ordinal > bound_ordinal for node in nodes)
+                )
+            already_invalidated = superseded and (
+                job.state in {"cancelled", "failed"}
+                or (
+                    job.state == "waiting-for-operator"
+                    and isinstance(job.result, Mapping)
+                    and job.result.get("cancel_requested") is True
+                )
+            )
+            if already_invalidated:
+                if not isinstance(actor, str) or not 1 <= len(actor) <= 256 or not isinstance(request_id, str):
+                    raise RecipeOperationConflict("cancellation request identity is invalid")
+                reused = session.scalar(
+                    select(Job.id)
+                    .where(
+                        Job.id != job.id,
+                        or_(
+                            Job.request_id == request_id,
+                            Job.result["cancel_request_id"].as_string() == request_id,
+                        ),
+                    )
+                    .limit(1)
+                )
+                if reused is not None:
+                    raise RecipeOperationConflict("cancellation request key was already used differently")
+                try:
+                    if str(uuid.UUID(request_id)) != request_id:
+                        raise ValueError("noncanonical cancellation request key")
+                except ValueError as error:
+                    raise RecipeOperationConflict("cancellation request identity is invalid") from error
+                logging.getLogger(__name__).info(
+                    "ignored cancellation of superseded recipe operation %s", job.id
+                )
+                return self._view(job)
             if job.state == "cancelled":
                 previous = _validated_result(job.kind, job.result) or {}
                 if (
