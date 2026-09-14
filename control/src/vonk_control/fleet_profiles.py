@@ -6,8 +6,9 @@ import hashlib
 import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import String, cast, func, select
@@ -72,6 +73,7 @@ from .models import (
 from .operation_contract import OperationFailureEvidence
 from .operation_progress import project_progress
 from .preparation_contract import RolloutPreparation
+from .recipe_action_plans import ActionReason
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_runtime_specs import (
     recipe_topology,
@@ -896,6 +898,82 @@ def _aware(value: datetime) -> datetime:
 
 def _digest(value: object) -> str:
     return hashlib.sha256(canonical_message(value)).hexdigest()
+
+
+def _lifecycle_blocker_reason(
+    kind: str, owner_id: str, blocker: ActionReason
+) -> FleetProfileReason:
+    """Translate one lifecycle blocker into a profile preview reason."""
+
+    return FleetProfileReason(
+        code=f"profile.{kind}_blocked",
+        detail=f"{kind} of {owner_id} is blocked: [{blocker.code}] {blocker.detail}"[
+            :512
+        ],
+        severity="error",
+    )
+
+
+def _active_run_reasons(
+    assessment: Any,
+    step: Mapping[str, object],
+    scheduled_stops: AbstractSet[str],
+    switch_scope: AbstractSet[str],
+) -> list[FleetProfileReason]:
+    """Decide whether this plan itself clears the active-run prerequisite.
+
+    ``uninstall.active_run`` is the one uninstall blocker a plan can satisfy on
+    its own, and only when every active run is provably one this plan stops
+    first or converges inside its own switch scope.  An incomplete bounded list
+    proves nothing, so it stays a blocker rather than a promise.
+    """
+
+    active = tuple(assessment.active_runs)
+    if assessment.active_runs_truncated or assessment.active_run_count > len(active):
+        return [
+            FleetProfileReason(
+                code="profile.uninstall_active_run",
+                detail=(
+                    "Cleanup is blocked: the active-run list is incomplete, so "
+                    "this plan cannot prove every run stops first."
+                ),
+                severity="error",
+            )
+        ]
+    raw_nodes = step.get("node_ids")
+    node_ids = {
+        node_id
+        for node_id in (raw_nodes if isinstance(raw_nodes, list) else [])
+        if isinstance(node_id, str)
+    }
+    scope_resolves = bool(switch_scope) and node_ids <= switch_scope
+    unresolved = tuple(
+        run.run_id
+        for run in active
+        if run.run_id not in scheduled_stops and not scope_resolves
+    )
+    if unresolved:
+        return [
+            FleetProfileReason(
+                code="profile.uninstall_active_run",
+                detail=("Cleanup is blocked until these runs stop: " + ", ".join(unresolved))[
+                    :512
+                ],
+                severity="error",
+            )
+        ]
+    if not active:
+        return []
+    return [
+        FleetProfileReason(
+            code="profile.uninstall_prerequisite",
+            detail=(
+                "Cleanup follows this plan's own stop of "
+                + ", ".join(sorted(run.run_id for run in active))
+            )[:512],
+            severity="info",
+        )
+    ]
 
 
 def _choice_id(value: FleetProfileAssignmentInput) -> str:
@@ -1859,6 +1937,16 @@ class FleetProfileService:
                     + switch_steps
                     + start_steps
                 )
+            self._compose_lifecycle_assessments(
+                raw_steps,
+                scheduled_stops=scheduled_stops,
+                switch_scope=(
+                    set(target_nodes)
+                    if self._switch_adapter is not None and adapter_switch_needed
+                    else set()
+                ),
+                reasons=reasons,
+            )
             steps = [
                 FleetProfilePlanStep(index=index, **step)
                 for index, step in enumerate(raw_steps)
@@ -1927,6 +2015,88 @@ class FleetProfileService:
                 reasons=reasons,
                 plan_digest=_digest(identity),
             )
+
+    def _compose_lifecycle_assessments(
+        self,
+        raw_steps: Sequence[Mapping[str, object]],
+        *,
+        scheduled_stops: AbstractSet[str],
+        switch_scope: AbstractSet[str],
+        reasons: list[FleetProfileReason],
+    ) -> None:
+        """Surface what the exact lifecycle assessment already knows.
+
+        The preview used to rebuild an uninstall or stop decision from
+        installation and run rows while execution invoked the lifecycle
+        planner, so an allowed preview could meet a blocker the operator never
+        saw.  Composing the same assessment here keeps one source of authority
+        for what each planned step will actually do.
+
+        A prerequisite this plan resolves is not a blocker: a run this plan
+        stops first, or a run inside the planned switch scope, is reported as a
+        named prerequisite so the operator sees the ordering instead of an
+        error the plan was always going to clear.
+        """
+
+        if self._recipe_operations is None:
+            return
+        for step in raw_steps:
+            kind = step.get("kind")
+            owner_id = step.get("owner_id")
+            if not isinstance(kind, str) or kind not in {"stop", "uninstall"}:
+                continue
+            if not isinstance(owner_id, str):
+                continue
+            assessment = self._assess_lifecycle_step(kind, owner_id, reasons)
+            if assessment is None:
+                continue
+            blockers = tuple(assessment.blockers)
+            if kind == "stop":
+                reasons.extend(
+                    _lifecycle_blocker_reason("stop", owner_id, blocker)
+                    for blocker in blockers
+                )
+                continue
+            reasons.extend(
+                _lifecycle_blocker_reason("uninstall", owner_id, blocker)
+                for blocker in blockers
+                if blocker.code != "uninstall.active_run"
+            )
+            if any(blocker.code == "uninstall.active_run" for blocker in blockers):
+                reasons.extend(
+                    _active_run_reasons(assessment, step, scheduled_stops, switch_scope)
+                )
+
+    def _assess_lifecycle_step(
+        self,
+        kind: str,
+        owner_id: str,
+        reasons: list[FleetProfileReason],
+    ) -> Any:
+        """Return the exact assessment for one planned step, or report why not."""
+
+        assert self._recipe_operations is not None
+        try:
+            if kind == "stop":
+                return self._recipe_operations.preview_stop(owner_id)
+            return self._recipe_operations.preview_uninstall(owner_id)
+        except (
+            KeyError,
+            RecipeOperationConflict,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            reasons.append(
+                FleetProfileReason(
+                    code=f"profile.{kind}_assessment_unavailable",
+                    detail=(
+                        f"This plan's {kind} step could not be assessed: {error}"
+                    )[:512],
+                    severity="error",
+                )
+            )
+            return None
 
     def apply(
         self, profile_id: str, *, plan_digest: str, request_key: str, actor: str

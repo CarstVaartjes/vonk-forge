@@ -23,6 +23,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileChildOperation,
     FleetProfileChildProgress,
     FleetProfileInput,
+    FleetProfileReason,
     FleetProfileScope,
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchAdapterState,
@@ -54,6 +55,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.preparation_contract import RolloutPreparation
+from vonk_control.recipe_action_plans import ActionReason
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -881,7 +883,24 @@ class _ProfileLifecycleSimulator(RecipeOperationService):
         return self._queue("start", run_id, request_id)
 
     def preview_stop(self, run_id):
-        return SimpleNamespace(plan_digest=self._digest(("stop", run_id)))
+        # The coordinator composes this assessment, so the double has to model
+        # its decision surface rather than only the digest it passes on.
+        return SimpleNamespace(
+            plan_digest=self._digest(("stop", run_id)),
+            allowed=True,
+            blockers=(),
+        )
+
+    def preview_uninstall(self, installation_id):
+        return SimpleNamespace(
+            installation_id=installation_id,
+            plan_digest=self._digest(("uninstall", installation_id)),
+            allowed=True,
+            blockers=(),
+            active_runs=(),
+            active_run_count=0,
+            active_runs_truncated=False,
+        )
 
     def stop(self, run_id, *, plan_digest, actor, request_id):
         with self.sessions.begin() as session:
@@ -2943,3 +2962,244 @@ def test_child_operation_state_distinguishes_absence_from_corruption() -> None:
         FleetProfileConflict, match="child operation state is invalid"
     ):
         _operation_state(7, default="running")
+
+
+class _AssessingSimulator(_ProfileLifecycleSimulator):
+    """Lifecycle double that reports a chosen exact assessment per step."""
+
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        *,
+        stop_blockers: tuple[ActionReason, ...] = (),
+        uninstall_blockers: tuple[ActionReason, ...] = (),
+        active_runs: tuple[SimpleNamespace, ...] = (),
+        active_run_count: int | None = None,
+        active_runs_truncated: bool = False,
+    ) -> None:
+        super().__init__(sessions)
+        self.stop_blockers = stop_blockers
+        self.uninstall_blockers = uninstall_blockers
+        self.active_runs = active_runs
+        self.active_run_count = (
+            len(active_runs) if active_run_count is None else active_run_count
+        )
+        self.active_runs_truncated = active_runs_truncated
+
+    def preview_stop(self, run_id):
+        return SimpleNamespace(
+            plan_digest=self._digest(("stop", run_id)),
+            allowed=not self.stop_blockers,
+            blockers=self.stop_blockers,
+        )
+
+    def preview_uninstall(self, installation_id):
+        return SimpleNamespace(
+            installation_id=installation_id,
+            plan_digest=self._digest(("uninstall", installation_id)),
+            allowed=not self.uninstall_blockers,
+            blockers=self.uninstall_blockers,
+            active_runs=self.active_runs,
+            active_run_count=self.active_run_count,
+            active_runs_truncated=self.active_runs_truncated,
+        )
+
+
+def _composed_reasons(
+    operations: _ProfileLifecycleSimulator,
+    steps: list[dict[str, object]],
+    *,
+    scheduled_stops: tuple[str, ...] = (),
+    switch_scope: tuple[str, ...] = (),
+) -> list[FleetProfileReason]:
+    """Run the coordinator's preview composition over exact step drafts."""
+
+    service = FleetProfileService(
+        operations.sessions, clock=lambda: NOW, recipe_operations=operations
+    )
+    reasons: list[FleetProfileReason] = []
+    service._compose_lifecycle_assessments(
+        steps,
+        scheduled_stops=set(scheduled_stops),
+        switch_scope=set(switch_scope),
+        reasons=reasons,
+    )
+    return reasons
+
+
+def _assessment_sessions() -> sessionmaker[Session]:
+    # The composition only consults the lifecycle double, so this sessionmaker
+    # never opens a connection.
+    return sessionmaker(create_engine("sqlite+pysqlite:///:memory:"))
+
+
+def test_preview_blocks_cleanup_the_plan_cannot_resolve() -> None:
+    """An allowed preview must not hide a blocker execution will meet.
+
+    The preview used to rebuild the uninstall decision from installation rows
+    while execution invoked the lifecycle planner, so a cleanup that could
+    never run was presented to the operator as an allowed plan.
+    """
+
+    operations = _AssessingSimulator(
+        _assessment_sessions(),
+        uninstall_blockers=(
+            ActionReason("uninstall.operation_active", "already uninstalling"),
+        ),
+    )
+    reasons = _composed_reasons(
+        operations,
+        [{"kind": "uninstall", "owner_id": _uuid(900), "node_ids": [_node_id(1)]}],
+    )
+
+    assert [(reason.code, reason.severity) for reason in reasons] == [
+        ("profile.uninstall_blocked", "error")
+    ]
+    assert "uninstall.operation_active" in reasons[0].detail
+
+
+def test_preview_accepts_a_prerequisite_the_plan_stops_first() -> None:
+    """A run this plan stops itself is ordering, not a blocker."""
+
+    run_id = _uuid(901)
+    operations = _AssessingSimulator(
+        _assessment_sessions(),
+        uninstall_blockers=(
+            ActionReason("uninstall.active_run", "1 active run(s) must stop first"),
+        ),
+        active_runs=(SimpleNamespace(run_id=run_id),),
+    )
+    reasons = _composed_reasons(
+        operations,
+        [{"kind": "uninstall", "owner_id": _uuid(900), "node_ids": [_node_id(1)]}],
+        scheduled_stops=(run_id,),
+    )
+
+    assert [(reason.code, reason.severity) for reason in reasons] == [
+        ("profile.uninstall_prerequisite", "info")
+    ]
+    assert run_id in reasons[0].detail
+
+
+def test_preview_accepts_a_prerequisite_inside_the_switch_scope() -> None:
+    """The adapter switch stops conflicting runs in its scope, so it resolves too."""
+
+    run_id = _uuid(902)
+    operations = _AssessingSimulator(
+        _assessment_sessions(),
+        uninstall_blockers=(
+            ActionReason("uninstall.active_run", "1 active run(s) must stop first"),
+        ),
+        active_runs=(SimpleNamespace(run_id=run_id),),
+    )
+    reasons = _composed_reasons(
+        operations,
+        [{"kind": "uninstall", "owner_id": _uuid(900), "node_ids": [_node_id(1)]}],
+        switch_scope=(_node_id(1),),
+    )
+
+    assert [(reason.code, reason.severity) for reason in reasons] == [
+        ("profile.uninstall_prerequisite", "info")
+    ]
+
+
+def test_preview_blocks_an_active_run_the_plan_does_not_stop() -> None:
+    """An unlisted run outside the plan's own stops stays a blocker."""
+
+    run_id = _uuid(903)
+    operations = _AssessingSimulator(
+        _assessment_sessions(),
+        uninstall_blockers=(
+            ActionReason("uninstall.active_run", "1 active run(s) must stop first"),
+        ),
+        active_runs=(SimpleNamespace(run_id=run_id),),
+    )
+    reasons = _composed_reasons(
+        operations,
+        [{"kind": "uninstall", "owner_id": _uuid(900), "node_ids": [_node_id(1)]}],
+        switch_scope=(_node_id(2),),
+    )
+
+    assert [(reason.code, reason.severity) for reason in reasons] == [
+        ("profile.uninstall_active_run", "error")
+    ]
+    assert run_id in reasons[0].detail
+
+
+def test_preview_blocks_an_incomplete_active_run_list() -> None:
+    """A bounded list that is incomplete cannot prove the prerequisite clears."""
+
+    operations = _AssessingSimulator(
+        _assessment_sessions(),
+        uninstall_blockers=(
+            ActionReason("uninstall.active_run", "1 active run(s) must stop first"),
+        ),
+        active_runs=(SimpleNamespace(run_id=_uuid(904)),),
+        active_runs_truncated=True,
+    )
+    reasons = _composed_reasons(
+        operations,
+        [{"kind": "uninstall", "owner_id": _uuid(900), "node_ids": [_node_id(1)]}],
+        scheduled_stops=(_uuid(904),),
+    )
+
+    assert [(reason.code, reason.severity) for reason in reasons] == [
+        ("profile.uninstall_active_run", "error")
+    ]
+    assert "incomplete" in reasons[0].detail
+
+
+def test_preview_surfaces_a_blocked_stop_step() -> None:
+    """A stop the lifecycle refuses is reported before the profile is applied."""
+
+    operations = _AssessingSimulator(
+        _assessment_sessions(),
+        stop_blockers=(ActionReason("stop.operation_active", "stop already running"),),
+    )
+    reasons = _composed_reasons(
+        operations,
+        [{"kind": "stop", "owner_id": _uuid(905), "node_ids": [_node_id(1)]}],
+    )
+
+    assert [(reason.code, reason.severity) for reason in reasons] == [
+        ("profile.stop_blocked", "error")
+    ]
+    assert "stop.operation_active" in reasons[0].detail
+
+
+def test_preview_composes_the_exact_lifecycle_assessment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The preview itself composes the assessment, not only the helper.
+
+    Without this the decision table below could pass while the preview never
+    consulted it, which is exactly the gap the composition closes.
+    """
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'wiring.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    _recipe, revision = _seed(sessions)
+    operations = _AssessingSimulator(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, recipe_operations=operations
+    )
+    profile = service.create(_input(revision), actor="admin")
+
+    composed: list[tuple[set[str], set[str]]] = []
+    original = FleetProfileService._compose_lifecycle_assessments
+
+    def record(self, raw_steps, *, scheduled_stops, switch_scope, reasons):
+        composed.append((set(scheduled_stops), set(switch_scope)))
+        return original(
+            self,
+            raw_steps,
+            scheduled_stops=scheduled_stops,
+            switch_scope=switch_scope,
+            reasons=reasons,
+        )
+
+    monkeypatch.setattr(FleetProfileService, "_compose_lifecycle_assessments", record)
+    service.preview(profile.id)
+
+    assert composed == [(set(), set())]
