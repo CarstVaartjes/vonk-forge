@@ -1697,7 +1697,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             // invalidates the agent's immutable installation receipt before
             // collective readiness. Inspect the whole selected tree and skip
             // the recursive write only when every ACL is already exact.
-            if runtime_read_tree_acl_ready(path, run.uid, self.required_owner_uid)? {
+            // Installation and run inputs are owned by the unprivileged
+            // agent, as checked while validating the signed Docker run.
+            // The helper's own root-owned custody is a separate boundary.
+            if runtime_read_tree_acl_ready(path, run.uid, self.runtime_request_owner_uid)? {
                 continue;
             }
             let output = self
@@ -4765,9 +4768,17 @@ mod tests {
             fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
         }
         let arguments = job_runtime_arguments(&roots, model.clone());
-        let validated = validate_docker_run(&arguments, &roots, None).unwrap();
+        let agent_uid = fs::metadata(&model).unwrap().uid();
+        let validated = validate_docker_run(&arguments, &roots, Some(agent_uid)).unwrap();
         let runner = KernelAclRunner::default();
-        let executor = OperationExecutor::new(roots, &[0; 32], runner.clone(), None).unwrap();
+        let executor = OperationExecutor::new(
+            roots,
+            &[0; 32],
+            runner.clone(),
+            Some(agent_uid.wrapping_add(1)),
+        )
+        .unwrap()
+        .with_runtime_request_owner(agent_uid);
         executor.prepare_runtime_access(&validated).unwrap();
         let first_writes = runner
             .calls
