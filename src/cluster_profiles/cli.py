@@ -18,6 +18,7 @@ from .cli_update import (
     CliUpdateError,
     begin_interactive_update_check,
     cache_update_notice,
+    configured_update_channel,
     interactive_notice,
     run_update,
 )
@@ -69,7 +70,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Install the signed wheel in this Python environment",
     )
-    update.add_argument("--channel", choices=("dev", "stable"), default="stable")
+    update.add_argument("--channel", choices=("dev", "stable"), default=None)
     update.add_argument("--public-key", type=Path, default=None)
     update.add_argument("--origin", default="https://install.vonkforge.ai")
     update.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
@@ -218,7 +219,7 @@ def main(
         else:
             try:
                 result = run_update(
-                    channel=args.channel,
+                    channel=args.channel or configured_update_channel(),
                     public_key=Path(key),
                     origin=args.origin,
                     apply=args.apply,

@@ -36,7 +36,6 @@ _GENERATION = _SHA256
 _WHEEL = re.compile(
     r"vonk_cluster_profiles-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any[.]whl\Z"
 )
-_NOTICE_CHANNEL = "stable"
 _NOTICE_ORIGIN = "https://install.vonkforge.ai"
 _NOTICE_TTL_SECONDS = 86400
 _NOTICE_FAILURE_RETRY_SECONDS = 900
@@ -45,6 +44,15 @@ _NOTICE_LOCK_STALE_SECONDS = 30
 
 class CliUpdateError(ValueError):
     """The requested CLI update cannot be safely verified or installed."""
+
+
+def configured_update_channel() -> str:
+    """Return the configured accepted release channel for CLI updates."""
+
+    channel = os.environ.get("VONK_CLI_UPDATE_CHANNEL", "stable")
+    if channel not in ("stable", "dev"):
+        raise CliUpdateError("VONK_CLI_UPDATE_CHANNEL must be stable or dev")
+    return channel
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -315,8 +323,14 @@ def run_update(
     return result
 
 
-def _notice_context(public_key: Path | None = None) -> tuple[Path, Path, str] | None:
+def _notice_context(
+    public_key: Path | None = None,
+) -> tuple[Path, Path, str, str] | None:
     if os.environ.get("VONK_CLI_UPDATE_NOTICES") != "1":
+        return None
+    try:
+        channel = configured_update_channel()
+    except CliUpdateError:
         return None
     if public_key is None:
         configured = os.environ.get("VONK_INSTALLER_PUBLIC_KEY_FILE")
@@ -343,17 +357,22 @@ def _notice_context(public_key: Path | None = None) -> tuple[Path, Path, str] | 
             return None
     except (OSError, ValueError):
         return None
-    return cache_root / "vonkctl" / "update-notice.json", public_key, key_digest
+    return (
+        cache_root / "vonkctl" / "update-notice.json",
+        public_key,
+        key_digest,
+        channel,
+    )
 
 
 def _notice_record(
-    *, key_digest: str, verified: bool, available: bool
+    *, key_digest: str, channel: str, verified: bool, available: bool
 ) -> dict[str, object]:
     current = current_build()
     return {
         "checked_at": int(time.time()),
         "verified": verified,
-        "channel": _NOTICE_CHANNEL,
+        "channel": channel,
         "origin": _NOTICE_ORIGIN,
         "update_available": available,
         "source_sha": current["source_sha"],
@@ -380,7 +399,9 @@ def _read_notice(cache: Path) -> dict[str, object] | None:
     return stored if isinstance(stored, dict) else None
 
 
-def _fresh_notice(stored: dict[str, object] | None, key_digest: str) -> bool:
+def _fresh_notice(
+    stored: dict[str, object] | None, key_digest: str, channel: str
+) -> bool:
     if stored is None:
         return False
     checked_at = stored.get("checked_at")
@@ -388,7 +409,7 @@ def _fresh_notice(stored: dict[str, object] | None, key_digest: str) -> bool:
     if (
         type(checked_at) is not int
         or stored.get("key_sha256") != key_digest
-        or stored.get("channel") != _NOTICE_CHANNEL
+        or stored.get("channel") != channel
         or stored.get("origin") != _NOTICE_ORIGIN
         or stored.get("source_sha") != current["source_sha"]
         or stored.get("version") != current["version"]
@@ -424,15 +445,18 @@ def interactive_notice() -> str | None:
     context = _notice_context()
     if context is None:
         return None
-    cache, _, key_digest = context
+    cache, _, key_digest, channel = context
     stored = _read_notice(cache)
     if (
-        _fresh_notice(stored, key_digest)
+        _fresh_notice(stored, key_digest, channel)
         and stored is not None
         and stored["verified"] is True
         and stored.get("update_available") is True
     ):
-        return "Accepted vonkctl update available; run 'vonkctl update --apply' to install it."
+        return (
+            "Accepted vonkctl update available; run "
+            f"'vonkctl update --channel {channel} --apply' to install it."
+        )
     return None
 
 
@@ -444,16 +468,19 @@ def cache_update_notice(
 ) -> None:
     """Cache an explicit signed stable-channel check for interactive commands."""
 
-    if result.get("channel") != _NOTICE_CHANNEL or origin != _NOTICE_ORIGIN:
+    if origin != _NOTICE_ORIGIN:
         return
     context = _notice_context(public_key)
     if context is None:
         return
-    cache, _, key_digest = context
+    cache, _, key_digest, channel = context
+    if result.get("channel") != channel:
+        return
     _write_notice(
         cache,
         _notice_record(
             key_digest=key_digest,
+            channel=channel,
             verified=True,
             available=result.get("update_available") is True,
         ),
@@ -466,8 +493,8 @@ def begin_interactive_update_check() -> None:
     context = _notice_context()
     if context is None:
         return
-    cache, _, key_digest = context
-    if _fresh_notice(_read_notice(cache), key_digest):
+    cache, _, key_digest, channel = context
+    if _fresh_notice(_read_notice(cache), key_digest, channel):
         return
     lock = cache.with_suffix(".lock")
     created = False
@@ -513,11 +540,11 @@ def background_notice_check(
     context = _notice_context()
     if context is None:
         return
-    cache, public_key, key_digest = context
+    cache, public_key, key_digest, channel = context
     try:
         try:
             result = run_update(
-                channel=_NOTICE_CHANNEL,
+                channel=channel,
                 public_key=public_key,
                 origin=_NOTICE_ORIGIN,
                 apply=False,
@@ -526,7 +553,12 @@ def background_notice_check(
         except (CliUpdateError, OSError, TimeoutError):
             _write_notice(
                 cache,
-                _notice_record(key_digest=key_digest, verified=False, available=False),
+                _notice_record(
+                    key_digest=key_digest,
+                    channel=channel,
+                    verified=False,
+                    available=False,
+                ),
             )
         else:
             cache_update_notice(result, public_key=public_key)

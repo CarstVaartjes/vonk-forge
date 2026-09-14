@@ -25,12 +25,15 @@ installed CLI intact. The virtual environment must be writable; run the command
 from the environment you intend to update.
 
 Set `VONK_INSTALLER_PUBLIC_KEY_FILE` to the trusted public key to avoid repeating
-`--public-key`. With that path set, `VONK_CLI_UPDATE_NOTICES=1` opts ordinary
-interactive commands into a short-lived background check of the signed accepted
-stable release. The command itself does not wait for the network; a newly found
-update may appear on the next interactive command. Verified results are cached
-for one day under the user cache directory, and failed checks retry after 15
-minutes. JSON and noninteractive commands, including offline `--version`, never
-start a check. Notices never install an update.
+`--public-key`. CLI updates default to the `stable` channel. Set
+`VONK_CLI_UPDATE_CHANNEL=dev` for a CLI installed from the accepted development
+channel; the same channel is used by `vonkctl update` and notices. With the key
+path set, `VONK_CLI_UPDATE_NOTICES=1` opts ordinary interactive commands into a
+short-lived background check of that signed accepted release. The command
+itself does not wait for the network; a newly found update may appear on the
+next interactive command. Verified results are cached for one day under the
+user cache directory, and failed checks retry after 15 minutes. JSON and
+noninteractive commands, including offline `--version`, never start a check.
+Notices never install an update.
 An accepted release without a CLI wheel is invalid under the current schema-2
 publication contract.
