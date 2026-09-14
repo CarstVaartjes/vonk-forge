@@ -2232,6 +2232,9 @@ class RunSwitchOperationService:
             ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
             for node in nodes:
                 node.workload_intent_ordinal = ordinal
+            self.request_superseded_workload_cancellation_in_session(
+                session, tuple(previous.targets), ordinal, _now(self._clock)
+            )
             payload = dict(previous.payload)
             payload["workload_intent_ordinal"] = ordinal
             payload["progress"] = progress
@@ -4549,6 +4552,12 @@ class RunSwitchOperationService:
                 ) + 1
                 for node in nodes:
                     node.workload_intent_ordinal = workload_intent_ordinal
+                self.request_superseded_workload_cancellation_in_session(
+                    session,
+                    tuple(node.node_id for node in nodes),
+                    workload_intent_ordinal,
+                    now,
+                )
             elif (
                 type(workload_intent_ordinal) is not int
                 or workload_intent_ordinal < 1
@@ -4574,6 +4583,23 @@ class RunSwitchOperationService:
             session.add(job)
             session.flush()
             return self._operation_view(job)
+
+    def request_superseded_workload_cancellation_in_session(
+        self,
+        session: Session,
+        targets: Sequence[str],
+        ordinal: int,
+        now: datetime,
+    ) -> None:
+        """Cancel exact older agent orders in the same ordinal-admission transaction."""
+
+        if self._lifecycle is None:
+            raise RunSwitchOperationConflict(
+                "run-switch lifecycle cancellation authority is unavailable"
+            )
+        self._lifecycle._agent_jobs.request_superseded_workload_cancellation_in_session(
+            session, targets, ordinal, now
+        )
 
     def _existing_request_operation(
         self,

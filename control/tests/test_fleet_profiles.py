@@ -361,6 +361,12 @@ class _SwitchAdapter:
         self._states: dict[str, int] = {}
         self._operations: dict[str, list[FleetProfileChildOperation]] = {}
         self._by_request: dict[str, str] = {}
+        self.cancellations: list[tuple[tuple[str, ...], int]] = []
+
+    def request_superseded_workload_cancellation_in_session(
+        self, session: Session, targets: tuple[str, ...], ordinal: int, now: datetime
+    ) -> None:
+        self.cancellations.append((targets, ordinal))
 
     def start(
         self,
@@ -1081,7 +1087,10 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
                 last_seen_at=NOW,
             )
         )
-    service = FleetProfileService(sessions, clock=lambda: NOW)
+    adapter = _SwitchAdapter()
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=adapter
+    )
     profile = service.create(
         FleetProfileInput(
             name="All idle",
@@ -1104,6 +1113,7 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
         actor="admin",
     )
     assert application.state == "succeeded"
+    assert adapter.cancellations == [((_node_id(1), _node_id(2)), 1)]
     assert application.result is not None
     assert application.result.changed is False
     assert application.result.completed_steps == 0

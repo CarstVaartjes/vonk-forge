@@ -502,6 +502,17 @@ class FleetProfileChildOperation(_StrictModel):
 class FleetProfileSwitchAdapter(Protocol):
     """Profile boundary for the integrated automatic Run switch service."""
 
+    def request_superseded_workload_cancellation_in_session(
+        self,
+        session: Session,
+        targets: tuple[str, ...],
+        ordinal: int,
+        now: datetime,
+    ) -> None:
+        """Cancel older exact agent orders in the profile admission transaction."""
+
+        ...
+
     def start(
         self,
         *,

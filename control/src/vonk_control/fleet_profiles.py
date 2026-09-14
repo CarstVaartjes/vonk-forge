@@ -260,6 +260,17 @@ class RunSwitchFleetProfileAdapter:
         self._sessions = sessions
         self._run_switch = run_switch
 
+    def request_superseded_workload_cancellation_in_session(
+        self,
+        session: Session,
+        targets: tuple[str, ...],
+        ordinal: int,
+        now: datetime,
+    ) -> None:
+        self._run_switch.request_superseded_workload_cancellation_in_session(
+            session, targets, ordinal, now
+        )
+
     def start(
         self,
         *,
@@ -2031,6 +2042,13 @@ class FleetProfileService:
             if workload_intent_ordinal is not None:
                 for node in scope_nodes:
                     node.workload_intent_ordinal = workload_intent_ordinal
+                if self._switch_adapter is None:
+                    raise FleetProfileConflict(
+                        "Profile switch cancellation authority is unavailable"
+                    )
+                self._switch_adapter.request_superseded_workload_cancellation_in_session(
+                    session, frozen_nodes, workload_intent_ordinal, now
+                )
             row = FleetProfileApplication(
                 request_key=request_key,
                 profile_id=preview.profile_id,
