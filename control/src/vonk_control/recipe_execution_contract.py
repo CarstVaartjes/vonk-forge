@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     RecipeBuildRequest,
     canonical_message,
 )
+from vonk_agent_protocol.compiled_execution_plan import COMPILED_PLAN_STORAGE_CONTEXT
 
 from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
 from .strict_json import StrictJSONModel
@@ -163,12 +164,12 @@ class StoredBuildPolicyReport(_PersistedModel):
 
 
 def _validate_json[ModelT: _PersistedModel](
-    value: object, model: type[ModelT], label: str
+    value: object, model: type[ModelT], label: str, *, context: object = None
 ) -> ModelT:
     try:
         # Always take the JSON path.  This keeps decoded DB arrays/objects
         # subject to the same strict semantics as bytes received on the wire.
-        return model.model_validate_json(canonical_message(value))
+        return model.model_validate_json(canonical_message(value), context=context)
     except (TypeError, ValueError) as error:
         raise RecipeExecutionContractError(f"{label} is invalid") from error
 
@@ -177,12 +178,21 @@ def _document(model: _PersistedModel) -> dict[str, object]:
     return json.loads(canonical_message(model))
 
 
-def parse_stored_installation_plan(value: object) -> StoredInstallationPlan:
-    return _validate_json(value, StoredInstallationPlan, "stored installation plan")
+def parse_stored_installation_plan(
+    value: object, *, for_uninstall: bool = False
+) -> StoredInstallationPlan:
+    return _validate_json(
+        value,
+        StoredInstallationPlan,
+        "stored installation plan",
+        context=COMPILED_PLAN_STORAGE_CONTEXT if for_uninstall else None,
+    )
 
 
-def installation_plan_document(value: object) -> dict[str, object]:
-    return _document(parse_stored_installation_plan(value))
+def installation_plan_document(
+    value: object, *, for_uninstall: bool = False
+) -> dict[str, object]:
+    return _document(parse_stored_installation_plan(value, for_uninstall=for_uninstall))
 
 
 def parse_stored_run_plan(value: object) -> StoredRunPlan:

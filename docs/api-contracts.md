@@ -366,6 +366,13 @@ copies are derived target evidence, not parallel cache authorities; persist
 their verification and readiness through the current lifecycle receipts rather
 than creating a second cache document.
 
+Uninstall validates the same typed installation document and immutable artifact
+identities, but does not require its stored placement to be launchable. Only
+that Controller reader supplies a process-local storage-validation context;
+JSON cannot select it. Schema, path, artifact-byte, topology and security checks
+remain enforced. Install, start and ordinary persisted-plan reads retain full
+launch validation, and teardown never rewrites a stored plan to make it pass.
+
 Structure validation does not replace transaction semantics. Cache workers
 refresh the database row when acquiring its lock, so a prior cooldown scan
 cannot hide another worker's newly committed claim. The PostgreSQL regression

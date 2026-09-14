@@ -14,6 +14,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     StringConstraints,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -29,6 +30,9 @@ _EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85
 # compiled artifact ceiling rather than imposing a small engine-specific cap.
 MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS = 4096
 MAX_COMPILED_EXECUTION_PLAN_MOUNTS = MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS + 2
+# Only the Controller's uninstall reader supplies this process-local context.
+# It cannot be selected by fields in a persisted or incoming JSON document.
+COMPILED_PLAN_STORAGE_CONTEXT = object()
 
 
 class CompiledExecutionPlanError(ValueError):
@@ -564,7 +568,7 @@ class CompiledExecutionPlan(_Strict):
         return value
 
     @model_validator(mode="after")
-    def cross_fields_match(self) -> CompiledExecutionPlan:
+    def cross_fields_match(self, info: ValidationInfo) -> CompiledExecutionPlan:
         if (self.endpoint is None) == (self.job is None):
             raise ValueError("exactly one compiled interface is required")
         placement = self.runtime.placement
@@ -625,6 +629,11 @@ class CompiledExecutionPlan(_Strict):
                 raise ValueError("compiled artifact digest sizes conflict")
         if sum(by_digest.values()) != self.identity.model_artifact_bytes:
             raise ValueError("compiled artifact bytes do not match identity")
+        # Teardown needs the current typed storage identity, not permission to
+        # launch it. Keep all structural, artifact and security checks above;
+        # only launch-time fabric/network admission is irrelevant to removal.
+        if info.context is COMPILED_PLAN_STORAGE_CONTEXT:
+            return self
         native_fabric = placement.world_size > 1 and placement.master_port is not None
         if native_fabric and (
             self.topology.node_count < 2

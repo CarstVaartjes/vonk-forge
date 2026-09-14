@@ -172,7 +172,7 @@ def _stored_run_plan(value: object) -> dict[str, object]:
 
 def _stored_installation_plan(value: object) -> dict[str, object]:
     try:
-        return installation_plan_document(value)
+        return installation_plan_document(value, for_uninstall=True)
     except RecipeExecutionContractError as error:
         raise RecipeOperationConflict("stored installation plan is invalid") from error
 
