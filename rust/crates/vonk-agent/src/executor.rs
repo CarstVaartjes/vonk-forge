@@ -3920,8 +3920,7 @@ mod tests {
                 minimum: 2,
                 observed_deadline: Arc::new(Mutex::new(None)),
             };
-            let mut state =
-                StateStore::open(&directory.join("state.sqlite"), NODE_ID).unwrap();
+            let mut state = StateStore::open(&directory.join("state.sqlite"), NODE_ID).unwrap();
             let started = std::time::Instant::now();
             run_once_with_heartbeat_interval(
                 &client,

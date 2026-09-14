@@ -537,11 +537,9 @@ impl AgentHttpClient {
         // A renewal must not outlive the lease it renews: bounding the call by
         // the remaining accepted lease lets the renewal loop retry promptly
         // instead of discovering the expiry only after a fixed timeout.
-        let remaining = (
-            progress.deadline.with_timezone(&chrono::Utc) - chrono::Utc::now()
-        )
-        .to_std()
-        .unwrap_or(Duration::ZERO);
+        let remaining = (progress.deadline.with_timezone(&chrono::Utc) - chrono::Utc::now())
+            .to_std()
+            .unwrap_or(Duration::ZERO);
         let response = self
             .current_client()
             .await
