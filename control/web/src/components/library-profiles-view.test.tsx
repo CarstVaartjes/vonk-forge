@@ -12,7 +12,7 @@ const profile = {
   assignments: [{selector: "qwen-code", display_name: "Qwen Code", recipe_selector: "vonk-forge/qwen-code", recipe_id: null, spark_ids: [nodeA], required_sparks: 1, assigned_sparks: 1, model: {variant: "nvfp4", state: "cached"}, recipe: {selector: "vonk-forge/qwen-code", name: "Qwen Code", state: "cached", revision_id: "33333333-3333-4333-8333-333333333333"}, resources: {}, observed_state: "Not loaded"}],
   fleet: [{selector: nodeA, display_name: "Spark A", state: "idle"}, {selector: nodeB, display_name: "Spark B", state: "idle"}], status: "ready", loaded_revision: null, cache_summary: {}, warnings: [], next_actions: [], profile_digest: "a".repeat(64), created_by: "admin", created_at: "2026-09-10T00:00:00Z", updated_at: "2026-09-10T00:00:00Z",
 } as unknown as FleetProfile;
-const preview = {allowed: true, steps: [{index: 0, kind: "start", label: "Start Qwen Code", node_ids: [nodeA]}], reasons: []} as unknown as FleetProfilePreview;
+const preview = {allowed: true, steps: [{index: 0, kind: "switch", label: "Switch to Qwen Code", node_ids: [nodeA]}], reasons: []} as unknown as FleetProfilePreview;
 const application = {state: "running", progress: {child_progress: {phase: "start", node_ids: [nodeA], bytes: 50, total_bytes: 100}}, status_reason: null} as unknown as FleetProfileApplicationView;
 
 function apiFor(overrides: Partial<ControlApi> = {}): ControlApi {

@@ -21,6 +21,9 @@ vonkctl --help
 
 Use `--json` for one parseable object on stdout. Use `--profile N` to select a
 stable numbered Profile for that invocation; the default is Profile 1.
+`vonkctl --version` reports the installed build without Controller credentials.
+The [accepted CLI update command](../operators/cli-updates.md) checks the signed
+installer publication and applies an update only when requested.
 
 When using the browser, sign in to the Controller and open the operator menu
 under your user name. Choose **Download CLI token** (it appears before
