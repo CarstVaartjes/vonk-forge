@@ -336,7 +336,7 @@ def agent_system(tmp_path):
     clock = Clock()
     with sessions.begin() as session:
         for node, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
-            session.add(AgentNode(node_id=node, state="active", capabilities=[]))
+            session.add(AgentNode(node_id=node, state="active", capabilities=[], workload_intent_ordinal=1))
             session.add(
                 AgentCertificate(
                     serial=serial,
@@ -1601,6 +1601,7 @@ def asgi_post(
 
 
 def parent(sessions, clock: Clock) -> Job:
+    payload = {"workload_intent_ordinal": 1}
     job = Job(
         request_id=str(uuid.uuid4()),
         kind="agent.operations",
@@ -1608,8 +1609,8 @@ def parent(sessions, clock: Clock) -> Job:
         actor="administrator",
         authority_revision="a" * 64,
         targets=[NODE_A],
-        payload_digest=hashlib.sha256(b"{}").hexdigest(),
-        payload={},
+        payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+        payload=payload,
         current_attempt=0,
         created_at=clock.now,
         updated_at=clock.now,
