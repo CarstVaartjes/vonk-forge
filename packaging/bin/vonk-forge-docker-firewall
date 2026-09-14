@@ -13,7 +13,7 @@ fail() {
 }
 
 usage() {
-    echo "usage: vonk-forge-docker-firewall --config PATH apply|check|check-host-port [PORT]" >&2
+    echo "usage: vonk-forge-docker-firewall --config PATH apply|check|check-host-port PORT|check-fabric-run LOCAL MASTER RENDEZVOUS ENDPOINT" >&2
     exit 64
 }
 
@@ -21,11 +21,20 @@ usage() {
 config=${2:-}
 action=${3:-}
 requested_host_port=
+requested_local=
+requested_master=
+requested_rendezvous=
 case "$action" in
     apply|check) [ "$#" -eq 3 ] || usage ;;
     check-host-port)
         [ "$#" -eq 4 ] || usage
         requested_host_port=$4 ;;
+    check-fabric-run)
+        [ "$#" -eq 7 ] || usage
+        requested_local=$4
+        requested_master=$5
+        requested_rendezvous=$6
+        requested_host_port=$7 ;;
     *) usage ;;
 esac
 
@@ -149,7 +158,18 @@ fi
 [ "$canonical_host_ports" = "$host_endpoint_ports" ] \
     || fail "host endpoint ports are not canonical"
 
-if [ "$action" = check-host-port ]; then
+if [ "$action" = check-fabric-run ]; then
+    [ "$requested_local" = "$node_fabric_ip" ] || fail "runtime fabric address is not authorized"
+    [ "$requested_rendezvous" = "$rendezvous_port" ] || fail "runtime rendezvous port is not authorized"
+    if [ "$requested_master" = "$node_fabric_ip" ]; then
+        [ "$requested_host_port" != none ] || fail "rendezvous owner endpoint is missing"
+    else
+        [ "$requested_master" = "$peer_fabric_ip" ] || fail "runtime master is not the authorized fabric peer"
+        [ "$requested_host_port" = none ] || fail "worker cannot publish a host endpoint"
+    fi
+fi
+
+if [ "$action" = check-host-port ] || { [ "$action" = check-fabric-run ] && [ "$requested_host_port" != none ]; }; then
     valid_port "$requested_host_port" || fail "requested host endpoint port is invalid"
     case ",$host_endpoint_ports," in
         *,$requested_host_port,*) ;;
@@ -306,9 +326,12 @@ require_host_rule() {
         || fail "managed host firewall rule is missing"
 }
 
-if [ "$action" = check ] || [ "$action" = check-host-port ]; then
+if [ "$action" = check ] || [ "$action" = check-host-port ] || [ "$action" = check-fabric-run ]; then
     verify_rules
     verify_host_rules
+    if [ "$action" = check-fabric-run ]; then
+        printf '%s\n' "$fabric_interface"
+    fi
     exit 0
 fi
 

@@ -63,6 +63,11 @@ _PLATFORM_ENV_NAMES = frozenset(
         "TRITON_CACHE_DIR",
         "CUDA_CACHE_PATH",
         "UV_CACHE_DIR",
+        "NCCL_SOCKET_IFNAME",
+        "NCCL_IB_HCA",
+        "NCCL_IB_GID_INDEX",
+        "TP_SOCKET_IFNAME",
+        "GLOO_SOCKET_IFNAME",
     }
 )
 

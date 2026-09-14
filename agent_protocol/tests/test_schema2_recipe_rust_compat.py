@@ -51,7 +51,7 @@ def _start(plan: dict[str, Any] | None = None) -> dict[str, Any]:
     plan = copy.deepcopy(plan or PLAN)
     if plan["topology"]["world_size"] == 1:
         plan["runtime"]["placement"]["endpoint_address"] = "100.100.20.30"
-    plan["security"]["network_mode"] = "bridge"
+        plan["security"]["network_mode"] = "bridge"
     return {
         "schema_version": 2,
         "run_id": RUN_ID,
@@ -93,7 +93,7 @@ def _distributed_start(
         master_address="100.100.20.31" if collective else "100.100.20.30",
         master_port=29500,
     )
-    plan["security"]["network_mode"] = "bridge"
+    plan["security"].update(network_mode="host", host_network=True)
     payload = _start(plan)
     payload.update(
         rank=1,

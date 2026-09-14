@@ -19,8 +19,13 @@ validation report. The historical Netplan and SSH commands have been removed
 from the operational path so they cannot be mistaken for fresh-install
 instructions. Regardless of how addresses are configured, Vonk's
 current container workload contract uses one declared direct-fabric address
-per node. Bridge-mode workloads use address-bound TCP publication. The narrow
-connected-multinode host mode passes `/dev/infiniband` and permits peer-only
+per node. Single-node bridge workloads use address-bound TCP publication. Distributed
+serving uses host networking with private IPC, bounded shared memory and
+the exact `/dev/infiniband` device. The helper verifies the configured local
+and master addresses, rank and ports, then resolves one active RoCE v2
+interface/HCA/GID from kernel sysfs. It supplies the platform-owned
+`NCCL_SOCKET_IFNAME`, `NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`,
+`TP_SOCKET_IFNAME`, and `GLOO_SOCKET_IFNAME` settings. The firewall permits peer-only
 TCP/UDP on that selected interface/address for native NCCL/RoCE; it does not
 grant arbitrary devices or claim GPUDirect RDMA.
 

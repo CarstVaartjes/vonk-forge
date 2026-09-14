@@ -41,6 +41,21 @@ fi
 $helper --config "$config" apply
 $helper --config "$config" check
 $helper --config "$config" check-host-port 8888
+test "$($helper --config "$config" check-fabric-run 192.168.100.10 192.168.100.10 29500 8888)" = vonk-fabric
+test "$($helper --config "$config" check-fabric-run 192.168.100.10 192.168.100.11 29500 none)" = vonk-fabric
+for invalid in \
+    '192.168.1.211 192.168.100.10 29500 8888' \
+    '192.168.100.10 192.168.1.231 29500 none' \
+    '192.168.100.10 192.168.100.10 29501 8888' \
+    '192.168.100.10 192.168.100.10 29500 8000' \
+    '192.168.100.10 192.168.100.11 29500 8888'; do
+    # Each literal is a deliberately invalid fixed request, never shell code.
+    # shellcheck disable=SC2086
+    if $helper --config "$config" check-fabric-run $invalid >/dev/null 2>&1; then
+        echo "native fabric admitted an unauthorized placement" >&2
+        exit 1
+    fi
+done
 $helper --config "$config" apply
 $helper --config "$config" check
 test "$($iptables -S DOCKER-USER | sed -n '/^-A DOCKER-USER /{p;q;}')" = \

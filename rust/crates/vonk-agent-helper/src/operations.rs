@@ -3,6 +3,7 @@ use std::ffi::{CStr, CString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::mem::MaybeUninit;
+use std::net::Ipv4Addr;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -36,6 +37,7 @@ const MAX_COMPILED_MODEL_PATH_CHARS: usize = 512;
 const MAX_COMPILED_MODEL_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const DOCKER_FIREWALL: &str = "/usr/lib/vonk-forge/vonk-forge-docker-firewall";
 const DOCKER_FIREWALL_CONFIG: &str = "/etc/vonk-forge-agent/docker-firewall.conf";
+const NATIVE_FABRIC_ROOT: &str = "/sys/class/infiniband";
 const RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Debug, Error)]
@@ -67,6 +69,10 @@ pub enum OperationError {
     RuntimeImageReceiptFailed,
     #[error("runtime process exited: {diagnostic}")]
     RuntimeProcessExited { diagnostic: String },
+    #[error("native fabric is unavailable or ambiguous")]
+    RuntimeFabricUnavailable,
+    #[error("native fabric firewall rejected the placement")]
+    RuntimeFabricFirewallRejected,
     #[error("one-shot runtime could not be stopped safely")]
     StopUncertain,
     #[error("host mutation failed")]
@@ -88,6 +94,8 @@ impl OperationError {
             Self::RuntimeImageIdentityInvalid => "helper.runtime_image_identity_invalid",
             Self::RuntimeImageReceiptFailed => "helper.runtime_image_receipt_failed",
             Self::RuntimeProcessExited { .. } => "helper.runtime_process_exited",
+            Self::RuntimeFabricUnavailable => "helper.runtime_fabric_unavailable",
+            Self::RuntimeFabricFirewallRejected => "helper.runtime_fabric_firewall_rejected",
             Self::StopUncertain => "helper.stop_uncertain",
             Self::Io(_) => "helper.io_failed",
         }
@@ -107,6 +115,8 @@ impl OperationError {
             Self::RuntimeImageIdentityInvalid => "runtime image identity is invalid",
             Self::RuntimeImageReceiptFailed => "runtime image receipt could not be written",
             Self::RuntimeProcessExited { .. } => "runtime process exited",
+            Self::RuntimeFabricUnavailable => "native fabric is unavailable or ambiguous",
+            Self::RuntimeFabricFirewallRejected => "native fabric firewall rejected the placement",
             Self::StopUncertain => "one-shot runtime could not be stopped safely",
             Self::Io(_) => "host mutation I/O failed",
         }
@@ -230,7 +240,7 @@ impl CommandRunner for ProcessCommandRunner {
         }
         let capture_output = matches!(
             executable.to_str(),
-            Some("/usr/bin/dpkg-deb" | "/usr/bin/docker")
+            Some("/usr/bin/dpkg-deb" | "/usr/bin/docker" | DOCKER_FIREWALL)
         ) && !(executable == Path::new("/usr/bin/docker")
             && arguments
                 .iter()
@@ -1391,7 +1401,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         else {
             return Err(OperationError::InvalidOperation);
         };
-        let validated = validate_docker_run_with_archive(
+        let mut validated = validate_docker_run_with_archive(
             docker,
             &self.roots,
             self.runtime_request_owner_uid,
@@ -1412,7 +1422,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .job_timeout_seconds
             .map(|_| self.job_cancellation.begin(&validated.run_id))
             .transpose()?;
-        self.require_host_endpoint_firewall(&validated)?;
+        self.bind_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))?;
         let (inspected, operational_image) =
             self.inspect_runtime_image_for_reference(&validated.local_image_reference)?;
         self.require_image_receipt(
@@ -1449,7 +1459,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // executable through --entrypoint, so consume the marker here to keep
         // the actual process argv from running it twice. Keep
         // validated.arguments unchanged: the semantic receipt identity is
-        // bound to the exact signed request shape above.
+        // bound to the signed request plus its verified native fabric binding.
         let mut compiled = validated.docker_arguments()?;
         compiled[validated.image_index] = operational_image;
         if validated.detached || validated.job_timeout_seconds.is_some() {
@@ -1497,28 +1507,54 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map(|_| bounded_container_exit_code(&output)))
     }
 
-    fn require_host_endpoint_firewall(
+    fn bind_native_fabric(
         &self,
-        run: &ValidatedDockerRun,
+        run: &mut ValidatedDockerRun,
+        sysfs_root: &Path,
     ) -> Result<(), OperationError> {
-        let Some(port) = run.host_endpoint_port else {
+        let Some(fabric) = &run.native_fabric else {
             return Ok(());
         };
         let output = self
             .runner
-            .run(
+            .run_with_timeout(
                 Path::new(DOCKER_FIREWALL),
                 &[
                     "--config".to_owned(),
                     DOCKER_FIREWALL_CONFIG.to_owned(),
-                    "check-host-port".to_owned(),
-                    port.to_string(),
+                    "check-fabric-run".to_owned(),
+                    fabric.local.to_string(),
+                    fabric.master.to_string(),
+                    fabric.port.to_string(),
+                    run.host_endpoint_port
+                        .map_or_else(|| "none".to_owned(), |port| port.to_string()),
                 ],
+                Duration::from_secs(10),
             )
-            .map_err(|_| OperationError::CommandFailed)?;
+            .map_err(|_| OperationError::RuntimeFabricFirewallRejected)?;
         if !output.success {
-            return Err(OperationError::CommandFailed);
+            return Err(OperationError::RuntimeFabricFirewallRejected);
         }
+        let interface = std::str::from_utf8(&output.stdout)
+            .ok()
+            .map(str::trim)
+            .filter(|value| crate::runtime_fabric::valid_interface(value))
+            .ok_or(OperationError::RuntimeFabricUnavailable)?;
+        let environment = crate::runtime_fabric::resolve(sysfs_root, interface, fabric.local)
+            .map_err(|error| match error {
+                crate::runtime_fabric::FabricError::Io(error) => OperationError::Io(error),
+                crate::runtime_fabric::FabricError::Unavailable => {
+                    OperationError::RuntimeFabricUnavailable
+                }
+            })?;
+        let arguments = environment
+            .into_iter()
+            .flat_map(|value| ["--env".to_owned(), value])
+            .collect::<Vec<_>>();
+        let added = arguments.len();
+        run.arguments
+            .splice(run.image_index..run.image_index, arguments);
+        run.image_index += added;
         Ok(())
     }
 
@@ -1537,7 +1573,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         else {
             return Err(OperationError::InvalidOperation);
         };
-        let validated = validate_docker_run_with_archive(
+        let mut validated = validate_docker_run_with_archive(
             docker,
             &self.roots,
             self.runtime_request_owner_uid,
@@ -1552,7 +1588,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        self.require_host_endpoint_firewall(&validated)?;
+        self.bind_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))?;
         let (inspected, _) =
             self.inspect_runtime_image_for_reference(&validated.local_image_reference)?;
         self.require_image_receipt(
@@ -2045,7 +2081,14 @@ struct ValidatedDockerRun {
     tmp_root: PathBuf,
     runtime_contract: PathBuf,
     host_endpoint_port: Option<u16>,
+    native_fabric: Option<NativeFabric>,
     job_timeout_seconds: Option<u16>,
+}
+
+struct NativeFabric {
+    local: Ipv4Addr,
+    master: Ipv4Addr,
+    port: u16,
 }
 
 type RuntimeImageInspection = (String, String, String, String, String);
@@ -2100,8 +2143,7 @@ fn validate_docker_run_with_archive(
     let mut cap_drop = false;
     let mut no_new_privileges = false;
     let mut network: Option<&str> = None;
-    let mut ipc_host = false;
-    let infiniband = false;
+    let mut infiniband = false;
     let mut memlock = false;
     let mut stack = false;
     let mut pids = false;
@@ -2115,6 +2157,10 @@ fn validate_docker_run_with_archive(
     let mut listen_port = None;
     let mut master_port = None;
     let mut rank = None;
+    let mut world_size = None;
+    let mut local_address = None;
+    let mut master_address = None;
+    let mut caller_fabric_environment = false;
     let mut job_timeout_seconds = None;
     let mut gpu = false;
     let mut home = false;
@@ -2208,20 +2254,15 @@ fn validate_docker_run_with_archive(
                 network = match arguments.get(index).map(String::as_str) {
                     Some("none") => Some("none"),
                     Some("bridge") => Some("bridge"),
+                    Some("host") => Some("host"),
                     _ => return Err(OperationError::InvalidOperation),
                 };
             }
-            "--ipc" if !ipc_host => {
-                index += 1;
-                if arguments.get(index).map(String::as_str) != Some("host") {
-                    return Err(OperationError::InvalidOperation);
-                }
-                ipc_host = true;
-            }
-            "--device" if !gpu => {
+            "--device" if !gpu || !infiniband => {
                 index += 1;
                 match arguments.get(index).map(String::as_str) {
                     Some("nvidia.com/gpu=all") if !gpu => gpu = true,
+                    Some("/dev/infiniband:/dev/infiniband") if !infiniband => infiniband = true,
                     _ => return Err(OperationError::InvalidOperation),
                 }
             }
@@ -2290,6 +2331,30 @@ fn validate_docker_run_with_archive(
                     .ok_or(OperationError::InvalidOperation)?;
                 if !valid_environment(value) {
                     return Err(OperationError::InvalidOperation);
+                }
+                caller_fabric_environment |= value.split_once('=').is_some_and(|(name, _)| {
+                    crate::runtime_fabric::ENVIRONMENT_NAMES.contains(&name)
+                });
+                if let Some(value) = value.strip_prefix("VONK_WORLD_SIZE=") {
+                    let parsed = value
+                        .parse::<u32>()
+                        .map_err(|_| OperationError::InvalidOperation)?;
+                    if parsed == 0 || world_size.replace(parsed).is_some() {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                }
+                for (name, target) in [
+                    ("VONK_LOCAL_ADDR=", &mut local_address),
+                    ("VONK_MASTER_ADDR=", &mut master_address),
+                ] {
+                    if let Some(value) = value.strip_prefix(name) {
+                        let parsed = value
+                            .parse::<Ipv4Addr>()
+                            .map_err(|_| OperationError::InvalidOperation)?;
+                        if target.replace(parsed).is_some() {
+                            return Err(OperationError::InvalidOperation);
+                        }
+                    }
                 }
                 if let Some(value) = value.strip_prefix("VONK_LISTEN_PORT=") {
                     let parsed = value
@@ -2435,10 +2500,7 @@ fn validate_docker_run_with_archive(
         || shm_size.is_none_or(|value| value > memory.unwrap_or_default())
         || (detach && (inputs.is_some() || job_timeout_seconds.is_some()))
         || (!detach && (inputs.is_none() || job_timeout_seconds.is_none()))
-        || ipc_host
-        || infiniband
-        || memlock
-        || stack
+        || (network != Some("host") && (infiniband || memlock || stack))
         || !home
         || !xdg_cache_home
         || !tmpdir
@@ -2463,28 +2525,48 @@ fn validate_docker_run_with_archive(
     }
     let endpoint_workload = listen_port.is_some();
     let distributed_workload = master_port.is_some();
-    let bridge_workload = endpoint_workload || distributed_workload;
-    let expected_network = if bridge_workload { "bridge" } else { "none" };
-    let publication_ports_match = published_ports
-        .iter()
-        .all(|port| Some(*port) == listen_port || Some(*port) == master_port);
+    let bridge_workload = endpoint_workload && !distributed_workload;
+    let expected_network = if distributed_workload {
+        "host"
+    } else if bridge_workload {
+        "bridge"
+    } else {
+        "none"
+    };
     let endpoint_published = listen_port.is_some_and(|port| published_ports.contains(&port));
-    let rendezvous_published =
-        master_port.is_some_and(|port| rank == Some(0) && published_ports.contains(&port));
-    let nonzero_rendezvous_published = master_port.is_some_and(|port| {
-        rank != Some(0) && listen_port != Some(port) && published_ports.contains(&port)
-    });
     if network != Some(expected_network)
         || publishes != published_ports.len()
-        || !publication_ports_match
         || (!bridge_workload && publishes != 0)
-        || (endpoint_workload && !endpoint_published)
-        || (distributed_workload && rank.is_none())
-        || (distributed_workload && rank == Some(0) && !rendezvous_published)
-        || nonzero_rendezvous_published
+        || (bridge_workload && (publishes != 1 || !endpoint_published))
     {
         return Err(OperationError::InvalidOperation);
     }
+    let native_fabric = if distributed_workload {
+        let (Some(local), Some(master), Some(port), Some(rank), Some(world_size)) =
+            (local_address, master_address, master_port, rank, world_size)
+        else {
+            return Err(OperationError::InvalidOperation);
+        };
+        if !detach
+            || !gpu
+            || !infiniband
+            || !memlock
+            || !stack
+            || world_size < 2
+            || rank >= world_size
+            || caller_fabric_environment
+            || endpoint_workload != (local == master)
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        Some(NativeFabric {
+            local,
+            master,
+            port,
+        })
+    } else {
+        None
+    };
     if models.is_empty()
         || models.len() > MAX_COMPILED_MODEL_FILES
         || models.len() > 1 && model_targets.contains("/models")
@@ -2604,6 +2686,7 @@ fn validate_docker_run_with_archive(
         tmp_root,
         runtime_contract,
         host_endpoint_port: (network == Some("host")).then_some(listen_port).flatten(),
+        native_fabric,
         job_timeout_seconds,
     })
 }
@@ -4057,13 +4140,13 @@ mod tests {
     }
 
     #[test]
-    fn distributed_rank_zero_requires_only_signed_rendezvous_publication() {
-        let (_temp, roots) = runtime_fixture();
+    fn native_fabric_requires_complete_bounded_shape_without_publications() {
+        let (temp, roots) = runtime_fixture();
         let model = artifact_path(&roots, 'a');
         fs::create_dir_all(&model).unwrap();
         let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
         let network = arguments.iter().position(|value| value == "none").unwrap();
-        arguments[network] = "bridge".to_owned();
+        arguments[network] = "host".to_owned();
         let image = arguments
             .iter()
             .position(|value| value.starts_with("localhost/vonk/"))
@@ -4071,49 +4154,140 @@ mod tests {
         arguments.splice(
             image..image,
             [
-                "--publish".to_owned(),
-                "192.168.1.211:29500:29500".to_owned(),
-                "--env".to_owned(),
-                "VONK_MASTER_PORT=29500".to_owned(),
-                "--env".to_owned(),
-                "VONK_RANK=0".to_owned(),
-            ],
+                "--device",
+                "nvidia.com/gpu=all",
+                "--device",
+                "/dev/infiniband:/dev/infiniband",
+                "--ulimit",
+                "memlock=-1:-1",
+                "--ulimit",
+                "stack=67108864:67108864",
+                "--env",
+                "VONK_MASTER_PORT=29500",
+                "--env",
+                "VONK_RANK=0",
+                "--env",
+                "VONK_WORLD_SIZE=2",
+                "--env",
+                "VONK_LOCAL_ADDR=192.168.100.10",
+                "--env",
+                "VONK_MASTER_ADDR=192.168.100.10",
+                "--env",
+                "VONK_LISTEN_PORT=8000",
+            ]
+            .map(str::to_owned),
         );
         assert!(validate_docker_run(&arguments, &roots, None).is_ok());
-
-        let mut wrong_port = arguments.clone();
-        let publication = wrong_port
-            .iter_mut()
-            .find(|value| value.starts_with("192.168.1.211:"))
-            .unwrap();
-        *publication = "192.168.1.211:29500:29501".to_owned();
-        assert!(validate_docker_run(&wrong_port, &roots, None).is_err());
-        let mut missing_publication = arguments.clone();
-        let publish = missing_publication
+        let mut nonzero_owner = arguments.clone();
+        let rank = nonzero_owner
             .iter()
-            .position(|value| value == "--publish")
+            .position(|arg| arg == "VONK_RANK=0")
             .unwrap();
-        missing_publication.drain(publish..=publish + 1);
-        assert!(validate_docker_run(&missing_publication, &roots, None).is_err());
-
-        let mut worker_publication = arguments;
-        let rank = worker_publication
+        nonzero_owner[rank] = "VONK_RANK=1".to_owned();
+        assert!(validate_docker_run(&nonzero_owner, &roots, None).is_ok());
+        let mut worker = arguments.clone();
+        let local = worker
             .iter()
-            .position(|value| value == "VONK_RANK=0")
+            .position(|arg| arg == "VONK_LOCAL_ADDR=192.168.100.10")
             .unwrap();
-        worker_publication[rank] = "VONK_RANK=1".to_owned();
-        let image = worker_publication
+        worker[local] = "VONK_LOCAL_ADDR=192.168.100.11".to_owned();
+        let endpoint = worker
             .iter()
-            .position(|value| value.starts_with("localhost/vonk/"))
+            .position(|arg| arg == "VONK_LISTEN_PORT=8000")
             .unwrap();
-        worker_publication.splice(
-            image..image,
-            [
-                "--publish".to_owned(),
-                "192.168.1.211:29500:29500".to_owned(),
-            ],
+        worker.drain(endpoint - 1..=endpoint);
+        assert!(validate_docker_run(&worker, &roots, None).is_ok());
+        struct FabricRunner;
+        impl CommandRunner for FabricRunner {
+            fn run(
+                &self,
+                executable: &Path,
+                arguments: &[String],
+            ) -> Result<CommandOutput, String> {
+                assert_eq!(executable, Path::new(super::DOCKER_FIREWALL));
+                assert_eq!(
+                    &arguments[2..],
+                    [
+                        "check-fabric-run",
+                        "192.168.100.10",
+                        "192.168.100.10",
+                        "29500",
+                        "8000"
+                    ]
+                );
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: b"enp1s0f1np1\n".to_vec(),
+                    exit_code: Some(0),
+                })
+            }
+        }
+        let sysfs = temp.path().join("sysfs");
+        crate::runtime_fabric::tests::gid(
+            &sysfs,
+            "rocep1s0f1",
+            "3",
+            "::ffff:192.168.100.10",
+            "RoCE v2",
         );
-        assert!(validate_docker_run(&worker_publication, &roots, None).is_err());
+        let executor = OperationExecutor::new(roots.clone(), &[0; 32], FabricRunner, None).unwrap();
+        let mut started = validate_docker_run(&arguments, &roots, None).unwrap();
+        executor.bind_native_fabric(&mut started, &sysfs).unwrap();
+        let mut inspected = validate_docker_run(&arguments, &roots, None).unwrap();
+        executor.bind_native_fabric(&mut inspected, &sysfs).unwrap();
+        assert_eq!(started.arguments, inspected.arguments);
+        assert!(
+            started
+                .arguments
+                .iter()
+                .any(|arg| arg == "NCCL_IB_HCA==rocep1s0f1:1")
+        );
+        assert!(
+            started
+                .arguments
+                .iter()
+                .any(|arg| arg == "NCCL_SOCKET_IFNAME==enp1s0f1np1")
+        );
+        let compiled = started.docker_arguments().unwrap();
+        assert_eq!(compiled[started.image_index], started.local_image_reference);
+        assert_eq!(
+            compiled
+                .iter()
+                .filter(|arg| *arg == &started.entrypoint)
+                .count(),
+            1
+        );
+        for required in [
+            "/dev/infiniband:/dev/infiniband",
+            "memlock=-1:-1",
+            "stack=67108864:67108864",
+            "VONK_WORLD_SIZE=2",
+            "VONK_LOCAL_ADDR=192.168.100.10",
+        ] {
+            let mut incomplete = arguments.clone();
+            let index = incomplete
+                .iter()
+                .position(|value| value == required)
+                .unwrap();
+            incomplete.drain(index - 1..=index);
+            assert!(
+                validate_docker_run(&incomplete, &roots, None).is_err(),
+                "missing {required}"
+            );
+        }
+        for forbidden in [
+            ["--publish", "192.168.1.211:8000:8000"],
+            ["--ipc", "host"],
+            ["--env", "NCCL_SOCKET_IFNAME=wlP9s9"],
+        ] {
+            let mut polluted = arguments.clone();
+            let image = polluted
+                .iter()
+                .position(|value| value.starts_with("localhost/vonk/"))
+                .unwrap();
+            polluted.splice(image..image, forbidden.map(str::to_owned));
+            assert!(validate_docker_run(&polluted, &roots, None).is_err());
+        }
     }
 
     #[test]

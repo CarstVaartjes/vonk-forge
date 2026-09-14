@@ -37,7 +37,11 @@ pub fn same_installed_workload(
     installed: &CompiledExecutionPlan,
     requested: &CompiledExecutionPlan,
 ) -> bool {
-    installed.identity == requested.identity
+    // Network authority is derived from signed placement at start time. Validate
+    // both plans before comparing the installed process and filesystem identity.
+    installed.validate().is_ok()
+        && requested.validate().is_ok()
+        && installed.identity == requested.identity
         && installed.artifacts == requested.artifacts
         && installed.runtime.executable == requested.runtime.executable
         && installed.runtime.argv == requested.runtime.argv
@@ -47,7 +51,6 @@ pub fn same_installed_workload(
         && installed.runtime_image == requested.runtime_image
         && installed.security.devices == requested.security.devices
         && installed.security.capabilities == requested.security.capabilities
-        && installed.security.host_network == requested.security.host_network
         && installed.security.privileged == requested.security.privileged
         && installed.security.user == requested.security.user
         && installed.security.mounts == requested.security.mounts
@@ -168,6 +171,17 @@ impl CompiledExecutionPlan {
         }
         self.runtime.validate()?;
         self.runtime_image.validate()?;
+        let placement = &self.runtime.placement;
+        if placement.world_size > 1
+            && placement.master_port.is_some()
+            && (self.topology.node_count < 2
+                || placement.local_address.is_none()
+                || placement.master_address.is_none()
+                || self.endpoint.is_none()
+                || self.security.devices != ["nvidia.com/gpu=all"])
+        {
+            return Err(WorkloadError::Invalid("native fabric placement is incomplete"));
+        }
         self.security.validate(&self.runtime.placement)?;
         self.topology.validate()?;
         self.lifecycle.validate()?;
@@ -280,13 +294,19 @@ impl CompiledRuntime {
 
 impl CompiledSecurity {
     fn validate(&self, placement: &CompiledRuntimePlacement) -> Result<(), WorkloadError> {
-        let bridge_required =
-            placement.endpoint_address.is_some() || placement.master_port.is_some();
-        let expected_network_mode = if bridge_required { "bridge" } else { "none" };
+        let native_fabric = placement.world_size > 1 && placement.master_port.is_some();
+        let expected_network_mode = if native_fabric {
+            "host"
+        } else if placement.endpoint_address.is_some() {
+            "bridge"
+        } else {
+            "none"
+        };
         if self.privileged
             || !self.no_new_privileges
             || !self.read_only_root
             || self.network_mode.as_str() != expected_network_mode
+            || self.host_network != native_fabric
             || !self.capabilities.is_empty()
             || self.devices.len() > 1
             || self

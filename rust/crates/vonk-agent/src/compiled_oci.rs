@@ -68,8 +68,7 @@ pub struct OciSecurityOptions {
     pub devices: Vec<String>,
     pub capabilities: Vec<String>,
     pub privileged: bool,
-    /// Network mode is signed by the placement's endpoint/rendezvous fields;
-    /// host networking is never admitted.
+    /// Network mode is bound to the signed endpoint and native fabric placement.
     pub network_mode: OciNetworkMode,
     pub read_only_root: bool,
     pub no_new_privileges: bool,
@@ -83,6 +82,7 @@ pub struct OciSecurityOptions {
 pub enum OciNetworkMode {
     None,
     Bridge,
+    Host,
 }
 
 impl OciNetworkMode {
@@ -90,6 +90,7 @@ impl OciNetworkMode {
         match self {
             Self::None => "none",
             Self::Bridge => "bridge",
+            Self::Host => "host",
         }
     }
 }
@@ -154,6 +155,16 @@ impl CompiledOciInvocation {
         ]);
         for device in &self.security.devices {
             arguments.extend(["--device".to_owned(), device.clone()]);
+        }
+        if self.security.network_mode == OciNetworkMode::Host {
+            arguments.extend([
+                "--device".to_owned(),
+                "/dev/infiniband:/dev/infiniband".to_owned(),
+                "--ulimit".to_owned(),
+                "memlock=-1:-1".to_owned(),
+                "--ulimit".to_owned(),
+                "stack=67108864:67108864".to_owned(),
+            ]);
         }
         for environment in &self.environment {
             arguments.extend([
@@ -304,6 +315,7 @@ pub fn project(
         network_mode: match plan.security.network_mode.as_str() {
             "none" => OciNetworkMode::None,
             "bridge" => OciNetworkMode::Bridge,
+            "host" => OciNetworkMode::Host,
             _ => return Err(CompiledOciError::Invalid("unsupported network mode")),
         },
         read_only_root: plan.security.read_only_root,
@@ -368,9 +380,26 @@ fn validate_paths(paths: &CompiledOciPaths) -> Result<(), CompiledOciError> {
 }
 
 fn validate_security(plan: &CompiledExecutionPlan) -> Result<(), CompiledOciError> {
-    let bridge_required = plan.runtime.placement.endpoint_address.is_some()
-        || plan.runtime.placement.master_port.is_some();
-    let expected_network_mode = if bridge_required { "bridge" } else { "none" };
+    let placement = &plan.runtime.placement;
+    let native_fabric = placement.world_size > 1 && placement.master_port.is_some();
+    let expected_network_mode = if native_fabric {
+        "host"
+    } else if placement.endpoint_address.is_some() {
+        "bridge"
+    } else {
+        "none"
+    };
+    if native_fabric
+        && (plan.topology.node_count < 2
+            || placement.local_address.is_none()
+            || placement.master_address.is_none()
+            || plan.endpoint.is_none()
+            || plan.security.devices != ["nvidia.com/gpu=all"])
+    {
+        return Err(CompiledOciError::Invalid(
+            "native fabric placement is incomplete",
+        ));
+    }
     if plan.security.privileged
         || !plan.security.capabilities.is_empty()
         || !plan.security.read_only_root
@@ -385,7 +414,7 @@ fn validate_security(plan: &CompiledExecutionPlan) -> Result<(), CompiledOciErro
     {
         return Err(CompiledOciError::Invalid("security override"));
     }
-    if plan.security.host_network {
+    if plan.security.host_network != native_fabric {
         return Err(CompiledOciError::Invalid(
             "host network mode is not authorized",
         ));
@@ -449,6 +478,9 @@ fn ordered_environment(
 }
 
 fn publications(plan: &CompiledExecutionPlan) -> Result<Vec<String>, CompiledOciError> {
+    if plan.security.network_mode.as_str() == "host" {
+        return Ok(Vec::new());
+    }
     let placement = &plan.runtime.placement;
     let mut result = Vec::new();
     if let (Some(endpoint), Some(endpoint_address), Some(port)) =
@@ -754,16 +786,69 @@ mod tests {
     }
 
     #[test]
+    fn native_ranks_keep_host_addresses_without_docker_port_translation() {
+        for rank in [0, 1] {
+            let mut value = fixture();
+            let role = if rank == 0 { "entrypoint" } else { "worker" };
+            value["runtime"]["placement"]["rank"] = json!(rank);
+            value["runtime"]["placement"]["role"] = json!(role);
+            value["runtime"]["placement"]["world_size"] = json!(2);
+            value["runtime"]["placement"]["local_address"] =
+                json!(format!("192.168.100.{}", 10 + rank));
+            value["runtime"]["placement"]["master_address"] = json!("192.168.100.10");
+            value["runtime"]["placement"]["master_port"] = json!(29500);
+            value["runtime"]["placement"]["endpoint_address"] = if rank == 0 {
+                json!("192.168.1.211")
+            } else {
+                json!(null)
+            };
+            value["topology"] = json!({"name":"dual", "mode":"distributed", "node_count":2, "world_size":2, "rank":rank, "role":role, "backend":"mp"});
+            value["security"]["host_network"] = json!(true);
+            value["security"]["network_mode"] = json!("host");
+            value["security"]["devices"] = json!(["nvidia.com/gpu=all"]);
+            let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+            let mut installed_value = value.clone();
+            for field in [
+                "local_address",
+                "master_address",
+                "master_port",
+                "endpoint_address",
+            ] {
+                installed_value["runtime"]["placement"][field] = json!(null);
+            }
+            installed_value["security"]["network_mode"] = json!("none");
+            installed_value["security"]["host_network"] = json!(false);
+            let installed: CompiledExecutionPlan = serde_json::from_value(installed_value).unwrap();
+            assert!(
+                vonk_agent_protocol::compiled_execution_plan::same_installed_workload(
+                    &installed, &plan
+                )
+            );
+            let invocation = project(&plan, &paths()).unwrap();
+            let argv = invocation.podman_arguments();
+            assert!(invocation.publishes.is_empty());
+            assert!(!argv.iter().any(|arg| arg == "--publish" || arg == "--ipc"));
+            assert!(
+                argv.windows(2)
+                    .any(|args| args == ["--device", "/dev/infiniband:/dev/infiniband"])
+            );
+            assert!(
+                argv.windows(2)
+                    .any(|args| args == ["--ulimit", "memlock=-1:-1"])
+            );
+            value["security"]["network_mode"] = json!("bridge");
+            value["security"]["host_network"] = json!(false);
+            let wrong: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+            assert!(project(&wrong, &paths()).is_err());
+        }
+    }
+
+    #[test]
     fn unauthorized_host_network_mode_is_rejected() {
         let mut value = fixture();
         value["security"]["host_network"] = json!(true);
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-        assert!(matches!(
-            project(&plan, &paths()),
-            Err(CompiledOciError::Invalid(
-                "host network mode is not authorized"
-            ))
-        ));
+        assert!(project(&plan, &paths()).is_err());
     }
 
     #[test]

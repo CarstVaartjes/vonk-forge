@@ -647,6 +647,8 @@ fn distributed_worker_has_runtime_identity_without_a_public_metrics_scrape() {
     plan.runtime.placement.local_address = Some("192.168.100.11".parse().unwrap());
     plan.runtime.placement.master_address = Some("192.168.100.10".parse().unwrap());
     plan.runtime.placement.master_port = Some(29500);
+    plan.security.network_mode = "host".parse().unwrap();
+    plan.security.host_network = true;
     plan.topology.rank = 1;
     plan.topology.role = "worker".into();
     plan.topology.world_size = 2;
