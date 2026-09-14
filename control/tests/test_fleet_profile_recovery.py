@@ -204,8 +204,13 @@ def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):
             )
 
 
-def test_retry_does_not_abandon_a_still_active_child_after_poll_failure(tmp_path):
-    sessions, operations, service, _profile, original = setup_recovery(tmp_path)
+@pytest.mark.parametrize("entrypoint", ["retry", "load"])
+def test_retry_does_not_abandon_a_still_active_child_after_poll_failure(tmp_path, entrypoint):
+    sessions, operations, service, profile, original = setup_recovery(tmp_path)
+    def recover():
+        if entrypoint == "load":
+            return service.load(profile.number, request_key=_uuid(801), actor="admin")
+        return service.retry(original.id, request_key=_uuid(801), actor="admin")
     child_id = _uuid(820)
     operations.operations[child_id] = SimpleNamespace(id=child_id, state="running")
     with sessions.begin() as session:
@@ -213,7 +218,62 @@ def test_retry_does_not_abandon_a_still_active_child_after_poll_failure(tmp_path
         assert application is not None
         application.current_operation_id = child_id
     with pytest.raises(FleetProfileConflict, match="still active"):
-        service.retry(original.id, request_key=_uuid(801), actor="admin")
+        recover()
     del operations.operations[child_id]
     with pytest.raises(FleetProfileConflict, match="must be reconciled"):
-        service.retry(original.id, request_key=_uuid(801), actor="admin")
+        recover()
+
+
+def test_numbered_load_recovers_failed_attempts_and_replays_the_request(tmp_path):
+    sessions, operations, service, profile, original = setup_recovery(tmp_path)
+    failed = service.application(original.id)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW + timedelta(seconds=1), recipe_operations=operations
+    )
+    retry = service.load(profile.number, request_key=_uuid(830), actor="admin")
+    assert retry.retry_of_application_id == original.id
+    assert retry.attempt == 2
+    with pytest.raises(FleetProfileConflict, match="already active"):
+        service.load(profile.number, request_key=_uuid(832), actor="admin")
+    finish(service, retry.id)
+    assert service.application(retry.id).state == "failed"
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW + timedelta(seconds=2), recipe_operations=operations
+    )
+    operations.fail = False
+    operations.events.clear()
+    third = service.load(profile.number, request_key=_uuid(831), actor="admin")
+    assert third.retry_of_application_id == retry.id
+    assert third.attempt == 3
+    finish(service, third.id)
+    final = service.application(third.id)
+    assert final.state == "succeeded"
+    assert operations.events == ["start"]
+    assert service.application(original.id) == failed
+    assert service.load(profile.number, request_key=_uuid(831), actor="admin") == final
+    with sessions() as session:
+        assert len(list(session.scalars(select(FleetProfileApplication)))) == 3
+    service.update(profile.id, _input(_uuid(2), name="Changed intent"), actor="admin")
+    with pytest.raises(FleetProfileConflict, match="request key"):
+        service.load(profile.number, request_key=_uuid(831), actor="admin")
+
+
+def test_numbered_load_repeated_noop_keeps_distinct_request_receipts(tmp_path):
+    from vonk_control.fleet_profile_contract import FleetProfileInput
+
+    sessions, operations, _service, _profile, _original = setup_recovery(tmp_path)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW + timedelta(seconds=1), recipe_operations=operations
+    )
+    idle = service.create(
+        FleetProfileInput(name="Keep cached", assignments=[], installation_policy="keep-cached"),
+        actor="admin",
+    )
+    first = service.load(idle.number, request_key=_uuid(840), actor="admin")
+    assert first.state == "succeeded"
+    assert first.total_steps == 0
+    second = service.load(idle.number, request_key=_uuid(841), actor="admin")
+    assert second.id != first.id
+    assert second.state == "succeeded"
+    assert second.result is not None and not second.result.changed
+    assert service.load(idle.number, request_key=_uuid(841), actor="admin") == second
