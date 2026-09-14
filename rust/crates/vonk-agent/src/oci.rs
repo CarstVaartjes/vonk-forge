@@ -2182,7 +2182,7 @@ mod tests {
     fn routine_recipe_uninstall_retains_shared_model_cache() {
         let data = tempdir().unwrap();
         let (installation_id, installation, plan) = persisted_installation(data.path());
-        let recipe_digest = "2".repeat(64);
+        let recipe_digest = plan.identity.recipe_revision_sha256.clone();
         authorize_installation(&installation, &recipe_digest);
         let cached = data
             .path()
