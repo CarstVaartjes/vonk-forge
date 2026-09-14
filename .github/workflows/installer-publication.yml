@@ -366,6 +366,10 @@ jobs:
             [[ "$image" != *:latest@* && "$image" != *:dev@* && "$image" != *:main@* && "$image" != *:edge@* ]]
           done
 
+          mkdir -p "$RUNNER_TEMP/cli-wheel"
+          VONK_BUILD_SOURCE_SHA="$SOURCE_SHA" VONK_BUILD_RELEASE_VERSION="$VERSION" uv build --wheel --out-dir "$RUNNER_TEMP/cli-wheel"
+          mapfile -t cli_wheels < <(find "$RUNNER_TEMP/cli-wheel" -maxdepth 1 -type f -name 'vonk_cluster_profiles-*-py3-none-any.whl')
+          test "${#cli_wheels[@]}" = 1
           output=$RUNNER_TEMP/installer-publication
           assemble=(
             uv run --no-project --with-editable agent_protocol --with cryptography==46.0.7 python scripts/install-release-publication assemble
@@ -382,6 +386,7 @@ jobs:
             --hermes-image "$hermes_image"
             --litellm-image "$litellm_image"
             --nas-payload "$payload"
+            --cli-wheel "${cli_wheels[0]}"
             --nas-setup "linux-amd64=$RUNNER_TEMP/setups/linux-amd64/vonk-nas-setup"
             --nas-setup "linux-arm64=$RUNNER_TEMP/setups/linux-arm64/vonk-nas-setup"
             --nas-setup "darwin-amd64=$RUNNER_TEMP/setups/darwin-amd64/vonk-nas-setup"

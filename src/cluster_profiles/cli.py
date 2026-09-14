@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import uuid
@@ -11,7 +12,9 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import overload
 
+from .build_identity import current_build
 from .cli_render import render_payload
+from .cli_update import CliUpdateError, interactive_notice, run_update
 from .control_client import (
     ControlClient,
     ControlClientError,
@@ -44,11 +47,26 @@ class _CliParser(argparse.ArgumentParser):
 def _parser() -> argparse.ArgumentParser:
     parser = _CliParser(prog="vonkctl")
     parser.add_argument("--json", dest="global_json", action="store_true")
+    parser.add_argument(
+        "--version", action="store_true", help="Show the installed CLI build identity"
+    )
     parser.add_argument("--profile", dest="profile_number", type=int, default=1)
     commands = parser.add_subparsers(
         dest="command", required=False, parser_class=_CliParser
     )
     add_controller_commands(commands)
+    update = commands.add_parser(
+        "update", help="Check or install the accepted CLI release"
+    )
+    update.add_argument(
+        "--apply",
+        action="store_true",
+        help="Install the signed wheel in this Python environment",
+    )
+    update.add_argument("--channel", choices=("dev", "stable"), default="stable")
+    update.add_argument("--public-key", type=Path, default=None)
+    update.add_argument("--origin", default="https://install.vonkforge.ai")
+    update.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     return parser
 
 
@@ -131,7 +149,11 @@ def _control_error(
 
 
 def _emit(payload: Mapping[str, object], args: argparse.Namespace) -> None:
-    safe = dict(payload) if args.global_json or getattr(args, "json", False) else _sanitize(payload)
+    safe = (
+        dict(payload)
+        if args.global_json or getattr(args, "json", False)
+        else _sanitize(payload)
+    )
     if args.global_json or getattr(args, "json", False):
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
         return
@@ -171,6 +193,41 @@ def main(
         )
         return 2
 
+    if args.version:
+        identity = current_build()
+        if args.global_json:
+            print(json.dumps(identity, sort_keys=True, separators=(",", ":")))
+        else:
+            source = identity["source_sha"] or "unstamped"
+            print(f"vonkctl {identity['version']} ({source})")
+        return 0
+    if args.command == "update":
+        key = args.public_key or os.environ.get("VONK_INSTALLER_PUBLIC_KEY_FILE")
+        if key is None:
+            result: dict[str, object] = {
+                "error": "set --public-key to the trusted installer signing public key",
+                "error_type": "update",
+            }
+            status = 2
+        else:
+            try:
+                result = run_update(
+                    channel=args.channel,
+                    public_key=Path(key),
+                    origin=args.origin,
+                    apply=args.apply,
+                )
+                status = 0
+            except (CliUpdateError, OSError) as error:
+                result = {"error": _sanitize_text(error), "error_type": "update"}
+                status = 2
+        if args.global_json or getattr(args, "json", False):
+            print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        else:
+            for name, value in result.items():
+                print(f"{name.replace('_', ' ')}: {value}")
+        return status
+
     try:
         client = control_client or ControlClient.from_environment()
         watch_rendered = False
@@ -195,6 +252,14 @@ def main(
         )
         if not watch_rendered or args.global_json or getattr(args, "json", False):
             _emit(result, args)
+        if (
+            sys.stderr.isatty()
+            and not args.global_json
+            and not getattr(args, "json", False)
+        ):
+            notice = interactive_notice()
+            if notice:
+                print(notice, file=sys.stderr)
         return result_exit_code(result)
     except (
         ControlClientError,

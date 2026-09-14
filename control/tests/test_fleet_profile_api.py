@@ -55,6 +55,13 @@ def test_profile_operator_routes_are_singular_and_unversioned() -> None:
     assert client.get("/api/profile/2/status", headers=_headers(codec)).status_code == 404
 
 
+def test_profile_request_lookup_is_authenticated_and_reports_missing_key() -> None:
+    client, codec = _client()
+    path = "/api/profile/1/requests/11111111-1111-4111-8111-111111111111"
+    assert client.get(path).status_code == 401
+    assert client.get(path, headers=_headers(codec)).status_code == 404
+
+
 def test_profile_mutation_role_is_declared_for_final_route() -> None:
     # Root owns the shared auth registry; this assertion documents the exact
     # key the integration patch must install without retaining old aliases.

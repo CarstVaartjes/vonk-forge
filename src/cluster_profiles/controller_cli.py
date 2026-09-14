@@ -19,7 +19,7 @@ from typing import Protocol, runtime_checkable
 
 from .cli_render import progress_line
 from .cli_select import SelectorError
-from .control_client import ControlTransportError, ControlUnavailable
+from .control_client import ControlNotFound, ControlTransportError, ControlUnavailable
 
 FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
@@ -75,9 +75,7 @@ def _add_output(parser: argparse.ArgumentParser) -> None:
 
 def _query(**values: object) -> dict[str, object]:
     return {
-        key: value
-        for key, value in values.items()
-        if value not in (None, "", [], ())
+        key: value for key, value in values.items() if value not in (None, "", [], ())
     }
 
 
@@ -140,7 +138,14 @@ def _selector(parser: argparse.ArgumentParser, name: str, *, help: str) -> None:
 
 def _filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--search", default="")
-    for name in ("usage", "family", "version", "quantization", "publisher", "alignment"):
+    for name in (
+        "usage",
+        "family",
+        "version",
+        "quantization",
+        "publisher",
+        "alignment",
+    ):
         parser.add_argument(f"--{name}", action="append", default=[])
     parser.add_argument("--updated-since")
     parser.add_argument("--sort", choices=("updated", "name"), default="updated")
@@ -218,7 +223,9 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _selector(rename, "selector", help="Exact Spark selector or friendly name")
     rename.add_argument("new_name")
     _action_flags(rename)
-    enroll = fleet_actions.add_parser("enroll", help="Create a one-time enrollment grant")
+    enroll = fleet_actions.add_parser(
+        "enroll", help="Create a one-time enrollment grant"
+    )
     enroll.add_argument("name")
     enroll.add_argument("--ttl-seconds", type=int, default=900)
     _add_output(enroll)
@@ -231,7 +238,9 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         _add_output(action)
         if action_name == "remove":
             action.add_argument("--yes", action="store_true")
-    upgrade = fleet_actions.add_parser("upgrade", help="Install the latest signed Spark client")
+    upgrade = fleet_actions.add_parser(
+        "upgrade", help="Install the latest signed Spark client"
+    )
     upgrade.add_argument("selector", nargs="?")
     upgrade.add_argument("--all", action="store_true")
     upgrade.add_argument(
@@ -261,10 +270,14 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _watch_controls(model)
     _add_output(model)
     model_actions = model.add_subparsers(dest="model_action", parser_class=type(model))
-    model_library = model_actions.add_parser("library", help="List published model variants")
+    model_library = model_actions.add_parser(
+        "library", help="List published model variants"
+    )
     _filters(model_library)
     _add_output(model_library)
-    model_detail = model_actions.add_parser("detail", help="Show an exact model variant")
+    model_detail = model_actions.add_parser(
+        "detail", help="Show an exact model variant"
+    )
     _selector(model_detail, "selector", help="Exact model selector or friendly name")
     model_detail.add_argument("--watch", action="store_true")
     _watch_controls(model_detail)
@@ -283,13 +296,21 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     recipe.add_argument("--watch", action="store_true")
     _watch_controls(recipe)
     _add_output(recipe)
-    recipe_actions = recipe.add_subparsers(dest="recipe_action", parser_class=type(recipe))
-    recipe_library = recipe_actions.add_parser("library", help="List compatible recipes")
+    recipe_actions = recipe.add_subparsers(
+        dest="recipe_action", parser_class=type(recipe)
+    )
+    recipe_library = recipe_actions.add_parser(
+        "library", help="List compatible recipes"
+    )
     _filters(recipe_library)
     recipe_library.add_argument("--model", action="append", default=[])
     recipe_library.add_argument("--all-models", action="store_true")
     recipe_library.add_argument(
-        "--sparks", action="append", type=int, default=[], help="Exact topology node count"
+        "--sparks",
+        action="append",
+        type=int,
+        default=[],
+        help="Exact topology node count",
     )
     _add_output(recipe_library)
     recipe_detail = recipe_actions.add_parser("detail", help="Show an exact recipe")
@@ -301,7 +322,9 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     recipe_download = recipe_actions.add_parser(
         "download", help="Cache a recipe and missing model"
     )
-    _selector(recipe_download, "selector", help="Exact recipe selector or friendly name")
+    _selector(
+        recipe_download, "selector", help="Exact recipe selector or friendly name"
+    )
     _action_flags(recipe_download, followable=True)
     recipe_update = recipe_actions.add_parser(
         "update", help="List or refresh cached recipe updates"
@@ -313,14 +336,16 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "remove", help="Cancel/remove Controller recipe cache"
     )
     _selector(recipe_remove, "selector", help="Exact recipe selector or friendly name")
-    _action_flags(
-        recipe_remove, destructive=True, recipe_remove=True, followable=True
-    )
+    _action_flags(recipe_remove, destructive=True, recipe_remove=True, followable=True)
 
     profile = commands.add_parser("profile", help="Edit and load a whole-fleet profile")
     _add_output(profile)
-    profile_actions = profile.add_subparsers(dest="profile_action", parser_class=type(profile))
-    profile_list = profile_actions.add_parser("list", help="List stable numbered profiles")
+    profile_actions = profile.add_subparsers(
+        dest="profile_action", parser_class=type(profile)
+    )
+    profile_list = profile_actions.add_parser(
+        "list", help="List stable numbered profiles"
+    )
     _add_output(profile_list)
     profile_name = profile_actions.add_parser("name", help="Name the selected profile")
     profile_name.add_argument("name")
@@ -470,6 +495,34 @@ def _poll_path(
         interval = _bounded_interval(args)
 
 
+def _submit_profile_load(
+    client: ControllerClient, number: int, request_key: str
+) -> dict[str, object]:
+    """Resolve an ambiguous accepted POST under its original identity.
+
+    The request lookup reads the durable application before a second POST.  A
+    404 permits one idempotent replay using the *same* key; an unavailable or
+    unauthorized lookup cannot justify a new submission.
+    """
+
+    path = f"/api/profile/{number}/load"
+    payload = {"request_key": request_key}
+    try:
+        return client.request("POST", path, payload)
+    except (ControlTransportError, ControlUnavailable, OSError) as lost:
+        try:
+            observed = client.request(
+                "GET", f"/api/profile/{number}/requests/{_quoted(request_key)}"
+            )
+        except ControlNotFound:
+            return client.request("POST", path, payload)
+        except (ControlTransportError, ControlUnavailable, OSError):
+            raise lost from None
+        if not isinstance(observed.get("id"), str) or not observed["id"]:
+            raise lost from None
+        return observed
+
+
 def _follow_mutation(
     client: ControllerClient,
     noun: str,
@@ -579,7 +632,9 @@ def _fleet(
 ) -> dict[str, object]:
     action = getattr(args, "fleet_action", None)
     if action is None:
-        return _watch_resource(client, "/api/fleet", _overview(client, "fleet", args), args)
+        return _watch_resource(
+            client, "/api/fleet", _overview(client, "fleet", args), args
+        )
     if action == "detail":
         selector = _fleet_selector(args)
         result = client.request(
@@ -596,9 +651,7 @@ def _fleet(
             )
             or None,
         )
-        return _watch_resource(
-            client, f"/api/fleet/{_quoted(selector)}", result, args
-        )
+        return _watch_resource(client, f"/api/fleet/{_quoted(selector)}", result, args)
     if action == "rename":
         return client.request(
             "POST",
@@ -683,10 +736,14 @@ def _model(
 ) -> dict[str, object]:
     action = getattr(args, "model_action", None)
     if action is None:
-        return _watch_resource(client, "/api/model", _overview(client, "model", args), args)
+        return _watch_resource(
+            client, "/api/model", _overview(client, "model", args), args
+        )
     if action == "library":
         return client.request(
-            "GET", "/api/model/library", query=_library_query(args, recipe=False) or None
+            "GET",
+            "/api/model/library",
+            query=_library_query(args, recipe=False) or None,
         )
     if action == "detail":
         result = client.request(
@@ -695,7 +752,10 @@ def _model(
             query=_query(technical=args.technical) or None,
         )
         return _watch_resource(
-            client, f"/api/model/{_quoted(args.selector)}", result, args,
+            client,
+            f"/api/model/{_quoted(args.selector)}",
+            result,
+            args,
             query=_query(technical=args.technical) or None,
         )
     if action == "download":
@@ -730,10 +790,14 @@ def _recipe(
 ) -> dict[str, object]:
     action = getattr(args, "recipe_action", None)
     if action is None:
-        return _watch_resource(client, "/api/recipe", _overview(client, "recipe", args), args)
+        return _watch_resource(
+            client, "/api/recipe", _overview(client, "recipe", args), args
+        )
     if action == "library":
         return client.request(
-            "GET", "/api/recipe/library", query=_library_query(args, recipe=True) or None
+            "GET",
+            "/api/recipe/library",
+            query=_library_query(args, recipe=True) or None,
         )
     if action == "detail":
         result = client.request(
@@ -742,7 +806,10 @@ def _recipe(
             query=_query(technical=args.technical) or None,
         )
         return _watch_resource(
-            client, f"/api/recipe/{_quoted(args.selector)}", result, args,
+            client,
+            f"/api/recipe/{_quoted(args.selector)}",
+            result,
+            args,
             query=_query(technical=args.technical) or None,
         )
     if action == "download":
@@ -793,7 +860,9 @@ def _spark_id_list(value: object) -> list[str]:
     identifiers: list[str] = []
     for item in value:
         if not isinstance(item, str):
-            raise TypeError("profile assignment spark_ids must be an array of Spark IDs")
+            raise TypeError(
+                "profile assignment spark_ids must be an array of Spark IDs"
+            )
         identifiers.append(item)
     return identifiers
 
@@ -1012,7 +1081,9 @@ def _profile(
                 for assignment in assignments
             ):
                 try:
-                    target = _resolve_recipe_selector(client, args.assignment).casefold()
+                    target = _resolve_recipe_selector(
+                        client, args.assignment
+                    ).casefold()
                 except SelectorError as error:
                     if error.candidates:
                         raise
@@ -1046,11 +1117,7 @@ def _profile(
     if action == "load":
         if args.dry_run:
             return client.request("POST", f"/api/profile/{number}/preview")
-        result = client.request(
-            "POST",
-            f"/api/profile/{number}/load",
-            {"request_key": _request_key(args, factory)},
-        )
+        result = _submit_profile_load(client, number, _request_key(args, factory))
         if args.detach:
             return result
         application_id = result.get("id")

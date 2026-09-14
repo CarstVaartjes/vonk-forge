@@ -254,7 +254,7 @@ def assemble_production_worker(
     artifact_job_retention_seconds: int,
     artifact_job_reconcile_interval_seconds: int,
     artifact_job_reconcile_batch_limit: int,
-    distributed_start_timeout_seconds: int = 60,
+    distributed_start_timeout_seconds: int = 1800,
     model_cache=None,
     background_services: Sequence[Callable[[], object]] = (),
     background_closers: Sequence[Callable[[], object]] = (),
