@@ -317,6 +317,7 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "runtime_image_identity_invalid"
             | "runtime_image_receipt_failed"
             | "runtime_process_exited"
+            | "runtime_run_missing"
             | "runtime_fabric_unavailable"
             | "runtime_fabric_firewall_rejected"
     )

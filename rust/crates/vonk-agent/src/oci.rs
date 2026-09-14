@@ -35,6 +35,8 @@ pub enum OciError {
     Workload(#[from] WorkloadError),
     #[error("container runtime rejected the request")]
     Runtime,
+    #[error("post-stop hook effect may already have been applied")]
+    PostStopHooksStarted,
     #[error("container image digest did not match")]
     ImageDigest,
     #[error("managed artifact content is corrupt")]
@@ -66,6 +68,7 @@ impl OciError {
             Self::Process(_) => "process",
             Self::Workload(_) => "workload",
             Self::Runtime => "runtime",
+            Self::PostStopHooksStarted => "runtime",
             Self::ImageDigest => "image-digest",
             Self::Artifact => "artifact",
             Self::Io(_) => "storage",
@@ -810,6 +813,32 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         })
     }
 
+    /// A fresh claim may observe an earlier exact Start without rewriting its
+    /// runtime contract, clearing tmp, or issuing lifecycle hooks again.
+    pub fn prepare_retained_start_if_present(
+        &self,
+        spec: &CompiledExecutionPlan,
+        installation_id: &str,
+        run_id: &str,
+        placement: &CompiledRuntimePlacement,
+        identity: Option<&RecipeRunStartIdentity>,
+    ) -> Result<Option<RuntimeStartPlan>, OciError> {
+        if self.load_run_lifecycle(run_id)?.is_none() {
+            return Ok(None);
+        }
+        let plan = match identity {
+            Some(identity) => self.prepare_retained_start_with_inspection_identity(
+                spec,
+                installation_id,
+                run_id,
+                placement,
+                identity,
+            )?,
+            None => self.prepare_retained_start(spec, installation_id, run_id, placement)?,
+        };
+        Ok(Some(plan))
+    }
+
     pub fn prepare_retained_start_with_inspection_identity(
         &self,
         spec: &CompiledExecutionPlan,
@@ -899,11 +928,78 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     pub fn complete_stop(&self, run_id: &str) -> Result<(), OciError> {
         let metadata = self.run_metadata_path(run_id)?;
+        let directory = match fs::symlink_metadata(&metadata) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        if !directory.file_type().is_dir()
+            || directory.file_type().is_symlink()
+            || directory.uid() != rustix::process::geteuid().as_raw()
+            || directory.mode() & 0o077 != 0
+        {
+            return Err(OciError::Artifact);
+        }
+        let marker = metadata.join("post-stop-hooks.started");
+        match fs::symlink_metadata(&marker) {
+            Ok(entry)
+                if !entry.file_type().is_file()
+                    || entry.file_type().is_symlink()
+                    || entry.uid() != directory.uid()
+                    || entry.mode() & 0o777 != 0o600 =>
+            {
+                return Err(OciError::Artifact);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         match fs::remove_file(metadata.join("lifecycle.json")) {
-            Ok(()) => File::open(metadata)?.sync_all().map_err(OciError::Io),
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        match fs::remove_file(marker) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        match File::open(metadata) {
+            Ok(directory) => directory.sync_all().map_err(OciError::Io),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.into()),
         }
+    }
+
+    /// Persist before the first post-stop hook. A restart must never replay
+    /// a hook whose effect may have completed before acknowledgement.
+    pub fn begin_post_stop_hooks(&self, run_id: &str) -> Result<(), OciError> {
+        let metadata = self.run_metadata_path(run_id)?;
+        let directory = fs::symlink_metadata(&metadata)?;
+        if !directory.file_type().is_dir()
+            || directory.file_type().is_symlink()
+            || directory.uid() != rustix::process::geteuid().as_raw()
+            || directory.mode() & 0o077 != 0
+        {
+            return Err(OciError::Artifact);
+        }
+        let marker = metadata.join("post-stop-hooks.started");
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(marker)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(OciError::PostStopHooksStarted);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        file.write_all(b"started")?;
+        file.sync_all()?;
+        File::open(metadata)?.sync_all()?;
+        Ok(())
     }
 
     pub fn recipe_run_inspection_plans(&self) -> Result<Vec<RecipeRunInspectionPlan>, OciError> {
@@ -2353,6 +2449,75 @@ mod tests {
         let binding: vonk_agent_protocol::RecipeRunInspectionBinding =
             serde_json::from_value(observation).unwrap();
         binding.validate().unwrap();
+    }
+
+    #[test]
+    fn interrupted_post_stop_hook_cannot_be_issued_twice() {
+        let data = tempdir().unwrap();
+        let run_id = Uuid::new_v4().to_string();
+        let metadata = data.path().join("run-metadata").join(&run_id);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::set_permissions(&metadata, fs::Permissions::from_mode(0o700)).unwrap();
+        let runner = NoProcess;
+        let first_agent = runtime(data.path(), &runner);
+        first_agent.begin_post_stop_hooks(&run_id).unwrap();
+
+        let restarted_agent = runtime(data.path(), &runner);
+        assert!(matches!(
+            restarted_agent.begin_post_stop_hooks(&run_id),
+            Err(OciError::PostStopHooksStarted)
+        ));
+        restarted_agent.complete_stop(&run_id).unwrap();
+        assert!(!metadata.join("post-stop-hooks.started").exists());
+    }
+
+    #[test]
+    fn fresh_claim_retains_exact_started_plan_without_resetting_writable_state() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, plan) = persisted_installation(data.path());
+        authorize_installation(&installation, &plan.identity.recipe_revision_sha256);
+        let run_id = Uuid::new_v4().to_string();
+        let runner = NoProcess;
+        let first_agent = runtime(data.path(), &runner);
+        first_agent
+            .prepare_start(&plan, &installation_id, &run_id, &plan.runtime.placement)
+            .unwrap();
+        let marker = data
+            .path()
+            .join("runs")
+            .join(&run_id)
+            .join("outputs/tmp")
+            .join(&run_id)
+            .join("in-flight-output");
+        fs::create_dir_all(marker.parent().unwrap()).unwrap();
+        fs::write(&marker, b"keep").unwrap();
+
+        let restarted_agent = runtime(data.path(), &runner);
+        let retained = restarted_agent
+            .prepare_retained_start_if_present(
+                &plan,
+                &installation_id,
+                &run_id,
+                &plan.runtime.placement,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(retained.pre_start.is_empty());
+        assert_eq!(fs::read(marker).unwrap(), b"keep");
+        let mut other_placement = plan.runtime.placement.clone();
+        other_placement.reserved_memory_bytes += 1;
+        assert!(
+            restarted_agent
+                .prepare_retained_start_if_present(
+                    &plan,
+                    &installation_id,
+                    &run_id,
+                    &other_placement,
+                    None,
+                )
+                .is_err()
+        );
     }
 
     #[test]
