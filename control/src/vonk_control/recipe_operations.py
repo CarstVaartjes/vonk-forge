@@ -1470,7 +1470,12 @@ class RecipeOperationService:
                 plan = self._uninstall_plan_in_session(
                     session, installation_id, lock=True
                 )
-                if not plan.allowed or plan.plan_digest != plan_digest:
+                if not plan.allowed:
+                    raise RecipeOperationConflict(
+                        "uninstall plan is stale or blocked: "
+                        + "; ".join(reason.code for reason in plan.blockers)
+                    )
+                if plan.plan_digest != plan_digest:
                     raise RecipeOperationConflict("uninstall plan is stale or blocked")
                 job = self._queue_in_session(
                     session,
@@ -1499,6 +1504,7 @@ class RecipeOperationService:
                             },
                         )
                         for node in plan.nodes
+                        if node.state != "uninstalled"
                     ),
                     authority_digest=plan.installation_authority_digest,
                     now=now,
