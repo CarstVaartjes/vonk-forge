@@ -397,11 +397,6 @@ class SynchronousPhaseExecutor:
         return PhaseExecution(result={"phase": phase.kind})
 
 
-class StopOnlyLifecycle:
-    def preview_stop(self, _run_id: str):
-        return SimpleNamespace(plan_digest="e" * 64)
-
-
 class PendingBuilds(RecipeBuildService):
     """Small build planner double that preserves the real build contract."""
 
@@ -2233,7 +2228,7 @@ def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_befo
     service = _service(
         sessions,
         lifecycle._clock(),
-        StopOnlyLifecycle(),
+        lifecycle,
         RecordingArtifactExecutor(),
         phase_executor=SynchronousPhaseExecutor(),
     )
