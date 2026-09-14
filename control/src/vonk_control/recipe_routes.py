@@ -496,11 +496,6 @@ class RecipeRouteService:
         try:
             generation = self._publish(candidate)
         except Exception as publication_error:
-            if publication_is_temporary(publication_error):
-                # The route remains unpublished while the worker schedules a
-                # bounded retry. Recovery authority and its original deadline
-                # remain intact; the next attempt rechecks both before use.
-                raise
             if recovery is None:
                 raise
             try:
@@ -508,6 +503,10 @@ class RecipeRouteService:
             except RecipeRecoveryDeadlineError as deadline_error:
                 failure: RecipeRouteError = deadline_error
             else:
+                if publication_is_temporary(publication_error):
+                    # The route remains unpublished while the worker schedules
+                    # a bounded retry within the original recovery deadline.
+                    raise
                 failure = RecipeRecoveryPublicationError(
                     "recovery route publication failed: "
                     f"{type(publication_error).__name__}",

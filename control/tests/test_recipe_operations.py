@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
     RecipeInstallPayload,
     RecipeRunObservationReceiptClaims,
     RecipeStartPayload,
+    RecipeStopPayload,
     SignedRecipeRunObservationReceipt,
     canonical_message,
     format_model_identity,
@@ -1361,11 +1362,12 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
             )
         )
         assert [item.node_id for item in first_stop] == [nodes[0]]
-        assert set(first_stop[0].payload) == {
-            "schema_version",
-            "run_id",
-            "plan_digest",
-        }
+        first_stop_payload = RecipeStopPayload.model_validate_json(
+            canonical_message(first_stop[0].payload), strict=True
+        )
+        assert first_stop_payload.run_id == start.owner_id
+        assert first_stop_payload.plan_digest == start.plan_digest
+        assert first_stop_payload.cancel_pending_start is True
     recovered.record_node_result(
         stop.id, first_stop[0].node_id, succeeded=True, evidence={"stopped": True}
     )
@@ -2634,11 +2636,12 @@ def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
         )
         assert len(children) == 1
         assert children[0].node_id == nodes[0]
-        assert set(children[0].payload) == {
-            "schema_version",
-            "run_id",
-            "plan_digest",
-        }
+        stop_payload = RecipeStopPayload.model_validate_json(
+            canonical_message(children[0].payload), strict=True
+        )
+        assert stop_payload.run_id == first_run.owner_id
+        assert stop_payload.plan_digest == first_run.plan_digest
+        assert stop_payload.cancel_pending_start is True
         assert {child.authority_revision for child in children} == {
             first_run.plan_digest
         }
@@ -3224,16 +3227,18 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         request_id="7" * 36,
     )
     assert service.get(stop.id).state == "running"
-    blocked_stop = service.preview_stop(start.owner_id)
-    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
-        service.stop(
-            start.owner_id,
-            plan_digest=blocked_stop.plan_digest,
-            actor="admin",
-            request_id="7" * 35 + "a",
-        )
+    next_stop_plan = service.preview_stop(start.owner_id)
+    replacement_stop = service.stop(
+        start.owner_id,
+        plan_digest=next_stop_plan.plan_digest,
+        actor="admin",
+        request_id="7" * 35 + "a",
+    )
+    assert replacement_stop.id != stop.id
+    assert service.get(stop.id).state == "cancelled"
+    assert service.get(replacement_stop.id).state == "running"
     service.record_node_result(
-        stop.id, nodes[0], succeeded=True, evidence={"stopped": True}
+        replacement_stop.id, nodes[0], succeeded=True, evidence={"stopped": True}
     )
     with sessions() as session:
         run = _required(session.get(RecipeRun, start.owner_id))
@@ -3590,7 +3595,11 @@ def test_profile_cleanup_recovers_failed_uninstall_and_only_retries_remaining_no
     )
     first = profiles.load(profile.number, request_key=str(uuid.uuid4()), actor="admin")
     assert profiles.tick()
-    first_switch = profiles.application(first.id).current_operation_id
+    first_application = profiles.application(first.id)
+    assert first_application.current_operation_id == first.id
+    first_adapter = first_application.progress.switch_adapter
+    assert first_adapter is not None
+    first_switch = first_adapter.active_operation_id
     assert first_switch is not None
     assert switch.tick()
     first_job = _child_operation_id(switch.get(first_switch))
@@ -3623,7 +3632,11 @@ def test_profile_cleanup_recovers_failed_uninstall_and_only_retries_remaining_no
     retry = profiles.load(profile.number, request_key=request_key, actor="admin")
     assert retry.retry_of_application_id == first.id
     assert profiles.tick()
-    second_switch = profiles.application(retry.id).current_operation_id
+    second_application = profiles.application(retry.id)
+    assert second_application.current_operation_id == retry.id
+    second_adapter = second_application.progress.switch_adapter
+    assert second_adapter is not None
+    second_switch = second_adapter.active_operation_id
     assert second_switch is not None, profiles.application(retry.id).status_reason
     assert switch.tick()
     second_job = _child_operation_id(switch.get(second_switch))
