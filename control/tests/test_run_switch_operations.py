@@ -747,6 +747,44 @@ def test_child_activity_change_persists_without_clock_only_writes(tmp_path: Path
     assert after is not None and after.activity == "waiting"
 
 
+def test_due_scheduler_reaches_work_past_a_full_parked_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sixteen parked scopes must not starve a seventeenth due scope."""
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, _nodes = setup_services(tmp_path)
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    due_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        for index in range(17):
+            job_id = f"00000000-0000-4000-8000-{index:012x}"
+            session.add(Job(
+                id=job_id,
+                request_id=str(uuid.uuid4()),
+                kind="recipe.run-switch.v2",
+                state="running",
+                actor="admin",
+                authority_revision="a" * 64,
+                targets=[f"spk_{index:032x}"],
+                payload_digest="a" * 64,
+                payload={},
+                result={"observation_due_at": (
+                    NOW - timedelta(seconds=1) if index == 16
+                    else NOW + timedelta(minutes=1)
+                ).isoformat()},
+                created_at=NOW,
+                updated_at=NOW,
+            ))
+            if index == 16:
+                due_id = job_id
+    seen: list[str] = []
+    monkeypatch.setattr(service, "_advance", lambda job_id: seen.append(job_id) or True)
+    assert service.tick() is True
+    assert seen == [due_id]
+    assert service.tick() is True
+    assert seen == [due_id, due_id]
+
+
 def test_default_run_switch_admission_uses_the_recipe_memory_reserve(tmp_path: Path) -> None:
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
     service = RunSwitchOperationService(

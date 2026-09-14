@@ -20,7 +20,7 @@ from typing import Any, Protocol, TypeGuard, runtime_checkable
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionAssignment,
@@ -2242,10 +2242,15 @@ class RunSwitchOperationService:
     def tick(self) -> bool:
         """Give every due independent operation a bounded chance to advance."""
 
+        due_at = Job.result["observation_due_at"].as_string()
         with self._sessions() as session:
             active = (
                 select(Job.id)
-                .where(Job.kind.in_(_OPERATION_KINDS), Job.state.in_(("queued", "running")))
+                .where(
+                    Job.kind.in_(_OPERATION_KINDS),
+                    Job.state.in_(("queued", "running")),
+                    or_(due_at.is_(None), due_at <= _now(self._clock).isoformat()),
+                )
                 .order_by(Job.id)
                 .limit(16)
             )
