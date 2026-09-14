@@ -1590,19 +1590,16 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     return failed("accepted container image is unavailable to the host runtime");
                 }
-                if self
-                    .runtime
-                    .ensure_disk_available(request.expected_bytes)
-                    .is_err()
-                {
-                    return failed("local disk capacity changed after install admission");
-                }
-                match self.runtime.install(
+                match self.runtime.install_with_space_check(
                     &spec,
                     &request.installation_id.to_string(),
                     &spec.identity.recipe_revision_sha256,
+                    request.expected_bytes,
                 ) {
                     Ok(()) => {}
+                    Err(OciError::Capacity) => {
+                        return failed("local disk capacity changed after install admission");
+                    }
                     Err(error) => {
                         let (stage, category) = error.safe_install_context();
                         return failed_owned(format!(

@@ -442,6 +442,81 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(())
     }
 
+    /// A lost install acknowledgement may be retried after the model has
+    /// already consumed the admitted space. Only the exact completed,
+    /// receipt-backed installation can bypass another full-copy reservation.
+    pub fn install_with_space_check(
+        &self,
+        spec: &CompiledExecutionPlan,
+        installation_id: &str,
+        recipe_content_sha256: &str,
+        expected_bytes: u64,
+    ) -> Result<(), OciError> {
+        if self.reuse_completed_install(spec, installation_id, recipe_content_sha256)? {
+            return Ok(());
+        }
+        self.ensure_disk_available(expected_bytes)?;
+        self.install(spec, installation_id, recipe_content_sha256)
+    }
+
+    fn reuse_completed_install(
+        &self,
+        spec: &CompiledExecutionPlan,
+        installation_id: &str,
+        recipe_content_sha256: &str,
+    ) -> Result<bool, OciError> {
+        self.verify_image(spec)?;
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        let metadata = match fs::symlink_metadata(&installation) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.file_type().is_dir()
+            || metadata.file_type().is_symlink()
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.mode() & 0o777 != 0o700
+        {
+            return Err(OciError::Artifact);
+        }
+        let mut incomplete = false;
+        for name in [
+            "spec.json",
+            "recipe-content.sha256",
+            INSTALLATION_METADATA_FILE,
+        ] {
+            match fs::symlink_metadata(installation.join(name)) {
+                Ok(metadata) if trusted_receipt_metadata(&metadata) => match name {
+                    "spec.json" if self.load_spec(installation_id)? == *spec => {}
+                    "recipe-content.sha256"
+                        if self.recipe_digest(installation_id)? == recipe_content_sha256 => {}
+                    INSTALLATION_METADATA_FILE
+                        if read_installation_metadata(&installation)?
+                            .is_some_and(|receipt| receipt_matches_plan(&receipt, spec)) => {}
+                    _ => return Err(OciError::Artifact),
+                },
+                Ok(_) => return Err(OciError::Artifact),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => incomplete = true,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if incomplete {
+            return Ok(false);
+        }
+        let cache = installation.join("runtime-cache");
+        let cache_metadata = fs::symlink_metadata(&cache)?;
+        if !cache_metadata.file_type().is_dir()
+            || cache_metadata.file_type().is_symlink()
+            || cache_metadata.uid() != rustix::process::geteuid().as_raw()
+            || cache_metadata.mode() & 0o777 != 0o700
+        {
+            return Err(OciError::Artifact);
+        }
+        self.verify_installation(installation_id)?;
+        self.verify_compiled_image_archive(spec)?;
+        Ok(true)
+    }
+
     /// Materialize only the model files authorized by a compiled Controller
     /// plan. Distribution objects live under the plan-independent,
     /// content-addressed model object root; artifact-set membership remains in
@@ -2338,6 +2413,76 @@ mod tests {
 
         let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn completed_install_retry_reuses_exact_receipt_without_another_space_reservation_or_copy() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, plan) = persisted_installation(data.path());
+        let recipe_digest = plan.identity.recipe_revision_sha256.clone();
+        authorize_installation(&installation, &recipe_digest);
+        for name in ["spec.json", "recipe-content.sha256"] {
+            fs::set_permissions(installation.join(name), fs::Permissions::from_mode(0o600))
+                .unwrap();
+        }
+        fs::set_permissions(&installation, fs::Permissions::from_mode(0o700)).unwrap();
+        let cache = installation.join("runtime-cache");
+        fs::create_dir(&cache).unwrap();
+        fs::set_permissions(&cache, fs::Permissions::from_mode(0o700)).unwrap();
+        let archive = data
+            .path()
+            .join("oci-archives")
+            .join(&plan.runtime_image.oci_layout_sha256);
+        fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        fs::write(&archive, vec![0; plan.runtime_image.image_bytes as usize]).unwrap();
+        fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let unavailable_full_copy_bytes =
+            crate::inventory::available_disk_bytes(data.path()).unwrap();
+        assert!(matches!(
+            runtime.ensure_disk_available(unavailable_full_copy_bytes),
+            Err(OciError::Capacity)
+        ));
+        let model = installation.join("models/primary/config.json");
+        let before = fs::metadata(&model).unwrap();
+        let hashes_before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+
+        runtime
+            .install_with_space_check(
+                &plan,
+                &installation_id,
+                &recipe_digest,
+                unavailable_full_copy_bytes,
+            )
+            .unwrap();
+
+        let after = fs::metadata(&model).unwrap();
+        assert_eq!(
+            (after.dev(), after.ino(), after.ctime_nsec()),
+            (before.dev(), before.ino(), before.ctime_nsec())
+        );
+        assert_eq!(
+            SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()),
+            hashes_before
+        );
+        assert!(!data.path().join("distribution/models").exists());
+
+        fs::write(
+            installation.join(super::INSTALLATION_METADATA_FILE),
+            b"invalid receipt",
+        )
+        .unwrap();
+        assert!(matches!(
+            runtime.install_with_space_check(
+                &plan,
+                &installation_id,
+                &recipe_digest,
+                unavailable_full_copy_bytes,
+            ),
+            Err(OciError::Artifact)
+        ));
     }
 
     #[test]
