@@ -876,6 +876,176 @@ def test_candidate_contains_published_runs_and_explicit_pending_run_only(
     ]
 
 
+class _TransientFirstPublish:
+    """Real route service whose first publication attempts fail transiently.
+
+    ``publish_run`` is the boundary the worker drives, so injecting the failure
+    here exercises the worker's own classification, durable retry scheduling
+    and the real publication that follows it.
+    """
+
+    def __init__(
+        self,
+        inner: RecipeRouteService,
+        error: BaseException,
+        *,
+        failures: int = 1,
+    ) -> None:
+        self.sessions = inner.sessions
+        self._inner = inner
+        self._error = error
+        self._remaining = failures
+        self.attempts = 0
+
+    def publish_run(self, run_id: str) -> LiteLlmGeneration:
+        self.attempts += 1
+        if self._remaining > 0:
+            self._remaining -= 1
+            raise self._error
+        return self._inner.publish_run(run_id)
+
+    def maintain(self, *, renew_before_seconds: int = 10) -> bool:
+        return self._inner.maintain(renew_before_seconds=renew_before_seconds)
+
+
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+
+
+def test_temporary_publication_failure_stays_pending_and_converges(
+    tmp_path: Path,
+) -> None:
+    """A brief supervisor failure must not permanently fail a ready route.
+
+    The run keeps ``pending`` with a durable next-attempt time, the dependency
+    is not hammered before that time, and restoring it converges without
+    another operator command or any runtime start/stop command.
+    """
+
+    service, _publisher, _applied, run_id = setup(tmp_path)
+    with service.sessions.begin() as session:
+        _recipe_run(session, run_id).route_state = "pending"
+    now = [NOW]
+    routes = _TransientFirstPublish(service, OSError("supervisor socket unavailable"))
+    worker = RecipeOperationWorker(service.sessions, routes, clock=lambda: now[0])
+
+    assert worker.tick() is True
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.route_state == "pending"
+        assert run.route_attempts == 1
+        assert "supervisor socket unavailable" in (run.route_error or "")
+        recorded_due_at = run.route_next_attempt_at
+    assert recorded_due_at is not None
+    due_at = _aware(recorded_due_at)
+
+    # Not due yet, so the worker must not attempt publication again.
+    assert worker.tick() is False
+    assert routes.attempts == 1
+
+    now[0] = due_at + timedelta(seconds=1)
+    assert worker.tick() is True
+    assert routes.attempts == 2
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.route_state == "published"
+        assert run.route_attempts == 0
+        assert run.route_next_attempt_at is None
+        assert run.route_error is None
+
+
+def test_invalid_route_contract_is_not_retried_as_a_temporary_failure(
+    tmp_path: Path,
+) -> None:
+    """An unrecognised route error stays one precise blocked reason."""
+
+    service, _publisher, _applied, run_id = setup(tmp_path)
+    with service.sessions.begin() as session:
+        _recipe_run(session, run_id).route_state = "pending"
+    now = [NOW]
+    routes = _TransientFirstPublish(
+        service, RuntimeError("recipe route document is invalid")
+    )
+    worker = RecipeOperationWorker(service.sessions, routes, clock=lambda: now[0])
+
+    assert worker.tick() is True
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.route_state == "failed"
+        assert run.route_next_attempt_at is None
+        assert run.route_error == "RuntimeError: recipe route document is invalid"
+
+    now[0] = NOW + timedelta(hours=1)
+    assert worker.tick() is False
+    assert routes.attempts == 1
+
+
+def test_route_publication_attempt_budget_ends_in_one_blocked_reason(
+    tmp_path: Path,
+) -> None:
+    """A dependency that never returns exhausts, it does not retry forever."""
+
+    service, _publisher, _applied, run_id = setup(tmp_path)
+    with service.sessions.begin() as session:
+        _recipe_run(session, run_id).route_state = "pending"
+    now = [NOW]
+    routes = _TransientFirstPublish(
+        service, OSError("supervisor socket unavailable"), failures=99
+    )
+    worker = RecipeOperationWorker(service.sessions, routes, clock=lambda: now[0])
+
+    for _ in range(20):
+        if worker.tick() is False:
+            break
+        with service.sessions() as session:
+            run = _recipe_run(session, run_id)
+            if run.route_state != "pending":
+                break
+            pending_until = run.route_next_attempt_at
+        assert pending_until is not None
+        now[0] = _aware(pending_until) + timedelta(seconds=1)
+
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.route_state == "failed"
+        assert run.route_attempts == 6
+        assert run.route_next_attempt_at is None
+        assert run.route_error is not None
+        assert "did not converge after 6 attempts" in run.route_error
+
+    # The exhausted run is no longer a publication candidate.
+    assert worker.tick() is False
+
+
+def test_acknowledgement_failure_after_activation_is_temporary() -> None:
+    """An activated generation with a lost supervisor ack is retried.
+
+    The generation exists, so the next attempt reconciles it instead of the
+    Controller reporting a permanent route failure.
+    """
+
+    import vonk_control.recipe_routes as routes_module
+
+    generation = LiteLlmGeneration(
+        generation=1,
+        route_digest="",
+        config_sha256="",
+        path="memory",
+    )
+    activated = routes_module._ActivatedRecipeRouteError(
+        "recipe route activation acknowledgement failed",
+        generation=generation,
+    )
+
+    assert routes_module.publication_is_temporary(activated) is True
+    assert routes_module.publication_is_temporary(RecipeRouteNotReady("waiting")) is True
+    assert routes_module.publication_is_temporary(OSError("socket")) is True
+    assert routes_module.publication_is_temporary(LiteLlmPolicyError("bad")) is False
+    assert (
+        routes_module.publication_is_temporary(RuntimeError("invalid document")) is False
+    )
+
+
 def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> None:
     service, _publisher, _applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:

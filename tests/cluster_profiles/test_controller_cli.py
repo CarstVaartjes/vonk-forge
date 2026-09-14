@@ -12,6 +12,11 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.cli_select import SelectorError, select_exact
+from cluster_profiles.control_client import (
+    ControlForbidden,
+    ControlTransportError,
+    ControlUnavailable,
+)
 from cluster_profiles.controller_cli import _operation_progress_line
 
 
@@ -37,11 +42,21 @@ class FakeClient:
         self.calls.append((method, path, payload, query))
         response = self.responses.get((method, path), {})
         if isinstance(response, list):
-            return response.pop(0)
+            # The final entry is sticky so a caller can describe a dependency
+            # that keeps answering the same way, including one that stays
+            # unavailable for the whole bounded observation.
+            response = response.pop(0) if len(response) > 1 else response[0]
+        if isinstance(response, BaseException):
+            raise response
         return response
 
     def _validate_request(self, method, path, payload, query):
         profile_path = re.fullmatch(r"/api/profile/(\d+)(?:/(preview|load|progress))?", path)
+        application_path = re.fullmatch(
+            r"/api/profile/applications/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            path,
+        )
         selector_path = re.fullmatch(
             r"/api/(model|recipe)/[^/]+(?:/(download|remove))?", path
         )
@@ -57,6 +72,7 @@ class FakeClient:
         known = (
             path in known_get
             or profile_path is not None
+            or application_path is not None
             or selector_path is not None
             or operation_path is not None
         )
@@ -493,23 +509,55 @@ def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
     assert profile_write["assignments"] == []
 
 
-def test_profile_load_is_one_step() -> None:
+def test_profile_load_follows_the_application_it_submitted() -> None:
+    """A load is followed by its own durable application identity.
+
+    The numbered progress route answers with whichever application is latest,
+    so following it would report a later load's progress and could report a
+    success this invocation never produced.
+    """
+
+    application_id = "33333333-3333-4333-8333-333333333333"
+    other_application = "44444444-4444-4444-8444-444444444444"
     client = FakeClient(
         {
             ("POST", "/api/profile/1/load"): {
-                "state": "accepted",
-                "operation_id": "load-1",
+                "id": application_id,
+                "state": "queued",
+            },
+            ("GET", f"/api/profile/applications/{application_id}"): {
+                "id": application_id,
+                "state": "succeeded",
             },
             ("GET", "/api/profile/1/progress"): {
-                "state": "succeeded",
-                "operation_id": "load-1",
+                "id": other_application,
+                "state": "failed",
             },
         }
     )
-    assert run(("profile", "load", "--json"), client)[1]["state"] == "succeeded"
+    status, payload = run(("profile", "load", "--json"), client)
+
+    assert status == 0 and payload["state"] == "succeeded"
+    assert [call[1] for call in client.calls] == [
+        "/api/profile/1/load",
+        f"/api/profile/applications/{application_id}",
+    ]
     assert client.calls[0][2] == {
         "request_key": "11111111-1111-4111-8111-111111111111"
     }
+
+
+def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route() -> None:
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): {"state": "queued"},
+            ("GET", "/api/profile/1/progress"): {"state": "succeeded"},
+        }
+    )
+    status, payload = run(("profile", "load", "--json"), client)
+
+    assert status == 0 and payload["state"] == "queued"
+    assert [call[1] for call in client.calls] == ["/api/profile/1/load"]
 
 
 def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
@@ -527,6 +575,107 @@ def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
     )
     assert status == 0 and payload["state"] == "succeeded"
     assert len(client.calls) == 2
+
+
+def test_follow_survives_lost_connections_and_reports_the_durable_outcome() -> None:
+    """A dropped observation must not discard the operation's real result.
+
+    The last confirmed snapshot stays authoritative across two consecutive
+    transport failures, and the durable success is still the reported outcome.
+    """
+
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/progress"): [
+                {"state": "running"},
+                ControlTransportError("connection reset"),
+                ControlTransportError("connection reset"),
+                {"state": "succeeded"},
+            ]
+        }
+    )
+    status, payload = run(
+        ("profile", "progress", "--follow", "--interval-seconds", "0.01", "--json"),
+        client,
+    )
+
+    assert status == 0 and payload["state"] == "succeeded"
+    assert "reconnecting" not in payload
+    assert len(client.calls) == 4
+
+
+def test_observation_timeout_names_the_connection_it_lost() -> None:
+    """An unreachable Controller is an observation failure, not a run failure."""
+
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/progress"): [
+                {"state": "running"},
+                ControlUnavailable(503, "control API unavailable"),
+            ]
+        }
+    )
+    status, payload = run(
+        (
+            "profile",
+            "progress",
+            "--follow",
+            "--timeout-seconds",
+            "1",
+            "--interval-seconds",
+            "0.05",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    assert payload["timed_out"] is True
+    assert payload["reconnecting"] is True
+    assert payload["observation_error"] == "control API reported unavailable"
+    # The durable operation kept its last observed state; only the observation
+    # is reported as incomplete.
+    assert payload["state"] == "running"
+
+
+def test_authorization_failure_is_not_retried_as_an_observation() -> None:
+    """A permission answer is actionable immediately, not a reconnect."""
+
+    client = FakeClient(
+        {
+            ("GET", "/api/profile/1/progress"): ControlForbidden(
+                403, "insufficient role"
+            ),
+        }
+    )
+    status, payload = run(("profile", "progress", "--follow", "--json"), client)
+
+    assert status != 0
+    assert payload["code"] == "http.403"
+    assert len(client.calls) == 1
+
+
+def test_lost_mutation_response_still_names_the_request_key() -> None:
+    """A submission accepted without a visible answer stays reconcilable.
+
+    The key is created before the request is sent and retained, so the error
+    output identifies the one durable operation the operator must inspect.
+    """
+
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): ControlTransportError(
+                "connection reset"
+            ),
+        }
+    )
+    status, payload = run(("profile", "load", "--json"), client)
+
+    assert status != 0
+    assert payload["request_key"] == "11111111-1111-4111-8111-111111111111"
+    reconcile = payload["reconcile"]
+    assert isinstance(reconcile, dict)
+    assert reconcile["request_key"] == payload["request_key"]
 
 
 def test_progress_does_not_invent_percentage_for_unknown_total() -> None:

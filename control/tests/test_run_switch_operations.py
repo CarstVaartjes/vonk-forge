@@ -61,6 +61,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchOperation,
     RunSwitchOperationResult,
     RunSwitchPhase,
+    RunSwitchPhaseKind,
     RunSwitchPhaseResult,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
@@ -76,6 +77,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationProvider,
     RunSwitchOperationService,
+    _automatic_retry_phase,
     _phase_result,
     _transient_distribution_exception,
     effective_build_receipt,
@@ -2467,6 +2469,107 @@ def test_run_switch_retry_classification_rejects_terminal_http_and_storage_error
     assert _transient_distribution_exception(OSError(errno.EPERM, "permission denied")) is False
     assert _transient_distribution_exception(OSError(errno.ENOSPC, "no space left")) is False
     assert _transient_distribution_exception(OSError(errno.ECONNRESET, "reset")) is True
+
+
+def test_automatic_retry_is_scoped_to_replay_stable_transfer_phases() -> None:
+    """Automatic retry must not re-plan a phase whose preview is volatile.
+
+    A ``transfer`` previews immutable model and image digests and derives its
+    child request key from the phase index, so a retry adopts the same durable
+    operation.  ``start`` admission instead hashes live inventory observation
+    time and current reservations, so automatically retrying it offered the
+    unchanged request key to admission with a changed digest -- the reported
+    ``request key was already used differently`` conflict.
+    """
+
+    def phase(kind: RunSwitchPhaseKind, index: int = 0) -> RunSwitchPhase:
+        return RunSwitchPhase(
+            index=index,
+            kind=kind,
+            state="planned",
+            detail=f"{kind} phase",
+        )
+
+    assert _automatic_retry_phase(phase("transfer")) is True
+    for kind in ("start", "stop", "prepare", "cleanup", "verify", "final_verify"):
+        assert _automatic_retry_phase(phase(kind)) is False
+
+
+class _CountingPreviewLifecycle(RecipeOperationService):
+    """Real lifecycle service that counts how often admission is re-derived.
+
+    It replaces no production state: every other call is delegated to the real
+    service, so the count observes the executor's actual admission decision.
+    """
+
+    def __init__(self, inner: RecipeOperationService) -> None:
+        self._inner = inner
+        self.previews = 0
+
+    def preview_run(self, installation_id: str, alias: str):
+        self.previews += 1
+        return self._inner.preview_run(installation_id, alias)
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
+
+
+def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
+    """A resumed start phase keeps the durable child it already queued.
+
+    Run admission hashes live inventory observation time and current
+    reservations, so re-previewing after the first start is admitted derives a
+    different plan digest for the identical child.  Without adoption the
+    executor offered the unchanged request key to admission with the changed
+    digest, and admission correctly rejected the second attempt instead of
+    resuming the child that was already running.
+    """
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: lifecycle._clock(),
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+    start_phase = next(phase for phase in plan.phases if phase.kind == "start")
+    counting = _CountingPreviewLifecycle(lifecycle)
+    executor = RecipeLifecyclePhaseExecutor(
+        counting, sessions, ClusterMappingService(sessions), lifecycle._clock()
+    )
+    progress = {"phase_results": [{"installation_id": installation.owner_id}]}
+    request_key = str(uuid.uuid4())
+
+    first = executor.execute(
+        plan,
+        start_phase,
+        item_index=0,
+        actor="admin",
+        request_key=request_key,
+        progress=progress,
+    )
+    second = executor.execute(
+        plan,
+        start_phase,
+        item_index=0,
+        actor="admin",
+        request_key=request_key,
+        progress=progress,
+    )
+
+    assert first.operation_id is not None
+    assert second.operation_id == first.operation_id
+    # The digest was never re-derived: adoption bound the durable request key,
+    # operation kind, owner kind, installation and alias instead.
+    assert counting.previews == 1
+    with sessions() as session:
+        starts = tuple(session.scalars(select(Job).where(Job.kind == "recipe.start")))
+    assert len(starts) == 1
 
 
 def test_cleanup_adapter_cannot_evict_nas_or_return_noop(tmp_path: Path) -> None:

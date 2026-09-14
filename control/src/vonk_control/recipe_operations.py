@@ -781,6 +781,43 @@ class RecipeOperationService:
     def preview_run(self, installation_id: str, alias: str) -> RunPlan:
         return self._run_admission.plan_run(installation_id, alias, now=self._clock())
 
+    def _adopt_start_in_session(
+        self,
+        session: Session,
+        installation_id: str,
+        alias: str,
+        *,
+        request_id: str,
+        plan_digest: str | None,
+    ) -> RecipeOperationView | None:
+        existing = session.scalar(select(Job).where(Job.request_id == request_id))
+        if (
+            existing is None
+            or existing.kind != "recipe.start"
+            or existing.payload.get("owner_kind") != "run"
+        ):
+            return None
+        recorded_digest = existing.payload.get("plan_digest")
+        if not isinstance(recorded_digest, str):
+            return None
+        if plan_digest is not None and recorded_digest != plan_digest:
+            return None
+        owner_id = existing.payload.get("owner_id")
+        if not isinstance(owner_id, str):
+            return None
+        run = session.get(RecipeRun, owner_id)
+        if (
+            run is None
+            or run.installation_id != installation_id
+            or run.alias != alias
+            # The run carries the admitted authority this child was queued
+            # under, so adopting a child whose run no longer matches is unsafe
+            # even when the caller cannot reproduce the original digest.
+            or run.plan_digest != recorded_digest
+        ):
+            return None
+        return self._view(existing)
+
     def replay_start(
         self,
         installation_id: str,
@@ -789,24 +826,69 @@ class RecipeOperationService:
         plan_digest: str,
         request_id: str,
     ) -> RecipeOperationView | None:
+        """Adopt the original start child when its exact plan is still known."""
+
+        with self._sessions() as session:
+            return self._adopt_start_in_session(
+                session,
+                installation_id,
+                alias,
+                request_id=request_id,
+                plan_digest=plan_digest,
+            )
+
+    def adopt_start(
+        self,
+        installation_id: str,
+        alias: str,
+        *,
+        request_id: str,
+    ) -> RecipeOperationView | None:
+        """Adopt an already admitted start child before re-reading admission.
+
+        Automatic recovery must bind the child that was actually queued before
+        it re-derives mutable admission.  ``preview_run`` hashes node documents
+        containing inventory observation time and current memory/reservation
+        facts, so a refreshed inventory or the first start's own reservations
+        legitimately change the digest.  Reproducing that digest is therefore
+        not a requirement for recognising our own durable child: the request
+        key, operation kind, owner kind and the run it owns are the identity
+        that must match, and the run carries the admitted authority.
+        """
+
+        with self._sessions() as session:
+            return self._adopt_start_in_session(
+                session,
+                installation_id,
+                alias,
+                request_id=request_id,
+                plan_digest=None,
+            )
+
+    def adopt_owned_operation(
+        self,
+        request_id: str,
+        *,
+        kind: str,
+        owner_kind: str,
+        owner_id: str,
+    ) -> RecipeOperationView | None:
+        """Adopt the exact child already recorded for this request key.
+
+        Scoped resume of a parent step needs to recognise a child it queued
+        earlier without re-deriving a plan digest.  Admission deliberately
+        keeps comparing digests for new work; this lookup is only the
+        recovery-side identity check, so it requires the same request key,
+        operation kind and owner as the durable record.
+        """
+
         with self._sessions() as session:
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if (
                 existing is None
-                or existing.kind != "recipe.start"
-                or existing.payload.get("owner_kind") != "run"
-                or existing.payload.get("plan_digest") != plan_digest
-            ):
-                return None
-            owner_id = existing.payload.get("owner_id")
-            if not isinstance(owner_id, str):
-                return None
-            run = session.get(RecipeRun, owner_id)
-            if (
-                run is None
-                or run.installation_id != installation_id
-                or run.alias != alias
-                or run.plan_digest != plan_digest
+                or existing.kind != kind
+                or existing.payload.get("owner_kind") != owner_kind
+                or existing.payload.get("owner_id") != owner_id
             ):
                 return None
             return self._view(existing)

@@ -16,7 +16,7 @@ use crate::{
     agent_upgrade::AgentUpgradeExecutor,
     client::{
         AgentHttpClient, ClientError, DistributionDownloadEvidence, DistributionProgress,
-        ExactRecipeRunObservation,
+        ExactRecipeRunObservation, HEARTBEAT_LEASE_MARGIN,
     },
     health::{wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome},
@@ -38,6 +38,23 @@ use vonk_agent_protocol::{
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+/// Prompt retry after a transient heartbeat failure.  Sleeping a whole
+/// renewal interval here is what let one lost request schedule the next
+/// attempt after the accepted lease had already expired.
+const HEARTBEAT_RETRY_INTERVAL: Duration = Duration::from_secs(2);
+/// Smallest delay between two renewal attempts.  A lease that is nearly spent
+/// still gets one bounded attempt instead of a busy loop.
+const HEARTBEAT_RETRY_FLOOR: Duration = Duration::from_millis(50);
+
+/// When a renewal loop attempts its next heartbeat.
+///
+/// ``interval`` is the steady-state cadence once a renewal is accepted and
+/// ``retry_interval`` is the prompt delay after a transient failure.
+#[derive(Clone, Copy)]
+struct HeartbeatSchedule {
+    interval: Duration,
+    retry_interval: Duration,
+}
 const JOB_CANCEL_EXIT_CODE: u32 = 130;
 const JOB_CANCEL_STOP_TIMEOUT_SECONDS: u16 = 5;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
@@ -2428,6 +2445,7 @@ struct RunOncePolicy<'a> {
     wait_seconds: u64,
     runtime_identity: Option<&'a AgentRuntimeIdentity>,
     heartbeat_interval: Duration,
+    heartbeat_retry_interval: Duration,
 }
 
 pub async fn run_once<C: LoopClient, E: Executor>(
@@ -2447,6 +2465,7 @@ pub async fn run_once<C: LoopClient, E: Executor>(
             wait_seconds,
             runtime_identity,
             heartbeat_interval: HEARTBEAT_INTERVAL,
+            heartbeat_retry_interval: HEARTBEAT_RETRY_INTERVAL,
         },
         || Ok(()),
     )
@@ -2476,6 +2495,7 @@ where
             wait_seconds,
             runtime_identity,
             heartbeat_interval: HEARTBEAT_INTERVAL,
+            heartbeat_retry_interval: HEARTBEAT_RETRY_INTERVAL,
         },
         on_claim_accepted,
     )
@@ -2527,7 +2547,10 @@ where
                 lease_deadline_sender,
                 cancellation_sender,
                 heartbeat_stop,
-                policy.heartbeat_interval,
+                HeartbeatSchedule {
+                    interval: policy.heartbeat_interval,
+                    retry_interval: policy.heartbeat_retry_interval,
+                },
             );
             let heartbeat_task = tokio::spawn(async move {
                 let _cancel_on_exit = cancel_on_exit;
@@ -2720,14 +2743,15 @@ async fn run_heartbeats<C: LoopClient>(
     lease_deadline: tokio::sync::watch::Sender<DateTime<FixedOffset>>,
     cancellation: tokio::sync::watch::Sender<bool>,
     mut stop: tokio::sync::oneshot::Receiver<()>,
-    interval: Duration,
+    schedule: HeartbeatSchedule,
 ) -> Result<bool, LoopError> {
     let mut deadline = claim.deadline;
     let mut cancellation_observed = false;
+    let mut delay = schedule.interval;
     loop {
         tokio::select! {
             _ = &mut stop => return Ok(cancellation_observed),
-            _ = tokio::time::sleep(interval) => {}
+            _ = tokio::time::sleep(delay) => {}
         }
         let progress = AgentProgress {
             attempt: claim.attempt,
@@ -2741,9 +2765,23 @@ async fn run_heartbeats<C: LoopClient>(
         };
         let directive = match client.heartbeat(&progress).await {
             Ok(directive) => directive,
-            Err(error) if error.retryable() && Utc::now() < deadline => continue,
+            Err(error) if error.retryable() && Utc::now() < deadline => {
+                // Retry promptly while the accepted lease still authorises a
+                // renewal.  Waiting the whole renewal cadence here is what
+                // pushed the next attempt past the deadline after a single
+                // lost request, so keep the retry inside the remaining lease
+                // and leave the lease margin for the request itself.
+                delay = schedule
+                    .retry_interval
+                    .min(remaining_lease(deadline).saturating_sub(HEARTBEAT_LEASE_MARGIN))
+                    .max(HEARTBEAT_RETRY_FLOOR);
+                continue;
+            }
             Err(error) => return Err(error.into()),
         };
+        // The accepted lease advanced, so the ordinary renewal cadence
+        // applies again until the next transient failure.
+        delay = schedule.interval;
         state.apply_heartbeat(&progress, &directive)?;
         lease_deadline.send_replace(directive.deadline);
         deadline = directive.deadline;
@@ -2752,6 +2790,13 @@ async fn run_heartbeats<C: LoopClient>(
             cancellation.send_replace(true);
         }
     }
+}
+
+/// Time left before the accepted lease stops authorising a renewal.
+fn remaining_lease(deadline: DateTime<FixedOffset>) -> Duration {
+    (deadline.with_timezone(&Utc) - Utc::now())
+        .to_std()
+        .unwrap_or(Duration::ZERO)
 }
 
 #[cfg(test)]
@@ -3801,6 +3846,7 @@ mod tests {
                 wait_seconds: 0,
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(10),
+                heartbeat_retry_interval: Duration::from_millis(1),
             },
             || Ok(()),
         )
@@ -3849,6 +3895,7 @@ mod tests {
                 wait_seconds: 0,
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(10),
+                heartbeat_retry_interval: Duration::from_millis(1),
             },
             || Ok(()),
         )
@@ -3858,6 +3905,75 @@ mod tests {
         assert!(client.heartbeats.lock().unwrap().len() >= 2);
         assert_eq!(client.results.lock().unwrap().len(), 1);
         assert!(state.pending_results().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn transient_heartbeat_failure_retries_inside_the_accepted_lease() {
+        // One lost renewal must not wait a whole renewal cadence before trying
+        // again: that is what scheduled the next attempt after the accepted
+        // lease had expired.  Comparing the same scenario with a short retry
+        // delay against one that waits the cadence isolates the scheduling
+        // decision from the constant cost of claiming, executing and recording.
+        async fn elapsed_with(
+            directory: &std::path::Path,
+            interval: Duration,
+            retry_interval: Duration,
+        ) -> Duration {
+            let heartbeats = Arc::new(Mutex::new(Vec::new()));
+            let client = RecordingClient {
+                cancel_requested: false,
+                claim: Arc::new(Mutex::new(Some(claim()))),
+                fail_heartbeat: true,
+                heartbeats: heartbeats.clone(),
+                results: Arc::new(Mutex::new(Vec::new())),
+            };
+            let executor = HeartbeatGatedExecutor {
+                heartbeats,
+                minimum: 2,
+                observed_deadline: Arc::new(Mutex::new(None)),
+            };
+            let mut state = StateStore::open(&directory.join("state.sqlite"), NODE_ID).unwrap();
+            let started = std::time::Instant::now();
+            run_once_with_heartbeat_interval(
+                &client,
+                &mut state,
+                &executor,
+                RunOncePolicy {
+                    capabilities: &["recipe.install"],
+                    wait_seconds: 0,
+                    runtime_identity: None,
+                    heartbeat_interval: interval,
+                    heartbeat_retry_interval: retry_interval,
+                },
+                || Ok(()),
+            )
+            .await
+            .unwrap();
+            assert!(client.heartbeats.lock().unwrap().len() >= 2);
+            started.elapsed()
+        }
+
+        let directory = tempdir().unwrap();
+        std::fs::create_dir(directory.path().join("cadence")).unwrap();
+        std::fs::create_dir(directory.path().join("prompt")).unwrap();
+        let cadence_only = elapsed_with(
+            &directory.path().join("cadence"),
+            Duration::from_millis(800),
+            Duration::from_millis(800),
+        )
+        .await;
+        let prompt_retry = elapsed_with(
+            &directory.path().join("prompt"),
+            Duration::from_millis(800),
+            Duration::from_millis(10),
+        )
+        .await;
+
+        assert!(
+            prompt_retry + Duration::from_millis(300) < cadence_only,
+            "a lost renewal did not retry before the next cadence: \
+             prompt={prompt_retry:?} cadence={cadence_only:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3888,6 +4004,7 @@ mod tests {
                     wait_seconds: 0,
                     runtime_identity: None,
                     heartbeat_interval: Duration::from_millis(10),
+                    heartbeat_retry_interval: Duration::from_millis(1),
                 },
                 || Ok(()),
             )
@@ -3922,6 +4039,7 @@ mod tests {
                 wait_seconds: 0,
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_secs(10),
+                heartbeat_retry_interval: Duration::from_millis(1),
             },
             || Ok(()),
         )
@@ -4053,6 +4171,7 @@ mod tests {
                 wait_seconds: 0,
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(1),
+                heartbeat_retry_interval: Duration::from_millis(1),
             },
             || Ok(()),
         )

@@ -50,6 +50,13 @@ const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const ROTATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
 const DISTRIBUTION_CONCURRENCY: usize = 16;
+/// Longest a single heartbeat request may spend before it is treated as lost.
+/// The renewal loop reserves lease margin against the same budget, so one
+/// slow or dropped request cannot consume the whole accepted lease.
+pub(crate) const HEARTBEAT_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// Part of the accepted lease the renewal loop keeps in hand to schedule the
+/// next authorised attempt rather than discovering the expiry while sending.
+pub(crate) const HEARTBEAT_LEASE_MARGIN: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -527,12 +534,18 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let body = canonical_json(&progress).map_err(|_| ClientError::Protocol)?;
+        // A renewal must not outlive the lease it renews: bounding the call by
+        // the remaining accepted lease lets the renewal loop retry promptly
+        // instead of discovering the expiry only after a fixed timeout.
+        let remaining = (progress.deadline.with_timezone(&chrono::Utc) - chrono::Utc::now())
+            .to_std()
+            .unwrap_or(Duration::ZERO);
         let response = self
             .current_client()
             .await
             .post(self.endpoint("/agent/heartbeat")?)
             .header("content-type", "application/json")
-            .timeout(Duration::from_secs(15))
+            .timeout(HEARTBEAT_REQUEST_TIMEOUT.min(remaining))
             .body(body)
             .send()
             .await?;

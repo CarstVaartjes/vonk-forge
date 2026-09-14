@@ -2219,6 +2219,10 @@ class RecipeRun(Base):
             "route_digest IS NULL OR length(route_digest)=64",
             name="ck_recipe_runs_route_digest",
         ),
+        CheckConstraint(
+            "route_attempts>=0",
+            name="ck_recipe_runs_route_attempts",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -2250,6 +2254,16 @@ class RecipeRun(Base):
     route_generation: Mapped[int | None] = mapped_column(BigInteger)
     route_digest: Mapped[str | None] = mapped_column(String(64))
     route_error: Mapped[str | None] = mapped_column(String(512))
+    #: Publication attempts already spent on this run and the durable time the
+    #: next one becomes eligible.  A temporary publication failure keeps
+    #: ``route_state='pending'`` and records when to try again instead of
+    #: turning one supervisor hiccup into a terminal route failure.
+    route_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    route_next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

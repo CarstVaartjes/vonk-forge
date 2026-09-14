@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import RecipeRun, RunNode
@@ -15,7 +16,49 @@ from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
 )
-from .recipe_routes import RecipeRouteNotReady, RecipeRouteService
+from .recipe_routes import RecipeRouteNotReady, publication_is_temporary
+
+#: Bounded publication retry.  The first attempt is prompt so a momentary
+#: supervisor hiccup does not delay a ready run, and the cap keeps a
+#: persistent dependency failure from becoming a tight retry loop.  The
+#: budget stays inside the Run/Switch final-verification window, so a
+#: dependency that returns still converges without another operator command.
+_ROUTE_PUBLICATION_ATTEMPTS = 6
+_ROUTE_PUBLICATION_BACKOFF_BASE_SECONDS = 5
+_ROUTE_PUBLICATION_BACKOFF_MAX_SECONDS = 60
+
+
+def _route_retry_delay(run_id: str, attempts: int) -> timedelta:
+    """Return the bounded delay after ``attempts`` failed publications.
+
+    Jitter spreads independent runs across the same recovery window.  It comes
+    from the run identity and attempt number rather than a random source so the
+    durable schedule stays reproducible for a given run, which is what makes
+    the recorded retry observable.
+    """
+
+    base = min(
+        _ROUTE_PUBLICATION_BACKOFF_BASE_SECONDS * (2 ** (attempts - 1)),
+        _ROUTE_PUBLICATION_BACKOFF_MAX_SECONDS,
+    )
+    spread = max(1, base // 4)
+    jitter = (
+        int(hashlib.sha256(f"{run_id}:{attempts}".encode()).hexdigest()[:8], 16)
+        % spread
+    )
+    return timedelta(seconds=base + jitter)
+
+
+class _RoutePublisher(Protocol):
+    """The publication surface this worker drives.
+
+    Narrowing it to the two operations the worker actually calls keeps the
+    retry decision testable without substituting the real route service.
+    """
+
+    def publish_run(self, run_id: str) -> object: ...
+
+    def maintain(self, *, renew_before_seconds: int = 10) -> bool: ...
 
 
 class _RecoveryCoordinator(Protocol):
@@ -34,7 +77,7 @@ class RecipeOperationWorker:
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        routes: RecipeRouteService,
+        routes: _RoutePublisher,
         *,
         clock: Callable[[], datetime],
         recoveries: _RecoveryCoordinator | None = None,
@@ -63,6 +106,7 @@ class RecipeOperationWorker:
             progressed = True
             if self._recoveries is not None:
                 self._recoveries.tick()
+        now = self._clock()
         with self._sessions() as session:
             run_ids = tuple(
                 session.scalars(
@@ -70,6 +114,14 @@ class RecipeOperationWorker:
                     .where(
                         RecipeRun.state == "running",
                         RecipeRun.route_state == "pending",
+                        # A run that failed publication temporarily holds
+                        # ``pending`` and is only due once its recorded
+                        # next-attempt time arrives; an untouched run has no
+                        # recorded attempt at all.
+                        or_(
+                            RecipeRun.route_next_attempt_at.is_(None),
+                            RecipeRun.route_next_attempt_at <= now,
+                        ),
                     )
                     .order_by(RecipeRun.created_at, RecipeRun.id)
                 )
@@ -78,16 +130,51 @@ class RecipeOperationWorker:
             try:
                 self._routes.publish_run(run_id)
             except RecipeRouteNotReady:
+                # Fail-closed: the candidate is waiting on current rank
+                # evidence, which the next tick re-reads.  This is not a
+                # failed attempt.
                 continue
             except (OSError, RuntimeError, TypeError, ValueError) as error:
-                with self._sessions.begin() as session:
-                    run = session.get(RecipeRun, run_id)
-                    if run is not None and run.route_state == "pending":
-                        run.route_state = "failed"
-                        run.route_error = f"{type(error).__name__}: {error}"[:512]
-                        run.updated_at = self._clock()
+                self._defer_publication(run_id, error)
             return True
         return self._routes.maintain(renew_before_seconds=10) or progressed
+
+    def _defer_publication(self, run_id: str, error: BaseException) -> None:
+        """Record one failed publication attempt without losing the run.
+
+        A temporary dependency failure keeps the run pending at a durable
+        next-attempt time so the existing worker converges once the dependency
+        returns.  An unrecognised failure is not retried: it becomes one
+        precise blocked reason for an explicit disposition, because the
+        Controller cannot distinguish it from an invalid route contract.
+        """
+
+        now = self._clock()
+        detail = f"{type(error).__name__}: {error}"[:512]
+        temporary = publication_is_temporary(error)
+        with self._sessions.begin() as session:
+            run = session.get(RecipeRun, run_id, with_for_update=True)
+            if run is None or run.route_state != "pending":
+                return
+            attempts = int(run.route_attempts or 0) + 1
+            run.route_attempts = attempts
+            if not temporary:
+                run.route_state = "failed"
+                run.route_error = detail
+                run.route_next_attempt_at = None
+                run.updated_at = now
+                return
+            if attempts >= _ROUTE_PUBLICATION_ATTEMPTS:
+                run.route_state = "failed"
+                run.route_error = (
+                    f"{detail} (route publication did not converge after "
+                    f"{attempts} attempts)"
+                )[:512]
+                run.route_next_attempt_at = None
+            else:
+                run.route_error = detail
+                run.route_next_attempt_at = now + _route_retry_delay(run_id, attempts)
+            run.updated_at = now
 
     def _expire_initial_observation_deadline(self) -> bool:
         now = self._clock()

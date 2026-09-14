@@ -20,7 +20,10 @@ from .fleet_profile_contract import (
 from .fleet_profiles import FleetProfileConflict
 from .operation_api import bounded_error_responses
 
+#: The canonical lowercase UUID shape every durable identity in this API uses.
+_UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _PROFILE_PATH = "/api/profile/{number}"
+_APPLICATION_PATH = "/api/profile/applications/{application_id}"
 FLEET_PROFILE_OPERATION_IDS = {
     ("get", "/api/profile"): "listProfiles",
     ("get", _PROFILE_PATH): "getProfile",
@@ -28,6 +31,7 @@ FLEET_PROFILE_OPERATION_IDS = {
     ("post", "/api/profile/{number}/preview"): "previewProfile",
     ("post", "/api/profile/{number}/load"): "loadProfile",
     ("get", "/api/profile/{number}/progress"): "getProfileProgress",
+    ("get", _APPLICATION_PATH): "getProfileApplication",
 }
 
 
@@ -155,6 +159,31 @@ def install_fleet_profile_routes(
             raise HTTPException(status_code=503, detail="Profile load unavailable") from None
         audit(request, actor, "profile.load", (str(number), result.id))
         return result
+
+    @app.get(
+        _APPLICATION_PATH,
+        response_model=FleetProfileApplicationView,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="getProfileApplication",
+    )
+    def profile_application(
+        application_id: str = Path(pattern=_UUID),
+        _actor: Actor = authenticated,
+    ) -> FleetProfileApplicationView:
+        # A client that submitted one load must be able to follow that exact
+        # application.  The numbered progress route answers with the profile's
+        # latest application, which is a different durable operation as soon as
+        # anyone loads the profile again.
+        try:
+            return service().application(application_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Profile application not found"
+            ) from None
+        except (OSError, RuntimeError, TypeError, ValueError):
+            raise HTTPException(
+                status_code=503, detail="Profile application unavailable"
+            ) from None
 
     @app.get(
         "/api/profile/{number}/progress",
