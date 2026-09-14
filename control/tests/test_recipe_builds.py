@@ -69,6 +69,8 @@ class RecordingQueue:
         *,
         operation_id: str,
     ) -> AgentOperation:
+        parent = session.get(Job, parent_job_id)
+        assert parent is not None
         record = AgentOperation(
             id=operation_id,
             parent_job_id=parent_job_id,
@@ -77,6 +79,7 @@ class RecordingQueue:
             payload_digest="f" * 64,
             payload=dict(payload),
             authority_revision=authority_revision,
+            workload_intent_ordinal=parent.payload.get("workload_intent_ordinal"),
             state="queued",
             current_attempt=0,
             created_at=datetime(2026, 8, 7, 12, tzinfo=UTC),

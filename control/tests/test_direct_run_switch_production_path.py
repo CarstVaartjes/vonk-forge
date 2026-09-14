@@ -203,6 +203,8 @@ class _Queue:
     ):
         from vonk_control.models import AgentOperation
 
+        parent = session.get(Job, parent_job_id)
+        assert parent is not None
         value = AgentOperation(
             id=operation_id,
             parent_job_id=parent_job_id,
@@ -211,6 +213,7 @@ class _Queue:
             payload_digest=hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest(),
             payload=dict(payload),
             authority_revision=authority_revision,
+            workload_intent_ordinal=parent.payload.get("workload_intent_ordinal"),
             state="queued",
             current_attempt=0,
             created_at=NOW,

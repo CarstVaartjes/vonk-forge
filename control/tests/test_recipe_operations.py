@@ -41,7 +41,7 @@ from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
 )
 from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
@@ -101,6 +101,7 @@ from vonk_control.route_runtime import (
     verify_active_route_bundle,
 )
 from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -3526,46 +3527,76 @@ def test_profile_cleanup_recovers_failed_uninstall_and_only_retries_remaining_no
     tmp_path: Path,
     first_node_removed: bool,
 ) -> None:
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+        _child_operation_id,
+    )
+
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
     installation = installed_recipe(
         operations, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
     )
-    profiles = FleetProfileService(
-        sessions, clock=lambda: NOW, recipe_operations=operations
+
+    def run_switch():
+        return RunSwitchOperationService(
+            sessions,
+            lifecycle=operations,
+            clock=operations._clock,
+            artifacts=CompleteArtifactInspector(),
+            artifact_phase_executor=RecordingArtifactExecutor(),
+            memory_floor_bytes=50,
+        )
+
+    switch = run_switch()
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=operations._clock, run_switch_operations=switch
     )
     profile = profiles.create(
         FleetProfileInput(name="Idle", installation_policy="exact"), actor="admin"
     )
     first = profiles.load(profile.number, request_key=str(uuid.uuid4()), actor="admin")
     assert profiles.tick()
-    first_job = profiles.application(first.id).current_operation_id
+    first_switch = profiles.application(first.id).current_operation_id
+    assert first_switch is not None
+    assert switch.tick()
+    first_job = _child_operation_id(switch.get(first_switch))
     assert first_job is not None
     operations.record_node_result(
         first_job,
         nodes[0],
         succeeded=first_node_removed,
-        evidence={"removed": True}
+        evidence={"uninstalled": True, "removed_model_bytes": 1}
         if first_node_removed
         else {"code": "cleanup.failed"},
     )
     operations.record_node_result(
         first_job, nodes[1], succeeded=False, evidence={"code": "cleanup.failed"}
     )
+    for _ in range(4):
+        if switch.get(first_switch).state == "failed":
+            break
+        switch.tick()
+    assert switch.get(first_switch).state == "failed"
     assert profiles.tick()
     assert profiles.application(first.id).state == "failed"
 
     # A new coordinator resumes persisted progress through the normal load path.
-    profiles = FleetProfileService(
-        sessions, clock=lambda: NOW + timedelta(seconds=1), recipe_operations=operations
+    switch = run_switch()
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=lambda: NOW + timedelta(seconds=1), run_switch_operations=switch
     )
     request_key = str(uuid.uuid4())
     retry = profiles.load(profile.number, request_key=request_key, actor="admin")
     assert retry.retry_of_application_id == first.id
     assert profiles.tick()
-    second_job = profiles.application(retry.id).current_operation_id
-    assert second_job is not None, profiles.application(retry.id).status_reason
+    second_switch = profiles.application(retry.id).current_operation_id
+    assert second_switch is not None, profiles.application(retry.id).status_reason
+    assert switch.tick()
+    second_job = _child_operation_id(switch.get(second_switch))
+    assert second_job is not None
     with sessions() as session:
         retried_nodes = set(
             session.scalars(
@@ -3577,8 +3608,16 @@ def test_profile_cleanup_recovers_failed_uninstall_and_only_retries_remaining_no
     assert retried_nodes == set(nodes[1:] if first_node_removed else nodes)
     for node_id in retried_nodes:
         operations.record_node_result(
-            second_job, node_id, succeeded=True, evidence={"removed": True}
+            second_job,
+            node_id,
+            succeeded=True,
+            evidence={"uninstalled": True, "removed_model_bytes": 1},
         )
+    for _ in range(4):
+        if switch.get(second_switch).state == "succeeded":
+            break
+        switch.tick()
+    assert switch.get(second_switch).state == "succeeded"
     assert profiles.tick()
     final = profiles.application(retry.id)
     assert final.state == "succeeded"
