@@ -129,9 +129,9 @@ mod tests {
 
     #[test]
     fn rotation_preserves_controller_status_code_and_decision() {
-        let error = RotationError::Client(ClientError::Controller(
+        let error = RotationError::Client(ClientError::Controller(Box::new(
             crate::client::ControllerError::from_status(403),
-        ));
+        )));
         assert_eq!(error.code(), "controller.request_rejected");
         assert_eq!(error.decision(), "exit");
         assert!(!error.retryable());

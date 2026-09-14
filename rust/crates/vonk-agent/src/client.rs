@@ -77,7 +77,7 @@ pub enum ClientError {
     #[error("controller transport failed")]
     Transport(#[from] reqwest::Error),
     #[error("controller rejected: {0}")]
-    Controller(ControllerError),
+    Controller(Box<ControllerError>),
     #[error("controller temporarily rejected the request")]
     Retryable,
     #[error("controller protocol response is invalid")]
@@ -1800,9 +1800,9 @@ impl AgentHttpClient {
             } else {
                 header_code
             };
-            return Err(ClientError::Controller(controller_error(
+            return Err(ClientError::Controller(Box::new(controller_error(
                 status, &endpoint, &operation, request_id, code,
-            )));
+            ))));
         }
         let body = bounded_body(response).await?;
         let issued: IssuedCertificateResponse =
@@ -1920,13 +1920,13 @@ fn classify_status(status: StatusCode) -> Result<(), ClientError> {
     if status.is_success() {
         return Ok(());
     }
-    Err(ClientError::Controller(controller_error(
+    Err(ClientError::Controller(Box::new(controller_error(
         status,
         "/",
         "controller.request",
         None,
         None,
-    )))
+    ))))
 }
 
 fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
@@ -1960,7 +1960,7 @@ fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
                 u32::try_from(delay.max(0)).ok()
             })
         });
-    Err(ClientError::Controller(error))
+    Err(ClientError::Controller(Box::new(error)))
 }
 
 fn controller_error(

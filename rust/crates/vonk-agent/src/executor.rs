@@ -501,7 +501,7 @@ impl<R> RecipeExecutor<'_, R> {
         }
         ExecutionResult {
             state: "cancelled",
-            body: json!({"reason": "controller cancellation confirmed after exact workload stop"}),
+            body: json!({"reason": "controller cancellation confirmed after exact workload stop", "error_code": "operation_cancelled"}),
         }
     }
 }
@@ -1919,8 +1919,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             }
                             return stopped;
                         }
-                        if !collective_readiness {
-                            if let Err(uncertain) = self
+                        if !collective_readiness
+                            && let Err(uncertain) = self
                                 .stop_start_run(
                                     claim,
                                     &run_id,
@@ -1928,9 +1928,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                     false,
                                 )
                                 .await
-                            {
-                                return uncertain;
-                            }
+                        {
+                            return uncertain;
                         }
                         return runtime_failure(
                             if collective_readiness {
@@ -1943,25 +1942,19 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                     Some(Ok(())) => {}
                 }
-                if let Some(transition) = acl_transition.take() {
-                    if self
+                if let Some(transition) = acl_transition.take()
+                    && self
                         .runtime
                         .finish_installation_acl_transition(&installation_id, transition)
                         .is_err()
+                {
+                    if let Err(uncertain) = self
+                        .stop_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds, false)
+                        .await
                     {
-                        if let Err(uncertain) = self
-                            .stop_start_run(
-                                claim,
-                                &run_id,
-                                spec.lifecycle.stop_timeout_seconds,
-                                false,
-                            )
-                            .await
-                        {
-                            return uncertain;
-                        }
-                        return failed("installed model custody changed during runtime start");
+                        return uncertain;
                     }
+                    return failed("installed model custody changed during runtime start");
                 }
                 if *cancellation.borrow() {
                     return self
@@ -2130,8 +2123,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
                             .await;
                     }
-                    if !collective_readiness {
-                        if let Err(uncertain) = self
+                    if !collective_readiness
+                        && let Err(uncertain) = self
                             .stop_start_run(
                                 claim,
                                 &run_id,
@@ -2139,9 +2132,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 false,
                             )
                             .await
-                        {
-                            return uncertain;
-                        }
+                    {
+                        return uncertain;
                     }
                     return failed("workload did not become ready before its deadline");
                 }
@@ -2265,7 +2257,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     if *cancellation.borrow() {
                         ExecutionResult {
                             state: "cancelled",
-                            body: json!({"reason": "controller cancellation confirmed after exact workload stop"}),
+                            body: json!({"reason": "controller cancellation confirmed after exact workload stop", "error_code": "operation_cancelled"}),
                         }
                     } else {
                         ExecutionResult {
@@ -2388,7 +2380,7 @@ fn failed(reason: &'static str) -> ExecutionResult {
 fn cancelled(reason: &'static str) -> ExecutionResult {
     ExecutionResult {
         state: "cancelled",
-        body: json!({"reason": reason}),
+        body: json!({"reason": reason, "error_code": "operation_cancelled"}),
     }
 }
 
@@ -3142,12 +3134,13 @@ fn remaining_lease(deadline: DateTime<FixedOffset>) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionResult, Executor, InterruptibleJob, LoopClient, RecipeExecutor,
-        RecipeObservationError, RejectingExecutor, RunOncePolicy, distribution_success_evidence,
-        normalize_execution_result, output_media_type, parse_compiled_execution_plan,
-        readiness_identity, recipe_install_success_body, report_complete_recipe_run_observations,
-        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
-        wait_for_launch_stability, wait_ready_with_runtime_guard_and_cancellation,
+        ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, InterruptibleJob, LoopClient,
+        RecipeExecutor, RecipeObservationError, RejectingExecutor, RunOncePolicy,
+        distribution_success_evidence, normalize_execution_result, output_media_type,
+        parse_compiled_execution_plan, readiness_identity, recipe_install_success_body,
+        report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
+        run_once_with_heartbeat_interval, wait_for_launch_stability,
+        wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
         client::{AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence},
@@ -3924,7 +3917,7 @@ mod tests {
 
         async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
             self.0.heartbeats.lock().unwrap().push(progress.clone());
-            Err(ClientError::Controller(ControllerError {
+            Err(ClientError::Controller(Box::new(ControllerError {
                 operation: "controller.request /agent/heartbeat".to_owned(),
                 endpoint: "/agent/heartbeat".to_owned(),
                 status: 409,
@@ -3932,7 +3925,7 @@ mod tests {
                 request_id: None,
                 decision: "exit",
                 retry_after_seconds: None,
-            }))
+            })))
         }
 
         async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
@@ -4019,7 +4012,7 @@ mod tests {
         ) -> ExecutionResult {
             let mut result = self.0.execute(claim, lease_deadline, cancellation).await;
             result.state = "cancelled";
-            result.body = json!({"reason": "exact workload stop confirmed"});
+            result.body = json!({"reason": "exact workload stop confirmed", "error_code": "operation_cancelled"});
             result
         }
     }
@@ -4521,6 +4514,7 @@ mod tests {
             body.reason.as_deref(),
             Some("exact workload stop confirmed")
         );
+        assert_eq!(body.error_code.as_deref(), Some("operation_cancelled"));
     }
 
     #[tokio::test]
@@ -4588,16 +4582,25 @@ mod tests {
                 wait_seconds: 0,
                 runtime_identity: None,
                 heartbeat_interval: Duration::from_millis(800),
-                heartbeat_retry_interval: Duration::from_millis(10),
+                heartbeat_retry_interval: HEARTBEAT_RETRY_FLOOR,
             },
             || Ok(()),
         );
         let drive_clock = async {
-            // Poll the operation first so its heartbeat timer is armed.
-            tokio::task::yield_now().await;
-            tokio::time::advance(Duration::from_millis(800)).await;
+            // Claim persistence and heartbeat task startup take an arbitrary
+            // number of polls. Advance virtual time in small steps until the
+            // first request, then measure the retry against that request.
+            for _ in 0..100 {
+                if !heartbeats.lock().unwrap().is_empty() {
+                    break;
+                }
+                tokio::time::advance(Duration::from_millis(10)).await;
+                tokio::task::yield_now().await;
+            }
             assert_eq!(heartbeats.lock().unwrap().len(), 1);
-            tokio::time::advance(Duration::from_millis(10)).await;
+            tokio::task::yield_now().await;
+            tokio::time::advance(HEARTBEAT_RETRY_FLOOR).await;
+            tokio::task::yield_now().await;
             assert_eq!(heartbeats.lock().unwrap().len(), 2);
         };
         let (result, ()) = tokio::join!(run, drive_clock);

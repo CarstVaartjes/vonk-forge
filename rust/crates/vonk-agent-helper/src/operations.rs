@@ -1857,7 +1857,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
             image.to_owned(),
         ])?;
         if !output.success {
-            return if output.exit_code == Some(1) && output.stdout.is_empty() {
+            // Docker writes a newline to stdout for some missing image
+            // references. A miss remains provisional here: receipt reuse
+            // additionally requires a successful empty image listing.
+            return if output.exit_code == Some(1)
+                && output.stdout.iter().all(u8::is_ascii_whitespace)
+            {
                 Ok(None)
             } else {
                 Err(OperationError::RuntimeImageInspectFailed)
@@ -3545,7 +3550,7 @@ mod tests {
     use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use tar::Builder;
     use tempfile::TempDir;
@@ -3606,6 +3611,8 @@ mod tests {
                 stdout: if arguments.first().map(String::as_str) == Some("load") {
                     b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest\n"
                         .to_vec()
+                } else if digest_lookup {
+                    b"\n".to_vec()
                 } else if inspect && !digest_lookup {
                     format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "b".repeat(64))
                         .into_bytes()
@@ -3638,7 +3645,7 @@ mod tests {
             if inspect_compiled && self.image_missing.load(SeqCst) {
                 return Ok(CommandOutput {
                     success: false,
-                    stdout: Vec::new(),
+                    stdout: b"\n".to_vec(),
                     exit_code: Some(1),
                 });
             }
