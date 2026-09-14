@@ -14,7 +14,12 @@ from typing import overload
 
 from .build_identity import current_build
 from .cli_render import render_payload
-from .cli_update import CliUpdateError, interactive_notice, run_update
+from .cli_update import (
+    CliUpdateError,
+    cache_update_notice,
+    interactive_notice,
+    run_update,
+)
 from .control_client import (
     ControlClient,
     ControlClientError,
@@ -217,6 +222,7 @@ def main(
                     origin=args.origin,
                     apply=args.apply,
                 )
+                cache_update_notice(result)
                 status = 0
             except (CliUpdateError, OSError) as error:
                 result = {"error": _sanitize_text(error), "error_type": "update"}

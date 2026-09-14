@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,12 +17,14 @@ import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Callable
+from importlib.resources import files
 from pathlib import Path
 from typing import cast
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from jsonschema import Draft202012Validator, ValidationError
 
 from .build_identity import current_build
 
@@ -31,7 +34,6 @@ _GENERATION = _SHA256
 _WHEEL = re.compile(
     r"vonk_cluster_profiles-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any[.]whl\Z"
 )
-_ORIGIN = "https://install.vonkforge.ai"
 
 
 class CliUpdateError(ValueError):
@@ -63,6 +65,34 @@ def _verify(key: rsa.RSAPublicKey, content: bytes, signature: bytes) -> None:
         key.verify(signature, content, padding.PKCS1v15(), hashes.SHA256())
     except (InvalidSignature, ValueError) as error:
         raise CliUpdateError("release signature is invalid") from error
+
+
+def _validate_release(release: object, release_raw: bytes) -> dict[str, object]:
+    schema_resource = files("cluster_profiles").joinpath(
+        "schemas/install-release-manifest.schema.json"
+    )
+    if not schema_resource.is_file():
+        schema_resource = (
+            Path(__file__).resolve().parents[2]
+            / "schemas/install-release-manifest.schema.json"
+        )
+    try:
+        schema = json.loads(schema_resource.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise CliUpdateError("current release schema is unavailable") from error
+    try:
+        Draft202012Validator(schema).validate(release)
+        if (
+            not isinstance(release, dict)
+            or (
+                json.dumps(release, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode()
+            != release_raw
+        ):
+            raise CliUpdateError("immutable release encoding is invalid")
+    except ValidationError as error:
+        raise CliUpdateError("immutable release schema is invalid") from error
+    return release
 
 
 def _signed_release(
@@ -156,7 +186,7 @@ def _signed_release(
         raise CliUpdateError("immutable release digest is invalid")
     try:
         _verify(key, release_raw, base64.b64decode(release_sig.strip(), validate=True))
-        release = json.loads(release_raw)
+        release = _validate_release(json.loads(release_raw), release_raw)
     except (ValueError, TypeError) as error:
         raise CliUpdateError("immutable release is invalid") from error
     if (
@@ -239,25 +269,36 @@ def run_update(
             raise CliUpdateError("CLI wheel identity does not match accepted release")
     except (KeyError, ValueError, zipfile.BadZipFile) as error:
         raise CliUpdateError("CLI wheel identity is invalid") from error
+    interpreter = Path(sys.executable)
+    if not (interpreter.parent.parent / "pyvenv.cfg").is_file():
+        raise CliUpdateError(
+            "CLI update requires a writable Python virtual environment"
+        )
+    uv = shutil.which("uv")
+    if uv is None:
+        raise CliUpdateError("CLI update requires uv")
     with tempfile.TemporaryDirectory(prefix="vonkctl-update-") as directory:
         wheel_path = Path(directory) / path.rsplit("/", 1)[-1]
         wheel_path.write_bytes(wheel)
         command = [
-            sys.executable,
-            "-m",
+            uv,
             "pip",
             "install",
-            "--isolated",
-            "--no-input",
-            "--disable-pip-version-check",
+            "--python",
+            str(interpreter),
             "--no-deps",
-            "--force-reinstall",
-            "--no-index",
+            "--reinstall",
+            "--offline",
             str(wheel_path),
         ]
-        completed = subprocess.run(
-            command, capture_output=True, text=True, timeout=180, check=False
-        )
+        try:
+            completed = subprocess.run(
+                command, capture_output=True, text=True, timeout=180, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise CliUpdateError(
+                "CLI installation failed in the current Python environment"
+            ) from error
         if completed.returncode != 0:
             raise CliUpdateError(
                 "CLI installation failed in the current Python environment"
@@ -268,45 +309,53 @@ def run_update(
 
 
 def interactive_notice() -> str | None:
-    """Return an opt-in, day-cached notice; never install or block a command."""
+    """Return a cached notice from an explicit update check without network I/O."""
 
     if os.environ.get("VONK_CLI_UPDATE_NOTICES") != "1":
-        return None
-    key = os.environ.get("VONK_INSTALLER_PUBLIC_KEY_FILE")
-    if not key:
         return None
     cache_root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
     cache = cache_root / "vonkctl" / "update-notice.json"
     now = int(time.time())
     try:
         stored = json.loads(cache.read_text())
-        if (
-            isinstance(stored, dict)
-            and type(stored.get("checked_at")) is int
-            and now - stored["checked_at"] < 86400
-        ):
-            available = stored.get("update_available") is True
-        else:
-            raise ValueError("stale notice")
     except (OSError, ValueError):
-        try:
-            result = run_update(
-                channel="stable", public_key=Path(key), origin=_ORIGIN, apply=False
-            )
-        except (CliUpdateError, OSError):
-            return None
-        available = result["update_available"] is True
-        try:
-            cache.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                mode="w", dir=cache.parent, prefix=".update-notice-", delete=False
-            ) as handle:
-                json.dump({"checked_at": now, "update_available": available}, handle)
-                temporary = Path(handle.name)
-            os.chmod(temporary, 0o600)
-            temporary.replace(cache)
-        except OSError:
-            pass
-    if available:
+        return None
+    if (
+        isinstance(stored, dict)
+        and type(stored.get("checked_at")) is int
+        and 0 <= now - stored["checked_at"] < 86400
+        and stored.get("update_available") is True
+        and stored.get("source_sha") == current_build()["source_sha"]
+    ):
         return "Accepted vonkctl update available; run 'vonkctl update --apply' to install it."
     return None
+
+
+def cache_update_notice(result: dict[str, object]) -> None:
+    """Cache an explicit stable-channel check for later interactive display."""
+
+    if (
+        os.environ.get("VONK_CLI_UPDATE_NOTICES") != "1"
+        or result.get("channel") != "stable"
+    ):
+        return
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
+    cache = cache_root / "vonkctl" / "update-notice.json"
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=cache.parent, prefix=".update-notice-", delete=False
+        ) as handle:
+            json.dump(
+                {
+                    "checked_at": int(time.time()),
+                    "update_available": result.get("update_available") is True,
+                    "source_sha": current_build()["source_sha"],
+                },
+                handle,
+            )
+            temporary = Path(handle.name)
+        os.chmod(temporary, 0o600)
+        temporary.replace(cache)
+    except OSError:
+        pass
