@@ -1271,6 +1271,36 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // boundary checks here, but do not hash a potentially multi-terabyte
         // archive again before loading it.
         let archive_identity = self.inspect_runtime_archive(archive, expected_bytes)?;
+        // A previous authorized import is reusable only when the exact
+        // archive, image reference, Docker config and receipt still agree.
+        // A present but invalid receipt is an integrity failure, not a cache
+        // miss that can silently trigger another import.
+        let receipt_path = self.roots.runtime_image_receipts.join(archive_sha256);
+        match fs::symlink_metadata(&receipt_path) {
+            Ok(_) => {
+                let (inspected, _) = self.inspect_runtime_image_for_reference(image_reference)?;
+                if inspected.1 != "linux"
+                    || inspected.2 != "arm64"
+                    || inspected.3 != "v1"
+                    || !numeric_non_root_user(&inspected.4)
+                {
+                    return Err(OperationError::RuntimeImageIdentityInvalid);
+                }
+                self.require_image_receipt(
+                    archive_sha256,
+                    registry_index_digest,
+                    platform_manifest_digest,
+                    image_reference,
+                    &inspected.0,
+                )?;
+                if archive_identity != self.inspect_runtime_archive(archive, expected_bytes)? {
+                    return Err(OperationError::InvalidArtifact);
+                }
+                return Ok(());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         let archive_config_id = runtime_archive_config_digest(archive)?;
         if archive_identity != self.inspect_runtime_archive(archive, expected_bytes)? {
             return Err(OperationError::InvalidArtifact);
@@ -1652,6 +1682,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
     fn prepare_runtime_access(&self, run: &ValidatedDockerRun) -> Result<(), OperationError> {
         for path in run.models.iter().chain(run.inputs.iter()) {
+            // Reapplying setfacl changes ctime even when the named runtime
+            // entry already grants precisely the intended read access. That
+            // invalidates the agent's immutable installation receipt before
+            // collective readiness. Inspect the exact ACL and skip only an
+            // already-correct regular file; directories keep the recursive
+            // path until every descendant has been checked.
+            if exact_runtime_read_file_acl(path, run.uid)? {
+                continue;
+            }
             let output = self
                 .runner
                 .run(
@@ -1990,6 +2029,44 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn require_directory(&self, path: &Path) -> Result<(), OperationError> {
         require_safe_directory(path, self.required_owner_uid)
     }
+}
+
+fn exact_runtime_read_file_acl(path: &Path, runtime_uid: u32) -> Result<bool, OperationError> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    let Some(value) = xattr::get(path, "system.posix_acl_access")? else {
+        return Ok(false);
+    };
+    if metadata.mode() & 0o777 != 0o640
+        || value.len() != 44
+        || u32::from_le_bytes(value[..4].try_into().unwrap()) != 2
+    {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let mut user_object = false;
+    let mut runtime_user = false;
+    let mut group_object = false;
+    let mut mask = false;
+    let mut other = false;
+    for entry in value[4..].chunks_exact(8) {
+        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
+        let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
+        let identifier = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+        match tag {
+            0x0001 if identifier == u32::MAX => user_object = permissions == 0o6,
+            0x0002 if identifier == runtime_uid => runtime_user = permissions == 0o4,
+            0x0004 if identifier == u32::MAX => group_object = permissions == 0,
+            0x0010 if identifier == u32::MAX => mask = permissions == 0o4,
+            0x0020 if identifier == u32::MAX => other = permissions == 0,
+            _ => return Err(OperationError::InvalidArtifact),
+        }
+    }
+    if !(user_object && runtime_user && group_object && mask && other) {
+        return Err(OperationError::InvalidArtifact);
+    }
+    Ok(true)
 }
 
 fn runtime_archive_config_digest(path: &Path) -> Result<String, OperationError> {
@@ -3438,6 +3515,20 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
+    struct CountingRuntimeImportRunner {
+        loads: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl CommandRunner for CountingRuntimeImportRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            if arguments.first().map(String::as_str) == Some("load") {
+                self.loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            RuntimeImportRunner.run(executable, arguments)
+        }
+    }
+
+    #[derive(Clone, Default)]
     struct NoLoadIdentityRunner {
         calls: Arc<Mutex<Vec<Vec<String>>>>,
     }
@@ -4337,6 +4428,53 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn runtime_access_skips_exact_model_acl_and_rejects_unexpected_acl() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        fs::write(&model, b"model").unwrap();
+        fs::set_permissions(&model, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut acl = 2_u32.to_le_bytes().to_vec();
+        for (tag, permissions, identifier) in [
+            (0x0001_u16, 0o6_u16, u32::MAX),
+            (0x0002, 0o4, 10_001),
+            (0x0004, 0, u32::MAX),
+            (0x0010, 0o4, u32::MAX),
+            (0x0020, 0, u32::MAX),
+        ] {
+            acl.extend_from_slice(&tag.to_le_bytes());
+            acl.extend_from_slice(&permissions.to_le_bytes());
+            acl.extend_from_slice(&identifier.to_le_bytes());
+        }
+        xattr::set(&model, "system.posix_acl_access", &acl).unwrap();
+        let arguments = runtime_arguments(&roots, &[(model.clone(), "/models", true)]);
+        let validated = validate_docker_run(&arguments, &roots, None).unwrap();
+        let runner = RecordingAclRunner::default();
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
+        executor.prepare_runtime_access(&validated).unwrap();
+        assert!(
+            !runner
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|call| call.last() == Some(&model.display().to_string()))
+        );
+
+        // An additional named ACL entry cannot be silently transformed into
+        // a runtime grant by the helper.
+        let mut unexpected = acl[..4].to_vec();
+        unexpected.extend_from_slice(&acl[4..20]);
+        unexpected.extend_from_slice(&0x0002_u16.to_le_bytes());
+        unexpected.extend_from_slice(&0o4_u16.to_le_bytes());
+        unexpected.extend_from_slice(&10_002_u32.to_le_bytes());
+        unexpected.extend_from_slice(&acl[20..]);
+        xattr::set(&model, "system.posix_acl_access", &unexpected).unwrap();
+        assert!(executor.prepare_runtime_access(&validated).is_err());
+    }
+
+    #[test]
     fn runtime_image_receipt_keeps_registry_archive_config_and_local_reference_distinct() {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(temp.path());
@@ -4501,18 +4639,20 @@ mod tests {
         let archive = archive_root.join(&archive_sha256);
         fs::write(&archive, &payload).unwrap();
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
-        let executor =
-            OperationExecutor::new(roots.clone(), &[0; 32], RuntimeImportRunner, None).unwrap();
-        executor
-            .runtime_image_import(&[
-                archive.display().to_string(),
-                archive_sha256.clone(),
-                payload.len().to_string(),
-                format!("sha256:{}", "a".repeat(64)),
-                registry_manifest.clone(),
-                local_reference.clone(),
-            ])
-            .unwrap();
+        let runner = CountingRuntimeImportRunner::default();
+        let loads = runner.loads.clone();
+        let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner, None).unwrap();
+        let arguments = [
+            archive.display().to_string(),
+            archive_sha256.clone(),
+            payload.len().to_string(),
+            format!("sha256:{}", "a".repeat(64)),
+            registry_manifest.clone(),
+            local_reference.clone(),
+        ];
+        executor.runtime_image_import(&arguments).unwrap();
+        executor.runtime_image_import(&arguments).unwrap();
+        assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
         executor
             .require_image_receipt(
                 &archive_sha256,
@@ -4531,6 +4671,11 @@ mod tests {
             receipt.image_config_id,
             format!("sha256:{}", "b".repeat(64))
         );
+        // A digest-named archive changed in place cannot turn a stale image
+        // receipt into another load request.
+        fs::write(&archive, vec![0_u8; payload.len()]).unwrap();
+        assert!(executor.runtime_image_import(&arguments).is_err());
+        assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
