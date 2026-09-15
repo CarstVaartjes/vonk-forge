@@ -120,11 +120,11 @@ def test_database_startup_retry_does_not_mask_permission_failures() -> None:
     assert calls == 1
 
 
-def test_build_engine_bounds_row_lock_waits_only_on_postgres(monkeypatch) -> None:
-    """A writer that waits forever on a row lock stops the worker silently.
+def test_build_engine_bounds_every_wait_only_on_postgres(monkeypatch) -> None:
+    """Every PostgreSQL wait must be finite, and the pool explicitly bounded.
 
-    PostgreSQL accepts a per-connection ``lock_timeout``; SQLite rejects the
-    option, so it must only be sent for a PostgreSQL URL.
+    PostgreSQL accepts the per-connection timeout options; SQLite rejects both
+    the server options and an explicit pool size, so it keeps the default pool.
     """
 
     from vonk_control import db
@@ -145,7 +145,17 @@ def test_build_engine_bounds_row_lock_waits_only_on_postgres(monkeypatch) -> Non
             "postgresql+psycopg://control@postgres/control",
             {
                 "pool_pre_ping": True,
-                "connect_args": {"options": "-c lock_timeout=30000"},
+                "pool_size": 5,
+                "max_overflow": 10,
+                "pool_timeout": 30.0,
+                "connect_args": {
+                    "options": (
+                        "-c lock_timeout=30000"
+                        " -c statement_timeout=120000"
+                        " -c transaction_timeout=300000"
+                        " -c idle_in_transaction_session_timeout=60000"
+                    )
+                },
             },
         ),
         (
@@ -155,14 +165,49 @@ def test_build_engine_bounds_row_lock_waits_only_on_postgres(monkeypatch) -> Non
     ]
 
 
-def test_build_engine_sets_the_lock_timeout_on_the_server(postgres_engine) -> None:
-    """The bound must reach PostgreSQL, not just the engine's argument list."""
+def test_database_wait_budgets_refuse_out_of_range_values(monkeypatch) -> None:
+    """Configuration is the owner, and an invalid budget is refused, not clamped."""
+
+    from vonk_control.settings import SettingsError, database_wait_budgets
+
+    monkeypatch.delenv("VONK_DATABASE_LOCK_TIMEOUT_MS", raising=False)
+    monkeypatch.setenv("VONK_DATABASE_LOCK_TIMEOUT_MS", "0")
+    with pytest.raises(SettingsError, match="VONK_DATABASE_LOCK_TIMEOUT_MS"):
+        database_wait_budgets()
+
+    monkeypatch.setenv("VONK_DATABASE_LOCK_TIMEOUT_MS", "30000")
+    monkeypatch.setenv("VONK_DATABASE_POOL_SIZE", "1000")
+    with pytest.raises(SettingsError, match="VONK_DATABASE_POOL_SIZE"):
+        database_wait_budgets()
+
+    # A lock budget above the statement budget would make the statement bound
+    # unreachable, so the combination is refused rather than reordered.
+    monkeypatch.setenv("VONK_DATABASE_POOL_SIZE", "5")
+    monkeypatch.setenv("VONK_DATABASE_STATEMENT_TIMEOUT_MS", "5000")
+    with pytest.raises(SettingsError, match="lock <= statement <= transaction"):
+        database_wait_budgets()
+
+
+def test_build_engine_sets_every_finite_budget_on_the_server(postgres_engine) -> None:
+    """The bounds must reach PostgreSQL, not just the engine's argument list."""
 
     from vonk_control import db
 
     engine = db.build_engine(postgres_engine.url.render_as_string(hide_password=False))
     try:
         with engine.connect() as connection:
-            assert connection.exec_driver_sql("SHOW lock_timeout").scalar() == "30s"
+            rows = connection.exec_driver_sql(
+                "SELECT name, setting FROM pg_settings WHERE name IN ("
+                "'lock_timeout', 'statement_timeout', 'transaction_timeout',"
+                " 'idle_in_transaction_session_timeout')"
+            ).all()
+            settings = {str(row[0]): str(row[1]) for row in rows}
     finally:
         engine.dispose()
+
+    assert settings == {
+        "lock_timeout": "30000",
+        "statement_timeout": "120000",
+        "transaction_timeout": "300000",
+        "idle_in_transaction_session_timeout": "60000",
+    }

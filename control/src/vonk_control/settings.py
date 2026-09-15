@@ -754,3 +754,75 @@ def _distributed_start_timeout() -> int:
             "distributed start timeout must be between 60 and 3600 seconds"
         )
     return distributed_start_timeout_seconds
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseWaitBudgets:
+    """Every finite upper bound on a PostgreSQL wait, in one place.
+
+    The engine applies these per connection and to its pool, so contention
+    surfaces as a bounded error the caller can reschedule instead of an
+    unbounded wait that silently stops a worker.
+    """
+
+    lock_timeout_ms: int
+    statement_timeout_ms: int
+    transaction_timeout_ms: int
+    idle_in_transaction_timeout_ms: int
+    pool_size: int
+    max_overflow: int
+    pool_timeout_seconds: float
+
+
+def _bounded_int_env(name: str, default: int, low: int, high: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError as error:
+        raise SettingsError(f"{name} must be an integer") from error
+    if not low <= value <= high:
+        raise SettingsError(f"{name} must be between {low} and {high}")
+    return value
+
+
+def _bounded_float_env(name: str, default: float, low: float, high: float) -> float:
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except ValueError as error:
+        raise SettingsError(f"{name} must be numeric") from error
+    if not low <= value <= high:
+        raise SettingsError(f"{name} must be between {low} and {high}")
+    return value
+
+
+def database_wait_budgets() -> DatabaseWaitBudgets:
+    """Read and validate the finite wait budgets owned by configuration."""
+
+    lock = _bounded_int_env("VONK_DATABASE_LOCK_TIMEOUT_MS", 30_000, 1_000, 600_000)
+    statement = _bounded_int_env(
+        "VONK_DATABASE_STATEMENT_TIMEOUT_MS", 120_000, 1_000, 3_600_000
+    )
+    transaction = _bounded_int_env(
+        "VONK_DATABASE_TRANSACTION_TIMEOUT_MS", 300_000, 1_000, 3_600_000
+    )
+    idle = _bounded_int_env(
+        "VONK_DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS", 60_000, 1_000, 600_000
+    )
+    if not lock <= statement <= transaction:
+        raise SettingsError(
+            "database wait budgets must satisfy lock <= statement <= transaction"
+        )
+    if idle > transaction:
+        raise SettingsError(
+            "idle-in-transaction budget must not exceed the transaction budget"
+        )
+    return DatabaseWaitBudgets(
+        lock_timeout_ms=lock,
+        statement_timeout_ms=statement,
+        transaction_timeout_ms=transaction,
+        idle_in_transaction_timeout_ms=idle,
+        pool_size=_bounded_int_env("VONK_DATABASE_POOL_SIZE", 5, 1, 64),
+        max_overflow=_bounded_int_env("VONK_DATABASE_MAX_OVERFLOW", 10, 0, 64),
+        pool_timeout_seconds=_bounded_float_env(
+            "VONK_DATABASE_POOL_TIMEOUT_SECONDS", 30.0, 1.0, 300.0
+        ),
+    )
