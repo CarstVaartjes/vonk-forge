@@ -3692,7 +3692,7 @@ def test_uninstall_warns_on_unknown_bytes_but_blocks_active_runs_without_implici
 
 
 @pytest.mark.parametrize("first_node_removed", [False, True])
-def test_profile_cleanup_recovers_failed_uninstall_and_only_retries_remaining_nodes(
+def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     tmp_path: Path,
     first_node_removed: bool,
 ) -> None:
@@ -3756,14 +3756,17 @@ def test_profile_cleanup_recovers_failed_uninstall_and_only_retries_remaining_no
     assert profiles.tick()
     assert profiles.application(first.id).state == "failed"
 
-    # A new coordinator resumes persisted progress through the normal load path.
+    # A new load has fresh authority but reuses completed node cleanup after restart.
     switch = run_switch()
     profiles = build_production_fleet_profile_service(
         sessions, clock=lambda: NOW + timedelta(seconds=1), run_switch_operations=switch
     )
     request_key = str(uuid.uuid4())
     retry = profiles.load(profile.number, request_key=request_key, actor="admin")
-    assert retry.retry_of_application_id == first.id
+    assert retry.retry_of_application_id is None
+    assert retry.progress.workload_intent_ordinal is not None
+    assert first.progress.workload_intent_ordinal is not None
+    assert retry.progress.workload_intent_ordinal > first.progress.workload_intent_ordinal
     assert profiles.tick()
     second_application = profiles.application(retry.id)
     assert second_application.current_operation_id == retry.id
