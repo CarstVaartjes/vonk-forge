@@ -187,6 +187,14 @@ capability declaration. Enrollment keeps its bounded raw-body security
 handling, while OpenAPI exposes the exact `EnrollmentSubmitRequest` used to
 validate that body.
 
+Work claiming prefers due operations supported by the agent's advertised
+capabilities, preserving creation order within that group. A retry requiring
+exact lifecycle recovery must not starve the authorized agent upgrade that
+enables it. The original retry retains its identity and progress and resumes
+when the upgraded agent reconnects. Capability preference does not bypass
+authority, lease, or concurrent-mutation checks; unsupported work remains
+blocked with its recovery reason.
+
 `scripts/generate-control-clients` derives the Controller OpenAPI document and
 Python/TypeScript clients from the actual API. Never fix drift by hand-editing
 generated clients or weakening their schema. Rust wire compatibility requires

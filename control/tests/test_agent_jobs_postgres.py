@@ -27,6 +27,7 @@ from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 
 from .runtime_identity_support import claim_agent
+from .test_agent_jobs import exercise_upgrade_reconnect
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -188,6 +189,14 @@ def test_postgres_claim_locks_only_operations_without_nullable_join(
     assert any(
         "FOR UPDATE OF agent_operations SKIP LOCKED" in statement
         for statement in statements
+    )
+
+
+@pytest.mark.parametrize("older_work", ("unadvertised", "exact-retry", "running"))
+def test_postgres_upgrade_bypasses_unsupported_work_then_resumes_it(service, older_work) -> None:
+    sessions, clock = service
+    exercise_upgrade_reconnect(
+        (AgentJobService(sessions, clock=clock), sessions, clock), older_work
     )
 
 

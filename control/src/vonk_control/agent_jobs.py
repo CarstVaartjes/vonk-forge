@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from pydantic import ValidationError
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
@@ -639,7 +639,21 @@ class AgentJobService:
                 self._available.wait(min(remaining, _DATABASE_REPOLL_SECONDS))
 
     @staticmethod
-    def _claimable_operations(node_id: str, now: datetime):
+    def _claimable_operations(
+        node_id: str, now: datetime, capabilities: tuple[str, ...] | None
+    ):
+        supported = StoredOperation.kind.in_(capabilities or ())
+        if "agent.lifecycle.resume.exact.v1" not in (capabilities or ()):
+            supported = and_(
+                supported,
+                and_(
+                    StoredOperation.kind.in_(_LIFECYCLE_RESTART_OPERATIONS),
+                    StoredOperation.current_attempt > 0,
+                    StoredOperation.retry_disposition == _RETRY_DISPOSITION,
+                    StoredOperation.retry_disposition_attempt
+                    == StoredOperation.current_attempt,
+                ).is_not(True),
+            )
         expired_attempt = (
             select(AgentOperationAttempt.id)
             .where(
@@ -716,7 +730,15 @@ class AgentJobService:
                     ),
                 ),
             )
-            .order_by(StoredOperation.created_at, StoredOperation.id)
+            # Choose work this agent can perform before limiting the queue.
+            # Otherwise a retry requiring a newer agent starves its own upgrade.
+            # Keep unsupported work as a fallback so the authority check can
+            # still record its actionable reason when no supported work is due.
+            .order_by(
+                case((supported, 0), else_=1),
+                StoredOperation.created_at,
+                StoredOperation.id,
+            )
             .execution_options(populate_existing=True)
             .limit(1)
         )
@@ -735,7 +757,7 @@ class AgentJobService:
         with self._claim_lock, self._sessions.begin() as session:
             now = self._clock()
             candidate_id = session.scalar(
-                self._claimable_operations(node_id, now).with_only_columns(
+                self._claimable_operations(node_id, now, capabilities).with_only_columns(
                     StoredOperation.id
                 )
             )
@@ -805,7 +827,7 @@ class AgentJobService:
             if candidate_id is None:
                 return None
             statement = (
-                self._claimable_operations(node_id, now)
+                self._claimable_operations(node_id, now, capabilities)
                 .where(StoredOperation.id == candidate_id)
                 .with_for_update(of=StoredOperation, skip_locked=True)
                 .execution_options(populate_existing=True)

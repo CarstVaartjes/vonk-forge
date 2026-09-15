@@ -414,9 +414,14 @@ def test_late_old_cancellation_never_retires_a_newer_attempt(service) -> None:
         assert newer is not None and newer.state == "running" and newer.result is None
 
 
+@pytest.mark.parametrize("older_work", (None, "unadvertised", "exact-retry", "running"))
 def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
-    service,
+    service, older_work,
 ) -> None:
+    exercise_upgrade_reconnect(service, older_work)
+
+
+def exercise_upgrade_reconnect(service, older_work) -> None:
     jobs, sessions, clock = service
     from .package_upgrade_fixtures import activation_receipt, source_transport
     target = {
@@ -433,9 +438,6 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
         "target_binary_digest": "a" * 64,
         "target_build_digest": "sha256:" + "b" * 64,
     }
-    job = parent(sessions, clock)
-    target.update(source_transport())
-    operation = jobs.enqueue(job.id, NODE_A, "agent.upgrade.v1", COMMIT, target)
     old_identity = {
         "architecture": "linux-arm64",
         "binary_digest": "f" * 64,
@@ -444,17 +446,67 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
         "self_test_passed": True,
         "observation_receipt_public_key": "d" * 64,
     }
+    capabilities = ["agent.runtime.rust.v1", "agent.upgrade.v1"]
+    older = first = None
+    if older_work is not None:
+        older = jobs.enqueue(
+            parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+        )
+        if older_work != "unadvertised":
+            capabilities.append("recipe.stop")
+            first = claim_agent(
+                jobs, NODE_A, "serial-a", 30,
+                capabilities=capabilities, runtime_identity=old_identity,
+            )
+            assert first is not None and first.operation_id == older.id
+        clock.advance(seconds=1)
+
+    job = parent(sessions, clock)
+    target.update(source_transport())
+    operation = jobs.enqueue(job.id, NODE_A, "agent.upgrade.v1", COMMIT, target)
+    if older_work == "running":
+        # Independent recovery must still wait for an actually running mutation.
+        assert claim_agent(
+            jobs, NODE_A, "serial-a", 30,
+            capabilities=capabilities, runtime_identity=old_identity,
+        ) is None
+    if first is not None:
+        jobs.record_result(AgentResult.model_validate_json(canonical_message({
+            **{key: getattr(first, key) for key in (
+                "schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "deadline"
+            )},
+            "state": "waiting-for-operator",
+            "result": {
+                "error_code": "agent_restart_interrupted",
+                "failure_kind": "uncertain-effect",
+                "uncertain": True,
+                "reason": "agent process restarted",
+            },
+        })))
+        with sessions() as session:
+            stored = session.get(AgentOperation, first.operation_id)
+            assert stored is not None and stored.retry_due_at is not None
+            clock.now = stored.retry_due_at.replace(tzinfo=UTC)
+        # Retry and upgrade ordering must survive a Controller restart.
+        jobs = AgentJobService(sessions, clock=clock)
+
     claim = claim_agent(
         jobs,
         NODE_A,
         "serial-a",
         30,
-        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+        capabilities=capabilities,
         runtime_identity=old_identity,
     )
     assert claim is not None
     assert claim.operation_id == operation.id
     assert job_state(sessions, job.id).state == "queued"
+    if older is not None:
+        with sessions() as session:
+            stored = session.get(AgentOperation, older.id)
+            assert stored is not None
+            assert stored.current_attempt == (0 if first is None else first.attempt)
+            assert stored.state == ("queued" if first is None else "waiting-for-operator")
 
     new_identity = {
         **old_identity,
@@ -462,17 +514,20 @@ def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
         "build_digest": target["target_build_digest"],
         "package_activation": activation_receipt(claim.payload.model_dump(mode="json"), NODE_A, now=int(clock.now.timestamp())),
     }
-    assert (
-        claim_agent(
-            jobs,
-            NODE_A,
-            "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-            runtime_identity=new_identity,
-        )
-        is None
+    resumed = claim_agent(
+        jobs, NODE_A, "serial-a", 30,
+        capabilities=[*capabilities, "recipe.stop", "agent.lifecycle.resume.exact.v1"],
+        runtime_identity=new_identity,
     )
+    if older is None:
+        assert resumed is None
+    else:
+        assert resumed is not None and resumed.operation_id == older.id
+        assert resumed.attempt == (1 if first is None else first.attempt + 1)
+        if first is not None:
+            assert resumed.payload == first.payload
+        jobs.succeed(resumed, STOP_RESULT)
+        assert job_state(sessions, older.parent_job_id).state == "succeeded"
 
     assert job_state(sessions, job.id).state == "succeeded"
     with sessions() as session:
