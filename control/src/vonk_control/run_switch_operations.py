@@ -2539,6 +2539,19 @@ class RunSwitchOperationService:
             )
             build = build_selection.build
             build_candidate = build_selection.candidate
+            if (
+                installation is not None
+                and _is_source_build(revision.document)
+                and (
+                    build is None
+                    or installation.recipe_build_id != build.id
+                )
+            ):
+                # An installed source build is reusable only while its exact
+                # Controller build remains selected.  A replacement build (or
+                # a newly planned recreation) needs a fresh compiled install
+                # plan and installation receipt.
+                installation = None
             if build_selection.builder_freshness is not None:
                 freshness.append(build_selection.builder_freshness)
             blockers.extend(build_selection.blockers)
@@ -3196,6 +3209,12 @@ class RunSwitchOperationService:
                 errors.append(f"{node.node_id}: build preview returned no build identity")
                 continue
             selected = session.get(RecipeBuild, proposed_id)
+            if selected is not None:
+                # ``preview_build`` persists through the lifecycle service's
+                # own short transaction.  This Session may already hold the
+                # succeeded row that was reset after its archive disappeared;
+                # refresh it so the first preview sees the durable planned row.
+                session.refresh(selected)
             if selected is None or selected.recipe_revision_id != revision.id:
                 errors.append(f"{node.node_id}: build preview receipt is unavailable")
                 continue

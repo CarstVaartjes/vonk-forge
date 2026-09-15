@@ -2015,28 +2015,148 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert executor.receipts == [receipt]
 
 
-def test_fresh_preview_does_not_select_a_database_only_succeeded_build(
+def test_first_profile_preparation_preview_replans_a_missing_build_archive(
     tmp_path: Path,
 ) -> None:
-    sessions, lifecycle, _queue, _mapping_id, build_id, _nodes = setup_services(tmp_path)
-    service = RunSwitchOperationService(
-        sessions,
-        lifecycle=lifecycle,
-        clock=lambda: NOW,
-        build_archive_available=lambda _digest, _size: False,
-        memory_floor_bytes=50,
-    )
-    with sessions() as session:
+    sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
+    with sessions.begin() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
         revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
-        installation = session.scalar(
-            select(RecipeInstallation).where(
-                RecipeInstallation.recipe_revision_id == revision.id
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None
+        node.binary_digest = "a" * 64
+        node.capabilities = [*node.capabilities, "recipe.build.v1"]
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
             )
         )
-        assert service._matching_build(session, revision.id, installation) is None
+        assert snapshot is not None
+        snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
+        if session.get(RecipeSourceBundle, build.source_bundle_sha256) is None:
+            session.add(
+                RecipeSourceBundle(
+                    sha256=build.source_bundle_sha256,
+                    media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
+                    archive_bytes=1,
+                    total_bytes=1,
+                    file_count=1,
+                    storage_key="restored-source-bundle",
+                    manifest={"schema_version": 1},
+                    verified_at=NOW,
+                )
+            )
+        build_plan = RecipeBuildPlan(
+            build_id=build.id,
+            recipe_revision_id=revision.id,
+            recipe_content_sha256=revision.content_digest,
+            builder_node_id=build.builder_node_id,
+            source_bundle_sha256=build.source_bundle_sha256,
+            build_input_sha256=build.build_input_sha256,
+            agent_payload=dict(build.plan),
+            policy_report=dict(build.policy_report),
+        )
+
+    def preview_build(_revision_id: str, _builder_node_id: str) -> RecipeBuildPlan:
+        # RecipeBuildService persists through its own short transaction while
+        # Run/Switch still holds the outer profile-preparation Session.
+        with sessions.begin() as session:
+            build = session.get(RecipeBuild, build_id)
+            assert build is not None
+            build.state = "planned"
+            build.image_digest = None
+            build.oci_layout_sha256 = None
+            build.image_bytes = None
+            build.updated_at = NOW + timedelta(seconds=1)
+        return build_plan
+
+    lifecycle.preview_build = preview_build
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        build_archive_available=lambda _digest, _size: False,
+        memory_floor_bytes=50,
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    assert plan.installation_id is None
+    assert plan.build.build_id == build_id
+    assert plan.build.state == "planned"
+    assert [(phase.kind, phase.subphase) for phase in plan.phases[:3]] == [
+        ("prepare", "container-build"),
+        ("prepare", "runtime-image"),
+        ("prepare", "runtime-plan"),
+    ]
+
+
+def test_present_rebuilt_image_replaces_installation_bound_to_missing_build(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, old_build_id, nodes = setup_services(
+        tmp_path
+    )
+    installed_recipe(
+        lifecycle,
+        mapping_id,
+        old_build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    new_build_id = str(uuid.uuid4())
+    new_layout = "5" * 64
+    with sessions.begin() as session:
+        old_build = session.get(RecipeBuild, old_build_id)
+        assert old_build is not None
+        installation = session.scalar(
+            select(RecipeInstallation).where(
+                RecipeInstallation.recipe_build_id == old_build_id
+            )
+        )
+        assert installation is not None
+        new_plan = dict(old_build.plan)
+        new_plan["build_id"] = new_build_id
+        new_plan["build_input_sha256"] = "6" * 64
+        session.add(
+            RecipeBuild(
+                id=new_build_id,
+                recipe_revision_id=old_build.recipe_revision_id,
+                builder_node_id=old_build.builder_node_id,
+                source_bundle_sha256=old_build.source_bundle_sha256,
+                build_input_sha256="6" * 64,
+                state="succeeded",
+                policy_report=dict(old_build.policy_report),
+                plan=new_plan,
+                image_digest="sha256:" + "2" * 64,
+                oci_layout_sha256=new_layout,
+                image_bytes=30,
+                created_at=NOW + timedelta(seconds=1),
+                updated_at=NOW + timedelta(seconds=1),
+            )
+        )
+
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        build_archive_available=lambda digest, _size: digest == new_layout,
+        memory_floor_bytes=50,
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    assert plan.build.build_id == new_build_id
+    assert plan.installation_id is None
+    assert ("prepare", "runtime-plan") in {
+        (phase.kind, phase.subphase) for phase in plan.phases
+    }
 
 
 def test_model_cache_manifest_failure_is_a_typed_blocker(tmp_path: Path) -> None:

@@ -1425,33 +1425,35 @@ class RecipeImageAvailabilityService:
         self, build_input_sha256: str
     ) -> tuple[Mapping[str, object] | None, bool]:
         with self._sessions() as session:
-            build = session.scalar(
+            builds = session.scalars(
                 select(RecipeBuild)
                 .where(
                     RecipeBuild.build_input_sha256 == build_input_sha256,
                     RecipeBuild.state == "succeeded",
                 )
                 .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
-                .limit(1)
             )
-            if (
-                build is None
-                or build.image_digest is None
-                or build.oci_layout_sha256 is None
-                or build.image_bytes is None
-            ):
-                return None, False
-            if not self._storage.build_archive_available(
-                build.oci_layout_sha256, build.image_bytes
-            ):
-                return None, True
-            return {
-                "state": "succeeded",
-                "build_id": build.id,
-                "image_digest": build.image_digest,
-                "oci_layout_sha256": build.oci_layout_sha256,
-                "image_bytes": build.image_bytes,
-            }, False
+            missing_archive = False
+            for build in builds:
+                if (
+                    build.image_digest is None
+                    or build.oci_layout_sha256 is None
+                    or build.image_bytes is None
+                ):
+                    continue
+                if not self._storage.build_archive_available(
+                    build.oci_layout_sha256, build.image_bytes
+                ):
+                    missing_archive = True
+                    continue
+                return {
+                    "state": "succeeded",
+                    "build_id": build.id,
+                    "image_digest": build.image_digest,
+                    "oci_layout_sha256": build.oci_layout_sha256,
+                    "image_bytes": build.image_bytes,
+                }, False
+            return None, missing_archive
 
     def _eligible(self, operation_id: str) -> bool:
         with self._sessions() as session:
@@ -1541,8 +1543,21 @@ class RecipeImageAvailabilityService:
                             "runtime_image.receipt_invalid",
                             "durable runtime image result is malformed",
                         ) from error
+                    image_available = self._storage.build_archive_available(
+                        receipt.oci_archive_sha256, receipt.image_bytes
+                    )
                 else:
-                    receipt = self._prepare_claimed_image(operation_id, payload, recipe, runtime)
+                    image_available = False
+                if not image_available:
+                    repair_payload = (
+                        dict(payload) | {"force_download": True}
+                        if isinstance(stored_image, Mapping)
+                        and recipe.execution.mode == "image"
+                        else payload
+                    )
+                    receipt = self._prepare_claimed_image(
+                        operation_id, repair_payload, recipe, runtime
+                    )
                     # Removal holds the same lock and commits a durable fence
                     # before deleting Controller image bytes.  A builder may
                     # finish after that point, but it cannot republish SQL or
