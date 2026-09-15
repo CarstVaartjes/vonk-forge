@@ -7,6 +7,13 @@ and apply admission; Spark-local copies are execution caches only. A cluster
 can contain one, two, or more Vonk Forge GPU nodes; no product contract fixes the count or
 uses a GPU node hostname or IP address as identity.
 
+This page describes the running architecture and its approved storage direction.
+The [state ownership](#state-ownership) and [artifact recovery](#artifact-recovery)
+sections define the target boundary. The
+[implementation plan](plans/resilient-artifact-storage.md) records the remaining
+work; this documentation does not claim that artifact bookkeeping has already
+moved out of PostgreSQL.
+
 Uninstall validates the requested installation's current typed metadata, recipe
 identity, and artifact paths, then removes only that installation directory.
 It does not scan unrelated installations or require the removed workload to
@@ -38,6 +45,7 @@ flowchart LR
         api[Control API, authority, and profile cache]
         worker[PostgreSQL-backed control worker]
         db[(PostgreSQL)]
+        storage[Managed model and image storage]
         litellm[LiteLLM]
         hermes[Hermes Agent]
         telemetry[Prometheus and Grafana]
@@ -54,6 +62,9 @@ flowchart LR
     caddy --> api
     api --> db
     worker --> db
+    api --> storage
+    worker --> storage
+    litellm -->|separate database| db
     api <-->|HMAC revision authority| worker
     hermes -->|published v1 hermes-agent run| caddy
     telemetry --> api
@@ -83,6 +94,246 @@ accepted recipe entrypoint**. Caddy knows paths, LiteLLM knows controller-publis
 aliases, and neither discovers containers. GPU nodes initiate outbound mTLS to
 the NAS; they do not run Tailscale, Caddy, LiteLLM, PostgreSQL, or the control
 API.
+
+## State ownership
+
+Each fact has one authoritative owner. The following is the target contract:
+
+| Fact | Owner | Other representations |
+| --- | --- | --- |
+| Users, sessions, enrollment, certificates, revocations, and execution authorization | PostgreSQL | Files cannot grant or restore this authority. |
+| Accepted catalog revisions, topology, saved profiles, desired placements, and exact plan references | PostgreSQL | Imported catalog files are source material; a digest reference does not assert local availability. |
+| Operation intent, idempotency keys, queue/attempt ownership, cancellation, reservations, and route decisions | PostgreSQL | Local work records carry the owning request/attempt identity; they do not schedule or authorize work. |
+| Model bytes, image archives, complete artifact manifests, and verification receipts | Managed artifact storage | A disposable index may accelerate discovery; readiness resolves through the storage owner. |
+| Local download ranges, completed members, build/export checkpoints, and local failure diagnostics | Canonical typed records alongside the work | API progress is derived from these records and current worker evidence, without a second independently writable SQL checkpoint. |
+| Audit history and retained Controller telemetry | PostgreSQL | Logs and metrics are observations, with their own retention rules. |
+| Spark-local files, runtime observations, and agent result journal | Spark execution storage and authenticated evidence | They prove target effects; they cannot become NAS profile or permission authority. |
+| LiteLLM application state | Its separate database in the PostgreSQL service | Controller-published route bundles remain derived from accepted run decisions. |
+
+PostgreSQL provides atomic control-state changes, row locking, unique claims,
+and queries shared by the API and worker. Keep these guarantees rather than
+implementing a second scheduler or cross-record transaction engine in files.
+Its use does not require every local byte counter or cache receipt to live in
+SQL. Replacing PostgreSQL or LiteLLM's database is outside this direction.
+
+### Current implementation and remaining cutover
+
+Today, `ModelCacheSet`, `ModelCacheArtifact`, and `ModelCacheOperation` retain
+artifact state and checkpoints in SQL. Image preparation writes filesystem
+receipts and `RuntimeImageReceipt` rows; SQL receipt state still participates in
+admission. `RecipeBuild`, `Job`, and agent-operation rows retain build and
+preparation results. These are existing paths to refactor, not justification
+for adding another independently writable copy.
+
+Recent cache-recovery work already reconciles absent bytes after a NAS restore,
+reuses completed transfers, and rebuilds missing source images. Preserve that
+behavior while changing ownership. The target removes SQL ownership of physical
+availability and local checkpoints, while retaining control intent, exact
+selected identities, authorization, reservations, and audit. Each cutover must
+update all consumers and retire the old path together.
+
+## Artifact recovery
+
+Models and container images follow one recovery policy, with format-specific
+transfer and build adapters. Native OCI stores keep their own blob/index
+semantics; Controller JSON describes its managed archives and work, without
+editing Docker or Podman internals. Shared policy does not require making a
+source build behave like an HTTP range download.
+
+- Bind work to exact model/recipe inputs, source revision, relevant builder
+  identity, requested output, and its authorized request/attempt. Persist the
+  identity before effects and checkpoints after the corresponding data is
+  durable. Report measured bytes and phases; unknown progress stays unknown.
+- Keep temporary work separate from complete immutable objects. Verify new
+  content before publication. Write records through same-filesystem staging,
+  sync data and required metadata, and atomically publish a complete generation.
+  Multiple files require a commit protocol that survives death between writes;
+  a JSON rename alone cannot make all artifact bytes durable.
+- Reuse valid completed artifacts. Resume compatible partial downloads; repair
+  or replace damaged temporary work within its managed scope. For builds,
+  inspect retained results and restart only the unfinished safe work. Preserve
+  reusable completed layers and final archives without weakening build isolation.
+- An existing file or old failed attempt never permanently blocks a fresh
+  authorized download or rebuild. A refresh preserves the last verified result.
+  Repeating a request key follows that same request; an explicit new rebuild
+  gets a new request identity. A new image digest is a new result and cannot
+  silently replace an exact image in a bound plan or running workload.
+- Serialize writers per artifact and fence superseded attempts. Inspect actual
+  effects and live ownership after restart; recorded `running` or `completed`
+  text is insufficient. Retry temporary failures automatically with bounded
+  concurrency, backoff, and visible retry timing while intent remains current.
+- Keep bad contracts, revoked authority, denied access, and integrity failures
+  visible and fail closed. The affected object can be prepared again after its
+  condition is corrected; unrelated work continues. Cancellation, explicit
+  removal, and newer operator intent must survive delayed results and restarts.
+- Admission trusts durable verification for immutable managed objects and
+  checks presence, type, and length. Do not scan all model bytes on each read
+  or restart. Publication, transfer, explicit verification, or evidence of
+  corruption supplies the reason for content verification.
+
+Garbage collection coordinates with current SQL references, reservations, and
+active preparation. It may reclaim only objects proved unused under that
+coordination. Database unavailability or a failed scan defers cleanup and leaves
+an actionable reason. Slow progress observation must not stall transfer I/O.
+Loss of coordination cannot authorize a new operation or let an expired attempt
+publish; completed immutable data and durable partial work remain reusable.
+
+A PostgreSQL backup restores control intent and permissions, not artifact bytes.
+If storage is absent, expose missing assets and prepare them through the normal
+authorized path. If artifact files survive but the database does not, preserve
+the files and restore control authority before adoption or cleanup. Discovery
+does not reconstruct users, grants, profiles, revocations, or catalog approval.
+Optional artifact backups must include their manifests/checkpoints and use a
+consistent storage snapshot or quiesced writers. See [backup recovery](postgres-backups.md).
+
+## Coordination and deadlock prevention
+
+The target must prevent circular waits across the database, filesystem, worker
+pools, and parent/child operations. Each boundary below is mandatory for new
+coordination code and an acceptance condition for the cutover. These are design
+requirements; existing code still needs the audit and concurrent tests in the
+implementation plan before conformance can be claimed.
+
+### How the parts converge
+
+The Controller persists accepted intent once. Each integration observes its
+own effects and reconciles them toward that intent; no handoff assumes a SQL
+commit, a file write, a remote effect, and an acknowledgement are atomic.
+
+| Integration | Durable handoff and recovery boundary |
+| --- | --- |
+| Admin client to API | A retained request key identifies accepted intent; a lost response is recovered by querying that request. |
+| API to worker | The worker claims current intent under a fenced lease, records waiting dependencies, and resumes unfinished steps after restart. |
+| Worker to artifact storage | Exact input identity and durable local checkpoints allow reuse/resume; accepting the resulting reference is conditional on current intent. |
+| Controller to Spark agent | Node-bound operations, attempt fences, heartbeats, and acknowledged result journals permit replay without assuming an effect ran exactly once. |
+| Agent to runtime | Observe the exact installation/container/effect before retrying; uncertain arbitrary side effects require their own reconciliation contract. |
+| Runtime evidence to route publication | Publish only the exact acknowledged, authorized generation; recover lost activation acknowledgements and withdraw stale serving authority. |
+| Owners to UI/telemetry | Derived views can lag and show their observation time or unavailability; they cannot mutate ownership or block the work they observe. |
+| References to cleanup/restore | Reconcile durable reservations and surviving storage before adoption or deletion; missing control authority cannot be reconstructed from bytes. |
+
+Eventual consistency means observed progress, availability, execution, and
+derived views catch up with accepted intent after recoverable faults clear.
+It does not relax permissions, revocations, fencing, exact plan identity, or
+route admission. Each boundary tolerates duplicate delivery, delayed results,
+and temporary disconnection within those constraints. Recovery remains on the
+normal operating path and scoped to the affected work.
+
+### Ownership boundaries
+
+| Boundary | Owns | Must never wait for |
+| --- | --- | --- |
+| API/admission transaction | Validate current authority; persist exact intent and reserve control resources atomically | Artifact locks, remote probes, filesystem scans, builds, transfers, or worker completion |
+| Reconciler | Inspect current intent/effects; schedule the next eligible step; record bounded waiting state | A child while holding a transaction or an execution slot the child needs |
+| Preparation/agent executor | One fenced attempt and its local effects/checkpoints | A parent-held node lease as a competing owner, or another job's execution slot while retaining its own |
+| Artifact writer | One exact managed object's local write lock | Another artifact lock, a child operation, or a blocking database lock |
+| Collector | A durable deletion reservation for an exact unreferenced object, then its local lock | Completion of a producer while holding a transaction or local lock |
+| Observer/API projection | Read bounded state and report progress or an unavailable observation | Completion of the operation it is describing |
+
+A reservation is durable ownership data, not permission to hold a database
+transaction open. Parents may retain node ownership while children execute;
+children inherit that owner and fence rather than acquiring conflicting leases.
+If a new request supersedes the parent, cancellation/reconciliation resolves
+issued effects before ownership passes to the replacement.
+
+### Lock and transaction rules
+
+1. **No SQL-to-filesystem lock edge.** Commit or roll back before acquiring a
+   local artifact lock. Acquire that lock nonblockingly; if busy, release the
+   execution slot and reschedule with a visible reason. Hold at most one
+   artifact lock. Shared blobs use immutable publication and bounded conflict
+   handling instead of a second nested artifact lock.
+2. **One narrowly allowed reverse edge.** An artifact lock may contain a short
+   SQL transaction to validate its fence/deletion reservation or renew its
+   existing lease. This SQL path must be nonblocking, touch only its declared
+   coordination rows, and
+   never call preparation, admission, or orchestration recursively. Failure
+   releases the artifact lock and defers work; it does not wait inside it.
+3. **One SQL lock order.** Shared helpers acquire explicit row/advisory locks
+   in a canonical order by lock namespace/table and immutable primary key.
+   Multi-node targets are sorted by stable node ID. Declare the full lock set
+   before acquisition; if new information requires an earlier lock, roll back
+   and replan. Include implicit foreign-key, unique-index, and upsert locks in
+   the audit; ordering explicit `FOR UPDATE` calls alone is insufficient.
+4. **Bound every database wait.** Use `SKIP LOCKED` for eligible work claims
+   and `NOWAIT` for contested coordination rows. Configure finite lock,
+   statement, and transaction budgets centrally, including implicit lock waits.
+   A conflict or PostgreSQL deadlock aborts the transaction; retry the complete
+   transaction only after releasing its resources, with bounded backoff.
+5. **Transactions contain database work only.** Never hold them across external
+   HTTP, process execution, transfer/build/import, storage scans or hashing,
+   child completion, or retry sleep. Read a bounded input snapshot, commit,
+   perform the effect under its fence, then conditionally record the result in
+   a fresh short transaction. Observers do not take mutation locks.
+
+Publication has two separate commits. Storage first makes a verified immutable
+generation durable. A subsequent conditional SQL update accepts its exact
+reference only if the operation still owns its fence and current intent.
+SQL owns that decision, not a second physical-availability flag. A crash between
+these commits leaves reusable unassociated bytes; reconciliation can attach
+them only under current authorization. Cancellation or removal racing the final
+update wins through its fence. Late bytes never recreate a removed logical
+entry or alter an already bound plan.
+
+```mermaid
+flowchart TD
+    intent[SQL: claim current intent and reserve resources] --> commit[Commit SQL transaction]
+    commit --> lock{Try one artifact lock}
+    lock -->|busy| defer[Release execution slot and reschedule]
+    lock -->|acquired| prepare[Recover or prepare durable local work]
+    prepare --> verify[Verify and publish immutable storage generation]
+    verify --> release[Release artifact lock]
+    release --> accept{SQL: conditionally accept reference under current fence}
+    accept -->|current| done[Record accepted result]
+    accept -->|cancelled or superseded| retained[Keep reusable bytes without reviving old intent]
+```
+
+Ownership checks and lease renewals during preparation use only the bounded,
+nonblocking SQL edge defined above. The diagram does not permit a transaction
+to remain open between stages.
+
+Deletion uses the corresponding reservation protocol: a short SQL transaction
+proves the exact object unreferenced and reserves its deletion. New references
+cannot be admitted while that reservation is active. The collector then takes
+the artifact lock and validates the reservation nonblockingly before removing
+that object. Interrupted deletion is reconciled before releasing the reservation;
+lease expiry alone must not let a late collector delete newly referenced data.
+Missing authority or storage evidence causes a bounded defer, never guessed
+permission to delete.
+
+### Scheduling and progress rules
+
+- Dependency graphs must be acyclic. Validate parent/child edges before
+  dispatch; do not let a child enqueue a dependency on an ancestor.
+- Claim execution slots only for runnable effects. Waiting parents retain
+  durable intent but release worker/build/transfer slots. A step cannot wait
+  for another pool while holding a slot that the dependency needs. Acquire
+  required scarce resources as one checked set or release partial acquisitions
+  before deferring. Completed artifacts remain reusable across these retries.
+- Check external readiness outside admission transactions, then revalidate
+  the bounded evidence when committing the decision. Resource shortages create
+  waiting work with a dependency and resume condition; they do not hold locks.
+- Each wait records a reason, dependency identity, current owner where known,
+  next check time, and persisted deadline. Heartbeats and restarts do not reset
+  an effect's deadline. At expiry, reconcile, retry safely, or report an
+  actionable failure. A temporary failure never permanently bans a fresh
+  authorized request for that artifact.
+- Leases and attempt fences protect every result and transition. Takeover
+  checks exact process/runtime/storage effects; an expired heartbeat is not
+  proof of death. Stale attempts cannot publish current references, renew
+  authority, or revive cancelled/superseded work.
+- Scan eligible work fairly. Skip a busy dependency and contain malformed or
+  failed records to their own operation. One blocked source, artifact, profile,
+  or expired attempt must not stop unrelated work or the reconciliation loop.
+
+Required evidence includes a one-slot worker pool with a parent/child chain,
+opposite-order requests for the same two nodes, concurrent prepare/remove,
+database contention during artifact publication, expired-owner takeover, and
+worker death at every commit boundary. Each case must prove bounded return,
+preserved authority, and eventual progress after the injected fault clears.
+Use real PostgreSQL and separate processes for database and OS-lock semantics;
+use the Linux/OrbStack lane for process death and storage durability. These
+checks establish conformance for the tested paths, not a blanket claim that
+arbitrary future code can never deadlock.
 
 ## Trust and control flow
 
@@ -128,7 +379,8 @@ fabric recovery, and explicit break-glass inspection.
 | Caddy | Tailnet web/API routing, distinct enrollment and agent SNI boundaries, agent mTLS verification, and denial of internal routes. |
 | Control API | Admin API/web backend, PostgreSQL authority and policy, trusted profile-cache resolution and admission, desired-state planning, agent enrollment/claims/results, audit, and metrics. |
 | Control worker | Durable reconciliation, dependency waves, compensation, fail-closed withdrawal, and atomic route/LiteLLM publication. |
-| PostgreSQL | Jobs, immutable resolved plans, operation/attempt fences, agent identity/presence, reconciliation state, cancellation, and audit evidence. |
+| PostgreSQL | Control intent, immutable resolved plans, operation/attempt fences, identity, authorization, reservations, cancellation, audit, and retained telemetry; current artifact bookkeeping awaits the ownership cutover above. |
+| Managed artifact storage | Model files, runnable image archives, and native transfer caches; target owner of typed verification manifests and local recovery checkpoints. |
 | LiteLLM | OpenAI-compatible aliases and quotas generated only from an acknowledged, unexpired publication bundle. |
 | Hermes Agent | Persistent tools/UI service that reaches inference only through the Caddy-gated LiteLLM route published by an exact v1 `RecipeRun` named `hermes-agent`. |
 | Prometheus/Grafana | Platform, agent, job, route, node-exporter, and DCGM observability. |
@@ -239,12 +491,15 @@ ownership, and mode remain unchanged. Changes trigger a new byte scan. The
 verification cache is bounded and process-local; authorization is still checked
 on every operation. Storage reconciliation reuses unchanged verified files;
 changed filesystem identities trigger a new byte scan.
-Removing an image from the Controller cache marks its SQL receipt `evicted`.
+In the current implementation, removing an image from the Controller cache marks
+its SQL receipt `evicted`.
 Admission rejects that receipt until preparation verifies the same immutable
 image and restores it to `verified`. Cache removal preserves recipe
 authorizations and any explicit `revoked` state; re-downloading bytes cannot
 restore revoked authority. This state belongs to the current fresh database
-schema, not an automatic migration of an existing Controller database.
+schema, not an automatic migration of an existing Controller database. The
+planned ownership cutover moves physical availability to managed storage while
+retaining revocation and recipe authorization in PostgreSQL.
 Model weights and other declared artifacts are installed separately, with disk checks before
 installation and memory/VRAM, active-workload, and direct-fabric checks before
 start. Run/Switch waits at most 180 seconds for each pending runtime-preflight
@@ -368,6 +623,7 @@ cluster shape, not a hard product limit.
 Tensor-parallel traffic follows the PostgreSQL topology directly between the
 selected GPU nodes. It never traverses Caddy, LiteLLM, PostgreSQL, or the service
 host. The [node onboarding runbook](runbooks/node-onboarding.md) covers stable
-identity and count-independent inventory. Model-version, harness, recipe, and
-capacity comparisons live in the [model catalog](operators/model-catalog.md) and
-[model capacity overview](model-capacity-overview.md).
+identity and count-independent inventory. Exact model, harness, and recipe
+choices live in the [model catalog](operators/model-catalog.md) and canonical
+recipe library. Admission uses each recipe's declared resource requirements
+and fresh measured capacity; dated hardware tables are not admission authority.

@@ -6,6 +6,12 @@ profile choice. Sparks receive authorized copies over the LAN for execution;
 those copies are derived, replaceable state and never an authority or fallback
 source for profiles or cache repair.
 
+The commands below describe current behavior. The
+[storage and coordination plan](../plans/resilient-artifact-storage.md) changes
+internal checkpoint/availability ownership while preserving these exact-asset,
+authorization, retry, and cancellation guarantees. It does not require operators
+to edit JSON or database status to recover work.
+
 ## Browse, download, and refresh
 
 Use the exact selector shown by the list:

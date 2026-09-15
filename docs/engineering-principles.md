@@ -4,14 +4,14 @@ These are the standing engineering commitments behind Vonk Forge. They are
 durable rules, not evidence: a passing test, a green pipeline, or a cache
 operation never stands in for physical Spark qualification.
 
-The commitments were recovered from the dated design set that preceded this
-document, so the reasoning survives even though those point-in-time briefs do
-not.
+These principles and the [architecture overview](architecture-overview.md)
+define current direction. Dated product briefs preserve product rationale;
+they do not override current storage, security, or execution contracts.
 
 ## Simplicity is a load-bearing choice
 
 The target deployment is one Docker Compose application on one service host,
-one PostgreSQL database, and a small number of GPU nodes and administrators.
+one PostgreSQL service, and a small number of GPU nodes and administrators.
 That scale does not justify distributed infrastructure.
 
 - A separate message broker, workflow cluster, service mesh, workload-identity
@@ -29,8 +29,41 @@ areas. PKI, software-update trust, artifact distribution, configuration
 application, and GPU telemetry earn real implementations precisely because
 they are where shortcuts become incidents.
 
+## Each fact has one owner
+
+PostgreSQL earns its place through transactions, concurrent operation ownership,
+security state, reservations, durable desired state, and operational queries.
+The Controller and LiteLLM use separate databases in that one service. Keep
+those responsibilities; use filesystem storage for artifact bytes and their
+local recovery facts. Do not introduce a database for facts whose simplest
+reliable owner is managed storage.
+
+The [ownership table](architecture-overview.md#state-ownership) defines the
+boundary. In the target design, model and image manifests, verification
+receipts, and download/build checkpoints travel with their managed files as
+canonical typed JSON. An exact digest in a profile is a reference, not a second
+copy of the artifact's availability state. UI indexes may be rebuilt from the
+owner; they cannot independently admit missing bytes or require manual repair.
+
+Self-descriptive files need explicit crash and concurrency guarantees: bounded
+validated records, one writer per artifact, durable data before publication,
+atomic visibility, and rejection of stale writers. Keep coordinated job intent,
+leases, cancellation, and security decisions in PostgreSQL. File storage must
+not grow another implementation of a transactional job database.
+
+The [implementation plan](plans/resilient-artifact-storage.md) distinguishes
+existing SQL-backed artifact bookkeeping from this target. Complete one
+ownership change across producers and consumers and remove the retired path;
+do not maintain two authorities during a compatibility period.
+
 ## Stability comes from one current path
 
+- Coordination must have an acyclic wait graph: work cannot wait on a dependency
+  that needs a lock, slot, or reservation held by that same waiting work. Follow
+  the [coordination boundaries](architecture-overview.md#coordination-and-deadlock-prevention).
+  Use one lock order, short database transactions, nonblocking claims, and
+  bounded waits. A timeout is a recovery mechanism, not proof that cycles
+  cannot exist.
 - Keep one current definition and one current execution path per document and
   operation. Retired parsers, DTOs, aliases, and fallback shapes are removed
   together with their callers rather than carried forward.
@@ -63,6 +96,16 @@ they are where shortcuts become incidents.
   and resumable transfers. A historical success record must not prevent repair
   or make absent bytes look ready. A rebuilt image receives its own verified
   identity; it must not silently replace the image in an already bound plan.
+- A failed attempt never permanently poisons an artifact identity. Reuse valid
+  results, resume compatible partial work, and safely replace damaged temporary
+  work. A failed refresh or rebuild preserves the last verified result.
+- Automatic retries stay within current intent and authorization. Bound their
+  rate and resource use, expose why work is waiting, and resume when a temporary
+  dependency recovers. Do not turn a finite attempt budget into a permanent ban
+  on a fresh authorized request. Cancellation and newer intent remain final.
+- Recovery and cleanup are scoped to the affected object or operation. One
+  malformed record must not stop unrelated work. Unavailable references or a
+  denied scan defer cleanup; they never authorize deletion of possibly used data.
 
 ## Security is fail-closed and least-authority
 
