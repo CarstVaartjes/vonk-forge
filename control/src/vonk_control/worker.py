@@ -323,6 +323,7 @@ def assemble_production_worker(
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
     from .run_admission import RunAdmissionService
     from .run_switch_operations import RunSwitchOperationService
+    from .runtime_image_preparation import FilesystemRuntimeImageStorage
     from .source_bundles import DatabaseSourceBundleStore
     from .telemetry_maintenance import (
         TelemetryMaintenance,

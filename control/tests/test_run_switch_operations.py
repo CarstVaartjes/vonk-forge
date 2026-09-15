@@ -2059,7 +2059,7 @@ def test_first_profile_preparation_preview_replans_a_missing_build_archive(
             policy_report=dict(build.policy_report),
         )
 
-    def preview_build(_revision_id: str, _builder_node_id: str) -> RecipeBuildPlan:
+    def preview_build(recipe_revision_id: str, builder_node_id: str) -> RecipeBuildPlan:
         # RecipeBuildService persists through its own short transaction while
         # Run/Switch still holds the outer profile-preparation Session.
         with sessions.begin() as session:

@@ -159,7 +159,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     service = RecipeImageAvailabilityService(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
-        authority=lambda revision_id, *, force=False: (
+        authority=lambda recipe_revision_id, *, force=False: (
             recipe,
             {
                 "architecture": "linux/arm64",

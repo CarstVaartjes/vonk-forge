@@ -497,6 +497,7 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     model_object.parent.mkdir(parents=True)
     model_object.write_bytes(b"one")
     image_object = service.root.parent / "runtime-images" / receipt.oci_archive_sha256
+    assert receipt.image_bytes is not None
     image_object.write_bytes(b"x" * receipt.image_bytes)
     with sessions.begin() as session:
         session.add_all([

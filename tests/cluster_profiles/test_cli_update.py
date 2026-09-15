@@ -23,6 +23,11 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cluster_profiles import cli, cli_update
 
 
+@pytest.fixture(autouse=True)
+def isolated_update_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VONK_CLI_UPDATE_CHANNEL", raising=False)
+
+
 def test_update_download_identifies_product_without_following_redirects() -> None:
     requests: list[str] = []
 
