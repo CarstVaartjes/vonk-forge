@@ -516,6 +516,13 @@ class FleetProfileSwitchAdapter(Protocol):
 
         ...
 
+    def recoverable_cache_loss(
+        self, application_id: str, *, session: Session
+    ) -> bool:
+        """Whether the current exact child failed only because managed bytes vanished."""
+
+        ...
+
     def start(
         self,
         *,

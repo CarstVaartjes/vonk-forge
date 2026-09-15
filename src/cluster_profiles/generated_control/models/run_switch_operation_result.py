@@ -62,6 +62,7 @@ class RunSwitchOperationResult:
             completed_bytes (Union[Unset, int]):  Default: 0.
             completed_phases (Union[Unset, list[RunSwitchOperationResultCompletedPhasesItem]]):
             failed_phase (Union[None, RunSwitchOperationResultFailedPhaseType0, Unset]):
+            failure_code (Union[None, Unset, str]):
             final_observation (Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult',
                 'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult',
                 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult',
@@ -100,6 +101,7 @@ class RunSwitchOperationResult:
     completed_bytes: Union[Unset, int] = 0
     completed_phases: Union[Unset, list[RunSwitchOperationResultCompletedPhasesItem]] = UNSET
     failed_phase: Union[None, RunSwitchOperationResultFailedPhaseType0, Unset] = UNSET
+    failure_code: Union[None, Unset, str] = UNSET
     final_observation: Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult', None, Unset] = UNSET
     final_verify_started_at: Union[None, Unset, float] = UNSET
     item_index: Union[Unset, int] = 0
@@ -180,6 +182,12 @@ class RunSwitchOperationResult:
             failed_phase = self.failed_phase
         else:
             failed_phase = self.failed_phase
+
+        failure_code: Union[None, Unset, str]
+        if isinstance(self.failure_code, Unset):
+            failure_code = UNSET
+        else:
+            failure_code = self.failure_code
 
         final_observation: Union[None, Unset, dict[str, Any]]
         if isinstance(self.final_observation, Unset):
@@ -395,6 +403,8 @@ class RunSwitchOperationResult:
             field_dict["completed_phases"] = completed_phases
         if failed_phase is not UNSET:
             field_dict["failed_phase"] = failed_phase
+        if failure_code is not UNSET:
+            field_dict["failure_code"] = failure_code
         if final_observation is not UNSET:
             field_dict["final_observation"] = final_observation
         if final_verify_started_at is not UNSET:
@@ -526,6 +536,16 @@ class RunSwitchOperationResult:
             return cast(Union[None, RunSwitchOperationResultFailedPhaseType0, Unset], data)
 
         failed_phase = _parse_failed_phase(d.pop("failed_phase", UNSET))
+
+
+        def _parse_failure_code(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        failure_code = _parse_failure_code(d.pop("failure_code", UNSET))
 
 
         def _parse_final_observation(data: object) -> Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult', None, Unset]:
@@ -1119,6 +1139,7 @@ class RunSwitchOperationResult:
             completed_bytes=completed_bytes,
             completed_phases=completed_phases,
             failed_phase=failed_phase,
+            failure_code=failure_code,
             final_observation=final_observation,
             final_verify_started_at=final_verify_started_at,
             item_index=item_index,

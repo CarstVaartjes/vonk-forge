@@ -14,7 +14,7 @@ import hashlib
 import json
 import logging
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, TypeGuard, runtime_checkable
@@ -147,6 +147,9 @@ from .run_switch_contract import (
     SparkGroup,
     SparkGroupNode,
     StopImpact,
+)
+from .runtime_image_preparation import (
+    RuntimeImagePreparationError,
 )
 from .runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
@@ -1610,6 +1613,7 @@ class RunSwitchOperationService:
         phase_executor: RunSwitchPhaseExecutor | None = None,
         model_capability_summary: Any | None = None,
         model_cache: ModelCacheService | None = None,
+        build_archive_available: Callable[[str, int], bool] | None = None,
         inventory_max_age_seconds: int = 300,
         memory_floor_bytes: int = 0,
     ) -> None:
@@ -1624,6 +1628,7 @@ class RunSwitchOperationService:
         self._artifacts = artifacts or DatabaseRunSwitchArtifactInspector(model_cache)
         self._artifact_phase_executor = artifact_phase_executor
         self._model_capability_summary = model_capability_summary
+        self._build_archive_available = build_archive_available
         self._custom_phase_executor = phase_executor is not None
         self._phase_executor = phase_executor or (
             RecipeLifecyclePhaseExecutor(
@@ -2301,6 +2306,7 @@ class RunSwitchOperationService:
             }
             progress["child_operation_id"] = None
             progress["retryable"] = False
+            progress.pop("failure_code", None)
             progress["workload_intent_ordinal"] = ordinal
             now = _now(self._clock)
             job = Job(
@@ -2537,6 +2543,19 @@ class RunSwitchOperationService:
             )
             build = build_selection.build
             build_candidate = build_selection.candidate
+            if (
+                installation is not None
+                and _is_source_build(revision.document)
+                and (
+                    build is None
+                    or installation.recipe_build_id != build.id
+                )
+            ):
+                # An installed source build is reusable only while its exact
+                # Controller build remains selected.  A replacement build (or
+                # a newly planned recreation) needs a fresh compiled install
+                # plan and installation receipt.
+                installation = None
             if build_selection.builder_freshness is not None:
                 freshness.append(build_selection.builder_freshness)
             blockers.extend(build_selection.blockers)
@@ -3024,12 +3043,24 @@ class RunSwitchOperationService:
                 return installation
         return None
 
-    @staticmethod
     def _matching_build(
+        self,
         session: Session,
         revision_id: str,
         installation: RecipeInstallation | None,
     ) -> RecipeBuild | None:
+        def available(candidate: RecipeBuild) -> bool:
+            if (
+                candidate.state != "succeeded"
+                or candidate.image_digest is None
+                or candidate.oci_layout_sha256 is None
+                or type(candidate.image_bytes) is not int
+            ):
+                return False
+            return self._build_archive_available is None or self._build_archive_available(
+                candidate.oci_layout_sha256, candidate.image_bytes
+            )
+
         revision = session.get(CatalogDocumentRevision, revision_id)
         if revision is not None and not _is_source_build(revision.document):
             return None
@@ -3042,9 +3073,7 @@ class RunSwitchOperationService:
             if (
                 build is not None
                 and build.recipe_revision_id == revision_id
-                and build.state == "succeeded"
-                and build.image_digest is not None
-                and build.image_bytes is not None
+                and available(build)
             ):
                 return build
         # A notes-only source-build revision may have a succeeded build whose
@@ -3066,12 +3095,10 @@ class RunSwitchOperationService:
             build = session.get(RecipeBuild, authorized_build_id)
             if (
                 build is not None
-                and build.state == "succeeded"
-                and build.image_digest is not None
-                and build.image_bytes is not None
+                and available(build)
             ):
                 return build
-        return session.scalar(
+        candidates = session.scalars(
             select(RecipeBuild)
             .where(
                 RecipeBuild.recipe_revision_id == revision_id,
@@ -3080,8 +3107,8 @@ class RunSwitchOperationService:
                 RecipeBuild.image_bytes.is_not(None),
             )
             .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id)
-            .limit(1)
         )
+        return next((candidate for candidate in candidates if available(candidate)), None)
 
     @staticmethod
     def _latest_build(session: Session, revision_id: str) -> RecipeBuild | None:
@@ -3186,6 +3213,12 @@ class RunSwitchOperationService:
                 errors.append(f"{node.node_id}: build preview returned no build identity")
                 continue
             selected = session.get(RecipeBuild, proposed_id)
+            if selected is not None:
+                # ``preview_build`` persists through the lifecycle service's
+                # own short transaction.  This Session may already hold the
+                # succeeded row that was reset after its archive disappeared;
+                # refresh it so the first preview sees the durable planned row.
+                session.refresh(selected)
             if selected is None or selected.recipe_revision_id != revision.id:
                 errors.append(f"{node.node_id}: build preview receipt is unavailable")
                 continue
@@ -4810,8 +4843,19 @@ class RunSwitchOperationService:
                 job.updated_at = now
                 session.commit()
                 return True
-        def fail(reason: str, *, retryable: bool = False) -> None:
-            self._fail(operation_id, reason, retryable=retryable, checkpoint=(phase_index, item_index, child_id))
+        def fail(
+            reason: str,
+            *,
+            retryable: bool = False,
+            failure_code: str | None = None,
+        ) -> None:
+            self._fail(
+                operation_id,
+                reason,
+                retryable=retryable,
+                checkpoint=(phase_index, item_index, child_id),
+                failure_code=failure_code,
+            )
 
         if child_id is not None:
             if not isinstance(child_id, str):
@@ -5113,6 +5157,12 @@ class RunSwitchOperationService:
                 )
             except RunSwitchOperationConflict as error:
                 fail(str(error))
+                return True
+            except RuntimeImagePreparationError as error:
+                fail(
+                    f"{type(error).__name__}: {error}",
+                    failure_code=error.code,
+                )
                 return True
             except (OSError, httpx.HTTPError, RuntimeError, TypeError, ValueError, KeyError) as error:
                 fail(
@@ -5445,6 +5495,7 @@ class RunSwitchOperationService:
         reason: str,
         *,
         retryable: bool = False,
+        failure_code: str | None = None,
         checkpoint: tuple[int, int, object] | None = None,
         child_evidence: object | None = None,
     ) -> None:
@@ -5463,12 +5514,18 @@ class RunSwitchOperationService:
                         progress, plan, plan.phases[checkpoint[0]], child_evidence, now
                     )
             self._mark_failed(
-                job, reason, now=now, retryable=retryable, progress=progress
+                job,
+                reason,
+                now=now,
+                retryable=retryable,
+                failure_code=failure_code,
+                progress=progress,
             )
 
     @staticmethod
     def _mark_failed(
         job: Job, reason: str, *, now: datetime, retryable: bool = False,
+        failure_code: str | None = None,
         progress: dict[str, Any] | None = None,
     ) -> None:
         """Record failure using the caller's transaction and existing row lock."""
@@ -5479,6 +5536,10 @@ class RunSwitchOperationService:
             progress = _read_progress(job.result)
         progress["failed_phase"] = progress.get("phase")
         progress["retryable"] = retryable
+        if failure_code is None:
+            progress.pop("failure_code", None)
+        else:
+            progress["failure_code"] = failure_code
         job.result = _persisted_result(progress)
         job.updated_at = now
 
@@ -6323,6 +6384,7 @@ def _complete_operation_progress(
     progress["subphase"] = None
     progress["retryable"] = False
     progress["failed_phase"] = None
+    progress.pop("failure_code", None)
     progress["child_operation_id"] = None
     return progress
 

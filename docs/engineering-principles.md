@@ -56,6 +56,13 @@ they are where shortcuts become incidents.
 - Exact cross-site image reproducibility is desirable but never silently
   assumed. When a local result differs from a publisher's tested result for the
   same recipe, Vonk shows the difference and withholds the claim.
+- Model files and runtime images are reconstructible caches. After a restore
+  or interrupted transfer, reconcile recorded availability with managed storage,
+  re-download missing model or published image assets, and rebuild missing
+  source images through the existing preparation path. Preserve completed files
+  and resumable transfers. A historical success record must not prevent repair
+  or make absent bytes look ready. A rebuilt image receives its own verified
+  identity; it must not silently replace the image in an already bound plan.
 
 ## Security is fail-closed and least-authority
 

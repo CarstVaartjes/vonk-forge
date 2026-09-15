@@ -344,6 +344,199 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(tmp_path: 
         restarted.get(queued.id)
 
 
+def test_missing_succeeded_build_archive_is_recreated_automatically(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    build_id = "00000000-0000-4000-8000-000000000902"
+    with sessions.begin() as session:
+        _add_revision(session, "revision-missing-build-archive", recipe)
+        session.add(AgentNode(node_id="spark-builder", state="active"))
+        session.add(
+            RecipeBuild(
+                id=build_id,
+                recipe_revision_id="revision-missing-build-archive",
+                builder_node_id="spark-builder",
+                source_bundle_sha256="b" * 64,
+                build_input_sha256="f" * 64,
+                state="succeeded",
+                policy_report={},
+                plan={},
+                image_digest=IMAGE_DIGEST,
+                oci_layout_sha256=ARCHIVE_SHA,
+                image_bytes=len(ARCHIVE),
+                error=None,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    forced: list[bool] = []
+
+    def builder(*_: object, force: bool, **__: object) -> dict[str, object]:
+        forced.append(force)
+        (storage.root / ARCHIVE_SHA).write_bytes(ARCHIVE)
+        return {
+            "state": "succeeded",
+            "build_id": build_id,
+            "build_input_sha256": "f" * 64,
+            "image_digest": IMAGE_DIGEST,
+            "oci_layout_sha256": ARCHIVE_SHA,
+            "image_bytes": len(ARCHIVE),
+        }
+
+    class BuildTransport(Transport):
+        def inspect_archive(
+            self,
+            archive: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
+        ) -> PulledImageEvidence:
+            assert archive.read_bytes() == ARCHIVE
+            return PulledImageEvidence(
+                manifest_digest=IMAGE_DIGEST,
+                requested_manifest_digest=None,
+                config_id=CONFIG_DIGEST,
+                local_reference="docker-archive:" + str(archive),
+                architecture=expected_architecture,
+                runtime_interface=expected_runtime_interface,
+                archive_sha256=expected_archive_sha256,
+                archive_bytes=expected_archive_bytes,
+            )
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe,
+            _build_runtime(),
+        ),
+        transport=BuildTransport(),
+        builder=builder,
+        receipt_writer=lambda *_args: None,
+        clock=lambda: datetime.now(UTC),
+        automatic_attempt_limit=1,
+    )
+    queued = service.start(
+        "revision-missing-build-archive",
+        actor="operator",
+        request_id="r" * 36,
+    )
+
+    assert service.run_pending() == 1
+    completed = service.get(queued.id)
+    assert completed.state == "succeeded", completed.failure
+    assert forced == [True]
+    assert (storage.root / ARCHIVE_SHA).read_bytes() == ARCHIVE
+
+
+def test_present_older_matching_build_is_reused_when_latest_archive_is_missing(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    older_id = "00000000-0000-4000-8000-000000000903"
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-older-build", recipe)
+        session.add_all(
+            [
+                AgentNode(node_id="spark-builder-old", state="active"),
+                AgentNode(node_id="spark-builder-new", state="active"),
+            ]
+        )
+        session.add_all(
+            [
+                RecipeBuild(
+                    id=older_id,
+                    recipe_revision_id="revision-older-build",
+                    builder_node_id="spark-builder-old",
+                    source_bundle_sha256="b" * 64,
+                    build_input_sha256="f" * 64,
+                    state="succeeded",
+                    policy_report={},
+                    plan={},
+                    image_digest=IMAGE_DIGEST,
+                    oci_layout_sha256=ARCHIVE_SHA,
+                    image_bytes=len(ARCHIVE),
+                    created_at=now,
+                    updated_at=now,
+                ),
+                RecipeBuild(
+                    id="00000000-0000-4000-8000-000000000904",
+                    recipe_revision_id="revision-older-build",
+                    builder_node_id="spark-builder-new",
+                    source_bundle_sha256="b" * 64,
+                    build_input_sha256="f" * 64,
+                    state="succeeded",
+                    policy_report={},
+                    plan={},
+                    image_digest="sha256:" + "a" * 64,
+                    oci_layout_sha256="a" * 64,
+                    image_bytes=len(ARCHIVE),
+                    created_at=now + timedelta(seconds=1),
+                    updated_at=now + timedelta(seconds=1),
+                ),
+            ]
+        )
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    (storage.root / ARCHIVE_SHA).write_bytes(ARCHIVE)
+
+    def builder(*_: object, **__: object) -> dict[str, object]:
+        raise AssertionError("a physically present matching build should be reused")
+
+    class BuildTransport(Transport):
+        def inspect_archive(
+            self,
+            archive: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
+        ) -> PulledImageEvidence:
+            return PulledImageEvidence(
+                manifest_digest=IMAGE_DIGEST,
+                requested_manifest_digest=None,
+                config_id=CONFIG_DIGEST,
+                local_reference="docker-archive:" + str(archive),
+                architecture=expected_architecture,
+                runtime_interface=expected_runtime_interface,
+                archive_sha256=expected_archive_sha256,
+                archive_bytes=expected_archive_bytes,
+            )
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe,
+            _build_runtime(),
+        ),
+        transport=BuildTransport(),
+        builder=builder,
+        receipt_writer=lambda *_args: None,
+        clock=lambda: datetime.now(UTC),
+    )
+    queued = service.start(
+        "revision-older-build", actor="operator", request_id="s" * 36
+    )
+
+    assert service.run_pending() == 1
+    completed = service.get(queued.id)
+    assert completed.state == "succeeded", completed.failure
+    assert completed.result is not None
+    assert completed.result["build_id"] == older_id
+
+
 def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(tmp_path: Path) -> None:
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
@@ -788,7 +981,11 @@ def test_model_child_and_image_complete_through_one_sql_operation(tmp_path: Path
 
         def download_preview(self, *, recipe_revision_id: str) -> dict[str, object]:
             assert recipe_revision_id == "revision-model-image"
-            return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
+            return {
+                "plan_digest": "d" * 64,
+                "artifact_set_sha256": "c" * 64,
+                "new_bytes": 0,
+            }
 
         def resolve_artifact_set(self, *, recipe_revision_id: str) -> SimpleNamespace:
             return SimpleNamespace(digest="c" * 64, document=lambda: {"model_content_digests": ["d" * 64], "artifacts": []})
@@ -857,7 +1054,11 @@ def test_model_and_image_children_advance_independently_and_reuse_image(tmp_path
 
     class ModelCache:
         def download_preview(self, **_: object) -> dict[str, object]:
-            return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
+            return {
+                "plan_digest": "d" * 64,
+                "artifact_set_sha256": "c" * 64,
+                "new_bytes": 0,
+            }
 
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(digest="c" * 64, document=lambda: {"model_content_digests": ["d" * 64], "artifacts": []})
@@ -895,14 +1096,24 @@ def test_model_and_image_children_advance_independently_and_reuse_image(tmp_path
     assert image_child.state == "succeeded"
     assert image_child.progress.completed_bytes == len(ARCHIVE)
     assert _progress_members(partial.progress["members"])[-1]["member_id"] == "model-cache"
+    (service._storage.root / ARCHIVE_SHA).unlink()
     child.state = "succeeded"
     with sessions.begin() as session:
         row = session.get(Job, queued.id)
         assert row is not None
         row.payload = dict(row.payload) | {"retry_after_at": "2000-01-01T00:00:00+00:00"}
-    assert service.run_pending() == 1
-    assert service.get(queued.id).state == "succeeded"
-    assert transport.calls == 1
+    restarted = RecipeImageAvailabilityService(
+        sessions,
+        storage=service._storage,
+        authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
+        transport=transport,
+        model_cache=ModelCache(),
+        clock=lambda: datetime.now(UTC),
+    )
+    assert restarted.run_pending() == 1
+    completed = restarted.get(queued.id)
+    assert completed.state == "succeeded", completed.failure
+    assert transport.calls == 2
 
 
 def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(tmp_path: Path) -> None:
@@ -997,7 +1208,11 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
             self.repair_calls: list[dict[str, object]] = []
 
         def download_preview(self, **_: object) -> dict[str, object]:
-            return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
+            return {
+                "plan_digest": "d" * 64,
+                "artifact_set_sha256": "c" * 64,
+                "new_bytes": 0,
+            }
 
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(

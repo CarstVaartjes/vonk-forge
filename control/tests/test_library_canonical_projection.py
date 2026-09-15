@@ -491,6 +491,7 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
         sessions,
         cursors=TokenCodec(b"q" * 32).cursor_codec(),
         clock=lambda: now,
+        runtime_archive_available=lambda _digest, _size: False,
     )
     models = projection.models(local_only=True).models
     assert {item.identity.content_sha256 for item in models} == {old_digest}
@@ -500,7 +501,8 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
     recipes = projection.recipe_library().recipes
     assert len(recipes) == 1
     assert recipes[0].identity.content_sha256 == recipe_digest
-    assert recipes[0].local.controller == "cached"
+    assert recipes[0].local.controller == "not_cached"
+    assert recipes[0].local.running_on == [node_id]
 
 
 def test_library_pagination_covers_more_than_one_page_without_gaps(tmp_path: Path) -> None:

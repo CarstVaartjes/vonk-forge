@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import uuid
 from collections.abc import Callable, Iterable, Mapping
@@ -434,22 +435,28 @@ def persist_runtime_image_receipt(
         )
     original_revision_id = original_revision.id
     _validate_revision_reuse_identity(current_revision, original_revision)
-    # One verified archive legitimately serves more than one execution
-    # identity: the availability operation records the recipe-level identity it
-    # admitted, and each placement then records the compiled identity that its
-    # launch and the Spark agent's receipt authorization actually compare.  A
-    # second identity for the same bytes is not a conflict, so the identity
-    # lookup below is the only one: it keeps the artifact immutable *per
-    # identity*, and ``_validate_revision_reuse_identity`` above keeps the
-    # revision an editorial successor with the same execution and artifact
-    # identity.  Direct published images prepared before any launch depend on
-    # this: refusing the second identity left every prepared recipe unusable.
+    # A source recipe can be rebuilt under the same execution identity.  The
+    # rebuild is a new immutable observation when its verified platform/config
+    # identity changes; retaining both rows lets a frozen plan continue to
+    # resolve only its original receipt while a fresh plan authorizes the new
+    # one.  Published pins cannot legitimately change beneath the same recipe
+    # execution, so their narrower lookup deliberately retains conflict
+    # detection.  For either source, the database uniqueness fields identify
+    # the row and the full comparison below prevents changed archive/build
+    # provenance from being folded into an existing observation.
     lookup = select(RuntimeImageReceiptRow).where(
         RuntimeImageReceiptRow.recipe_revision_id == original_revision_id,
         RuntimeImageReceiptRow.source == receipt.source,
         RuntimeImageReceiptRow.original_content_digest == original_content_digest,
         RuntimeImageReceiptRow.effective_execution_key == effective_execution_key,
     )
+    if receipt.source == "controller-build":
+        lookup = lookup.where(
+            RuntimeImageReceiptRow.platform_manifest_digest
+            == receipt.platform_manifest_digest,
+            RuntimeImageReceiptRow.local_image_config_id
+            == receipt.local_image_config_id,
+        )
     row = session.scalar(lookup)
     identity = {
         "registry_manifest_digest": receipt.registry_manifest_digest,
@@ -862,9 +869,22 @@ class FilesystemRuntimeImageStorage:
                 "runtime_image.archive_invalid", "OCI archive digest is invalid"
             )
         path = self.root / archive_sha256
-        if not path.is_file() or path.is_symlink():
+        try:
+            observed = path.lstat()
+        except FileNotFoundError as error:
             raise RuntimeImagePreparationError(
-                "runtime_image.archive_unavailable", "OCI archive is not present in Controller storage"
+                "runtime_image.cache_missing",
+                "OCI archive is not present in Controller storage",
+            ) from error
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_unavailable",
+                "Controller runtime image storage could not be inspected",
+            ) from error
+        if not stat.S_ISREG(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch",
+                "stored OCI archive is not a regular file",
             )
         if not 1 <= expected_bytes <= self.maximum_bytes or not verified_files.verify_path(
             path, archive_sha256, expected_bytes
@@ -873,6 +893,45 @@ class FilesystemRuntimeImageStorage:
                 "runtime_image.archive_mismatch", "stored OCI archive failed content verification"
             )
         return path
+
+    def build_archive_available(self, archive_sha256: str, expected_bytes: int) -> bool:
+        """Report whether exact build bytes are present without scanning the archive.
+
+        This is the planning/projection check.  The preparation and distribution
+        paths still hash the archive before using it.  A missing file is normal
+        cache loss; unsafe types, changed sizes, and inaccessible storage remain
+        explicit failures rather than being projected as an ordinary cache miss.
+        """
+
+        if (
+            _SHA256.fullmatch(archive_sha256) is None
+            or type(expected_bytes) is not int
+            or not 1 <= expected_bytes <= self.maximum_bytes
+        ):
+            raise RuntimeImagePreparationError(
+                "runtime_image.receipt_invalid", "source-build image evidence is invalid"
+            )
+        path = self.root / archive_sha256
+        try:
+            observed = path.lstat()
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_unavailable",
+                "Controller runtime image storage could not be inspected",
+            ) from error
+        if not stat.S_ISREG(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch",
+                "stored OCI build object is not a regular archive",
+            )
+        if observed.st_size != expected_bytes:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch",
+                "stored OCI build archive length changed",
+            )
+        return True
 
     def find_published(
         self,

@@ -152,6 +152,10 @@ class RuntimeImageCacheStorage(RuntimeImageStorage, Protocol):
 
     root: Path
 
+    def build_archive_available(
+        self, archive_sha256: str, expected_bytes: int
+    ) -> bool: ...
+
 
 class ModelCacheOperationHandle(Protocol):
     """The bounded view a durable ModelCache operation exposes to its caller."""
@@ -903,7 +907,10 @@ class RecipeImageAvailabilityService:
             )
             plan_digest = preview.get("plan_digest")
             artifact_set_sha256 = preview.get("artifact_set_sha256")
-            if not isinstance(plan_digest, str) or not isinstance(artifact_set_sha256, str):
+            if (
+                not isinstance(plan_digest, str)
+                or not isinstance(artifact_set_sha256, str)
+            ):
                 raise RecipeImageAvailabilityError(
                     "recipe_image.model_cache_invalid",
                     "ModelCache returned an incomplete exact artifact plan",
@@ -914,6 +921,15 @@ class RecipeImageAvailabilityService:
                 recipe_revision_id=recipe_revision_id
             )
             manifest_document = manifest.document()
+            artifacts = manifest_document.get("artifacts")
+            new_bytes = preview.get("new_bytes")
+            if type(new_bytes) is not int or new_bytes < 0:
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.model_cache_invalid",
+                    "ModelCache returned incomplete transfer accounting",
+                    retryable=True,
+                    recovery_actions=("retry",),
+                )
             if manifest.digest != artifact_set_sha256:
                 raise RecipeImageAvailabilityError(
                     "recipe_image.model_cache_invalid",
@@ -930,6 +946,7 @@ class RecipeImageAvailabilityService:
                     if (
                         candidate.artifact_set_sha256 == artifact_set_sha256
                         and candidate.state in {"queued", "running", "partial", "succeeded", "failed"}
+                        and not (candidate.state == "succeeded" and new_bytes > 0)
                     )
                 ]
                 state_rank = {"succeeded": 0, "queued": 1, "running": 1, "partial": 1, "failed": 2}
@@ -964,7 +981,6 @@ class RecipeImageAvailabilityService:
                 recovery_actions=("retry",),
             ) from error
         model_content_digests = manifest_document["model_content_digests"]
-        artifacts = manifest_document.get("artifacts")
         return {
             "id": operation.id,
             "request_key": str(getattr(operation, "request_key", child_request_key)),
@@ -1417,31 +1433,39 @@ class RecipeImageAvailabilityService:
                 self._identity_locks[identity_key] = lock
             return lock
 
-    def _stored_build_receipt(self, build_input_sha256: str) -> Mapping[str, object] | None:
+    def _stored_build_receipt(
+        self, build_input_sha256: str
+    ) -> tuple[Mapping[str, object] | None, bool]:
         with self._sessions() as session:
-            build = session.scalar(
+            builds = session.scalars(
                 select(RecipeBuild)
                 .where(
                     RecipeBuild.build_input_sha256 == build_input_sha256,
                     RecipeBuild.state == "succeeded",
                 )
                 .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
-                .limit(1)
             )
-            if (
-                build is None
-                or build.image_digest is None
-                or build.oci_layout_sha256 is None
-                or build.image_bytes is None
-            ):
-                return None
-            return {
-                "state": "succeeded",
-                "build_id": build.id,
-                "image_digest": build.image_digest,
-                "oci_layout_sha256": build.oci_layout_sha256,
-                "image_bytes": build.image_bytes,
-            }
+            missing_archive = False
+            for build in builds:
+                if (
+                    build.image_digest is None
+                    or build.oci_layout_sha256 is None
+                    or build.image_bytes is None
+                ):
+                    continue
+                if not self._storage.build_archive_available(
+                    build.oci_layout_sha256, build.image_bytes
+                ):
+                    missing_archive = True
+                    continue
+                return {
+                    "state": "succeeded",
+                    "build_id": build.id,
+                    "image_digest": build.image_digest,
+                    "oci_layout_sha256": build.oci_layout_sha256,
+                    "image_bytes": build.image_bytes,
+                }, False
+            return None, missing_archive
 
     def _eligible(self, operation_id: str) -> bool:
         with self._sessions() as session:
@@ -1482,6 +1506,8 @@ class RecipeImageAvailabilityService:
                 return
             if operation.state == "cancelled" or payload.get("removal_fence") is not None:
                 return
+            operation_actor = operation.actor
+            operation_request_id = operation.request_id
             was_running = operation.state == "running"
             operation.state = "running"
             if not was_running:
@@ -1509,7 +1535,11 @@ class RecipeImageAvailabilityService:
             runtime = payload["runtime"]
             if not isinstance(runtime, Mapping):
                 raise RecipeImageAvailabilityError("recipe_image.runtime_invalid", "runtime projection is invalid")
-            model_child = self._current_model_child(payload)
+            model_child = self._current_model_child(
+                payload,
+                actor=operation_actor,
+                parent_request_key=operation_request_id,
+            )
             model_pending = False
             model_failure: Mapping[str, object] | None = None
             if model_child is not None:
@@ -1523,6 +1553,7 @@ class RecipeImageAvailabilityService:
             identity = identity_key if isinstance(identity_key, str) else None
             with self._identity_lock(identity):
                 stored_image = payload.get("image_result")
+                receipt = None
                 if isinstance(stored_image, Mapping):
                     try:
                         receipt = RuntimeImageReceipt(**dict(stored_image))
@@ -1531,8 +1562,18 @@ class RecipeImageAvailabilityService:
                             "runtime_image.receipt_invalid",
                             "durable runtime image result is malformed",
                         ) from error
-                else:
-                    receipt = self._prepare_claimed_image(operation_id, payload, recipe, runtime)
+                if receipt is None or not self._storage.build_archive_available(
+                    receipt.oci_archive_sha256, receipt.image_bytes
+                ):
+                    repair_payload = (
+                        dict(payload) | {"force_download": True}
+                        if isinstance(stored_image, Mapping)
+                        and recipe.execution.mode == "image"
+                        else payload
+                    )
+                    receipt = self._prepare_claimed_image(
+                        operation_id, repair_payload, recipe, runtime
+                    )
                     # Removal holds the same lock and commits a durable fence
                     # before deleting Controller image bytes.  A builder may
                     # finish after that point, but it cannot republish SQL or
@@ -1654,7 +1695,13 @@ class RecipeImageAvailabilityService:
                 heartbeat_stop.set()
                 heartbeat.join(timeout=max(1.0, self._claim_lease_seconds / 2))
 
-    def _current_model_child(self, payload: Mapping[str, object]) -> Mapping[str, object] | None:
+    def _current_model_child(
+        self,
+        payload: Mapping[str, object],
+        *,
+        actor: str | None = None,
+        parent_request_key: str | None = None,
+    ) -> Mapping[str, object] | None:
         child = payload.get("model_child")
         if not isinstance(child, Mapping) or self._model_cache is None:
             return child if isinstance(child, Mapping) else None
@@ -1663,6 +1710,46 @@ class RecipeImageAvailabilityService:
             return child
         try:
             operation = self._model_cache.get_operation(child_id)
+            if (
+                operation.state == "succeeded"
+                and actor is not None
+                and parent_request_key is not None
+                and isinstance(operation.artifact_set_sha256, str)
+            ):
+                recipe_revision_id = payload.get("recipe_revision_id")
+                if not isinstance(recipe_revision_id, str):
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.model_cache_invalid",
+                        "availability operation lacks its exact recipe revision",
+                        retryable=True,
+                        recovery_actions=("retry",),
+                    )
+                preview = self._model_cache.download_preview(
+                    recipe_revision_id=recipe_revision_id
+                )
+                preview_set = preview.get("artifact_set_sha256")
+                preview_plan = preview.get("plan_digest")
+                new_bytes = preview.get("new_bytes")
+                if (
+                    preview_set != operation.artifact_set_sha256
+                    or not isinstance(preview_plan, str)
+                    or type(new_bytes) is not int
+                    or new_bytes < 0
+                ):
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.model_cache_invalid",
+                        "ModelCache returned an incomplete exact artifact plan",
+                        retryable=True,
+                        recovery_actions=("retry",),
+                )
+                if new_bytes > 0:
+                    return self._ensure_model_child(
+                        recipe_revision_id,
+                        actor=actor,
+                        parent_request_key=(
+                            f"{parent_request_key}:restore:{child_id}:{preview_plan}"
+                        ),
+                    )
         except ModelCacheNotFound:
             return dict(child) | {
                 "state": "failed",
@@ -1737,7 +1824,11 @@ class RecipeImageAvailabilityService:
             if self._builder_admission is not None:
                 self._builder_admission(recipe, runtime)
             self._update_progress(operation_id, "build", total_bytes=None)
-            build_receipt = None if force_rebuild else self._stored_build_receipt(build_input_sha256)
+            build_receipt, missing_archive = (
+                (None, False)
+                if force_rebuild
+                else self._stored_build_receipt(build_input_sha256)
+            )
             if build_receipt is None:
                 def report(value: Mapping[str, object]) -> None:
                     phase = value.get("phase", "build")
@@ -1748,7 +1839,7 @@ class RecipeImageAvailabilityService:
                     runtime,
                     operation_id=operation_id,
                     build_input_sha256=build_input_sha256,
-                    force=force_rebuild,
+                    force=force_rebuild or missing_archive,
                     progress=report,
                 )
             if not isinstance(build_receipt, Mapping):

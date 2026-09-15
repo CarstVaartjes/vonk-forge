@@ -376,6 +376,12 @@ class _SwitchAdapter:
     ) -> None:
         self.cancellations.append((targets, ordinal))
 
+    def recoverable_cache_loss(
+        self, application_id: str, *, session: Session
+    ) -> bool:
+        del application_id, session
+        return False
+
     def start(
         self,
         *,

@@ -1329,6 +1329,8 @@ def production_app() -> FastAPI:
 
     settings = Settings.from_env_and_secrets()
     sessions = session_factory(build_engine(settings.database_url))
+    # Planning, profile choices, and preparation share the same managed OCI root.
+    runtime_image_storage = FilesystemRuntimeImageStorage(settings.agent_artifact_root)
 
     def clock() -> datetime:
         return datetime.now(UTC)
@@ -1362,6 +1364,7 @@ def production_app() -> FastAPI:
         telemetry_live_seconds=6,
         telemetry_delayed_seconds=20,
         disk_floor_bytes=10_000_000_000,
+        runtime_archive_available=runtime_image_storage.build_archive_available,
     )
     metrics = MetricsRegistry()
     operational_metrics = OperationalMetricsCollector(
@@ -1376,6 +1379,7 @@ def production_app() -> FastAPI:
         max_parallel_downloads=settings.model_cache_parallel_downloads,
         clock=clock,
         huggingface_token_path=settings.huggingface_token_path,
+        runtime_archive_available=runtime_image_storage.build_archive_available,
     )
     model_cache.resume_operations()
 
@@ -1390,12 +1394,6 @@ def production_app() -> FastAPI:
         revision_eligible=revision_eligible,
         current_revision=current_revision,
         model_cache=model_cache,
-    )
-    runtime_image_storage = FilesystemRuntimeImageStorage(
-        # RecipeBuildVerifiedObjectSource and direct-image preparation share
-        # the Controller's verified OCI root.  A successful build therefore
-        # needs no Spark hop or duplicate copy before it can be inspected.
-        settings.agent_artifact_root
     )
     runtime_image_transport = SkopeoOCIImageTransport()
 
@@ -1539,6 +1537,7 @@ def production_app() -> FastAPI:
         sessions,
         bundles=database_bundles,
         inventory_max_age=300,
+        build_archive_available=runtime_image_storage.build_archive_available,
     )
     recipe_operations = RecipeOperationService(
         sessions,
@@ -1565,6 +1564,7 @@ def production_app() -> FastAPI:
         clock=clock,
         mappings=ClusterMappingService(sessions),
         model_cache=model_cache,
+        build_archive_available=runtime_image_storage.build_archive_available,
         artifact_phase_executor=CompositeDistributionPhaseExecutor(
             sessions,
             agent_services.operations,

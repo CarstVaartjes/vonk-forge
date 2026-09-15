@@ -323,6 +323,7 @@ def assemble_production_worker(
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
     from .run_admission import RunAdmissionService
     from .run_switch_operations import RunSwitchOperationService
+    from .runtime_image_preparation import FilesystemRuntimeImageStorage
     from .source_bundles import DatabaseSourceBundleStore
     from .telemetry_maintenance import (
         TelemetryMaintenance,
@@ -355,10 +356,16 @@ def assemble_production_worker(
         management_policy=management_policy,
         clock=clock,
     )
+    runtime_archive_available = (
+        FilesystemRuntimeImageStorage(agent_artifact_root).build_archive_available
+        if agent_artifact_root is not None
+        else None
+    )
     recipe_builds = RecipeBuildService(
         sessions,
         bundles=DatabaseSourceBundleStore(sessions),
         inventory_max_age=300,
+        build_archive_available=runtime_archive_available,
     )
     lifecycle = RecipeOperationService(
         sessions,
@@ -385,6 +392,7 @@ def assemble_production_worker(
         clock=clock,
         mappings=ClusterMappingService(sessions),
         model_cache=model_cache,
+        build_archive_available=runtime_archive_available,
         artifact_phase_executor=artifact_phase_executor,
     )
     recipe_operations = RecipeOperationWorker(
@@ -516,6 +524,9 @@ if __name__ == "__main__":
             clock=clock,
         ),
     )
+    runtime_image_storage = FilesystemRuntimeImageStorage(
+        settings.agent_artifact_root
+    )
     model_cache = ModelCacheService(
         sessions,
         settings.model_cache_root,
@@ -523,11 +534,9 @@ if __name__ == "__main__":
         max_parallel_downloads=settings.model_cache_parallel_downloads,
         clock=clock,
         huggingface_token_path=settings.huggingface_token_path,
+        runtime_archive_available=runtime_image_storage.build_archive_available,
     )
     model_cache.resume_operations()
-    runtime_image_storage = FilesystemRuntimeImageStorage(
-        settings.agent_artifact_root
-    )
     runtime_image_transport = SkopeoOCIImageTransport()
 
     def prepare_runtime_image_receipt(document, runtime_spec, build):

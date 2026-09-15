@@ -10,11 +10,13 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from vonk_control.catalog_entities import _build_projection
 from vonk_control.compiled_execution_plan import CompiledRuntimeImage
 from vonk_control.execution_plan_service import _runtime_receipt_mapping
 from vonk_control.models import (
+    AgentNode,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -597,6 +599,26 @@ def test_build_receipt_requires_the_exact_stored_archive(tmp_path: Path) -> None
         )
 
 
+def test_build_archive_presence_is_cheap_and_requires_a_regular_exact_size_file(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+
+    assert storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE)) is False
+    archive = storage.root / ARCHIVE_DIGEST
+    archive.write_bytes(ARCHIVE)
+    assert storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE)) is True
+
+    archive.write_bytes(ARCHIVE + b"corrupt")
+    with pytest.raises(RuntimeImagePreparationError, match="length"):
+        storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE))
+
+    archive.unlink()
+    archive.symlink_to(tmp_path / "outside")
+    with pytest.raises(RuntimeImagePreparationError, match="regular archive"):
+        storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE))
+
+
 def test_runtime_distribution_document_is_not_a_recipe_authority(tmp_path: Path) -> None:
     with pytest.raises(RuntimeImagePreparationError, match="canonical RecipeDefinition"):
         prepare_runtime_image(
@@ -802,6 +824,170 @@ def test_one_verified_archive_serves_availability_and_launch_identities(
             .count()
             == 2
         )
+
+
+def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
+    postgres_engine: Engine,
+) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    recipe_digest = content_sha256(recipe)
+    revision_id = "revision-rebuilt-source"
+    execution_key = "a" * 64
+    old_build_id = "a0a6e2d9-7771-45eb-bacb-c56142a240cf"
+    new_build_id = "833ac675-ec54-46b4-b490-81916d9d6b0e"
+    old_receipt = RuntimeImageReceipt(
+        schema_version=2,
+        source="controller-build",
+        distribution_publisher=recipe.identity.publisher,
+        distribution_slug=recipe.identity.slug,
+        distribution_content_sha256=recipe_digest,
+        registry_manifest_digest=None,
+        platform_manifest_digest=(
+            "sha256:a511438d08c3e9761e6f91ce10561cb50dcdd8ff33b898015910c7c6d6bf87cf"
+        ),
+        image_digest=(
+            "sha256:a511438d08c3e9761e6f91ce10561cb50dcdd8ff33b898015910c7c6d6bf87cf"
+        ),
+        oci_archive_sha256=(
+            "92363d7363402c0c4217b2711b786e124c4d173db0301e3c95f695f36d5f1def"
+        ),
+        image_bytes=21_017_472_512,
+        local_image_config_id="sha256:" + "7b37b97a71c439d0" + "0" * 48,
+        local_image_reference=None,
+        architecture="linux-arm64",
+        runtime_interface="vonk.runtime.v1",
+        runtime_interface_label="v1",
+        archive_path="/state/agent-artifacts/image-cache/old",
+        recorded_at="2026-09-15T17:00:00+00:00",
+        build_id=old_build_id,
+    )
+    new_receipt = old_receipt.model_copy(
+        update={
+            "platform_manifest_digest": (
+                "sha256:c27772a442473d151a312c46add350a6f35f1cc9713017f2f06a377b8ca01b5e"
+            ),
+            "image_digest": (
+                "sha256:c27772a442473d151a312c46add350a6f35f1cc9713017f2f06a377b8ca01b5e"
+            ),
+            "oci_archive_sha256": (
+                "69b60a20441d70237e7ac1dd375ab5fe22270f40aba94a63b4404fb2161016ff"
+            ),
+            "local_image_config_id": "sha256:" + "0b81177e49318128" + "0" * 48,
+            "archive_path": "/state/agent-artifacts/image-cache/new",
+            "recorded_at": "2026-09-15T17:17:02+00:00",
+            "build_id": new_build_id,
+        }
+    )
+    engine = postgres_engine
+    Base.metadata.create_all(engine)
+    now = datetime.now(UTC)
+    with Session(engine) as session:
+        session.add(
+            CatalogDocument(
+                id="document-" + revision_id,
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                title=recipe.metadata.title,
+                created_by="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add_all(
+            [
+                AgentNode(node_id="old-builder", state="active"),
+                AgentNode(node_id="new-builder", state="active"),
+            ]
+        )
+        session.flush()
+        _add_revision(session, revision_id, recipe)
+        session.flush()
+        session.add_all(
+            [
+                RecipeBuild(
+                    id=old_build_id,
+                    recipe_revision_id=revision_id,
+                    builder_node_id="old-builder",
+                    source_bundle_sha256="c" * 64,
+                    build_input_sha256="d" * 64,
+                    state="succeeded",
+                    policy_report={},
+                    plan={},
+                    image_digest=old_receipt.image_digest,
+                    oci_layout_sha256=old_receipt.oci_archive_sha256,
+                    image_bytes=old_receipt.image_bytes,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                RecipeBuild(
+                    id=new_build_id,
+                    recipe_revision_id=revision_id,
+                    builder_node_id="new-builder",
+                    source_bundle_sha256="c" * 64,
+                    build_input_sha256="e" * 64,
+                    state="succeeded",
+                    policy_report={},
+                    plan={},
+                    image_digest=new_receipt.image_digest,
+                    oci_layout_sha256=new_receipt.oci_archive_sha256,
+                    image_bytes=new_receipt.image_bytes,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        session.flush()
+        old_row = persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=revision_id,
+            original_content_digest=recipe_digest,
+            effective_execution_key=execution_key,
+            receipt=old_receipt,
+            verified_at=now,
+        )
+        new_row = persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=revision_id,
+            original_content_digest=recipe_digest,
+            effective_execution_key=execution_key,
+            receipt=new_receipt,
+            verified_at=now + timedelta(seconds=1),
+        )
+        changed_provenance = new_receipt.model_copy(
+            update={
+                "oci_archive_sha256": "1" * 64,
+                "build_id": "11111111-1111-4111-8111-111111111111",
+            }
+        )
+        with pytest.raises(RuntimeImagePreparationError, match="identity changed"):
+            persist_runtime_image_receipt(
+                session,
+                recipe_revision_id=revision_id,
+                original_content_digest=recipe_digest,
+                effective_execution_key=execution_key,
+                receipt=changed_provenance,
+                verified_at=now + timedelta(seconds=2),
+            )
+        session.commit()
+
+        assert new_row.id != old_row.id
+        assert session.query(RuntimeImageReceiptRow).count() == 2
+        assert session.query(RuntimeImageAuthorization).count() == 2
+        assert resolve_persisted_runtime_image_receipt(
+            session,
+            recipe_revision_id=revision_id,
+            current_content_digest=recipe_digest,
+            effective_execution_key=execution_key,
+            receipt=new_receipt,
+        ).id == new_row.id
+        assert resolve_persisted_runtime_image_receipt(
+            session,
+            recipe_revision_id=revision_id,
+            current_content_digest=recipe_digest,
+            effective_execution_key=execution_key,
+            receipt=old_receipt,
+        ).id == old_row.id
 
 
 def test_notes_revision_reuses_original_receipt_with_separate_authorization(
@@ -1137,3 +1323,19 @@ def test_native_transfer_continues_while_progress_observer_is_busy(
         progress, "download", None,
     )
     assert reports[-1] == ("download", len(destination.read_bytes()), None)
+
+
+def test_runtime_image_storage_types_only_clean_absence_as_cache_missing(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    digest = "a" * 64
+    with pytest.raises(RuntimeImagePreparationError) as missing:
+        storage.verify_existing(digest, 4)
+    assert missing.value.code == "runtime_image.cache_missing"
+
+    archive = storage.root / digest
+    archive.symlink_to(tmp_path / "absent-target")
+    with pytest.raises(RuntimeImagePreparationError) as unsafe:
+        storage.verify_existing(digest, 4)
+    assert unsafe.value.code == "runtime_image.archive_mismatch"
