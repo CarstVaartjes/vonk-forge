@@ -102,6 +102,11 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
     password_file = tmp_path / "litellm-password"
     password_file.write_text("b" * 64 + "\n", encoding="ascii")
     password_file.chmod(0o600)
+    init_asset = tmp_path / "init-databases.sh"
+    shutil.copyfile(SCRIPT, init_asset)
+    # A restored NAS project folder may retain readable contents without a
+    # host-executable file. The container must treat it as a source asset.
+    init_asset.chmod(0o644)
     container = f"vonk-postgres-test-{uuid.uuid4().hex}"
     try:
         subprocess.run(
@@ -118,7 +123,7 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
                 "-e",
                 "POSTGRES_PASSWORD=control-password",
                 "-v",
-                f"{SCRIPT}:/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh:ro",
+                f"{init_asset}:/run/vonk-source-assets/postgres/init-databases.sh:ro",
                 "-v",
                 f"{password_file}:/run/secrets/litellm-database-password:ro",
                 "-v",
@@ -202,6 +207,20 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
         ).splitlines()
 
         assert rows == ["control:control", "litellm:litellm"]
+        staged_initializer = subprocess.check_output(
+            [
+                "docker",
+                "exec",
+                container,
+                "stat",
+                "-c",
+                "%F:%u:%g:%a",
+                "/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh",
+            ],
+            text=True,
+            timeout=10,
+        ).strip()
+        assert staged_initializer == "regular file:0:0:444"
         roles = subprocess.check_output(
             [
                 "docker",

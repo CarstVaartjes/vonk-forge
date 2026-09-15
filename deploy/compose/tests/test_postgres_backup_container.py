@@ -52,7 +52,7 @@ def test_postgres_backup_restore():
             "-v",
             f"{root}/deploy/compose/postgres/entrypoint.sh:/entrypoint:ro",
             "-v",
-            f"{root}/deploy/compose/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh:ro",
+            f"{root}/deploy/compose/postgres/init-databases.sh:/run/vonk-source-assets/postgres/init-databases.sh:ro",
             "--entrypoint",
             "/entrypoint",
             "postgres:18",

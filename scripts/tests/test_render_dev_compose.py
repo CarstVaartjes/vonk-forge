@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import os
+import shutil
 import subprocess
 import sys
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -155,8 +160,8 @@ def test_render_preserves_runtime_asset_executability_with_safe_config_modes(
         },
         "control-api": {
             "/run/vonk-source-assets/litellm/bootstrap-config.json": "0444",
-            "/run/vonk-source-assets/litellm/entrypoint.sh": "0555",
-            "/run/vonk-source-assets/litellm/config_supervisor.py": "0555",
+            "/run/vonk-source-assets/litellm/entrypoint.sh": "0444",
+            "/run/vonk-source-assets/litellm/config_supervisor.py": "0444",
             "/run/vonk-source-assets/prometheus/prometheus.yml": "0444",
             "/run/vonk-source-assets/prometheus/alerts.yaml": "0444",
         },
@@ -167,7 +172,7 @@ def test_render_preserves_runtime_asset_executability_with_safe_config_modes(
             "/usr/local/bin/provision-hermes-litellm-key": "0444",
         },
         "postgres": {
-            "/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh": "0555",
+            "/run/vonk-source-assets/postgres/init-databases.sh": "0444",
         },
     }
 
@@ -179,6 +184,131 @@ def test_render_preserves_runtime_asset_executability_with_safe_config_modes(
             if mount["target"] in expected_modes
         }
         assert actual_modes == expected_modes, service_name
+
+
+@pytest.mark.lane
+def test_rendered_postgres_configs_start_with_an_inert_initializer(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("docker") is None:
+        if os.getenv("CI"):
+            raise AssertionError("Docker is unavailable")
+        pytest.skip("Docker is required for the rendered PostgreSQL config test")
+    docker_info = subprocess.run(
+        ["docker", "info"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if docker_info.returncode != 0:
+        if os.getenv("CI"):
+            raise AssertionError("Docker is unavailable")
+        pytest.skip("Docker is unavailable for the rendered PostgreSQL config test")
+
+    rendered = tmp_path / "rendered.yaml"
+    result = _run_renderer(rendered)
+    assert result.returncode == 0, result.stderr
+    document = yaml.safe_load(rendered.read_text(encoding="utf-8"))
+    postgres = document["services"]["postgres"]
+    config_names = {mount["source"] for mount in postgres["configs"]}
+    backups = tmp_path / "backups"
+    backups.mkdir()
+    postgres["volumes"] = [
+        "postgres-data:/var/lib/postgresql",
+        {"type": "bind", "source": str(backups), "target": "/backups"},
+    ]
+    postgres.pop("networks")
+    postgres_password = tmp_path / "postgres-password"
+    postgres_password.write_text("postgres-password\n", encoding="ascii")
+    litellm_password = tmp_path / "litellm-password"
+    litellm_password.write_text("c" * 64 + "\n", encoding="ascii")
+    compose = {
+        "services": {"postgres": postgres},
+        "configs": {
+            name: config
+            for name, config in document["configs"].items()
+            if name in config_names
+        },
+        "secrets": {
+            "postgres-password": {"file": str(postgres_password)},
+            "litellm-database-password": {"file": str(litellm_password)},
+        },
+        "volumes": {"postgres-data": {}},
+    }
+    rendered.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+    project = f"vonk-rendered-postgres-{uuid.uuid4().hex}"
+    command = ["docker", "compose", "-p", project, "-f", str(rendered)]
+    try:
+        subprocess.run(
+            [*command, "up", "-d", "postgres"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        for _ in range(120):
+            logs = subprocess.run(
+                [*command, "logs", "postgres"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            probe = subprocess.run(
+                [
+                    *command,
+                    "exec",
+                    "-T",
+                    "postgres",
+                    "psql",
+                    "-U",
+                    "control",
+                    "-d",
+                    "control",
+                    "-tAc",
+                    "SELECT count(*) FROM pg_database WHERE datname = 'litellm'",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if (
+                "PostgreSQL init process complete; ready for start up."
+                in logs.stdout + logs.stderr
+                and probe.returncode == 0
+                and probe.stdout.strip() == "1"
+            ):
+                break
+            time.sleep(0.25)
+        else:
+            raise AssertionError(
+                f"rendered PostgreSQL did not initialize LiteLLM:\n{logs.stdout}{logs.stderr}"
+            )
+        staged = subprocess.check_output(
+            [
+                *command,
+                "exec",
+                "-T",
+                "postgres",
+                "stat",
+                "-c",
+                "%F:%u:%g:%a",
+                "/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh",
+            ],
+            text=True,
+            timeout=10,
+        ).strip()
+        assert staged == "regular file:0:0:444"
+    finally:
+        subprocess.run(
+            [*command, "down", "--volumes", "--remove-orphans"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
 
 
 def test_render_uses_canonical_template_and_inlines_step_ca(tmp_path: Path) -> None:
