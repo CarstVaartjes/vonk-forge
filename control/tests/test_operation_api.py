@@ -547,6 +547,111 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     assert filtered.json()["operations"][0]["id"] == newest_id
 
 
+def test_activity_page_survives_one_unreadable_profile_application(tmp_path) -> None:
+    """A damaged record must not fail the global Activity page or its detail."""
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'profile-damaged.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    profile_id = "44444444-4444-4444-8444-444444444444"
+    valid_id = "55555555-5555-4555-8555-555555555555"
+    damaged_id = "66666666-6666-4666-8666-666666666666"
+    now = datetime(2026, 8, 15, 12, tzinfo=UTC)
+    with sessions.begin() as session:
+        session.add(
+            FleetProfile(
+                id=profile_id,
+                number=1,
+                name="Studio",
+                description="",
+                installation_policy="keep-cached",
+                assignments=[],
+                labels={},
+                favorite=False,
+                created_by="admin",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            FleetProfileApplication(
+                id=valid_id,
+                request_key="77777777-7777-4777-8777-777777777777",
+                profile_id=profile_id,
+                profile_digest="9" * 64,
+                plan_digest="7" * 64,
+                state="running",
+                plan=_profile_operation_plan(
+                    profile_id=profile_id,
+                    profile_digest="9" * 64,
+                    plan_digest="7" * 64,
+                    node_ids=[NODE_ID],
+                    now=now,
+                ),
+                current_step=0,
+                current_operation_id=None,
+                progress={
+                    "operation_kind": "fleet-profile.apply",
+                    "completed_steps": 0,
+                    "total_steps": 1,
+                },
+                result=None,
+                status_reason=None,
+                actor="admin",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            FleetProfileApplication(
+                id=damaged_id,
+                request_key="88888888-8888-4888-8888-888888888888",
+                profile_id=profile_id,
+                profile_digest="9" * 64,
+                plan_digest="8" * 64,
+                state="running",
+                # A step list that cannot be decoded into the canonical plan.
+                plan={"steps": []},
+                current_step=0,
+                current_operation_id=None,
+                progress={
+                    "operation_kind": "fleet-profile.apply",
+                    "completed_steps": 0,
+                    "total_steps": 1,
+                },
+                result=None,
+                status_reason=None,
+                actor="admin",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    profiles = FleetProfileService(sessions, clock=lambda: now)
+    services = durable_operation_services(
+        sessions,
+        tmp_path / "routes",
+        clock=lambda: now,
+        cursors=TokenCodec(b"q" * 32).cursor_codec(),
+        operation_providers=(profiles.operation_provider(),),
+    )
+    client, operator, *_ = _client(operations=services)
+
+    page = client.get("/api/operations", headers=operator)
+    detail = client.get(f"/api/operations/{damaged_id}", headers=operator)
+
+    assert page.status_code == 200
+    assert page.json()["total"] == 2
+    items = {item["id"]: item for item in page.json()["operations"]}
+    assert items[valid_id].get("failure") is None
+    assert items[valid_id]["node_ids"] == [NODE_ID]
+    assert items[damaged_id]["failure"] is not None
+    assert items[damaged_id]["recovery"]["actions"] == ["inspect"]
+    assert detail.status_code == 200
+    assert detail.json()["id"] == damaged_id
+    assert detail.json()["failure"] is not None
+
+
 def test_fleet_exposes_typed_visual_state() -> None:
     client, operator, *_ = _client()
 

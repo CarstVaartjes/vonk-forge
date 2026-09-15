@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -101,6 +102,7 @@ if TYPE_CHECKING:
 _STORED_ASSIGNMENTS = TypeAdapter(
     list[FleetProfileAssignmentInput], config=ConfigDict(strict=True)
 )
+_NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _ACTIVE_INSTALL_STATES = frozenset(
     {"planned", "installing", "installed", "partial", "failed"}
@@ -195,6 +197,47 @@ def _persisted_profile_progress(
         raise FleetProfileConflict(
             "Persisted Fleet profile progress is invalid"
         ) from error
+
+
+def _persisted_profile_scope(row: FleetProfileApplication) -> tuple[str, ...] | None:
+    """Read an application's declared frozen scope without decoding its plan.
+
+    The scope written at admission is the durable authority for which nodes a
+    pending order can still affect.  Its step list is a finer effect
+    projection; when that projection is unreadable the scope is the only safe
+    boundary, because a damaged document must never be narrowed into a guessed
+    cleanup scope.  ``None`` means the stored scope itself cannot be trusted.
+    """
+
+    plan = row.plan
+    if not isinstance(plan, Mapping):
+        return None
+    scope = plan.get("scope")
+    if not isinstance(scope, Mapping):
+        return None
+    node_ids = scope.get("node_ids")
+    if not isinstance(node_ids, Sequence) or isinstance(node_ids, (str, bytes)):
+        return None
+    if not all(
+        isinstance(node_id, str) and _NODE_ID.fullmatch(node_id) is not None
+        for node_id in node_ids
+    ):
+        return None
+    return tuple(node_ids)
+
+
+def _stored_retry_lineage(value: object) -> str | None:
+    """Read only the explicit retry lineage one stored receipt declared.
+
+    Retry authority is the durable workload-intent ordinal on each node plus
+    this explicit lineage.  A damaged historical row contributes no lineage
+    instead of forcing the projection to decode every sibling document.
+    """
+
+    if not isinstance(value, Mapping):
+        return None
+    candidate = value.get("retry_of_application_id")
+    return candidate if isinstance(candidate, str) else None
 
 
 _PROFILE_PHASE_BY_RUN_PHASE = {
@@ -1854,12 +1897,36 @@ class FleetProfileService:
                         FleetProfileApplication.state.in_(("queued", "running"))
                     )
                 ):
-                    members = {
-                        node_id
-                        for step in _persisted_profile_plan(pending).steps
-                        for node_id in step.node_ids
-                    }
+                    try:
+                        _pending_plan = _persisted_profile_plan(pending)
+                    except FleetProfileConflict:
+                        # The step list is unreadable, so the declared frozen
+                        # scope is the only durable authority left for which
+                        # nodes this order can still affect.  Never infer a
+                        # narrower cleanup scope from a damaged document.
+                        scope = _persisted_profile_scope(pending)
+                        if scope is None:
+                            reasons.append(FleetProfileReason(
+                                code="profile.pending_record_unreadable",
+                                detail=(
+                                    "A queued profile change cannot be read and "
+                                    "must be reconciled before this profile is "
+                                    "applied."
+                                ),
+                                severity="error",
+                            ))
+                            continue
+                        members = set(scope)
+                    else:
+                        members = {
+                            node_id
+                            for step in _pending_plan.steps
+                            for node_id in step.node_ids
+                        }
                     if not members & target_nodes:
+                        # An unrelated damaged record must not veto a fresh
+                        # authorized profile; it stays queued for its own
+                        # worker to quarantine.
                         continue
                     if not members <= target_nodes:
                         reasons.append(FleetProfileReason(
@@ -2241,24 +2308,37 @@ class FleetProfileService:
     def _retry_eligible(self, session: Session, row: FleetProfileApplication) -> bool:
         if row.state not in {"failed", "waiting-for-operator"}:
             return False
-        progress = _canonical_progress(row.progress)
+        try:
+            progress = _canonical_progress(row.progress)
+        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+            # A damaged receipt cannot prove that it still carries the current
+            # recoverable intent, so it simply does not advertise retry.
+            return False
         profile = session.get(FleetProfile, row.profile_id)
         if (
             progress.intended_profile is None
             or profile is None
             or self._view(session, profile).profile_digest != row.profile_digest
-            or self._superseding_intent(session, row, progress)
         ):
             return False
+        try:
+            superseded = self._superseding_intent(session, row, progress)
+        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+            return False
+        if superseded:
+            return False
+        # Retry authority is the durable workload-intent ordinal each node owns
+        # (compared above) plus this receipt's explicit lineage.  Decoding every
+        # sibling's full progress let one damaged historical row deny a valid
+        # receipt its retry; the sibling ordinal was only a proxy for the
+        # node-owned intent that is already authoritative.
         others = session.scalars(select(FleetProfileApplication).where(
             FleetProfileApplication.profile_id == row.profile_id,
             FleetProfileApplication.id != row.id,
         ))
         return not any(
-            _canonical_progress(other.progress).retry_of_application_id == row.id
-            or other.state in {"queued", "running"}
-            or (_canonical_progress(other.progress).workload_intent_ordinal or 0)
-            > (progress.workload_intent_ordinal or 0)
+            other.state in {"queued", "running"}
+            or _stored_retry_lineage(other.progress) == row.id
             for other in others
         )
 
@@ -2374,14 +2454,18 @@ class FleetProfileService:
         )
 
     @staticmethod
-    def _operation_scope(row: FleetProfileApplication) -> tuple[str, ...]:
-        return tuple(_persisted_profile_plan(row).scope.node_ids)
+    def _operation_scope(plan: FleetProfilePreview) -> tuple[str, ...]:
+        return tuple(plan.scope.node_ids)
 
     @classmethod
-    def _operation_phase(cls, row: FleetProfileApplication) -> str:
+    def _operation_phase(
+        cls,
+        row: FleetProfileApplication,
+        plan: FleetProfilePreview,
+        progress: FleetProfileApplicationProgress,
+    ) -> str:
         if row.state == "succeeded":
             return "final_verify"
-        plan = _persisted_profile_plan(row)
         if 0 <= row.current_step < len(plan.steps):
             kind = plan.steps[row.current_step].kind
             if kind in {"create-placement", "build", "install"}:
@@ -2395,7 +2479,6 @@ class FleetProfileService:
             if kind == "start":
                 return "start"
             if kind == "switch":
-                progress = _canonical_progress(row.progress)
                 if progress.child_progress is not None:
                     return progress.child_progress.phase
                 return "prepare"
@@ -2405,11 +2488,20 @@ class FleetProfileService:
     def _operation_item(
         cls, row: FleetProfileApplication, *, retry_available: bool = False
     ) -> dict[str, object]:
-        """Project profile progress and its operator-visible failure into Activity."""
+        """Project profile progress and its operator-visible failure into Activity.
 
-        typed_progress = _canonical_progress(row.progress)
-        progress = {"phase": cls._operation_phase(row)}
-        operation_kind = typed_progress.operation_kind
+        A single damaged historical row must not fail the whole page and must
+        not be hidden as an empty success: its unreadable document becomes an
+        explicit failure on that record while every readable record stays
+        usable.
+        """
+
+        try:
+            typed_progress = _canonical_progress(row.progress)
+            plan = _persisted_profile_plan(row)
+            result = _persisted_profile_result(row)
+        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+            return cls._unreadable_operation_item(row)
         failure = None
         if row.state in {"failed", "waiting-for-operator"}:
             if not row.status_reason or not row.status_reason.strip():
@@ -2428,20 +2520,46 @@ class FleetProfileService:
         return {
             "id": row.id,
             "parent_id": typed_progress.retry_of_application_id,
-            "node_ids": list(cls._operation_scope(row)),
-            "kind": operation_kind or "fleet-profile.apply",
+            "node_ids": list(cls._operation_scope(plan)),
+            "kind": typed_progress.operation_kind or "fleet-profile.apply",
             "state": row.state,
             "attempt": typed_progress.attempt,
-            "progress": progress,
+            "progress": {"phase": cls._operation_phase(row, plan, typed_progress)},
             "created_at": _aware(row.created_at).isoformat(),
             "updated_at": _aware(row.updated_at).isoformat(),
             "supported_actions": ["retry"] if retry_available else [],
             "failure": failure,
-            "result": (
-                result.model_dump(mode="json")
-                if (result := _persisted_profile_result(row)) is not None
-                else None
-            ),
+            "result": result.model_dump(mode="json") if result is not None else None,
+        }
+
+    @staticmethod
+    def _unreadable_operation_item(row: FleetProfileApplication) -> dict[str, object]:
+        """Project a damaged application instead of letting it break Activity.
+
+        Durable columns stay authoritative for identity and declared scope;
+        only the unreadable document is replaced by an explicit failure, and
+        no retry is offered because intent cannot be proven.
+        """
+
+        return {
+            "id": row.id,
+            "parent_id": None,
+            "node_ids": list(_persisted_profile_scope(row) or ()),
+            "kind": "fleet-profile.apply",
+            "state": row.state,
+            "attempt": 0,
+            "progress": None,
+            "created_at": _aware(row.created_at).isoformat(),
+            "updated_at": _aware(row.updated_at).isoformat(),
+            "supported_actions": [],
+            "failure": OperationFailureEvidence(
+                error_code="fleet_profile_application_unreadable",
+                summary="Profile application record is unreadable",
+                detail="Persisted Fleet profile plan, progress, or result is invalid",
+                retryable=False,
+                uncertain=False,
+            ).model_dump(mode="json"),
+            "result": None,
         }
 
     def application(self, application_id: str) -> FleetProfileApplicationView:

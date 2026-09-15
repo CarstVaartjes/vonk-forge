@@ -780,6 +780,82 @@ def test_due_scheduler_reaches_work_past_a_full_parked_batch(
     assert seen == [due_id, due_id]
 
 
+@pytest.mark.parametrize("damage", ["plan", "result"])
+def test_malformed_operation_is_rejected_without_aborting_the_batch(
+    tmp_path: Path, damage: str,
+) -> None:
+    """One invalid persisted contract must not deny a valid operation its turn."""
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(child_transfer=True),
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    valid = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    malformed_id = "00000000-0000-4000-8000-000000000000"
+    assert malformed_id < valid.operation_id
+    with sessions.begin() as session:
+        session.add(
+            Job(
+                id=malformed_id,
+                request_id=str(uuid.uuid4()),
+                kind="recipe.run-switch.v2",
+                state="running",
+                actor="admin",
+                authority_revision="a" * 64,
+                targets=[nodes[0]],
+                payload_digest="a" * 64,
+                payload=(
+                    {"plan": {"not": "a plan"}}
+                    if damage == "plan"
+                    else {"plan": plan.model_dump(mode="json")}
+                ),
+                result=["malformed"] if damage == "result" else None,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    with sessions() as session:
+        stored_valid = session.get(Job, valid.operation_id)
+        assert stored_valid is not None
+        before_index = (stored_valid.result or {}).get("phase_index")
+
+    assert service.tick() is True
+
+    with sessions() as session:
+        rejected = session.get(Job, malformed_id)
+        assert rejected is not None
+        assert rejected.state == "failed"
+        assert rejected.status_reason == (
+            "run-switch persisted plan is invalid"
+            if damage == "plan"
+            else "run-switch persisted progress is invalid"
+        )
+        # The invalid evidence is retained rather than rewritten into a valid
+        # contract or a claim that issued effects stopped.
+        if damage == "result":
+            assert rejected.result == ["malformed"]
+        advanced = session.get(Job, valid.operation_id)
+        assert advanced is not None and advanced.state == "running"
+        after_index = (advanced.result or {}).get("phase_index")
+    # The unrelated due operation still advanced in the same batch.
+    assert after_index == 1
+    assert after_index != before_index
+
+
 def test_default_run_switch_admission_uses_the_recipe_memory_reserve(tmp_path: Path) -> None:
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
     service = RunSwitchOperationService(

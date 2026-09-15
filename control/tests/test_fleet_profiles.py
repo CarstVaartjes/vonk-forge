@@ -51,6 +51,7 @@ from vonk_control.models import (
     RecipeRun,
     RunNode,
 )
+from vonk_control.operation_api import OperationQuery
 from vonk_control.preparation_contract import RolloutPreparation
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -833,6 +834,165 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
     # Invalid history remains invalid; it is never executed or silently repaired.
     with pytest.raises(ValidationError):
         service.load(profile.number, request_key=_uuid(975), actor="admin")
+
+
+def test_preview_isolates_an_unreadable_pending_plan() -> None:
+    """A damaged pending step list must not veto a fresh authorized preview."""
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    assigned = service.create(_input(revision_id), actor="admin")
+    pending = service.load(assigned.number, request_key=_uuid(981), actor="admin")
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, pending.id)
+        assert row is not None
+        # The step list is unreadable, but the declared scope written at
+        # admission is still the durable boundary.
+        row.plan = {**row.plan, "steps": [{"kind": "not-a-step"}]}
+    idle = service.create(
+        FleetProfileInput(name="All idle", assignments=[]), actor="admin"
+    )
+
+    preview = service.preview(idle.id)
+
+    assert preview.allowed is True
+    assert [step.node_ids for step in preview.steps] == [[_node_id(1)]]
+    assert all(
+        reason.code != "profile.pending_record_unreadable"
+        for reason in preview.reasons
+    )
+    # The damaged order is preserved for its own worker to quarantine.
+    with sessions() as session:
+        damaged = session.get(FleetProfileApplication, pending.id)
+        assert damaged is not None
+        assert damaged.state == "queued"
+        assert damaged.plan["steps"] == [{"kind": "not-a-step"}]
+
+
+def test_preview_reports_an_unreadable_pending_plan_without_a_scope() -> None:
+    """Without a readable scope the preview blocks instead of guessing one."""
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    assigned = service.create(_input(revision_id), actor="admin")
+    pending = service.load(assigned.number, request_key=_uuid(982), actor="admin")
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, pending.id)
+        assert row is not None
+        row.plan = {"steps": [{"kind": "not-a-step"}]}
+    idle = service.create(
+        FleetProfileInput(name="All idle", assignments=[]), actor="admin"
+    )
+
+    preview = service.preview(idle.id)
+
+    assert preview.allowed is False
+    assert any(
+        reason.code == "profile.pending_record_unreadable"
+        for reason in preview.reasons
+    )
+
+
+def test_activity_projection_keeps_valid_records_when_one_is_unreadable() -> None:
+    """One damaged profile application must not fail the whole Activity page."""
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    valid = service.load(profile.number, request_key=_uuid(983), actor="admin")
+    with sessions() as session:
+        valid_row = session.get(FleetProfileApplication, valid.id)
+        assert valid_row is not None
+        valid_progress = deepcopy(valid_row.progress)
+    damaged_id = _uuid(984)
+    with sessions.begin() as session:
+        session.add(
+            FleetProfileApplication(
+                id=damaged_id,
+                request_key=_uuid(985),
+                profile_id=profile.id,
+                profile_digest="a" * 64,
+                plan_digest="b" * 64,
+                state="failed",
+                plan={"steps": []},
+                current_step=0,
+                current_operation_id=None,
+                progress=valid_progress,
+                result=None,
+                status_reason="stored attempt cannot continue",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    page = service.operation_provider().list_operations(
+        OperationQuery(after=None, limit=10, state=None, node_id=None)
+    )
+
+    items = {item["id"]: item for item in page.items}
+    assert set(items) == {valid.id, damaged_id}
+    assert items[valid.id]["failure"] is None
+    assert items[valid.id]["node_ids"] == [_node_id(1)]
+    unreadable = items[damaged_id]
+    failure = unreadable["failure"]
+    assert isinstance(failure, dict)
+    assert failure["error_code"] == "fleet_profile_application_unreadable"
+    assert unreadable["supported_actions"] == []
+    assert unreadable["result"] is None
+
+
+def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
+    """Damaged history must not deny a valid receipt its retry authority."""
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    first = service.load(profile.number, request_key=_uuid(986), actor="admin")
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        row.state = "failed"
+        row.status_reason = "stored attempt cannot continue"
+        valid_progress = deepcopy(row.progress)
+        session.add(
+            FleetProfileApplication(
+                id=_uuid(987),
+                request_key=_uuid(988),
+                profile_id=profile.id,
+                profile_digest=row.profile_digest,
+                plan_digest="c" * 64,
+                state="failed",
+                plan=deepcopy(row.plan),
+                current_step=0,
+                current_operation_id=None,
+                progress={**valid_progress, "unexpected": {}},
+                result=None,
+                status_reason="stored attempt cannot continue",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    assert service.retry_eligible(first.id) is True
+
+    # The authoritative per-node intent still fences the receipt once a later
+    # load supersedes it, even though a damaged sibling is present.
+    service.load(profile.number, request_key=_uuid(989), actor="admin")
+    assert service.retry_eligible(first.id) is False
 
 
 def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
