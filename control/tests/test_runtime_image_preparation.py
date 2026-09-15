@@ -10,11 +10,13 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from vonk_control.catalog_entities import _build_projection
 from vonk_control.compiled_execution_plan import CompiledRuntimeImage
 from vonk_control.execution_plan_service import _runtime_receipt_mapping
 from vonk_control.models import (
+    AgentNode,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -824,7 +826,9 @@ def test_one_verified_archive_serves_availability_and_launch_identities(
         )
 
 
-def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan() -> None:
+def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
+    postgres_engine: Engine,
+) -> None:
     recipe = _recipe("recipe-source-build.json")
     recipe_digest = content_sha256(recipe)
     revision_id = "revision-rebuilt-source"
@@ -874,11 +878,31 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan()
             "build_id": new_build_id,
         }
     )
-    engine = create_engine("sqlite:///:memory:")
+    engine = postgres_engine
     Base.metadata.create_all(engine)
     now = datetime.now(UTC)
     with Session(engine) as session:
+        session.add(
+            CatalogDocument(
+                id="document-" + revision_id,
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                title=recipe.metadata.title,
+                created_by="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add_all(
+            [
+                AgentNode(node_id="old-builder", state="active"),
+                AgentNode(node_id="new-builder", state="active"),
+            ]
+        )
+        session.flush()
         _add_revision(session, revision_id, recipe)
+        session.flush()
         session.add_all(
             [
                 RecipeBuild(
