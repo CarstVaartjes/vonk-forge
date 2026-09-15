@@ -432,6 +432,9 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
     ) -> bool:
         """Verify an assignment with its durable Run/Switch source binding."""
 
+        # Published-receipt authorization reads managed storage, so the read
+        # transaction that finds the Run/Switch source binding is closed first.
+        published_revision_id: str | None = None
         with self.sessions() as session:
             jobs = session.scalars(
                 select(Job).where(
@@ -447,11 +450,14 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                 if plan.get("recipe_build_id") is None and isinstance(revision_id, str):
                     # This assignment was issued for a direct published image;
                     # its published receipt remains the only image authority.
-                    return self._published_receipt_authorizes(
-                        assignment.oci_image_digest,
-                        assignment.oci_archive_sha256,
-                        recipe_revision_id=revision_id,
-                    )
+                    published_revision_id = revision_id
+                    break
+        if published_revision_id is not None:
+            return self._published_receipt_authorizes(
+                assignment.oci_image_digest,
+                assignment.oci_archive_sha256,
+                recipe_revision_id=published_revision_id,
+            )
         return self.verify_runtime_image(
             assignment.oci_image_digest,
             assignment.oci_archive_sha256,

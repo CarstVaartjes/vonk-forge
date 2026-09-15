@@ -613,6 +613,9 @@ class RecipeImageAvailabilityService:
                 build.state = "failed"
                 build.error = "recipe Controller cache removal cancelled the build"
                 build.updated_at = now
+            # The result is written after this session commits, so the exact
+            # build identities are captured before the rows detach.
+            cancelled_build_ids = [build.id for build in builds]
             revision = session.get(CatalogDocumentRevision, revision_id)
             content_digest = revision.content_digest if revision is not None else None
             receipts = (
@@ -631,23 +634,22 @@ class RecipeImageAvailabilityService:
             other_archives = {
                 item.oci_archive_sha256 for item in all_receipts if item not in receipts
             }
-            reclaimed = 0
+            # Cache removal invalidates availability, not recipe authority.
+            # Exact re-preparation may restore evicted bytes; an explicit
+            # security revocation must survive removal and re-download. The
+            # deletion of those bytes is not SQL work, so it is collected here
+            # and performed once this transaction has committed.
+            removal_targets: list[tuple[Path, Path]] = []
             for receipt in receipts:
                 archive_sha256 = _digest(
                     receipt.oci_archive_sha256, field="runtime image archive digest"
                 )
                 archive = self._storage.root / archive_sha256
                 receipt_file = self._storage.root / f"{archive_sha256}.receipt.json"
-                # Cache removal invalidates availability, not recipe authority.
-                # Exact re-preparation may restore evicted bytes; an explicit
-                # security revocation must survive removal and re-download.
                 if receipt.state == "verified":
                     receipt.state = "evicted"
-                if archive_sha256 not in other_archives and archive.is_file():
-                    reclaimed += archive.stat().st_size
-                    archive.unlink(missing_ok=True)
                 if archive_sha256 not in other_archives:
-                    receipt_file.unlink(missing_ok=True)
+                    removal_targets.append((archive, receipt_file))
             model_children = [
                 child.get("model_content_digests", [])
                 for job in jobs
@@ -658,6 +660,16 @@ class RecipeImageAvailabilityService:
                 ]
                 if isinstance(child, Mapping)
             ]
+        # Storage deletion happens between two short transactions: the fence and
+        # evicted receipt states are already durable above, and the removal
+        # operation that records reclaimed bytes is written below.
+        reclaimed = 0
+        for archive, receipt_file in removal_targets:
+            if archive.is_file():
+                reclaimed += archive.stat().st_size
+                archive.unlink(missing_ok=True)
+            receipt_file.unlink(missing_ok=True)
+        with self._removal_lock, self._sessions.begin() as session:
             result = {
                 "schema_version": SCHEMA_VERSION,
                 "action": "remove",
@@ -666,7 +678,7 @@ class RecipeImageAvailabilityService:
                 "recipe_revision_id": revision_id,
                 "state": "succeeded",
                 "cancelled_operations": cancelled,
-                "cancelled_builds": [build.id for build in builds],
+                "cancelled_builds": cancelled_build_ids,
                 "reclaimed_bytes": reclaimed,
                 "preserved": [
                     "profile-assignments",

@@ -249,6 +249,17 @@ to write the current errors, then write the reason for anything it adds.
 `pyright` runs over `control/src`, `src`, `tests` and `control/tests` in basic
 mode; generated clients and virtualenvs are excluded.
 
+The coordination boundaries are checked by
+`control/tests/coordination_boundaries.py`, which is pure stdlib and runs as
+`python3 control/tests/coordination_boundaries.py` (CI runs the same step). It
+proves from the syntax tree that a SQL transaction never spans external work
+and that an artifact lock is acquired outside a transaction, nonblockingly, and
+one at a time. `tools/coordination-baseline.json` is a reviewed allowlist like
+the pyright baseline: an unreviewed site fails, a baseline site that no longer
+occurs fails as stale, and every entry carries a written reason. A stale entry
+means the boundary now holds, so the entry is deleted rather than explained.
+Run `--write-baseline` after a fix to see exactly which entries disappeared.
+
 There is no separate ESLint or Prettier configuration. TypeScript formatting
 follows the surrounding files, and `npm run build` is the type gate.
 
