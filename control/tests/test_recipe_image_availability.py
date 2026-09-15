@@ -981,7 +981,11 @@ def test_model_child_and_image_complete_through_one_sql_operation(tmp_path: Path
 
         def download_preview(self, *, recipe_revision_id: str) -> dict[str, object]:
             assert recipe_revision_id == "revision-model-image"
-            return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
+            return {
+                "plan_digest": "d" * 64,
+                "artifact_set_sha256": "c" * 64,
+                "new_bytes": 0,
+            }
 
         def resolve_artifact_set(self, *, recipe_revision_id: str) -> SimpleNamespace:
             return SimpleNamespace(digest="c" * 64, document=lambda: {"model_content_digests": ["d" * 64], "artifacts": []})
@@ -1050,7 +1054,11 @@ def test_model_and_image_children_advance_independently_and_reuse_image(tmp_path
 
     class ModelCache:
         def download_preview(self, **_: object) -> dict[str, object]:
-            return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
+            return {
+                "plan_digest": "d" * 64,
+                "artifact_set_sha256": "c" * 64,
+                "new_bytes": 0,
+            }
 
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(digest="c" * 64, document=lambda: {"model_content_digests": ["d" * 64], "artifacts": []})
@@ -1200,7 +1208,11 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
             self.repair_calls: list[dict[str, object]] = []
 
         def download_preview(self, **_: object) -> dict[str, object]:
-            return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
+            return {
+                "plan_digest": "d" * 64,
+                "artifact_set_sha256": "c" * 64,
+                "new_bytes": 0,
+            }
 
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(

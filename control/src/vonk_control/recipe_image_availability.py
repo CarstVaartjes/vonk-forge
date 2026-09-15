@@ -923,8 +923,6 @@ class RecipeImageAvailabilityService:
             manifest_document = manifest.document()
             artifacts = manifest_document.get("artifacts")
             new_bytes = preview.get("new_bytes")
-            if artifacts == [] and new_bytes is None:
-                new_bytes = 0
             if type(new_bytes) is not int or new_bytes < 0:
                 raise RecipeImageAvailabilityError(
                     "recipe_image.model_cache_invalid",
@@ -1719,7 +1717,6 @@ class RecipeImageAvailabilityService:
                 and actor is not None
                 and parent_request_key is not None
                 and isinstance(operation.artifact_set_sha256, str)
-                and child.get("artifacts") != []
             ):
                 recipe_revision_id = payload.get("recipe_revision_id")
                 if not isinstance(recipe_revision_id, str):
