@@ -344,7 +344,7 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(tmp_path: 
         restarted.get(queued.id)
 
 
-def test_missing_succeeded_build_archive_is_recreated_automatically(
+def test_build_mode_dispatches_when_no_verified_build_receipt_exists(
     tmp_path: Path,
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
@@ -429,112 +429,13 @@ def test_missing_succeeded_build_archive_is_recreated_automatically(
         request_id="r" * 36,
     )
 
+    # Cache reconciliation belongs to the builder's own filesystem-first
+    # resolution; the durable service only dispatches and records the result.
     assert service.run_pending() == 1
     completed = service.get(queued.id)
     assert completed.state == "succeeded", completed.failure
-    assert forced == [True]
+    assert forced == [False]
     assert (storage.root / ARCHIVE_SHA).read_bytes() == ARCHIVE
-
-
-def test_present_older_matching_build_is_reused_when_latest_archive_is_missing(
-    tmp_path: Path,
-) -> None:
-    recipe = _recipe("recipe-source-build.json")
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine)
-    older_id = "00000000-0000-4000-8000-000000000903"
-    now = datetime.now(UTC)
-    with sessions.begin() as session:
-        _add_revision(session, "revision-older-build", recipe)
-        session.add_all(
-            [
-                AgentNode(node_id="spark-builder-old", state="active"),
-                AgentNode(node_id="spark-builder-new", state="active"),
-            ]
-        )
-        session.add_all(
-            [
-                RecipeBuild(
-                    id=older_id,
-                    recipe_revision_id="revision-older-build",
-                    builder_node_id="spark-builder-old",
-                    source_bundle_sha256="b" * 64,
-                    build_input_sha256="f" * 64,
-                    state="succeeded",
-                    policy_report={},
-                    plan={},
-                    image_digest=IMAGE_DIGEST,
-                    oci_layout_sha256=ARCHIVE_SHA,
-                    image_bytes=len(ARCHIVE),
-                    created_at=now,
-                    updated_at=now,
-                ),
-                RecipeBuild(
-                    id="00000000-0000-4000-8000-000000000904",
-                    recipe_revision_id="revision-older-build",
-                    builder_node_id="spark-builder-new",
-                    source_bundle_sha256="b" * 64,
-                    build_input_sha256="f" * 64,
-                    state="succeeded",
-                    policy_report={},
-                    plan={},
-                    image_digest="sha256:" + "a" * 64,
-                    oci_layout_sha256="a" * 64,
-                    image_bytes=len(ARCHIVE),
-                    created_at=now + timedelta(seconds=1),
-                    updated_at=now + timedelta(seconds=1),
-                ),
-            ]
-        )
-    storage = FilesystemRuntimeImageStorage(tmp_path)
-    (storage.root / ARCHIVE_SHA).write_bytes(ARCHIVE)
-
-    def builder(*_: object, **__: object) -> dict[str, object]:
-        raise AssertionError("a physically present matching build should be reused")
-
-    class BuildTransport(Transport):
-        def inspect_archive(
-            self,
-            archive: Path,
-            *,
-            expected_architecture: str,
-            expected_runtime_interface: str,
-            expected_archive_sha256: str,
-            expected_archive_bytes: int,
-        ) -> PulledImageEvidence:
-            return PulledImageEvidence(
-                manifest_digest=IMAGE_DIGEST,
-                requested_manifest_digest=None,
-                config_id=CONFIG_DIGEST,
-                local_reference="docker-archive:" + str(archive),
-                architecture=expected_architecture,
-                runtime_interface=expected_runtime_interface,
-                archive_sha256=expected_archive_sha256,
-                archive_bytes=expected_archive_bytes,
-            )
-
-    service = RecipeImageAvailabilityService(
-        sessions,
-        storage=storage,
-        authority=lambda recipe_revision_id, *, force=False: (
-            recipe,
-            _build_runtime(),
-        ),
-        transport=BuildTransport(),
-        builder=builder,
-        receipt_writer=lambda *_args: None,
-        clock=lambda: datetime.now(UTC),
-    )
-    queued = service.start(
-        "revision-older-build", actor="operator", request_id="s" * 36
-    )
-
-    assert service.run_pending() == 1
-    completed = service.get(queued.id)
-    assert completed.state == "succeeded", completed.failure
-    assert completed.result is not None
-    assert completed.result["build_id"] == older_id
 
 
 def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(tmp_path: Path) -> None:

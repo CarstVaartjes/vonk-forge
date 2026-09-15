@@ -57,6 +57,7 @@ from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
+    RuntimeImageReceipt,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -351,6 +352,45 @@ def test_build_resolution_reuses_exact_receipt_without_builder_admission(
     assert resolution.image_digest == "sha256:" + "b" * 64
 
 
+def _write_controller_build_receipt(
+    storage: FilesystemRuntimeImageStorage,
+    *,
+    archive: bytes,
+    image_digest: str,
+    build_id: str,
+    build_input_sha256: str,
+    distribution_content_sha256: str,
+) -> RuntimeImageReceipt:
+    """Publish the exact filesystem receipt a completed Controller build leaves."""
+
+    staged = storage.prepare_path()
+    staged.write_bytes(archive)
+    return storage.commit(
+        staged,
+        receipt=RuntimeImageReceipt(
+            schema_version=2,
+            source="controller-build",
+            distribution_publisher="vonk",
+            distribution_slug="cached",
+            distribution_content_sha256=distribution_content_sha256,
+            registry_manifest_digest=None,
+            platform_manifest_digest=image_digest,
+            image_digest=image_digest,
+            oci_archive_sha256=hashlib.sha256(archive).hexdigest(),
+            image_bytes=len(archive),
+            local_image_config_id="sha256:" + "c" * 64,
+            local_image_reference=None,
+            architecture="linux-arm64",
+            runtime_interface="vonk.runtime.v1",
+            archive_path=str(staged),
+            recorded_at="2026-09-15T00:00:00Z",
+            build_id=build_id,
+            build_input_sha256=build_input_sha256,
+            runtime_interface_label="v1",
+        ),
+    )
+
+
 def test_nonforced_availability_dispatch_reuses_build_resolved_after_queue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -359,11 +399,11 @@ def test_nonforced_availability_dispatch_reuses_build_resolved_after_queue(
     storage = FilesystemRuntimeImageStorage(artifact_root)
     archive = b"cached source build archive"
     archive_digest = hashlib.sha256(archive).hexdigest()
-    (storage.root / archive_digest).write_bytes(archive)
     builds = RecipeBuildService(
         sessions,
         bundles=bundles,
         build_archive_available=storage.build_archive_available,
+        prepared_builds=storage.find_build,
     )
     plan = builds.plan(revision.id, node_id, now=now)
     image_digest = "sha256:" + "b" * 64
@@ -375,8 +415,17 @@ def test_nonforced_availability_dispatch_reuses_build_resolved_after_queue(
         image_bytes=len(archive),
         now=now,
     )
+    published = _write_controller_build_receipt(
+        storage,
+        archive=archive,
+        image_digest=image_digest,
+        build_id=plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        distribution_content_sha256=revision.content_digest,
+    )
     cached = builds.resolve(revision.id)
     assert cached.cached
+    assert cached.oci_layout_sha256 == published.oci_archive_sha256
 
     class DelayedCachedResolution:
         def __init__(self) -> None:
@@ -461,6 +510,229 @@ def test_nonforced_availability_dispatch_reuses_build_resolved_after_queue(
     production.close()
 
 
+def test_present_archive_without_receipt_is_reprepared_not_rebuilt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    artifact_root = tmp_path / "artifacts"
+    storage = FilesystemRuntimeImageStorage(artifact_root)
+    archive = b"cached source build archive"
+    archive_digest = hashlib.sha256(archive).hexdigest()
+    # The upload producer publishes the archive; preparation publishes the
+    # receipt. A Controller death in between must not force a rebuild.
+    (storage.root / archive_digest).write_bytes(archive)
+    image_digest = "sha256:" + "b" * 64
+    builds = RecipeBuildService(
+        sessions,
+        bundles=bundles,
+        build_archive_available=storage.build_archive_available,
+        prepared_builds=storage.find_build,
+    )
+    plan = builds.plan(revision.id, node_id, now=now)
+    builds.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest=image_digest,
+        oci_layout_sha256=archive_digest,
+        image_bytes=len(archive),
+        now=now,
+    )
+
+    resolution = builds.resolve(revision.id)
+
+    assert resolution.cached is True
+    assert resolution.stale_receipt is False
+    assert resolution.receipt_pending is True
+    assert resolution.build_input_sha256 == plan.build_input_sha256
+
+    class Operations:
+        def build(self, *_args, **_kwargs):
+            raise AssertionError(
+                "present bytes with a missing receipt must be re-prepared, not rebuilt"
+            )
+
+    class Transport:
+        def inspect_archive(
+            self,
+            archive_path: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
+        ) -> PulledImageEvidence:
+            assert archive_path.read_bytes() == archive
+            return PulledImageEvidence(
+                manifest_digest=image_digest,
+                requested_manifest_digest=None,
+                config_id="sha256:" + "c" * 64,
+                local_reference="localhost/vonk/cached@" + image_digest,
+                architecture=expected_architecture,
+                runtime_interface="v1",
+                archive_sha256=expected_archive_sha256,
+                archive_bytes=expected_archive_bytes,
+            )
+
+    monkeypatch.setattr(
+        availability_production_module, "SkopeoOCIImageTransport", Transport
+    )
+    production = build_recipe_image_availability(
+        sessions,
+        artifact_root=artifact_root,
+        managed_catalog_sync=None,
+        recipe_builds=builds,
+        recipe_operations=Operations(),
+        clock=lambda: now,
+    )
+    operation = production.service.start(
+        revision.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000734",
+    )
+    assert operation.build_input_sha256 == plan.build_input_sha256
+
+    assert production.service.run_pending() == 1
+    completed = production.service.get(operation.id)
+    assert completed.state == "succeeded", completed.failure
+    republished = storage.read_receipt(archive_digest)
+    assert republished.build_input_sha256 == plan.build_input_sha256
+    assert republished.build_id == plan.build_id
+    with sessions() as session:
+        build_jobs = tuple(
+            session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
+        )
+    assert build_jobs == ()
+    production.close()
+
+
+def test_build_resolution_reports_stale_receipt_when_archive_is_gone(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    storage = FilesystemRuntimeImageStorage(tmp_path / "artifacts")
+    archive = b"cached source build archive"
+    archive_digest = hashlib.sha256(archive).hexdigest()
+    service = RecipeBuildService(
+        sessions,
+        bundles=bundles,
+        build_archive_available=storage.build_archive_available,
+        prepared_builds=storage.find_build,
+    )
+    plan = service.plan(revision.id, node_id, now=now)
+    image_digest = "sha256:" + "b" * 64
+    service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest=image_digest,
+        oci_layout_sha256=archive_digest,
+        image_bytes=len(archive),
+        now=now,
+    )
+    _write_controller_build_receipt(
+        storage,
+        archive=archive,
+        image_digest=image_digest,
+        build_id=plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        distribution_content_sha256=revision.content_digest,
+    )
+    (storage.root / archive_digest).unlink()
+
+    resolution = service.resolve(revision.id)
+
+    assert resolution.cached is False
+    assert resolution.stale_receipt is True
+    rebuilt = service.plan(revision.id, node_id, now=now, resolution=resolution)
+    assert rebuilt.build_input_sha256 == plan.build_input_sha256
+
+
+def test_resolution_reuses_the_present_receipt_for_the_shared_identity(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    storage = FilesystemRuntimeImageStorage(tmp_path / "artifacts")
+    archive = b"cached source build archive"
+    archive_digest = hashlib.sha256(archive).hexdigest()
+    service = RecipeBuildService(
+        sessions,
+        bundles=bundles,
+        build_archive_available=storage.build_archive_available,
+        prepared_builds=storage.find_build,
+    )
+    plan = service.plan(revision.id, node_id, now=now)
+    image_digest = "sha256:" + "b" * 64
+    service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest=image_digest,
+        oci_layout_sha256=archive_digest,
+        image_bytes=len(archive),
+        now=now,
+    )
+    _write_controller_build_receipt(
+        storage,
+        archive=archive,
+        image_digest=image_digest,
+        build_id=plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        distribution_content_sha256=revision.content_digest,
+    )
+    # A newer succeeded build on a second builder with the same executable
+    # identity has no archive of its own. The present filesystem receipt for
+    # that identity is still the authority, so no rebuild is dispatched.
+    second_node = "spk_22222222222222222222222222222222"
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=second_node,
+                state="active",
+                architecture="linux-arm64",
+                semantic_version="1.2.3",
+                build_digest="sha256:" + "a" * 64,
+                binary_digest="1" * 64,
+                self_test_passed=True,
+                capabilities=["recipe.build.v1", "recipe.image.import.v1"],
+                last_seen_at=now,
+            )
+        )
+    InventoryRepository(sessions, clock=lambda: now).record(
+        InventorySnapshotInput(
+            second_node,
+            now,
+            2 * 1024**4,
+            1 * 1024**4,
+            100_000,
+            80_000,
+            100_000,
+            80_000,
+            1,
+            False,
+            (
+                "recipe.build.v1",
+                "recipe.build.egress-proxy.v1",
+                "recipe.image.import.v1",
+            ),
+        )
+    )
+    second_plan = service.plan(revision.id, second_node, now=now)
+    assert second_plan.build_input_sha256 == plan.build_input_sha256
+    service.record_success(
+        second_plan.build_id,
+        build_input_sha256=second_plan.build_input_sha256,
+        image_digest="sha256:" + "e" * 64,
+        oci_layout_sha256="d" * 64,
+        image_bytes=len(archive),
+        now=now + timedelta(seconds=5),
+    )
+
+    resolution = service.resolve(revision.id)
+
+    assert resolution.cached is True
+    assert resolution.stale_receipt is False
+    assert resolution.image_digest == image_digest
+    assert resolution.oci_layout_sha256 == archive_digest
+
+
 def test_missing_build_archive_is_not_reused_and_replans_the_same_build_input(
     tmp_path: Path,
 ) -> None:
@@ -484,6 +756,7 @@ def test_missing_build_archive_is_not_reused_and_replans_the_same_build_input(
     rebuilt = service.plan(revision.id, node_id, now=now, resolution=resolution)
 
     assert resolution.cached is False
+    assert resolution.stale_receipt is True
     assert rebuilt.build_id == plan.build_id
     assert rebuilt.build_input_sha256 == plan.build_input_sha256
     with sessions() as session:

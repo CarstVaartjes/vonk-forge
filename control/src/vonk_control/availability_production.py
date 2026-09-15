@@ -202,27 +202,20 @@ def build_recipe_image_availability(
                             retryable=True,
                             recovery_actions=("retry",),
                         ) from error
-                if resolution is not None and resolution.cached and not force:
-                    if not isinstance(resolution.build_input_sha256, str):
-                        raise RecipeImageAvailabilityError(
-                            "recipe_image.build_input_missing",
-                            "cached Recipe build has no exact input identity",
-                        )
-                    image_digest = getattr(resolution, "image_digest", None)
-                    if isinstance(image_digest, str) and image_digest.startswith("sha256:"):
-                        image_digest = image_digest[7:]
-                    if not isinstance(image_digest, str) or len(image_digest) != 64:
-                        image_digest = resolution.input_intent_sha256
-                    package_handle = {
-                        "build_input_sha256": resolution.build_input_sha256,
-                        "image_digest": image_digest,
-                        "image_reference": f"localhost/vonk/recipe-build@sha256:{image_digest}",
-                    }
-                else:
-                    # Builder selection and final input binding happen only at
-                    # dispatch. Persist the immutable intent so saturation can
-                    # queue a durable parent operation.
-                    if resolution is not None:
+                if resolution is not None:
+                    cached = None if force else _cached_build_receipt(resolution)
+                    if cached is not None:
+                        package_handle = {
+                            "build_input_sha256": cached["build_input_sha256"],
+                            "image_digest": str(cached["image_digest"]).removeprefix("sha256:"),
+                            "image_reference": (
+                                f"localhost/vonk/recipe-build@{cached['image_digest']}"
+                            ),
+                        }
+                    else:
+                        # Builder selection and final input binding happen only
+                        # at dispatch. Persist the immutable intent so
+                        # saturation can queue a durable parent operation.
                         package_handle = {
                             "input_intent_sha256": resolution.input_intent_sha256,
                             # A source-build operation has no final image until
@@ -281,38 +274,13 @@ def build_recipe_image_availability(
                 "canonical build plan is unavailable after restart",
             )
         resolution = recipe_builds.resolve(revision_id)
-        if (
-            not force
-            and getattr(resolution, "cached", False) is True
-            and build_input_sha256 in {"", resolution.build_input_sha256}
-        ):
-            cached_identity = (
-                resolution.build_id,
-                resolution.builder_node_id,
-                resolution.build_input_sha256,
-                resolution.image_digest,
-                resolution.oci_layout_sha256,
-                resolution.image_bytes,
-            )
-            if (
-                not all(isinstance(value, str) for value in cached_identity[:5])
-                or not isinstance(resolution.image_bytes, int)
-                or isinstance(resolution.image_bytes, bool)
-                or resolution.image_bytes < 1
-            ):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.build_invalid",
-                    "cached Recipe build receipt is incomplete",
-                )
-            return {
-                "state": "succeeded",
-                "build_id": resolution.build_id,
-                "builder_node_id": resolution.builder_node_id,
-                "build_input_sha256": resolution.build_input_sha256,
-                "image_digest": resolution.image_digest,
-                "oci_layout_sha256": resolution.oci_layout_sha256,
-                "image_bytes": resolution.image_bytes,
-            }
+        cached = None if force else _cached_build_receipt(resolution)
+        if cached is not None and build_input_sha256 in {"", cached["build_input_sha256"]}:
+            return cached
+        # SQL may still record a succeeded build whose archive is gone. The
+        # resolution reports that as stale cache loss, and dispatch must build
+        # again instead of replaying the vanished result.
+        force = force or bool(getattr(resolution, "stale_receipt", False))
         selected_plan: Any | None = None
         selected_candidate: str | None = None
         candidate_ids: tuple[str, ...] = ()
@@ -730,6 +698,47 @@ async def run_availability_scheduler(
             await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
         except TimeoutError:
             continue
+
+
+def _cached_build_receipt(resolution: Any) -> Mapping[str, object] | None:
+    """Shape one prepared-build resolution into the canonical build receipt.
+
+    This is the only source-build reuse test. The resolution proves the exact
+    archive is present on disk; when its verification receipt also exists the
+    values come from that receipt, and when the receipt is missing or
+    incomplete the values come from the SQL build candidate so preparation
+    re-verifies the bytes and republishes the receipt instead of building
+    again. Queue-time and dispatch-time callers share this one answer.
+    """
+
+    if getattr(resolution, "cached", False) is not True:
+        return None
+    identity = (
+        resolution.build_id,
+        resolution.builder_node_id,
+        resolution.build_input_sha256,
+        resolution.image_digest,
+        resolution.oci_layout_sha256,
+    )
+    if (
+        not all(isinstance(value, str) for value in identity)
+        or not isinstance(resolution.image_bytes, int)
+        or isinstance(resolution.image_bytes, bool)
+        or resolution.image_bytes < 1
+    ):
+        raise RecipeImageAvailabilityError(
+            "recipe_image.build_invalid",
+            "cached Recipe build receipt is incomplete",
+        )
+    return {
+        "state": "succeeded",
+        "build_id": resolution.build_id,
+        "builder_node_id": resolution.builder_node_id,
+        "build_input_sha256": resolution.build_input_sha256,
+        "image_digest": resolution.image_digest,
+        "oci_layout_sha256": resolution.oci_layout_sha256,
+        "image_bytes": resolution.image_bytes,
+    }
 
 
 __all__ = [

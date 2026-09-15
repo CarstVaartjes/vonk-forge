@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine
@@ -194,8 +195,78 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     assert image_production.scheduler is not None
     scheduler = image_production.scheduler
     assert scheduler.tick in worker._background_services
+    builds = run_switches._lifecycle._builds
+    assert builds is not None
+    prepared_builds = builds._prepared_builds
+    archive_available = builds._build_archive_available
+    assert prepared_builds is not None
+    assert archive_available is not None
+    assert cast(Any, prepared_builds).__self__.root == (
+        tmp_path / "agent-artifacts" / "image-cache"
+    )
+    assert cast(Any, archive_available).__self__.root == (
+        tmp_path / "agent-artifacts" / "image-cache"
+    )
     worker.close()
     assert scheduler.executor._shutdown is True
+
+
+def test_production_worker_binds_build_reuse_to_the_image_cache_root(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'reuse-root.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    current = datetime(2026, 8, 6, tzinfo=UTC)
+    clock = lambda: current
+    jobs = JobService(sessions, clock=clock)
+    publisher = AtomicRouteBundlePublisher(tmp_path / "routes", clock=clock)
+
+    class AgentJobs:
+        def enqueue_in_session(self, *_args, **_kwargs):
+            raise AssertionError("validation enqueue is not exercised here")
+
+        def notify_available(self):
+            return None
+
+    model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
+    agent_root = tmp_path / "agent-artifacts"
+    image_root = tmp_path / "recipe-image-artifacts"
+    worker = assemble_production_worker(
+        jobs=jobs,
+        sessions=sessions,
+        agent_jobs=AgentJobs(),
+        publisher=publisher,
+        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=clock,
+        worker_id="control-worker-reuse-root",
+        distributed_start_timeout_seconds=1800,
+        artifact_job_root=tmp_path / "artifact-jobs" / "blobs",
+        artifact_job_storage_max_bytes=16 * 1024**3,
+        artifact_job_retention_seconds=7 * 24 * 60 * 60,
+        artifact_job_reconcile_interval_seconds=3600,
+        artifact_job_reconcile_batch_limit=1000,
+        model_cache=model_cache,
+        agent_artifact_root=agent_root,
+        recipe_image_artifact_root=image_root,
+    )
+    try:
+        assert isinstance(worker._recipes, RecipeOperationWorker)
+        run_switches = worker._recipes._run_switches
+        assert isinstance(run_switches, RunSwitchOperationService)
+        assert run_switches._lifecycle is not None
+        builds = run_switches._lifecycle._builds
+        assert builds is not None
+        # Build reuse must read the same image cache the availability service
+        # writes, not merely whatever the agent artifact root happens to be.
+        prepared_builds = builds._prepared_builds
+        archive_available = builds._build_archive_available
+        assert prepared_builds is not None
+        assert archive_available is not None
+        assert cast(Any, prepared_builds).__self__.root == image_root / "image-cache"
+        assert cast(Any, archive_available).__self__.root == image_root / "image-cache"
+        assert cast(Any, prepared_builds).__self__.root != agent_root / "image-cache"
+    finally:
+        worker.close()
+        model_cache.close()
 
 
 def test_production_worker_settings_loads_current_secrets(

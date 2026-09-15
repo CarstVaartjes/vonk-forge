@@ -5990,6 +5990,8 @@ export interface components {
             archive_path: string;
             /** Build Id */
             build_id: string | null;
+            /** Build Input Sha256 */
+            build_input_sha256?: string | null;
             /** Distribution Content Sha256 */
             distribution_content_sha256: string;
             /** Distribution Publisher */

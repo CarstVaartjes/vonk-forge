@@ -8,9 +8,11 @@ from ..types import UNSET, Unset
 
 from ..models.runtime_image_receipt_source import check_runtime_image_receipt_source
 from ..models.runtime_image_receipt_source import RuntimeImageReceiptSource
+from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
 from typing import Literal, cast
+from typing import Union
 
 
 
@@ -49,6 +51,7 @@ class RuntimeImageReceipt:
             runtime_interface_label (Literal['v1']):
             schema_version (Literal[2]):
             source (RuntimeImageReceiptSource):
+            build_input_sha256 (Union[None, Unset, str]):
      """
 
     architecture: Literal['linux-arm64']
@@ -69,6 +72,7 @@ class RuntimeImageReceipt:
     runtime_interface_label: Literal['v1']
     schema_version: Literal[2]
     source: RuntimeImageReceiptSource
+    build_input_sha256: Union[None, Unset, str] = UNSET
 
 
 
@@ -115,6 +119,12 @@ class RuntimeImageReceipt:
 
         source: str = self.source
 
+        build_input_sha256: Union[None, Unset, str]
+        if isinstance(self.build_input_sha256, Unset):
+            build_input_sha256 = UNSET
+        else:
+            build_input_sha256 = self.build_input_sha256
+
 
         field_dict: dict[str, Any] = {}
 
@@ -138,6 +148,8 @@ class RuntimeImageReceipt:
             "schema_version": schema_version,
             "source": source,
         })
+        if build_input_sha256 is not UNSET:
+            field_dict["build_input_sha256"] = build_input_sha256
 
         return field_dict
 
@@ -217,6 +229,16 @@ class RuntimeImageReceipt:
 
 
 
+        def _parse_build_input_sha256(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        build_input_sha256 = _parse_build_input_sha256(d.pop("build_input_sha256", UNSET))
+
+
         runtime_image_receipt = cls(
             architecture=architecture,
             archive_path=archive_path,
@@ -236,6 +258,7 @@ class RuntimeImageReceipt:
             runtime_interface_label=runtime_interface_label,
             schema_version=schema_version,
             source=source,
+            build_input_sha256=build_input_sha256,
         )
 
         return runtime_image_receipt

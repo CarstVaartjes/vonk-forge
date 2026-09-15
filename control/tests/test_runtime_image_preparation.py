@@ -619,6 +619,187 @@ def test_build_archive_presence_is_cheap_and_requires_a_regular_exact_size_file(
         storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE))
 
 
+def test_find_build_matches_the_recorded_input_identity_only(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    (storage.root / ARCHIVE_DIGEST).write_bytes(ARCHIVE)
+    build_input = "a" * 64
+    receipt = prepare_runtime_image(
+        _recipe("recipe-source-build.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+        build_receipt={
+            "state": "succeeded",
+            "build_id": "build-1",
+            "build_input_sha256": build_input,
+            "image_digest": BUILT_IMAGE_DIGEST,
+            "oci_layout_sha256": ARCHIVE_DIGEST,
+            "image_bytes": len(ARCHIVE),
+        },
+    )
+    assert receipt.build_input_sha256 == build_input
+
+    assert (
+        storage.find_build(
+            build_input,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        == receipt
+    )
+    # A different input identity must not reuse these bytes.
+    assert (
+        storage.find_build(
+            "b" * 64,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+    with pytest.raises(RuntimeImagePreparationError, match="identity is invalid"):
+        storage.find_build(
+            "not-a-digest",
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+
+    (storage.root / ARCHIVE_DIGEST).unlink()
+    assert (
+        storage.find_build(
+            build_input,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+
+
+def test_find_build_does_not_reuse_a_receipt_without_an_input_identity(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    (storage.root / ARCHIVE_DIGEST).write_bytes(ARCHIVE)
+    receipt = prepare_runtime_image(
+        _recipe("recipe-source-build.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+        build_receipt={
+            "state": "succeeded",
+            "build_id": "build-legacy",
+            "image_digest": BUILT_IMAGE_DIGEST,
+            "oci_layout_sha256": ARCHIVE_DIGEST,
+            "image_bytes": len(ARCHIVE),
+        },
+    )
+    assert receipt.build_input_sha256 is None
+
+    # A receipt that cannot prove its executable inputs is not a reuse
+    # authority: the absent key must not degrade into a weaker identity match.
+    assert (
+        storage.find_build(
+            "a" * 64,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+
+
+def test_preparation_backfills_a_missing_build_input_identity(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    (storage.root / ARCHIVE_DIGEST).write_bytes(ARCHIVE)
+    build_input = "a" * 64
+    legacy = prepare_runtime_image(
+        _recipe("recipe-source-build.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+        build_receipt={
+            "state": "succeeded",
+            "build_id": "build-1",
+            "image_digest": BUILT_IMAGE_DIGEST,
+            "oci_layout_sha256": ARCHIVE_DIGEST,
+            "image_bytes": len(ARCHIVE),
+        },
+    )
+    assert legacy.build_input_sha256 is None
+
+    repaired = prepare_runtime_image(
+        _recipe("recipe-source-build.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+        build_receipt={
+            "state": "succeeded",
+            "build_id": "build-1",
+            "build_input_sha256": build_input,
+            "image_digest": BUILT_IMAGE_DIGEST,
+            "oci_layout_sha256": ARCHIVE_DIGEST,
+            "image_bytes": len(ARCHIVE),
+        },
+    )
+
+    assert repaired.build_input_sha256 == build_input
+    assert storage.read_receipt(ARCHIVE_DIGEST).build_input_sha256 == build_input
+    assert (
+        storage.find_build(
+            build_input,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        == repaired
+    )
+
+    with pytest.raises(RuntimeImagePreparationError, match="different build input"):
+        prepare_runtime_image(
+            _recipe("recipe-source-build.json"),
+            runtime=_runtime(),
+            storage=storage,
+            transport=TinyTransport(),
+            build_receipt={
+                "state": "succeeded",
+                "build_id": "build-1",
+                "build_input_sha256": "b" * 64,
+                "image_digest": BUILT_IMAGE_DIGEST,
+                "oci_layout_sha256": ARCHIVE_DIGEST,
+                "image_bytes": len(ARCHIVE),
+            },
+        )
+
+
+def test_verified_lookup_treats_a_vanished_archive_as_a_miss(tmp_path: Path) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    receipt = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    Path(receipt.archive_path).unlink()
+
+    assert (
+        storage.find_published(
+            IMAGE_DIGEST,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+    assert (
+        storage.find_verified(
+            IMAGE_DIGEST,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+
+
 def test_runtime_distribution_document_is_not_a_recipe_authority(tmp_path: Path) -> None:
     with pytest.raises(RuntimeImagePreparationError, match="canonical RecipeDefinition"):
         prepare_runtime_image(

@@ -301,6 +301,10 @@ class RuntimeImageReceipt(WireModel):
     archive_path: str = Field(min_length=1, max_length=4096)
     recorded_at: str = Field(min_length=1, max_length=128)
     build_id: str | None = Field(min_length=1, max_length=128)
+    # The executable build identity is the reuse key: the filesystem receipt
+    # carries it so a prepared build can be recognized without reading the SQL
+    # build index. It is meaningful only for a Controller build.
+    build_input_sha256: Digest | None = None
     runtime_interface_label: RuntimeInterfaceLabel
 
     @model_validator(mode="after")
@@ -308,7 +312,9 @@ class RuntimeImageReceipt(WireModel):
         if self.platform_manifest_digest != self.image_digest:
             raise ValueError("runtime image receipt platform and image digests differ")
         if self.source == "published" and (
-            self.registry_manifest_digest is None or self.build_id is not None
+            self.registry_manifest_digest is None
+            or self.build_id is not None
+            or self.build_input_sha256 is not None
         ):
             raise ValueError("published runtime image receipt provenance is invalid")
         if self.source == "controller-build" and (
@@ -774,6 +780,16 @@ class RuntimeImageStorage(Protocol):
         """Find and verify a prepared image without invoking a transport."""
         ...
 
+    def find_build(
+        self,
+        build_input_sha256: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> RuntimeImageReceipt | None:
+        """Find and verify a prepared Controller build by its exact input identity."""
+        ...
+
 
 class FilesystemRuntimeImageStorage:
     """Content-addressed Controller/NAS storage under the OCI namespace.
@@ -827,7 +843,7 @@ class FilesystemRuntimeImageStorage:
                         "runtime_image.archive_conflict",
                         "content-addressed OCI archive has no valid immutable receipt",
                     ) from error
-            if existing_receipt is not None and existing_receipt.to_mapping() != receipt.to_mapping() and any(
+            if existing_receipt is not None and any(
                 getattr(existing_receipt, field) != getattr(receipt, field)
                 for field in (
                     "source",
@@ -847,6 +863,33 @@ class FilesystemRuntimeImageStorage:
                     "runtime_image.archive_conflict",
                     "content-addressed OCI archive has a different immutable identity",
                 )
+            if existing_receipt is not None:
+                if (
+                    receipt.build_input_sha256 is not None
+                    and existing_receipt.build_input_sha256 not in {
+                        None,
+                        receipt.build_input_sha256,
+                    }
+                ):
+                    raise RuntimeImagePreparationError(
+                        "runtime_image.archive_conflict",
+                        "content-addressed OCI archive has a different build input identity",
+                    )
+                if (
+                    existing_receipt.build_input_sha256 is None
+                    and receipt.build_input_sha256 is not None
+                ):
+                    # Repair an incomplete receipt from the exact build evidence
+                    # that produced these verified bytes. The archive does not
+                    # change, so this only completes its metadata.
+                    backfilled = RuntimeImageReceipt(
+                        **{
+                            **existing_receipt.to_mapping(),
+                            "build_input_sha256": receipt.build_input_sha256,
+                        }
+                    )
+                    _atomic_json_replace(receipt_path, backfilled.to_mapping())
+                    existing_receipt = backfilled
             if staged != final:
                 staged.unlink()
         else:
@@ -944,23 +987,15 @@ class FilesystemRuntimeImageStorage:
 
         Receipt files are the content-addressed index: the archive is still
         re-hashed when its filesystem identity changes, so a partial or corrupt object fails loudly
-        and cannot be mistaken for a cache hit.
+        and cannot be mistaken for a cache hit.  A receipt whose archive is
+        simply gone is ordinary cache loss and is reported as a miss so the
+        caller prepares it again instead of failing.
         """
 
         expected_architecture = _wire_architecture(expected_architecture)
         expected_interface = expected_runtime_interface
         expected_label = _runtime_interface_label(expected_interface)
-        for receipt_path in sorted(self.root.glob("*.receipt.json")):
-            try:
-                value = json.loads(receipt_path.read_text(encoding="utf-8"))
-                receipt = _parse_runtime_image_receipt(value)
-            except RuntimeImagePreparationError:
-                raise
-            except (OSError, TypeError, ValueError, KeyError) as error:
-                raise RuntimeImagePreparationError(
-                    "runtime_image.receipt_unavailable",
-                    "runtime image receipt index is malformed",
-                ) from error
+        for receipt in self._iter_receipts():
             if (
                 receipt.source != "published"
                 or receipt.registry_manifest_digest != registry_manifest_digest
@@ -979,7 +1014,8 @@ class FilesystemRuntimeImageStorage:
                     "runtime_image.receipt_invalid",
                     "published runtime image receipt identity is malformed",
                 )
-            self.verify_existing(receipt.oci_archive_sha256, receipt.image_bytes)
+            if not self._archive_is_present(receipt):
+                continue
             return receipt
         return None
 
@@ -997,6 +1033,8 @@ class FilesystemRuntimeImageStorage:
         :func:`prepare_runtime_image` when the receipt is absent.  Published
         parent manifests and Controller-built platform images are both valid
         lookup identities. Unchanged verified files do not need another byte scan.
+        A receipt whose archive is absent is a miss, not a failure: the caller
+        re-prepares rather than surfacing an integrity error.
         """
 
         if _IMAGE_DIGEST.fullmatch(image_digest) is None:
@@ -1005,17 +1043,7 @@ class FilesystemRuntimeImageStorage:
             )
         expected_architecture = _wire_architecture(expected_architecture)
         expected_label = _runtime_interface_label(expected_runtime_interface)
-        for receipt_path in sorted(self.root.glob("*.receipt.json")):
-            try:
-                value = json.loads(receipt_path.read_text(encoding="utf-8"))
-                receipt = _parse_runtime_image_receipt(value)
-            except RuntimeImagePreparationError:
-                raise
-            except (OSError, TypeError, ValueError, KeyError) as error:
-                raise RuntimeImagePreparationError(
-                    "runtime_image.receipt_unavailable",
-                    "runtime image receipt index is malformed",
-                ) from error
+        for receipt in self._iter_receipts():
             if receipt.source == "published":
                 matches = receipt.registry_manifest_digest == image_digest
             elif receipt.source == "controller-build":
@@ -1036,9 +1064,78 @@ class FilesystemRuntimeImageStorage:
                     "runtime_image.receipt_invalid",
                     "runtime image receipt does not prove the requested platform identity",
                 )
-            self.verify_existing(receipt.oci_archive_sha256, receipt.image_bytes)
+            if not self._archive_is_present(receipt):
+                continue
             return receipt
         return None
+
+    def find_build(
+        self,
+        build_input_sha256: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> RuntimeImageReceipt | None:
+        """Return the prepared Controller build for an exact input identity.
+
+        This is the reuse gate for source builds.  The filesystem receipt is
+        the authority for "the bytes are already here": a matching receipt
+        whose archive is absent is ordinary cache loss and returns ``None`` so
+        the caller builds again.  Only the recorded executable input identity
+        selects a receipt; a receipt that cannot prove its inputs is not reused.
+        """
+
+        if _SHA256.fullmatch(build_input_sha256) is None:
+            raise RuntimeImagePreparationError(
+                "runtime_image.digest_invalid", "build input identity is invalid"
+            )
+        expected_architecture = _wire_architecture(expected_architecture)
+        expected_label = _runtime_interface_label(expected_runtime_interface)
+        for receipt in self._iter_receipts():
+            if receipt.source != "controller-build":
+                continue
+            if receipt.build_input_sha256 != build_input_sha256:
+                continue
+            if (
+                receipt.architecture != expected_architecture
+                or receipt.runtime_interface != expected_runtime_interface
+                or receipt.runtime_interface_label not in {None, expected_label}
+                or _IMAGE_DIGEST.fullmatch(receipt.image_digest) is None
+                or receipt.platform_manifest_digest != receipt.image_digest
+                or _IMAGE_DIGEST.fullmatch(receipt.local_image_config_id or "") is None
+            ):
+                raise RuntimeImagePreparationError(
+                    "runtime_image.receipt_invalid",
+                    "Controller build receipt does not prove the requested identity",
+                )
+            if not self._archive_is_present(receipt):
+                continue
+            return receipt
+        return None
+
+    def _iter_receipts(self) -> Iterable[RuntimeImageReceipt]:
+        for receipt_path in sorted(self.root.glob("*.receipt.json")):
+            try:
+                value = json.loads(receipt_path.read_text(encoding="utf-8"))
+                yield _parse_runtime_image_receipt(value)
+            except RuntimeImagePreparationError:
+                raise
+            except (OSError, TypeError, ValueError, KeyError) as error:
+                raise RuntimeImagePreparationError(
+                    "runtime_image.receipt_unavailable",
+                    "runtime image receipt index is malformed",
+                ) from error
+
+    def _archive_is_present(self, receipt: RuntimeImageReceipt) -> bool:
+        """Report archive presence; clean absence is a miss, not a failure."""
+
+        try:
+            self.verify_existing(receipt.oci_archive_sha256, receipt.image_bytes)
+        except RuntimeImagePreparationError as error:
+            if error.code == "runtime_image.cache_missing":
+                return False
+            raise
+        return True
 
     def read_receipt(self, archive_sha256: str) -> RuntimeImageReceipt:
         path = self.root / f"{archive_sha256}.receipt.json"
@@ -1232,6 +1329,13 @@ def _prepare_from_build(
         raise RuntimeImagePreparationError(
             "runtime_image.receipt_invalid", "source-build image bytes are invalid"
         )
+    raw_build_input = value.get("build_input_sha256")
+    if raw_build_input is not None and (
+        not isinstance(raw_build_input, str) or _SHA256.fullmatch(raw_build_input) is None
+    ):
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_invalid", "source-build input identity is invalid"
+        )
     existing = storage.verify_existing(archive_sha, image_bytes)
     expected_interface_label = _runtime_interface_label(expected_interface)
     try:
@@ -1250,6 +1354,7 @@ def _prepare_from_build(
         and cached.runtime_interface_label == expected_interface_label
         and cached.image_bytes == image_bytes
         and cached.build_id == build_id
+        and (raw_build_input is None or cached.build_input_sha256 == raw_build_input)
     ):
         return cached
     observed = transport.inspect_archive(
@@ -1267,6 +1372,14 @@ def _prepare_from_build(
     )
     architecture, runtime_interface, runtime_interface_label = _receipt_runtime_identity(
         observed, expected_interface
+    )
+    # A caller that only knows the archive (for example a pre-upgrade build
+    # row) must not erase an input identity the existing receipt already
+    # proves; a fresh evidence mapping records its own.
+    recorded_build_input = (
+        raw_build_input
+        if raw_build_input is not None
+        else (cached.build_input_sha256 if cached is not None else None)
     )
     receipt = RuntimeImageReceipt(
         schema_version=2,
@@ -1294,6 +1407,7 @@ def _prepare_from_build(
         archive_path=str(getattr(storage, "root", Path("")) / archive_sha),
         recorded_at=_timestamp(now),
         build_id=build_id,
+        build_input_sha256=recorded_build_input,
     )
     # A build receipt already points at an immutable stored archive, but still
     # update the receipt atomically so direct and source-build paths converge.

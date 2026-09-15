@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from typing import Protocol
 
 from pydantic import TypeAdapter
 from sqlalchemy import func, select
@@ -59,6 +60,10 @@ BUILD_ARTIFACT_FORMAT = "docker-archive-v1"
 MINIMUM_BUILD_DISK_RESERVE_BYTES = 4 * 1024**3
 MAXIMUM_BUILD_DISK_RESERVE_BYTES = 64 * 1024**3
 BUILD_INPUT_IDENTITY_SCHEMA_VERSION = 2
+# Controller source builds are always linux/arm64 under the v1 runtime
+# contract, so the filesystem build lookup is scoped by the same identity.
+_BUILD_RUNTIME_PLATFORM = "linux/arm64"
+_BUILD_RUNTIME_INTERFACE = "vonk.runtime.v1"
 _RECIPE_SETTINGS = TypeAdapter(RecipeSettings)
 
 
@@ -334,6 +339,12 @@ class RecipeBuildResolution:
     when a succeeded receipt was found and verified with its recorded
     builder binary digest.  The selected live builder must still be admitted
     and planned before a new final build identity is usable for dispatch.
+    ``stale_receipt`` reports that SQL recorded a succeeded build for this
+    exact identity but no verified archive is present on disk; a fresh build
+    must replace it rather than replay the vanished result.  ``receipt_pending``
+    reports the opposite, recoverable case: the verified archive is present but
+    its verification receipt is absent or incomplete, so preparation must
+    re-verify the bytes and republish the receipt instead of building again.
     """
 
     recipe_revision_id: str
@@ -348,6 +359,8 @@ class RecipeBuildResolution:
     image_digest: str | None = None
     oci_layout_sha256: str | None = None
     image_bytes: int | None = None
+    stale_receipt: bool = False
+    receipt_pending: bool = False
 
     @property
     def cached(self) -> bool:
@@ -371,6 +384,51 @@ class ImageDistributionPlan:
     targets: tuple[tuple[str, dict[str, object]], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _BuildCandidate:
+    """Plain snapshot of one succeeded build row, safe to use after commit.
+
+    Managed storage is consulted only after the reading transaction has ended,
+    so a candidate carries the values that decision needs instead of keeping an
+    ORM instance alive across storage I/O.
+    """
+
+    build_id: str
+    builder_node_id: str
+    build_input_sha256: str
+    builder_binary_digest: str
+    image_digest: str
+    oci_layout_sha256: str
+    image_bytes: int
+
+
+class PreparedBuildReceipt(Protocol):
+    """Verified filesystem identity of one prepared Controller build."""
+
+    build_id: str | None
+    build_input_sha256: str | None
+    image_digest: str
+    oci_archive_sha256: str
+    image_bytes: int
+
+
+class PreparedBuildLookup(Protocol):
+    """Answer whether exact build bytes are already prepared on disk.
+
+    The lookup is keyed by the executable build input identity the receipt
+    recorded beside the archive. It is the reuse owner, so it never consults the
+    SQL build index and never falls back to a weaker key.
+    """
+
+    def __call__(
+        self,
+        build_input_sha256: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> PreparedBuildReceipt | None: ...
+
+
 class RecipeBuildService:
     def __init__(
         self,
@@ -379,23 +437,28 @@ class RecipeBuildService:
         bundles: SourceBundleStoreProtocol,
         inventory_max_age: int = 300,
         build_archive_available: Callable[[str, int], bool] | None = None,
+        prepared_builds: PreparedBuildLookup | None = None,
     ) -> None:
         self._sessions = sessions
         self._bundles = bundles
         self._inventory = InventoryRepository(sessions)
         self._inventory_max_age = inventory_max_age
         self._build_archive_available = build_archive_available
+        self._prepared_builds = prepared_builds
+
+    def _stored_archive_present(self, archive_sha256: str, image_bytes: int) -> bool:
+        """Cheap presence/type/length check usable inside a short transaction."""
+
+        if self._build_archive_available is None:
+            return True
+        return self._build_archive_available(archive_sha256, image_bytes)
 
     def _succeeded_build_available(self, build: RecipeBuild) -> bool:
         if not _valid_succeeded_receipt(build):
             return False
-        if self._build_archive_available is None:
-            return True
         assert build.oci_layout_sha256 is not None
         assert build.image_bytes is not None
-        return self._build_archive_available(
-            build.oci_layout_sha256, build.image_bytes
-        )
+        return self._stored_archive_present(build.oci_layout_sha256, build.image_bytes)
 
     def check_source(self, recipe_revision_id: str) -> SourcePolicyReport:
         with self._sessions() as session:
@@ -496,9 +559,11 @@ class RecipeBuildService:
         )
         intent_sha256 = _digest(intent)
 
-        cached: RecipeBuild | None = None
+        # Read a bounded snapshot and commit before touching managed storage:
+        # a database transaction contains database work only.
+        candidates: list[_BuildCandidate] = []
         with self._sessions() as session:
-            candidates = session.scalars(
+            rows = session.scalars(
                 select(RecipeBuild)
                 .where(
                     RecipeBuild.source_bundle_sha256 == source_sha256,
@@ -506,8 +571,8 @@ class RecipeBuildService:
                 )
                 .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
             )
-            for candidate in candidates:
-                if not self._succeeded_build_available(candidate):
+            for candidate in rows:
+                if not _valid_succeeded_receipt(candidate):
                     continue
                 try:
                     report = parse_stored_build_policy(candidate.policy_report)
@@ -534,8 +599,49 @@ class RecipeBuildService:
                 )
                 if candidate.build_input_sha256 != _digest(exact):
                     continue
-                cached = candidate
-                break
+                assert candidate.image_digest is not None
+                assert candidate.oci_layout_sha256 is not None
+                assert candidate.image_bytes is not None
+                candidates.append(
+                    _BuildCandidate(
+                        build_id=candidate.id,
+                        builder_node_id=candidate.builder_node_id,
+                        build_input_sha256=candidate.build_input_sha256,
+                        builder_binary_digest=builder_digest,
+                        image_digest=candidate.image_digest,
+                        oci_layout_sha256=candidate.oci_layout_sha256,
+                        image_bytes=candidate.image_bytes,
+                    )
+                )
+
+        cached: _BuildCandidate | None = None
+        prepared: PreparedBuildReceipt | None = None
+        receipt_pending = False
+        stale_receipt = False
+        for candidate in candidates:
+            # The file on disk, not the SQL row, decides availability. A
+            # present archive whose verification receipt is absent or
+            # incomplete is a metadata gap that preparation repairs by
+            # re-verifying the bytes; only missing bytes are cache loss that
+            # forces a rebuild. Trusting the SQL row here would make the row a
+            # second availability authority.
+            if not self._stored_archive_present(
+                candidate.oci_layout_sha256, candidate.image_bytes
+            ):
+                stale_receipt = True
+                continue
+            receipt = None
+            if self._prepared_builds is not None:
+                receipt = self._prepared_builds(
+                    candidate.build_input_sha256,
+                    expected_architecture=_BUILD_RUNTIME_PLATFORM,
+                    expected_runtime_interface=_BUILD_RUNTIME_INTERFACE,
+                )
+            cached = candidate
+            prepared = receipt
+            receipt_pending = receipt is None
+            stale_receipt = False
+            break
 
         if cached is None:
             return RecipeBuildResolution(
@@ -544,17 +650,29 @@ class RecipeBuildService:
                 source_bundle_sha256=source_sha256,
                 input_intent_sha256=intent_sha256,
                 input_intent=copy.deepcopy(intent),
+                stale_receipt=stale_receipt,
             )
-        try:
-            report = parse_stored_build_policy(cached.policy_report)
-        except RecipeExecutionContractError as error:
+        if prepared is not None:
+            build_id = prepared.build_id or cached.build_id
+            build_input_sha256 = prepared.build_input_sha256
+            image_digest = prepared.image_digest
+            oci_layout_sha256 = prepared.oci_archive_sha256
+            image_bytes = prepared.image_bytes
+        else:
+            build_id = cached.build_id
+            build_input_sha256 = cached.build_input_sha256
+            image_digest = cached.image_digest
+            oci_layout_sha256 = cached.oci_layout_sha256
+            image_bytes = cached.image_bytes
+        if (
+            not isinstance(build_input_sha256, str)
+            or not isinstance(image_digest, str)
+            or not isinstance(oci_layout_sha256, str)
+            or not isinstance(image_bytes, int)
+            or isinstance(image_bytes, bool)
+        ):
             raise RecipeBuildError(
-                "build.plan_invalid", "cached source build envelope is invalid"
-            ) from error
-        builder_digest = report.builder_binary_digest
-        if builder_digest is None:
-            raise RecipeBuildError(
-                "build.plan_invalid", "cached source build policy is incomplete"
+                "build.plan_invalid", "cached source build receipt is incomplete"
             )
         return RecipeBuildResolution(
             recipe_revision_id=revision.id,
@@ -562,13 +680,14 @@ class RecipeBuildService:
             source_bundle_sha256=source_sha256,
             input_intent_sha256=intent_sha256,
             input_intent=copy.deepcopy(intent),
-            build_input_sha256=cached.build_input_sha256,
-            build_id=cached.id,
+            build_input_sha256=build_input_sha256,
+            build_id=build_id,
             builder_node_id=cached.builder_node_id,
-            builder_binary_digest=builder_digest,
-            image_digest=cached.image_digest,
-            oci_layout_sha256=cached.oci_layout_sha256,
-            image_bytes=cached.image_bytes,
+            builder_binary_digest=cached.builder_binary_digest,
+            image_digest=image_digest,
+            oci_layout_sha256=oci_layout_sha256,
+            image_bytes=image_bytes,
+            receipt_pending=receipt_pending,
         )
 
     def prepare_plan(
