@@ -2855,8 +2855,8 @@ class FleetProfileService:
                 select(FleetProfileApplication)
                 .where(FleetProfileApplication.state == "failed")
                 .order_by(
-                    FleetProfileApplication.updated_at,
-                    FleetProfileApplication.id,
+                    FleetProfileApplication.updated_at.desc(),
+                    FleetProfileApplication.id.desc(),
                 )
                 .limit(64)
             )
