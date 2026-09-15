@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -53,6 +54,10 @@ from vonk_control.recipe_operations import (
     _record_build_evidence,
 )
 from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    PulledImageEvidence,
+)
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
@@ -344,6 +349,116 @@ def test_build_resolution_reuses_exact_receipt_without_builder_admission(
     assert resolution.build_input_sha256 == plan.build_input_sha256
     assert resolution.builder_binary_digest == "1" * 64
     assert resolution.image_digest == "sha256:" + "b" * 64
+
+
+def test_nonforced_availability_dispatch_reuses_build_resolved_after_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    artifact_root = tmp_path / "artifacts"
+    storage = FilesystemRuntimeImageStorage(artifact_root)
+    archive = b"cached source build archive"
+    archive_digest = hashlib.sha256(archive).hexdigest()
+    (storage.root / archive_digest).write_bytes(archive)
+    builds = RecipeBuildService(
+        sessions,
+        bundles=bundles,
+        build_archive_available=storage.build_archive_available,
+    )
+    plan = builds.plan(revision.id, node_id, now=now)
+    image_digest = "sha256:" + "b" * 64
+    builds.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest=image_digest,
+        oci_layout_sha256=archive_digest,
+        image_bytes=len(archive),
+        now=now,
+    )
+    cached = builds.resolve(revision.id)
+    assert cached.cached
+
+    class DelayedCachedResolution:
+        def __init__(self) -> None:
+            self.resolve_calls = 0
+
+        def resolve(self, recipe_revision_id: str):
+            self.resolve_calls += 1
+            resolved = builds.resolve(recipe_revision_id)
+            if self.resolve_calls == 1:
+                return replace(
+                    resolved,
+                    build_input_sha256=None,
+                    build_id=None,
+                    builder_node_id=None,
+                    builder_binary_digest=None,
+                    image_digest=None,
+                    oci_layout_sha256=None,
+                    image_bytes=None,
+                )
+            return resolved
+
+        def __getattr__(self, name: str):
+            return getattr(builds, name)
+
+    class Operations:
+        def build(self, *_args, **_kwargs):
+            raise AssertionError("verified cached bytes must bypass build dispatch")
+
+    class Transport:
+        def inspect_archive(
+            self,
+            archive_path: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
+        ) -> PulledImageEvidence:
+            assert archive_path.read_bytes() == archive
+            return PulledImageEvidence(
+                manifest_digest=image_digest,
+                requested_manifest_digest=None,
+                config_id="sha256:" + "c" * 64,
+                local_reference="localhost/vonk/cached@" + image_digest,
+                architecture=expected_architecture,
+                runtime_interface="v1",
+                archive_sha256=expected_archive_sha256,
+                archive_bytes=expected_archive_bytes,
+            )
+
+    delayed = DelayedCachedResolution()
+    monkeypatch.setattr(
+        availability_production_module, "SkopeoOCIImageTransport", Transport
+    )
+    production = build_recipe_image_availability(
+        sessions,
+        artifact_root=artifact_root,
+        managed_catalog_sync=None,
+        recipe_builds=delayed,
+        recipe_operations=Operations(),
+        clock=lambda: now,
+    )
+    operation = production.service.start(
+        revision.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000733",
+    )
+    assert operation.build_input_sha256 is None
+
+    assert production.service.run_pending() == 1
+    completed = production.service.get(operation.id)
+    assert completed.state == "succeeded", completed.failure
+    assert completed.result is not None
+    assert completed.result["build_id"] == plan.build_id
+    assert completed.result["build_input_sha256"] == plan.build_input_sha256
+    assert delayed.resolve_calls == 2
+    with sessions() as session:
+        build_jobs = tuple(
+            session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
+        )
+    assert build_jobs == ()
+    production.close()
 
 
 def test_missing_build_archive_is_not_reused_and_replans_the_same_build_input(

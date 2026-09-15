@@ -281,6 +281,38 @@ def build_recipe_image_availability(
                 "canonical build plan is unavailable after restart",
             )
         resolution = recipe_builds.resolve(revision_id)
+        if (
+            not force
+            and getattr(resolution, "cached", False) is True
+            and build_input_sha256 in {"", resolution.build_input_sha256}
+        ):
+            cached_identity = (
+                resolution.build_id,
+                resolution.builder_node_id,
+                resolution.build_input_sha256,
+                resolution.image_digest,
+                resolution.oci_layout_sha256,
+                resolution.image_bytes,
+            )
+            if (
+                not all(isinstance(value, str) for value in cached_identity[:5])
+                or not isinstance(resolution.image_bytes, int)
+                or isinstance(resolution.image_bytes, bool)
+                or resolution.image_bytes < 1
+            ):
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.build_invalid",
+                    "cached Recipe build receipt is incomplete",
+                )
+            return {
+                "state": "succeeded",
+                "build_id": resolution.build_id,
+                "builder_node_id": resolution.builder_node_id,
+                "build_input_sha256": resolution.build_input_sha256,
+                "image_digest": resolution.image_digest,
+                "oci_layout_sha256": resolution.oci_layout_sha256,
+                "image_bytes": resolution.image_bytes,
+            }
         selected_plan: Any | None = None
         selected_candidate: str | None = None
         candidate_ids: tuple[str, ...] = ()
