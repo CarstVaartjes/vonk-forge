@@ -1323,3 +1323,19 @@ def test_native_transfer_continues_while_progress_observer_is_busy(
         progress, "download", None,
     )
     assert reports[-1] == ("download", len(destination.read_bytes()), None)
+
+
+def test_runtime_image_storage_types_only_clean_absence_as_cache_missing(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    digest = "a" * 64
+    with pytest.raises(RuntimeImagePreparationError) as missing:
+        storage.verify_existing(digest, 4)
+    assert missing.value.code == "runtime_image.cache_missing"
+
+    archive = storage.root / digest
+    archive.symlink_to(tmp_path / "absent-target")
+    with pytest.raises(RuntimeImagePreparationError) as unsafe:
+        storage.verify_existing(digest, 4)
+    assert unsafe.value.code == "runtime_image.archive_mismatch"

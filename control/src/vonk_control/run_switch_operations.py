@@ -149,6 +149,9 @@ from .run_switch_contract import (
     StopImpact,
 )
 from .runtime_image_preparation import (
+    RuntimeImagePreparationError,
+)
+from .runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
 
@@ -2303,6 +2306,7 @@ class RunSwitchOperationService:
             }
             progress["child_operation_id"] = None
             progress["retryable"] = False
+            progress.pop("failure_code", None)
             progress["workload_intent_ordinal"] = ordinal
             now = _now(self._clock)
             job = Job(
@@ -4839,8 +4843,19 @@ class RunSwitchOperationService:
                 job.updated_at = now
                 session.commit()
                 return True
-        def fail(reason: str, *, retryable: bool = False) -> None:
-            self._fail(operation_id, reason, retryable=retryable, checkpoint=(phase_index, item_index, child_id))
+        def fail(
+            reason: str,
+            *,
+            retryable: bool = False,
+            failure_code: str | None = None,
+        ) -> None:
+            self._fail(
+                operation_id,
+                reason,
+                retryable=retryable,
+                checkpoint=(phase_index, item_index, child_id),
+                failure_code=failure_code,
+            )
 
         if child_id is not None:
             if not isinstance(child_id, str):
@@ -5142,6 +5157,12 @@ class RunSwitchOperationService:
                 )
             except RunSwitchOperationConflict as error:
                 fail(str(error))
+                return True
+            except RuntimeImagePreparationError as error:
+                fail(
+                    f"{type(error).__name__}: {error}",
+                    failure_code=error.code,
+                )
                 return True
             except (OSError, httpx.HTTPError, RuntimeError, TypeError, ValueError, KeyError) as error:
                 fail(
@@ -5474,6 +5495,7 @@ class RunSwitchOperationService:
         reason: str,
         *,
         retryable: bool = False,
+        failure_code: str | None = None,
         checkpoint: tuple[int, int, object] | None = None,
         child_evidence: object | None = None,
     ) -> None:
@@ -5492,12 +5514,18 @@ class RunSwitchOperationService:
                         progress, plan, plan.phases[checkpoint[0]], child_evidence, now
                     )
             self._mark_failed(
-                job, reason, now=now, retryable=retryable, progress=progress
+                job,
+                reason,
+                now=now,
+                retryable=retryable,
+                failure_code=failure_code,
+                progress=progress,
             )
 
     @staticmethod
     def _mark_failed(
         job: Job, reason: str, *, now: datetime, retryable: bool = False,
+        failure_code: str | None = None,
         progress: dict[str, Any] | None = None,
     ) -> None:
         """Record failure using the caller's transaction and existing row lock."""
@@ -5508,6 +5536,10 @@ class RunSwitchOperationService:
             progress = _read_progress(job.result)
         progress["failed_phase"] = progress.get("phase")
         progress["retryable"] = retryable
+        if failure_code is None:
+            progress.pop("failure_code", None)
+        else:
+            progress["failure_code"] = failure_code
         job.result = _persisted_result(progress)
         job.updated_at = now
 
@@ -6352,6 +6384,7 @@ def _complete_operation_progress(
     progress["subphase"] = None
     progress["retryable"] = False
     progress["failed_phase"] = None
+    progress.pop("failure_code", None)
     progress["child_operation_id"] = None
     return progress
 

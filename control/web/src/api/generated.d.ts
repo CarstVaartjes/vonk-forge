@@ -5660,6 +5660,8 @@ export interface components {
             completed_phases?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify")[];
             /** Failed Phase */
             failed_phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify") | null;
+            /** Failure Code */
+            failure_code?: string | null;
             /** Final Observation */
             final_observation?: components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | null;
             /** Final Verify Started At */

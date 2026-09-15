@@ -869,9 +869,22 @@ class FilesystemRuntimeImageStorage:
                 "runtime_image.archive_invalid", "OCI archive digest is invalid"
             )
         path = self.root / archive_sha256
-        if not path.is_file() or path.is_symlink():
+        try:
+            observed = path.lstat()
+        except FileNotFoundError as error:
             raise RuntimeImagePreparationError(
-                "runtime_image.archive_unavailable", "OCI archive is not present in Controller storage"
+                "runtime_image.cache_missing",
+                "OCI archive is not present in Controller storage",
+            ) from error
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_unavailable",
+                "Controller runtime image storage could not be inspected",
+            ) from error
+        if not stat.S_ISREG(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch",
+                "stored OCI archive is not a regular file",
             )
         if not 1 <= expected_bytes <= self.maximum_bytes or not verified_files.verify_path(
             path, archive_sha256, expected_bytes

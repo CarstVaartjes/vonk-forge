@@ -14693,6 +14693,18 @@
             ],
             "title": "Failed Phase"
           },
+          "failure_code": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_.:-]{0,95}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
           "final_observation": {
             "anyOf": [
               {

@@ -7,7 +7,7 @@ import json
 import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
@@ -119,6 +119,7 @@ _CHILD_FAILED_STATES = frozenset(
 _OPERATION_STATE_ADAPTER = TypeAdapter(FleetProfileOperationState)
 _PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
 _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
+_MAX_AUTOMATIC_CACHE_RECOVERY_ATTEMPTS = 3
 
 
 class _PlanStepDraftRequired(TypedDict):
@@ -313,6 +314,34 @@ class RunSwitchFleetProfileAdapter:
     ) -> None:
         self._run_switch.request_superseded_workload_cancellation_in_session(
             session, targets, ordinal, now
+        )
+
+    def recoverable_cache_loss(
+        self, application_id: str, *, session: Session
+    ) -> bool:
+        """Recognize only a typed, pre-effect Controller cache loss."""
+
+        application = session.get(FleetProfileApplication, application_id)
+        if application is None:
+            return False
+        state = self._state(application)
+        if state is None or state.get("state") != "failed":
+            return False
+        active = state.get("active_operation_id")
+        if not isinstance(active, str):
+            return False
+        try:
+            child = self._run_switch.get(active)
+        except (KeyError, RuntimeError, TypeError, ValueError):
+            return False
+        result = child.result
+        return bool(
+            child.state == "failed"
+            and result is not None
+            and result.phase == "prepare"
+            and result.subphase == "runtime-image"
+            and result.child_operation_id is None
+            and result.failure_code == "runtime_image.cache_missing"
         )
 
     def start(
@@ -2382,6 +2411,26 @@ class FleetProfileService:
             raise FleetProfileConflict("Application intent is obsolete because the saved profile changed")
         if not preview.allowed:
             raise FleetProfileConflict("Current Fleet state blocks application recovery")
+        if tuple(preview.scope.node_ids) != tuple(progress.intended_profile.scope.node_ids):
+            raise FleetProfileConflict("Fleet scope changed during application recovery")
+        expected_assignments = {
+            assignment.id: (
+                assignment.recipe_revision_id,
+                assignment.desired_state,
+                tuple(node.node_id for node in assignment.nodes),
+            )
+            for assignment in progress.intended_profile.assignments
+        }
+        observed_assignments = {
+            assignment.assignment_id: (
+                assignment.recipe_revision_id,
+                assignment.desired_state,
+                tuple(assignment.node_ids),
+            )
+            for assignment in preview.assignments
+        }
+        if observed_assignments != expected_assignments:
+            raise FleetProfileConflict("Profile assignment scope changed during application recovery")
         return self._queue_application(preview, request_key=request_key, actor=actor,
                                        operation_kind=operation_kind,
                                        retry_of_application_id=application_id)
@@ -2588,6 +2637,23 @@ class FleetProfileService:
         if self._switch_adapter is None:
             return False
         now = _aware(self._clock())
+        recovery = self._automatic_cache_recovery(now)
+        if recovery is not None:
+            application_id, actor = recovery
+            request_key = str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"vonk-forge:profile-cache-recovery:{application_id}",
+                )
+            )
+            try:
+                self.retry(application_id, request_key=request_key, actor=actor)
+            except FleetProfileConflict:
+                # Retry performs the authoritative profile, scope, ordinal and
+                # lineage checks again after this read-only candidate scan.
+                pass
+            else:
+                return True
         with self._sessions.begin() as session:
             row = session.scalar(
                 select(FleetProfileApplication)
@@ -2778,6 +2844,52 @@ class FleetProfileService:
                 current.status_reason = str(error)[:512]
             current.updated_at = _aware(self._clock())
         return True
+
+    def _automatic_cache_recovery(
+        self, now: datetime
+    ) -> tuple[str, str] | None:
+        """Find one current failed profile whose only blocker is vanished cache bytes."""
+
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(FleetProfileApplication)
+                .where(FleetProfileApplication.state == "failed")
+                .order_by(
+                    FleetProfileApplication.updated_at,
+                    FleetProfileApplication.id,
+                )
+                .limit(64)
+            )
+            for row in rows:
+                try:
+                    progress = _persisted_profile_progress(row)
+                except FleetProfileConflict:
+                    continue
+                if (
+                    progress.attempt >= _MAX_AUTOMATIC_CACHE_RECOVERY_ATTEMPTS
+                    or progress.intended_profile is None
+                    or not self._switch_adapter.recoverable_cache_loss(
+                        row.id, session=session
+                    )
+                ):
+                    continue
+                current_scope = tuple(
+                    session.scalars(
+                        select(AgentNode.node_id)
+                        .where(AgentNode.revoked_at.is_(None))
+                        .order_by(AgentNode.node_id)
+                    )
+                )
+                if (
+                    tuple(progress.intended_profile.scope.node_ids) != current_scope
+                    or not self._retry_eligible(session, row)
+                ):
+                    continue
+                delay = min(60, 2 ** (progress.attempt - 1))
+                if now < _aware(row.updated_at) + timedelta(seconds=delay):
+                    continue
+                return row.id, row.actor
+        return None
 
     def _superseding_intent(
         self,

@@ -816,6 +816,9 @@ class RunSwitchOperationResult(_StrictModel):
     total_bytes_known: bool = False
     members: list[RunSwitchMemberReceipt] = Field(default_factory=list, max_length=32)
     retryable: bool = False
+    failure_code: Annotated[
+        str, StringConstraints(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")
+    ] | None = None
     retry_attempt: int | None = Field(default=None, ge=2)
     retry_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     observation_due_at: datetime | None = None
@@ -858,6 +861,8 @@ class RunSwitchOperation(_StrictModel):
                 raise ValueError("succeeded run-switch cannot retain failure evidence")
             if self.result.retryable or self.result.child_operation_id is not None:
                 raise ValueError("succeeded run-switch cannot retain pending recovery or child work")
+            if self.result.failure_code is not None:
+                raise ValueError("succeeded run-switch cannot retain failure evidence")
         if self.state == "failed" and not (self.status_reason or "").strip():
             raise ValueError("failed run-switch requires a status reason")
         return self
