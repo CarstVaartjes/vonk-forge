@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -299,3 +300,82 @@ def test_due_telemetry_housekeeping_does_not_consume_worker_source_turn(
         "maintenance",
         "recipe",
     ]
+
+
+def test_failing_source_does_not_starve_a_healthy_durable_job(
+    tmp_path, caplog
+) -> None:
+    """A source that keeps failing must not deny unrelated jobs their turn."""
+
+    jobs = _service(tmp_path)
+    for index in range(3):
+        jobs.enqueue("probe", "admin", "a" * 64, ["node"], {"index": index})
+
+    class RecoveringSource:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.available = False
+
+        def tick(self) -> bool:
+            self.calls += 1
+            if not self.available:
+                raise RuntimeError("dependency unavailable")
+            return True
+
+    recipes = RecoveringSource()
+    handled: list[int] = []
+
+    def handle(request: HandlerRequest) -> dict[str, object]:
+        index = request["index"]
+        assert isinstance(index, int)
+        handled.append(index)
+        return {}
+
+    worker = Worker(
+        jobs,
+        "worker-1",
+        {"probe": handle},
+        recipes=recipes,
+    )
+
+    with caplog.at_level(logging.INFO, logger="vonk-control-worker"):
+        # The failing source is first in rotation every pass because the
+        # durable job source advances the cursor back to it.  The job must
+        # still complete on each pass.
+        assert [worker.run_once() for _ in range(3)] == [True, True, True]
+        assert sorted(handled) == [0, 1, 2]
+        assert recipes.calls == 3
+        assert "worker.source_failed" in caplog.text
+        # Once the dependency recovers, the previously failing source resumes.
+        recipes.available = True
+        assert worker.run_once() is True
+        assert recipes.calls == 4
+        assert sorted(handled) == [0, 1, 2]
+
+
+def test_failing_housekeeping_task_does_not_stop_sources_or_heartbeat(
+    tmp_path, caplog
+) -> None:
+    """One failing maintenance task must not take the whole pass down."""
+
+    jobs = _service(tmp_path)
+    jobs.enqueue("probe", "admin", "a" * 64, ["node"], {})
+    events: list[str] = []
+
+    def failing_housekeeping() -> None:
+        events.append("housekeeping")
+        raise RuntimeError("maintenance dependency unavailable")
+
+    worker = Worker(
+        jobs,
+        "worker-1",
+        {"probe": lambda _request: events.append("job") or {}},
+        housekeeping=failing_housekeeping,
+        loop_heartbeat=lambda: events.append("heartbeat"),
+    )
+
+    with caplog.at_level(logging.INFO, logger="vonk-control-worker"):
+        assert worker.run_once() is True
+
+    assert events == ["housekeeping", "job", "heartbeat"]
+    assert "worker.housekeeping_failed" in caplog.text

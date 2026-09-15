@@ -16,6 +16,11 @@ from .logging import log_event
 
 _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 
+#: Operational failures a durable source or handler can recover from on the
+#: next pass.  Programming defects (``AssertionError`` and friends) stay
+#: uncaught so they are never mistaken for a retryable dependency failure.
+_SOURCE_FAILURES = (OSError, RuntimeError, TypeError, ValueError, KeyError)
+
 _LOGGER = logging.getLogger("vonk-control-worker")
 
 
@@ -167,32 +172,66 @@ class Worker:
                 close()
 
     def run_once(self) -> bool:
-        if self._housekeeping is not None:
-            self._housekeeping()
-        if self._artifact_housekeeping is not None:
-            self._artifact_housekeeping()
-        sources: list[Callable[[], bool]] = []
+        # Housekeeping runs before all work, so one failing maintenance task
+        # must not deny the heartbeat and every source their turn.  Each task
+        # is contained and reported; the outer loop retries it next pass.
+        self._run_housekeeping("telemetry", self._housekeeping)
+        self._run_housekeeping("artifact", self._artifact_housekeeping)
+        sources: list[tuple[str, Callable[[], bool]]] = []
         if self._recipes is not None:
-            sources.append(self._recipes.tick)
+            sources.append(("recipes", self._recipes.tick))
         if self._model_cache is not None:
-            sources.append(self._run_model_cache)
-        sources.extend(
-            lambda service=service: bool(service())
-            for service in self._background_services
-        )
-        sources.append(self._run_generic)
+            sources.append(("model-cache", self._run_model_cache))
+        for index, service in enumerate(self._background_services):
+            sources.append(
+                (
+                    f"background-{index}",
+                    lambda service=service: bool(service()),
+                )
+            )
+        sources.append(("jobs", self._run_generic))
         if self._source_cursor >= len(sources):
             self._source_cursor = 0
         advanced = False
         for offset in range(len(sources)):
             index = (self._source_cursor + offset) % len(sources)
-            if sources[index]():
+            name, source = sources[index]
+            try:
+                progressed = source()
+            except _SOURCE_FAILURES as error:
+                # A source that keeps failing must not starve the others: the
+                # failure stays visible, the turn moves on, and the failed
+                # source is retried on a later pass.
+                log_event(
+                    _LOGGER,
+                    "worker.source_failed",
+                    service="control-worker",
+                    source=name,
+                    error=type(error).__name__,
+                )
+                continue
+            if progressed:
                 self._source_cursor = (index + 1) % len(sources)
                 advanced = True
                 break
         if self._loop_heartbeat is not None:
             self._loop_heartbeat()
         return advanced
+
+    @staticmethod
+    def _run_housekeeping(name: str, task: Callable[[], object] | None) -> None:
+        if task is None:
+            return
+        try:
+            task()
+        except _SOURCE_FAILURES as error:
+            log_event(
+                _LOGGER,
+                "worker.housekeeping_failed",
+                service="control-worker",
+                task=name,
+                error=type(error).__name__,
+            )
 
     def _run_model_cache(self) -> bool:
         # The model cache is consumed structurally, like the distribution
@@ -226,7 +265,7 @@ class Worker:
                     attempt.targets,
                 )
             )
-        except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
+        except _SOURCE_FAILURES as error:
             self._jobs.fail(attempt, f"{type(error).__name__}: {error}")
             if self._logs is not None:
                 self._logs.save(
