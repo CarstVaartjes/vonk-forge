@@ -652,6 +652,22 @@ class ArtifactJobService:
                     .limit(batch_limit)
                 )
             )
+            # Bytes may only be reclaimed because the exact job that referenced
+            # them expired. An empty global reference scan proves nothing after a
+            # restore that lost reference rows, so it never authorizes deletion.
+            expired_blobs = (
+                set(
+                    session.scalars(
+                        select(ArtifactJobFile.blob_sha256).where(
+                            ArtifactJobFile.artifact_job_id.in_(
+                                [job.id for job in expired]
+                            )
+                        )
+                    )
+                )
+                if expired
+                else set()
+            )
             if expired:
                 session.execute(
                     delete(ArtifactJobFile).where(
@@ -662,22 +678,27 @@ class ArtifactJobService:
                 session.delete(job)
             session.flush()
             referenced = set(session.scalars(select(ArtifactJobFile.blob_sha256)))
+            reclaimable = expired_blobs - referenced
             orphan_rows = (
                 tuple(
                     session.scalars(
                         select(ArtifactJobBlob)
-                        .where(ArtifactJobBlob.sha256.not_in(referenced))
+                        .where(ArtifactJobBlob.sha256.in_(reclaimable))
                         .limit(batch_limit)
                     )
                 )
-                if referenced
-                else tuple(session.scalars(select(ArtifactJobBlob).limit(batch_limit)))
+                if reclaimable
+                else ()
             )
             for blob in orphan_rows:
                 session.delete(blob)
+        # The store may unlink only the digests this pass proved reclaimable.
+        # Passing the full reference set at all is what let an incomplete
+        # reference scan delete live bytes, so the evidence is now explicit.
         result = self._blob_store.reconcile(
             referenced,
             batch_limit=batch_limit,
+            reclaimable_sha256=reclaimable,
             _reference_fenced=True,
         )
         return {
