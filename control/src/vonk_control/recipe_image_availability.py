@@ -907,7 +907,10 @@ class RecipeImageAvailabilityService:
             )
             plan_digest = preview.get("plan_digest")
             artifact_set_sha256 = preview.get("artifact_set_sha256")
-            if not isinstance(plan_digest, str) or not isinstance(artifact_set_sha256, str):
+            if (
+                not isinstance(plan_digest, str)
+                or not isinstance(artifact_set_sha256, str)
+            ):
                 raise RecipeImageAvailabilityError(
                     "recipe_image.model_cache_invalid",
                     "ModelCache returned an incomplete exact artifact plan",
@@ -918,6 +921,17 @@ class RecipeImageAvailabilityService:
                 recipe_revision_id=recipe_revision_id
             )
             manifest_document = manifest.document()
+            artifacts = manifest_document.get("artifacts")
+            new_bytes = preview.get("new_bytes")
+            if artifacts == [] and new_bytes is None:
+                new_bytes = 0
+            if type(new_bytes) is not int or new_bytes < 0:
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.model_cache_invalid",
+                    "ModelCache returned incomplete transfer accounting",
+                    retryable=True,
+                    recovery_actions=("retry",),
+                )
             if manifest.digest != artifact_set_sha256:
                 raise RecipeImageAvailabilityError(
                     "recipe_image.model_cache_invalid",
@@ -934,6 +948,7 @@ class RecipeImageAvailabilityService:
                     if (
                         candidate.artifact_set_sha256 == artifact_set_sha256
                         and candidate.state in {"queued", "running", "partial", "succeeded", "failed"}
+                        and not (candidate.state == "succeeded" and new_bytes > 0)
                     )
                 ]
                 state_rank = {"succeeded": 0, "queued": 1, "running": 1, "partial": 1, "failed": 2}
@@ -968,7 +983,6 @@ class RecipeImageAvailabilityService:
                 recovery_actions=("retry",),
             ) from error
         model_content_digests = manifest_document["model_content_digests"]
-        artifacts = manifest_document.get("artifacts")
         return {
             "id": operation.id,
             "request_key": str(getattr(operation, "request_key", child_request_key)),
@@ -1494,6 +1508,8 @@ class RecipeImageAvailabilityService:
                 return
             if operation.state == "cancelled" or payload.get("removal_fence") is not None:
                 return
+            operation_actor = operation.actor
+            operation_request_id = operation.request_id
             was_running = operation.state == "running"
             operation.state = "running"
             if not was_running:
@@ -1521,7 +1537,11 @@ class RecipeImageAvailabilityService:
             runtime = payload["runtime"]
             if not isinstance(runtime, Mapping):
                 raise RecipeImageAvailabilityError("recipe_image.runtime_invalid", "runtime projection is invalid")
-            model_child = self._current_model_child(payload)
+            model_child = self._current_model_child(
+                payload,
+                actor=operation_actor,
+                parent_request_key=operation_request_id,
+            )
             model_pending = False
             model_failure: Mapping[str, object] | None = None
             if model_child is not None:
@@ -1679,7 +1699,13 @@ class RecipeImageAvailabilityService:
                 heartbeat_stop.set()
                 heartbeat.join(timeout=max(1.0, self._claim_lease_seconds / 2))
 
-    def _current_model_child(self, payload: Mapping[str, object]) -> Mapping[str, object] | None:
+    def _current_model_child(
+        self,
+        payload: Mapping[str, object],
+        *,
+        actor: str | None = None,
+        parent_request_key: str | None = None,
+    ) -> Mapping[str, object] | None:
         child = payload.get("model_child")
         if not isinstance(child, Mapping) or self._model_cache is None:
             return child if isinstance(child, Mapping) else None
@@ -1688,6 +1714,47 @@ class RecipeImageAvailabilityService:
             return child
         try:
             operation = self._model_cache.get_operation(child_id)
+            if (
+                operation.state == "succeeded"
+                and actor is not None
+                and parent_request_key is not None
+                and isinstance(operation.artifact_set_sha256, str)
+                and child.get("artifacts") != []
+            ):
+                recipe_revision_id = payload.get("recipe_revision_id")
+                if not isinstance(recipe_revision_id, str):
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.model_cache_invalid",
+                        "availability operation lacks its exact recipe revision",
+                        retryable=True,
+                        recovery_actions=("retry",),
+                    )
+                preview = self._model_cache.download_preview(
+                    recipe_revision_id=recipe_revision_id
+                )
+                preview_set = preview.get("artifact_set_sha256")
+                preview_plan = preview.get("plan_digest")
+                new_bytes = preview.get("new_bytes")
+                if (
+                    preview_set != operation.artifact_set_sha256
+                    or not isinstance(preview_plan, str)
+                    or type(new_bytes) is not int
+                    or new_bytes < 0
+                ):
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.model_cache_invalid",
+                        "ModelCache returned an incomplete exact artifact plan",
+                        retryable=True,
+                        recovery_actions=("retry",),
+                )
+                if new_bytes > 0:
+                    return self._ensure_model_child(
+                        recipe_revision_id,
+                        actor=actor,
+                        parent_request_key=(
+                            f"{parent_request_key}:restore:{child_id}:{preview_plan}"
+                        ),
+                    )
         except ModelCacheNotFound:
             return dict(child) | {
                 "state": "failed",
