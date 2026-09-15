@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.exc import DBAPIError, OperationalError
+
 from .jobs import JobService
 from .logging import log_event
 
@@ -19,7 +21,19 @@ _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 #: Operational failures a durable source or handler can recover from on the
 #: next pass.  Programming defects (``AssertionError`` and friends) stay
 #: uncaught so they are never mistaken for a retryable dependency failure.
-_SOURCE_FAILURES = (OSError, RuntimeError, TypeError, ValueError, KeyError)
+#: A bounded PostgreSQL wait (lock or statement timeout) surfaces as
+#: ``OperationalError``/``DBAPIError``; containing it here keeps the loop
+#: heartbeat running and the failed source retried on a later pass instead of
+#: turning database contention into a worker tick failure.
+_SOURCE_FAILURES = (
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    OperationalError,
+    DBAPIError,
+)
 
 _LOGGER = logging.getLogger("vonk-control-worker")
 
