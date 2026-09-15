@@ -435,22 +435,28 @@ def persist_runtime_image_receipt(
         )
     original_revision_id = original_revision.id
     _validate_revision_reuse_identity(current_revision, original_revision)
-    # One verified archive legitimately serves more than one execution
-    # identity: the availability operation records the recipe-level identity it
-    # admitted, and each placement then records the compiled identity that its
-    # launch and the Spark agent's receipt authorization actually compare.  A
-    # second identity for the same bytes is not a conflict, so the identity
-    # lookup below is the only one: it keeps the artifact immutable *per
-    # identity*, and ``_validate_revision_reuse_identity`` above keeps the
-    # revision an editorial successor with the same execution and artifact
-    # identity.  Direct published images prepared before any launch depend on
-    # this: refusing the second identity left every prepared recipe unusable.
+    # A source recipe can be rebuilt under the same execution identity.  The
+    # rebuild is a new immutable observation when its verified platform/config
+    # identity changes; retaining both rows lets a frozen plan continue to
+    # resolve only its original receipt while a fresh plan authorizes the new
+    # one.  Published pins cannot legitimately change beneath the same recipe
+    # execution, so their narrower lookup deliberately retains conflict
+    # detection.  For either source, the database uniqueness fields identify
+    # the row and the full comparison below prevents changed archive/build
+    # provenance from being folded into an existing observation.
     lookup = select(RuntimeImageReceiptRow).where(
         RuntimeImageReceiptRow.recipe_revision_id == original_revision_id,
         RuntimeImageReceiptRow.source == receipt.source,
         RuntimeImageReceiptRow.original_content_digest == original_content_digest,
         RuntimeImageReceiptRow.effective_execution_key == effective_execution_key,
     )
+    if receipt.source == "controller-build":
+        lookup = lookup.where(
+            RuntimeImageReceiptRow.platform_manifest_digest
+            == receipt.platform_manifest_digest,
+            RuntimeImageReceiptRow.local_image_config_id
+            == receipt.local_image_config_id,
+        )
     row = session.scalar(lookup)
     identity = {
         "registry_manifest_digest": receipt.registry_manifest_digest,
