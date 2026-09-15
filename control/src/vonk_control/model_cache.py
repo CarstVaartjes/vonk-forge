@@ -1354,16 +1354,17 @@ class ModelCacheService:
                 )
                 if self._runtime_archive_available is None:
                     return None
-                return next(
-                    (
-                        receipt
-                        for receipt in receipts
-                        if self._runtime_archive_available(
-                            receipt.oci_archive_sha256, receipt.image_bytes
+                for receipt in receipts:
+                    archive = receipt.oci_archive_sha256
+                    size = receipt.image_bytes
+                    if not isinstance(archive, str) or type(size) is not int:
+                        raise ModelCacheStorageError(
+                            "model_cache.runtime_receipt_invalid",
+                            "verified runtime image receipt lacks its archive identity",
                         )
-                    ),
-                    None,
-                )
+                    if self._runtime_archive_available(archive, size):
+                        return receipt
+                return None
 
             selected: tuple[CatalogDocumentRevision, str, str | None, RuntimeImageReceiptRow | None] | None = None
             newest_compatible: CatalogDocumentRevision | None = None
