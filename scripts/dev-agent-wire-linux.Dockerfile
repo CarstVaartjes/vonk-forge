@@ -2,7 +2,7 @@
 #
 # The probe executables are built and *executed* by the pytest suites, so this
 # image carries the same three tools the ``controller-spark-wire`` CI job
-# installs on ubuntu-24.04: Python 3.12, uv, and the pinned Rust toolchain.
+# installs on ubuntu-24.04: uv-managed Python, uv, and the pinned Rust toolchain.
 # ``scripts/dev_agent_wire_linux.py`` builds it with the versions asserted
 # against .github/workflows/ci.yml; the defaults here are a fallback only.
 # The base is pinned by tag plus index digest, never a moving tag alone; the
@@ -11,9 +11,9 @@
 # the module, and in docs/local-linux-lane.md.
 FROM ubuntu:24.04@sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254
 
-ARG RUST_TOOLCHAIN=1.97.1
+ARG RUST_TOOLCHAIN=1.98.1
 ARG UV_VERSION=0.12.1
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_VERSION=3.14
 
 ENV DEBIAN_FRONTEND=noninteractive \
     RUSTUP_HOME=/usr/local/rustup \
@@ -32,9 +32,6 @@ RUN apt-get update \
         python3 \
         python3-venv \
     && rm -rf /var/lib/apt/lists/*
-
-# Fail the build rather than silently running a different Python than CI uses.
-RUN python3 -c "import sys; assert '.'.join(map(str, sys.version_info[:2])) == '${PYTHON_VERSION}', sys.version"
 
 RUN curl --proto '=https' --tlsv1.2 --silent --show-error --fail https://sh.rustup.rs \
         | sh -s -- \
@@ -55,10 +52,12 @@ RUN curl --location --silent --show-error --fail \
         "https://astral.sh/uv/${UV_VERSION}/install.sh" \
         | env UV_UNMANAGED_INSTALL=/usr/local/bin sh
 
-# Resolve the interpreter from the image instead of downloading a managed
-# CPython, so a run cannot silently drift away from the pinned 3.12.
+# uv owns the interpreter so the lane is not capped by the distro Python.
+# Fail the build rather than running a different Python than CI uses.
+RUN uv python install "${PYTHON_VERSION}" \
+    && uv run --python "${PYTHON_VERSION}" python -c "import sys; assert '.'.join(map(str, sys.version_info[:2])) == '${PYTHON_VERSION}', sys.version"
+
 ENV UV_PYTHON=${PYTHON_VERSION} \
-    UV_PYTHON_DOWNLOADS=never \
     UV_LINK_MODE=copy
 
 LABEL org.opencontainers.image.title="vonk-forge agent wire-contract lane" \

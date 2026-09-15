@@ -31,12 +31,12 @@ export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 # Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
 uv run --project control --frozen --with-editable . \
   pytest -q control/tests -m "not lane" -n auto --dist loadfile
-uv run --python 3.12 --frozen --with pytest==9.1.1 --with pytest-xdist==3.8.0 \
+uv run --python 3.14 --frozen --with pytest==9.1.1 --with pytest-xdist==3.8.0 \
   --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
   pytest -q tests -m "not lane" -n auto
 
 # Repository and protocol contracts, in the standalone environment CI uses.
-uv run --python 3.12 --frozen --with pytest==9.1.1 \
+uv run --python 3.14 --frozen --with pytest==9.1.1 \
   --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" pytest -q tests
 
 # Control-plane/API/worker tests, including the container and PostgreSQL lane.

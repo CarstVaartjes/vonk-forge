@@ -108,8 +108,8 @@ runs:
       run: |
         set -euo pipefail
         rustup set profile minimal
-        rustup toolchain install 1.97.1
-        rustup default 1.97.1
+        rustup toolchain install 1.98.1
+        rustup default 1.98.1
         rustup target add "$TARGET"
 
     - name: Restore architecture Rust dependency cache

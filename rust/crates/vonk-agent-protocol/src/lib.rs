@@ -2426,7 +2426,9 @@ impl generated::AgentRuntimeIdentity {
         for (index, pair) in self
             .observation_receipt_public_key
             .as_bytes()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .enumerate()
         {
             let digit = |value: u8| {
@@ -2436,7 +2438,8 @@ impl generated::AgentRuntimeIdentity {
                     value - b'a' + 10
                 }
             };
-            bytes[index] = digit(pair[0]) * 16 + digit(pair[1]);
+            let [high, low] = *pair;
+            bytes[index] = digit(high) * 16 + digit(low);
         }
         Ok(bytes)
     }

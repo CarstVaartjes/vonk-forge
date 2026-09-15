@@ -127,7 +127,7 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
   uv run --project control --frozen --with-editable . pytest -q \
     control/tests -m "not lane" -n auto --dist loadfile
 UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
-  uv run --python 3.12 --frozen --with pytest==9.1.1 \
+  uv run --python 3.14 --frozen --with pytest==9.1.1 \
     --with pytest-xdist==3.8.0 \
     --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
     pytest -q tests -m "not lane" -n auto
@@ -138,7 +138,7 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
 UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
   uv run --project control --frozen --with-editable . pytest -q control/tests
 UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
-  uv run --python 3.12 --frozen --with pytest==9.1.1 \
+  uv run --python 3.14 --frozen --with pytest==9.1.1 \
     --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" pytest -q tests
 
 # Compose lane. These tests import the Controller, so they run in the control

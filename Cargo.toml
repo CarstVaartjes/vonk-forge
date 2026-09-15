@@ -16,7 +16,7 @@ resolver = "3"
 version = "0.1.1"
 edition = "2024"
 license = "MIT"
-rust-version = "1.97.1"
+rust-version = "1.98.1"
 
 [workspace.dependencies]
 async-trait = "0.1.89"

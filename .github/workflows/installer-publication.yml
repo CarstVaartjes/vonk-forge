@@ -79,7 +79,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.1"
-          python-version: "3.12"
+          python-version: "3.14"
           enable-cache: true
 
       - name: Bind accepted workflow evidence to source authority
@@ -268,7 +268,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.1"
-          python-version: "3.12"
+          python-version: "3.14"
           enable-cache: true
 
       - name: Download accepted native setup programs
@@ -503,7 +503,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.1"
-          python-version: "3.12"
+          python-version: "3.14"
           enable-cache: true
 
       - name: Download verified Compose parser fixtures
@@ -842,7 +842,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.1"
-          python-version: "3.12"
+          python-version: "3.14"
           enable-cache: true
 
       - name: Download exact Spark publication graph
@@ -947,7 +947,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.1"
-          python-version: "3.12"
+          python-version: "3.14"
           enable-cache: true
 
       - name: Download exact candidate publication graph
@@ -1137,7 +1137,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.1"
-          python-version: "3.12"
+          python-version: "3.14"
           enable-cache: true
 
       - name: Install R2 publication client

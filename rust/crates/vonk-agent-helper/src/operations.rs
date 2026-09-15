@@ -2175,10 +2175,8 @@ fn exact_runtime_read_acl(
     let mut group_object = None;
     let mut mask = None;
     let mut other = None;
-    for entry in value[4..].chunks_exact(8) {
-        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
-        let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
-        let identifier = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+    for entry in value[4..].as_chunks::<8>().0.iter() {
+        let (tag, permissions, identifier) = acl_entry(entry);
         match tag {
             0x0001 if identifier == u32::MAX && user_object.replace(permissions).is_none() => {}
             0x0002 if identifier == runtime_uid && runtime_user.replace(permissions).is_none() => {}
@@ -3276,10 +3274,8 @@ fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
     let mut group_object = false;
     let mut mask = false;
     let mut other = false;
-    for entry in entries.chunks_exact(8) {
-        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
-        let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
-        let identifier = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+    for entry in entries.as_chunks::<8>().0.iter() {
+        let (tag, permissions, identifier) = acl_entry(entry);
         match tag {
             USER_OBJ => user_object = permissions == 0o7,
             USER if identifier == runtime_uid => runtime_user = permissions == 0o7,
@@ -3290,6 +3286,18 @@ fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
         }
     }
     user_object && runtime_user && group_object && mask && other
+}
+
+/// Split one eight-byte POSIX ACL entry into its tag, permissions, and id.
+fn acl_entry(entry: &[u8; 8]) -> (u16, u16, u32) {
+    let [tag, permissions, low, high] = entry.as_chunks::<2>().0 else {
+        unreachable!("an eight-byte entry yields four two-byte fields")
+    };
+    (
+        u16::from_le_bytes(*tag),
+        u16::from_le_bytes(*permissions),
+        u32::from_le_bytes([low[0], low[1], high[0], high[1]]),
+    )
 }
 
 fn ensure_private_directory(
