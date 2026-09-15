@@ -170,6 +170,7 @@ or timed-out operations exit 2.
 
 Unknown totals are shown as unknown; a build step count is not converted into a
 fake percentage. A failed refresh preserves the last verified cache copy.
-Repeating a profile load reconciles current fleet/cache state and follows the
-durable operation when the Controller reports one. Observation can be
-interrupted without cancelling accepted work.
+A new profile load reconciles current fleet/cache state and supersedes older
+overlapping requests. Reusing its request key returns the same durable
+operation. Observation can be interrupted without cancelling accepted work;
+use `profile progress --follow` to reconnect to it.
