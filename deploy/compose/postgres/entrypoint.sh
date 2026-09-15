@@ -4,6 +4,8 @@ set -eu
 source=${LITELLM_DATABASE_PASSWORD_FILE:-/run/secrets/litellm-database-password}
 runtime_directory=/run/vonk-postgres-secrets
 target=$runtime_directory/litellm-database-password
+init_source=/run/vonk-source-assets/postgres/init-databases.sh
+init_target=/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh
 
 # Standalone Compose implements secrets as read-only bind mounts. Their host
 # UID is not portable to the image's postgres UID, so stage the one secret
@@ -11,6 +13,30 @@ target=$runtime_directory/litellm-database-password
 install -d -m 0700 -o postgres -g postgres "$runtime_directory"
 install -m 0400 -o postgres -g postgres "$source" "$target"
 export LITELLM_DATABASE_PASSWORD_FILE=$target
+
+# Compose configs are host-backed on NAS platforms. Treat the signed config as
+# input and give PostgreSQL a container-local, non-executable copy so host ACLs
+# and mount execution policy cannot decide whether the official entrypoint can
+# initialize the databases.
+if [ -L "$init_source" ] || [ ! -f "$init_source" ]; then
+  printf '%s\n' 'PostgreSQL database initializer source must be a regular file' >&2
+  exit 1
+fi
+init_size=$(stat -c '%s' "$init_source") || {
+  printf '%s\n' 'PostgreSQL database initializer source cannot be inspected' >&2
+  exit 1
+}
+case "$init_size" in
+  ''|*[!0-9]*)
+    printf '%s\n' 'PostgreSQL database initializer source size is invalid' >&2
+    exit 1
+    ;;
+esac
+if [ "$init_size" -eq 0 ] || [ "$init_size" -gt 65536 ]; then
+  printf '%s\n' 'PostgreSQL database initializer source size is invalid' >&2
+  exit 1
+fi
+install -m 0444 -o root -g root "$init_source" "$init_target"
 
 sentinel=${PGDATA:-/var/lib/postgresql/data}/.vonk-database-initialized
 if [ -f "${PGDATA:-/var/lib/postgresql/data}/PG_VERSION" ]; then
@@ -53,7 +79,7 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 
-if ! /docker-entrypoint-initdb.d/10-vonk-forge-databases.sh; then
+if ! gosu postgres /bin/sh "$init_target"; then
   printf '%s\n' 'PostgreSQL database reconciliation failed' >&2
   kill -TERM "$postgres_pid" 2>/dev/null || true
   wait "$postgres_pid" || true

@@ -150,7 +150,11 @@ def _config_content(source: Path) -> str:
     return content.replace("$", "$$")
 
 
-def _config_mode(source: Path) -> str:
+def _config_mode(source: Path, target: str) -> str:
+    # Source assets are inert inputs. Their service entrypoint validates and
+    # stages the executable copy inside the container when one is needed.
+    if target.startswith("/run/vonk-source-assets/"):
+        return "0444"
     # Shell programs are executable in the rendered artifact even when the
     # source graph currently invokes them through /bin/sh. Preserve execute
     # bits for other program types, but never project writable permissions.
@@ -190,7 +194,11 @@ def _config_mounts(
         )
         configs[name] = {"content": _config_content(file)}
         mounts.append(
-            {"source": name, "target": destination, "mode": _config_mode(file)}
+            {
+                "source": name,
+                "target": destination,
+                "mode": _config_mode(file, destination),
+            }
         )
     return configs, mounts
 
