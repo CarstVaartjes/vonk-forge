@@ -83,7 +83,7 @@ def _failed_profile(tmp_path: Path):
     return sessions, lifecycle, service, profile, desired, application, child_id, nodes
 
 
-def test_numbered_load_retries_failed_child_with_one_new_request(
+def test_explicit_retry_preserves_failed_child_recovery_and_replay(
     tmp_path: Path,
 ) -> None:
     sessions, _lifecycle, service, profile, _desired, first, first_child, _nodes = (
@@ -92,15 +92,13 @@ def test_numbered_load_retries_failed_child_with_one_new_request(
     failed = service.application(first.id)
     assert service.retry_eligible(first.id)
 
-    second = service.load(profile.number, request_key=_uuid(801), actor="admin")
+    second = service.retry(first.id, request_key=_uuid(801), actor="admin")
     assert second.retry_of_application_id == first.id
     assert second.attempt == 2
     assert service.load(profile.number, request_key=_uuid(801), actor="admin") == second
     assert not service.retry_eligible(first.id)
     with pytest.raises(FleetProfileConflict, match="superseded"):
         service.retry(first.id, request_key=_uuid(802), actor="admin")
-    with pytest.raises(FleetProfileConflict, match="already active"):
-        service.load(profile.number, request_key=_uuid(802), actor="admin")
 
     assert service.tick()
     with sessions() as session:
@@ -118,22 +116,19 @@ def test_numbered_load_retries_failed_child_with_one_new_request(
         second_child.state = "failed"
         second_child.status_reason = "dependency still unavailable"
     assert service.tick()
-    third = service.load(profile.number, request_key=_uuid(807), actor="admin")
+    third = service.retry(second.id, request_key=_uuid(807), actor="admin")
     assert third.retry_of_application_id == second.id
     assert third.attempt == 3
 
 
-@pytest.mark.parametrize("entrypoint", ["retry", "load"])
 def test_recovery_waits_for_original_active_child_and_reports_missing_child(
-    tmp_path: Path, entrypoint: str
+    tmp_path: Path,
 ) -> None:
-    sessions, _lifecycle, service, profile, _desired, first, child_id, _nodes = (
+    sessions, _lifecycle, service, _profile, _desired, first, child_id, _nodes = (
         _failed_profile(tmp_path)
     )
 
     def recover():
-        if entrypoint == "load":
-            return service.load(profile.number, request_key=_uuid(803), actor="admin")
         return service.retry(first.id, request_key=_uuid(803), actor="admin")
 
     with sessions.begin() as session:

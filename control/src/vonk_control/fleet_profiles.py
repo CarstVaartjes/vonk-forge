@@ -1553,10 +1553,9 @@ class FleetProfileService:
         actor: str,
         request_key: str,
     ) -> FleetProfileApplicationView:
-        """Preview and bind one whole-fleet execution in one operator action."""
+        """Bind fresh intent; only the same request key replays an old load."""
 
         profile = self.get_number(number)
-        recovery_id = None
         with self._sessions() as session:
             replay = session.scalar(select(FleetProfileApplication).where(
                 FleetProfileApplication.request_key == request_key
@@ -1565,25 +1564,9 @@ class FleetProfileService:
                 if replay.profile_id != profile.id or replay.profile_digest != profile.profile_digest:
                     raise FleetProfileConflict("Load request key was reused for another profile intent")
                 return self._application_view(replay)
-            latest = max(
-                session.scalars(select(FleetProfileApplication).where(
-                    FleetProfileApplication.profile_id == profile.id
-                )),
-                key=lambda item: (
-                    _canonical_progress(item.progress).workload_intent_ordinal or 0,
-                    _aware(item.created_at), item.id,
-                ),
-                default=None,
-            )
-            if latest is not None and latest.profile_digest == profile.profile_digest:
-                if latest.state in {"queued", "running"} and not self._superseding_intent(
-                    session, latest, _canonical_progress(latest.progress)
-                ):
-                    raise FleetProfileConflict("Profile load is already active; follow its progress")
-                if latest.state in {"failed", "waiting-for-operator"} and self._retry_eligible(session, latest):
-                    recovery_id = latest.id
-        if recovery_id is not None:
-            return self.retry(recovery_id, request_key=request_key, actor=actor)
+        # Recovery follows its own durable request. A new operator request must
+        # not depend on decoding history or waiting for an earlier load: the
+        # shared admission path fences older intent and reconciles issued effects.
         preview = self.preview(profile.id)
         if not preview.allowed:
             raise FleetProfileConflict("Fleet profile preview is blocked")
@@ -2193,16 +2176,24 @@ class FleetProfileService:
                     .where(FleetProfileApplication.state.in_(("queued", "running")))
                     .with_for_update()
                 ):
-                    prior_progress = _canonical_progress(prior_application.progress)
+                    try:
+                        prior_plan = _persisted_profile_plan(prior_application)
+                        prior_scope = {
+                            node_id for step in prior_plan.steps for node_id in step.node_ids
+                        }
+                        if not prior_scope & execution_nodes:
+                            continue
+                        prior_progress = _persisted_profile_progress(prior_application)
+                    except FleetProfileConflict as error:
+                        # Quarantine the invalid order, retaining its evidence.
+                        # Its agent effects were independently fenced above;
+                        # malformed history cannot roll back the new authority.
+                        prior_application.state = "failed"
+                        prior_application.status_reason = str(error)
+                        prior_application.updated_at = now
+                        continue
                     prior_ordinal = prior_progress.workload_intent_ordinal
                     if prior_ordinal is None or prior_ordinal >= workload_intent_ordinal:
-                        continue
-                    prior_scope = {
-                        node_id
-                        for step in _persisted_profile_plan(prior_application).steps
-                        for node_id in step.node_ids
-                    }
-                    if not prior_scope & execution_nodes:
                         continue
                     prior_application.state = "cancelled"
                     prior_application.status_reason = (

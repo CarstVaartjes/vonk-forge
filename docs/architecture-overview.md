@@ -262,14 +262,14 @@ store image layers or registry credentials.
 
 ## Profile cache lifecycle
 
-`vonkctl --profile N profile load` also resumes a failed load of the unchanged
-profile through the Controller's recovery coordinator. Recovery preserves the
-original receipt, checks that its child operation has stopped, and plans only
-the remaining work. Each execution binds the preview digest and request key,
-so an unchanged plan can run again after failure or drift. Repeating a request
-key returns its original receipt. An active load must finish before another
-is admitted; a new load of an already reconciled profile records a successful
-no-op.
+`vonkctl --profile N profile load` submits fresh desired state and supersedes
+older overlapping requests, including an earlier load of the same profile.
+Admission does not scan terminal history or require an old load to finish.
+Run/Switch reconciles issued effects and reuses completed work and managed
+caches. Each execution binds the preview digest and request key; repeating
+the same key returns its original receipt. Explicit recovery of an existing
+operation retains its original intent and checks its exact child state.
+A new load of an already reconciled profile records a successful no-op.
 
 Profile authoring resolves every choice through the trusted NAS/Controller
 cache. The cache projection selects the exact active recipe revision, model

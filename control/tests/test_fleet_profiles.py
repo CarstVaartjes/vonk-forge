@@ -798,6 +798,58 @@ def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> N
     assert service.application(second.id).state == "queued"
 
 
+@pytest.mark.parametrize("old_state", ["failed", "queued", "running"])
+def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) -> None:
+    """A history parser failure must not veto a fresh authorized workload."""
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    now = NOW
+    service = FleetProfileService(
+        sessions, clock=lambda: now, switch_adapter=_SwitchAdapter()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    first = service.load(profile.number, request_key=_uuid(975), actor="admin")
+    now += timedelta(seconds=1)
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        row.state = old_state
+        row.status_reason = "stored attempt cannot continue"
+        damaged_progress = {**row.progress, "unexpected": {}}
+        row.progress = damaged_progress
+
+    second = service.load(profile.number, request_key=_uuid(976), actor="admin")
+    assert second.state == "queued"
+    assert second.progress.workload_intent_ordinal == 2
+    assert second.retry_of_application_id is None
+    assert service.load(profile.number, request_key=_uuid(976), actor="admin") == second
+    assert service.progress_number(profile.number).id == second.id
+    with sessions() as session:
+        old = session.get(FleetProfileApplication, first.id)
+        assert old is not None
+        assert old.progress == damaged_progress
+        assert old.state == "failed"
+    # Invalid history remains invalid; it is never executed or silently repaired.
+    with pytest.raises(ValidationError):
+        service.load(profile.number, request_key=_uuid(975), actor="admin")
+
+
+def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    first = service.load(profile.number, request_key=_uuid(977), actor="admin")
+    second = service.load(profile.number, request_key=_uuid(978), actor="admin")
+    assert second.id != first.id
+    assert second.progress.workload_intent_ordinal == 2
+    assert service.application(first.id).state == "cancelled"
+    assert service.load(profile.number, request_key=_uuid(978), actor="admin") == second
+
+
 def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() -> None:
     sessions = _database()
     _dual_revision_id, _solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
