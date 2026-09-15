@@ -84,6 +84,10 @@ _INTEGRITY_FAILURE_CODES = frozenset(
     }
 )
 _ADMISSION_WAIT_CODES = frozenset({"recipe_image.build_capacity_wait"})
+# Verified cache bytes can disappear (NAS restore, eviction, partial cleanup).
+# That is ordinary cache loss, not corruption: it must re-prepare, never ask an
+# operator to inspect a terminal failure.
+_RECOVERABLE_MISS_CODES = frozenset({"runtime_image.cache_missing"})
 
 
 class RecipeImageAvailabilityError(RuntimeError):
@@ -301,6 +305,8 @@ def _retryable(error: BaseException) -> bool:
     code = getattr(error, "code", None)
     if isinstance(code, str) and code in _TERMINAL_FAILURE_CODES:
         return False
+    if isinstance(code, str) and code in _RECOVERABLE_MISS_CODES:
+        return True
     if getattr(error, "retryable", False) is True:
         return True
     status = getattr(error, "status_code", None)
@@ -337,6 +343,8 @@ def _recovery_actions(
     if code in _CAPACITY_FAILURE_CODES:
         return ["free_space"]
     if code in _INTEGRITY_FAILURE_CODES:
+        return ["download_again"] if mode == "image" else ["force_rebuild"]
+    if code in _RECOVERABLE_MISS_CODES:
         return ["download_again"] if mode == "image" else ["force_rebuild"]
     if retryable:
         resumable = mode == "image" and (
@@ -1433,40 +1441,6 @@ class RecipeImageAvailabilityService:
                 self._identity_locks[identity_key] = lock
             return lock
 
-    def _stored_build_receipt(
-        self, build_input_sha256: str
-    ) -> tuple[Mapping[str, object] | None, bool]:
-        with self._sessions() as session:
-            builds = session.scalars(
-                select(RecipeBuild)
-                .where(
-                    RecipeBuild.build_input_sha256 == build_input_sha256,
-                    RecipeBuild.state == "succeeded",
-                )
-                .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
-            )
-            missing_archive = False
-            for build in builds:
-                if (
-                    build.image_digest is None
-                    or build.oci_layout_sha256 is None
-                    or build.image_bytes is None
-                ):
-                    continue
-                if not self._storage.build_archive_available(
-                    build.oci_layout_sha256, build.image_bytes
-                ):
-                    missing_archive = True
-                    continue
-                return {
-                    "state": "succeeded",
-                    "build_id": build.id,
-                    "image_digest": build.image_digest,
-                    "oci_layout_sha256": build.oci_layout_sha256,
-                    "image_bytes": build.image_bytes,
-                }, False
-            return None, missing_archive
-
     def _eligible(self, operation_id: str) -> bool:
         with self._sessions() as session:
             operation = session.get(Job, operation_id)
@@ -1824,24 +1798,22 @@ class RecipeImageAvailabilityService:
             if self._builder_admission is not None:
                 self._builder_admission(recipe, runtime)
             self._update_progress(operation_id, "build", total_bytes=None)
-            build_receipt, missing_archive = (
-                (None, False)
-                if force_rebuild
-                else self._stored_build_receipt(build_input_sha256)
-            )
-            if build_receipt is None:
-                def report(value: Mapping[str, object]) -> None:
-                    phase = value.get("phase", "build")
-                    self._update_progress(operation_id, str(phase), detail=value)
 
-                build_receipt = self._builder(
-                    recipe,
-                    runtime,
-                    operation_id=operation_id,
-                    build_input_sha256=build_input_sha256,
-                    force=force_rebuild or missing_archive,
-                    progress=report,
-                )
+            def report(value: Mapping[str, object]) -> None:
+                phase = value.get("phase", "build")
+                self._update_progress(operation_id, str(phase), detail=value)
+
+            # The builder re-resolves the exact executable identity and reuses
+            # a verified filesystem receipt itself, so queue-time and
+            # dispatch-time cache hits take the same path.
+            build_receipt = self._builder(
+                recipe,
+                runtime,
+                operation_id=operation_id,
+                build_input_sha256=build_input_sha256,
+                force=force_rebuild,
+                progress=report,
+            )
             if not isinstance(build_receipt, Mapping):
                 raise RecipeImageAvailabilityError("recipe_image.build_invalid", "builder returned no receipt")
             if dispatch_identity_missing:

@@ -34,6 +34,15 @@ by Sparks. No registry push is involved. The verified archive and its immutable
 image identity in the Controller/NAS cache are authoritative; Spark imports are
 derived execution copies and cannot replenish or replace that cache.
 
+A Controller source build records its exact executable input identity on the
+filesystem receipt beside the archive. That receipt owns availability: reuse is
+decided by the verified bytes on disk, not by the build row's status or digest
+fields, and a receipt whose archive is missing is ordinary cache loss that is
+rebuilt instead of reported as a failure. The build row remains the index of
+candidate builder identities and the audit record; it is not the availability
+gate. Making discovery itself storage-only is part of the
+[remaining cutover](plans/resilient-artifact-storage.md).
+
 After the exact model and image assets for a profile are ready in the cache, the
 Controller distributes them to all selected Sparks in parallel. The transfer
 grant binds the image identity, size, destination and operation. A Spark

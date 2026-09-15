@@ -1417,6 +1417,7 @@ def production_app() -> FastAPI:
             build_receipt = {
                 "state": build.state,
                 "build_id": build.id,
+                "build_input_sha256": build.build_input_sha256,
                 "image_digest": build.image_digest,
                 "oci_layout_sha256": build.oci_layout_sha256,
                 "image_bytes": build.image_bytes,
@@ -1538,6 +1539,7 @@ def production_app() -> FastAPI:
         bundles=database_bundles,
         inventory_max_age=300,
         build_archive_available=runtime_image_storage.build_archive_available,
+        prepared_builds=runtime_image_storage.find_build,
     )
     recipe_operations = RecipeOperationService(
         sessions,

@@ -356,9 +356,17 @@ def assemble_production_worker(
         management_policy=management_policy,
         clock=clock,
     )
+    # Reuse and archive-presence checks read the same image cache the
+    # availability service writes, so prefer its explicit root.
+    image_cache_root = recipe_image_artifact_root or agent_artifact_root
+    runtime_archive_storage = (
+        FilesystemRuntimeImageStorage(image_cache_root)
+        if image_cache_root is not None
+        else None
+    )
     runtime_archive_available = (
-        FilesystemRuntimeImageStorage(agent_artifact_root).build_archive_available
-        if agent_artifact_root is not None
+        runtime_archive_storage.build_archive_available
+        if runtime_archive_storage is not None
         else None
     )
     recipe_builds = RecipeBuildService(
@@ -366,6 +374,11 @@ def assemble_production_worker(
         bundles=DatabaseSourceBundleStore(sessions),
         inventory_max_age=300,
         build_archive_available=runtime_archive_available,
+        prepared_builds=(
+            runtime_archive_storage.find_build
+            if runtime_archive_storage is not None
+            else None
+        ),
     )
     lifecycle = RecipeOperationService(
         sessions,
@@ -551,6 +564,7 @@ if __name__ == "__main__":
             build_receipt = {
                 "state": build.state,
                 "build_id": build.id,
+                "build_input_sha256": build.build_input_sha256,
                 "image_digest": build.image_digest,
                 "oci_layout_sha256": build.oci_layout_sha256,
                 "image_bytes": build.image_bytes,
