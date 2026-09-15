@@ -16,7 +16,9 @@ from .build_identity import current_build
 from .cli_render import render_payload
 from .cli_update import (
     CliUpdateError,
+    begin_interactive_update_check,
     cache_update_notice,
+    configured_update_channel,
     interactive_notice,
     run_update,
 )
@@ -68,7 +70,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Install the signed wheel in this Python environment",
     )
-    update.add_argument("--channel", choices=("dev", "stable"), default="stable")
+    update.add_argument("--channel", choices=("dev", "stable"), default=None)
     update.add_argument("--public-key", type=Path, default=None)
     update.add_argument("--origin", default="https://install.vonkforge.ai")
     update.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
@@ -217,12 +219,12 @@ def main(
         else:
             try:
                 result = run_update(
-                    channel=args.channel,
+                    channel=args.channel or configured_update_channel(),
                     public_key=Path(key),
                     origin=args.origin,
                     apply=args.apply,
                 )
-                cache_update_notice(result)
+                cache_update_notice(result, public_key=Path(key), origin=args.origin)
                 status = 0
             except (CliUpdateError, OSError) as error:
                 result = {"error": _sanitize_text(error), "error_type": "update"}
@@ -233,6 +235,14 @@ def main(
             for name, value in result.items():
                 print(f"{name.replace('_', ' ')}: {value}")
         return status
+
+    interactive = (
+        sys.stderr.isatty()
+        and not args.global_json
+        and not getattr(args, "json", False)
+    )
+    if interactive:
+        begin_interactive_update_check()
 
     try:
         client = control_client or ControlClient.from_environment()
@@ -258,11 +268,7 @@ def main(
         )
         if not watch_rendered or args.global_json or getattr(args, "json", False):
             _emit(result, args)
-        if (
-            sys.stderr.isatty()
-            and not args.global_json
-            and not getattr(args, "json", False)
-        ):
+        if interactive:
             notice = interactive_notice()
             if notice:
                 print(notice, file=sys.stderr)

@@ -237,6 +237,10 @@ impl CommandRunner for RecordingRunner {
         Ok(self.outputs.pop_front().unwrap_or(default))
     }
 
+    fn authenticate_sudo(&mut self, _sudo: &std::path::Path) -> Result<(), SetupError> {
+        Ok(())
+    }
+
     fn sleep(&mut self, _duration: std::time::Duration) {}
 }
 
@@ -266,6 +270,10 @@ impl CommandRunner for FailingReadinessRunner {
         };
         self.commands.push(command);
         Ok(output)
+    }
+
+    fn authenticate_sudo(&mut self, _sudo: &std::path::Path) -> Result<(), SetupError> {
+        Ok(())
     }
 
     fn sleep(&mut self, _duration: std::time::Duration) {}

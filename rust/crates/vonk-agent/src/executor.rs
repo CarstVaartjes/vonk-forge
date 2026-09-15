@@ -676,7 +676,7 @@ pub fn recipe_start_success_body(
     })
 }
 
-fn distribution_success_evidence(evidence: DistributionDownloadEvidence) -> Value {
+pub fn distribution_success_evidence(evidence: DistributionDownloadEvidence) -> Value {
     evidence_with_digest(json!({
         "assignment_id": evidence.assignment_id,
         "model_artifact_set_sha256": evidence.model_artifact_set_sha256,
@@ -1742,7 +1742,36 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     return failed("distributed start deadline elapsed before execution");
                 }
-                let plan = if collective_readiness {
+                // A previous agent may have completed the Docker start before
+                // its result was acknowledged. Retained lifecycle identity is
+                // read without resetting writable state or replaying hooks.
+                let retained_plan = if collective_readiness {
+                    None
+                } else {
+                    match self.runtime.prepare_retained_start_if_present(
+                        &spec,
+                        &installation_id,
+                        &run_id,
+                        &placement,
+                        inspection_identity.as_ref(),
+                    ) {
+                        Ok(plan) => plan,
+                        Err(crate::oci::OciError::Io(error))
+                            if error.kind() != std::io::ErrorKind::PermissionDenied =>
+                        {
+                            return temporary_runtime_observation_failure();
+                        }
+                        Err(_) => {
+                            return waiting_for_operator(
+                                "retained workload identity does not match the authorized start",
+                            );
+                        }
+                    }
+                };
+                let retained_existing = retained_plan.is_some();
+                let plan = if let Some(plan) = retained_plan {
+                    plan
+                } else if collective_readiness {
                     match inspection_identity.as_ref().map_or_else(
                         || {
                             self.runtime.prepare_retained_start(
@@ -1849,7 +1878,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
                 let arguments = runtime_arguments_for_plan(&plan, &plan.main);
                 let runtime_guard_arguments = arguments.clone();
-                let mut acl_transition = if collective_readiness {
+                let mut acl_transition = if collective_readiness || retained_existing {
                     None
                 } else {
                     match self
@@ -1863,22 +1892,64 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                 };
                 let mut cancellation_observer = cancellation.clone();
-                let runtime_action = if collective_readiness {
+                let runtime_action = if collective_readiness || retained_existing {
                     HostRuntimeAction::RunInspect
                 } else {
                     HostRuntimeAction::Start
                 };
-                let runtime_arguments = if collective_readiness {
+                let runtime_arguments = if collective_readiness || retained_existing {
                     runtime_guard_arguments.clone()
                 } else {
                     arguments
                 };
-                match run_until_cancelled(
+                let mut runtime_result = run_until_cancelled(
                     self.execute_host_runtime(claim, runtime_action, runtime_arguments),
                     &mut cancellation_observer,
                 )
-                .await
+                .await;
+                if retained_existing
+                    && matches!(
+                        &runtime_result,
+                        Some(Err(crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }))
+                            if code == "runtime_run_missing"
+                    )
+                    && spec.lifecycle.pre_start.is_empty()
                 {
+                    // The retained plan and an independent Docker listing prove
+                    // this exact run never reached a running container. With no
+                    // pre-start hooks there is no ambiguous one-shot effect.
+                    if self
+                        .runtime
+                        .ensure_memory_available(
+                            request.reserved_memory_bytes,
+                            Path::new("/proc/meminfo"),
+                        )
+                        .is_err()
+                    {
+                        return failed("local memory capacity changed after run admission");
+                    }
+                    acl_transition = match self
+                        .runtime
+                        .begin_installation_acl_transition(&installation_id)
+                    {
+                        Ok(transition) => Some(transition),
+                        Err(_) => {
+                            return failed(
+                                "installed model custody changed before resumed runtime start",
+                            );
+                        }
+                    };
+                    runtime_result = run_until_cancelled(
+                        self.execute_host_runtime(
+                            claim,
+                            HostRuntimeAction::Start,
+                            runtime_guard_arguments.clone(),
+                        ),
+                        &mut cancellation_observer,
+                    )
+                    .await;
+                }
+                match runtime_result {
                     None => {
                         let stopped = self
                             .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
@@ -1918,6 +1989,16 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 );
                             }
                             return stopped;
+                        }
+                        if retained_existing {
+                            if temporary_observation_error(&error) {
+                                return temporary_runtime_observation_failure();
+                            }
+                            // A foreign or uninspectable exact container, or
+                            // ambiguous pre-start hook, requires reconciliation.
+                            return waiting_for_operator(
+                                "retained workload runtime effect could not be confirmed",
+                            );
                         }
                         if !collective_readiness
                             && let Err(uncertain) = self
@@ -2209,6 +2290,20 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     waiting_for_operator("container runtime stop remains unconfirmed")
                 } else {
+                    if !plan.post_stop.is_empty() {
+                        match self.runtime.begin_post_stop_hooks(&run_id) {
+                            Ok(()) => {}
+                            Err(crate::oci::OciError::PostStopHooksStarted) => {
+                                return waiting_for_operator(
+                                    "post-stop hook effect may already have been applied",
+                                );
+                            }
+                            Err(crate::oci::OciError::Io(_)) => {
+                                return failed("post-stop hook marker could not be persisted");
+                            }
+                            Err(_) => return failed("post-stop hook metadata is invalid"),
+                        }
+                    }
                     if let (
                         Some(archive_sha256),
                         Some(registry_index_digest),
@@ -2388,6 +2483,34 @@ fn waiting_for_operator(reason: &'static str) -> ExecutionResult {
     ExecutionResult {
         state: "waiting-for-operator",
         body: json!({"reason": reason}),
+    }
+}
+
+fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
+    use crate::host_runtime::HostRuntimeError;
+    match error {
+        HostRuntimeError::Io(error) => error.kind() != std::io::ErrorKind::PermissionDenied,
+        HostRuntimeError::Controller(ClientError::Protocol) => false,
+        HostRuntimeError::Controller(ClientError::Controller(error))
+            if matches!(error.status, 401 | 403) =>
+        {
+            false
+        }
+        HostRuntimeError::Controller(_) => true,
+        HostRuntimeError::HelperRejected { code, .. } => code == "operation_io",
+        HostRuntimeError::Protocol => false,
+    }
+}
+
+fn temporary_runtime_observation_failure() -> ExecutionResult {
+    ExecutionResult {
+        state: "failed",
+        body: json!({
+            "reason": "exact workload runtime observation is temporarily unavailable",
+            "error_code": "runtime_observation_unavailable",
+            "failure_kind": "temporary-dependency",
+            "retry_after_seconds": 5,
+        }),
     }
 }
 
@@ -2935,18 +3058,25 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         .chars()
         .take(1024)
         .collect();
-    let error_code = match claim.operation.as_str() {
-        "agent.upgrade.v1" => "agent_upgrade_failed",
-        "artifact.distribution.v1" => "artifact_distribution_failed",
-        "recipe.build.v1" => "recipe_build_failed",
-        "recipe.image.import.v1" => "recipe_image_import_failed",
-        "recipe.job.run.v1" => "recipe_job_run_failed",
-        "recipe.install" => "recipe_install_failed",
-        "recipe.start" => "recipe_start_failed",
-        "recipe.stop" => "recipe_stop_failed",
-        "recipe.uninstall" => "recipe_uninstall_failed",
-        _ => "operation_failed",
-    };
+    let error_code = executed
+        .body
+        .get("error_code")
+        .and_then(Value::as_str)
+        .filter(|code| {
+            claim.operation == "recipe.start" && *code == "runtime_observation_unavailable"
+        })
+        .unwrap_or_else(|| match claim.operation.as_str() {
+            "agent.upgrade.v1" => "agent_upgrade_failed",
+            "artifact.distribution.v1" => "artifact_distribution_failed",
+            "recipe.build.v1" => "recipe_build_failed",
+            "recipe.image.import.v1" => "recipe_image_import_failed",
+            "recipe.job.run.v1" => "recipe_job_run_failed",
+            "recipe.install" => "recipe_install_failed",
+            "recipe.start" => "recipe_start_failed",
+            "recipe.stop" => "recipe_stop_failed",
+            "recipe.uninstall" => "recipe_uninstall_failed",
+            _ => "operation_failed",
+        });
     let mut body = json!({
         "error_code": error_code,
         "reason": reason,
@@ -3139,8 +3269,8 @@ mod tests {
         distribution_success_evidence, normalize_execution_result, output_media_type,
         parse_compiled_execution_plan, readiness_identity, recipe_install_success_body,
         report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
-        run_once_with_heartbeat_interval, wait_for_launch_stability,
-        wait_ready_with_runtime_guard_and_cancellation,
+        run_once_with_heartbeat_interval, temporary_runtime_observation_failure,
+        wait_for_launch_stability, wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
         client::{AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence},
@@ -4688,6 +4818,18 @@ mod tests {
                 "status": "failed"
             })
         );
+    }
+
+    #[test]
+    fn exact_start_observation_failure_keeps_retry_contract() {
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let result =
+            normalize_execution_result(&start_claim, temporary_runtime_observation_failure());
+        assert_eq!(result.state, "failed");
+        assert_eq!(result.body["error_code"], "runtime_observation_unavailable");
+        assert_eq!(result.body["failure_kind"], "temporary-dependency");
+        assert_eq!(result.body["retry_after_seconds"], 5);
     }
 
     #[test]

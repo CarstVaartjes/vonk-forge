@@ -69,6 +69,8 @@ pub enum OperationError {
     RuntimeImageReceiptFailed,
     #[error("runtime process exited: {diagnostic}")]
     RuntimeProcessExited { diagnostic: String },
+    #[error("exact runtime container is absent")]
+    RuntimeRunMissing,
     #[error("native fabric is unavailable or ambiguous")]
     RuntimeFabricUnavailable,
     #[error("native fabric firewall rejected the placement")]
@@ -94,6 +96,7 @@ impl OperationError {
             Self::RuntimeImageIdentityInvalid => "helper.runtime_image_identity_invalid",
             Self::RuntimeImageReceiptFailed => "helper.runtime_image_receipt_failed",
             Self::RuntimeProcessExited { .. } => "helper.runtime_process_exited",
+            Self::RuntimeRunMissing => "helper.runtime_run_missing",
             Self::RuntimeFabricUnavailable => "helper.runtime_fabric_unavailable",
             Self::RuntimeFabricFirewallRejected => "helper.runtime_fabric_firewall_rejected",
             Self::StopUncertain => "helper.stop_uncertain",
@@ -115,6 +118,7 @@ impl OperationError {
             Self::RuntimeImageIdentityInvalid => "runtime image identity is invalid",
             Self::RuntimeImageReceiptFailed => "runtime image receipt could not be written",
             Self::RuntimeProcessExited { .. } => "runtime process exited",
+            Self::RuntimeRunMissing => "exact runtime container is absent",
             Self::RuntimeFabricUnavailable => "native fabric is unavailable or ambiguous",
             Self::RuntimeFabricFirewallRejected => "native fabric firewall rejected the placement",
             Self::StopUncertain => "one-shot runtime could not be stopped safely",
@@ -1648,6 +1652,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
             format!("vonk-{}", validated.run_id),
         ])?;
+        if !existing.success {
+            if capture_failure
+                && self.prove_container_absent(&format!("vonk-{}", validated.run_id), &existing)?
+            {
+                return Err(OperationError::RuntimeRunMissing);
+            }
+            return Err(OperationError::CommandFailed);
+        }
         let fields = std::str::from_utf8(&existing.stdout)
             .ok()
             .map(str::trim)
@@ -1656,8 +1668,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let [container_id, running, digest, managed, run_id] = fields.as_slice() else {
             return Ok(false);
         };
-        if !existing.success
-            || !lower_hex(container_id, 64)
+        if !lower_hex(container_id, 64)
             || *digest != semantic_digest
             || *managed != "true"
             || *run_id != validated.run_id
@@ -1789,15 +1800,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Duration::from_secs(15),
         )?;
         if !existing.success {
-            let daemon = self.run_docker_with_timeout(
-                &[
-                    "version".to_owned(),
-                    "--format".to_owned(),
-                    "{{.Server.Version}}".to_owned(),
-                ],
-                Duration::from_secs(15),
-            )?;
-            return if daemon.success {
+            // A failed inspect is not proof of absence. Docker access and
+            // daemon errors can share its exit code, so require an independent
+            // exact empty listing before acknowledging a repeated stop.
+            return if self.prove_container_absent(&name, &existing)? {
                 Ok(())
             } else {
                 Err(OperationError::CommandFailed)
@@ -1825,6 +1831,31 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Err(OperationError::CommandFailed);
         }
         Ok(())
+    }
+
+    fn prove_container_absent(
+        &self,
+        name: &str,
+        inspected: &CommandOutput,
+    ) -> Result<bool, OperationError> {
+        if inspected.exit_code != Some(1) || !inspected.stdout.iter().all(u8::is_ascii_whitespace) {
+            return Ok(false);
+        }
+        let listing = self.run_docker_with_timeout(
+            &[
+                "container".to_owned(),
+                "ls".to_owned(),
+                "--all".to_owned(),
+                "--quiet".to_owned(),
+                "--no-trunc".to_owned(),
+                "--filter".to_owned(),
+                format!("name=^/{name}$"),
+            ],
+            Duration::from_secs(15),
+        )?;
+        Ok(listing.success
+            && listing.exit_code == Some(0)
+            && listing.stdout.iter().all(u8::is_ascii_whitespace))
     }
 
     fn run_docker(&self, arguments: &[String]) -> Result<CommandOutput, OperationError> {
@@ -3574,6 +3605,27 @@ mod tests {
         fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
             assert_eq!(executable, Path::new("/usr/bin/docker"));
             let daemon_probe = arguments.first().map(String::as_str) == Some("version");
+            let missing_listing = arguments.first().map(String::as_str) == Some("container")
+                && arguments.get(1).map(String::as_str) == Some("ls");
+            Ok(CommandOutput {
+                success: daemon_probe || missing_listing,
+                stdout: Vec::new(),
+                exit_code: Some(if daemon_probe || missing_listing {
+                    0
+                } else {
+                    1
+                }),
+            })
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct DeniedContainerInspectRunner;
+
+    impl CommandRunner for DeniedContainerInspectRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(executable, Path::new("/usr/bin/docker"));
+            let daemon_probe = arguments.first().map(String::as_str) == Some("version");
             Ok(CommandOutput {
                 success: daemon_probe,
                 stdout: Vec::new(),
@@ -3917,6 +3969,23 @@ mod tests {
             )
             .unwrap();
         assert!(executor.job_cancellation.begin(RUN_ID).is_ok());
+    }
+
+    #[test]
+    fn stop_rejects_unproven_container_absence_even_when_daemon_is_healthy() {
+        let temp = tempfile::tempdir().unwrap();
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            DeniedContainerInspectRunner,
+            None,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            executor.runtime_stop_once(RUN_ID, 5),
+            Err(OperationError::CommandFailed)
+        ));
     }
 
     #[test]

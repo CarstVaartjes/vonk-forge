@@ -3303,6 +3303,63 @@ def test_parked_start_still_progressing_is_observed_before_final_success(
     assert service.get(operation.operation_id).state == "succeeded"
 
 
+def test_restart_interrupted_start_keeps_exact_child_when_effect_is_uncertain(
+    tmp_path: Path,
+) -> None:
+    service, operation, _ = _parked_start_switch(tmp_path, healthy=False)
+    with service._sessions.begin() as session:
+        parent = session.get(Job, operation.operation_id)
+        assert parent is not None and isinstance(parent.result, dict)
+        child_id = parent.result.get("child_operation_id")
+        assert isinstance(child_id, str)
+        child = session.get(Job, child_id)
+        assert child is not None
+        owner_id = child.payload.get("owner_id")
+        assert isinstance(owner_id, str)
+        run = session.get(RecipeRun, owner_id)
+        assert run is not None
+        run.state = "lost"
+        for node in session.scalars(select(RunNode).where(RunNode.run_id == owner_id)):
+            node.state = "failed"
+
+    assert service.tick() is True
+    view = service.get(operation.operation_id)
+    assert view.state == "waiting-for-operator"
+    assert view.result is not None
+    assert view.result.child_operation_id == child_id
+
+
+def test_restart_retry_due_is_projected_without_replacing_the_child(
+    tmp_path: Path,
+) -> None:
+    service, operation, _ = _parked_start_switch(tmp_path, healthy=False)
+    due = NOW + timedelta(seconds=7)
+    with service._sessions.begin() as session:
+        parent = session.get(Job, operation.operation_id)
+        assert parent is not None and isinstance(parent.result, dict)
+        child_id = parent.result.get("child_operation_id")
+        assert isinstance(child_id, str)
+        child = session.get(Job, child_id)
+        assert child is not None
+        child.state = "queued"
+        agent_child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == child_id)
+        )
+        assert agent_child is not None
+        agent_child.state = "waiting-for-operator"
+        agent_child.retry_disposition = "retry"
+        agent_child.retry_due_at = due
+        agent_child.status_reason = "exact lifecycle retry scheduled"
+
+    assert service.tick() is True
+    view = service.get(operation.operation_id)
+    assert view.state == "running"
+    assert view.status_reason == "exact lifecycle retry scheduled"
+    assert view.result is not None
+    assert view.result.child_operation_id == child_id
+    assert view.result.observation_due_at == due
+
+
 def test_scoped_cleanup_is_allowed_without_launch_readiness(tmp_path: Path) -> None:
     """Removing work must not depend on being able to start work.
 

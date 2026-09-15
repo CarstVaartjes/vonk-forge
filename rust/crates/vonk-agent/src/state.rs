@@ -7,9 +7,11 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serde_json::{Value, json};
+use serde_json::Value;
 use thiserror::Error;
-use vonk_agent_protocol::generated::AgentOperation;
+use vonk_agent_protocol::generated::{
+    AgentFailureKind, AgentFailureResult, AgentOperation, AgentResultResult, AgentResultState,
+};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
 };
@@ -507,14 +509,19 @@ impl StateStore {
                 job_id: job_id.parse().map_err(|_| StateError::ResultState)?,
                 node_id,
                 operation_id: operation_id.parse().map_err(|_| StateError::ResultState)?,
-                result: serde_json::from_value(
-                    json!({"reason": "agent restarted with an operation in progress"}),
-                )
-                .map_err(|_| StateError::ResultState)?,
+                // Startup cannot establish whether the host action finished.
+                // Preserve that uncertainty as typed evidence: the Controller
+                // owns any new attempt and its current intent/authority checks.
+                result: AgentResultResult::AgentFailureResult(AgentFailureResult {
+                    error_code: Some("agent_restart_interrupted".to_owned()),
+                    failure_kind: Some(AgentFailureKind::UncertainEffect),
+                    operation: Some(operation),
+                    reason: Some("agent restarted with an operation in progress".to_owned()),
+                    uncertain: Some(true),
+                    ..Default::default()
+                }),
                 schema_version: 1,
-                state: "waiting-for-operator"
-                    .parse()
-                    .map_err(|_| StateError::ResultState)?,
+                state: AgentResultState::WaitingForOperator,
             };
             result.validate_for_operation(&operation)?;
             transaction.execute(

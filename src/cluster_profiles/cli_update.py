@@ -9,6 +9,8 @@ import json
 import os
 import re
 import shutil
+import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -34,10 +36,23 @@ _GENERATION = _SHA256
 _WHEEL = re.compile(
     r"vonk_cluster_profiles-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any[.]whl\Z"
 )
+_NOTICE_ORIGIN = "https://install.vonkforge.ai"
+_NOTICE_TTL_SECONDS = 86400
+_NOTICE_FAILURE_RETRY_SECONDS = 900
+_NOTICE_LOCK_STALE_SECONDS = 30
 
 
 class CliUpdateError(ValueError):
     """The requested CLI update cannot be safely verified or installed."""
+
+
+def configured_update_channel() -> str:
+    """Return the configured accepted release channel for CLI updates."""
+
+    channel = os.environ.get("VONK_CLI_UPDATE_CHANNEL", "stable")
+    if channel not in ("stable", "dev"):
+        raise CliUpdateError("VONK_CLI_UPDATE_CHANNEL must be stable or dev")
+    return channel
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -45,10 +60,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise CliUpdateError("release download redirected")
 
 
-def _download(url: str, maximum: int) -> bytes:
+def _download(url: str, maximum: int, *, timeout: int = 20) -> bytes:
     try:
         with urllib.request.build_opener(_NoRedirect()).open(
-            url, timeout=20
+            url, timeout=timeout
         ) as response:
             if response.status != 200:
                 raise CliUpdateError("release download failed")
@@ -308,54 +323,269 @@ def run_update(
     return result
 
 
-def interactive_notice() -> str | None:
-    """Return a cached notice from an explicit update check without network I/O."""
-
+def _notice_context(
+    public_key: Path | None = None,
+) -> tuple[Path, Path, str, str] | None:
     if os.environ.get("VONK_CLI_UPDATE_NOTICES") != "1":
         return None
-    cache_root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
-    cache = cache_root / "vonkctl" / "update-notice.json"
-    now = int(time.time())
     try:
-        stored = json.loads(cache.read_text())
+        channel = configured_update_channel()
+    except CliUpdateError:
+        return None
+    if public_key is None:
+        configured = os.environ.get("VONK_INSTALLER_PUBLIC_KEY_FILE")
+        if not configured:
+            return None
+        public_key = Path(configured)
+    try:
+        descriptor = os.open(public_key, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        try:
+            key_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(key_stat.st_mode) or not 0 < key_stat.st_size <= 16384:
+                return None
+            key_bytes = os.read(descriptor, 16385)
+            if len(key_bytes) != key_stat.st_size:
+                return None
+        finally:
+            os.close(descriptor)
+        key_digest = hashlib.sha256(key_bytes).hexdigest()
+        configured_cache = os.environ.get("XDG_CACHE_HOME")
+        cache_root = (
+            Path(configured_cache) if configured_cache else Path.home() / ".cache"
+        )
+        if not cache_root.is_absolute():
+            return None
     except (OSError, ValueError):
         return None
-    if (
-        isinstance(stored, dict)
-        and type(stored.get("checked_at")) is int
-        and 0 <= now - stored["checked_at"] < 86400
-        and stored.get("update_available") is True
-        and stored.get("source_sha") == current_build()["source_sha"]
-    ):
-        return "Accepted vonkctl update available; run 'vonkctl update --apply' to install it."
-    return None
+    return (
+        cache_root / "vonkctl" / "update-notice.json",
+        public_key,
+        key_digest,
+        channel,
+    )
 
 
-def cache_update_notice(result: dict[str, object]) -> None:
-    """Cache an explicit stable-channel check for later interactive display."""
+def _notice_record(
+    *, key_digest: str, channel: str, verified: bool, available: bool
+) -> dict[str, object]:
+    current = current_build()
+    return {
+        "checked_at": int(time.time()),
+        "verified": verified,
+        "channel": channel,
+        "origin": _NOTICE_ORIGIN,
+        "update_available": available,
+        "source_sha": current["source_sha"],
+        "version": current["version"],
+        "key_sha256": key_digest,
+    }
 
-    if (
-        os.environ.get("VONK_CLI_UPDATE_NOTICES") != "1"
-        or result.get("channel") != "stable"
-    ):
-        return
-    cache_root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
-    cache = cache_root / "vonkctl" / "update-notice.json"
+
+def _read_notice(cache: Path) -> dict[str, object] | None:
     try:
-        cache.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(cache, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        try:
+            observed = os.fstat(descriptor)
+            if not stat.S_ISREG(observed.st_mode) or observed.st_size > 4096:
+                return None
+            raw = os.read(descriptor, 4097)
+            if len(raw) != observed.st_size:
+                return None
+        finally:
+            os.close(descriptor)
+        stored = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    return stored if isinstance(stored, dict) else None
+
+
+def _fresh_notice(
+    stored: dict[str, object] | None, key_digest: str, channel: str
+) -> bool:
+    if stored is None:
+        return False
+    checked_at = stored.get("checked_at")
+    current = current_build()
+    if (
+        type(checked_at) is not int
+        or stored.get("key_sha256") != key_digest
+        or stored.get("channel") != channel
+        or stored.get("origin") != _NOTICE_ORIGIN
+        or stored.get("source_sha") != current["source_sha"]
+        or stored.get("version") != current["version"]
+        or type(stored.get("verified")) is not bool
+    ):
+        return False
+    age = int(time.time()) - checked_at
+    ttl = (
+        _NOTICE_TTL_SECONDS
+        if stored["verified"] is True
+        else _NOTICE_FAILURE_RETRY_SECONDS
+    )
+    return 0 <= age < ttl
+
+
+def _write_notice(cache: Path, record: dict[str, object]) -> None:
+    try:
+        cache.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="w", dir=cache.parent, prefix=".update-notice-", delete=False
         ) as handle:
-            json.dump(
-                {
-                    "checked_at": int(time.time()),
-                    "update_available": result.get("update_available") is True,
-                    "source_sha": current_build()["source_sha"],
-                },
-                handle,
-            )
+            json.dump(record, handle)
             temporary = Path(handle.name)
         os.chmod(temporary, 0o600)
         temporary.replace(cache)
     except OSError:
         pass
+
+
+def interactive_notice() -> str | None:
+    """Read a locally cached signed result without doing network I/O."""
+
+    context = _notice_context()
+    if context is None:
+        return None
+    cache, _, key_digest, channel = context
+    stored = _read_notice(cache)
+    if (
+        _fresh_notice(stored, key_digest, channel)
+        and stored is not None
+        and stored["verified"] is True
+        and stored.get("update_available") is True
+    ):
+        return (
+            "Accepted vonkctl update available; run "
+            f"'vonkctl update --channel {channel} --apply' to install it."
+        )
+    return None
+
+
+def cache_update_notice(
+    result: dict[str, object],
+    *,
+    public_key: Path | None = None,
+    origin: str = _NOTICE_ORIGIN,
+) -> None:
+    """Cache an explicit signed stable-channel check for interactive commands."""
+
+    if origin != _NOTICE_ORIGIN:
+        return
+    context = _notice_context(public_key)
+    if context is None:
+        return
+    cache, _, key_digest, channel = context
+    if result.get("channel") != channel:
+        return
+    _write_notice(
+        cache,
+        _notice_record(
+            key_digest=key_digest,
+            channel=channel,
+            verified=True,
+            available=result.get("update_available") is True,
+        ),
+    )
+
+
+def begin_interactive_update_check() -> None:
+    """Start one short-lived signed check when the current cache is stale."""
+
+    context = _notice_context()
+    if context is None:
+        return
+    cache, _, key_digest, channel = context
+    if _fresh_notice(_read_notice(cache), key_digest, channel):
+        return
+    lock = cache.with_suffix(".lock")
+    created = False
+    try:
+        cache.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            observed = lock.lstat()
+            age = time.time() - observed.st_mtime
+            if not stat.S_ISREG(observed.st_mode) or age < _NOTICE_LOCK_STALE_SECONDS:
+                return
+            lock.unlink()
+            descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        created = True
+        os.close(descriptor)
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "cluster_profiles.cli_update",
+                "--background-notice",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            start_new_session=True,
+        )
+    except (OSError, ValueError):
+        if created:
+            try:
+                lock.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def background_notice_check(
+    *, download: Callable[[str, int], bytes] = _download
+) -> None:
+    """Verify the accepted publication in the detached one-shot process."""
+
+    context = _notice_context()
+    if context is None:
+        return
+    cache, public_key, key_digest, channel = context
+    try:
+        try:
+            result = run_update(
+                channel=channel,
+                public_key=public_key,
+                origin=_NOTICE_ORIGIN,
+                apply=False,
+                download=download,
+            )
+        except (CliUpdateError, OSError, TimeoutError):
+            _write_notice(
+                cache,
+                _notice_record(
+                    key_digest=key_digest,
+                    channel=channel,
+                    verified=False,
+                    available=False,
+                ),
+            )
+        else:
+            cache_update_notice(result, public_key=public_key)
+    finally:
+        try:
+            cache.with_suffix(".lock").unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _notice_timeout(_signum: int, _frame: object) -> None:
+    raise TimeoutError("background release check timed out")
+
+
+def _background_main() -> int:
+    if sys.argv[1:] != ["--background-notice"]:
+        return 2
+    signal.signal(signal.SIGALRM, _notice_timeout)
+    signal.alarm(20)
+    try:
+        background_notice_check(
+            download=lambda url, maximum: _download(url, maximum, timeout=5)
+        )
+    finally:
+        signal.alarm(0)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_background_main())

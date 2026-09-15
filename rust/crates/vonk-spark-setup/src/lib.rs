@@ -134,6 +134,8 @@ impl CommandOutput {
 pub trait CommandRunner {
     fn run(&mut self, command: Command) -> Result<CommandOutput, String>;
 
+    fn authenticate_sudo(&mut self, sudo: &Path) -> Result<(), SetupError>;
+
     fn sleep(&mut self, duration: Duration) {
         thread::sleep(duration);
     }
@@ -702,7 +704,6 @@ pub fn handoff_to_root(
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
     validate_native_architecture(std::env::consts::ARCH)?;
-    authenticate_sudo_foreground(&prepared.sudo)?;
     handoff_to_root_with_authority(prepared, runner, &ReleaseAuthority::canonical())
 }
 
@@ -732,6 +733,7 @@ pub fn handoff_to_root_with_authority(
     runner: &mut dyn CommandRunner,
     authority: &ReleaseAuthority,
 ) -> Result<(), SetupError> {
+    runner.authenticate_sudo(&prepared.sudo)?;
     let root_handoff = root_handoff_script(prepared, authority)?;
     let command = Command::new(
         &prepared.sudo,
@@ -2918,6 +2920,10 @@ impl CommandRunner for SystemCommandRunner {
         let timeout = command_timeout(&command.program);
         run_process(command, timeout)
     }
+
+    fn authenticate_sudo(&mut self, sudo: &Path) -> Result<(), SetupError> {
+        authenticate_sudo_foreground(sudo)
+    }
 }
 
 fn run_process(command: Command, timeout: Duration) -> Result<CommandOutput, String> {
@@ -3188,7 +3194,9 @@ mod tests {
                 ],
             )
             .capture_and_forward_stderr(),
-            Duration::from_secs(10),
+            // CI runners may need time to read their APT lists; keep this
+            // diagnostic bounded without using the 180-second production limit.
+            Duration::from_secs(30),
         )
         .unwrap();
         assert!(!output.success);
@@ -3205,6 +3213,10 @@ mod tests {
         fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
             self.commands.push(command);
             Ok(self.outcomes.pop_front().unwrap())
+        }
+
+        fn authenticate_sudo(&mut self, _sudo: &Path) -> Result<(), SetupError> {
+            Ok(())
         }
     }
 
@@ -3358,6 +3370,10 @@ mod tests {
             Ok(CommandOutput::success_empty())
         }
 
+        fn authenticate_sudo(&mut self, _sudo: &Path) -> Result<(), SetupError> {
+            Ok(())
+        }
+
         fn sleep(&mut self, _duration: Duration) {}
     }
 
@@ -3428,6 +3444,10 @@ mod tests {
             } else {
                 Ok(CommandOutput::success_empty())
             }
+        }
+
+        fn authenticate_sudo(&mut self, _sudo: &Path) -> Result<(), SetupError> {
+            Ok(())
         }
 
         fn sleep(&mut self, _duration: Duration) {}
