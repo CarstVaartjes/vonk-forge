@@ -61,9 +61,12 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _download(url: str, maximum: int, *, timeout: int = 20) -> bytes:
+    request = urllib.request.Request(
+        url, headers={"User-Agent": f"vonkctl/{current_build()['version']}"}
+    )
     try:
         with urllib.request.build_opener(_NoRedirect()).open(
-            url, timeout=timeout
+            request, timeout=timeout
         ) as response:
             if response.status != 200:
                 raise CliUpdateError("release download failed")
