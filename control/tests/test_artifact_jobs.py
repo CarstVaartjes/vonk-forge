@@ -1426,6 +1426,101 @@ def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) ->
         assert session.get(ArtifactJobBlob, digest) is None
 
 
+def test_reconcile_never_deletes_blobs_on_an_empty_reference_scan(tmp_path) -> None:
+    """A restore that lost reference rows must not authorize a mass delete.
+
+    With no ArtifactJobFile rows the sweep has no evidence about who referenced
+    the stored bytes, so it must reclaim nothing rather than treat every blob as
+    an orphan.
+    """
+
+    sessions, _recipe_operations, _queue, service, _run_id, _node_id = (
+        running_artifact_service(tmp_path)
+    )
+    content = b"surviving bytes"
+    digest = hashlib.sha256(content).hexdigest()
+    root = tmp_path / "artifact-blobs"
+    stored = ArtifactBlobStore(root).put_bytes(
+        digest, content, maximum_bytes=len(content)
+    )
+    with sessions.begin() as session:
+        session.add(
+            ArtifactJobBlob(
+                sha256=digest,
+                size_bytes=len(content),
+                storage_key=stored.storage_key,
+                created_at=NOW,
+            )
+        )
+
+    report = service.reconcile_storage()
+
+    assert report["expired_jobs"] == 0
+    assert report["removed_blob_records"] == 0
+    assert stored.path.is_file()
+    with sessions() as session:
+        assert session.get(ArtifactJobBlob, digest) is not None
+
+
+def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
+    """Partial reference loss must not unlink bytes a surviving row still owns."""
+
+    sessions, _recipe_operations, _queue, service, run_id, _node_id = (
+        running_artifact_service(tmp_path)
+    )
+    expired_content = b"png"
+    expired_digest = hashlib.sha256(expired_content).hexdigest()
+    unproven_content = b"unproven bytes"
+    unproven_digest = hashlib.sha256(unproven_content).hexdigest()
+    job = service.create(
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000150")
+    )
+    service.put_input(
+        job.id,
+        name="input.png",
+        media_type="image/png",
+        expected_sha256=expired_digest,
+        content=expired_content,
+    )
+    root = tmp_path / "artifact-blobs"
+    seeded = ArtifactBlobStore(root).put_bytes(
+        unproven_digest, unproven_content, maximum_bytes=len(unproven_content)
+    )
+    with sessions.begin() as session:
+        session.add(
+            ArtifactJobBlob(
+                sha256=unproven_digest,
+                size_bytes=len(unproven_content),
+                storage_key=seeded.storage_key,
+                created_at=NOW,
+            )
+        )
+    service.cancel(
+        job.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000151",
+        reason="test complete",
+    )
+    with sessions.begin() as session:
+        stored = session.get(ArtifactJob, job.id)
+        assert stored is not None
+        stored.completed_at = NOW - timedelta(days=8)
+    # Remove the orphan grace so an unguarded store would unlink immediately.
+    expired_path = next(root.glob(f"*/{expired_digest}"))
+    os.utime(expired_path, (0, 0))
+    os.utime(seeded.path, (0, 0))
+
+    report = service.reconcile_storage()
+
+    assert report["expired_jobs"] == 1
+    assert report["removed_blob_records"] == 1
+    assert not expired_path.exists()
+    assert seeded.path.is_file()
+    with sessions() as session:
+        assert session.get(ArtifactJobBlob, expired_digest) is None
+        assert session.get(ArtifactJobBlob, unproven_digest) is not None
+
+
 def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
     tmp_path, monkeypatch
 ) -> None:
