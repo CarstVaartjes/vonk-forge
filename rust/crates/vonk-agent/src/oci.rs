@@ -1823,10 +1823,13 @@ fn exact_runtime_file_acl(file: &File) -> bool {
     let mut group_object = false;
     let mut mask = false;
     let mut other = false;
-    for entry in value[4..].chunks_exact(8) {
-        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
-        let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
-        let identifier = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+    for entry in value[4..].as_chunks::<8>().0.iter() {
+        let [tag, permissions, low, high] = entry.as_chunks::<2>().0 else {
+            unreachable!("an eight-byte entry yields four two-byte fields")
+        };
+        let tag = u16::from_le_bytes(*tag);
+        let permissions = u16::from_le_bytes(*permissions);
+        let identifier = u32::from_le_bytes([low[0], low[1], high[0], high[1]]);
         match tag {
             USER_OBJ if identifier == u32::MAX => user_object = permissions == 0o6,
             USER if identifier == TRUSTED_RUNTIME_UID => runtime_user = permissions == 0o4,

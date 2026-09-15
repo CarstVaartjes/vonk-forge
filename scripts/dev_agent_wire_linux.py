@@ -46,9 +46,9 @@ BASE_IMAGE = (
     "ubuntu:24.04@sha256:"
     "224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254"
 )
-RUST_TOOLCHAIN = "1.97.1"
+RUST_TOOLCHAIN = "1.98.1"
 UV_VERSION = "0.12.1"
-PYTHON_VERSION = "3.12"
+PYTHON_VERSION = "3.14"
 RECIPE_REVISION_FILE = Path("tests/acceptance/recipe-library-revision.txt")
 # Whitespace-normalized form of the CI step "Exercise Controller requests and
 # Spark results together". This exact string is executed by the lane.

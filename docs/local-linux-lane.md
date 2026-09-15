@@ -55,8 +55,8 @@ Useful flags:
   lane. `tests/scripts/test_dev_agent_wire_linux.py` asserts the same in the
   repository suite, so a CI change that forgets the lane fails in CI.
 - **The CI toolchain.** Base `ubuntu:24.04` pinned by index digest
-  (`ubuntu:24.04@sha256:224a1869…`) with Python 3.12, uv `0.12.1` and Rust
-  `1.97.1` (`--profile minimal --component rustfmt`), mirroring the CI
+  (`ubuntu:24.04@sha256:224a1869…`) with Python 3.14, uv `0.12.1` and Rust
+  `1.98.1` (`--profile minimal --component rustfmt`), mirroring the CI
   `rustup toolchain install` step. `UV_PYTHON_DOWNLOADS=never` keeps uv from
   silently substituting a downloaded interpreter.
 - **The pinned recipe library.** `VONK_RECIPE_LIBRARY_ROOT` is bind-mounted

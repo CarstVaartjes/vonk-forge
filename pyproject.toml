@@ -49,7 +49,7 @@ extend-exclude = [
 [tool.pyright]
 # One checker for the whole repository. The control virtualenv carries the
 # union of both projects' dependencies, so import resolution is complete.
-pythonVersion = "3.12"
+pythonVersion = "3.14"
 venvPath = "control"
 venv = ".venv"
 typeCheckingMode = "basic"

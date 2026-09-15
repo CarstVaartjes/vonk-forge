@@ -1019,8 +1019,8 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
     assert (
         "Install pinned Rust toolchain for the historical helper fixture" in lifecycle
     )
-    assert "rustup toolchain install 1.97.1" in lifecycle
-    assert lifecycle.index("rustup toolchain install 1.97.1") < lifecycle.index(
+    assert "rustup toolchain install 1.98.1" in lifecycle
+    assert lifecycle.index("rustup toolchain install 1.98.1") < lifecycle.index(
         "actions/download-artifact@"
     )
     assert 'compatibility_cargo_dir=$(dirname "$(command -v cargo)")' in lifecycle
