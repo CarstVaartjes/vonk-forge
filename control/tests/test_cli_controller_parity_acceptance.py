@@ -31,7 +31,9 @@ schema_path = Path(
 )
 OPENAPI = json.loads(schema_path.read_text())
 if "/api/model/library" not in OPENAPI.get("paths", {}):
-    pytest.skip("requires the current singular operator OpenAPI", allow_module_level=True)
+    pytest.skip(
+        "requires the current singular operator OpenAPI", allow_module_level=True
+    )
 
 TOKEN = "operator-test-token"
 CSRF = "operator-test-csrf"
@@ -157,7 +159,9 @@ def _route_template(path: str) -> str:
     ):
         match = re.match(pattern, path)
         if match:
-            return template.replace("\\1", match.group(1)) if match.lastindex else template
+            return (
+                template.replace("\\1", match.group(1)) if match.lastindex else template
+            )
     return path
 
 
@@ -341,20 +345,20 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
     cli_transport = HTTPTransport(api)
     browser_transport = HTTPTransport(api, browser=True)
 
-    assert _cli(cli_transport, "model", "library", "--json") == browser_transport.request(
-        "GET", "/api/model/library"
-    )
-    assert _cli(cli_transport, "recipe", "library", "--json") == browser_transport.request(
-        "GET", "/api/recipe/library"
-    )
-    assert _cli(cli_transport, "--profile", "1", "profile", "--json") == browser_transport.request(
-        "GET", "/api/profile/1"
-    )
+    assert _cli(
+        cli_transport, "model", "library", "--json"
+    ) == browser_transport.request("GET", "/api/model/library")
+    assert _cli(
+        cli_transport, "recipe", "library", "--json"
+    ) == browser_transport.request("GET", "/api/recipe/library")
+    assert _cli(
+        cli_transport, "--profile", "1", "profile", "--json"
+    ) == browser_transport.request("GET", "/api/profile/1")
 
     request = {"schema_version": 2, "request_key": REQUEST_KEY}
-    assert _cli(cli_transport, "model", "download", "qwen-code", "--json") == browser_transport.request(
-        "POST", "/api/model/qwen-code/download", request
-    )
+    assert _cli(
+        cli_transport, "model", "download", "qwen-code", "--json"
+    ) == browser_transport.request("POST", "/api/model/qwen-code/download", request)
 
     assignment = {
         "recipe_selector": "vonk-forge/qwen-code",
@@ -379,9 +383,9 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
     ) == browser_transport.request("PUT", "/api/profile/1", profile_body)
 
     load_request: dict[str, object] = {"request_key": REQUEST_KEY}
-    assert _cli(cli_transport, "--profile", "1", "profile", "load", "--json") == browser_transport.request(
-        "POST", "/api/profile/1/load", load_request
-    )
-    assert _cli(cli_transport, "--profile", "1", "profile", "progress", "--json") == browser_transport.request(
-        "GET", "/api/profile/1/progress"
-    )
+    assert _cli(
+        cli_transport, "--profile", "1", "profile", "load", "--json"
+    ) == browser_transport.request("POST", "/api/profile/1/load", load_request)
+    assert _cli(
+        cli_transport, "--profile", "1", "profile", "progress", "--json"
+    ) == browser_transport.request("GET", "/api/profile/1/progress")

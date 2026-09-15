@@ -41,7 +41,12 @@ def test_workers_cannot_claim_same_job(service) -> None:
     jobs, _ = service
     job = jobs.enqueue("probe", "admin", "abc123", ["spk_1"], {"safe": True})
     with ThreadPoolExecutor(max_workers=4) as pool:
-        claims = list(pool.map(lambda index: jobs.claim(f"worker-{index}", 30, kinds=("probe",)), range(4)))
+        claims = list(
+            pool.map(
+                lambda index: jobs.claim(f"worker-{index}", 30, kinds=("probe",)),
+                range(4),
+            )
+        )
     claimed = [claim for claim in claims if claim is not None]
     assert len(claimed) == 1
     assert claimed[0].job_id == job.id
@@ -82,9 +87,7 @@ def test_job_list_keyset_pages_reach_every_job_in_stable_order(service) -> None:
     expected: set[str] = set()
     for index in range(23):
         expected.add(
-            jobs.enqueue(
-                "probe", "admin", "a" * 40, [f"spk_{index:032x}"], {}
-            ).id
+            jobs.enqueue("probe", "admin", "a" * 40, [f"spk_{index:032x}"], {}).id
         )
         if index % 3 == 0:
             clock.now += timedelta(seconds=1)
@@ -137,14 +140,12 @@ def test_job_list_keyset_cursor_excludes_concurrent_newer_insert(service) -> Non
     assert cursor is not None and total == 3
 
     clock.now += timedelta(seconds=1)
-    inserted = jobs.enqueue(
-        "probe", "admin", "a" * 40, ["spk_" + "f" * 32], {}
-    )
+    inserted = jobs.enqueue("probe", "admin", "a" * 40, ["spk_" + "f" * 32], {})
     second, next_cursor, updated_total = jobs.list_page(limit=2, cursor=cursor)
 
-    assert {job.id for job in second} == {
-        job.id for job in initial
-    } - {job.id for job in first}
+    assert {job.id for job in second} == {job.id for job in initial} - {
+        job.id for job in first
+    }
     assert inserted.id not in {job.id for job in (*first, *second)}
     assert next_cursor is None
     assert updated_total == 4
@@ -233,9 +234,7 @@ def test_job_json_values_targets_and_projection_survive_store_load(service) -> N
         "none": None,
         "engine_extension": {"enabled": False, "values": []},
     }
-    job = jobs.enqueue(
-        "probe", "admin", "abc", ("target-a", "target-b"), payload
-    )
+    job = jobs.enqueue("probe", "admin", "abc", ("target-a", "target-b"), payload)
     loaded = jobs.get(job.id)
     assert loaded.payload == payload
     assert loaded.targets == ["target-a", "target-b"]
@@ -261,7 +260,9 @@ def test_job_json_values_targets_and_projection_survive_store_load(service) -> N
 
 
 @pytest.mark.parametrize("targets", [[1], ["target", 1], "target", None])
-def test_job_targets_reject_non_string_json_members_on_enqueue(service, targets) -> None:
+def test_job_targets_reject_non_string_json_members_on_enqueue(
+    service, targets
+) -> None:
     jobs, _ = service
     with pytest.raises(ValueError, match="job targets"):
         jobs.enqueue("probe", "admin", "abc", targets, {})
@@ -276,7 +277,6 @@ def test_job_targets_reject_malformed_persisted_json_on_read(service) -> None:
         row.targets = [1]
     with pytest.raises(ValueError, match="job targets"):
         jobs.get(job.id)
-
 
 
 @pytest.mark.parametrize(
@@ -351,9 +351,15 @@ def test_matching_fence_can_heartbeat_wait_and_fail(service) -> None:
     assert jobs.get(retry.job_id).state == "failed"
 
 
-@pytest.mark.parametrize("kind", [
-    "agent-upgrade", "artifact-distribution", "recipe.run-switch.v2", "recipe.stop.v2",
-])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "agent-upgrade",
+        "artifact-distribution",
+        "recipe.run-switch.v2",
+        "recipe.stop.v2",
+    ],
+)
 def test_generic_worker_claim_skips_coordinator_owned_jobs(service, kind) -> None:
     jobs, _ = service
     upgrade = jobs.enqueue(

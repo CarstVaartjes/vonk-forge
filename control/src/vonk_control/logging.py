@@ -13,11 +13,15 @@ from urllib.parse import urlsplit, urlunsplit
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-_SENSITIVE_KEY = re.compile(r"(?i)(authorization|api.?key|password|secret|token|private.?key|credential)")
+_SENSITIVE_KEY = re.compile(
+    r"(?i)(authorization|api.?key|password|secret|token|private.?key|credential)"
+)
 _AUTHORIZATION = re.compile(r"(?i)authorization\s*:\s*(?:bearer|basic)\s+[^\s,;]+")
 _BEARER = re.compile(r"(?i)\b(?:bearer|basic)\s+[^\s,;]+")
 _ASSIGNMENT = re.compile(r"(?i)\b(password|secret|token|api[_-]?key)\s*[:=]\s*[^\s,;]+")
-_PRIVATE_BLOCK = re.compile(r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL)
+_PRIVATE_BLOCK = re.compile(
+    r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL
+)
 _HTTP_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _MAX_FIELD = 4096
@@ -29,20 +33,23 @@ def _redact_url(match: re.Match[str]) -> str:
     # names. Keep the source useful for diagnosis without guessing those names.
     value = match.group(0)
     url = value.rstrip(".,;)]}")
-    suffix = value[len(url):]
+    suffix = value[len(url) :]
     try:
         parts = urlsplit(url)
     except ValueError:
         return "<redacted-url>" + suffix
-    return urlunsplit(
-        (
-            parts.scheme,
-            parts.netloc.rsplit("@", 1)[-1],
-            parts.path,
-            "<redacted>" if parts.query else "",
-            "<redacted>" if parts.fragment else "",
+    return (
+        urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc.rsplit("@", 1)[-1],
+                parts.path,
+                "<redacted>" if parts.query else "",
+                "<redacted>" if parts.fragment else "",
+            )
         )
-    ) + suffix
+        + suffix
+    )
 
 
 def redact_text(value: object) -> str:
@@ -63,7 +70,10 @@ def _safe(value: object, key: str = "") -> object:
     if isinstance(value, str):
         return redact_text(value)
     if isinstance(value, dict):
-        return {str(child_key): _safe(child, str(child_key)) for child_key, child in list(value.items())[:64]}
+        return {
+            str(child_key): _safe(child, str(child_key))
+            for child_key, child in list(value.items())[:64]
+        }
     if isinstance(value, (list, tuple)):
         return [_safe(child) for child in value[:64]]
     if value is None or isinstance(value, (bool, int, float)):
@@ -71,7 +81,9 @@ def _safe(value: object, key: str = "") -> object:
     return redact_text(value)
 
 
-def log_event(logger: stdlib_logging.Logger, event: str, *, service: str, **fields: object) -> None:
+def log_event(
+    logger: stdlib_logging.Logger, event: str, *, service: str, **fields: object
+) -> None:
     if re.fullmatch(r"[a-z][a-z0-9_.-]{1,127}", event) is None:
         raise ValueError("structured log event name is invalid")
     if re.fullmatch(r"[a-z][a-z0-9_.-]{1,63}", service) is None:
@@ -120,7 +132,9 @@ class DatabaseJobLogStore:
         identity = self._job_id(job_id)
         if not isinstance(content, bytes) or len(content) > _MAX_LOG_INPUT:
             raise ValueError("job log input is invalid or too large")
-        sanitized = redact_text(content.decode("utf-8", errors="replace")).encode() + b"\n"
+        sanitized = (
+            redact_text(content.decode("utf-8", errors="replace")).encode() + b"\n"
+        )
         digest = hashlib.sha256(sanitized).hexdigest()
         from .models import JobLogEntry
 

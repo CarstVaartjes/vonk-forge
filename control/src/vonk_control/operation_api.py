@@ -215,7 +215,9 @@ def bounded_error_responses(*status_codes: int) -> dict[int | str, dict[str, Any
 
     return {
         status_code: {
-            "model": RequestValidationProblem if status_code == 422 else BoundedErrorResponse
+            "model": RequestValidationProblem
+            if status_code == 422
+            else BoundedErrorResponse
         }
         for status_code in status_codes
     }
@@ -741,12 +743,30 @@ def decode_offset(
     return offset
 
 
-def _progress_projection(value: object, state: object = None) -> JobOperationProgress | None:
+def _progress_projection(
+    value: object, state: object = None
+) -> JobOperationProgress | None:
     if value is None:
         return None
-    projected = project_progress(JobOperationProgress.model_validate(value, strict=True))
-    if state in {"succeeded", "accepted", "compensated", "failed", "cancelled", "waiting-for-operator"}:
-        return projected.model_copy(update={"activity": None, "bytes_per_second": None, "smoothed_bytes_per_second": None, "eta_seconds": None})
+    projected = project_progress(
+        JobOperationProgress.model_validate(value, strict=True)
+    )
+    if state in {
+        "succeeded",
+        "accepted",
+        "compensated",
+        "failed",
+        "cancelled",
+        "waiting-for-operator",
+    }:
+        return projected.model_copy(
+            update={
+                "activity": None,
+                "bytes_per_second": None,
+                "smoothed_bytes_per_second": None,
+                "eta_seconds": None,
+            }
+        )
     return projected
 
 
@@ -796,14 +816,20 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
     kind = _required_text(item["kind"], "operation kind is invalid")
     state = _required_text(item["state"], "operation state is invalid")
     if kind in {operation.value for operation in ProtocolAgentOperation}:
-        if state not in {"failed", "waiting-for-operator"} or item.get("result") is None:
+        if (
+            state not in {"failed", "waiting-for-operator"}
+            or item.get("result") is None
+        ):
             return None
         value = item["result"]
         if not isinstance(value, Mapping):
             raise ValueError("agent result must be a JSON object")
         # The evidence collector adds these separate, typed read decorations.
-        result = {key: child for key, child in value.items()
-                  if key not in {"provenance", "evidence_download"}}
+        result = {
+            key: child
+            for key, child in value.items()
+            if key not in {"provenance", "evidence_download"}
+        }
         parsed = validate_result_for_operation(kind, result, state=state)
         if isinstance(parsed, AgentFailureResult):
             return parsed
@@ -811,9 +837,12 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
         # complete manifest remains on the artifact-job result endpoint.
         if not isinstance(parsed, RecipeJobRunResult):
             raise ValueError("agent result is not a failure receipt")
-        reason = parsed.reason or f"Artifact process exited with code {parsed.exit_code}"
-        return OperationFailureEvidence(error_code="artifact_process_failed",
-                                       summary=reason[:256], detail=reason)
+        reason = (
+            parsed.reason or f"Artifact process exited with code {parsed.exit_code}"
+        )
+        return OperationFailureEvidence(
+            error_code="artifact_process_failed", summary=reason[:256], detail=reason
+        )
     return _failure_projection(item.get("result"))
 
 
@@ -906,13 +935,17 @@ def operation_detail_response(
     operation_id = _required_text(item["id"], "operation id is invalid")
     return OperationDetailResponse(
         id=operation_id,
-        parent_id=_optional_text(item.get("parent_id"), "operation parent id is invalid"),
+        parent_id=_optional_text(
+            item.get("parent_id"), "operation parent id is invalid"
+        ),
         node_ids=_required_node_ids(item["node_ids"]),
         kind=_required_text(item["kind"], "operation kind is invalid"),
         state=state,
         attempt=require_integer(item["attempt"], "operation attempt is invalid"),
         progress=_progress_projection(item.get("progress"), state),
-        created_at=_required_text(item["created_at"], "operation created_at is invalid"),
+        created_at=_required_text(
+            item["created_at"], "operation created_at is invalid"
+        ),
         updated_at=_optional_text(
             item.get("updated_at"), "operation updated_at is invalid"
         ),
@@ -923,10 +956,8 @@ def operation_detail_response(
             state,
             supported_actions=item.get("supported_actions"),
             available_actions=available_actions,
-            uncertain=bool(failure is not None and getattr(failure, "uncertain", False)) or bool(
-                isinstance(result, Mapping)
-                and result.get("uncertain") is True
-            ),
+            uncertain=bool(failure is not None and getattr(failure, "uncertain", False))
+            or bool(isinstance(result, Mapping) and result.get("uncertain") is True),
         ),
     )
 
@@ -952,9 +983,7 @@ def _agent_upgrade_diagnostics(
         return None
     package = payload["package"]
     if not isinstance(package, Mapping):
-        raise BoundedJSONError(
-            f"agent upgrade job {job_id} package payload is invalid"
-        )
+        raise BoundedJSONError(f"agent upgrade job {job_id} package payload is invalid")
     operations = list(
         session.scalars(
             select(AgentOperation)
@@ -1125,7 +1154,9 @@ class _DurableOperationProjection:
                 or _aware(publication.lease_expires_at) <= _aware(self._clock())
             ):
                 raise RuntimeError("active publication is unavailable")
-            marker = _stored_activation_marker(publication.activation_marker).model_dump()
+            marker = _stored_activation_marker(
+                publication.activation_marker
+            ).model_dump()
             marker_digest = publication.activation_marker_digest
             route_digest = publication.route_digest
             evidence_digest = publication.evidence_digest
@@ -1316,21 +1347,36 @@ class _DurableOperationProjection:
             aggregate_members = []
             for operation, progress in session.execute(
                 select(AgentOperation, AgentOperationAttempt.progress)
-                .outerjoin(AgentOperationAttempt, (AgentOperationAttempt.operation_id == AgentOperation.id)
-                           & (AgentOperationAttempt.attempt == AgentOperation.current_attempt))
+                .outerjoin(
+                    AgentOperationAttempt,
+                    (AgentOperationAttempt.operation_id == AgentOperation.id)
+                    & (AgentOperationAttempt.attempt == AgentOperation.current_attempt),
+                )
                 .where(AgentOperation.parent_job_id == job_id)
                 .order_by(AgentOperation.created_at, AgentOperation.id)
             ):
                 projected = _progress_projection(progress, operation.state)
-                document = {} if projected is None else projected.model_dump(mode="json", exclude_none=True)
+                document = (
+                    {}
+                    if projected is None
+                    else projected.model_dump(mode="json", exclude_none=True)
+                )
                 # A member is one independent node operation. Its identity is
                 # the durable operation ID, since a node can have several steps.
                 for key in ("checkpoint", "members", "total_bytes_known"):
                     document.pop(key, None)
-                document.update(member_id=operation.id, kind=operation.kind,
-                                phase=document.get("phase", operation.state), state=operation.state)
-                aggregate_members.append(OperationMemberProgress.model_validate(document))
-            aggregate = aggregate_progress(aggregate_members) if aggregate_members else None
+                document.update(
+                    member_id=operation.id,
+                    kind=operation.kind,
+                    phase=document.get("phase", operation.state),
+                    state=operation.state,
+                )
+                aggregate_members.append(
+                    OperationMemberProgress.model_validate(document)
+                )
+            aggregate = (
+                aggregate_progress(aggregate_members) if aggregate_members else None
+            )
             state_counts = {
                 str(state): int(count)
                 for state, count in session.execute(
@@ -1363,7 +1409,9 @@ class _DurableOperationProjection:
                 "progress": (
                     None
                     if attempts.get(operation.id) is None
-                    else _progress_document(attempts[operation.id].progress, operation.state)
+                    else _progress_document(
+                        attempts[operation.id].progress, operation.state
+                    )
                 ),
                 "result": (
                     None

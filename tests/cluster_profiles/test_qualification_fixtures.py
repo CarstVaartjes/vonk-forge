@@ -301,10 +301,14 @@ def test_registry_fails_closed_for_missing_changed_and_special_fixtures() -> Non
 
     recipe, blocker = registry.resolve("vonk-forge/image", "a" * 64, "image-job")
     assert recipe is not None and blocker is None
-    _recipe, digest_blocker = registry.resolve("vonk-forge/image", "c" * 64, "image-job")
+    _recipe, digest_blocker = registry.resolve(
+        "vonk-forge/image", "c" * 64, "image-job"
+    )
     assert digest_blocker is not None
     assert digest_blocker["code"] == "fixture.recipe_digest_mismatch"
-    _recipe, missing_blocker = registry.resolve("vonk-forge/missing", "a" * 64, "image-job")
+    _recipe, missing_blocker = registry.resolve(
+        "vonk-forge/missing", "a" * 64, "image-job"
+    )
     assert missing_blocker is not None
     assert missing_blocker["code"] == "fixture.missing"
 

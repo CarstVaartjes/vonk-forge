@@ -144,7 +144,11 @@ class _PlanLifecycleExecutor:
     def prepare(self) -> Mapping[str, object]:
         self._require("stopped")
         self._state = "prepared"
-        return {"security": _runtime_security(self._request.runtime_spec, self._request.plan)}
+        return {
+            "security": _runtime_security(
+                self._request.runtime_spec, self._request.plan
+            )
+        }
 
     def verify(self) -> Mapping[str, object]:
         self._require("prepared")
@@ -206,7 +210,13 @@ def run_synthetic_conformance(slug: str) -> HarnessEvidence:
     """Compile a canonical fixture and exercise its full recoverable lifecycle."""
     try:
         request = _fixture_request(slug)
-    except (HarnessCompileError, RecipeRuntimeSpecError, CompiledExecutionPlanError, ValueError, TypeError) as error:
+    except (
+        HarnessCompileError,
+        RecipeRuntimeSpecError,
+        CompiledExecutionPlanError,
+        ValueError,
+        TypeError,
+    ) as error:
         raise HarnessConformanceError(str(error)) from error
     return _run_plan_conformance(request, clock=DeterministicClock())
 
@@ -223,9 +233,15 @@ def run_recipe_conformance(
 ) -> HarnessEvidence:
     """Run conformance for any current canonical recipe/model projection."""
     try:
-        parsed = recipe if isinstance(recipe, RecipeDefinition) else RecipeDefinition.model_validate(recipe)
+        parsed = (
+            recipe
+            if isinstance(recipe, RecipeDefinition)
+            else RecipeDefinition.model_validate(recipe)
+        )
         parsed_models = tuple(
-            item if isinstance(item, ModelDefinition) else ModelDefinition.model_validate(item)
+            item
+            if isinstance(item, ModelDefinition)
+            else ModelDefinition.model_validate(item)
             for item in models
         )
         request = _compile_request(
@@ -237,18 +253,31 @@ def run_recipe_conformance(
             role=role,
             rank=rank,
         )
-    except (HarnessCompileError, RecipeRuntimeSpecError, CompiledExecutionPlanError, ValueError, TypeError) as error:
+    except (
+        HarnessCompileError,
+        RecipeRuntimeSpecError,
+        CompiledExecutionPlanError,
+        ValueError,
+        TypeError,
+    ) as error:
         raise HarnessConformanceError(str(error)) from error
     return _run_plan_conformance(request, clock=DeterministicClock())
 
 
-def validate_terminal_evidence(document: Mapping[str, object], request: LifecycleRequest) -> dict[str, object]:
+def validate_terminal_evidence(
+    document: Mapping[str, object], request: LifecycleRequest
+) -> dict[str, object]:
     """Validate strict schema-two terminal evidence and exact plan identity."""
     if not isinstance(document, dict):
         raise HarnessConformanceError("lifecycle evidence is invalid")
     expected_keys = {
-        "schema_version", "recipe_revision_sha256", "harness_sha256",
-        "execution_sha256", "plan", "outcome", "artifacts",
+        "schema_version",
+        "recipe_revision_sha256",
+        "harness_sha256",
+        "execution_sha256",
+        "plan",
+        "outcome",
+        "artifacts",
     }
     if set(document) != expected_keys or document.get("schema_version") != 2:
         raise HarnessConformanceError("lifecycle evidence is invalid")
@@ -265,12 +294,16 @@ def validate_terminal_evidence(document: Mapping[str, object], request: Lifecycl
     }
     if any(document.get(name) != value for name, value in expected.items()):
         raise HarnessConformanceError("lifecycle evidence identity is invalid")
-    if document.get("outcome") != "passed" or not _valid_artifacts(document.get("artifacts")):
+    if document.get("outcome") != "passed" or not _valid_artifacts(
+        document.get("artifacts")
+    ):
         raise HarnessConformanceError("lifecycle evidence outcome is invalid")
     return document
 
 
-def _run_plan_conformance(request: LifecycleRequest, *, clock: DeterministicClock) -> HarnessEvidence:
+def _run_plan_conformance(
+    request: LifecycleRequest, *, clock: DeterministicClock
+) -> HarnessEvidence:
     executor = _PlanLifecycleExecutor(request, clock=clock)
     observations: list[LifecycleObservation] = []
     _observe_state(observations, "inspect", executor.inspect(), "stopped")
@@ -295,7 +328,9 @@ def _run_plan_conformance(request: LifecycleRequest, *, clock: DeterministicCloc
     document = terminal.get("evidence")
     if not isinstance(document, Mapping):
         raise HarnessConformanceError("lifecycle evidence is invalid")
-    return HarnessEvidence(tuple(observations), validate_terminal_evidence(document, request))
+    return HarnessEvidence(
+        tuple(observations), validate_terminal_evidence(document, request)
+    )
 
 
 def _fixture_request(slug: str) -> LifecycleRequest:
@@ -318,7 +353,9 @@ def _compile_request(
 ) -> LifecycleRequest:
     # Exercise both canonical seams explicitly; the runtime compiler calls the
     # harness compiler again to produce the transport envelope.
-    compile_canonical_harness(recipe, models, package_handle, role=role, rank=rank, settings=None)
+    compile_canonical_harness(
+        recipe, models, package_handle, role=role, rank=rank, settings=None
+    )
     runtime_spec = compile_runtime_spec(
         recipe, models=models, package_handle=package_handle, role=role, rank=rank
     )
@@ -357,23 +394,33 @@ def _compile_request(
         raise CompiledExecutionPlanError(
             "canonical placement cannot be bound to the execution plan"
         ) from error
-    return LifecycleRequest(recipe, models, runtime_spec, plan, placement, launch_payload)
+    return LifecycleRequest(
+        recipe, models, runtime_spec, plan, placement, launch_payload
+    )
 
 
-def _bind_runtime_artifacts(runtime_spec: Mapping[str, object], models: Sequence[ModelDefinition]) -> dict[str, object]:
+def _bind_runtime_artifacts(
+    runtime_spec: Mapping[str, object], models: Sequence[ModelDefinition]
+) -> dict[str, object]:
     by_identity: dict[tuple[str, str], Mapping[str, object]] = {}
     for model in models:
         for item in model.files:
             by_identity[(content_sha256(model), item.id)] = item.model_dump(mode="json")
     raw_artifacts = runtime_spec.get("artifacts")
-    if not isinstance(raw_artifacts, Sequence) or isinstance(raw_artifacts, (str, bytes)):
-        raise HarnessConformanceError("canonical runtime model artifacts are unavailable")
+    if not isinstance(raw_artifacts, Sequence) or isinstance(
+        raw_artifacts, (str, bytes)
+    ):
+        raise HarnessConformanceError(
+            "canonical runtime model artifacts are unavailable"
+        )
     bound: list[dict[str, object]] = []
     for raw in raw_artifacts:
         if not isinstance(raw, Mapping):
             raise HarnessConformanceError("canonical runtime model artifact is invalid")
         model = raw.get("model")
-        model_digest = model.get("content_sha256") if isinstance(model, Mapping) else None
+        model_digest = (
+            model.get("content_sha256") if isinstance(model, Mapping) else None
+        )
         file_id = raw.get("file_id")
         if not isinstance(model_digest, str) or not isinstance(file_id, str):
             raise HarnessConformanceError(
@@ -381,9 +428,13 @@ def _bind_runtime_artifacts(runtime_spec: Mapping[str, object], models: Sequence
             )
         source = by_identity.get((model_digest, file_id))
         if source is None:
-            raise HarnessConformanceError("selected model file is absent from the canonical model manifest")
+            raise HarnessConformanceError(
+                "selected model file is absent from the canonical model manifest"
+            )
         if raw.get("path") != source.get("path"):
-            raise HarnessConformanceError("selected model file path does not match the canonical manifest")
+            raise HarnessConformanceError(
+                "selected model file path does not match the canonical manifest"
+            )
         item = dict(raw)
         item["sha256"] = source.get("sha256")
         item["bytes"] = source.get("size_bytes")
@@ -410,11 +461,20 @@ def _verified_model_objects(
     *,
     role: str,
 ) -> tuple[dict[str, object], ...]:
-    by_identity = {(content_sha256(model), model.identity.publisher, model.identity.slug): model for model in models}
+    by_identity = {
+        (content_sha256(model), model.identity.publisher, model.identity.slug): model
+        for model in models
+    }
     objects: list[dict[str, object]] = []
     selected: set[tuple[str, str]] = set()
     for selection in recipe.models:
-        model = by_identity.get((selection.model.content_sha256, selection.model.publisher, selection.model.slug))
+        model = by_identity.get(
+            (
+                selection.model.content_sha256,
+                selection.model.publisher,
+                selection.model.slug,
+            )
+        )
         if model is None:
             raise HarnessConformanceError("selected canonical model is unavailable")
         for selector in selection.files:
@@ -444,7 +504,9 @@ def _verified_model_objects(
 
 
 def _fixture_runtime_image(recipe: RecipeDefinition) -> dict[str, object]:
-    digest = recipe.execution.image.digest if recipe.execution.mode == "image" else "d" * 64
+    digest = (
+        recipe.execution.image.digest if recipe.execution.mode == "image" else "d" * 64
+    )
     image_digest = f"sha256:{digest}"
     layout_digest = "f" * 64
     return {
@@ -459,28 +521,108 @@ def _fixture_runtime_image(recipe: RecipeDefinition) -> dict[str, object]:
         "runtime_interface_label": "v1",
         "source": "published",
         "build_id": None,
-        "distribution_object": {"name": "image.oci.tar", "sha256": layout_digest, "bytes": 4096, "kind": "oci-archive"},
+        "distribution_object": {
+            "name": "image.oci.tar",
+            "sha256": layout_digest,
+            "bytes": 4096,
+            "kind": "oci-archive",
+        },
     }
 
 
 def _fixture_cases() -> dict[str, tuple[list[str], list[dict[str, object]], str]]:
     return {
-        "vllm": (["/opt/vonk/bin/vllm", "serve", "/models"], [{"name": "max-model-len", "value": 32768}, {"name": "tensor-parallel-size", "value": 1}], "openai"),
-        "sglang": (["/opt/vonk/bin/sglang-serve", "serve", "/models"], [{"name": "model-path", "value": "/models"}, {"name": "context-length", "value": 32768}, {"name": "tensor-parallel-size", "value": 1}], "openai"),
-        "tensorrt-llm": (["/opt/vonk/bin/trtllm-serve", "serve", "/models"], [{"name": "backend", "value": "pytorch"}, {"name": "max-batch-size", "value": 8}, {"name": "max-num-tokens", "value": 4096}, {"name": "max-seq-len", "value": 32768}, {"name": "tp-size", "value": 1}, {"name": "pp-size", "value": 1}, {"name": "ep-size", "value": 1}], "openai"),
-        "llama-cpp": (["/opt/vonk/bin/llama-server", "/models"], [{"name": "model", "value": "/models/model.gguf"}, {"name": "ctx-size", "value": 32768}, {"name": "n-gpu-layers", "value": 999}], "openai"),
-        "ds4": (["/opt/vonk/bin/ds4-serve", "/models"], [{"name": "model", "value": "/models/target.gguf"}, {"name": "draft-model", "value": "/models/drafter.gguf"}, {"name": "ctx-size", "value": 32768}], "openai"),
-        "diffusers": (["/opt/vonk/bin/diffusers-job"], [{"name": "pipeline", "value": "text-to-image"}, {"name": "output-mime", "value": "image/png"}], "image-job"),
-        "comfyui": (["/opt/vonk/bin/comfyui-job"], [{"name": "workflow", "value": "/opt/vonk/source/workflows/image.json"}, {"name": "workflow-sha256", "value": "e" * 64}, {"name": "output-mime", "value": "image/png"}], "image-job"),
-        "pytorch-pipeline": (["/opt/vonk/bin/pytorch-pipeline"], [{"name": "entrypoint", "value": "/opt/vonk/source/pipelines/run.py"}, {"name": "output-mime", "value": "model/gltf-binary"}], "mesh-job"),
+        "vllm": (
+            ["/opt/vonk/bin/vllm", "serve", "/models"],
+            [
+                {"name": "max-model-len", "value": 32768},
+                {"name": "tensor-parallel-size", "value": 1},
+            ],
+            "openai",
+        ),
+        "sglang": (
+            ["/opt/vonk/bin/sglang-serve", "serve", "/models"],
+            [
+                {"name": "model-path", "value": "/models"},
+                {"name": "context-length", "value": 32768},
+                {"name": "tensor-parallel-size", "value": 1},
+            ],
+            "openai",
+        ),
+        "tensorrt-llm": (
+            ["/opt/vonk/bin/trtllm-serve", "serve", "/models"],
+            [
+                {"name": "backend", "value": "pytorch"},
+                {"name": "max-batch-size", "value": 8},
+                {"name": "max-num-tokens", "value": 4096},
+                {"name": "max-seq-len", "value": 32768},
+                {"name": "tp-size", "value": 1},
+                {"name": "pp-size", "value": 1},
+                {"name": "ep-size", "value": 1},
+            ],
+            "openai",
+        ),
+        "llama-cpp": (
+            ["/opt/vonk/bin/llama-server", "/models"],
+            [
+                {"name": "model", "value": "/models/model.gguf"},
+                {"name": "ctx-size", "value": 32768},
+                {"name": "n-gpu-layers", "value": 999},
+            ],
+            "openai",
+        ),
+        "ds4": (
+            ["/opt/vonk/bin/ds4-serve", "/models"],
+            [
+                {"name": "model", "value": "/models/target.gguf"},
+                {"name": "draft-model", "value": "/models/drafter.gguf"},
+                {"name": "ctx-size", "value": 32768},
+            ],
+            "openai",
+        ),
+        "diffusers": (
+            ["/opt/vonk/bin/diffusers-job"],
+            [
+                {"name": "pipeline", "value": "text-to-image"},
+                {"name": "output-mime", "value": "image/png"},
+            ],
+            "image-job",
+        ),
+        "comfyui": (
+            ["/opt/vonk/bin/comfyui-job"],
+            [
+                {"name": "workflow", "value": "/opt/vonk/source/workflows/image.json"},
+                {"name": "workflow-sha256", "value": "e" * 64},
+                {"name": "output-mime", "value": "image/png"},
+            ],
+            "image-job",
+        ),
+        "pytorch-pipeline": (
+            ["/opt/vonk/bin/pytorch-pipeline"],
+            [
+                {"name": "entrypoint", "value": "/opt/vonk/source/pipelines/run.py"},
+                {"name": "output-mime", "value": "model/gltf-binary"},
+            ],
+            "mesh-job",
+        ),
     }
 
 
-def _fixture_recipe(slug: str, case: tuple[list[str], list[dict[str, object]], str]) -> tuple[RecipeDefinition, ModelDefinition]:
+def _fixture_recipe(
+    slug: str, case: tuple[list[str], list[dict[str, object]], str]
+) -> tuple[RecipeDefinition, ModelDefinition]:
     entrypoint, arguments, interface = case
     base_name = "recipe-image.json" if interface == "openai" else "recipe-job.json"
-    raw_recipe = json.loads(files("vonk_forge_contracts").joinpath("examples", base_name).read_text(encoding="utf-8"))
-    raw_model = json.loads(files("vonk_forge_contracts").joinpath("examples", "model-definition.json").read_text(encoding="utf-8"))
+    raw_recipe = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", base_name)
+        .read_text(encoding="utf-8")
+    )
+    raw_model = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
+    )
     model = ModelDefinition.model_validate(raw_model)
     raw_recipe["identity"]["slug"] = f"synthetic-{slug}"
     raw_recipe["runtime"]["engine"] = slug
@@ -494,24 +636,47 @@ def _fixture_recipe(slug: str, case: tuple[list[str], list[dict[str, object]], s
     return RecipeDefinition.model_validate(raw_recipe), model
 
 
-def _runtime_security(runtime_spec: Mapping[str, object], plan: CompiledExecutionPlan) -> dict[str, object]:
+def _runtime_security(
+    runtime_spec: Mapping[str, object], plan: CompiledExecutionPlan
+) -> dict[str, object]:
     runtime = _mapping(runtime_spec.get("runtime"), "runtime")
     security = _mapping(runtime_spec.get("security"), "security")
     mounts = security.get("mounts")
     if not isinstance(mounts, Sequence) or isinstance(mounts, (str, bytes)):
         raise HarnessConformanceError("compiled security mounts are invalid")
-    model_mounts = [item for item in mounts if isinstance(item, Mapping) and str(item.get("source", "")).startswith("/run/vonk/models")]
-    input_mounts = [item for item in mounts if isinstance(item, Mapping) and item.get("source") == "/run/vonk/inputs"]
-    output_mounts = [item for item in mounts if isinstance(item, Mapping) and item.get("source") == "/run/vonk/outputs"]
+    model_mounts = [
+        item
+        for item in mounts
+        if isinstance(item, Mapping)
+        and str(item.get("source", "")).startswith("/run/vonk/models")
+    ]
+    input_mounts = [
+        item
+        for item in mounts
+        if isinstance(item, Mapping) and item.get("source") == "/run/vonk/inputs"
+    ]
+    output_mounts = [
+        item
+        for item in mounts
+        if isinstance(item, Mapping) and item.get("source") == "/run/vonk/outputs"
+    ]
     if len(output_mounts) != 1:
         raise HarnessConformanceError("compiled output mount is invalid")
     return {
         "architecture": runtime.get("architecture"),
         "capabilities": security.get("capabilities"),
-        "docker_socket": any(".sock" in str(item.get("source", "")).lower() or ".sock" in str(item.get("target", "")).lower() for item in mounts if isinstance(item, Mapping)),
+        "docker_socket": any(
+            ".sock" in str(item.get("source", "")).lower()
+            or ".sock" in str(item.get("target", "")).lower()
+            for item in mounts
+            if isinstance(item, Mapping)
+        ),
         "image": runtime.get("image"),
-        "model_mounts_read_only": all(item.get("read_only") is True for item in model_mounts),
-        "input_mount_read_only": not input_mounts or all(item.get("read_only") is True for item in input_mounts),
+        "model_mounts_read_only": all(
+            item.get("read_only") is True for item in model_mounts
+        ),
+        "input_mount_read_only": not input_mounts
+        or all(item.get("read_only") is True for item in input_mounts),
         "mount_paths_isolated": _mount_paths_are_isolated(mounts),
         "network_mode": security.get("network_mode"),
         "no_new_privileges": security.get("no_new_privileges"),
@@ -521,34 +686,55 @@ def _runtime_security(runtime_spec: Mapping[str, object], plan: CompiledExecutio
     }
 
 
-def _validated_security(prepared: Mapping[str, object], runtime_spec: Mapping[str, object], plan: CompiledExecutionPlan) -> None:
+def _validated_security(
+    prepared: Mapping[str, object],
+    runtime_spec: Mapping[str, object],
+    plan: CompiledExecutionPlan,
+) -> None:
     security = prepared.get("security")
     expected = _runtime_security(runtime_spec, plan)
     if not isinstance(security, Mapping) or dict(security) != expected:
         raise HarnessConformanceError("lifecycle security evidence is invalid")
     if expected["architecture"] != "linux/arm64" or expected["network_mode"] != "none":
         raise HarnessConformanceError("canonical runtime security is invalid")
-    if expected["docker_socket"] is not False or expected["no_new_privileges"] is not True:
+    if (
+        expected["docker_socket"] is not False
+        or expected["no_new_privileges"] is not True
+    ):
         raise HarnessConformanceError("canonical runtime security is invalid")
-    if expected["model_mounts_read_only"] is not True or expected["output_mount_writable"] is not True:
+    if (
+        expected["model_mounts_read_only"] is not True
+        or expected["output_mount_writable"] is not True
+    ):
         raise HarnessConformanceError("canonical runtime mounts are invalid")
     if expected["plan_schema_version"] != 2:
         raise HarnessConformanceError("compiled execution plan schema is invalid")
 
 
 def _mount_paths_are_isolated(mounts: Sequence[object]) -> bool:
-    paths = tuple(path for item in mounts if isinstance(item, Mapping) for path in (item.get("source"), item.get("target")))
-    return all(isinstance(path, str) and path != "/" for path in paths) and len(paths) == len(set(paths))
+    paths = tuple(
+        path
+        for item in mounts
+        if isinstance(item, Mapping)
+        for path in (item.get("source"), item.get("target"))
+    )
+    return all(isinstance(path, str) and path != "/" for path in paths) and len(
+        paths
+    ) == len(set(paths))
 
 
 def _runtime_timeout(runtime_spec: Mapping[str, object]) -> float:
-    value = _mapping(runtime_spec.get("lifecycle"), "lifecycle").get("stop_timeout_seconds")
+    value = _mapping(runtime_spec.get("lifecycle"), "lifecycle").get(
+        "stop_timeout_seconds"
+    )
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
         raise HarnessConformanceError("runtime stop timeout is invalid")
     return float(value)
 
 
-def _recover_start(executor: _PlanLifecycleExecutor, observations: list[LifecycleObservation]) -> None:
+def _recover_start(
+    executor: _PlanLifecycleExecutor, observations: list[LifecycleObservation]
+) -> None:
     try:
         _observe(observations, "start", executor.start())
     except LifecycleInterrupted:
@@ -556,13 +742,19 @@ def _recover_start(executor: _PlanLifecycleExecutor, observations: list[Lifecycl
         first = _observe(observations, "inspect", executor.inspect())
         second = _observe(observations, "inspect", executor.inspect())
         if first != second:
-            raise HarnessConformanceError("inspect is not idempotent during start recovery")
+            raise HarnessConformanceError(
+                "inspect is not idempotent during start recovery"
+            )
         _observe_state(observations, "start", executor.start(), "running")
         return
     raise HarnessConformanceError("start interruption was not observed")
 
 
-def _recover_stop(executor: _PlanLifecycleExecutor, observations: list[LifecycleObservation], deadline: float) -> Mapping[str, object]:
+def _recover_stop(
+    executor: _PlanLifecycleExecutor,
+    observations: list[LifecycleObservation],
+    deadline: float,
+) -> Mapping[str, object]:
     try:
         _observe(observations, "stop", executor.stop(deadline))
     except LifecycleInterrupted:
@@ -570,12 +762,16 @@ def _recover_stop(executor: _PlanLifecycleExecutor, observations: list[Lifecycle
         first = _observe(observations, "inspect", executor.inspect())
         second = _observe(observations, "inspect", executor.inspect())
         if first != second:
-            raise HarnessConformanceError("inspect is not idempotent during stop recovery")
+            raise HarnessConformanceError(
+                "inspect is not idempotent during stop recovery"
+            )
         return _observe_state(observations, "stop", executor.stop(deadline), "stopped")
     raise HarnessConformanceError("stop interruption was not observed")
 
 
-def _observe(observations: list[LifecycleObservation], operation: str, value: object) -> Mapping[str, object]:
+def _observe(
+    observations: list[LifecycleObservation], operation: str, value: object
+) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise HarnessConformanceError(f"{operation} result is invalid")
     result = dict(value)
@@ -583,22 +779,37 @@ def _observe(observations: list[LifecycleObservation], operation: str, value: ob
     return result
 
 
-def _observe_state(observations: list[LifecycleObservation], operation: str, value: object, expected: str) -> Mapping[str, object]:
+def _observe_state(
+    observations: list[LifecycleObservation],
+    operation: str,
+    value: object,
+    expected: str,
+) -> Mapping[str, object]:
     result = _observe(observations, operation, value)
     if result.get("state") != expected:
         raise HarnessConformanceError(f"{operation} state is invalid")
     return result
 
 
-def _observation(observations: tuple[LifecycleObservation, ...], operation: str) -> Mapping[str, object]:
+def _observation(
+    observations: tuple[LifecycleObservation, ...], operation: str
+) -> Mapping[str, object]:
     for observation in observations:
         if observation.operation == operation:
             return observation.result
     return {}
 
 
-def _interrupted_then_state(observations: tuple[LifecycleObservation, ...], operation: str, state: str) -> bool:
-    return any(item.operation == operation and item.result.get("interrupted") is True for item in observations) and any(item.operation == operation and item.result.get("state") == state for item in observations)
+def _interrupted_then_state(
+    observations: tuple[LifecycleObservation, ...], operation: str, state: str
+) -> bool:
+    return any(
+        item.operation == operation and item.result.get("interrupted") is True
+        for item in observations
+    ) and any(
+        item.operation == operation and item.result.get("state") == state
+        for item in observations
+    )
 
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:

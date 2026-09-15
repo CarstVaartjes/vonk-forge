@@ -197,7 +197,9 @@ def build_recipe_image_availability(
                         resolution = resolve(recipe_revision_id)
                     except Exception as error:
                         raise RecipeImageAvailabilityError(
-                            str(getattr(error, "code", "recipe_image.build_unavailable")),
+                            str(
+                                getattr(error, "code", "recipe_image.build_unavailable")
+                            ),
                             str(error)[:512],
                             retryable=True,
                             recovery_actions=("retry",),
@@ -207,7 +209,9 @@ def build_recipe_image_availability(
                     if cached is not None:
                         package_handle = {
                             "build_input_sha256": cached["build_input_sha256"],
-                            "image_digest": str(cached["image_digest"]).removeprefix("sha256:"),
+                            "image_digest": str(cached["image_digest"]).removeprefix(
+                                "sha256:"
+                            ),
                             "image_reference": (
                                 f"localhost/vonk/recipe-build@{cached['image_digest']}"
                             ),
@@ -247,9 +251,13 @@ def build_recipe_image_availability(
             result = dict(runtime) | {"recipe_revision_id": revision.id}
             if builder_node_id is not None:
                 result["builder_node_id"] = builder_node_id
-            if package_handle is not None and isinstance(package_handle.get("build_input_sha256"), str):
+            if package_handle is not None and isinstance(
+                package_handle.get("build_input_sha256"), str
+            ):
                 result["build_input_sha256"] = package_handle["build_input_sha256"]
-            if package_handle is not None and isinstance(package_handle.get("input_intent_sha256"), str):
+            if package_handle is not None and isinstance(
+                package_handle.get("input_intent_sha256"), str
+            ):
                 result["input_intent_sha256"] = package_handle["input_intent_sha256"]
             return recipe, result
 
@@ -275,7 +283,10 @@ def build_recipe_image_availability(
             )
         resolution = recipe_builds.resolve(revision_id)
         cached = None if force else _cached_build_receipt(resolution)
-        if cached is not None and build_input_sha256 in {"", cached["build_input_sha256"]}:
+        if cached is not None and build_input_sha256 in {
+            "",
+            cached["build_input_sha256"],
+        }:
             return cached
         # SQL may still record a succeeded build whose archive is gone. The
         # resolution reports that as stale cache loss, and dispatch must build
@@ -301,7 +312,9 @@ def build_recipe_image_availability(
                         "recipe_image.build_unavailable",
                         "availability operation is no longer reservable",
                     )
-                parent_payload = parent.payload if isinstance(parent.payload, Mapping) else {}
+                parent_payload = (
+                    parent.payload if isinstance(parent.payload, Mapping) else {}
+                )
                 parent_runtime = parent_payload.get("runtime")
                 if isinstance(parent_runtime, Mapping) and isinstance(
                     parent_runtime.get("builder_node_id"), str
@@ -323,7 +336,9 @@ def build_recipe_image_availability(
                         session.scalars(
                             select(Job).where(
                                 Job.state.in_({"queued", "running", "partial"}),
-                                Job.kind.in_({"recipe.build.v1", "recipe.image.availability.v2"}),
+                                Job.kind.in_(
+                                    {"recipe.build.v1", "recipe.image.availability.v2"}
+                                ),
                             )
                         )
                     )
@@ -339,7 +354,9 @@ def build_recipe_image_availability(
                             or (
                                 job.kind == "recipe.image.availability.v2"
                                 and isinstance(job.payload, Mapping)
-                                and not isinstance(job.payload.get("image_result"), Mapping)
+                                and not isinstance(
+                                    job.payload.get("image_result"), Mapping
+                                )
                                 and isinstance(
                                     (job_runtime := job.payload.get("runtime")),
                                     Mapping,
@@ -365,7 +382,10 @@ def build_recipe_image_availability(
                                 select(Job).where(
                                     Job.state.in_({"queued", "running", "partial"}),
                                     Job.kind.in_(
-                                        {"recipe.build.v1", "recipe.image.availability.v2"}
+                                        {
+                                            "recipe.build.v1",
+                                            "recipe.image.availability.v2",
+                                        }
                                     ),
                                 )
                             )
@@ -423,7 +443,9 @@ def build_recipe_image_availability(
                         "recipe_image.build_unavailable",
                         "availability operation is no longer reservable",
                     )
-                parent_payload = parent.payload if isinstance(parent.payload, Mapping) else {}
+                parent_payload = (
+                    parent.payload if isinstance(parent.payload, Mapping) else {}
+                )
                 parent_runtime = parent_payload.get("runtime")
                 assigned = (
                     parent_runtime.get("builder_node_id")
@@ -472,7 +494,10 @@ def build_recipe_image_availability(
                             if other_id != candidate_id
                             and other_id not in attempted_candidates
                             and work_for(other_id, current_jobs)
-                            == min(work_for(item_id, current_jobs) for item_id in candidate_ids)
+                            == min(
+                                work_for(item_id, current_jobs)
+                                for item_id in candidate_ids
+                            )
                         ),
                         None,
                     )
@@ -578,7 +603,9 @@ def build_recipe_image_availability(
         )
         while operation.state not in {"succeeded", "failed", "expired"}:
             with sessions() as session:
-                current_progress = _build_progress(session, operation.id, builder_node_id)
+                current_progress = _build_progress(
+                    session, operation.id, builder_node_id
+                )
             if current_progress is not None:
                 progress(current_progress.model_dump(mode="json", exclude_none=True))
             time.sleep(0.5)
@@ -796,12 +823,17 @@ def _compile_consistent_runtime(
     return first
 
 
-def _build_progress(session: Session, job_id: str, node_id: str) -> OperationProgress | None:
+def _build_progress(
+    session: Session, job_id: str, node_id: str
+) -> OperationProgress | None:
     """Read the current attempt's typed heartbeat, including image uploads."""
     document = session.scalar(
-        select(AgentOperationAttempt.progress).join(
-            AgentOperation, AgentOperation.id == AgentOperationAttempt.operation_id,
-        ).where(
+        select(AgentOperationAttempt.progress)
+        .join(
+            AgentOperation,
+            AgentOperation.id == AgentOperationAttempt.operation_id,
+        )
+        .where(
             AgentOperation.parent_job_id == job_id,
             AgentOperation.node_id == node_id,
             AgentOperationAttempt.attempt == AgentOperation.current_attempt,

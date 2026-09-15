@@ -127,6 +127,7 @@ def test_progress_rejects_invalid_or_unzoned_timestamps(value):
 
 def test_terminal_operation_never_claims_work_is_stalled_or_running():
     from vonk_control.operation_api import _progress_projection
+
     document = sample(completed_bytes=10, total_bytes=20, total_bytes_known=True)
     for state in ("succeeded", "failed", "cancelled", "waiting-for-operator"):
         projected = _progress_projection(document, state)
@@ -144,7 +145,14 @@ def test_total_knowledge_can_be_explicitly_withdrawn_without_losing_bytes():
 
 def test_image_availability_boundary_preserves_canonical_measurements():
     from vonk_control.recipe_image_availability_api import _progress
-    original = sample(completed_bytes=10, total_bytes=20, total_bytes_known=True, completed_items=1, total_items=2)
+
+    original = sample(
+        completed_bytes=10,
+        total_bytes=20,
+        total_bytes_known=True,
+        completed_items=1,
+        total_items=2,
+    )
     original = sample(original, seconds=2, completed_bytes=15)
     projected = _progress(original)
     assert projected.model_dump(mode="json", exclude_none=True) == original

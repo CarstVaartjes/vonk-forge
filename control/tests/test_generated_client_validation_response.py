@@ -1,5 +1,6 @@
 """Exercise the Controller producer through its generated client parser."""
 
+
 def test_generated_python_list_jobs_preserves_cursor_and_typed_rejection() -> None:
     import httpx
     from vonk_control.operation_api import RequestValidationProblem as ProblemProducer
@@ -28,7 +29,9 @@ def test_generated_python_list_jobs_preserves_cursor_and_typed_rejection() -> No
         client=Client(base_url="https://control.invalid"),
         response=httpx.Response(
             422,
-            json=ProblemProducer(detail="job cursor is invalid", issues=[]).model_dump(mode="json"),
+            json=ProblemProducer(detail="job cursor is invalid", issues=[]).model_dump(
+                mode="json"
+            ),
         ),
     )
     assert isinstance(parsed, RequestValidationProblem)

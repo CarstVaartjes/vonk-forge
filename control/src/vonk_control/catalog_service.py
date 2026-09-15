@@ -116,7 +116,9 @@ class CatalogService:
     ) -> SourceBundleView:
         del actor
         if self._source_bundles is None:
-            raise CatalogError("bundle.storage_unavailable", "source bundle storage is unavailable")
+            raise CatalogError(
+                "bundle.storage_unavailable", "source bundle storage is unavailable"
+            )
         try:
             stored = self._source_bundles.put(expected_sha256, payload)
         except SourceBundleError as error:
@@ -139,10 +141,15 @@ class CatalogService:
                     session.add(row)
                 else:
                     if parse_source_bundle_manifest(existing.manifest) != manifest:
-                        raise CatalogValidationError("bundle.metadata_mismatch", "stored source manifest differs from verified bundle")
+                        raise CatalogValidationError(
+                            "bundle.metadata_mismatch",
+                            "stored source manifest differs from verified bundle",
+                        )
                     row = existing
         except IntegrityError as error:
-            raise CatalogConflict("bundle.storage_conflict", "source bundle metadata conflicts") from error
+            raise CatalogConflict(
+                "bundle.storage_conflict", "source bundle metadata conflicts"
+            ) from error
         except SourceBundleError as error:
             raise CatalogValidationError(error.code, error.detail) from error
         return SourceBundleView(
@@ -155,7 +162,9 @@ class CatalogService:
 
     def read_source_bundle(self, sha256: str) -> bytes:
         if self._source_bundles is None:
-            raise CatalogError("bundle.storage_unavailable", "source bundle storage is unavailable")
+            raise CatalogError(
+                "bundle.storage_unavailable", "source bundle storage is unavailable"
+            )
         with self._sessions() as session:
             row = session.get(RecipeSourceBundle, sha256)
             if row is None:
@@ -169,9 +178,16 @@ class CatalogService:
             stored = self._source_bundles.get(sha256)
         except SourceBundleError as error:
             raise CatalogValidationError(error.code, error.detail) from error
-        observed = (len(stored.archive), stored.manifest.total_bytes, len(stored.manifest.files))
+        observed = (
+            len(stored.archive),
+            stored.manifest.total_bytes,
+            len(stored.manifest.files),
+        )
         if observed != expected or stored.manifest != manifest:
-            raise CatalogValidationError("bundle.metadata_mismatch", "source bundle storage does not match its database metadata")
+            raise CatalogValidationError(
+                "bundle.metadata_mismatch",
+                "source bundle storage does not match its database metadata",
+            )
         return stored.archive
 
     def get_recipe(self, recipe_id: str) -> RecipeRevisionView:
@@ -185,16 +201,16 @@ class CatalogService:
         self, identities: Sequence[tuple[str, str]]
     ) -> dict[tuple[str, str], RecipeCatalogLocalRevision]:
         requested = sorted(set(identities))
-        if (
-            any(
-                not isinstance(publisher, str)
-                or not isinstance(slug, str)
-                or not _SLUG.fullmatch(publisher)
-                or not _SLUG.fullmatch(slug)
-                for publisher, slug in requested
-            )
+        if any(
+            not isinstance(publisher, str)
+            or not isinstance(slug, str)
+            or not _SLUG.fullmatch(publisher)
+            or not _SLUG.fullmatch(slug)
+            for publisher, slug in requested
         ):
-            raise CatalogValidationError("catalog.identities", "catalog recipe identities are invalid")
+            raise CatalogValidationError(
+                "catalog.identities", "catalog recipe identities are invalid"
+            )
         if not requested:
             return {}
         result: dict[tuple[str, str], RecipeCatalogLocalRevision] = {}
@@ -236,15 +252,22 @@ class CatalogService:
                     )
         return result
 
-    def import_catalog_models(self, actor: str, documents: Sequence[Mapping[str, object]]) -> int:
+    def import_catalog_models(
+        self, actor: str, documents: Sequence[Mapping[str, object]]
+    ) -> int:
         actor = _actor(actor)
         try:
             models = [ModelDefinition.model_validate(value) for value in documents]
         except (TypeError, ValueError) as error:
-            raise CatalogValidationError("recipe_library.model_document_invalid", "catalog index model documents are invalid") from error
+            raise CatalogValidationError(
+                "recipe_library.model_document_invalid",
+                "catalog index model documents are invalid",
+            ) from error
         with self._sessions.begin() as session:
             for model in models:
-                self._upsert_canonical_document(session, model.model_dump(mode="json"), actor=actor)
+                self._upsert_canonical_document(
+                    session, model.model_dump(mode="json"), actor=actor
+                )
         return len(models)
 
     def refresh_build_policy(self) -> None:
@@ -268,25 +291,56 @@ class CatalogService:
         actor = _actor(actor)
         try:
             recipe = RecipeDefinition.model_validate(document)
-            models = [ModelDefinition.model_validate(value) for value in dependency_documents]
+            models = [
+                ModelDefinition.model_validate(value) for value in dependency_documents
+            ]
         except (TypeError, ValueError) as error:
-            raise CatalogValidationError("recipe_library.document_invalid", "recipe library package must contain a canonical recipe and model snapshots") from error
+            raise CatalogValidationError(
+                "recipe_library.document_invalid",
+                "recipe library package must contain a canonical recipe and model snapshots",
+            ) from error
         actual = content_sha256(recipe)
         if actual != expected_content_sha256:
-            raise CatalogValidationError("recipe_library.hash_mismatch", "recipe content does not match the supplied digest")
+            raise CatalogValidationError(
+                "recipe_library.hash_mismatch",
+                "recipe content does not match the supplied digest",
+            )
         if not _SHA1.fullmatch(library_commit) or not source_path:
-            raise CatalogValidationError("recipe_library.source_invalid", "recipe library publication identity is invalid")
+            raise CatalogValidationError(
+                "recipe_library.source_invalid",
+                "recipe library publication identity is invalid",
+            )
         if (release_version is None) != (release_released_at is None):
-            raise CatalogValidationError("recipe_library.release_invalid", "recipe library release metadata is invalid")
-        if release_version is not None and release_released_at is not None and (_RELEASE_VERSION.fullmatch(release_version) is None or date.fromisoformat(release_released_at).isoformat() != release_released_at):
-            raise CatalogValidationError("recipe_library.release_invalid", "recipe library release metadata is invalid")
+            raise CatalogValidationError(
+                "recipe_library.release_invalid",
+                "recipe library release metadata is invalid",
+            )
+        if (
+            release_version is not None
+            and release_released_at is not None
+            and (
+                _RELEASE_VERSION.fullmatch(release_version) is None
+                or date.fromisoformat(release_released_at).isoformat()
+                != release_released_at
+            )
+        ):
+            raise CatalogValidationError(
+                "recipe_library.release_invalid",
+                "recipe library release metadata is invalid",
+            )
         if package_handle is not None:
-            _package_handle_metadata(package_handle, recipe=recipe, package_sha256=package_sha256)
+            _package_handle_metadata(
+                package_handle, recipe=recipe, package_sha256=package_sha256
+            )
         actor = _actor(actor)
         with self._sessions.begin() as session:
             for model in models:
-                self._upsert_canonical_document(session, model.model_dump(mode="json"), actor=actor)
-            revision = self._upsert_canonical_document(session, recipe.model_dump(mode="json"), actor=actor)
+                self._upsert_canonical_document(
+                    session, model.model_dump(mode="json"), actor=actor
+                )
+            revision = self._upsert_canonical_document(
+                session, recipe.model_dump(mode="json"), actor=actor
+            )
             self._select_imported_recipe_head(session, revision)
             projected = read_catalog_projection(revision).model_dump(
                 mode="json", exclude_none=False
@@ -297,7 +351,11 @@ class CatalogService:
                     "source_path": source_path,
                     "package_sha256": package_sha256,
                     "source_bundle_sha256": source_bundle_sha256,
-                    "package_handle": _package_handle_metadata(package_handle, recipe=recipe, package_sha256=package_sha256) if package_handle is not None else None,
+                    "package_handle": _package_handle_metadata(
+                        package_handle, recipe=recipe, package_sha256=package_sha256
+                    )
+                    if package_handle is not None
+                    else None,
                     "release_version": release_version,
                     "release_released_at": release_released_at,
                 }
@@ -305,7 +363,9 @@ class CatalogService:
             session.execute(
                 update(CatalogDocumentRevision)
                 .where(CatalogDocumentRevision.id == revision.id)
-                .values(projected=write_catalog_projection(projected, kind=revision.kind))
+                .values(
+                    projected=write_catalog_projection(projected, kind=revision.kind)
+                )
             )
             session.expire(revision, ["projected"])
             return _view(revision)
@@ -321,14 +381,22 @@ class CatalogService:
         """
         root = session.get(CatalogDocument, revision.document_id, with_for_update=True)
         if root is None:
-            raise CatalogValidationError("catalog.document_missing", "catalog document is missing")
-        head = session.scalar(select(CatalogDocumentHead).where(
-            CatalogDocumentHead.kind == root.kind,
-            CatalogDocumentHead.publisher == root.publisher,
-            CatalogDocumentHead.slug == root.slug,
-        ).with_for_update())
+            raise CatalogValidationError(
+                "catalog.document_missing", "catalog document is missing"
+            )
+        head = session.scalar(
+            select(CatalogDocumentHead)
+            .where(
+                CatalogDocumentHead.kind == root.kind,
+                CatalogDocumentHead.publisher == root.publisher,
+                CatalogDocumentHead.slug == root.slug,
+            )
+            .with_for_update()
+        )
         if head is None:
-            raise CatalogValidationError("catalog.head_missing", "catalog document head is missing")
+            raise CatalogValidationError(
+                "catalog.head_missing", "catalog document head is missing"
+            )
         if head.active_revision_id == revision.id:
             return
         if head.candidate_revision_id is not None:
@@ -340,12 +408,20 @@ class CatalogService:
         head.generation += 1
         recipe = read_catalog_document(revision)
         if not isinstance(recipe, RecipeDefinition):
-            raise CatalogValidationError("catalog.recipe_invalid", "catalog revision is not a recipe")
+            raise CatalogValidationError(
+                "catalog.recipe_invalid", "catalog revision is not a recipe"
+            )
         root.title = recipe.metadata.title
         root.updated_at = self._clock()
 
-    def _upsert_canonical_document(self, session: Session, document: Mapping[str, object], *, actor: str) -> CatalogDocumentRevision:
-        parsed = ModelDefinition.model_validate(document) if document.get("kind") == "model" else RecipeDefinition.model_validate(document)
+    def _upsert_canonical_document(
+        self, session: Session, document: Mapping[str, object], *, actor: str
+    ) -> CatalogDocumentRevision:
+        parsed = (
+            ModelDefinition.model_validate(document)
+            if document.get("kind") == "model"
+            else RecipeDefinition.model_validate(document)
+        )
         kind = str(parsed.kind)
         digest = content_sha256(parsed)
         identity = parsed.identity
@@ -360,23 +436,31 @@ class CatalogService:
         )
         if existing is not None:
             return existing
-        service = CatalogEntityService(session, clock=self._clock, cursors=self._cursors)
+        service = CatalogEntityService(
+            session, clock=self._clock, cursors=self._cursors
+        )
         root = session.scalar(
-            select(CatalogDocument).where(
+            select(CatalogDocument)
+            .where(
                 CatalogDocument.kind == kind,
                 CatalogDocument.publisher == identity.publisher,
                 CatalogDocument.slug == identity.slug,
-            ).with_for_update()
+            )
+            .with_for_update()
         )
         if root is None:
-            candidate = service.create_draft(parsed.model_dump(mode="json"), actor=actor)
+            candidate = service.create_draft(
+                parsed.model_dump(mode="json"), actor=actor
+            )
         else:
             head = session.scalar(
-                select(CatalogDocumentHead).where(
+                select(CatalogDocumentHead)
+                .where(
                     CatalogDocumentHead.kind == kind,
                     CatalogDocumentHead.publisher == identity.publisher,
                     CatalogDocumentHead.slug == identity.slug,
-                ).with_for_update()
+                )
+                .with_for_update()
             )
             if head is not None and head.candidate_revision_id is not None:
                 service.fail_candidate(
@@ -388,29 +472,48 @@ class CatalogService:
                 .order_by(CatalogDocumentRevision.revision_number.desc())
                 .limit(1)
             )
-            candidate = service.revise(root.id, parsed.model_dump(mode="json"), actor=actor, expected_revision=latest.revision_number if latest else None)
+            candidate = service.revise(
+                root.id,
+                parsed.model_dump(mode="json"),
+                actor=actor,
+                expected_revision=latest.revision_number if latest else None,
+            )
         return service.resolve(candidate.id, actor=actor)
 
-    def resolve_recipe_revision(self, document: Mapping[str, object], *, actor: str) -> str:
+    def resolve_recipe_revision(
+        self, document: Mapping[str, object], *, actor: str
+    ) -> str:
         try:
             recipe = RecipeDefinition.model_validate(document)
         except (TypeError, ValueError) as error:
-            raise CatalogValidationError("catalog.document_invalid", "recipe document is invalid") from error
+            raise CatalogValidationError(
+                "catalog.document_invalid", "recipe document is invalid"
+            ) from error
         with self._sessions() as session:
             return _resolve_recipe(session, recipe, actor=actor)
 
-    def attach_test_report(self, recipe_id: str, report: Mapping[str, object], actor: str) -> dict[str, object]:
+    def attach_test_report(
+        self, recipe_id: str, report: Mapping[str, object], actor: str
+    ) -> dict[str, object]:
         del actor
         clean = copy.deepcopy(dict(report))
-        errors = sorted(_test_report_validator().iter_errors(clean), key=lambda error: tuple(str(part) for part in error.absolute_path))
+        errors = sorted(
+            _test_report_validator().iter_errors(clean),
+            key=lambda error: tuple(str(part) for part in error.absolute_path),
+        )
         if errors:
-            raise CatalogValidationError("catalog.test_report_invalid", "test report is invalid")
+            raise CatalogValidationError(
+                "catalog.test_report_invalid", "test report is invalid"
+            )
         with self._sessions.begin() as session:
             revision = _get_active_recipe(session, recipe_id)
             if revision is None:
                 raise KeyError(recipe_id)
             if clean.get("recipe_sha256") != revision.content_digest:
-                raise CatalogValidationError("catalog.test_report_recipe_mismatch", "test report does not match this recipe revision")
+                raise CatalogValidationError(
+                    "catalog.test_report_recipe_mismatch",
+                    "test report does not match this recipe revision",
+                )
             projected = read_catalog_projection(revision).model_dump(
                 mode="json", exclude_none=False
             )
@@ -419,26 +522,40 @@ class CatalogService:
             session.flush()
         return clean
 
-    def publication_export(self, recipe_id: str, target_publisher: str) -> dict[str, object]:
+    def publication_export(
+        self, recipe_id: str, target_publisher: str
+    ) -> dict[str, object]:
         if not _SLUG.fullmatch(target_publisher):
-            raise CatalogValidationError("catalog.publisher", "target publisher namespace is invalid")
+            raise CatalogValidationError(
+                "catalog.publisher", "target publisher namespace is invalid"
+            )
         with self._sessions() as session:
             revision = _get_active_recipe(session, recipe_id)
             if revision is None:
                 raise KeyError(recipe_id)
             report = read_catalog_projection(revision).test_report
             if report is None:
-                raise CatalogConflict("catalog.test_report_required", "attach a passing local test report before publication export")
+                raise CatalogConflict(
+                    "catalog.test_report_required",
+                    "attach a passing local test report before publication export",
+                )
             recipe_document = read_catalog_document(revision)
             if not isinstance(recipe_document, RecipeDefinition):
-                raise CatalogValidationError("catalog.recipe_invalid", "catalog revision is not a recipe")
-            recipe = recipe_document.model_dump(mode="json", exclude_none=False, exclude_unset=False)
+                raise CatalogValidationError(
+                    "catalog.recipe_invalid", "catalog revision is not a recipe"
+                )
+            recipe = recipe_document.model_dump(
+                mode="json", exclude_none=False, exclude_unset=False
+            )
         identity = recipe["identity"]
         if isinstance(identity, dict):
             identity["publisher"] = target_publisher
         return {"recipe": recipe, "test_report": report}
 
-def _get_active_recipe(session: Session, recipe_id: str) -> CatalogDocumentRevision | None:
+
+def _get_active_recipe(
+    session: Session, recipe_id: str
+) -> CatalogDocumentRevision | None:
     return session.scalar(
         select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == "recipe",
@@ -455,7 +572,9 @@ def _get_active_recipe(session: Session, recipe_id: str) -> CatalogDocumentRevis
 
 
 def _resolve_recipe(session: Session, recipe: RecipeDefinition, *, actor: str) -> str:
-    service = CatalogEntityService(session, clock=lambda: datetime.now(UTC), cursors=None)
+    service = CatalogEntityService(
+        session, clock=lambda: datetime.now(UTC), cursors=None
+    )
     for selection in recipe.models:
         service.resolve_reference(selection.model)
     return content_sha256(recipe)
@@ -464,7 +583,9 @@ def _resolve_recipe(session: Session, recipe: RecipeDefinition, *, actor: str) -
 def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
     recipe = read_catalog_document(revision)
     if not isinstance(recipe, RecipeDefinition):
-        raise CatalogValidationError("catalog.recipe_invalid", "catalog revision is not a recipe")
+        raise CatalogValidationError(
+            "catalog.recipe_invalid", "catalog revision is not a recipe"
+        )
     return RecipeRevisionView(
         id=revision.id,
         recipe_id=revision.document_id,
@@ -475,7 +596,9 @@ def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
         revision_number=revision.revision_number,
         lifecycle="resolved" if revision.state == "active" else revision.state,
         schema_version=revision.schema_version,
-        document=recipe.model_dump(mode="json", exclude_none=False, exclude_unset=False),
+        document=recipe.model_dump(
+            mode="json", exclude_none=False, exclude_unset=False
+        ),
         content_sha256=revision.content_digest,
         created_by=revision.created_by,
         created_at=revision.created_at,
@@ -487,28 +610,69 @@ def _release_version(document: Mapping[str, object]) -> str | None:
     history = release.get("history") if isinstance(release, Mapping) else None
     current = history[0] if isinstance(history, list) and history else None
     version = current.get("version") if isinstance(current, Mapping) else None
-    return version if isinstance(version, str) and _RELEASE_VERSION.fullmatch(version) else None
+    return (
+        version
+        if isinstance(version, str) and _RELEASE_VERSION.fullmatch(version)
+        else None
+    )
 
 
-def _package_handle_metadata(handle: object, *, recipe: RecipeDefinition, package_sha256: str | None) -> dict[str, object]:
-    fields = ("publication_commit", "source_commit", "package_sha256", "package_size", "package_path", "recipe_content_sha256", "archive_path", "closure_path")
-    values: dict[str, object] = {field: getattr(handle, field, None) for field in fields}
+def _package_handle_metadata(
+    handle: object, *, recipe: RecipeDefinition, package_sha256: str | None
+) -> dict[str, object]:
+    fields = (
+        "publication_commit",
+        "source_commit",
+        "package_sha256",
+        "package_size",
+        "package_path",
+        "recipe_content_sha256",
+        "archive_path",
+        "closure_path",
+    )
+    values: dict[str, object] = {
+        field: getattr(handle, field, None) for field in fields
+    }
     for field in ("package_path", "archive_path", "closure_path"):
         if values[field] is not None:
             values[field] = str(values[field])
     if package_sha256 is not None and values["package_sha256"] != package_sha256:
-        raise CatalogValidationError("recipe_library.package_handle_invalid", "recipe package handle digest is invalid")
-    if not isinstance(values["package_sha256"], str) or _SHA256.fullmatch(values["package_sha256"]) is None:
-        raise CatalogValidationError("recipe_library.package_handle_invalid", "recipe package handle digest is invalid")
+        raise CatalogValidationError(
+            "recipe_library.package_handle_invalid",
+            "recipe package handle digest is invalid",
+        )
+    if (
+        not isinstance(values["package_sha256"], str)
+        or _SHA256.fullmatch(values["package_sha256"]) is None
+    ):
+        raise CatalogValidationError(
+            "recipe_library.package_handle_invalid",
+            "recipe package handle digest is invalid",
+        )
     package_size = values["package_size"]
     if (
         values["recipe_content_sha256"] != content_sha256(recipe)
         or not isinstance(package_size, int)
         or package_size <= 0
     ):
-        raise CatalogValidationError("recipe_library.package_handle_invalid", "recipe package handle identity is invalid")
-    if not all(isinstance(values[field], str) and values[field] for field in ("publication_commit", "source_commit", "package_path", "archive_path", "closure_path")):
-        raise CatalogValidationError("recipe_library.package_handle_invalid", "recipe package handle closure is invalid")
+        raise CatalogValidationError(
+            "recipe_library.package_handle_invalid",
+            "recipe package handle identity is invalid",
+        )
+    if not all(
+        isinstance(values[field], str) and values[field]
+        for field in (
+            "publication_commit",
+            "source_commit",
+            "package_path",
+            "archive_path",
+            "closure_path",
+        )
+    ):
+        raise CatalogValidationError(
+            "recipe_library.package_handle_invalid",
+            "recipe package handle closure is invalid",
+        )
     return values
 
 

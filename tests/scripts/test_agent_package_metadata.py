@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
-def run_metadata(*arguments: str, root: Path = ROOT) -> subprocess.CompletedProcess[str]:
+def run_metadata(
+    *arguments: str, root: Path = ROOT
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, root / "scripts/agent-package-metadata", *arguments],
         cwd=root,
@@ -106,9 +108,7 @@ def test_metadata_rejects_mismatched_workspace_versions(tmp_path: Path) -> None:
         control_project.read_text().replace('version = "0.1.1"', 'version = "0.1.2"')
     )
 
-    result = run_metadata(
-        "production", "tag", "v0.1.1", SHA, "0", root=workspace
-    )
+    result = run_metadata("production", "tag", "v0.1.1", SHA, "0", root=workspace)
 
     assert result.returncode == 64
     assert result.stdout == ""

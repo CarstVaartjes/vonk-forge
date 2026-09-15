@@ -516,17 +516,13 @@ def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
     sessions, now, _node, mapping, _build = setup(
         tmp_path, free=100, recipe_mode="image"
     )
-    service = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    )
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, None, now=now)
     assert plan.allowed is True
     assert plan.nodes[0].required_bytes == 90
     assert plan.nodes[0].free_after_bytes == 10
 
-    service = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=11
-    )
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=11)
     blocked = service.plan_install(mapping, None, now=now)
     assert blocked.allowed is False
     assert blocked.nodes[0].blockers[0].code == "install.insufficient_disk"
@@ -597,9 +593,9 @@ def test_install_admission_blocks_malformed_mapping_parameters(tmp_path) -> None
             .values(parameters=["malformed"])
         )
 
-    plan = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    ).plan_install(mapping_id, None, now=now)
+    plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
+        mapping_id, None, now=now
+    )
 
     assert plan.allowed is False
     assert any(
@@ -620,9 +616,9 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
     with sessions.begin() as session:
         for artifact in session.scalars(select(NodeArtifact)):
             session.delete(artifact)
-    plan = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    ).plan_install(mapping, None, now=now)
+    plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
+        mapping, None, now=now
+    )
     assert plan.allowed is allowed
     assert plan.nodes[0].required_download_bytes == 100
     assert plan.nodes[0].required_bytes == 120
@@ -667,9 +663,9 @@ def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
                 updated_at=now,
             )
         )
-    plan = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    ).plan_install(mapping, build, now=now)
+    plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
+        mapping, build, now=now
+    )
     assert plan.allowed is True
     assert plan.nodes[0].reused_bytes == 100
     assert plan.nodes[0].required_bytes == 20
@@ -677,9 +673,7 @@ def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
 
 def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> None:
     sessions, now, _node, mapping, build = setup(tmp_path, free=200)
-    service = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    )
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     installation_id = service.accept_install(plan, actor="admin", now=now)
     with sessions() as session:
@@ -699,9 +693,7 @@ def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> 
 
 def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) -> None:
     sessions, now, node, mapping, build = setup(tmp_path, free=200)
-    service = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    )
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     with sessions.begin() as session:
         artifact = session.scalar(
@@ -727,12 +719,10 @@ def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) 
 
 
 def test_stale_and_read_only_inventory_are_blocking(tmp_path) -> None:
-    sessions, now, _node, mapping, build = setup(
-        tmp_path, free=200, observed_age=301
+    sessions, now, _node, mapping, build = setup(tmp_path, free=200, observed_age=301)
+    stale = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
+        mapping, build, now=now
     )
-    stale = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    ).plan_install(mapping, build, now=now)
     assert any(
         item.code == "install.stale_inventory" for item in stale.nodes[0].blockers
     )
@@ -751,9 +741,7 @@ def test_stale_and_read_only_inventory_are_blocking(tmp_path) -> None:
 
 def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None:
     sessions, now, node, mapping, build = setup(tmp_path, free=200)
-    service = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    )
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     original = service.plan_install(mapping, build, now=now)
     InventoryRepository(sessions, clock=lambda: now).record(
         InventorySnapshotInput(
@@ -785,9 +773,7 @@ def test_apply_revalidates_but_tolerates_nonblocking_reservation_noise(
     tmp_path,
 ) -> None:
     sessions, now, node, mapping, build = setup(tmp_path, free=200)
-    service = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    )
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     with sessions.begin() as session:
         session.add(
@@ -816,9 +802,9 @@ def test_install_topology_uses_authenticated_inventory_capabilities(tmp_path) ->
         assert registered is not None
         registered.capabilities = []
 
-    plan = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    ).plan_install(mapping, build, now=now)
+    plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
+        mapping, build, now=now
+    )
 
     assert plan.allowed is True
 
@@ -845,9 +831,9 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
         )
     )
 
-    plan = _service(
-        sessions, inventory_max_age=300, disk_floor_bytes=10
-    ).plan_install(mapping, build, now=now + timedelta(seconds=1))
+    plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
+        mapping, build, now=now + timedelta(seconds=1)
+    )
 
     assert plan.allowed is False
     assert plan.nodes[0].blockers[0].code == "topology.runtime_capability_missing"
@@ -879,7 +865,17 @@ def _record_inventory(sessions, node_id, at, *, free=200) -> None:
 
     InventoryRepository(sessions, clock=lambda: at).record(
         InventorySnapshotInput(
-            node_id, at, 1000, free, 1000, 800, 1000, 800, 1, False, ("runtime.vonk.v1",)
+            node_id,
+            at,
+            1000,
+            free,
+            1000,
+            800,
+            1000,
+            800,
+            1,
+            False,
+            ("runtime.vonk.v1",),
         )
     )
 
@@ -900,14 +896,14 @@ def test_expired_preflight_alone_is_a_typed_retryable_acceptance_outcome(
     assert plan.allowed
 
     # Inside the window nothing changes: the identical plan is still accepted.
-    warm = _service(sessions, preflight=False, inventory_max_age=300, disk_floor_bytes=10)
+    warm = _service(
+        sessions, preflight=False, inventory_max_age=300, disk_floor_bytes=10
+    )
     warm_id = warm.accept_install(plan, actor="admin", now=now + timedelta(seconds=299))
     with sessions.begin() as session:
         session.delete(session.get(RecipeInstallation, warm_id))
         session.execute(
-            delete(ResourceReservation).where(
-                ResourceReservation.owner_id == warm_id
-            )
+            delete(ResourceReservation).where(ResourceReservation.owner_id == warm_id)
         )
 
     later = now + timedelta(seconds=716)
@@ -927,7 +923,9 @@ def test_expired_preflight_alone_is_a_typed_retryable_acceptance_outcome(
         assert installation.mapping_generation == plan.mapping_generation
 
 
-@pytest.mark.parametrize("change", ["inventory", "capacity", "fingerprint-and-capacity"])
+@pytest.mark.parametrize(
+    "change", ["inventory", "capacity", "fingerprint-and-capacity"]
+)
 def test_refreshable_preflight_with_any_other_change_stays_an_opaque_conflict(
     tmp_path, change
 ) -> None:
@@ -1010,12 +1008,19 @@ def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_p
     sessions, now, node_id, mapping, _build = setup(tmp_path, recipe_mode="image")
     service = _service(sessions, preflight=False, disk_floor_bytes=10)
     blocked = service.plan_install(mapping, None, now=now)
-    assert "runtime_preflight.required" in {reason.code for reason in blocked.nodes[0].blockers}
+    assert "runtime_preflight.required" in {
+        reason.code for reason in blocked.nodes[0].blockers
+    }
     record_passing_preflight(sessions, now, floor=10)
     assert service.plan_install(mapping, None, now=now).allowed
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.capabilities = ["runtime.vonk.v1", "runtime.preflight.fingerprint." + "b" * 64]
+        node.capabilities = [
+            "runtime.vonk.v1",
+            "runtime.preflight.fingerprint." + "b" * 64,
+        ]
     blocked = service.plan_install(mapping, None, now=now)
-    assert "runtime_preflight.host_changed" in {reason.code for reason in blocked.nodes[0].blockers}
+    assert "runtime_preflight.host_changed" in {
+        reason.code for reason in blocked.nodes[0].blockers
+    }

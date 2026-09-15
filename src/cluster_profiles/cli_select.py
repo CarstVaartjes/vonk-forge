@@ -45,9 +45,7 @@ def select_exact(
     if len(matches) == 1:
         return matches[0]
     candidates = tuple(
-        selector
-        for item in matches
-        if (selector := selector_for(item)) is not None
+        selector for item in matches if (selector := selector_for(item)) is not None
     )
     if not matches:
         raise SelectorError(f"unknown {noun} selector: {requested}")
@@ -57,7 +55,9 @@ def select_exact(
     )
 
 
-def selectors_from_payload(payload: Mapping[str, object], noun: str) -> list[Mapping[str, object]]:
+def selectors_from_payload(
+    payload: Mapping[str, object], noun: str
+) -> list[Mapping[str, object]]:
     """Extract rows from the documented overview/list envelopes."""
     keys = {
         "fleet": ("nodes", "sparks", "fleet"),

@@ -270,7 +270,9 @@ class CompiledRuntimeImage(_StrictModel):
     registry_manifest_digest: ImageDigest | None = None
     platform_manifest_digest: ImageDigest
     local_image_config_id: ImageDigest
-    local_image_reference: str | None = Field(default=None, min_length=1, max_length=512)
+    local_image_reference: str | None = Field(
+        default=None, min_length=1, max_length=512
+    )
     runtime_interface_label: str = Field(min_length=1, max_length=128)
 
     @model_validator(mode="after")
@@ -289,8 +291,13 @@ class CompiledRuntimeImage(_StrictModel):
             raise ValueError("published image receipts require a registry manifest")
         if self.source == "controller-build" and self.build_id is None:
             raise ValueError("Controller-built image receipts require a build id")
-        if self.source == "controller-build" and self.registry_manifest_digest is not None:
-            raise ValueError("Controller-built image receipts cannot claim a registry manifest")
+        if (
+            self.source == "controller-build"
+            and self.registry_manifest_digest is not None
+        ):
+            raise ValueError(
+                "Controller-built image receipts cannot claim a registry manifest"
+            )
         if self.platform_manifest_digest != self.image_digest:
             raise ValueError(
                 "runtime image digest must identify the selected platform manifest"
@@ -300,7 +307,9 @@ class CompiledRuntimeImage(_StrictModel):
             f"localhost/vonk/compiled-runtime-{self.oci_layout_sha256}@{parent}"
         )
         if self.local_image_reference not in (None, expected_reference):
-            raise ValueError("runtime local image reference is not bound to its receipt")
+            raise ValueError(
+                "runtime local image reference is not bound to its receipt"
+            )
         return self
 
 
@@ -488,10 +497,15 @@ class CompiledExecutionPlan(_StrictModel):
             )
 
         raw_entrypoint = runtime.get("entrypoint")
-        if not isinstance(raw_entrypoint, Sequence) or isinstance(
-            raw_entrypoint, (str, bytes)
-        ) or not raw_entrypoint or any(type(item) is not str for item in raw_entrypoint):
-            raise CompiledExecutionPlanError("compiled runtime executable and argv are invalid")
+        if (
+            not isinstance(raw_entrypoint, Sequence)
+            or isinstance(raw_entrypoint, (str, bytes))
+            or not raw_entrypoint
+            or any(type(item) is not str for item in raw_entrypoint)
+        ):
+            raise CompiledExecutionPlanError(
+                "compiled runtime executable and argv are invalid"
+            )
         executable = str(raw_entrypoint[0])
         argv = [str(item) for item in raw_entrypoint[1:]]
         raw_environment = runtime.get("environment", ())
@@ -505,12 +519,16 @@ class CompiledExecutionPlan(_StrictModel):
             name = value.get("name")
             rendered = value.get("value")
             if type(name) is not str or type(rendered) is not str:
-                raise CompiledExecutionPlanError("compiled runtime environment is invalid")
+                raise CompiledExecutionPlanError(
+                    "compiled runtime environment is invalid"
+                )
             # Secret values are resolved by the Controller-owned secret
             # projection.  A recipe authoring value may never cross this
             # boundary as an opaque upstream handle.
             if value.get("secret") not in (None, ""):
-                raise CompiledExecutionPlanError("compiled runtime secret projection is unavailable")
+                raise CompiledExecutionPlanError(
+                    "compiled runtime secret projection is unavailable"
+                )
             environment.append({"name": name, "value": rendered})
 
         raw_mounts = security.get("mounts", ())
@@ -522,7 +540,11 @@ class CompiledExecutionPlan(_StrictModel):
             source = mount.get("source")
             target = mount.get("target")
             read_only = mount.get("read_only")
-            if type(source) is not str or type(target) is not str or type(read_only) is not bool:
+            if (
+                type(source) is not str
+                or type(target) is not str
+                or type(read_only) is not bool
+            ):
                 raise CompiledExecutionPlanError("compiled security mounts are invalid")
             if source == "/run/vonk/models" or source.startswith("/run/vonk/models/"):
                 source = "model"
@@ -531,7 +553,9 @@ class CompiledExecutionPlan(_StrictModel):
             elif source == "/run/vonk/outputs":
                 source = "outputs"
             else:
-                raise CompiledExecutionPlanError("compiled security mount is not Controller-owned")
+                raise CompiledExecutionPlanError(
+                    "compiled security mount is not Controller-owned"
+                )
             mounts.append({"source": source, "target": target, "read_only": read_only})
 
         def _required_int(value: object, label: str, *, minimum: int = 0) -> int:
@@ -540,13 +564,17 @@ class CompiledExecutionPlan(_StrictModel):
             return value
 
         raw_devices = security.get("devices", ())
-        if not isinstance(raw_devices, Sequence) or isinstance(raw_devices, (str, bytes)):
+        if not isinstance(raw_devices, Sequence) or isinstance(
+            raw_devices, (str, bytes)
+        ):
             raise CompiledExecutionPlanError("compiled security devices are invalid")
         raw_capabilities = security.get("capabilities", ())
         if not isinstance(raw_capabilities, Sequence) or isinstance(
             raw_capabilities, (str, bytes)
         ):
-            raise CompiledExecutionPlanError("compiled security capabilities are invalid")
+            raise CompiledExecutionPlanError(
+                "compiled security capabilities are invalid"
+            )
 
         if "port" not in placement:
             raise CompiledExecutionPlanError("runtime port is missing")
@@ -578,7 +606,10 @@ class CompiledExecutionPlan(_StrictModel):
             raise CompiledExecutionPlanError("runtime role is invalid")
 
         declared_network_mode = security.get("network_mode")
-        if declared_network_mode not in {"none", "bridge"} or security.get("host_network") is not False:
+        if (
+            declared_network_mode not in {"none", "bridge"}
+            or security.get("host_network") is not False
+        ):
             raise CompiledExecutionPlanError(
                 "compiled security has an unsupported network mode or host networking"
             )
@@ -973,9 +1004,9 @@ def compile_verified_execution_plan(
     runtime = _mapping(spec.get("runtime"), "runtime")
     runtime_image_reference = runtime.get("image")
     expected_runtime_digest = image.registry_manifest_digest or image.image_digest
-    if not isinstance(runtime_image_reference, str) or not runtime_image_reference.endswith(
-        f"@{expected_runtime_digest}"
-    ):
+    if not isinstance(
+        runtime_image_reference, str
+    ) or not runtime_image_reference.endswith(f"@{expected_runtime_digest}"):
         raise CompiledExecutionPlanError(
             "verified runtime image does not match the compiled runtime projection"
         )

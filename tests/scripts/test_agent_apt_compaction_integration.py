@@ -133,9 +133,9 @@ def run_channel(
             public = work / f"public-{position}"
             public.mkdir()
             configuration = json.loads(config.read_text())
-            configuration["FileSystemPublishEndpoints"]["integration"][
-                "rootDir"
-            ] = str(public)
+            configuration["FileSystemPublishEndpoints"]["integration"]["rootDir"] = str(
+                public
+            )
             config.write_text(json.dumps(configuration))
         publication = receipt(channel, version, package_dir)
         snapshot = publication["snapshot"]
@@ -206,9 +206,9 @@ def run_channel(
         replay_public = work / f"public-replay-{position}"
         replay_public.mkdir()
         configuration = json.loads(config.read_text())
-        configuration["FileSystemPublishEndpoints"]["integration"][
-            "rootDir"
-        ] = str(replay_public)
+        configuration["FileSystemPublishEndpoints"]["integration"]["rootDir"] = str(
+            replay_public
+        )
         config.write_text(json.dumps(configuration))
         aptly(
             config,

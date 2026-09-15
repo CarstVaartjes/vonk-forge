@@ -44,7 +44,9 @@ def test_optional_huggingface_token_allows_missing_or_empty_normalized_secret(
     assert Settings.from_env_and_secrets().huggingface_token_path is None
 
 
-def test_optional_huggingface_token_rejects_symlink(tmp_path: Path, monkeypatch) -> None:
+def test_optional_huggingface_token_rejects_symlink(
+    tmp_path: Path, monkeypatch
+) -> None:
     token = tmp_path / "hf-token"
     token.write_text("hf_test_secret")
     link = tmp_path / "hf-token-link"
@@ -67,7 +69,9 @@ def test_recipe_library_api_uses_only_github_or_the_internal_relay(monkeypatch) 
             Settings.from_env_and_secrets()
 
 
-def test_recipe_library_raw_url_uses_only_github_or_the_internal_relay(monkeypatch) -> None:
+def test_recipe_library_raw_url_uses_only_github_or_the_internal_relay(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
     monkeypatch.setenv("VONK_RECIPE_LIBRARY_RAW_URL", "http://caddy:8085/")
     assert Settings.from_env_and_secrets().recipe_library_raw_url == "http://caddy:8085"
@@ -628,14 +632,19 @@ def test_worker_recipe_build_parallel_preparations_defaults_and_bounds(
 
 
 @pytest.mark.parametrize("settings_class", [Settings, WorkerSettings])
-def test_distributed_start_timeout_default_override_and_bounds(monkeypatch, settings_class) -> None:
+def test_distributed_start_timeout_default_override_and_bounds(
+    monkeypatch, settings_class
+) -> None:
     monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
     monkeypatch.delenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", raising=False)
-    assert settings_class.from_env_and_secrets().distributed_start_timeout_seconds == 1800
+    assert (
+        settings_class.from_env_and_secrets().distributed_start_timeout_seconds == 1800
+    )
     for valid in (60, 1800, 3600):
         monkeypatch.setenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", str(valid))
         assert (
-            settings_class.from_env_and_secrets().distributed_start_timeout_seconds == valid
+            settings_class.from_env_and_secrets().distributed_start_timeout_seconds
+            == valid
         )
     for invalid in ("0", "59", "3601", "1.5", "invalid"):
         monkeypatch.setenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", invalid)

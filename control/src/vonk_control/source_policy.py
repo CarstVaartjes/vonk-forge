@@ -58,9 +58,7 @@ def inspect_build_source_policy(
     network_mode = network.get("mode") if isinstance(network, Mapping) else None
     allowed_hosts = (
         frozenset(
-            host.lower()
-            for host in network.get("hosts", ())
-            if isinstance(host, str)
+            host.lower() for host in network.get("hosts", ()) if isinstance(host, str)
         )
         if isinstance(network, Mapping)
         else frozenset()

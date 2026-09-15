@@ -133,7 +133,9 @@ class FleetProfileAssignmentInput(_StrictModel):
     recipe_selector: RecipeSelector
     spark_ids: list[NodeId] = Field(min_length=1, max_length=32)
     assignment_name: Alias | None = None
-    model_variant: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
+    model_variant: (
+        Annotated[str, StringConstraints(min_length=1, max_length=200)] | None
+    ) = None
     desired_state: Literal["installed", "running"] = "running"
 
     @model_validator(mode="after")
@@ -168,7 +170,9 @@ class StoredFleetProfileAssignment(_StrictModel):
         if self.desired_state == "running" and self.alias is None:
             raise ValueError("running profile assignments require an endpoint alias")
         if self.desired_state == "installed" and self.alias is not None:
-            raise ValueError("installed-only profile assignments cannot declare an endpoint alias")
+            raise ValueError(
+                "installed-only profile assignments cannot declare an endpoint alias"
+            )
         return self
 
 
@@ -218,7 +222,11 @@ class FleetProfileInput(_StrictModel):
     @model_validator(mode="after")
     def validate_profile(self) -> FleetProfileInput:
         identities = [
-            (assignment.recipe_selector, tuple(assignment.spark_ids), assignment.assignment_name)
+            (
+                assignment.recipe_selector,
+                tuple(assignment.spark_ids),
+                assignment.assignment_name,
+            )
             for assignment in self.assignments
         ]
         if len(identities) != len(set(identities)):
@@ -358,6 +366,7 @@ class FleetProfileChildProgress(_StrictModel):
             raise ValueError("child progress bytes cannot exceed total bytes")
         return self
 
+
 class FleetProfileSwitchQueueItem(_StrictModel):
     """One durable Run/Switch child in the profile reconciliation queue."""
 
@@ -399,7 +408,9 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     position: int = Field(default=0, ge=0, le=128)
     active_operation_id: UuidId | None = None
     active_kind: Literal["run", "stop", "cleanup"] | None = None
-    children: list[FleetProfileSwitchChildState] = Field(default_factory=list, max_length=128)
+    children: list[FleetProfileSwitchChildState] = Field(
+        default_factory=list, max_length=128
+    )
     actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     request_id: UuidId
     state: FleetProfileOperationState = "queued"
@@ -421,6 +432,7 @@ class FleetProfileSwitchAdapterState(_StrictModel):
         if self.active_kind is not None and self.active_operation_id is None:
             raise ValueError("profile switch active kind must have an operation")
         return self
+
 
 class FleetProfileSwitchChildResult(_StrictModel):
     """Profile child receipt containing the public Run/Switch result tree."""
@@ -454,6 +466,7 @@ class FleetProfileStepResult(_StrictModel):
     kind: Literal["switch"]
     result: FleetProfileChildResult | None = None
 
+
 class FleetProfileIntendedConfiguration(_StrictModel):
     """Immutable desired configuration captured when execution is admitted."""
 
@@ -484,6 +497,7 @@ class FleetProfileApplicationProgress(_StrictModel):
         if self.total_steps < self.completed_steps:
             raise ValueError("profile progress completed steps exceed total steps")
         return self
+
 
 class FleetProfileApplicationResult(_StrictModel):
     """Terminal result for one profile application."""
@@ -516,9 +530,7 @@ class FleetProfileSwitchAdapter(Protocol):
 
         ...
 
-    def recoverable_cache_loss(
-        self, application_id: str, *, session: Session
-    ) -> bool:
+    def recoverable_cache_loss(self, application_id: str, *, session: Session) -> bool:
         """Whether the current exact child failed only because managed bytes vanished."""
 
         ...
@@ -596,19 +608,33 @@ class FleetProfileApplicationView(_StrictModel):
     created_at: datetime
     updated_at: datetime
 
-
     @model_validator(mode="after")
     def application_state_is_consistent(self) -> FleetProfileApplicationView:
         if self.current_step > self.total_steps:
             raise ValueError("application step exceeds total steps")
-        if self.attempt != self.progress.attempt or self.retry_of_application_id != self.progress.retry_of_application_id:
-            raise ValueError("application recovery identity disagrees with persisted progress")
+        if (
+            self.attempt != self.progress.attempt
+            or self.retry_of_application_id != self.progress.retry_of_application_id
+        ):
+            raise ValueError(
+                "application recovery identity disagrees with persisted progress"
+            )
         if self.state == "succeeded":
             if self.result is None or self.status_reason is not None:
-                raise ValueError("successful application requires a result and no failure reason")
-            if self.current_step != self.total_steps or self.result.completed_steps != self.total_steps:
-                raise ValueError("successful application must complete every planned step")
-        if self.state in {"failed", "waiting-for-operator"} and not (self.status_reason or "").strip():
+                raise ValueError(
+                    "successful application requires a result and no failure reason"
+                )
+            if (
+                self.current_step != self.total_steps
+                or self.result.completed_steps != self.total_steps
+            ):
+                raise ValueError(
+                    "successful application must complete every planned step"
+                )
+        if (
+            self.state in {"failed", "waiting-for-operator"}
+            and not (self.status_reason or "").strip()
+        ):
             raise ValueError("failed or waiting application requires a failure reason")
         return self
 

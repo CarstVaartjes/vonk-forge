@@ -92,15 +92,25 @@ def parse_availability_failure(value: object) -> AvailabilityFailureView | None:
     if not isinstance(value, Mapping):
         return None
     recovery = value.get("recovery_actions")
-    actions = tuple(_text(item, maximum=64) for item in recovery if isinstance(item, str)) if isinstance(recovery, Sequence) and not isinstance(recovery, (str, bytes)) else ()
+    actions = (
+        tuple(_text(item, maximum=64) for item in recovery if isinstance(item, str))
+        if isinstance(recovery, Sequence) and not isinstance(recovery, (str, bytes))
+        else ()
+    )
     raw = value
+
     def bytes_field(name: str) -> int | None:
         number = _number(raw.get(name), integer=True)
         return number if isinstance(number, int) else None
+
     retry_after = _number(value.get("retry_after_seconds"), integer=True)
     return AvailabilityFailureView(
-        code=_text(value.get("code"), maximum=128, fallback="availability.operation_failed"),
-        detail=_text(value.get("detail"), maximum=512, fallback="Availability operation failed."),
+        code=_text(
+            value.get("code"), maximum=128, fallback="availability.operation_failed"
+        ),
+        detail=_text(
+            value.get("detail"), maximum=512, fallback="Availability operation failed."
+        ),
         recovery_actions=actions[:8],
         retryable=value.get("retryable") is True,
         retry_time=_text(value.get("retry_time"), maximum=64) or None,
@@ -136,16 +146,22 @@ def parse_availability_operation(value: object) -> AvailabilityOperationView | N
         return None
     raw_children = value.get("children")
     children: list[AvailabilityMemberView] = []
-    if isinstance(raw_children, Sequence) and not isinstance(raw_children, (str, bytes)):
+    if isinstance(raw_children, Sequence) and not isinstance(
+        raw_children, (str, bytes)
+    ):
         for child in raw_children:
             if not isinstance(child, Mapping):
                 continue
-            children.append(AvailabilityMemberView(
-                key=_text(child.get("kind"), maximum=64, fallback="availability-member"),
-                state=_text(child.get("state"), maximum=32, fallback="queued"),
-                progress=parse_availability_progress(child.get("progress")),
-                failure=parse_availability_failure(child.get("failure")),
-            ))
+            children.append(
+                AvailabilityMemberView(
+                    key=_text(
+                        child.get("kind"), maximum=64, fallback="availability-member"
+                    ),
+                    state=_text(child.get("state"), maximum=32, fallback="queued"),
+                    progress=parse_availability_progress(child.get("progress")),
+                    failure=parse_availability_failure(child.get("failure")),
+                )
+            )
     result = value.get("result")
     return AvailabilityOperationView(
         id=_text(value.get("id"), maximum=128),
@@ -157,12 +173,23 @@ def parse_availability_operation(value: object) -> AvailabilityOperationView | N
         members=tuple(children),
         failure=parse_availability_failure(value.get("failure")),
         result=dict(result) if isinstance(result, Mapping) else None,
-        actions=tuple(_text(item, maximum=64) for item in value.get("actions", ()) if isinstance(item, str)) if isinstance(value.get("actions"), Sequence) and not isinstance(value.get("actions"), (str, bytes)) else (),
+        actions=tuple(
+            _text(item, maximum=64)
+            for item in value.get("actions", ())
+            if isinstance(item, str)
+        )
+        if isinstance(value.get("actions"), Sequence)
+        and not isinstance(value.get("actions"), (str, bytes))
+        else (),
     )
 
 
-def select_availability_operation(values: Sequence[AvailabilityOperationView], recipe_revision_id: str) -> AvailabilityOperationView | None:
-    matching = [value for value in values if value.recipe_revision_id == recipe_revision_id]
+def select_availability_operation(
+    values: Sequence[AvailabilityOperationView], recipe_revision_id: str
+) -> AvailabilityOperationView | None:
+    matching = [
+        value for value in values if value.recipe_revision_id == recipe_revision_id
+    ]
     if not matching:
         return None
     terminal = {"succeeded", "failed", "cancelled"}

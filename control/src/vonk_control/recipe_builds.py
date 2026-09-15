@@ -135,14 +135,17 @@ def _build_effective_settings(value: object | None) -> dict[str, object] | None:
         if isinstance(setting := getattr(settings, name), RecipeSetting)
         and setting.change_effect == "rebuild"
     }
-    selected.update({
-        f"knobs.{name}": copy.deepcopy(setting.value)
-        for name, setting in settings.knobs.items()
-        if setting.change_effect == "rebuild"
-    })
+    selected.update(
+        {
+            f"knobs.{name}": copy.deepcopy(setting.value)
+            for name, setting in settings.knobs.items()
+            if setting.change_effect == "rebuild"
+        }
+    )
     return (
         {"values": selected, "change_effects": {name: "rebuild" for name in selected}}
-        if selected else None
+        if selected
+        else None
     )
 
 
@@ -156,7 +159,9 @@ def _canonical_recipe_document(value: object) -> dict[str, object]:
     return recipe.model_dump(mode="json")
 
 
-def _canonical_model_build_inputs(artifacts: Sequence[object]) -> list[dict[str, object]]:
+def _canonical_model_build_inputs(
+    artifacts: Sequence[object],
+) -> list[dict[str, object]]:
     projected: list[dict[str, object]] = []
     for artifact in artifacts:
         if isinstance(artifact, BuildModelArtifactProjection):
@@ -166,15 +171,35 @@ def _canonical_model_build_inputs(artifacts: Sequence[object]) -> list[dict[str,
         elif isinstance(artifact, Mapping):
             path = artifact.get("path")
             digest = artifact.get("sha256")
-            size = artifact.get("download_bytes", artifact.get("size_bytes", artifact.get("size")))
+            size = artifact.get(
+                "download_bytes", artifact.get("size_bytes", artifact.get("size"))
+            )
         else:
             path = getattr(artifact, "path", None)
             digest = getattr(artifact, "sha256", None)
-            size = getattr(artifact, "download_bytes", getattr(artifact, "size_bytes", getattr(artifact, "size", None)))
-        if not isinstance(path, str) or not isinstance(digest, str) or not isinstance(size, int) or isinstance(size, bool):
-            raise TypeError("model build inputs require canonical path, sha256, and size")
+            size = getattr(
+                artifact,
+                "download_bytes",
+                getattr(artifact, "size_bytes", getattr(artifact, "size", None)),
+            )
+        if (
+            not isinstance(path, str)
+            or not isinstance(digest, str)
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+        ):
+            raise TypeError(
+                "model build inputs require canonical path, sha256, and size"
+            )
         projected.append({"path": path, "sha256": digest, "download_bytes": size})
-    return sorted(projected, key=lambda item: (str(item["path"]), str(item["sha256"]), item["download_bytes"]))
+    return sorted(
+        projected,
+        key=lambda item: (
+            str(item["path"]),
+            str(item["sha256"]),
+            item["download_bytes"],
+        ),
+    )
 
 
 def _canonical_build(
@@ -185,7 +210,9 @@ def _canonical_build(
         raise RecipeBuildError("build.not_required", "recipe selects a prebuilt image")
     build = execution.get("build")
     if not isinstance(build, Mapping):
-        raise RecipeBuildError("build.contract_invalid", "canonical execution.build is unavailable")
+        raise RecipeBuildError(
+            "build.contract_invalid", "canonical execution.build is unavailable"
+        )
     compiled = {**build, "dockerfile": _bundle_dockerfile_path(build)}
     if projected is not None:
         # Executable platform policy participates in the same cache identity
@@ -222,7 +249,9 @@ def _source_bundle_handle(projected: RecipeRevisionProjection) -> str:
     """
     candidate = projected.source_bundle_sha256
     if candidate is None or _SHA256.fullmatch(candidate) is None:
-        raise RecipeBuildError("build.source_unavailable", "catalog package handle is unavailable")
+        raise RecipeBuildError(
+            "build.source_unavailable", "catalog package handle is unavailable"
+        )
     return candidate
 
 
@@ -251,9 +280,13 @@ def _canonical_build_resources(
 
 def _canonical_build_platform(build: Mapping[str, object]) -> str:
     base_image = build.get("base_image")
-    if not isinstance(base_image, Mapping) or base_image.get("platform") != "linux/arm64":
+    if (
+        not isinstance(base_image, Mapping)
+        or base_image.get("platform") != "linux/arm64"
+    ):
         raise RecipeBuildError(
-            "build.platform_invalid", "canonical source builds require a linux/arm64 base image"
+            "build.platform_invalid",
+            "canonical source builds require a linux/arm64 base image",
         )
     return "linux/arm64"
 
@@ -267,7 +300,9 @@ def _source_policy_document(
     context = build.get("context")
     context_path = context.get("path") if isinstance(context, Mapping) else None
     if not isinstance(context_path, str):
-        raise RecipeBuildError("build.source_invalid", "canonical build context path is invalid")
+        raise RecipeBuildError(
+            "build.source_invalid", "canonical build context path is invalid"
+        )
     normalized_build = {
         "context": {"path": context_path, "sha256": source_sha256},
         "dockerfile": build.get("dockerfile"),
@@ -473,9 +508,7 @@ class RecipeBuildService:
             document = _canonical_recipe_document(revision.document)
             build = _canonical_build(document, projected)
             source_sha256 = _source_bundle_handle(projected)
-            if (
-                session.get(RecipeSourceBundle, source_sha256) is None
-            ):
+            if session.get(RecipeSourceBundle, source_sha256) is None:
                 raise RecipeBuildError(
                     "build.source_unavailable", "verified source bundle is unavailable"
                 )
@@ -813,8 +846,15 @@ class RecipeBuildService:
             artifact_format=BUILD_ARTIFACT_FORMAT,
             base_images=base_images,
             effective_settings=document["settings"],
-            topology_inputs=(topology_inputs if isinstance(topology_inputs, Mapping) else None),
-            model_artifacts=(model_inputs if isinstance(model_inputs, Sequence) and not isinstance(model_inputs, (str, bytes)) else None),
+            topology_inputs=(
+                topology_inputs if isinstance(topology_inputs, Mapping) else None
+            ),
+            model_artifacts=(
+                model_inputs
+                if isinstance(model_inputs, Sequence)
+                and not isinstance(model_inputs, (str, bytes))
+                else None
+            ),
         )
         build_input_sha256 = _digest(build_identity)
         if resolution is not None:

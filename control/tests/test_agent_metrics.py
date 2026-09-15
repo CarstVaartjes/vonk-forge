@@ -72,7 +72,7 @@ def _sessions(tmp_path):
                 kind="fleet.revoke",
                 state="waiting-for-operator",
                 actor="actor-secret-value",
-                authority_revision="a"  * 64,
+                authority_revision="a" * 64,
                 targets=[NODE],
                 payload_digest="b" * 64,
                 payload={"content": "payload-secret-value"},
@@ -91,7 +91,7 @@ def _sessions(tmp_path):
                     kind="recipe.start",
                     payload_digest="c" * 64,
                     payload={"content": "operation-payload-secret"},
-                    authority_revision="a"  * 64,
+                    authority_revision="a" * 64,
                     state="running",
                     current_attempt=1,
                     created_at=NOW - timedelta(minutes=1),
@@ -104,7 +104,7 @@ def _sessions(tmp_path):
                     kind="recipe.install",
                     payload_digest="d" * 64,
                     payload={},
-                    authority_revision="a"  * 64,
+                    authority_revision="a" * 64,
                     state="failed",
                     current_attempt=0,
                     created_at=NOW - timedelta(minutes=1),
@@ -117,7 +117,7 @@ def _sessions(tmp_path):
                     kind="unique-operation-secret",
                     payload_digest="e" * 64,
                     payload={},
-                    authority_revision="a"  * 64,
+                    authority_revision="a" * 64,
                     state="unique-state-secret",
                     current_attempt=0,
                     created_at=NOW - timedelta(minutes=1),
@@ -138,7 +138,9 @@ def _sessions(tmp_path):
     return sessions
 
 
-def test_operational_metrics_project_existing_agent_state_with_bounded_labels(tmp_path) -> None:
+def test_operational_metrics_project_existing_agent_state_with_bounded_labels(
+    tmp_path,
+) -> None:
     sessions = _sessions(tmp_path)
     metrics = MetricsRegistry()
     collector = OperationalMetricsCollector(metrics, sessions, clock=lambda: NOW)
@@ -147,16 +149,35 @@ def test_operational_metrics_project_existing_agent_state_with_bounded_labels(tm
     rendered = metrics.render()
 
     assert f'vonk_agent_state{{node_id="{NODE}",state="active"}} 1' in rendered
-    assert f'vonk_agent_version_compatibility{{node_id="{NODE}",version_bucket="supported"}} 1' in rendered
-    assert f'vonk_agent_version_compatibility{{node_id="{NEW_NODE}",version_bucket="new"}} 1' in rendered
-    assert f'vonk_agent_version_compatibility{{node_id="{OLD_NODE}",version_bucket="old"}} 1' in rendered
-    assert f'vonk_agent_version_compatibility{{node_id="{UNKNOWN_NODE}",version_bucket="incompatible"}} 1' in rendered
+    assert (
+        f'vonk_agent_version_compatibility{{node_id="{NODE}",version_bucket="supported"}} 1'
+        in rendered
+    )
+    assert (
+        f'vonk_agent_version_compatibility{{node_id="{NEW_NODE}",version_bucket="new"}} 1'
+        in rendered
+    )
+    assert (
+        f'vonk_agent_version_compatibility{{node_id="{OLD_NODE}",version_bucket="old"}} 1'
+        in rendered
+    )
+    assert (
+        f'vonk_agent_version_compatibility{{node_id="{UNKNOWN_NODE}",version_bucket="incompatible"}} 1'
+        in rendered
+    )
     assert f'vonk_agent_certificate_expiry_seconds{{node_id="{NODE}"}} 3600' in rendered
     assert f'vonk_agent_last_seen_age_seconds{{node_id="{NODE}"}} 90' in rendered
-    assert 'vonk_agent_operations{operation="recipe.install",state="failed"} 1' in rendered
-    assert 'vonk_agent_operations{operation="recipe.start",state="running"} 1' in rendered
+    assert (
+        'vonk_agent_operations{operation="recipe.install",state="failed"} 1' in rendered
+    )
+    assert (
+        'vonk_agent_operations{operation="recipe.start",state="running"} 1' in rendered
+    )
     assert 'vonk_agent_operations{operation="other",state="other"} 1' in rendered
-    assert f'vonk_agent_operation_lease_age_seconds{{node_id="{NODE}",operation="recipe.start"}} 12' in rendered
+    assert (
+        f'vonk_agent_operation_lease_age_seconds{{node_id="{NODE}",operation="recipe.start"}} 12'
+        in rendered
+    )
 
     allowed = {"node_id", "operation", "state", "version_bucket"}
     for line in rendered.splitlines():

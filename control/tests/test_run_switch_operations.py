@@ -102,8 +102,16 @@ from .test_recipe_operations import (
 @pytest.mark.parametrize(
     ("kind", "subphase", "receipt"),
     [
-        ("stop", None, {"phase": "start", "run_id": "11111111-1111-4111-8111-111111111111"}),
-        ("prepare", "runtime-image", {"phase": "prepare", "subphase": "runtime-plan", "prepared": True}),
+        (
+            "stop",
+            None,
+            {"phase": "start", "run_id": "11111111-1111-4111-8111-111111111111"},
+        ),
+        (
+            "prepare",
+            "runtime-image",
+            {"phase": "prepare", "subphase": "runtime-plan", "prepared": True},
+        ),
     ],
 )
 def test_valid_receipt_for_another_phase_cannot_enter_current_progress(
@@ -170,6 +178,7 @@ def test_persisted_phase_receipts_reject_empty_and_cross_phase_shapes() -> None:
             strict=True,
         )
 
+
 MODEL_ARTIFACT = "c" * 64
 MODEL_ARTIFACT_SET = "f" * 64
 
@@ -206,7 +215,8 @@ def _target_copy_evidence(plan, phase, progress=None) -> dict[str, object]:
     return {
         "node_id": node_id,
         "verified": True,
-        "verified_digests": list(getattr(plan.storage, "artifact_digests", ())) or [MODEL_ARTIFACT],
+        "verified_digests": list(getattr(plan.storage, "artifact_digests", ()))
+        or [MODEL_ARTIFACT],
         "verified_image_digest": image_digest,
         "imported_image_digest": image_digest,
         "verified_oci_layout_sha256": layout_digest,
@@ -222,7 +232,11 @@ def _runtime_receipt(
     size: int | None = None,
     build_id: str | None = None,
 ) -> dict[str, object]:
-    image = image or getattr(plan.build, "image_digest", None) or getattr(plan, "image_digest", None)
+    image = (
+        image
+        or getattr(plan.build, "image_digest", None)
+        or getattr(plan, "image_digest", None)
+    )
     layout = layout or getattr(plan.build, "oci_layout_sha256", None)
     size = size or getattr(plan.build, "image_bytes", None) or 1
     build_id = build_id or getattr(plan, "recipe_build_id", None)
@@ -249,7 +263,9 @@ def _runtime_receipt(
 
 
 class CompleteArtifactInspector:
-    def __init__(self, *, reclaimable_bytes: int = 0, missing_spark_bytes: int = 0) -> None:
+    def __init__(
+        self, *, reclaimable_bytes: int = 0, missing_spark_bytes: int = 0
+    ) -> None:
         self.reclaimable_bytes = reclaimable_bytes
         self.missing_spark_bytes = missing_spark_bytes
 
@@ -329,7 +345,9 @@ class ModelCacheManifestProvider(ModelCacheService):
 
 
 class RecordingArtifactExecutor:
-    def __init__(self, *, child_transfer: bool = False, bad_verify: bool = False) -> None:
+    def __init__(
+        self, *, child_transfer: bool = False, bad_verify: bool = False
+    ) -> None:
         self.child_transfer = child_transfer
         self.bad_verify = bad_verify
         self.calls: list[str] = []
@@ -355,7 +373,9 @@ class RecordingArtifactExecutor:
             )
         if phase.kind == "verify":
             digests = ["d" * 64] if self.bad_verify else [MODEL_ARTIFACT]
-            runtime_image = getattr(getattr(plan, "preparation", None), "runtime_image", None)
+            runtime_image = getattr(
+                getattr(plan, "preparation", None), "runtime_image", None
+            )
             image_digest = getattr(runtime_image, "image_digest", "sha256:" + "1" * 64)
             archive_sha256 = getattr(runtime_image, "oci_layout_sha256", "3" * 64)
             return PhaseExecution(
@@ -600,7 +620,9 @@ class ColdStartPhaseExecutor:
         if phase.subphase == "runtime-plan":
             mapping = getattr(plan, "mapping", None)
             mapping_id = getattr(mapping, "mapping_id", None) or str(uuid.uuid4())
-            installation_id = getattr(plan, "installation_id", None) or str(uuid.uuid4())
+            installation_id = getattr(plan, "installation_id", None) or str(
+                uuid.uuid4()
+            )
             return PhaseExecution(
                 result={
                     "installation_id": installation_id,
@@ -683,7 +705,9 @@ def _service(
 def test_same_clock_later_intent_fences_older_queued_work(tmp_path: Path) -> None:
     """Database admission order, not timestamp spelling, owns the node."""
 
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
     request = _request(sessions, nodes[0])
     first = service.apply(
@@ -707,13 +731,20 @@ def test_same_clock_later_intent_fences_older_queued_work(tmp_path: Path) -> Non
     assert service.get(second.operation_id).state == "queued"
 
 
-def test_child_activity_change_persists_without_clock_only_writes(tmp_path: Path) -> None:
+def test_child_activity_change_persists_without_clock_only_writes(
+    tmp_path: Path,
+) -> None:
     """An unchanged poll is quiet, but a changed stall signal is durable."""
 
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
     executor = RecordingArtifactExecutor(child_transfer=True)
     service = _service(
-        sessions, NOW, lifecycle, executor,
+        sessions,
+        NOW,
+        lifecycle,
+        executor,
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
     )
     request = _request(sessions, nodes[0])
@@ -726,11 +757,15 @@ def test_child_activity_change_persists_without_clock_only_writes(tmp_path: Path
         if _result(service.get(operation.operation_id)).child_operation_id is not None:
             break
     child = executor.children[_child_operation_id(service.get(operation.operation_id))]
-    child.result = {"operation": {
-        "phase": "transfer", "completed_bytes": 0,
-        "total_bytes_known": False, "activity": "active",
-        "observed_at": NOW.isoformat(),
-    }}
+    child.result = {
+        "operation": {
+            "phase": "transfer",
+            "completed_bytes": 0,
+            "total_bytes_known": False,
+            "activity": "active",
+            "observed_at": NOW.isoformat(),
+        }
+    }
     assert service.tick() is True
     before = _result(service.get(operation.operation_id)).operation
     assert before is not None and before.activity == "active"
@@ -743,33 +778,41 @@ def test_child_activity_change_persists_without_clock_only_writes(tmp_path: Path
 
 
 def test_due_scheduler_reaches_work_past_a_full_parked_batch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Sixteen parked scopes must not starve a seventeenth due scope."""
 
-    sessions, lifecycle, _queue, _mapping_id, _build_id, _nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, _mapping_id, _build_id, _nodes = setup_services(
+        tmp_path
+    )
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
     due_id = str(uuid.uuid4())
     with sessions.begin() as session:
         for index in range(17):
             job_id = f"00000000-0000-4000-8000-{index:012x}"
-            session.add(Job(
-                id=job_id,
-                request_id=str(uuid.uuid4()),
-                kind="recipe.run-switch.v2",
-                state="running",
-                actor="admin",
-                authority_revision="a" * 64,
-                targets=[f"spk_{index:032x}"],
-                payload_digest="a" * 64,
-                payload={},
-                result={"observation_due_at": (
-                    NOW if index == 16
-                    else NOW + timedelta(minutes=1)
-                ).isoformat().replace("+00:00", "Z")},
-                created_at=NOW,
-                updated_at=NOW,
-            ))
+            session.add(
+                Job(
+                    id=job_id,
+                    request_id=str(uuid.uuid4()),
+                    kind="recipe.run-switch.v2",
+                    state="running",
+                    actor="admin",
+                    authority_revision="a" * 64,
+                    targets=[f"spk_{index:032x}"],
+                    payload_digest="a" * 64,
+                    payload={},
+                    result={
+                        "observation_due_at": (
+                            NOW if index == 16 else NOW + timedelta(minutes=1)
+                        )
+                        .isoformat()
+                        .replace("+00:00", "Z")
+                    },
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
             if index == 16:
                 due_id = job_id
     seen: list[str] = []
@@ -782,11 +825,14 @@ def test_due_scheduler_reaches_work_past_a_full_parked_batch(
 
 @pytest.mark.parametrize("damage", ["plan", "result"])
 def test_malformed_operation_is_rejected_without_aborting_the_batch(
-    tmp_path: Path, damage: str,
+    tmp_path: Path,
+    damage: str,
 ) -> None:
     """One invalid persisted contract must not deny a valid operation its turn."""
 
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
     service = _service(
         sessions,
         NOW,
@@ -856,8 +902,12 @@ def test_malformed_operation_is_rejected_without_aborting_the_batch(
     assert after_index != before_index
 
 
-def test_default_run_switch_admission_uses_the_recipe_memory_reserve(tmp_path: Path) -> None:
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+def test_default_run_switch_admission_uses_the_recipe_memory_reserve(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
@@ -941,14 +991,18 @@ def test_mapping_selection_rejects_malformed_persisted_parameters(
             )._mapping_selection(mapping, mapping_nodes)
 
 
-def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(tmp_path: Path) -> None:
+def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(
+    tmp_path: Path,
+) -> None:
     sessions, lifecycle, _queue, mapping_id, _build_id, nodes = setup_services(tmp_path)
     node_id = nodes[0]
     with sessions.begin() as session:
         mapping = session.get(ClusterMapping, mapping_id)
         assert mapping is not None
         for item in session.scalars(
-            select(ClusterMappingNode).where(ClusterMappingNode.mapping_id == mapping_id)
+            select(ClusterMappingNode).where(
+                ClusterMappingNode.mapping_id == mapping_id
+            )
         ):
             session.delete(item)
         session.delete(mapping)
@@ -998,14 +1052,17 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(tmp_pat
     )
     assert operation.state == "queued"
     assert operation.operation_id
-    assert service.apply(
-        RunSwitchApplyRequest(
-            **request.model_dump(),
-            plan_digest=plan.plan_digest,
-            request_key=operation.request_key,
-        ),
-        actor="admin",
-    ).operation_id == operation.operation_id
+    assert (
+        service.apply(
+            RunSwitchApplyRequest(
+                **request.model_dump(),
+                plan_digest=plan.plan_digest,
+                request_key=operation.request_key,
+            ),
+            actor="admin",
+        ).operation_id
+        == operation.operation_id
+    )
 
     assert service.tick() is True
     assert service.tick() is True
@@ -1022,14 +1079,18 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(tmp_pat
             )
         )
         child = session.scalar(
-            select(Job).where(Job.kind == "recipe.install").order_by(Job.created_at.desc())
+            select(Job)
+            .where(Job.kind == "recipe.install")
+            .order_by(Job.created_at.desc())
         )
     assert created is not None
     assert child is not None
 
 
 def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> None:
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
@@ -1064,7 +1125,9 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
 def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
     tmp_path: Path,
 ) -> None:
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
     with sessions.begin() as session:
         session.query(NodeArtifact).delete()
     inspector = CompleteArtifactInspector(missing_spark_bytes=1024)
@@ -1140,7 +1203,9 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     assert layout_digest is not None
     assert image_bytes is not None
 
-    controller_storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
+    controller_storage = FilesystemRuntimeImageStorage(
+        tmp_path / "controller-artifacts"
+    )
     expected_archive = b"canonical-runtime-image-archive"[:image_bytes]
     assert hashlib.sha256(expected_archive).hexdigest() == layout_digest
     (controller_storage.root / layout_digest).write_bytes(expected_archive)
@@ -1374,11 +1439,14 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     assert service.tick() is True
     assert service.tick() is True
     assert executor.events == ["model-download", "runtime-image"]
-    assert controller_storage.find_verified(
-        image_digest,
-        expected_architecture="linux/arm64",
-        expected_runtime_interface="vonk.runtime.v1",
-    ) is not None
+    assert (
+        controller_storage.find_verified(
+            image_digest,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is not None
+    )
 
     # Controller compilation/persistence is synchronous and must not create a
     # Spark install child before target-copy verification.
@@ -1400,8 +1468,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
         assert isinstance(compiled_plans, dict)
         assert compiled_plans
         assert all(
-            payload["schema_version"] == 2
-            for payload in compiled_plans.values()
+            payload["schema_version"] == 2 for payload in compiled_plans.values()
         )
     assert executor.events == ["model-download", "runtime-image", "runtime-plan"]
 
@@ -1463,7 +1530,9 @@ class _SlowColdCompiler:
     caller can model one cold compile or a Controller that stays slow.
     """
 
-    def __init__(self, delegate, clock, seconds, during_compile, slow_compiles=1) -> None:
+    def __init__(
+        self, delegate, clock, seconds, during_compile, slow_compiles=1
+    ) -> None:
         self._delegate = delegate
         self._clock = clock
         self._seconds = seconds
@@ -1688,7 +1757,10 @@ def test_slow_cold_compile_refreshes_preflight_instead_of_failing_the_switch(
     failure = service.get(switch.operation.operation_id)
     assert failure.state != "failed", failure.status_reason
     assert failure.result.retry_attempt == 2
-    assert failure.result.retry_reason == "runtime preflight expired during install compilation"
+    assert (
+        failure.result.retry_reason
+        == "runtime preflight expired during install compilation"
+    )
     assert failure.progress.operation.phase == "install-preflight-refresh"
     assert failure.progress.operation.completed_items == 1
     assert failure.progress.operation.observed_at == clock.now.isoformat()
@@ -1795,12 +1867,14 @@ def test_preflight_receipt_disagreement_cannot_bypass_compilation_retry_bound(
     stale_time = switch.clock.now - timedelta(seconds=301)
     record_passing_preflight(switch.sessions, stale_time)
     with switch.sessions() as session:
-        stale_ids = list(session.scalars(
-            select(AgentOperation.id).where(
-                AgentOperation.kind == "runtime.preflight.v1",
-                AgentOperation.created_at == stale_time,
+        stale_ids = list(
+            session.scalars(
+                select(AgentOperation.id).where(
+                    AgentOperation.kind == "runtime.preflight.v1",
+                    AgentOperation.created_at == stale_time,
+                )
             )
-        ))
+        )
     assert stale_ids
 
     def order_stale_receipts(*, latest: bool) -> None:
@@ -1830,13 +1904,18 @@ def test_preflight_receipt_disagreement_cannot_bypass_compilation_retry_bound(
                     )
                 assert selected is not None
                 assert selected.observed_at == int(stale_time.timestamp()), (
-                    view.state, view.status_reason, switch.executor.events,
-                    switch.compiler.compiles, receipt.request_sha256,
+                    view.state,
+                    view.status_reason,
+                    switch.executor.events,
+                    switch.compiler.compiles,
+                    receipt.request_sha256,
                 )
 
     view = switch.service.get(switch.operation.operation_id)
     assert view.state == "failed"
-    assert view.status_reason.startswith("run-switch.install-preflight-refresh-exhausted:")
+    assert view.status_reason.startswith(
+        "run-switch.install-preflight-refresh-exhausted:"
+    )
     assert switch.executor.events.count("runtime-plan") == 3
     assert view.result.retry_attempt == 3
     assert view.result.operation.completed_items == 3
@@ -1969,7 +2048,10 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert build_start_calls == ["start"]
     assert build_start_plans[0].build_id == build_id
     assert build_start_plans[0].build_input_sha256 == build_plan.build_input_sha256
-    assert build_start_plans[0].agent_payload["recipe_content_sha256"] == revision.content_digest
+    assert (
+        build_start_plans[0].agent_payload["recipe_content_sha256"]
+        == revision.content_digest
+    )
 
     restarted = RunSwitchOperationService(
         sessions,
@@ -2160,7 +2242,9 @@ def test_present_rebuilt_image_replaces_installation_bound_to_missing_build(
 
 
 def test_model_cache_manifest_failure_is_a_typed_blocker(tmp_path: Path) -> None:
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
@@ -2305,6 +2389,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         )
         assert snapshot is not None
         snapshot.capabilities = ["recipe.build.v1"]
+
     class _LifecycleStub(RecipeOperationService):
         """Only ``build`` is reached by the container-build subphase."""
 
@@ -2466,7 +2551,9 @@ def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_befo
     ]
 
 
-def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(tmp_path: Path) -> None:
+def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(
+    tmp_path: Path,
+) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(
         lifecycle,
@@ -2498,7 +2585,9 @@ def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(tmp_path: Pat
     assert pending.current_phase == "transfer"
     child_id = _child_operation_id(pending)
     artifact_executor.children[child_id].state = "succeeded"
-    artifact_executor.children[child_id].result = _target_copy_evidence(plan, plan.phases[0])
+    artifact_executor.children[child_id].result = _target_copy_evidence(
+        plan, plan.phases[0]
+    )
     assert service.tick() is True
     assert service.get(operation.operation_id).current_phase == "verify"
 
@@ -2601,14 +2690,16 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert runtime_image is not None
     artifact_executor.children[child_id].result = {
         "copied_bytes": 1024,
-        "evidence": [{
-            "node_id": nodes[0],
-            "verified": True,
-            "verified_digests": [MODEL_ARTIFACT],
-            "verified_image_digest": "sha256:" + "1" * 64,
-            "imported_image_digest": "sha256:" + "1" * 64,
-            "verified_oci_layout_sha256": runtime_image.oci_layout_sha256,
-        }],
+        "evidence": [
+            {
+                "node_id": nodes[0],
+                "verified": True,
+                "verified_digests": [MODEL_ARTIFACT],
+                "verified_image_digest": "sha256:" + "1" * 64,
+                "imported_image_digest": "sha256:" + "1" * 64,
+                "verified_oci_layout_sha256": runtime_image.oci_layout_sha256,
+            }
+        ],
     }
     assert restarted.tick() is True
     completed_transfer = restarted.get(operation.operation_id)
@@ -2666,12 +2757,14 @@ def test_transient_distribution_child_is_not_replayed_by_parent(
         "progress": {
             "completed_bytes": 512,
             "total_bytes": 1024,
-            "members": [{
-                "node_id": nodes[0],
-                "state": "unknown",
-                "completed_bytes": 512,
-                "total_bytes": 1024,
-            }],
+            "members": [
+                {
+                    "node_id": nodes[0],
+                    "state": "unknown",
+                    "completed_bytes": 512,
+                    "total_bytes": 1024,
+                }
+            ],
         },
     }
     assert service.tick() is True
@@ -2752,30 +2845,44 @@ def test_operator_retry_uses_a_new_request_after_typed_transient_failure(
     assert retried_image is not None
     artifact_executor.children[retried_child].result = {
         "copied_bytes": 1024,
-        "evidence": [{
-            "node_id": nodes[0],
-            "verified": True,
-            "verified_digests": [MODEL_ARTIFACT],
-            "verified_image_digest": "sha256:" + "1" * 64,
-            "imported_image_digest": "sha256:" + "1" * 64,
-            "verified_oci_layout_sha256": retried_image.oci_layout_sha256,
-        }],
+        "evidence": [
+            {
+                "node_id": nodes[0],
+                "verified": True,
+                "verified_digests": [MODEL_ARTIFACT],
+                "verified_image_digest": "sha256:" + "1" * 64,
+                "imported_image_digest": "sha256:" + "1" * 64,
+                "verified_oci_layout_sha256": retried_image.oci_layout_sha256,
+            }
+        ],
     }
     assert service.tick() is True
 
 
-def test_run_switch_retry_classification_rejects_terminal_http_and_storage_errors() -> None:
+def test_run_switch_retry_classification_rejects_terminal_http_and_storage_errors() -> (
+    None
+):
     request = httpx.Request("GET", "https://example.invalid/artifact")
     for status in (401, 403, 404):
         response = httpx.Response(status, request=request)
-        error = httpx.HTTPStatusError("request failed", request=request, response=response)
+        error = httpx.HTTPStatusError(
+            "request failed", request=request, response=response
+        )
         assert _transient_distribution_exception(error) is False
     for status in (429, 500, 503):
         response = httpx.Response(status, request=request)
-        error = httpx.HTTPStatusError("request failed", request=request, response=response)
+        error = httpx.HTTPStatusError(
+            "request failed", request=request, response=response
+        )
         assert _transient_distribution_exception(error) is True
-    assert _transient_distribution_exception(OSError(errno.EPERM, "permission denied")) is False
-    assert _transient_distribution_exception(OSError(errno.ENOSPC, "no space left")) is False
+    assert (
+        _transient_distribution_exception(OSError(errno.EPERM, "permission denied"))
+        is False
+    )
+    assert (
+        _transient_distribution_exception(OSError(errno.ENOSPC, "no space left"))
+        is False
+    )
     assert _transient_distribution_exception(OSError(errno.ECONNRESET, "reset")) is True
 
 
@@ -2921,7 +3028,9 @@ def test_cleanup_adapter_cannot_evict_nas_or_return_noop(tmp_path: Path) -> None
 
 
 def test_invocation_metadata_does_not_change_plan_digest(tmp_path: Path) -> None:
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
     service = _service(
         sessions,
         lifecycle._clock(),
@@ -2932,13 +3041,18 @@ def test_invocation_metadata_does_not_change_plan_digest(tmp_path: Path) -> None
     cli_request = web_request.model_copy(
         update={"invocation": InvocationMetadata(origin="cli", reason="switch")}
     )
-    assert service.preview(web_request, actor="admin").plan_digest == service.preview(
-        cli_request, actor="admin"
-    ).plan_digest
+    assert (
+        service.preview(web_request, actor="admin").plan_digest
+        == service.preview(cli_request, actor="admin").plan_digest
+    )
 
 
-def test_activity_provider_preserves_group_and_canonical_nested_progress(tmp_path: Path) -> None:
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+def test_activity_provider_preserves_group_and_canonical_nested_progress(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
     service = _service(
         sessions,
         lifecycle._clock(),
@@ -2981,7 +3095,9 @@ def test_activity_provider_preserves_group_and_canonical_nested_progress(tmp_pat
     assert "phase_index" not in progress
     assert checkpoint["digest"] == operation.plan_digest
     assert datetime.fromisoformat(created_at).tzinfo == UTC
-    assert provider.get_operation(operation.operation_id)["id"] == operation.operation_id
+    assert (
+        provider.get_operation(operation.operation_id)["id"] == operation.operation_id
+    )
 
 
 def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
@@ -2994,7 +3110,9 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
         operation_detail_response,
     )
 
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
     service = _service(
         sessions,
         lifecycle._clock(),
@@ -3060,7 +3178,9 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
 
     switch = _cold_compile_switch(tmp_path)
     switch.drive()
-    reason = "install plan is blocked: " + "missing durable runtime image receipt; " * 10
+    reason = (
+        "install plan is blocked: " + "missing durable runtime image receipt; " * 10
+    )
     if failed:
         switch.service._fail(switch.operation.operation_id, reason)
     operation = switch.service.get(switch.operation.operation_id)
@@ -3114,7 +3234,9 @@ def test_operation_read_rejects_malformed_persisted_result(
     with pytest.raises(RunSwitchOperationConflict, match="persisted result is invalid"):
         service.get(operation.operation_id)
     with pytest.raises(RunSwitchOperationConflict, match="persisted result is invalid"):
-        service.retry(operation.operation_id, request_key=str(uuid.uuid4()), actor="admin")
+        service.retry(
+            operation.operation_id, request_key=str(uuid.uuid4()), actor="admin"
+        )
     with sessions() as session:
         job = session.get(Job, operation.operation_id)
         assert job is not None
@@ -3122,15 +3244,25 @@ def test_operation_read_rejects_malformed_persisted_result(
         assert job.state == previous_state
 
 
-def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evidence(tmp_path):
+def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evidence(
+    tmp_path,
+):
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4()))
-    service = _service(sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor())
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    service = _service(
+        sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
+    )
     request = _request(sessions, nodes[0])
     plan = service.preview(request, actor="admin")
     operation = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest,
-                              request_key=str(uuid.uuid4())), actor="admin",
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
     )
     # Resume the durable checkpoint written after the last phase of a retry.
     with sessions.begin() as session:
@@ -3144,7 +3276,9 @@ def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evid
             "retryable": True,
             "failed_phase": "transfer",
         }
-    restarted = _service(sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor())
+    restarted = _service(
+        sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
+    )
     assert restarted.tick() is True
     completed = restarted.get(operation.operation_id)
     assert completed.state == "succeeded"
@@ -3153,6 +3287,7 @@ def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evid
     assert completed.result.failed_phase is None
     assert completed.status_reason is None
     from vonk_control.run_switch_contract import RunSwitchOperation
+
     with pytest.raises(ValidationError, match="completed phase evidence"):
         RunSwitchOperation.model_validate(completed.model_dump() | {"result": None})
     with pytest.raises(ValidationError, match="requires a status reason"):
@@ -3170,13 +3305,31 @@ def test_nas_transfer_checkpoint_does_not_complete_unstarted_spark_copy(tmp_path
 
     class ColdInspector(CompleteArtifactInspector):
         def inspect(self, *args, **kwargs):
-            return replace(super().inspect(*args, **kwargs), missing_nas_bytes=1024, nas_coverage="partial")
+            return replace(
+                super().inspect(*args, **kwargs),
+                missing_nas_bytes=1024,
+                nas_coverage="partial",
+            )
 
     executor = ColdStartPhaseExecutor()
-    service = _service(sessions, NOW, lifecycle, None, artifacts=ColdInspector(missing_spark_bytes=1024), phase_executor=executor)
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        None,
+        artifacts=ColdInspector(missing_spark_bytes=1024),
+        phase_executor=executor,
+    )
     request = _request(sessions, nodes[0])
     plan = service.preview(request, actor="admin")
-    operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
     service.tick()
     progress = service.get(operation.operation_id).progress
     assert executor.events == ["model-download"]
@@ -3188,9 +3341,13 @@ def test_nas_transfer_checkpoint_does_not_complete_unstarted_spark_copy(tmp_path
 
 
 @pytest.mark.parametrize("child_completion", [False, True])
-def test_overlapping_ticks_cannot_apply_completion_to_the_next_checkpoint(tmp_path, child_completion):
+def test_overlapping_ticks_cannot_apply_completion_to_the_next_checkpoint(
+    tmp_path, child_completion
+):
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4()))
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
 
     class InterleavedExecutor(RecordingArtifactExecutor):
         entered = False
@@ -3214,11 +3371,24 @@ def test_overlapping_ticks_cannot_apply_completion_to_the_next_checkpoint(tmp_pa
             return result
 
     executor = InterleavedExecutor(child_transfer=child_completion)
-    service = _service(sessions, NOW, lifecycle, executor, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
     executor.service = service
     request = _request(sessions, nodes[0])
     plan = service.preview(request, actor="admin")
-    operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
     service.tick()
     if child_completion:
         child_id = _child_operation_id(service.get(operation.operation_id))
@@ -3234,24 +3404,58 @@ def test_overlapping_ticks_cannot_apply_completion_to_the_next_checkpoint(tmp_pa
 
 def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tmp_path):
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4()))
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
     executor = RecordingArtifactExecutor(child_transfer=True)
-    service = _service(sessions, NOW, lifecycle, executor, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
     request = _request(sessions, nodes[0])
     plan = service.preview(request, actor="admin")
-    operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
     service.tick()
     child_id = _child_operation_id(service.get(operation.operation_id))
     key = str(uuid.uuid4())
-    pending = service.cancel(operation.operation_id, actor="admin", request_key=key, reason="Stop preparation")
+    pending = service.cancel(
+        operation.operation_id,
+        actor="admin",
+        request_key=key,
+        reason="Stop preparation",
+    )
     assert pending.state == "running"
-    assert service.cancel(operation.operation_id, actor="admin", request_key=key, reason="Stop preparation") == pending
+    assert (
+        service.cancel(
+            operation.operation_id,
+            actor="admin",
+            request_key=key,
+            reason="Stop preparation",
+        )
+        == pending
+    )
     service.tick()
     assert service.get(operation.operation_id).state == "running"
     child = executor.children[child_id]
     child.state = "succeeded"
     child.result = _target_copy_evidence(plan, plan.phases[0])
-    restarted = _service(sessions, NOW, lifecycle, executor, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
+    restarted = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
     restarted.tick()
     cancelled = restarted.get(operation.operation_id)
     assert cancelled.state == "cancelled"
@@ -3269,25 +3473,58 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
 
 def test_cancel_queued_start_is_idempotent_but_active_runtime_requires_stop(tmp_path):
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4()))
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
     request = _request(sessions, nodes[0])
     plan = service.preview(request, actor="admin")
-    operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
     key = str(uuid.uuid4())
-    cancelled = service.cancel(operation.operation_id, actor="admin", request_key=key, reason="Keep the current profile")
+    cancelled = service.cancel(
+        operation.operation_id,
+        actor="admin",
+        request_key=key,
+        reason="Keep the current profile",
+    )
     assert cancelled.state == "cancelled"
     assert cancelled.progress.state == "cancelled"
     with pytest.raises(RunSwitchOperationConflict, match="already used differently"):
-        service.cancel(operation.operation_id, actor="admin", request_key=key, reason="Different intent")
+        service.cancel(
+            operation.operation_id,
+            actor="admin",
+            request_key=key,
+            reason="Different intent",
+        )
     request_key = str(uuid.uuid4())
-    active = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=request_key), actor="admin")
+    active = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=request_key,
+        ),
+        actor="admin",
+    )
     service.tick()
     with pytest.raises(RunSwitchOperationConflict, match="explicit Stop"):
-        service.cancel(active.operation_id, actor="admin", request_key=str(uuid.uuid4()), reason="Stop running")
+        service.cancel(
+            active.operation_id,
+            actor="admin",
+            request_key=str(uuid.uuid4()),
+            reason="Stop running",
+        )
 
 
-def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tmp_path: Path) -> None:
+def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
+    tmp_path: Path,
+) -> None:
     from vonk_control.agent_jobs import AgentJobService
 
     from .test_recipe_builds import setup as setup_build
@@ -3305,7 +3542,10 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tm
         builds=builds,
     )
     executor = RecipeLifecyclePhaseExecutor(
-        lifecycle, sessions, ClusterMappingService(sessions), lambda: now,
+        lifecycle,
+        sessions,
+        ClusterMappingService(sessions),
+        lambda: now,
     )
     # This phase consumes only the build identities already selected by preview.
     plan = RunSwitchPlan.model_construct(
@@ -3317,14 +3557,21 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tm
         ),
     )
     phase = RunSwitchPhase(
-        index=0, kind="prepare", subphase="container-build", state="planned",
+        index=0,
+        kind="prepare",
+        subphase="container-build",
+        state="planned",
         detail="Build selected source recipe",
     )
     request_key = str(uuid.uuid4())
 
     def execute():
         return executor.execute(
-            plan, phase, item_index=0, actor="admin", request_key=request_key,
+            plan,
+            phase,
+            item_index=0,
+            actor="admin",
+            request_key=request_key,
             progress={},
         )
 
@@ -3365,7 +3612,9 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(tm
         stale = session.get(RecipeBuild, selected.build_id)
         assert stale is not None
         stale.image_bytes = None
-    with pytest.raises(RunSwitchOperationConflict, match="container-build-evidence-invalid"):
+    with pytest.raises(
+        RunSwitchOperationConflict, match="container-build-evidence-invalid"
+    ):
         execute()
 
 

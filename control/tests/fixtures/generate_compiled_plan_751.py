@@ -94,8 +94,12 @@ def main() -> None:
             }
         )
     runtime_spec["artifacts"] = artifacts
-    _json_object(_json_array(runtime_spec["model_dependencies"])[0])["content_sha256"] = model_digest
-    _json_object(runtime_spec["identity"])["execution_sha256"] = execution_identity_sha256(runtime_spec)
+    _json_object(_json_array(runtime_spec["model_dependencies"])[0])[
+        "content_sha256"
+    ] = model_digest
+    _json_object(runtime_spec["identity"])["execution_sha256"] = (
+        execution_identity_sha256(runtime_spec)
+    )
     bound = _bind_runtime_artifacts(
         runtime_spec,
         [
@@ -127,7 +131,9 @@ def main() -> None:
         },
     )
     output = Path(__file__).with_name("compiled_plan_751.json")
-    output.write_bytes(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+    output.write_bytes(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    )
     print(output, output.stat().st_size, len(_json_array(payload["artifacts"])))
 
 

@@ -44,6 +44,7 @@ PositiveInt = Annotated[int, Field(ge=1)]
 class _StrictPayload(WireModel):
     """Base for immutable, exact recipe lifecycle payloads."""
 
+
 class RecipeInstallPayload(_StrictPayload):
     schema_version: Literal[2]
     installation_id: CanonicalUuid
@@ -83,7 +84,9 @@ class RecipeStartPayload(_StrictPayload):
     master_address: str | None = Field(json_schema_extra={"format": "ip"})
     master_port: Port | None
     phase: Literal["rank-launch", "collective-readiness"] | None = None
-    start_deadline: str | None = Field(default=None, json_schema_extra={"format": "date-time"})
+    start_deadline: str | None = Field(
+        default=None, json_schema_extra={"format": "date-time"}
+    )
     run_generation: PositiveInt | None = None
 
     @model_validator(mode="after")
@@ -91,17 +94,31 @@ class RecipeStartPayload(_StrictPayload):
         if self.rank >= self.world_size:
             raise ValueError("start placement is invalid")
         placement = self.compiled_execution_plan.runtime.placement
-        if (self.rank, self.role, self.world_size) != (placement.rank, placement.role, placement.world_size):
+        if (self.rank, self.role, self.world_size) != (
+            placement.rank,
+            placement.role,
+            placement.world_size,
+        ):
             raise ValueError("start placement does not match compiled plan")
         if self.image_digest != self.compiled_execution_plan.runtime.image_digest:
             raise ValueError("start image does not match compiled plan")
-        if self.recipe_content_sha256 != self.compiled_execution_plan.identity.recipe_revision_sha256:
+        if (
+            self.recipe_content_sha256
+            != self.compiled_execution_plan.identity.recipe_revision_sha256
+        ):
             raise ValueError("start recipe digest does not match compiled plan")
         placement = self.compiled_execution_plan.runtime.placement
         endpoint_matches = self.endpoint_address == placement.endpoint_address
         if placement.endpoint_address is None and self.world_size > 1:
             endpoint_matches = self.endpoint_address == self.local_address
-        if not endpoint_matches or self.port != placement.port or self.reserved_memory_bytes != placement.reserved_memory_bytes or self.local_address != placement.local_address or self.master_address != placement.master_address or self.master_port != placement.master_port:
+        if (
+            not endpoint_matches
+            or self.port != placement.port
+            or self.reserved_memory_bytes != placement.reserved_memory_bytes
+            or self.local_address != placement.local_address
+            or self.master_address != placement.master_address
+            or self.master_port != placement.master_port
+        ):
             raise ValueError("start placement does not match compiled plan")
         for name, address in (
             ("endpoint_address", self.endpoint_address),
@@ -111,16 +128,31 @@ class RecipeStartPayload(_StrictPayload):
             if address is None:
                 continue
             parsed_address = ipaddress.ip_address(address)
-            if parsed_address.is_loopback or parsed_address.is_link_local or parsed_address.is_multicast or parsed_address.is_unspecified or str(parsed_address) != address:
+            if (
+                parsed_address.is_loopback
+                or parsed_address.is_link_local
+                or parsed_address.is_multicast
+                or parsed_address.is_unspecified
+                or str(parsed_address) != address
+            ):
                 raise ValueError(f"{name} is invalid")
         if self.world_size == 1:
-            if self.rank != 0 or self.local_address is not None or self.master_address is not None or self.master_port is not None:
+            if (
+                self.rank != 0
+                or self.local_address is not None
+                or self.master_address is not None
+                or self.master_port is not None
+            ):
                 raise ValueError("single-node rendezvous is invalid")
-        elif self.local_address is None or self.master_address is None or self.master_port is None or self.master_port < 1024:
+        elif (
+            self.local_address is None
+            or self.master_address is None
+            or self.master_port is None
+            or self.master_port < 1024
+        ):
             raise ValueError("distributed rendezvous is invalid")
         if self.world_size == 1 and (
-            self.phase is not None
-            or self.start_deadline is not None
+            self.phase is not None or self.start_deadline is not None
         ):
             raise ValueError("single-node start phases are invalid")
         if self.world_size == 1 and (
@@ -132,11 +164,17 @@ class RecipeStartPayload(_StrictPayload):
                 deadline = datetime.fromisoformat(self.start_deadline or "")
             except ValueError as error:
                 raise ValueError("start deadline is invalid") from error
-            if deadline.tzinfo is None or deadline.utcoffset() != UTC.utcoffset(deadline):
+            if deadline.tzinfo is None or deadline.utcoffset() != UTC.utcoffset(
+                deadline
+            ):
                 raise ValueError("start deadline must be UTC")
         if self.phase is None and self.start_deadline is not None:
             raise ValueError("start phase binding is invalid")
-        if self.phase is not None and (self.start_deadline is None or self.run_generation is None or self.run_generation < 1):
+        if self.phase is not None and (
+            self.start_deadline is None
+            or self.run_generation is None
+            or self.run_generation < 1
+        ):
             raise ValueError("start phase binding is invalid")
         return self
 
@@ -309,6 +347,7 @@ class RecipeOperationRequest(_StrictPayload):
     @property
     def cleanup_model_content_sha256(self) -> str | None:
         return getattr(self.payload, "cleanup_model_content_sha256", None)
+
 
 def parse_recipe_operation_result(
     operation: AgentOperation, result: Any

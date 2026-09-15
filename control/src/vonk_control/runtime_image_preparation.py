@@ -68,7 +68,11 @@ class PulledImageEvidence:
 
 class OCIImageTransport(Protocol):
     def pull_and_export(
-        self, reference: str, destination: Path, *, expected_architecture: str,
+        self,
+        reference: str,
+        destination: Path,
+        *,
+        expected_architecture: str,
         expected_runtime_interface: str,
         progress: Callable[[str, int, int | None], None] | None = None,
     ) -> PulledImageEvidence:
@@ -122,20 +126,36 @@ class SkopeoOCIImageTransport:
         # (``vonk.runtime.v1``), while the OCI label stores its short value
         # (``v1``).  Keep that translation at the OCI boundary so callers
         # cannot accidentally compare unlike identities.
-        expected_runtime_interface = _runtime_interface_label(expected_runtime_interface)
+        expected_runtime_interface = _runtime_interface_label(
+            expected_runtime_interface
+        )
         source = f"docker://{reference}"
         expected_manifest = _reference_digest(reference)
         observed_digest = _run_text(
-            [self.executable, "inspect", *_platform_args(expected_architecture), "--format", "{{.Digest}}", source]
+            [
+                self.executable,
+                "inspect",
+                *_platform_args(expected_architecture),
+                "--format",
+                "{{.Digest}}",
+                source,
+            ]
         ).strip()
         config = _run_json_text(
             _run_text(
-                [self.executable, "inspect", *_platform_args(expected_architecture), "--config", source]
+                [
+                    self.executable,
+                    "inspect",
+                    *_platform_args(expected_architecture),
+                    "--config",
+                    source,
+                ]
             )
         )
         if observed_digest != expected_manifest:
             raise RuntimeImagePreparationError(
-                "runtime_image.digest_mismatch", "skopeo resolved a different recipe image digest"
+                "runtime_image.digest_mismatch",
+                "skopeo resolved a different recipe image digest",
             )
         if not isinstance(config, Mapping):
             raise RuntimeImagePreparationError(
@@ -144,12 +164,14 @@ class SkopeoOCIImageTransport:
         architecture = _observed_architecture(config)
         if architecture != expected_architecture:
             raise RuntimeImagePreparationError(
-                "runtime_image.architecture_mismatch", "OCI image architecture does not match the recipe"
+                "runtime_image.architecture_mismatch",
+                "OCI image architecture does not match the recipe",
             )
         interface = _observed_runtime_interface(config)
         if interface != expected_runtime_interface:
             raise RuntimeImagePreparationError(
-                "runtime_image.interface_mismatch", "OCI image runtime interface label does not match the recipe"
+                "runtime_image.interface_mismatch",
+                "OCI image runtime interface label does not match the recipe",
             )
         # Keep native OCI blobs between attempts and share completed layers
         # across images. Streaming straight into a tar discards this reuse on
@@ -157,7 +179,9 @@ class SkopeoOCIImageTransport:
         # only the final local conversion creates the runnable archive.
         cache = destination.parent / "registry-layers"
         cache.mkdir(parents=True, exist_ok=True)
-        key = hashlib.sha256(f"{reference}\n{expected_architecture}".encode()).hexdigest()
+        key = hashlib.sha256(
+            f"{reference}\n{expected_architecture}".encode()
+        ).hexdigest()
         layout = cache / key
         blobs = cache / "blobs"
         blobs.mkdir(exist_ok=True)
@@ -171,27 +195,64 @@ class SkopeoOCIImageTransport:
             # can still be using them; completed shared blobs remain reusable.
             for abandoned in layout.glob("oci-put-blob*"):
                 abandoned.unlink(missing_ok=True)
-            metadata = SkopeoImageMetadata.model_validate_json(_run_text([
-                self.executable, "inspect", *_platform_args(expected_architecture), source,
-            ]))
-            layer_paths = [blobs / value.digest.replace(":", "/", 1)
-                           for value in metadata.layers
-                           if _IMAGE_DIGEST.fullmatch(value.digest)]
-            total = (sum(value.size for value in metadata.layers)
-                     if metadata.layers and all(value.size >= 0 for value in metadata.layers)
-                     else None)
-            _run_with_progress([
-                self.executable, "copy", *_platform_args(expected_architecture),
-                "--retry-times", "3", "--image-parallel-copies", "6",
-                "--dest-oci-accept-uncompressed-layers",
-                "--dest-shared-blob-dir", str(blobs), source, staged_source,
-            ], lambda: _existing_bytes(layer_paths) + _existing_bytes(layout.glob("oci-put-blob*")),
-                progress, "download", total)
-            _run_with_progress([
-                self.executable, "copy", *_platform_args(expected_architecture),
-                "--src-shared-blob-dir", str(blobs), staged_source,
-                f"docker-archive:{destination}",
-            ], lambda: _existing_bytes([destination]), progress, "prepare", None)
+            metadata = SkopeoImageMetadata.model_validate_json(
+                _run_text(
+                    [
+                        self.executable,
+                        "inspect",
+                        *_platform_args(expected_architecture),
+                        source,
+                    ]
+                )
+            )
+            layer_paths = [
+                blobs / value.digest.replace(":", "/", 1)
+                for value in metadata.layers
+                if _IMAGE_DIGEST.fullmatch(value.digest)
+            ]
+            total = (
+                sum(value.size for value in metadata.layers)
+                if metadata.layers and all(value.size >= 0 for value in metadata.layers)
+                else None
+            )
+            _run_with_progress(
+                [
+                    self.executable,
+                    "copy",
+                    *_platform_args(expected_architecture),
+                    "--retry-times",
+                    "3",
+                    "--image-parallel-copies",
+                    "6",
+                    "--dest-oci-accept-uncompressed-layers",
+                    "--dest-shared-blob-dir",
+                    str(blobs),
+                    source,
+                    staged_source,
+                ],
+                lambda: (
+                    _existing_bytes(layer_paths)
+                    + _existing_bytes(layout.glob("oci-put-blob*"))
+                ),
+                progress,
+                "download",
+                total,
+            )
+            _run_with_progress(
+                [
+                    self.executable,
+                    "copy",
+                    *_platform_args(expected_architecture),
+                    "--src-shared-blob-dir",
+                    str(blobs),
+                    staged_source,
+                    f"docker-archive:{destination}",
+                ],
+                lambda: _existing_bytes([destination]),
+                progress,
+                "prepare",
+                None,
+            )
         archive_bytes, archive_sha = _file_digest(destination, 16 * 1024**4)
         # Registry pins may identify a multi-platform index. Docker's native
         # archive conversion also changes manifest representation. Inspect the
@@ -219,17 +280,38 @@ class SkopeoOCIImageTransport:
         expected_archive_sha256: str,
         expected_archive_bytes: int,
     ) -> PulledImageEvidence:
-        expected_runtime_interface = _runtime_interface_label(expected_runtime_interface)
+        expected_runtime_interface = _runtime_interface_label(
+            expected_runtime_interface
+        )
         source = f"docker-archive:{archive}"
         observed_digest = _run_text(
-            [self.executable, "inspect", *_platform_args(expected_architecture), "--format", "{{.Digest}}", source]
+            [
+                self.executable,
+                "inspect",
+                *_platform_args(expected_architecture),
+                "--format",
+                "{{.Digest}}",
+                source,
+            ]
         ).strip()
         raw_manifest = _run_text(
-            [self.executable, "inspect", *_platform_args(expected_architecture), "--raw", source]
+            [
+                self.executable,
+                "inspect",
+                *_platform_args(expected_architecture),
+                "--raw",
+                source,
+            ]
         )
         config = _run_json_text(
             _run_text(
-                [self.executable, "inspect", *_platform_args(expected_architecture), "--config", source]
+                [
+                    self.executable,
+                    "inspect",
+                    *_platform_args(expected_architecture),
+                    "--config",
+                    source,
+                ]
             )
         )
         if not isinstance(config, Mapping):
@@ -239,16 +321,19 @@ class SkopeoOCIImageTransport:
         architecture = _observed_architecture(config)
         if architecture != expected_architecture:
             raise RuntimeImagePreparationError(
-                "runtime_image.architecture_mismatch", "OCI image architecture does not match the recipe"
+                "runtime_image.architecture_mismatch",
+                "OCI image architecture does not match the recipe",
             )
         interface = _observed_runtime_interface(config)
         if interface != expected_runtime_interface:
             raise RuntimeImagePreparationError(
-                "runtime_image.interface_mismatch", "OCI image runtime interface label does not match the recipe"
+                "runtime_image.interface_mismatch",
+                "OCI image runtime interface label does not match the recipe",
             )
         if _IMAGE_DIGEST.fullmatch(observed_digest) is None:
             raise RuntimeImagePreparationError(
-                "runtime_image.digest_mismatch", "skopeo archive inspection returned an invalid image digest"
+                "runtime_image.digest_mismatch",
+                "skopeo archive inspection returned an invalid image digest",
             )
         return PulledImageEvidence(
             manifest_digest=observed_digest,
@@ -320,7 +405,9 @@ class RuntimeImageReceipt(WireModel):
         if self.source == "controller-build" and (
             self.registry_manifest_digest is not None or self.build_id is None
         ):
-            raise ValueError("Controller-build runtime image receipt provenance is invalid")
+            raise ValueError(
+                "Controller-build runtime image receipt provenance is invalid"
+            )
         return self
 
     def to_mapping(self) -> dict[str, object]:
@@ -429,7 +516,8 @@ def persist_runtime_image_receipt(
         select(CatalogDocumentRevision)
         .where(
             CatalogDocumentRevision.kind == "recipe",
-            CatalogDocumentRevision.content_digest == receipt.distribution_content_sha256,
+            CatalogDocumentRevision.content_digest
+            == receipt.distribution_content_sha256,
         )
         .order_by(CatalogDocumentRevision.revision_number, CatalogDocumentRevision.id)
         .limit(1)
@@ -492,10 +580,7 @@ def persist_runtime_image_receipt(
                 "runtime_image.receipt_authority_revoked",
                 "immutable runtime image receipt is not verified",
             )
-        existing = {
-            key: getattr(row, key)
-            for key in identity
-        }
+        existing = {key: getattr(row, key) for key in identity}
         if existing != identity:
             raise RuntimeImagePreparationError(
                 "runtime_image.receipt_identity_conflict",
@@ -550,29 +635,40 @@ def resolve_persisted_runtime_image_receipt(
             RuntimeImageReceiptRow.original_content_digest == original_content_digest,
             RuntimeImageReceiptRow.effective_execution_key == effective_execution_key,
             RuntimeImageReceiptRow.state == "verified",
-            RuntimeImageReceiptRow.registry_manifest_digest == receipt.registry_manifest_digest,
-            RuntimeImageReceiptRow.platform_manifest_digest == receipt.platform_manifest_digest,
-            RuntimeImageReceiptRow.local_image_config_id == receipt.local_image_config_id,
+            RuntimeImageReceiptRow.registry_manifest_digest
+            == receipt.registry_manifest_digest,
+            RuntimeImageReceiptRow.platform_manifest_digest
+            == receipt.platform_manifest_digest,
+            RuntimeImageReceiptRow.local_image_config_id
+            == receipt.local_image_config_id,
             RuntimeImageReceiptRow.oci_archive_sha256 == receipt.oci_archive_sha256,
             RuntimeImageReceiptRow.image_bytes == receipt.image_bytes,
             RuntimeImageReceiptRow.architecture == receipt.architecture,
             RuntimeImageReceiptRow.runtime_interface == receipt.runtime_interface,
-            RuntimeImageReceiptRow.runtime_interface_label == receipt.runtime_interface_label,
+            RuntimeImageReceiptRow.runtime_interface_label
+            == receipt.runtime_interface_label,
             RuntimeImageReceiptRow.build_id == receipt.build_id,
         )
     )
     if row is None:
-        raise ValueError("durable runtime image receipt identity does not match filesystem receipt")
+        raise ValueError(
+            "durable runtime image receipt identity does not match filesystem receipt"
+        )
     authorization = session.scalar(
         select(RuntimeImageAuthorization).where(
             RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
             RuntimeImageAuthorization.receipt_id == row.id,
             RuntimeImageAuthorization.source == receipt.source,
-            RuntimeImageAuthorization.original_content_digest == row.original_content_digest,
-            RuntimeImageAuthorization.effective_execution_key == effective_execution_key,
-            RuntimeImageAuthorization.registry_manifest_digest == receipt.registry_manifest_digest,
-            RuntimeImageAuthorization.platform_manifest_digest == receipt.platform_manifest_digest,
-            RuntimeImageAuthorization.local_image_config_id == receipt.local_image_config_id,
+            RuntimeImageAuthorization.original_content_digest
+            == row.original_content_digest,
+            RuntimeImageAuthorization.effective_execution_key
+            == effective_execution_key,
+            RuntimeImageAuthorization.registry_manifest_digest
+            == receipt.registry_manifest_digest,
+            RuntimeImageAuthorization.platform_manifest_digest
+            == receipt.platform_manifest_digest,
+            RuntimeImageAuthorization.local_image_config_id
+            == receipt.local_image_config_id,
             RuntimeImageAuthorization.oci_archive_sha256 == receipt.oci_archive_sha256,
             RuntimeImageAuthorization.image_bytes == receipt.image_bytes,
             RuntimeImageAuthorization.build_id == receipt.build_id,
@@ -580,7 +676,9 @@ def resolve_persisted_runtime_image_receipt(
         )
     )
     if authorization is None:
-        raise ValueError("current recipe revision is not authorized for runtime image receipt")
+        raise ValueError(
+            "current recipe revision is not authorized for runtime image receipt"
+        )
     return row
 
 
@@ -618,7 +716,10 @@ def _authorize_current_revision(
         image = execution.image
         raw_digest = image.digest
         expected = f"sha256:{raw_digest}"
-        if receipt.source != "published" or expected != receipt.registry_manifest_digest:
+        if (
+            receipt.source != "published"
+            or expected != receipt.registry_manifest_digest
+        ):
             raise RuntimeImagePreparationError(
                 "runtime_image.authorization_invalid",
                 "current recipe image authority does not match the verified receipt",
@@ -642,7 +743,10 @@ def _authorize_current_revision(
                 "source-build receipt is not backed by the exact succeeded build",
             )
         source_bundle_sha256 = read_catalog_projection(revision).source_bundle_sha256
-        if source_bundle_sha256 is None or build.source_bundle_sha256 != source_bundle_sha256:
+        if (
+            source_bundle_sha256 is None
+            or build.source_bundle_sha256 != source_bundle_sha256
+        ):
             raise RuntimeImagePreparationError(
                 "runtime_image.authorization_invalid",
                 "source-build receipt does not match the current build input",
@@ -754,9 +858,7 @@ class RuntimeImageStorage(Protocol):
         """Verify and atomically publish an archive and its receipt."""
         ...
 
-    def verify_existing(
-        self, archive_sha256: str, expected_bytes: int
-    ) -> Path:
+    def verify_existing(self, archive_sha256: str, expected_bytes: int) -> Path:
         """Return an existing verified archive or raise."""
         ...
 
@@ -813,7 +915,8 @@ class FilesystemRuntimeImageStorage:
     ) -> RuntimeImageReceipt:
         if not staged.is_file() or staged.is_symlink():
             raise RuntimeImagePreparationError(
-                "runtime_image.archive_unavailable", "OCI export did not produce a regular archive"
+                "runtime_image.archive_unavailable",
+                "OCI export did not produce a regular archive",
             )
         size = staged.stat().st_size
         if (
@@ -832,7 +935,8 @@ class FilesystemRuntimeImageStorage:
             existing_size = final.stat().st_size
             if existing_size != size:
                 raise RuntimeImagePreparationError(
-                    "runtime_image.archive_conflict", "content-addressed OCI archive conflicts"
+                    "runtime_image.archive_conflict",
+                    "content-addressed OCI archive conflicts",
                 )
             receipt_path = self.root / f"{receipt.oci_archive_sha256}.receipt.json"
             if receipt_path.exists():
@@ -866,7 +970,8 @@ class FilesystemRuntimeImageStorage:
             if existing_receipt is not None:
                 if (
                     receipt.build_input_sha256 is not None
-                    and existing_receipt.build_input_sha256 not in {
+                    and existing_receipt.build_input_sha256
+                    not in {
                         None,
                         receipt.build_input_sha256,
                     }
@@ -929,11 +1034,13 @@ class FilesystemRuntimeImageStorage:
                 "runtime_image.archive_mismatch",
                 "stored OCI archive is not a regular file",
             )
-        if not 1 <= expected_bytes <= self.maximum_bytes or not verified_files.verify_path(
-            path, archive_sha256, expected_bytes
+        if (
+            not 1 <= expected_bytes <= self.maximum_bytes
+            or not verified_files.verify_path(path, archive_sha256, expected_bytes)
         ):
             raise RuntimeImagePreparationError(
-                "runtime_image.archive_mismatch", "stored OCI archive failed content verification"
+                "runtime_image.archive_mismatch",
+                "stored OCI archive failed content verification",
             )
         return path
 
@@ -952,7 +1059,8 @@ class FilesystemRuntimeImageStorage:
             or not 1 <= expected_bytes <= self.maximum_bytes
         ):
             raise RuntimeImagePreparationError(
-                "runtime_image.receipt_invalid", "source-build image evidence is invalid"
+                "runtime_image.receipt_invalid",
+                "source-build image evidence is invalid",
             )
         path = self.root / archive_sha256
         try:
@@ -1146,7 +1254,8 @@ class FilesystemRuntimeImageStorage:
             raise
         except (OSError, TypeError, ValueError, KeyError) as error:
             raise RuntimeImagePreparationError(
-                "runtime_image.receipt_unavailable", "runtime image receipt is unavailable or malformed"
+                "runtime_image.receipt_unavailable",
+                "runtime image receipt is unavailable or malformed",
             ) from error
 
 
@@ -1175,7 +1284,8 @@ def prepare_runtime_image(
     source_build = parsed.execution.mode == "build"
     if source_build != (build_receipt is not None):
         raise RuntimeImagePreparationError(
-            "runtime_image.source_mismatch", "recipe execution mode and build receipt disagree"
+            "runtime_image.source_mismatch",
+            "recipe execution mode and build receipt disagree",
         )
     effective_transport = transport or SkopeoOCIImageTransport()
     if source_build:
@@ -1208,7 +1318,8 @@ def prepare_runtime_image(
         )
     if not source_build and receipt.registry_manifest_digest != expected_manifest:
         raise RuntimeImagePreparationError(
-            "runtime_image.digest_mismatch", "prepared image digest does not match the immutable distribution"
+            "runtime_image.digest_mismatch",
+            "prepared image digest does not match the immutable distribution",
         )
     if receipt_writer is not None:
         try:
@@ -1319,8 +1430,13 @@ def _prepare_from_build(
         )
     image_digest = _string(value.get("image_digest"), "runtime_image.build_digest")
     build_id = _string(value.get("build_id"), "runtime_image.build_id")
-    archive_sha = _string(value.get("oci_layout_sha256"), "runtime_image.build_archive_digest")
-    if _IMAGE_DIGEST.fullmatch(image_digest) is None or _SHA256.fullmatch(archive_sha) is None:
+    archive_sha = _string(
+        value.get("oci_layout_sha256"), "runtime_image.build_archive_digest"
+    )
+    if (
+        _IMAGE_DIGEST.fullmatch(image_digest) is None
+        or _SHA256.fullmatch(archive_sha) is None
+    ):
         raise RuntimeImagePreparationError(
             "runtime_image.receipt_invalid", "source-build image evidence is invalid"
         )
@@ -1331,7 +1447,8 @@ def _prepare_from_build(
         )
     raw_build_input = value.get("build_input_sha256")
     if raw_build_input is not None and (
-        not isinstance(raw_build_input, str) or _SHA256.fullmatch(raw_build_input) is None
+        not isinstance(raw_build_input, str)
+        or _SHA256.fullmatch(raw_build_input) is None
     ):
         raise RuntimeImagePreparationError(
             "runtime_image.receipt_invalid", "source-build input identity is invalid"
@@ -1370,8 +1487,8 @@ def _prepare_from_build(
         expected_interface_label,
         expected_requested_manifest=None,
     )
-    architecture, runtime_interface, runtime_interface_label = _receipt_runtime_identity(
-        observed, expected_interface
+    architecture, runtime_interface, runtime_interface_label = (
+        _receipt_runtime_identity(observed, expected_interface)
     )
     # A caller that only knows the archive (for example a pre-upgrade build
     # row) must not erase an input identity the existing receipt already
@@ -1387,7 +1504,9 @@ def _prepare_from_build(
         distribution_publisher=publisher,
         distribution_slug=slug,
         distribution_content_sha256=content_sha256,
-        registry_manifest_digest=_optional_string(value.get("registry_manifest_digest"), None),
+        registry_manifest_digest=_optional_string(
+            value.get("registry_manifest_digest"), None
+        ),
         # The authenticated builder binds its original image manifest to this
         # exact archive checksum. Docker-save drops that original manifest;
         # Skopeo reconstructs a different manifest when reading the archive.
@@ -1414,19 +1533,23 @@ def _prepare_from_build(
     return storage.commit(existing, receipt=receipt)
 
 
-def _canonical_recipe(value: RecipeDefinition | Mapping[str, object] | object) -> RecipeDefinition:
+def _canonical_recipe(
+    value: RecipeDefinition | Mapping[str, object] | object,
+) -> RecipeDefinition:
     if isinstance(value, RecipeDefinition):
         return value
     raw = getattr(value, "document", value)
     if not isinstance(raw, Mapping):
         raise RuntimeImagePreparationError(
-            "runtime_image.recipe_invalid", "canonical RecipeDefinition document is unavailable"
+            "runtime_image.recipe_invalid",
+            "canonical RecipeDefinition document is unavailable",
         )
     try:
         return RecipeDefinition.model_validate(raw)
     except Exception as error:
         raise RuntimeImagePreparationError(
-            "runtime_image.recipe_invalid", "recipe does not satisfy canonical RecipeDefinition"
+            "runtime_image.recipe_invalid",
+            "recipe does not satisfy canonical RecipeDefinition",
         ) from error
 
 
@@ -1436,17 +1559,25 @@ def runtime_image_expectations(value: Mapping[str, object] | object) -> dict[str
     raw: object = dump(mode="json") if callable(dump) else value
     if not isinstance(raw, Mapping):
         raise RuntimeImagePreparationError(
-            "runtime_image.runtime_invalid", "canonical runtime projection is unavailable"
+            "runtime_image.runtime_invalid",
+            "canonical runtime projection is unavailable",
         )
     if "runtime_interface" in raw:
         raise RuntimeImagePreparationError(
-            "runtime_image.runtime_invalid", "runtime projection contains retired runtime_interface"
+            "runtime_image.runtime_invalid",
+            "runtime projection contains retired runtime_interface",
         )
     architecture = raw.get("architecture")
     interface = raw.get("interface")
-    if not isinstance(architecture, str) or not architecture or not isinstance(interface, str) or not interface:
+    if (
+        not isinstance(architecture, str)
+        or not architecture
+        or not isinstance(interface, str)
+        or not interface
+    ):
         raise RuntimeImagePreparationError(
-            "runtime_image.runtime_invalid", "runtime projection lacks observed architecture/interface expectations"
+            "runtime_image.runtime_invalid",
+            "runtime projection lacks observed architecture/interface expectations",
         )
     return {"architecture": architecture, "interface": interface}
 
@@ -1493,7 +1624,9 @@ def _receipt_runtime_identity(
 
 def _recipe_image(recipe: RecipeDefinition) -> tuple[str, str]:
     if recipe.execution.mode != "image":
-        raise RuntimeImagePreparationError("runtime_image.source_mismatch", "recipe does not select a direct image")
+        raise RuntimeImagePreparationError(
+            "runtime_image.source_mismatch", "recipe does not select a direct image"
+        )
     image = recipe.execution.image
     digest = f"sha256:{image.digest}"
     return f"{image.repository}@{digest}", digest
@@ -1521,15 +1654,21 @@ def _validate_evidence(
         and evidence.requested_manifest_digest != expected_requested_manifest
     ):
         raise RuntimeImagePreparationError(
-            "runtime_image.digest_mismatch", "OCI transport used a different recipe image digest"
+            "runtime_image.digest_mismatch",
+            "OCI transport used a different recipe image digest",
         )
     if _IMAGE_DIGEST.fullmatch(evidence.manifest_digest) is None:
         raise RuntimeImagePreparationError(
-            "runtime_image.digest_mismatch", "OCI transport returned a different manifest digest"
+            "runtime_image.digest_mismatch",
+            "OCI transport returned a different manifest digest",
         )
-    if _IMAGE_DIGEST.fullmatch(evidence.config_id) is None or not evidence.local_reference:
+    if (
+        _IMAGE_DIGEST.fullmatch(evidence.config_id) is None
+        or not evidence.local_reference
+    ):
         raise RuntimeImagePreparationError(
-            "runtime_image.evidence_invalid", "OCI transport did not return local image identity"
+            "runtime_image.evidence_invalid",
+            "OCI transport did not return local image identity",
         )
     if (
         _SHA256.fullmatch(evidence.archive_sha256) is None
@@ -1537,17 +1676,21 @@ def _validate_evidence(
         or evidence.archive_bytes < 1
     ):
         raise RuntimeImagePreparationError(
-            "runtime_image.evidence_invalid", "OCI transport did not return archive verification evidence"
+            "runtime_image.evidence_invalid",
+            "OCI transport did not return archive verification evidence",
         )
     if evidence.architecture != expected_architecture:
         raise RuntimeImagePreparationError(
-            "runtime_image.architecture_mismatch", "verified image architecture does not match the recipe"
+            "runtime_image.architecture_mismatch",
+            "verified image architecture does not match the recipe",
         )
     if not evidence.runtime_interface or (
-        expected_interface is not None and evidence.runtime_interface != expected_interface
+        expected_interface is not None
+        and evidence.runtime_interface != expected_interface
     ):
         raise RuntimeImagePreparationError(
-            "runtime_image.interface_mismatch", "verified image runtime interface does not match the recipe"
+            "runtime_image.interface_mismatch",
+            "verified image runtime interface does not match the recipe",
         )
 
 
@@ -1563,9 +1706,11 @@ def _existing_bytes(paths: Iterable[Path]) -> int:
 
 
 def _run_with_progress(
-    command: list[str], sample: Callable[[], int],
+    command: list[str],
+    sample: Callable[[], int],
     progress: Callable[[str, int, int | None], None] | None,
-    phase: str, total: int | None,
+    phase: str,
+    total: int | None,
 ) -> None:
     if progress is None:
         _run_text(command)
@@ -1577,7 +1722,9 @@ def _run_with_progress(
         observed = 0
         while True:
             observed = max(observed, sample())
-            progress(phase, min(observed, total) if total is not None else observed, total)
+            progress(
+                phase, min(observed, total) if total is not None else observed, total
+            )
             try:
                 transfer.result(timeout=1.0)
                 break
@@ -1620,17 +1767,22 @@ def _platform_args(architecture: str) -> list[str]:
         os_name, cpu = architecture.split("/", 1)
     except ValueError as error:
         raise RuntimeImagePreparationError(
-            "runtime_image.runtime_invalid", "runtime architecture must be os/architecture"
+            "runtime_image.runtime_invalid",
+            "runtime architecture must be os/architecture",
         ) from error
     if not os_name or not cpu or "/" in cpu:
         raise RuntimeImagePreparationError(
-            "runtime_image.runtime_invalid", "runtime architecture must be os/architecture"
+            "runtime_image.runtime_invalid",
+            "runtime architecture must be os/architecture",
         )
     return ["--override-os", os_name, "--override-arch", cpu]
 
 
 def _observed_architecture(image: Mapping[str, object]) -> str:
-    os_name, architecture = image.get("os", image.get("Os")), image.get("architecture", image.get("Architecture"))
+    os_name, architecture = (
+        image.get("os", image.get("Os")),
+        image.get("architecture", image.get("Architecture")),
+    )
     if not isinstance(os_name, str) or not isinstance(architecture, str):
         raise RuntimeImagePreparationError(
             "runtime_image.architecture_missing", "OCI image platform is missing"
@@ -1644,7 +1796,8 @@ def _observed_runtime_interface(image: Mapping[str, object]) -> str:
         labels = labels.get("Labels", labels.get("labels"))
     if not isinstance(labels, Mapping):
         raise RuntimeImagePreparationError(
-            "runtime_image.interface_missing", "OCI image runtime interface label is missing"
+            "runtime_image.interface_missing",
+            "OCI image runtime interface label is missing",
         )
     values = {
         str(labels[name])
@@ -1658,7 +1811,8 @@ def _observed_runtime_interface(image: Mapping[str, object]) -> str:
     }
     if len(values) != 1:
         raise RuntimeImagePreparationError(
-            "runtime_image.interface_missing", "OCI image runtime interface label is missing or ambiguous"
+            "runtime_image.interface_missing",
+            "OCI image runtime interface label is missing or ambiguous",
         )
     return values.pop()
 
@@ -1680,8 +1834,15 @@ def _object_mapping(value: Mapping[str, object] | object) -> Mapping[str, object
     data = {
         name: getattr(value, name)
         for name in (
-            "state", "image_digest", "oci_layout_sha256", "image_bytes", "build_id",
-            "architecture", "runtime_interface", "config_id", "local_reference",
+            "state",
+            "image_digest",
+            "oci_layout_sha256",
+            "image_bytes",
+            "build_id",
+            "architecture",
+            "runtime_interface",
+            "config_id",
+            "local_reference",
         )
         if hasattr(value, name)
     }
@@ -1694,7 +1855,9 @@ def _object_mapping(value: Mapping[str, object] | object) -> Mapping[str, object
 
 def _string(value: object, field: str) -> str:
     if not isinstance(value, str) or not value:
-        raise RuntimeImagePreparationError("runtime_image.identity_invalid", f"{field} is invalid")
+        raise RuntimeImagePreparationError(
+            "runtime_image.identity_invalid", f"{field} is invalid"
+        )
     return value
 
 
@@ -1742,7 +1905,8 @@ def _atomic_json_replace(path: Path, value: Mapping[str, object]) -> None:
     except OSError as error:
         _unlink_quietly(temporary)
         raise RuntimeImagePreparationError(
-            "runtime_image.receipt_write_failed", "runtime image receipt could not be recorded"
+            "runtime_image.receipt_write_failed",
+            "runtime image receipt could not be recorded",
         ) from error
 
 

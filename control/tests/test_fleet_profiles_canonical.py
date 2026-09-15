@@ -290,7 +290,9 @@ def test_numbered_autosave_uses_revision_and_load_freezes_whole_roster() -> None
             actor="other",
         )
 
-    application = service.load(2, actor="test", request_key="00000000-0000-4000-8000-000000000099")
+    application = service.load(
+        2, actor="test", request_key="00000000-0000-4000-8000-000000000099"
+    )
     assert application.state == "succeeded"
     assert application.progress.intended_profile is not None
     assert application.progress.intended_profile.scope.node_ids == [NODE_1, NODE_2]
@@ -335,7 +337,10 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
     from .test_fleet_profiles import _SwitchAdapter
 
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, cache_resolver=resolve, switch_adapter=_SwitchAdapter()
+        sessions,
+        clock=lambda: NOW,
+        cache_resolver=resolve,
+        switch_adapter=_SwitchAdapter(),
     )
     profile = service.create(
         FleetProfileInput(

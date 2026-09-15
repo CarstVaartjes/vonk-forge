@@ -112,7 +112,12 @@ def _spec(
             "interface": "vonk.runtime.v1",
             "adapter": "vllm",
             "adapter_version": 1,
-            "telemetry": {"engine": "vllm", "engine_version": None, "metrics_format": "prometheus", "metrics_path": "/metrics"},
+            "telemetry": {
+                "engine": "vllm",
+                "engine_version": None,
+                "metrics_format": "prometheus",
+                "metrics_path": "/metrics",
+            },
             "image": "registry.example/vonk/vllm@sha256:" + "0" * 64,
             "architecture": "linux/arm64",
             "entrypoint": ["/opt/vonk/bin/vllm", "serve"],
@@ -286,7 +291,9 @@ def _compile(
     )
 
 
-def test_controller_compiler_preserves_canonical_model_path_and_publisher_text() -> None:
+def test_controller_compiler_preserves_canonical_model_path_and_publisher_text() -> (
+    None
+):
     spec = _spec()
     path = "模型 file_" * 64
     publisher = "发布者 " + "_" * 124
@@ -535,7 +542,9 @@ def test_compiled_launch_payload_rejects_document_over_dedicated_ceiling() -> No
             "reserved_memory_bytes": 1,
         },
     )
-    _mapping(payload["runtime"])["oversized_flat_field"] = "x" * MAX_COMPILED_EXECUTION_PLAN_BYTES
+    _mapping(payload["runtime"])["oversized_flat_field"] = (
+        "x" * MAX_COMPILED_EXECUTION_PLAN_BYTES
+    )
     with pytest.raises(CompiledExecutionPlanError, match="too large"):
         validate_compiled_launch_payload(payload)
 
@@ -601,7 +610,9 @@ def test_compiled_launch_payload_rejects_mismatched_receipt() -> None:
         },
     )
     mismatched = copy.deepcopy(payload)
-    distribution = _mapping(_first_mapping(mismatched["artifacts"])["distribution_object"])
+    distribution = _mapping(
+        _first_mapping(mismatched["artifacts"])["distribution_object"]
+    )
     distribution["bytes"] = _integer(distribution["bytes"]) + 1
     with pytest.raises(CompiledExecutionPlanError):
         validate_compiled_launch_payload(mismatched)
@@ -1025,7 +1036,9 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
 def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
     from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
-    recipe = RecipeDefinition.model_validate(canonical_example("recipe-source-build.json"))
+    recipe = RecipeDefinition.model_validate(
+        canonical_example("recipe-source-build.json")
+    )
     model = ModelDefinition.model_validate(canonical_example("model-definition.json"))
     recipe_document = recipe.model_dump(mode="json")
     model_document = model.model_dump(mode="json")
@@ -1214,8 +1227,12 @@ def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundar
         )
 
 
-def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resolution() -> None:
-    recipe = RecipeDefinition.model_validate(canonical_example("recipe-source-build.json"))
+def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resolution() -> (
+    None
+):
+    recipe = RecipeDefinition.model_validate(
+        canonical_example("recipe-source-build.json")
+    )
 
     class Cache:
         def resolve_artifact_set(self, **_kwargs: object) -> object:
@@ -1251,7 +1268,9 @@ def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resoluti
 
 
 def test_placement_rejects_unresolved_role_and_endpoint() -> None:
-    recipe = RecipeDefinition.model_validate(canonical_example("recipe-source-build.json"))
+    recipe = RecipeDefinition.model_validate(
+        canonical_example("recipe-source-build.json")
+    )
     with pytest.raises(ExecutionPlanCompilationError, match="mapped role"):
         _placement(
             recipe,
@@ -1261,9 +1280,7 @@ def test_placement_rejects_unresolved_role_and_endpoint() -> None:
         )
 
     with pytest.raises(ExecutionPlanCompilationError, match="endpoint"):
-        _placement(
-            recipe, {}, _PlacementTarget(rank=0, role="entrypoint"), 1
-        )
+        _placement(recipe, {}, _PlacementTarget(rank=0, role="entrypoint"), 1)
 
 
 def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and_isolation() -> (
@@ -1303,8 +1320,7 @@ def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and
     assert wire.security.host_network is False
     runtime_image = wire.runtime_image
     assert (
-        runtime_image.registry_manifest_digest
-        != runtime_image.platform_manifest_digest
+        runtime_image.registry_manifest_digest != runtime_image.platform_manifest_digest
     )
     assert runtime_image.platform_manifest_digest == runtime_image.image_digest
     assert runtime_image.local_image_config_id != runtime_image.image_digest
@@ -1799,7 +1815,9 @@ def test_execution_identity_covers_compiled_launch_facts_and_ignores_notes() -> 
     baseline = execution_identity_sha256(base)
     notes = copy.deepcopy(base)
     notes["editorial_notes"] = {"release": "same bytes"}
-    _first_mapping(notes["model_dependencies"])["artifact_key"] = "new-provenance-handle"
+    _first_mapping(notes["model_dependencies"])["artifact_key"] = (
+        "new-provenance-handle"
+    )
     assert execution_identity_sha256(notes) == baseline
 
     changes = []

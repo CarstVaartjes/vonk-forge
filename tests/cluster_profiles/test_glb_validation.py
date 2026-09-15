@@ -16,7 +16,7 @@ from cluster_profiles.qualification_fixtures import FixtureError, _glb_metadata
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTEXTS = ("platform",)
-VALIDATOR_SHA256 = "10e31294146186d3b2b5cf935dbac2eb1416dae07b379c2815b1deaf9cdb6f75"
+VALIDATOR_SHA256 = "740cbcd2a36546c39eaf67d26f3485f5c31f00a946ed116e53ef2c08934cf6c1"
 
 
 def _json_object(value: object) -> dict[str, object]:
@@ -63,7 +63,6 @@ def _json_array_at(document: dict[str, object], *path: str | int) -> list[object
     """Return the mutable JSON array at *path*."""
 
     return _json_array(_json_navigate(document, *path))
-
 
 
 class Glb:
@@ -283,7 +282,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             "bufferView": builder.view(webp),
             "mimeType": "image/webp",
         }
-        _json_array_at(document, "textures")[0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
+        _json_array_at(document, "textures")[0] = {
+            "extensions": {"EXT_texture_webp": {"source": 0}}
+        }
         document["extensionsUsed"] = ["EXT_texture_webp"]
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.validate(document, builder, "textured")
@@ -332,7 +333,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         builder = Glb()
         document = builder.document()
         position_view = builder.views[_json_int(builder.accessors[0]["bufferView"])]
-        struct.pack_into("<f", builder.blob, _json_int(position_view["byteOffset"]), math.nan)
+        struct.pack_into(
+            "<f", builder.blob, _json_int(position_view["byteOffset"]), math.nan
+        )
         self.rejected(document, builder, "geometry", "non-finite")
 
         builder = Glb()
@@ -500,7 +503,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             count=1,
             target=34962,
         )
-        _json_at(document, "meshes", 0, "primitives", 0, "attributes")["NORMAL"] = normal
+        _json_at(document, "meshes", 0, "primitives", 0, "attributes")["NORMAL"] = (
+            normal
+        )
         self.rejected(document, builder, "geometry", "attribute counts")
 
         builder = Glb()
@@ -565,7 +570,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             count=3,
             target=34962,
         )
-        _json_at(document, "meshes", 0, "primitives", 0, "attributes")["_CUSTOM"] = custom
+        _json_at(document, "meshes", 0, "primitives", 0, "attributes")["_CUSTOM"] = (
+            custom
+        )
         self.rejected(document, builder, "geometry", "UNSIGNED_INT")
 
         builder = Glb()
@@ -612,7 +619,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
                 document = builder.document(profile)
                 parent = len(_json_array_at(document, "nodes"))
                 child = parent + 1
-                _json_array_at(document, "nodes").extend([{"children": [child]}, {"name": "child"}])
+                _json_array_at(document, "nodes").extend(
+                    [{"children": [child]}, {"name": "child"}]
+                )
                 _json_array_at(document, "scenes").append({"nodes": [parent, child]})
                 self.rejected(document, builder, profile, "scene roots are invalid")
 
@@ -663,7 +672,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
             with self.subTest(profile=profile):
                 builder = Glb()
                 document = builder.document(profile)
-                attributes = _json_at(document, "meshes", 0, "primitives", 0, "attributes")
+                attributes = _json_at(
+                    document, "meshes", 0, "primitives", 0, "attributes"
+                )
                 normal = attributes.get("NORMAL")
                 if normal is None:
                     normal = builder.accessor(
@@ -674,7 +685,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
                         target=34962,
                     )
                     attributes["NORMAL"] = normal
-                normal_view = builder.views[_json_int(builder.accessors[_json_int(normal)]["bufferView"])]
+                normal_view = builder.views[
+                    _json_int(builder.accessors[_json_int(normal)]["bufferView"])
+                ]
                 struct.pack_into(
                     "<f", builder.blob, _json_int(normal_view["byteOffset"]), math.nan
                 )
@@ -745,7 +758,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         webp_header = b"RIFF\x08\0\0\0WEBPVP8 "
         _json_at(document, "images", 0)["bufferView"] = builder.view(webp_header)
         _json_at(document, "images", 0)["mimeType"] = "image/webp"
-        _json_array_at(document, "textures")[0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
+        _json_array_at(document, "textures")[0] = {
+            "extensions": {"EXT_texture_webp": {"source": 0}}
+        }
         document["extensionsUsed"] = ["EXT_texture_webp"]
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
@@ -766,7 +781,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         )
         _json_at(document, "images", 0)["bufferView"] = builder.view(duplicate_webp)
         _json_at(document, "images", 0)["mimeType"] = "image/webp"
-        _json_array_at(document, "textures")[0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
+        _json_array_at(document, "textures")[0] = {
+            "extensions": {"EXT_texture_webp": {"source": 0}}
+        }
         document["extensionsUsed"] = ["EXT_texture_webp"]
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
@@ -793,7 +810,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         )
         _json_at(document, "images", 0)["bufferView"] = builder.view(fake_webp)
         _json_at(document, "images", 0)["mimeType"] = "image/webp"
-        _json_array_at(document, "textures")[0] = {"extensions": {"EXT_texture_webp": {"source": 0}}}
+        _json_array_at(document, "textures")[0] = {
+            "extensions": {"EXT_texture_webp": {"source": 0}}
+        }
         document["extensionsUsed"] = ["EXT_texture_webp"]
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.rejected(document, builder, "textured-pbr", "does not match its MIME")
@@ -838,9 +857,9 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         builder = Glb()
         document = builder.document("textured-pbr")
         image_view = _json_int(_json_at(document, "images", 0)["bufferView"])
-        _json_at(document, "meshes", 0, "primitives", 0, "attributes")["_IMAGE_ALIAS"] = len(
-            builder.accessors
-        )
+        _json_at(document, "meshes", 0, "primitives", 0, "attributes")[
+            "_IMAGE_ALIAS"
+        ] = len(builder.accessors)
         builder.accessors.append(
             {
                 "bufferView": image_view,

@@ -31,9 +31,7 @@ def _sample(
     observed_at = previous.get("observed_at") if previous else None
     if isinstance(observed_at, str) and observed_at:
         interval = (now - datetime.fromisoformat(observed_at)).total_seconds()
-        if (
-            interval >= STALE_AFTER_SECONDS or interval < 0
-        ) and previous is not None:
+        if (interval >= STALE_AFTER_SECONDS or interval < 0) and previous is not None:
             # A disconnected worker is not a throughput sample. Preserve elapsed
             # work already measured, but begin a fresh adjacent receipt window.
             previous = dict(previous, observed_at=now.isoformat())
@@ -81,11 +79,15 @@ def cache_progress(
         completed_bytes=require_integer(value["downloaded_bytes"], "downloaded bytes"),
         total_bytes=total,
         total_bytes_known=total is not None,
-        completed_items=require_integer(value["completed_artifacts"], "completed artifacts"),
+        completed_items=require_integer(
+            value["completed_artifacts"], "completed artifacts"
+        ),
         total_items=require_integer(value["total_artifacts"], "total artifacts"),
         checkpoint=OperationCheckpoint(
             key="artifact-set",
-            sequence=require_integer(value["completed_artifacts"], "completed artifacts"),
+            sequence=require_integer(
+                value["completed_artifacts"], "completed artifacts"
+            ),
             cursor=text(value.get("current_artifact_key")),
         ),
     )

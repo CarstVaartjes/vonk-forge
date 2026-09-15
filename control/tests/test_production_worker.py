@@ -75,8 +75,12 @@ def test_production_worker_does_not_claim_agent_owned_upgrade_parent(
     assert persisted.current_attempt == 0
 
 
-@pytest.mark.parametrize("coordinator", ["fleet_profiles", "run_switches", "recoveries", "build_cleanup"])
-def test_recipe_worker_services_routes_while_coordinators_are_active(tmp_path, coordinator) -> None:
+@pytest.mark.parametrize(
+    "coordinator", ["fleet_profiles", "run_switches", "recoveries", "build_cleanup"]
+)
+def test_recipe_worker_services_routes_while_coordinators_are_active(
+    tmp_path, coordinator
+) -> None:
     calls: list[str] = []
     engine = create_engine(f"sqlite:///{tmp_path / 'fair-worker.sqlite'}")
     Base.metadata.create_all(engine)
@@ -110,7 +114,8 @@ def test_recipe_worker_services_routes_while_coordinators_are_active(tmp_path, c
 
 
 def test_production_builder_wires_recipe_operations_and_housekeeping(
-    tmp_path, request,
+    tmp_path,
+    request,
 ) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
     Base.metadata.create_all(engine)
@@ -190,7 +195,11 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     assert fleet_profiles._switch_adapter._run_switch is run_switches
     assert run_switches._artifact_phase_executor is not None
     from vonk_control.failure_evidence import FailureEvidenceService
-    assert any(isinstance(callback.__self__, FailureEvidenceService) for callback in worker._background_services)
+
+    assert any(
+        isinstance(callback.__self__, FailureEvidenceService)
+        for callback in worker._background_services
+    )
     image_production = worker._background_closers[0].__self__
     assert image_production.scheduler is not None
     scheduler = image_production.scheduler

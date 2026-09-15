@@ -90,7 +90,9 @@ def test_non_path_recipe_environment_remains_recipe_owned() -> None:
         ("pytorch-pipeline", "unsupported", None),
     ),
 )
-def test_telemetry_contract_matches_agent_producer(slug: str, adapter: str, path: str | None) -> None:
+def test_telemetry_contract_matches_agent_producer(
+    slug: str, adapter: str, path: str | None
+) -> None:
     contract = telemetry_contract(slug)
     assert (contract.adapter, contract.path) == (adapter, path)
     values = dict(effective_environment(slug, ()))

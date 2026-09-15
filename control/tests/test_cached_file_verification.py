@@ -25,7 +25,9 @@ def test_repeated_reads_reuse_verification_but_same_size_changes_do_not(
         scans.append(True)
         return original_hasher()
 
-    monkeypatch.setattr("vonk_control.cached_file_verification.hashlib.sha256", count_scan)
+    monkeypatch.setattr(
+        "vonk_control.cached_file_verification.hashlib.sha256", count_scan
+    )
     for _ in range(5):
         assert verifier.verify_path(path, digest, len(original))
     assert len(scans) == 1
@@ -36,7 +38,9 @@ def test_repeated_reads_reuse_verification_but_same_size_changes_do_not(
     assert len(scans) == 2
 
 
-def test_replacement_symlink_and_different_digest_cannot_reuse_verification(tmp_path: Path) -> None:
+def test_replacement_symlink_and_different_digest_cannot_reuse_verification(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "image.tar"
     original = b"verified archive"
     path.write_bytes(original)
@@ -63,6 +67,7 @@ def test_changed_during_verification_is_not_remembered(tmp_path: Path) -> None:
     verifier = CachedFileVerifier()
     digest = hashlib.sha256(content).hexdigest()
     with path.open("rb") as stream:
+
         class ChangingReader(io.RawIOBase, BinaryIO):
             def fileno(self) -> int:
                 return stream.fileno()

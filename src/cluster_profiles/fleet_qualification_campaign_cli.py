@@ -196,9 +196,7 @@ def _load_authority(path: Path) -> CampaignAuthority:
     root = _object(document, "qualification authority")
     schema_version = root.get("schema_version")
     if schema_version != 2 or isinstance(schema_version, bool):
-        raise QualificationError(
-            f"qualification authority identity is invalid: {path}"
-        )
+        raise QualificationError(f"qualification authority identity is invalid: {path}")
     category_fields = {
         "capacity_blocked_recipe_keys",
         "legal_blocked_recipe_keys",
@@ -221,9 +219,7 @@ def _load_authority(path: Path) -> CampaignAuthority:
     )
     authority_id = _string(root["authority_id"], "authority_id")
     if _LANE_NAME.fullmatch(authority_id) is None:
-        raise QualificationError(
-            f"qualification authority identity is invalid: {path}"
-        )
+        raise QualificationError(f"qualification authority identity is invalid: {path}")
     catalog = _object(root["catalog"], "qualification authority catalog")
     _exact_keys(
         catalog,

@@ -48,7 +48,9 @@ def fixture_server():
         thread.join(timeout=2)
 
 
-def test_execute_http_check_uses_real_request_response_and_assertions(fixture_server: str) -> None:
+def test_execute_http_check_uses_real_request_response_and_assertions(
+    fixture_server: str,
+) -> None:
     check = {
         "name": "chat-smoke",
         "kind": "openai.chat",
@@ -56,7 +58,11 @@ def test_execute_http_check_uses_real_request_response_and_assertions(fixture_se
             "transport": "http",
             "method": "POST",
             "path": "/v1/chat/completions",
-            "body": {"model": "$ALIAS", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 4},
+            "body": {
+                "model": "$ALIAS",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 4,
+            },
         },
         "assertions": ["chat.nonempty", "chat.output-cap"],
     }
@@ -76,23 +82,31 @@ def test_http_evaluator_rejects_output_cap() -> None:
     response = {"choices": [{"text": "done"}], "usage": {"completion_tokens": 3}}
 
     with pytest.raises(ServingExecutionError, match="output cap"):
-        evaluate_http_response(HttpObservation(200, {}, json.dumps(response).encode()), check)
+        evaluate_http_response(
+            HttpObservation(200, {}, json.dumps(response).encode()), check
+        )
 
 
 @pytest.mark.parametrize(
     "usage",
     [{}, {"completion_tokens": -1}, {"completion_tokens": "1"}],
 )
-def test_output_cap_requires_nonnegative_integer_usage(usage: dict[str, object]) -> None:
+def test_output_cap_requires_nonnegative_integer_usage(
+    usage: dict[str, object],
+) -> None:
     check = {
         "kind": "openai.chat",
-        "request": {"body": {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}},
+        "request": {
+            "body": {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}
+        },
         "assertions": ["chat.nonempty", "chat.output-cap"],
     }
     response = {"choices": [{"message": {"content": "done"}}], "usage": usage}
 
     with pytest.raises(ServingExecutionError, match="output cap"):
-        evaluate_http_response(HttpObservation(200, {}, json.dumps(response).encode()), check)
+        evaluate_http_response(
+            HttpObservation(200, {}, json.dumps(response).encode()), check
+        )
 
 
 def test_http_execution_rejects_oversized_content_length_before_read() -> None:
@@ -118,7 +132,11 @@ def test_http_execution_rejects_oversized_content_length_before_read() -> None:
     }
 
     with pytest.raises(ServingExecutionError, match="maximum body size"):
-        execute_http_check("http://fixture", check, opener=lambda *_args, **_kwargs: OversizedResponse())
+        execute_http_check(
+            "http://fixture",
+            check,
+            opener=lambda *_args, **_kwargs: OversizedResponse(),
+        )
 
 
 def test_job_evaluator_requires_declared_output_slot() -> None:
@@ -128,14 +146,18 @@ def test_job_evaluator_requires_declared_output_slot() -> None:
         "assertions": ["inference.completed", "artifact.output"],
     }
 
-    observed = evaluate_job_result({"state": "succeeded", "outputs": [{"slot": "result", "bytes": 1}]}, check)
+    observed = evaluate_job_result(
+        {"state": "succeeded", "outputs": [{"slot": "result", "bytes": 1}]}, check
+    )
 
     assert observed["response_shape"] == "job.result"
     assert observed["output_count"] == 1
 
 
 @pytest.mark.parametrize("state", ["failed", "completed"])
-def test_job_evaluator_rejects_non_succeeded_completion_with_outputs(state: str) -> None:
+def test_job_evaluator_rejects_non_succeeded_completion_with_outputs(
+    state: str,
+) -> None:
     check = {
         "kind": "artifact-job.output",
         "request": {"output_slot": "result"},
@@ -143,4 +165,6 @@ def test_job_evaluator_rejects_non_succeeded_completion_with_outputs(state: str)
     }
 
     with pytest.raises(ServingExecutionError, match="successful completion"):
-        evaluate_job_result({"state": state, "outputs": [{"slot": "result", "bytes": 1}]}, check)
+        evaluate_job_result(
+            {"state": state, "outputs": [{"slot": "result", "bytes": 1}]}, check
+        )

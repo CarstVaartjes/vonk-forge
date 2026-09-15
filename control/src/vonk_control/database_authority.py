@@ -30,7 +30,9 @@ def _canonical(value: object) -> bytes:
     ).encode("utf-8")
 
 
-def _revision(documents: Mapping[str, object], dependencies: Mapping[str, object]) -> str:
+def _revision(
+    documents: Mapping[str, object], dependencies: Mapping[str, object]
+) -> str:
     return hashlib.sha256(
         _canonical({"dependencies": dependencies, "documents": documents})
     ).hexdigest()

@@ -392,8 +392,12 @@ def test_controller_distribution_http_response_round_trips_through_rust(
     assert isinstance(initializer, dict)
     initializer["name"] = "__init__.py"
     assignment = DistributionAssignment.parse(document)
-    source.register_artifact_set(assignment.model_artifact_set_sha256, assignment.objects)
-    source.register_runtime_image(assignment.oci_image_digest, assignment.oci_archive_sha256)
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(
+        assignment.oci_image_digest, assignment.oci_archive_sha256
+    )
     service = DistributionService(source, clock=clock)
     service.register(assignment)
     object.__setattr__(services, "distribution", service)
@@ -404,6 +408,9 @@ def test_controller_distribution_http_response_round_trips_through_rust(
     assert response.status_code == 200
     result = subprocess.run(
         [str(install_start_wire_probe), "--distribution"],
-        input=response.text + "\n", capture_output=True, text=True, check=True,
+        input=response.text + "\n",
+        capture_output=True,
+        text=True,
+        check=True,
     )
     assert DistributionAssignment.model_validate_json(result.stdout) == assignment

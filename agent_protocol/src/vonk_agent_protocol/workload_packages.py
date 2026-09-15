@@ -311,7 +311,11 @@ class _SignedHttpIndexIdentity(WireModel):
 
 
 UpstreamIdentity = Annotated[
-    _GitSource | _HuggingFaceSource | _OciSource | _PythonIndexIdentity | _SignedHttpIndexIdentity,
+    _GitSource
+    | _HuggingFaceSource
+    | _OciSource
+    | _PythonIndexIdentity
+    | _SignedHttpIndexIdentity,
     Field(discriminator="provider"),
 ]
 

@@ -22,7 +22,9 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 
 
 def _canonical(value: object) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
 
 
 def _repack(files: dict[str, bytes]) -> bytes:
@@ -46,7 +48,11 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
             "identity": {
                 "publisher": "fixture",
                 "slug": "tiny-model",
-                "family": {"publisher": "fixture", "slug": "tiny-model", "title": "Tiny Model"},
+                "family": {
+                    "publisher": "fixture",
+                    "slug": "tiny-model",
+                    "title": "Tiny Model",
+                },
                 "model": {
                     "publisher": "fixture",
                     "slug": "tiny-model",
@@ -56,8 +62,15 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                 "version": "1.0.0",
                 "variant": "default",
             },
-            "metadata": {"description": "A deterministic package fixture.", "tags": ["fixture"]},
-            "access": {"visibility": "public", "gated": False, "authentication": "none"},
+            "metadata": {
+                "description": "A deterministic package fixture.",
+                "tags": ["fixture"],
+            },
+            "access": {
+                "visibility": "public",
+                "gated": False,
+                "authentication": "none",
+            },
             "lineage": {
                 "publisher": "fixture",
                 "relation": "official",
@@ -66,10 +79,22 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
             },
             "dependencies": [],
             "modalities": ["text"],
-            "source": {"repository": "https://example.invalid/fixture", "revision": "a" * 40},
-            "format": {"container": "safetensors", "precision": "fp16", "quantization": "none"},
+            "source": {
+                "repository": "https://example.invalid/fixture",
+                "revision": "a" * 40,
+            },
+            "format": {
+                "container": "safetensors",
+                "precision": "fp16",
+                "quantization": "none",
+            },
             "parameters": {"total": 1, "active": 1},
-            "limits": {"context_tokens": 128, "resolution_pixels": None, "frames": None, "sample_rate_hz": None},
+            "limits": {
+                "context_tokens": 128,
+                "resolution_pixels": None,
+                "frames": None,
+                "sample_rate_hz": None,
+            },
             "license": {
                 "spdx": "Apache-2.0",
                 "url": "https://www.apache.org/licenses/LICENSE-2.0",
@@ -113,11 +138,19 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
     recipe = RecipeDefinition.model_validate(
         {
             "identity": {"publisher": "fixture", "slug": "tiny-recipe"},
-            "metadata": {"title": "Tiny Recipe", "description": "A deterministic package fixture.", "tags": ["fixture"]},
+            "metadata": {
+                "title": "Tiny Recipe",
+                "description": "A deterministic package fixture.",
+                "tags": ["fixture"],
+            },
             "models": [
                 {
                     "id": "primary",
-                    "model": {"publisher": "fixture", "slug": "tiny-model", "content_sha256": model_digest},
+                    "model": {
+                        "publisher": "fixture",
+                        "slug": "tiny-model",
+                        "content_sha256": model_digest,
+                    },
                     "files": [
                         {
                             "id": "weights",
@@ -130,14 +163,22 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
             ],
             "execution": {
                 "mode": "image",
-                "image": {"repository": "fixture/tiny", "digest": "d" * 64, "platform": "linux/arm64"},
+                "image": {
+                    "repository": "fixture/tiny",
+                    "digest": "d" * 64,
+                    "platform": "linux/arm64",
+                },
             },
             "runtime": {
                 "engine": "vllm",
                 "entrypoint": ["serve"],
                 "arguments": [],
                 "environment": [],
-                "lifecycle": {"pre_start": [], "post_stop": [], "stop_timeout_seconds": 30},
+                "lifecycle": {
+                    "pre_start": [],
+                    "post_stop": [],
+                    "stop_timeout_seconds": 30,
+                },
             },
             "topology": {
                 "name": "single",
@@ -167,12 +208,25 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                         },
                     }
                 ],
-                "parallelism": {"world_size": 1, "tensor": 1, "pipeline": 1, "data": 1, "backend": "none"},
+                "parallelism": {
+                    "world_size": 1,
+                    "tensor": 1,
+                    "pipeline": 1,
+                    "data": 1,
+                    "backend": "none",
+                },
                 "fabric": {"connectivity": "none", "minimum_bandwidth_mbps": 0},
                 "start_order": ["worker"],
                 "stop_order": ["worker"],
             },
-            "interfaces": [{"adapter": "openai", "port": 8000, "model_aliases": ["tiny"], "health_path": "/health"}],
+            "interfaces": [
+                {
+                    "adapter": "openai",
+                    "port": 8000,
+                    "model_aliases": ["tiny"],
+                    "health_path": "/health",
+                }
+            ],
             "validation": {
                 "benchmarks": [],
                 "serving": {
@@ -185,15 +239,24 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                                 "transport": "http",
                                 "method": "POST",
                                 "path": "/v1/chat/completions",
-                                "body": {"messages": [{"role": "user", "content": "hello"}]},
+                                "body": {
+                                    "messages": [{"role": "user", "content": "hello"}]
+                                },
                             },
                             "assertions": ["chat.nonempty"],
                         }
                     ],
                 },
             },
-            "provenance": {"source_kind": "global", "source_reference": "fixture", "attribution": []},
-            "settings": {"kind": "generation", "context_tokens": {"value": 128, "change_effect": "none"}},
+            "provenance": {
+                "source_kind": "global",
+                "source_reference": "fixture",
+                "attribution": [],
+            },
+            "settings": {
+                "kind": "generation",
+                "context_tokens": {"value": 128, "change_effect": "none"},
+            },
             "release": {
                 "version": "1.0.0",
                 "released_at": "2026-01-01",
@@ -220,7 +283,11 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
         "package_type": "recipe",
         "recipe_content_sha256": recipe_digest,
         "files": [
-            {"path": path, "sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
+            {
+                "path": path,
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "size": len(content),
+            }
             for path, content in sorted(files.items())
         ],
         "build_inputs": [],
@@ -267,7 +334,11 @@ def _package_with_extra_member(package: bytes) -> bytes:
     files["fixture.txt"] = b"same recipe, new package bytes\n"
     manifest = json.loads(files["manifest.json"])
     manifest["files"] = [
-        {"path": path, "sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
+        {
+            "path": path,
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "size": len(content),
+        }
         for path, content in sorted(files.items())
         if path != "manifest.json"
     ]
@@ -275,7 +346,9 @@ def _package_with_extra_member(package: bytes) -> bytes:
     return _repack(files)
 
 
-def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_path: Path) -> None:
+def test_production_reader_pins_raw_index_and_package_to_resolved_commit(
+    tmp_path: Path,
+) -> None:
     index, row, package = _canonical_package_fixture()
     publication = "2" * 40
     requests: list[str] = []
@@ -283,9 +356,13 @@ def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_pat
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(str(request.url))
         if request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(200, json={"object": {"sha": publication, "type": "commit"}})
+            return httpx.Response(
+                200, json={"object": {"sha": publication, "type": "commit"}}
+            )
         if request.url.path.endswith("/catalog-index.json"):
-            return httpx.Response(200, headers={"content-type": "text/plain"}, content=index)
+            return httpx.Response(
+                200, headers={"content-type": "text/plain"}, content=index
+            )
         if request.url.path.endswith("tiny-recipe.tar.gz"):
             return httpx.Response(
                 200,
@@ -302,18 +379,18 @@ def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_pat
     )
     snapshot = client.list()
     item = client.fetch(
-        next(
-            entry.uri
-            for entry in snapshot.items
-            if entry.slug == "tiny-recipe"
-        )
+        next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe")
     )
-    assert requests[0].endswith("/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main")
+    assert requests[0].endswith(
+        "/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main"
+    )
     assert requests[1] == (
         "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge-recipes/"
         f"{publication}/catalog-index.json"
     )
-    package_metadata = require_mapping(row["package"], "canonical fixture package metadata")
+    package_metadata = require_mapping(
+        row["package"], "canonical fixture package metadata"
+    )
     assert requests[2] == (
         "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge-recipes/"
         f"{publication}/{package_metadata['path']}"
@@ -326,19 +403,33 @@ def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_pat
     assert item.package_handle.closure_path.is_dir()
 
 
-def test_production_reader_can_pin_through_the_internal_raw_relay(tmp_path: Path) -> None:
+def test_production_reader_can_pin_through_the_internal_raw_relay(
+    tmp_path: Path,
+) -> None:
     index, row, package = _canonical_package_fixture()
     publication = "3" * 40
     requests: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(str(request.url))
-        if request.url.port == 8083 and request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(200, json={"object": {"sha": publication, "type": "commit"}})
-        if request.url.port == 8085 and request.url.path.endswith("/catalog-index.json"):
-            return httpx.Response(200, headers={"content-type": "text/plain"}, content=index)
+        if request.url.port == 8083 and request.url.path.endswith(
+            "/git/ref/heads/main"
+        ):
+            return httpx.Response(
+                200, json={"object": {"sha": publication, "type": "commit"}}
+            )
+        if request.url.port == 8085 and request.url.path.endswith(
+            "/catalog-index.json"
+        ):
+            return httpx.Response(
+                200, headers={"content-type": "text/plain"}, content=index
+            )
         if request.url.port == 8085 and request.url.path.endswith("tiny-recipe.tar.gz"):
-            return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=package)
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/octet-stream"},
+                content=package,
+            )
         return httpx.Response(404)
 
     client = RecipePackageClient(
@@ -349,8 +440,12 @@ def test_production_reader_can_pin_through_the_internal_raw_relay(tmp_path: Path
         transport=httpx.MockTransport(handler),
     )
     snapshot = client.list()
-    item = client.fetch(next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe"))
-    package_metadata = require_mapping(row["package"], "canonical fixture package metadata")
+    item = client.fetch(
+        next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe")
+    )
+    package_metadata = require_mapping(
+        row["package"], "canonical fixture package metadata"
+    )
 
     assert requests == [
         "http://127.0.0.1:8083/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main",
@@ -384,13 +479,16 @@ def test_publication_ref_uses_nested_commit_object_for_large_github_responses(
                     "object": {
                         "sha": publication,
                         "type": "commit",
-                        "url": "https://api.github.com/repos/example/git/commits/" + publication,
+                        "url": "https://api.github.com/repos/example/git/commits/"
+                        + publication,
                     },
                     "node_id": "MDM6UmVm" + "x" * 130_000,
                 },
             )
         if request.url.path.endswith("/catalog-index.json"):
-            return httpx.Response(200, headers={"content-type": "application/json"}, content=index)
+            return httpx.Response(
+                200, headers={"content-type": "application/json"}, content=index
+            )
         if request.url.path.endswith("tiny-recipe.tar.gz"):
             return httpx.Response(
                 200,
@@ -406,14 +504,18 @@ def test_publication_ref_uses_nested_commit_object_for_large_github_responses(
         transport=httpx.MockTransport(handler),
     )
     snapshot = client.list()
-    item = client.fetch(next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe"))
+    item = client.fetch(
+        next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe")
+    )
 
     assert calls[0].endswith(
         "/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main"
     )
     assert item.package_handle is not None
     assert item.package_handle.publication_commit == publication
-    package_metadata = require_mapping(row["package"], "canonical fixture package metadata")
+    package_metadata = require_mapping(
+        row["package"], "canonical fixture package metadata"
+    )
     assert item.package_handle.package_sha256 == package_metadata["sha256"]
     client.close()
 
@@ -421,7 +523,9 @@ def test_publication_ref_uses_nested_commit_object_for_large_github_responses(
 def test_publication_network_smoke_at_published_commit(tmp_path: Path) -> None:
     """Opt-in smoke for the real GitHub API/raw publication boundary."""
     if os.environ.get("VONK_RUN_RECIPE_NETWORK_SMOKE") != "1":
-        pytest.skip("set VONK_RUN_RECIPE_NETWORK_SMOKE=1 for the public publication smoke")
+        pytest.skip(
+            "set VONK_RUN_RECIPE_NETWORK_SMOKE=1 for the public publication smoke"
+        )
     client = RecipePackageClient(
         None,
         publication_commit="2001c6502bfdc66141dd7224bfde5d77734e9959",
@@ -452,20 +556,31 @@ def test_publication_network_smoke_at_published_commit(tmp_path: Path) -> None:
         client.close()
 
 
-def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(tmp_path: Path) -> None:
+def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(
+    tmp_path: Path,
+) -> None:
     index, _, package = _canonical_package_fixture()
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(str(request.url))
         if request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(200, json={"object": {"sha": "2" * 40, "type": "commit"}})
+            return httpx.Response(
+                200, json={"object": {"sha": "2" * 40, "type": "commit"}}
+            )
         if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(200, headers={"content-type": "text/plain"}, content=index)
-        return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=package)
+            return httpx.Response(
+                200, headers={"content-type": "text/plain"}, content=index
+            )
+        return httpx.Response(
+            200, headers={"content-type": "application/octet-stream"}, content=package
+        )
 
     client = RecipePackageClient(
-        None, api_url="http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler)
+        None,
+        api_url="http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(handler),
     )
     client.list()
     candidate = client.list()
@@ -474,11 +589,15 @@ def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(tmp_
     client.close()
 
 
-def test_same_recipe_digest_but_changed_package_bytes_are_fetched(tmp_path: Path) -> None:
+def test_same_recipe_digest_but_changed_package_bytes_are_fetched(
+    tmp_path: Path,
+) -> None:
     index, row, package = _canonical_package_fixture()
     changed = _package_with_extra_member(package)
     changed_row = deepcopy(row)
-    changed_package = dict(require_mapping(row["package"], "canonical fixture package metadata"))
+    changed_package = dict(
+        require_mapping(row["package"], "canonical fixture package metadata")
+    )
     changed_package["sha256"] = hashlib.sha256(changed).hexdigest()
     changed_package["expected_bytes"] = len(changed)
     changed_row["package"] = changed_package
@@ -490,13 +609,26 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(tmp_path: Path
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(str(request.url))
         if request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(200, json={"object": {"sha": "2" * 40, "type": "commit"}})
+            return httpx.Response(
+                200, json={"object": {"sha": "2" * 40, "type": "commit"}}
+            )
         if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(200, headers={"content-type": "application/json"}, content=state["index"])
-        return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=state["package"])
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                content=state["index"],
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/octet-stream"},
+            content=state["package"],
+        )
 
     client = RecipePackageClient(
-        None, api_url="http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler)
+        None,
+        api_url="http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(handler),
     )
     client.prepare(client.list())
     calls.clear()
@@ -507,10 +639,14 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(tmp_path: Path
     client.close()
 
 
-def test_failed_candidate_can_retry_against_previous_good_snapshot(tmp_path: Path) -> None:
+def test_failed_candidate_can_retry_against_previous_good_snapshot(
+    tmp_path: Path,
+) -> None:
     index, row, package = _canonical_package_fixture()
     bad_row = deepcopy(row)
-    bad_package = dict(require_mapping(row["package"], "canonical fixture package metadata"))
+    bad_package = dict(
+        require_mapping(row["package"], "canonical fixture package metadata")
+    )
     bad_package["sha256"] = "0" * 64
     bad_package["expected_bytes"] = 1
     bad_row["package"] = bad_package
@@ -520,10 +656,22 @@ def test_failed_candidate_can_retry_against_previous_good_snapshot(tmp_path: Pat
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(200, headers={"content-type": "application/json"}, content=state["index"])
-        return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=state["package"])
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                content=state["index"],
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/octet-stream"},
+            content=state["package"],
+        )
 
-    client = RecipePackageClient("http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler))
+    client = RecipePackageClient(
+        "http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(handler),
+    )
     client.prepare(client.list())
     state["index"] = _canonical(bad_index) + b"\n"
     with pytest.raises(RecipePackageError, match="bytes do not match"):
@@ -535,23 +683,33 @@ def test_failed_candidate_can_retry_against_previous_good_snapshot(tmp_path: Pat
     client.close()
 
 
-def test_restart_offline_reuses_promoted_snapshot_and_package_closure(tmp_path: Path) -> None:
+def test_restart_offline_reuses_promoted_snapshot_and_package_closure(
+    tmp_path: Path,
+) -> None:
     index, _, package = _canonical_package_fixture()
 
     def online(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(200, headers={"content-type": "application/json"}, content=index)
-        return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=package)
+            return httpx.Response(
+                200, headers={"content-type": "application/json"}, content=index
+            )
+        return httpx.Response(
+            200, headers={"content-type": "application/octet-stream"}, content=package
+        )
 
     cache = tmp_path / "packages"
-    first = RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(online))
+    first = RecipePackageClient(
+        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(online)
+    )
     first.prepare(first.list())
     first.close()
 
     def offline(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("offline", request=request)
 
-    restarted = RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(offline))
+    restarted = RecipePackageClient(
+        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(offline)
+    )
     snapshot = restarted.list()
     restarted.prepare(snapshot)
     item = restarted.fetch(snapshot.items[0].uri)

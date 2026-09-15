@@ -22,7 +22,9 @@ _sibling_library = ROOT.parent / "vonk-forge-recipes"
 CANDIDATE = (
     Path(_configured_library)
     if _configured_library
-    else _sibling_library if _sibling_library.is_dir() else None
+    else _sibling_library
+    if _sibling_library.is_dir()
+    else None
 )
 
 
@@ -83,7 +85,9 @@ def test_secret_scan_excludes_nested_platform_checkout(tmp_path: Path) -> None:
     _VALIDATOR._scan_secrets(library, platform)
 
 
-def test_canonical_harness_loader_uses_exact_platform_root(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_canonical_harness_loader_uses_exact_platform_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     stale = types.ModuleType("vonk_control")
     stale_harnesses = types.ModuleType("vonk_control.harnesses")
     stale_metadata = types.ModuleType("vonk_control.harnesses.canonical_metadata")
@@ -92,7 +96,9 @@ def test_canonical_harness_loader_uses_exact_platform_root(monkeypatch: pytest.M
     )
     monkeypatch.setitem(sys.modules, "vonk_control", stale)
     monkeypatch.setitem(sys.modules, "vonk_control.harnesses", stale_harnesses)
-    monkeypatch.setitem(sys.modules, "vonk_control.harnesses.canonical_metadata", stale_metadata)
+    monkeypatch.setitem(
+        sys.modules, "vonk_control.harnesses.canonical_metadata", stale_metadata
+    )
 
     canonical = _VALIDATOR._canonical_harness_from(ROOT)
     assert canonical("vllm").slug == "vllm"
@@ -157,7 +163,9 @@ def test_contract_recipe_library_rejects_an_archive_without_recipe_entrypoint(
     library = tmp_path / "library"
     library.mkdir()
     for directory in ("models", "recipes", "contracts"):
-        (library / directory).symlink_to(candidate / directory, target_is_directory=True)
+        (library / directory).symlink_to(
+            candidate / directory, target_is_directory=True
+        )
     package_dir = library / "packages"
     package_dir.mkdir()
     for source in (candidate / "packages").glob("*.tar.gz"):
@@ -168,7 +176,10 @@ def test_contract_recipe_library_rejects_an_archive_without_recipe_entrypoint(
     for path in sorted((candidate / "recipes").glob("*.json")):
         document = json.loads(path.read_text())
         package_path = candidate / "packages" / f"{path.stem}.tar.gz"
-        if document.get("execution", {}).get("mode") == "build" and package_path.is_file():
+        if (
+            document.get("execution", {}).get("mode") == "build"
+            and package_path.is_file()
+        ):
             recipe_path = path
             recipe_document = document
             break

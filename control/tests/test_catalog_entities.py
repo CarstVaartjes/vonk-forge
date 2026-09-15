@@ -209,11 +209,14 @@ def test_failed_recipe_candidate_preserves_the_prior_active_revision(
     active = service.resolve(successor.id, actor="operator", expected_revision=3)
     assert active.id == successor.id
     assert service.get_entity(first.document_id).id == successor.id
-    assert session.scalar(
-        select(CatalogRecipeModelReference).where(
-            CatalogRecipeModelReference.recipe_revision_id == successor.id
+    assert (
+        session.scalar(
+            select(CatalogRecipeModelReference).where(
+                CatalogRecipeModelReference.recipe_revision_id == successor.id
+            )
         )
-    ) is not None
+        is not None
+    )
 
 
 def test_model_capability_revision_reuses_its_artifact_projection(

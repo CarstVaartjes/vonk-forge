@@ -10,9 +10,7 @@ from typing import Annotated, Literal
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-ImageDigest = Annotated[
-    str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-]
+ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
 NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 
 PreparationState = Literal[
@@ -58,9 +56,13 @@ class ControllerAssetState(_StrictModel):
             raise ValueError("asset missing bytes require a known expected size")
         if self.state == "ready":
             if self.expected_bytes is None or self.missing_bytes != 0:
-                raise ValueError("ready Controller asset requires complete byte coverage")
+                raise ValueError(
+                    "ready Controller asset requires complete byte coverage"
+                )
             if self.verified_sha256 is None or self.verified_at is None:
-                raise ValueError("ready Controller asset requires verification evidence")
+                raise ValueError(
+                    "ready Controller asset requires verification evidence"
+                )
         if self.state in {"failed", "unsupported"} and self.reason is None:
             raise ValueError("failed or unsupported Controller asset requires a reason")
         return self
@@ -94,7 +96,9 @@ class TargetAssetState(_StrictModel):
             or self.verified_sha256 is None
             or self.verified_at is None
         ):
-            raise ValueError("ready target asset requires complete verification evidence")
+            raise ValueError(
+                "ready target asset requires complete verification evidence"
+            )
         if self.state in {"failed", "unsupported"} and self.reason is None:
             raise ValueError("failed or unsupported target asset requires a reason")
         return self
@@ -126,22 +130,32 @@ class ModelArtifactPreparation(_StrictModel):
         if self.model_content_sha256 in self.dependency_model_content_sha256:
             raise ValueError("primary model cannot also be a dependency")
         if self.controller.expected_bytes != self.artifact_set_bytes:
-            raise ValueError("Controller model bytes do not match the exact artifact set")
+            raise ValueError(
+                "Controller model bytes do not match the exact artifact set"
+            )
         if (
             self.controller.state == "ready"
             and self.controller.verified_sha256 != self.artifact_set_sha256
         ):
-            raise ValueError("Controller model digest does not match the exact artifact set")
+            raise ValueError(
+                "Controller model digest does not match the exact artifact set"
+            )
         for target in self.targets:
             if target.expected_bytes != self.artifact_set_bytes:
-                raise ValueError("target model bytes do not match the exact artifact set")
+                raise ValueError(
+                    "target model bytes do not match the exact artifact set"
+                )
             if target.imported_image_digest is not None:
-                raise ValueError("model targets cannot claim an imported image identity")
+                raise ValueError(
+                    "model targets cannot claim an imported image identity"
+                )
             if (
                 target.state == "ready"
                 and target.verified_sha256 != self.artifact_set_sha256
             ):
-                raise ValueError("target model digest does not match the exact artifact set")
+                raise ValueError(
+                    "target model digest does not match the exact artifact set"
+                )
         if (
             self.completeness == "complete"
             and self.controller.state == "ready"
@@ -215,7 +229,9 @@ class CompatibilityPreparation(_StrictModel):
             json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         if self.compatibility_key_sha256 != expected_key:
-            raise ValueError("compatibility key does not match immutable preparation inputs")
+            raise ValueError(
+                "compatibility key does not match immutable preparation inputs"
+            )
         if len(self.node_ids) != len(set(self.node_ids)) or self.node_ids != sorted(
             self.node_ids
         ):
@@ -235,7 +251,9 @@ class RolloutPreparation(_StrictModel):
     schema_version: Literal[2] = 2
     model: ModelArtifactPreparation
     runtime_image: RuntimeImagePreparation
-    exceptions: list[CompatibilityPreparation] = Field(default_factory=list, max_length=64)
+    exceptions: list[CompatibilityPreparation] = Field(
+        default_factory=list, max_length=64
+    )
     target_node_ids: list[NodeId] = Field(min_length=1, max_length=64)
     controller_ready: bool
     targets_ready: bool
@@ -255,17 +273,22 @@ class RolloutPreparation(_StrictModel):
                 raise ValueError("asset readiness must cover the complete target scope")
         for exception in self.exceptions:
             if not set(exception.node_ids) <= expected_targets:
-                raise ValueError("exception preparation exceeds the rollout target scope")
+                raise ValueError(
+                    "exception preparation exceeds the rollout target scope"
+                )
             if self.model.recipe_revision_sha256 is None:
-                raise ValueError("exception preparation requires an exact recipe revision")
+                raise ValueError(
+                    "exception preparation requires an exact recipe revision"
+                )
             identity = exception.compatibility
             if (
-                identity.recipe_revision_sha256
-                != self.model.recipe_revision_sha256
+                identity.recipe_revision_sha256 != self.model.recipe_revision_sha256
                 or identity.model_content_sha256 != self.model.model_content_sha256
                 or identity.runtime_image_digest != self.runtime_image.image_digest
             ):
-                raise ValueError("exception identity does not match the rollout authority")
+                raise ValueError(
+                    "exception identity does not match the rollout authority"
+                )
         computed_controller = (
             self.model.completeness == "complete"
             and self.model.controller.state == "ready"
@@ -277,13 +300,18 @@ class RolloutPreparation(_StrictModel):
             for target in asset.targets
         )
         exceptions_ready = all(item.state == "ready" for item in self.exceptions)
-        blockers_absent = not any(reason.severity == "blocker" for reason in self.reasons)
+        blockers_absent = not any(
+            reason.severity == "blocker" for reason in self.reasons
+        )
         if self.controller_ready != computed_controller:
             raise ValueError("controller readiness does not match asset evidence")
         if self.targets_ready != computed_targets:
             raise ValueError("target readiness does not match asset evidence")
         if self.ready != (
-            computed_controller and computed_targets and exceptions_ready and blockers_absent
+            computed_controller
+            and computed_targets
+            and exceptions_ready
+            and blockers_absent
         ):
             raise ValueError("rollout readiness does not match preparation evidence")
         return self

@@ -132,7 +132,9 @@ def test_tailscale_browser_forwarding_crosses_only_an_internal_edge() -> None:
     assert "tailnet-control-plane" not in services["caddy"]["networks"]
 
 
-def test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurator_to_profile() -> None:
+def test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurator_to_profile() -> (
+    None
+):
     """Catches render warnings and disabled-profile dependencies in either graph."""
     for hermes in (False, True):
         services = _rendered(hermes=hermes)["services"]

@@ -847,7 +847,9 @@ def test_build_resolution_without_cache_returns_durable_intent_identity(
     ],
 )
 def test_build_resolution_rejects_incomplete_or_mismatched_cache_receipts(
-    tmp_path: Path, field: str, value: object,
+    tmp_path: Path,
+    field: str,
+    value: object,
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     service = RecipeBuildService(sessions, bundles=bundles)
@@ -1307,7 +1309,8 @@ def test_terminal_build_can_be_retried_once_with_fresh_fencing_and_capacity(
 
 @pytest.mark.parametrize("force", [False, True])
 def test_fresh_build_request_retries_matching_failed_build_idempotently(
-    tmp_path: Path, force: bool,
+    tmp_path: Path,
+    force: bool,
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     builds = RecipeBuildService(sessions, bundles=bundles)
@@ -2087,11 +2090,20 @@ def test_image_distribution_requires_the_previewed_plan_digest(
     assert operation.nodes == (builder, target)
 
 
-@pytest.mark.parametrize("settings", [
-    {"kind": "generation", "context_tokens": 4096, "change_effects": {"context_tokens": "rebuild"}},
-    None,
-])
-def test_build_readers_reject_retired_or_null_persisted_settings(tmp_path, settings) -> None:
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {
+            "kind": "generation",
+            "context_tokens": 4096,
+            "change_effects": {"context_tokens": "rebuild"},
+        },
+        None,
+    ],
+)
+def test_build_readers_reject_retired_or_null_persisted_settings(
+    tmp_path, settings
+) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     with sessions.begin() as session:
         row = session.get(CatalogDocumentRevision, revision.id)
@@ -2142,7 +2154,9 @@ def test_build_readers_require_persisted_settings(tmp_path) -> None:
         service.plan(revision.id, node_id, now=now)
 
 
-def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_changes(tmp_path) -> None:
+def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_changes(
+    tmp_path,
+) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     catalog = CatalogEntityService(sessions, clock=lambda: now)
     document = copy.deepcopy(revision.document)
@@ -2166,12 +2180,31 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
     service = RecipeBuildService(sessions, bundles=bundles)
     first = service.plan(selected.id, node_id, now=now)
     assert recipe_builds_module._build_effective_settings(canonical.settings) == {
-        "values": {"knobs.compiler": "clang", "knobs.enabled": False, "knobs.count": 0, "knobs.label": ""},
-        "change_effects": {name: "rebuild" for name in ("knobs.compiler", "knobs.enabled", "knobs.count", "knobs.label")},
+        "values": {
+            "knobs.compiler": "clang",
+            "knobs.enabled": False,
+            "knobs.count": 0,
+            "knobs.label": "",
+        },
+        "change_effects": {
+            name: "rebuild"
+            for name in (
+                "knobs.compiler",
+                "knobs.enabled",
+                "knobs.count",
+                "knobs.label",
+            )
+        },
     }
-    assert service.plan(selected.id, node_id, now=now).build_input_sha256 == first.build_input_sha256
-    _json_object(
-        _json_object(_json_object(document["settings"])["knobs"])["compiler"]
-    )["value"] = "gcc"
+    assert (
+        service.plan(selected.id, node_id, now=now).build_input_sha256
+        == first.build_input_sha256
+    )
+    _json_object(_json_object(_json_object(document["settings"])["knobs"])["compiler"])[
+        "value"
+    ] = "gcc"
     changed = publish(document)
-    assert service.plan(changed.id, node_id, now=now).build_input_sha256 != first.build_input_sha256
+    assert (
+        service.plan(changed.id, node_id, now=now).build_input_sha256
+        != first.build_input_sha256
+    )

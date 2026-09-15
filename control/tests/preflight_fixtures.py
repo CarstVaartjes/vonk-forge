@@ -76,7 +76,12 @@ def record_passing_preflight(
                     attempt=1,
                     fence=str(uuid.uuid4()),
                     lease_deadline=now + timedelta(seconds=60),
-                    agent_certificate_serial=session.scalar(select(AgentCertificate.serial).where(AgentCertificate.node_id == node.node_id, AgentCertificate.state == "active")),
+                    agent_certificate_serial=session.scalar(
+                        select(AgentCertificate.serial).where(
+                            AgentCertificate.node_id == node.node_id,
+                            AgentCertificate.state == "active",
+                        )
+                    ),
                     state="succeeded",
                     result={
                         "schema_version": 1,

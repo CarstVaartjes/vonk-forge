@@ -98,7 +98,9 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
     with sessions() as session:
         applications = tuple(
             session.scalars(
-                select(FleetProfileApplication).order_by(FleetProfileApplication.created_at)
+                select(FleetProfileApplication).order_by(
+                    FleetProfileApplication.created_at
+                )
             )
         )
         children = tuple(
@@ -110,7 +112,9 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         assert retry.progress["attempt"] == 2
         assert retry.progress["workload_intent_ordinal"] == original_ordinal + 1
         retry_scope = require_mapping(retry.plan["scope"], "retry scope")
-        assert tuple(require_sequence(retry_scope["node_ids"], "retry nodes")) == tuple(nodes)
+        assert tuple(require_sequence(retry_scope["node_ids"], "retry nodes")) == tuple(
+            nodes
+        )
         original_child = session.get(Job, child_id)
         assert original_child is not None
         assert original_child.payload["plan"] == original_plan
@@ -266,11 +270,11 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
         child_phases = require_sequence(child_plan["phases"], "child phases")
         first_phase = require_mapping(child_phases[0], "first child phase")
         assert child_build["state"] == "planned"
-        assert (
-            first_phase["subphase"] == "container-build"
-        )
+        assert first_phase["subphase"] == "container-build"
         retry_scope = require_mapping(retry.plan["scope"], "retry scope")
-        assert tuple(require_sequence(retry_scope["node_ids"], "retry nodes")) == tuple(nodes)
+        assert tuple(require_sequence(retry_scope["node_ids"], "retry nodes")) == tuple(
+            nodes
+        )
 
 
 def test_malformed_failed_profile_does_not_block_unrelated_queued_work(

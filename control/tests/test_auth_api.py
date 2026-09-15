@@ -125,9 +125,9 @@ def test_auth_openapi_documents_every_runtime_error_status() -> None:
             responses = paths[path][method]["responses"]
             assert statuses <= set(responses)
             for status_code in statuses - {"422"}:
-                response_schema = responses[status_code]["content"][
-                    "application/json"
-                ]["schema"]
+                response_schema = responses[status_code]["content"]["application/json"][
+                    "schema"
+                ]
                 assert response_schema["$ref"].endswith(BoundedErrorResponse.__name__)
 
 
@@ -247,9 +247,7 @@ def test_login_rejects_non_exact_or_unbounded_strict_documents(
     """Coercion, extra fields, or out-of-bound credentials must fail pre-auth."""
     client, audits, _verifier = _client()
 
-    response = client.post(
-        "/api/auth/login", headers={"origin": ORIGIN}, json=document
-    )
+    response = client.post("/api/auth/login", headers={"origin": ORIGIN}, json=document)
 
     assert response.status_code == 422
     assert response.json() == {"detail": "login request is invalid"}
@@ -433,7 +431,10 @@ def test_cli_token_is_a_browser_session_only_download_with_expiry() -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/plain; charset=utf-8"
-    assert response.headers["content-disposition"] == 'attachment; filename="vonkctl-token"'
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="vonkctl-token"'
+    )
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-vonk-token-expires-at"] == "2026-09-12T09:30:00Z"
     token = response.text.strip()
@@ -457,9 +458,12 @@ def test_cli_token_cannot_be_minted_with_a_bearer_or_without_csrf() -> None:
         ttl_seconds=60,
         now=int(NOW.timestamp()),
     )
-    assert client.post(
-        "/api/auth/cli-token",
-        headers={"authorization": f"Bearer {bearer}"},
-    ).status_code == 401
+    assert (
+        client.post(
+            "/api/auth/cli-token",
+            headers={"authorization": f"Bearer {bearer}"},
+        ).status_code
+        == 401
+    )
     assert _login(client).status_code == 200
     assert client.post("/api/auth/cli-token").status_code == 403

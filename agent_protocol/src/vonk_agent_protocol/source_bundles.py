@@ -1,4 +1,5 @@
 """Canonical source-bundle digest document and verified storage metadata."""
+
 from __future__ import annotations
 
 import hashlib
@@ -24,9 +25,11 @@ class SourceBundleFile(WireModel):
     def canonical_relative_path(cls, value: str) -> str:
         path = PurePosixPath(value)
         if (
-            path.is_absolute() or path.as_posix() != value
+            path.is_absolute()
+            or path.as_posix() != value
             or any(part in {"", ".", ".."} for part in path.parts)
-            or "\x00" in value or len(value.encode("utf-8")) > 512
+            or "\x00" in value
+            or len(value.encode("utf-8")) > 512
         ):
             raise ValueError("source bundle path is not canonical and relative")
         return value
@@ -41,13 +44,17 @@ class SourceBundleDigestManifest(WireModel):
     def canonical_file_set(self) -> SourceBundleDigestManifest:
         paths = [item.path for item in self.files]
         if paths != sorted(set(paths), key=lambda value: value.encode("utf-8")):
-            raise ValueError("source bundle files must be unique and canonically sorted")
+            raise ValueError(
+                "source bundle files must be unique and canonically sorted"
+            )
         if self.total_bytes != sum(item.size for item in self.files):
             raise ValueError("source bundle total differs from its files")
         return self
 
     def digest(self) -> str:
-        document = self.model_dump(mode="json", include=set(SourceBundleDigestManifest.model_fields))
+        document = self.model_dump(
+            mode="json", include=set(SourceBundleDigestManifest.model_fields)
+        )
         return hashlib.sha256(canonical_message(document)).hexdigest()
 
 

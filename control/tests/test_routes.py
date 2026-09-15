@@ -58,7 +58,9 @@ def _policy() -> RouteEndpointPolicy:
     )
 
 
-def _publisher(tmp_path: Path, *, validate=lambda _: True, apply=lambda _: None) -> RoutePublisher:
+def _publisher(
+    tmp_path: Path, *, validate=lambda _: True, apply=lambda _: None
+) -> RoutePublisher:
     return RoutePublisher(
         tmp_path,
         endpoint_policy=_policy(),

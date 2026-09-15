@@ -64,9 +64,12 @@ def _installed(tmp_path, engine, *, nodes=1):
 
 
 def test_postgres_conflicts_deduplicate_distributed_runs_and_preserve_group_safety(
-    tmp_path, migrated_engine,
+    tmp_path,
+    migrated_engine,
 ):
-    sessions, lifecycle, nodes, installation = _installed(tmp_path, migrated_engine, nodes=2)
+    sessions, lifecycle, nodes, installation = _installed(
+        tmp_path, migrated_engine, nodes=2
+    )
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
     with sessions() as session:
         assert service._conflicts(session, nodes, action="run") == ([], [], [])
@@ -77,22 +80,30 @@ def test_postgres_conflicts_deduplicate_distributed_runs_and_preserve_group_safe
         conflicts, stops, blockers = service._conflicts(session, nodes, action="run")
         assert len(conflicts) == len(stops) == 1
         assert blockers == []
-        conflicts, stops, blockers = service._conflicts(session, nodes[:1], action="switch")
+        conflicts, stops, blockers = service._conflicts(
+            session, nodes[:1], action="switch"
+        )
         assert [item.code for item in blockers] == ["run-switch.cross-group_conflict"]
         assert len(conflicts) == 1 and stops == []
 
 
-def test_postgres_invalid_terminal_child_fails_without_nested_row_lock(tmp_path, migrated_engine):
+def test_postgres_invalid_terminal_child_fails_without_nested_row_lock(
+    tmp_path, migrated_engine
+):
     sessions, lifecycle, nodes, _ = _installed(tmp_path, migrated_engine)
     artifacts = RecordingArtifactExecutor(child_transfer=True)
     service = _service(
-        sessions, NOW, lifecycle, artifacts,
+        sessions,
+        NOW,
+        lifecycle,
+        artifacts,
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
     )
     request = _request(sessions, nodes[0])
     assert service.preview(request, actor="admin").allowed
     operation = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())), actor="admin"
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
     )
     service.tick()
     persisted = service.get(operation.operation_id)
@@ -117,7 +128,8 @@ def _awaiting_final_verification(tmp_path, engine):
     request = _request(sessions, nodes[0])
     assert service.preview(request, actor="admin").allowed
     operation = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())), actor="admin"
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
     )
     completed = set()
     for _ in range(20):
@@ -128,13 +140,19 @@ def _awaiting_final_verification(tmp_path, engine):
         child_id = current.result.child_operation_id
         if child_id:
             with sessions() as session:
-                children = tuple(session.scalars(select(AgentOperation).where(
-                    AgentOperation.parent_job_id == child_id
-                )))
+                children = tuple(
+                    session.scalars(
+                        select(AgentOperation).where(
+                            AgentOperation.parent_job_id == child_id
+                        )
+                    )
+                )
             for child in children:
                 if child.id not in completed:
                     lifecycle.record_node_result(
-                        child_id, child.node_id, succeeded=True,
+                        child_id,
+                        child.node_id,
+                        succeeded=True,
                         evidence=start_evidence(child.payload),
                     )
                     completed.add(child.id)
@@ -158,10 +176,16 @@ def _awaiting_final_verification(tmp_path, engine):
     return sessions, lifecycle, routes, publisher, service, operation
 
 
-def test_postgres_running_switch_allows_route_publication_and_survives_restart(tmp_path, migrated_engine):
-    sessions, lifecycle, routes, publisher, _, operation = _awaiting_final_verification(tmp_path, migrated_engine)
+def test_postgres_running_switch_allows_route_publication_and_survives_restart(
+    tmp_path, migrated_engine
+):
+    sessions, lifecycle, routes, publisher, _, operation = _awaiting_final_verification(
+        tmp_path, migrated_engine
+    )
     restarted = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
-    worker = RecipeOperationWorker(sessions, routes, clock=lambda: NOW, run_switches=restarted)
+    worker = RecipeOperationWorker(
+        sessions, routes, clock=lambda: NOW, run_switches=restarted
+    )
     for _ in range(4):
         worker.tick()
     result = restarted.get(operation.operation_id)
@@ -175,7 +199,9 @@ def test_postgres_running_switch_allows_route_publication_and_survives_restart(t
 
 
 def test_postgres_final_verification_has_durable_timeout(tmp_path, migrated_engine):
-    sessions, lifecycle, _, _, service, operation = _awaiting_final_verification(tmp_path, migrated_engine)
+    sessions, lifecycle, _, _, service, operation = _awaiting_final_verification(
+        tmp_path, migrated_engine
+    )
     before_operation = service.get(operation.operation_id)
     assert before_operation.result is not None
     before = before_operation.result
@@ -184,14 +210,18 @@ def test_postgres_final_verification_has_durable_timeout(tmp_path, migrated_engi
     current = service.get(operation.operation_id)
     assert current.result is not None
     assert current.result.phase_results == before.phase_results
-    restarted = _service(sessions, NOW + timedelta(seconds=300), lifecycle, RecordingArtifactExecutor())
+    restarted = _service(
+        sessions, NOW + timedelta(seconds=300), lifecycle, RecordingArtifactExecutor()
+    )
     restarted.tick()
     failed = restarted.get(operation.operation_id)
     assert failed.state == "failed"
     assert failed.status_reason == "run-switch.final-verification-timeout"
 
 
-def test_postgres_duplicate_apply_converges_under_target_lock(tmp_path, migrated_engine):
+def test_postgres_duplicate_apply_converges_under_target_lock(
+    tmp_path, migrated_engine
+):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
 
@@ -204,7 +234,10 @@ def test_postgres_duplicate_apply_converges_under_target_lock(tmp_path, migrated
     def apply():
         barrier.wait(timeout=5)
         return service._apply_plan(
-            plan, request_key=key, actor="admin", kind="recipe.run-switch.v2",
+            plan,
+            request_key=key,
+            actor="admin",
+            kind="recipe.run-switch.v2",
             workload_intent_ordinal=None,
         )
 

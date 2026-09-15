@@ -43,6 +43,7 @@ def _copy(tmp_path: Path) -> Path:
         "control/uv.lock",
         "control/packaging/public-contracts.lock",
         "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
+        "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl",
         ".github/workflows/validate-recipe-library.yml",
         "control/src/vonk_control/catalog_entities.py",
         "control/src/vonk_control/catalog_service.py",
@@ -711,17 +712,19 @@ def test_verifier_rejects_stale_sbom_after_lock_change(tmp_path: Path) -> None:
     assert "SBOM" in result.stderr or "manifest" in result.stderr
 
 
-def test_verifier_rejects_protocol_wheel_or_lock_drift(tmp_path: Path) -> None:
+def test_verifier_rejects_protocol_version_drift(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
-    source = repository / "agent_protocol/src/vonk_agent_protocol/contracts.py"
-    source.write_text(source.read_text() + "\n# package drift\n")
+    project = repository / "agent_protocol/pyproject.toml"
+    project.write_text(
+        project.read_text().replace('version = "2.2.0"', 'version = "2.2.1"', 1)
+    )
 
     result = subprocess.run(
         [SCRIPT, "--root", repository], capture_output=True, text=True, check=False
     )
 
     assert result.returncode != 0
-    assert "wheel" in result.stderr
+    assert "version" in result.stderr
 
 
 def test_verifier_rejects_a_missing_protocol_wheel_artifact(tmp_path: Path) -> None:
@@ -738,19 +741,28 @@ def test_verifier_rejects_a_missing_protocol_wheel_artifact(tmp_path: Path) -> N
     assert "wheel" in result.stderr
 
 
-def test_verifier_rejects_a_byte_different_protocol_wheel_with_the_same_name_and_version(
+def test_verifier_accepts_a_same_version_protocol_wheel_rebuild(
     tmp_path: Path,
 ) -> None:
     repository = _copy(tmp_path)
     wheel = repository / "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
     wheel.write_bytes(wheel.read_bytes() + b"different bytes")
 
-    result = subprocess.run(
+    # A same-version rebuild makes the recorded evidence stale, so verification
+    # fails closed until the evidence is regenerated...
+    stale = subprocess.run(
         [SCRIPT, "--root", repository], capture_output=True, text=True, check=False
     )
+    assert stale.returncode != 0
 
-    assert result.returncode != 0
-    assert "wheel" in result.stderr
+    # ...and regeneration needs no lock or version edit.
+    regenerated = subprocess.run(
+        [SCRIPT, "--root", repository, "--generate"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert regenerated.returncode == 0, regenerated.stderr
 
 
 def test_protocol_spdx_records_the_verified_wheel_checksum(tmp_path: Path) -> None:
@@ -794,26 +806,6 @@ def test_verifier_rejects_a_root_dockerignore_change(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "manifest" in result.stderr
-
-
-def test_verifier_rejects_a_protocol_lock_hash_that_does_not_match_the_wheel(
-    tmp_path: Path,
-) -> None:
-    repository = _copy(tmp_path)
-    lock = repository / "control/uv.lock"
-    wheel = repository / "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
-    wheel_hash = hashlib.sha256(wheel.read_bytes()).hexdigest()
-    lock.write_text(lock.read_text().replace(wheel_hash, "0" * 64))
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--generate"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "wheel" in result.stderr
 
 
 def test_verifier_rejects_a_dockerfile_that_copies_but_does_not_install_the_protocol_wheel(

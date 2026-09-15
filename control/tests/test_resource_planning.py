@@ -12,7 +12,9 @@ from vonk_control.resource_planning import (
 )
 
 
-def _recipe_settings(*, context: int | None = 32_768, concurrency: int | None = 1) -> dict[str, object]:
+def _recipe_settings(
+    *, context: int | None = 32_768, concurrency: int | None = 1
+) -> dict[str, object]:
     settings: dict[str, object] = {
         "kind": "generation",
         "knobs": {},
@@ -55,7 +57,9 @@ def _evidence(*, context_bytes_per_token: int | None = 2) -> ResourceEvidence:
 
 def test_text_settings_drive_demand_and_identity() -> None:
     small = resolve_effective_settings(_recipe_document(_recipe_settings()))
-    large = resolve_effective_settings(_recipe_document(_recipe_settings(context=65_536, concurrency=3)))
+    large = resolve_effective_settings(
+        _recipe_document(_recipe_settings(context=65_536, concurrency=3))
+    )
     assert small.allowed and large.allowed
     assert small.settings is not None and large.settings is not None
     first = resource_demand(small.settings, _evidence())
@@ -72,7 +76,13 @@ def test_non_text_settings_may_omit_context_concurrency_and_batch() -> None:
             "settings": {"kind": "job", "knobs": {}},
             "topology": {
                 "node_count": 1,
-                "parallelism": {"world_size": 1, "tensor": 1, "pipeline": 1, "data": 1, "backend": "local"},
+                "parallelism": {
+                    "world_size": 1,
+                    "tensor": 1,
+                    "pipeline": 1,
+                    "data": 1,
+                    "backend": "local",
+                },
             },
         }
     )
@@ -87,12 +97,19 @@ def test_parallelism_has_one_topology_authority_and_duplicate_is_blocked() -> No
             "settings": {"kind": "job", "parallelism": {"world_size": 99}},
             "topology": {
                 "node_count": 1,
-                "parallelism": {"tensor": 1, "pipeline": 1, "data": 1, "backend": "local"},
+                "parallelism": {
+                    "tensor": 1,
+                    "pipeline": 1,
+                    "data": 1,
+                    "backend": "local",
+                },
             },
         }
     )
     assert not result.allowed
-    assert any(reason.code == "resource.parallelism_duplicate" for reason in result.reasons)
+    assert any(
+        reason.code == "resource.parallelism_duplicate" for reason in result.reasons
+    )
 
 
 def test_declared_world_size_must_match_node_count_and_dimension_product() -> None:
@@ -112,7 +129,9 @@ def test_declared_world_size_must_match_node_count_and_dimension_product() -> No
         }
     )
     assert not result.allowed
-    assert any(reason.code == "resource.parallelism_inconsistent" for reason in result.reasons)
+    assert any(
+        reason.code == "resource.parallelism_inconsistent" for reason in result.reasons
+    )
 
 
 def test_capacity_only_uses_explicit_planned_stop_release() -> None:
@@ -120,10 +139,13 @@ def test_capacity_only_uses_explicit_planned_stop_release() -> None:
         "generation", 32_768, 1, None, ParallelismSettings(1, 1, 1, 1, "local")
     )
     demand = resource_demand(settings, _evidence())
-    capacity = [CapacitySnapshot("rank-0", "unified", 1_000, 600, 100, "measured", "b" * 64)]
+    capacity = [
+        CapacitySnapshot("rank-0", "unified", 1_000, 600, 100, "measured", "b" * 64)
+    ]
     without = plan_capacity({"rank-0": demand}, capacity, memory_floor_bytes=200)
     with_stop = plan_capacity(
-        {"rank-0": demand}, capacity,
+        {"rank-0": demand},
+        capacity,
         [PlannedStopRelease("old", "rank-0", "unified-memory", 100, True, "c" * 64)],
         memory_floor_bytes=200,
     )
@@ -133,12 +155,18 @@ def test_capacity_only_uses_explicit_planned_stop_release() -> None:
     assert with_stop.nodes[0].after_stop_free_after_bytes == 280
 
 
-def test_missing_changed_text_evidence_blocks_and_effect_does_not_rebuild_image() -> None:
-    settings = resolve_effective_settings(_recipe_document(_recipe_settings(context=65_536))).settings
+def test_missing_changed_text_evidence_blocks_and_effect_does_not_rebuild_image() -> (
+    None
+):
+    settings = resolve_effective_settings(
+        _recipe_document(_recipe_settings(context=65_536))
+    ).settings
     assert settings is not None
     demand = resource_demand(settings, _evidence(context_bytes_per_token=None))
     assert not demand.allowed
-    previous = EffectiveResourceSettings("generation", 32_768, 1, None, ParallelismSettings(2, 2, 1, 1, "tcp"))
+    previous = EffectiveResourceSettings(
+        "generation", 32_768, 1, None, ParallelismSettings(2, 2, 1, 1, "tcp")
+    )
     decision = classify_preparation_effects(previous, settings)
     assert decision.effect == "reprepare"
     assert decision.requires_reprepare

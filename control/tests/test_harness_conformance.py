@@ -58,7 +58,9 @@ def test_canonical_harness_completes_observed_synthetic_lifecycle(slug: str) -> 
 def test_conformance_fixture_uses_canonical_pydantic_definitions() -> None:
     request = _fixture_request("vllm")
     assert isinstance(request.recipe, RecipeDefinition)
-    assert request.models and all(isinstance(item, ModelDefinition) for item in request.models)
+    assert request.models and all(
+        isinstance(item, ModelDefinition) for item in request.models
+    )
     assert isinstance(request.plan, CompiledExecutionPlan)
     assert request.plan.schema_version == 2
     runtime_identity = request.runtime_spec["identity"]

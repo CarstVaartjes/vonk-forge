@@ -69,7 +69,9 @@ def test_all_boundaries_and_stable_json(tmp_path):
     assert service.snapshot().model_dump_json() == result.model_dump_json()
 
 
-def test_running_image_metadata_supplies_source_without_inventing_digest(tmp_path, monkeypatch):
+def test_running_image_metadata_supplies_source_without_inventing_digest(
+    tmp_path, monkeypatch
+):
     from vonk_control import deployment_provenance as provenance
 
     metadata = tmp_path / "controller-build.json"
@@ -238,10 +240,16 @@ def test_package_receipt_must_match_the_current_authenticated_binary(tmp_path):
                     "package_version": "1.2.3",
                     "self_test_passed": True,
                     "status": "upgraded",
-                    "activation_receipt": activation_receipt({
-                        **source_transport(), "package_sha256": "d" * 64,
-                        "package_version": "1.2.3", "target_binary_digest": "b" * 64,
-                    }, node, now=int(now.timestamp())),
+                    "activation_receipt": activation_receipt(
+                        {
+                            **source_transport(),
+                            "package_sha256": "d" * 64,
+                            "package_version": "1.2.3",
+                            "target_binary_digest": "b" * 64,
+                        },
+                        node,
+                        now=int(now.timestamp()),
+                    ),
                 },
             )
         )
@@ -330,7 +338,9 @@ def test_connected_recipe_start_receipts_expose_rank_artifacts(tmp_path):
     with sessions.begin() as session:
         attempt = session.scalar(
             select(AgentOperationAttempt)
-            .join(AgentOperation, AgentOperation.id == AgentOperationAttempt.operation_id)
+            .join(
+                AgentOperation, AgentOperation.id == AgentOperationAttempt.operation_id
+            )
             .where(AgentOperation.kind == "recipe.start")
             .order_by(AgentOperationAttempt.id)
         )

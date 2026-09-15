@@ -181,9 +181,7 @@ def _compiled_plan_fixture(
 
 def _controller_ca() -> tuple[str, str]:
     key = ed25519.Ed25519PrivateKey.generate()
-    subject = x509.Name(
-        [x509.NameAttribute(NameOID.COMMON_NAME, "controller-ca")]
-    )
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "controller-ca")])
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -336,7 +334,14 @@ def agent_system(tmp_path):
     clock = Clock()
     with sessions.begin() as session:
         for node, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
-            session.add(AgentNode(node_id=node, state="active", capabilities=[], workload_intent_ordinal=1))
+            session.add(
+                AgentNode(
+                    node_id=node,
+                    state="active",
+                    capabilities=[],
+                    workload_intent_ordinal=1,
+                )
+            )
             session.add(
                 AgentCertificate(
                     serial=serial,
@@ -879,6 +884,7 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         ) -> object:
             self.upgrade_calls.append(kwargs)
             from .package_upgrade_fixtures import rollback_authority
+
             operation = InstallVonkDebOperation(
                 type="install-vonk-deb",
                 package_sha256=kwargs["package_sha256"],
@@ -1126,8 +1132,7 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
         == 204
     )
     assert (
-        client.post("/agent/recipe-runs/observations", json=payload).status_code
-        == 401
+        client.post("/agent/recipe-runs/observations", json=payload).status_code == 401
     )
     assert (
         client.post(
@@ -1513,9 +1518,7 @@ def valid_enrollment_body(token: str) -> bytes:
     key = ed25519.Ed25519PrivateKey.generate()
     csr = (
         x509.CertificateSigningRequestBuilder()
-        .subject_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, NODE_C)])
-        )
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, NODE_C)]))
         .add_extension(
             x509.SubjectAlternativeName(
                 [
@@ -1782,10 +1785,6 @@ def test_claim_uses_atomic_presence_consumer_not_post_commit(
         assert session.get(AgentPresence, NODE_A) is not None
 
 
-
-
-
-
 @pytest.mark.parametrize(
     "hostname",
     ("", "-spark", "spark_3542", "spark 3542", "spark..lab", "a" * 256),
@@ -1953,8 +1952,6 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         assert node.architecture is None
-
-
 
 
 @pytest.mark.parametrize(
@@ -2347,21 +2344,39 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
     )
 
 
-def test_expired_exact_result_is_retained_as_diagnostic_without_completing_job(agent_system) -> None:
+def test_expired_exact_result_is_retained_as_diagnostic_without_completing_job(
+    agent_system,
+) -> None:
     client, services, _, clock = agent_system
     job = parent(services.sessions, clock)
     services.operations.enqueue(job.id, NODE_A, "recipe.stop", "a" * 64, STOP_PAYLOAD)
-    claim = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a")).json()
+    claim = client.post(
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
+    ).json()
     clock.now += timedelta(seconds=61)
     result = {
         key: claim[key]
-        for key in ("schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "deadline")
+        for key in (
+            "schema_version",
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "node_id",
+            "deadline",
+        )
     } | {"state": "succeeded", "result": {"stopped": True}}
 
-    response = client.post("/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result)
+    response = client.post(
+        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
+    )
     assert response.status_code == 202
     with services.sessions() as session:
-        attempt = session.scalar(select(AgentOperationAttempt).where(AgentOperationAttempt.fence == claim["fence"]))
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim["fence"]
+            )
+        )
         assert attempt.state == "expired"
         assert attempt.result == {"stopped": True}
         assert session.get(Job, job.id).state != "succeeded"
@@ -2927,9 +2942,9 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
         AgentCompiledExecutionPlan.model_validate(payload)
     )
     openapi = client.get("/openapi.json").json()
-    spec_route = openapi["paths"][
-        "/agent/recipe-installations/{installation_id}/spec"
-    ]["get"]
+    spec_route = openapi["paths"]["/agent/recipe-installations/{installation_id}/spec"][
+        "get"
+    ]
     schema_ref = spec_route["responses"]["200"]["content"]["application/json"][
         "schema"
     ]["$ref"]
@@ -3009,9 +3024,7 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
     key = ed25519.Ed25519PrivateKey.generate()
     csr = (
         x509.CertificateSigningRequestBuilder()
-        .subject_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, NODE_C)])
-        )
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, NODE_C)]))
         .add_extension(
             x509.SubjectAlternativeName(
                 [
@@ -3060,13 +3073,13 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
     assert "certificate_pem" in pickup.json()
     assert mismatch.status_code == 403
     assert "certificate" not in mismatch.text.lower()
+
+
 def _csr_for(node_id: str) -> bytes:
     key = ed25519.Ed25519PrivateKey.generate()
     return (
         x509.CertificateSigningRequestBuilder()
-        .subject_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)])
-        )
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)]))
         .add_extension(
             x509.SubjectAlternativeName(
                 [
@@ -3322,26 +3335,57 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
         assert attempt.result is None
 
 
-def test_recipe_job_failure_uses_its_typed_exit_result_at_authenticated_ingress(agent_system):
+def test_recipe_job_failure_uses_its_typed_exit_result_at_authenticated_ingress(
+    agent_system,
+):
     import json
     from pathlib import Path
 
     client, services, _, clock = agent_system
-    vectors = Path(__file__).parents[2] / "agent_protocol/src/vonk_agent_protocol/vectors"
-    request = json.loads((vectors / "recipe-job-run-claim-v1.json").read_text())["payload"]
-    job_result = json.loads((vectors / "recipe-job-run-result-v1.json").read_text())["result"]
-    services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "recipe.job.run.v1", "a" * 64, request,
+    vectors = (
+        Path(__file__).parents[2] / "agent_protocol/src/vonk_agent_protocol/vectors"
     )
-    claim_response = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+    request = json.loads((vectors / "recipe-job-run-claim-v1.json").read_text())[
+        "payload"
+    ]
+    job_result = json.loads((vectors / "recipe-job-run-result-v1.json").read_text())[
+        "result"
+    ]
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.job.run.v1",
+        "a" * 64,
+        request,
+    )
+    claim_response = client.post(
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
+    )
     assert claim_response.status_code == 200
     claim = claim_response.json()
-    result = {key: claim[key] for key in ("schema_version", "job_id", "operation_id", "attempt", "fence", "node_id", "deadline")}
-    result.update(state="failed", result=dict(job_result, exit_code=1, reason="runtime failed"))
-    response = client.post("/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result)
+    result = {
+        key: claim[key]
+        for key in (
+            "schema_version",
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "node_id",
+            "deadline",
+        )
+    }
+    result.update(
+        state="failed", result=dict(job_result, exit_code=1, reason="runtime failed")
+    )
+    response = client.post(
+        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
+    )
     assert response.status_code == 204
     with services.sessions() as session:
-        attempt = session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
+        attempt = (
+            session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
+        )
         assert attempt.state == "failed"
         assert attempt.result["exit_code"] == 1
 
@@ -3757,6 +3801,7 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
 
 def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
     from .package_upgrade_fixtures import source_transport
+
     client, services, _, clock = agent_system
     digest = hashlib.sha256(b"expected").hexdigest()
     (services.artifact_root / digest).write_bytes(b"tampered")
@@ -3832,9 +3877,7 @@ def test_authenticated_agents_can_fetch_only_signed_workload_tuf_targets(
     assert target.content == raw
     assert (
         client.get(
-            "/agent/workload-tuf/targets/platform/releases/1.2.3/"
-            + "a" * 64
-            + ".json",
+            "/agent/workload-tuf/targets/platform/releases/1.2.3/" + "a" * 64 + ".json",
             headers=agent_headers(NODE_A, "serial-a"),
         ).status_code
         == 404
@@ -3946,6 +3989,8 @@ def test_revoked_identity_is_gated_before_invalid_json_is_parsed(agent_system) -
         ).status_code
         == 401
     )
+
+
 def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None:
     from vonk_agent_protocol import (
         AgentClaim,

@@ -36,5 +36,7 @@ def _operation_ids(paths: dict[str, object]):
         if not isinstance(methods, dict):
             continue
         for operation in methods.values():
-            if isinstance(operation, dict) and isinstance(operation.get("operationId"), str):
+            if isinstance(operation, dict) and isinstance(
+                operation.get("operationId"), str
+            ):
                 yield operation["operationId"]

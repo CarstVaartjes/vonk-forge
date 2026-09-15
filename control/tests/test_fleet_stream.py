@@ -51,7 +51,7 @@ from vonk_control.telemetry_contract import TelemetryDetails
 from .telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
-COMMIT = "a"  * 64
+COMMIT = "a" * 64
 NODE_ID = "spk_" + "1" * 32
 SAMPLE_ID = "00000000-0000-4000-8000-000000000001"
 NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
@@ -72,7 +72,9 @@ class Projection(FleetProjection):
         )
 
 
-def _events(stream: FleetStream, last_event_id: int | None) -> AsyncGenerator[str, None]:
+def _events(
+    stream: FleetStream, last_event_id: int | None
+) -> AsyncGenerator[str, None]:
     """``FleetStream.events`` is an async generator, so the caller owns ``aclose``."""
 
     generator = stream.events(last_event_id)
@@ -86,9 +88,7 @@ class Events(FleetEventRepository):
         *,
         high_watermark: int,
         first_retained_id: int | None,
-        batches: list[
-            tuple[FleetEvent, ...] | FleetReplayBatch | BaseException
-        ]
+        batches: list[tuple[FleetEvent, ...] | FleetReplayBatch | BaseException]
         | None = None,
     ) -> None:
         self.high_watermark_value = high_watermark
@@ -305,7 +305,9 @@ def test_last_event_id_rejects_duplicates_signs_spacing_unicode_and_overflow(
         parse_last_event_id(values)
 
 
-def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics() -> None:
+def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics() -> (
+    None
+):
     telemetry_event = _event(
         6,
         "node-telemetry",
@@ -375,24 +377,24 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
                 "accelerator_performance_state": "P0",
             },
             "gap_samples": 0,
-                "id": SAMPLE_ID,
-                "node_id": NODE_ID,
-                "observed_at": "2026-08-15T11:59:58Z",
-                "received_at": "2026-08-15T11:59:59Z",
-                "metrics": {
-                    "capabilities": [],
-                    "provenance": {
-                        "collector": "test",
-                        "collector_version": "1",
-                    },
-                    "runtimes": [],
-                    "schema_version": 2,
-                    "series": [],
-                    "workloads": [],
+            "id": SAMPLE_ID,
+            "node_id": NODE_ID,
+            "observed_at": "2026-08-15T11:59:58Z",
+            "received_at": "2026-08-15T11:59:59Z",
+            "metrics": {
+                "capabilities": [],
+                "provenance": {
+                    "collector": "test",
+                    "collector_version": "1",
                 },
+                "runtimes": [],
+                "schema_version": 2,
+                "series": [],
+                "workloads": [],
             },
-            "schema_version": 1,
-        }
+        },
+        "schema_version": 1,
+    }
     assert recipe_fields == {"id": "7", "event": "recipe-state"}
     assert recipe_data == {
         "change": {
@@ -481,12 +483,16 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
     assert replay_fields == {"id": "6", "event": "operation-state"}
     assert isinstance(replay_data, dict)
     assert replay_data["projection_refresh_required"] is True
-    assert FleetSnapshotEvent.model_validate_json(
-        json.dumps(snapshot_data)
-    ).snapshot.event_cursor == 5
-    assert FleetChangeEvent.model_validate_json(
-        json.dumps(replay_data)
-    ).change.entity_id == "entity-6"
+    assert (
+        FleetSnapshotEvent.model_validate_json(
+            json.dumps(snapshot_data)
+        ).snapshot.event_cursor
+        == 5
+    )
+    assert (
+        FleetChangeEvent.model_validate_json(json.dumps(replay_data)).change.entity_id
+        == "entity-6"
+    )
     assert events.high_watermark_calls == 1
     assert projection.cursors == [5]
     assert events.replay_calls == [(5, NOW, 128)]
@@ -713,7 +719,9 @@ def test_midstream_retention_loss_resets_before_delivering_later_event() -> None
     ]
 
 
-def test_empty_stream_polls_once_per_second_and_keeps_alive_by_fifteen_seconds() -> None:
+def test_empty_stream_polls_once_per_second_and_keeps_alive_by_fifteen_seconds() -> (
+    None
+):
     events = Events(high_watermark=0, first_retained_id=None)
     timing = Timing()
     stream = FleetStream(
@@ -774,7 +782,9 @@ def test_database_failure_terminates_without_emitting_or_advancing() -> None:
     assert events.replay_calls == [(4, NOW, 128)]
 
 
-def test_production_repositories_bound_queries_and_release_before_orderly_close() -> None:
+def test_production_repositories_bound_queries_and_release_before_orderly_close() -> (
+    None
+):
     engine, sessions, repository = _production_stream_store()
     sample_ids = [f"00000000-0000-4000-8000-{value:012x}" for value in range(1, 129)]
     with sessions.begin() as session:
@@ -1178,15 +1188,20 @@ def test_sse_route_accepts_shared_auth_and_sets_exact_headers() -> None:
     route = "/api/fleet/stream"
 
     assert client.get(route, headers={"last-event-id": "+1"}).status_code == 401
-    assert client.get(route, params={"access_token": browser_session}).status_code == 401
+    assert (
+        client.get(route, params={"access_token": browser_session}).status_code == 401
+    )
     assert stream.calls == []
 
     client.cookies.set("vonk_session", browser_session)
     assert client.get(route, headers={"last-event-id": "+1"}).status_code == 400
-    assert client.get(
-        route,
-        headers=[("last-event-id", "1"), ("last-event-id", "2")],
-    ).status_code == 400
+    assert (
+        client.get(
+            route,
+            headers=[("last-event-id", "1"), ("last-event-id", "2")],
+        ).status_code
+        == 400
+    )
     assert stream.calls == []
 
     response = client.get(route, headers={"last-event-id": "0"})
@@ -1195,9 +1210,7 @@ def test_sse_route_accepts_shared_auth_and_sets_exact_headers() -> None:
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
     assert response.headers["cache-control"] == "no-cache, no-transform"
     assert response.headers["x-accel-buffering"] == "no"
-    assert response.text == (
-        "retry: 2000\nid: 12\nevent: fleet-snapshot\ndata: {}\n\n"
-    )
+    assert response.text == ("retry: 2000\nid: 12\nevent: fleet-snapshot\ndata: {}\n\n")
     assert stream.calls == [0]
 
     client.cookies.clear()

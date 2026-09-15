@@ -81,8 +81,6 @@ def _parse_model[ModelT: _RecipeJobModel](
         ) from error
 
 
-
-
 class RecipeJobFile(_RecipeJobModel):
     name: ArtifactName
     media_type: MediaType

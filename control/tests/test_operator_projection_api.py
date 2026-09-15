@@ -80,10 +80,15 @@ def test_operator_routes_use_singular_namespaces_and_shared_mutation_roles() -> 
     try:
         app = _app(Actor("viewer", "viewer"))
         client = TestClient(app)
-        assert client.post("/api/fleet/enroll", json={"name": "Spark"}).status_code == 403
-        assert client.post(
-            f"/api/fleet/{_NODE}/rename", json={"display_name": "Spark"}
-        ).status_code == 403
+        assert (
+            client.post("/api/fleet/enroll", json={"name": "Spark"}).status_code == 403
+        )
+        assert (
+            client.post(
+                f"/api/fleet/{_NODE}/rename", json={"display_name": "Spark"}
+            ).status_code
+            == 403
+        )
         assert client.post("/api/fleet/upgrade", json={"all": True}).status_code == 403
         paths = set(app.openapi()["paths"])
         assert "/api/model/library" in paths

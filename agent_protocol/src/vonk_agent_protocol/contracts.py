@@ -91,9 +91,7 @@ class AgentProtocolError(ValueError):
     """A protocol message is invalid or outside the agent trust boundary."""
 
 
-_UUID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-)
+_UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 CanonicalUUID = Annotated[
     str,
     Field(
@@ -149,7 +147,9 @@ class AgentUpgradePayload(WireModel):
     """Signed package authority for the current agent upgrade operation."""
 
     rollback: PackageRollbackAuthority
-    source_package_url: str = Field(pattern=r"^https://install\.vonkforge\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\.deb$")
+    source_package_url: str = Field(
+        pattern=r"^https://install\.vonkforge\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\.deb$"
+    )
     source_package_bytes: int = Field(strict=True, ge=1, le=1024**3)
     architecture: Literal["linux-arm64"]
     package_bytes: int = Field(strict=True, ge=1, le=1024**3)
@@ -161,7 +161,9 @@ class AgentUpgradePayload(WireModel):
             pattern=r"^https://install\.vonkforge\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\.deb$"
         ),
     ]
-    package_version: Annotated[str, Field(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")]
+    package_version: Annotated[
+        str, Field(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")
+    ]
     schema_version: Literal[1]
     target_binary_digest: DigestText
     target_build_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -287,7 +289,9 @@ class AgentFailureKind(StrEnum):
 
 class AgentFailureResult(WireModel):
     failure_kind: AgentFailureKind | None = None
-    retry_after_seconds: int | None = Field(default=None, strict=True, ge=0, le=2**32 - 1)
+    retry_after_seconds: int | None = Field(
+        default=None, strict=True, ge=0, le=2**32 - 1
+    )
     diagnostics: FailureDiagnostics | None = None
     package_activation: PackageActivationReceipt | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=1024)
@@ -429,20 +433,17 @@ def _validate_safe_keys(
         for key, item in value.items():
             if not isinstance(key, str):
                 raise AgentProtocolError("JSON object keys must be strings")
-            typed_recipe_build_key = (
-                operation is AgentOperation.RECIPE_BUILD
-                and (
-                    (
-                        path == ("options",)
-                        and key in {"environment", "ignorefile", "unset_environment"}
-                    )
-                    or (
-                        len(path) == 3
-                        and path[0] == "options"
-                        and path[1] == "additional_contexts"
-                        and isinstance(path[2], int)
-                        and key == "path"
-                    )
+            typed_recipe_build_key = operation is AgentOperation.RECIPE_BUILD and (
+                (
+                    path == ("options",)
+                    and key in {"environment", "ignorefile", "unset_environment"}
+                )
+                or (
+                    len(path) == 3
+                    and path[0] == "options"
+                    and path[1] == "additional_contexts"
+                    and isinstance(path[2], int)
+                    and key == "path"
                 )
             )
             typed_distribution_object_name = (
@@ -453,10 +454,11 @@ def _validate_safe_keys(
                 and isinstance(path[2], int)
                 and key == "name"
             )
-            typed_compiled_plan_key = (
-                operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
-                and path[:1] == ("compiled_execution_plan",)
-            )
+            typed_compiled_plan_key = operation in {
+                AgentOperation.RECIPE_INSTALL,
+                AgentOperation.RECIPE_START,
+                AgentOperation.RECIPE_JOB_RUN,
+            } and path[:1] == ("compiled_execution_plan",)
             if _is_path_key(key) and not (
                 typed_recipe_build_key
                 or typed_distribution_object_name
@@ -470,10 +472,7 @@ def _validate_safe_keys(
                 raise AgentProtocolError(f"filesystem path key is not allowed: {key}")
             if UNSAFE_KEY.search(key) and not (
                 typed_recipe_build_key
-                or (
-                    allow_secret_refs
-                    and (key == "secrets" or field_name == "secrets")
-                )
+                or (allow_secret_refs and (key == "secrets" or field_name == "secrets"))
             ):
                 raise AgentProtocolError(f"unsafe protocol key: {key}")
             _validate_safe_keys(
@@ -531,7 +530,12 @@ def _validate_safe_keys(
                 and _typed_result_string(path, value)
             )
         ) or (
-            operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
+            operation
+            in {
+                AgentOperation.RECIPE_INSTALL,
+                AgentOperation.RECIPE_START,
+                AgentOperation.RECIPE_JOB_RUN,
+            }
             and path[:1] == ("compiled_execution_plan",)
         ):
             return
@@ -719,9 +723,7 @@ def parse_model_identity(value: str) -> tuple[str, str]:
     return repository, revision
 
 
-def format_model_identity(
-    publisher: str, slug: str, content_sha256: str
-) -> str:
+def format_model_identity(publisher: str, slug: str, content_sha256: str) -> str:
     """Format the catalog model identity used by result evidence."""
 
     value = f"{publisher}/{slug}@{content_sha256}"
@@ -876,8 +878,7 @@ from .runtime_preflight import RuntimePreflightRequest, RuntimePreflightResult
 
 AgentPayload = (
     RuntimePreflightRequest
-    |
-    AgentUpgradePayload
+    | AgentUpgradePayload
     | ArtifactDistributionPayload
     | RecipeBuildRequest
     | RecipeBuildCleanupRequest
@@ -890,8 +891,7 @@ AgentPayload = (
 )
 AgentResultPayload = (
     RuntimePreflightResult
-    |
-    AgentInstallResult
+    | AgentInstallResult
     | RecipeStartResult
     | RecipeStopResult
     | RecipeUninstallResult
@@ -923,7 +923,11 @@ def canonical_payload(operation: AgentOperation | str, payload: Any) -> bytes:
     try:
         kind = AgentOperation(operation)
         model = PAYLOAD_MODELS[kind]
-        document = payload.model_dump(mode="python") if isinstance(payload, BaseModel) else payload
+        document = (
+            payload.model_dump(mode="python")
+            if isinstance(payload, BaseModel)
+            else payload
+        )
         typed = model.model_validate(document)
     except (KeyError, TypeError, ValueError) as error:
         raise AgentProtocolError("operation protocol payload is invalid") from error
@@ -976,11 +980,17 @@ def validate_result_for_operation(
         model = AgentFailureResult
     try:
         parsed = (
-            TypeAdapter(AgentFailureResult | RecipeJobRunResult).validate_json(canonical_message(result))
+            TypeAdapter(AgentFailureResult | RecipeJobRunResult).validate_json(
+                canonical_message(result)
+            )
             if state != "succeeded" and operation_kind == AgentOperation.RECIPE_JOB_RUN
             else model.model_validate_json(canonical_message(result))
         )
-        if state == "failed" and isinstance(parsed, RecipeJobRunResult) and parsed.exit_code == 0:
+        if (
+            state == "failed"
+            and isinstance(parsed, RecipeJobRunResult)
+            and parsed.exit_code == 0
+        ):
             raise ValueError("failed recipe job requires a nonzero process exit code")
         return parsed
     except (TypeError, ValueError, ValidationError) as error:
@@ -1018,7 +1028,9 @@ class AgentClaim(_ProtocolEnvelopeModel):
         if not isinstance(value, Mapping):
             return value
         document = dict(value)
-        if "operation" in document and not isinstance(document["operation"], AgentOperation):
+        if "operation" in document and not isinstance(
+            document["operation"], AgentOperation
+        ):
             try:
                 document["operation"] = AgentOperation(document["operation"])
             except (TypeError, ValueError):
@@ -1047,7 +1059,12 @@ class AgentClaim(_ProtocolEnvelopeModel):
         payload_document = json.loads(canonical_message(self.payload))
         maximum_bytes = (
             MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
-            if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
+            if self.operation
+            in {
+                AgentOperation.RECIPE_INSTALL,
+                AgentOperation.RECIPE_START,
+                AgentOperation.RECIPE_JOB_RUN,
+            }
             else MAX_DOCUMENT_BYTES
         )
         payload = _validate_bounded_document(
@@ -1056,7 +1073,10 @@ class AgentClaim(_ProtocolEnvelopeModel):
             operation=self.operation,
             maximum_bytes=maximum_bytes,
         )
-        if hashlib.sha256(canonical_message(payload)).hexdigest() != self.payload_digest:
+        if (
+            hashlib.sha256(canonical_message(payload)).hexdigest()
+            != self.payload_digest
+        ):
             raise AgentProtocolError("payload digest does not match payload")
         object.__setattr__(self, "payload", self.payload)
         object.__setattr__(self, "deadline", _deadline(self.deadline))
@@ -1078,7 +1098,11 @@ class AgentClaim(_ProtocolEnvelopeModel):
                     maximum_bytes=(
                         MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
                         if operation_kind
-                        in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START, AgentOperation.RECIPE_JOB_RUN}
+                        in {
+                            AgentOperation.RECIPE_INSTALL,
+                            AgentOperation.RECIPE_START,
+                            AgentOperation.RECIPE_JOB_RUN,
+                        }
                         else MAX_DOCUMENT_BYTES
                     ),
                 )
@@ -1239,6 +1263,7 @@ class AgentResult(_ProtocolEnvelopeModel):
         except ValidationError as error:
             raise AgentProtocolError(str(error)) from error
 
+
 def schema_validator(schema_name: str) -> Draft202012Validator:
     """Return the package-mandated Draft 2020-12 validator for a wire schema."""
     if schema_name not in {
@@ -1293,11 +1318,9 @@ def _add_protocol_schema_constraints(document: dict[str, Any]) -> None:
 
     def constrain_extension_objects(value: object) -> None:
         if isinstance(value, dict):
-            if (
-                value.get("type") == "object"
-                and value.get("additionalProperties")
-                == {"$ref": "#/$defs/JsonValue"}
-            ):
+            if value.get("type") == "object" and value.get("additionalProperties") == {
+                "$ref": "#/$defs/JsonValue"
+            }:
                 value["propertyNames"] = safe_property_names
             for child in value.values():
                 constrain_extension_objects(child)

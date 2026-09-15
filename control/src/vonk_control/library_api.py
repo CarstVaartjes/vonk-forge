@@ -71,7 +71,9 @@ def install_library_routes(
 
     def library() -> Any:
         if projection is None:
-            raise HTTPException(status_code=503, detail="library projection unavailable")
+            raise HTTPException(
+                status_code=503, detail="library projection unavailable"
+            )
         return projection
 
     @app.get(
@@ -108,10 +110,17 @@ def install_library_routes(
     ) -> ModelLibraryResponse:
         try:
             return library().models(
-                limit=limit, cursor=cursor, usage=usage or [], family=family or [],
-                version=version or [], quantization=quantization or [],
-                publisher=publisher or [], alignment=alignment or [], search=search,
-                updated_since=updated_since, sort=sort,
+                limit=limit,
+                cursor=cursor,
+                usage=usage or [],
+                family=family or [],
+                version=version or [],
+                quantization=quantization or [],
+                publisher=publisher or [],
+                alignment=alignment or [],
+                search=search,
+                updated_since=updated_since,
+                sort=sort,
             )
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise _error(error) from None
@@ -165,10 +174,17 @@ def install_library_routes(
     ) -> RecipeLibraryResponse:
         try:
             return library().recipe_library(
-                limit=limit, cursor=cursor, model_selectors=model or [],
-                all_models=all_models, usage=usage or [], publisher=publisher or [],
-                alignment=alignment or [], sparks=sparks or [], search=search,
-                updated_since=updated_since, sort=sort,
+                limit=limit,
+                cursor=cursor,
+                model_selectors=model or [],
+                all_models=all_models,
+                usage=usage or [],
+                publisher=publisher or [],
+                alignment=alignment or [],
+                sparks=sparks or [],
+                search=search,
+                updated_since=updated_since,
+                sort=sort,
             )
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise _error(error) from None

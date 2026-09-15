@@ -35,7 +35,9 @@ class CertificateAuthority(ABC):
     """Stable CA provider boundary; Smallstep can implement this interface."""
 
     @abstractmethod
-    def issue_node(self, node_id: str, csr_pem: bytes, now: datetime) -> IssuedCertificate:
+    def issue_node(
+        self, node_id: str, csr_pem: bytes, now: datetime
+    ) -> IssuedCertificate:
         """Issue a client certificate that represents exactly one node."""
 
     @abstractmethod
@@ -64,7 +66,9 @@ def _read_regular_secret_file(path_value: Path | str) -> bytes:
     try:
         descriptor = os.open(path, flags)
     except OSError as error:
-        raise ValueError("intermediate material must be a regular non-symlink file") from error
+        raise ValueError(
+            "intermediate material must be a regular non-symlink file"
+        ) from error
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise ValueError("intermediate material must be a regular non-symlink file")
@@ -89,7 +93,9 @@ def _load_node_csr(node_id: str, csr_pem: bytes) -> x509.CertificateSigningReque
     if len(request.extensions) != 1:
         raise ValueError("node CSR must contain only the node URI SAN extension")
     try:
-        sans = request.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        sans = request.extensions.get_extension_for_class(
+            x509.SubjectAlternativeName
+        ).value
     except x509.ExtensionNotFound as error:
         raise ValueError("node CSR must contain the node URI SAN") from error
     expected_sans = x509.SubjectAlternativeName(

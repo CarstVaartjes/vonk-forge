@@ -71,9 +71,7 @@ def test_source_bundle_download_preserves_raw_bytes() -> None:
         service=_BundleService(),
     )
 
-    response = TestClient(app).get(
-        "/api/catalog/source-bundles/" + "a" * 64
-    )
+    response = TestClient(app).get("/api/catalog/source-bundles/" + "a" * 64)
 
     assert response.status_code == 200
     assert response.content == b"raw source bundle bytes"
@@ -92,9 +90,12 @@ def test_catalog_api_exposes_only_canonical_bundle_and_sync_routes() -> None:
     )
     paths = app.openapi()["paths"]
     assert "/api/catalog/source-bundles/{sha256}" in paths
-    assert paths["/api/catalog/source-bundles/{sha256}"]["get"][
-        "x-vonk-streaming-transport"
-    ] is True
+    assert (
+        paths["/api/catalog/source-bundles/{sha256}"]["get"][
+            "x-vonk-streaming-transport"
+        ]
+        is True
+    )
     assert "/api/catalog/managed-recipes/sync" in paths
     assert "/api/catalog/managed-recipes/sync-status" in paths
     assert "/api/catalog/public-recipes" not in paths

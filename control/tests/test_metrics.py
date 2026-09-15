@@ -71,7 +71,9 @@ def _fleet_snapshot(
                     last_seen_at=NOW,
                     last_seen_age_seconds=0,
                 ),
-                inventory=None if inventory is None else InventoryState(
+                inventory=None
+                if inventory is None
+                else InventoryState(
                     observed_at=NOW,
                     received_at=NOW,
                     age_seconds=0,
@@ -88,7 +90,9 @@ def _fleet_snapshot(
                     nvidia_driver_version="580.65",
                     container_runtime_version="5.4.2",
                 ),
-                telemetry=None if telemetry is None else TelemetryState(
+                telemetry=None
+                if telemetry is None
+                else TelemetryState(
                     age_seconds=0,
                     freshness=telemetry,
                     sample=point,
@@ -116,8 +120,12 @@ def test_metrics_use_typed_fleet_evidence_without_health_or_probe_fields() -> No
     assert f'vonk_node_certificate_state{{node_id="{NODE}",state="valid"}} 1' in text
     assert f'vonk_node_inventory_freshness{{node_id="{NODE}",state="fresh"}} 1' in text
     assert f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="live"}} 1' in text
-    assert f'vonk_node_inventory_host_memory_free_bytes{{node_id="{NODE}"}} 15000' in text
-    assert f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}}' not in text
+    assert (
+        f'vonk_node_inventory_host_memory_free_bytes{{node_id="{NODE}"}} 15000' in text
+    )
+    assert (
+        f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}}' not in text
+    )
     assert "vonk_node_ready" not in text
     assert "probe" not in text.lower()
     assert "192.168." not in text and "node.local" not in text
@@ -129,16 +137,24 @@ def test_metrics_keep_missing_and_stale_evidence_distinct() -> None:
     text = metrics.render()
     assert f'vonk_node_inventory_freshness{{node_id="{NODE}",state="stale"}} 1' in text
     assert f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="stale"}} 1' in text
-    assert f'vonk_node_inventory_freshness{{node_id="{NODE}",state="missing"}} 0' in text
-    assert f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="missing"}} 0' in text
+    assert (
+        f'vonk_node_inventory_freshness{{node_id="{NODE}",state="missing"}} 0' in text
+    )
+    assert (
+        f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="missing"}} 0' in text
+    )
 
     snapshot = _fleet_snapshot()
     snapshot.nodes[0].inventory = None
     snapshot.nodes[0].telemetry = None
     metrics.update_fleet(snapshot)
     text = metrics.render()
-    assert f'vonk_node_inventory_freshness{{node_id="{NODE}",state="missing"}} 1' in text
-    assert f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="missing"}} 1' in text
+    assert (
+        f'vonk_node_inventory_freshness{{node_id="{NODE}",state="missing"}} 1' in text
+    )
+    assert (
+        f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="missing"}} 1' in text
+    )
     assert f'vonk_node_inventory_host_memory_free_bytes{{node_id="{NODE}"}}' not in text
 
 
@@ -146,11 +162,15 @@ def test_metrics_export_typed_gpu_utilization_and_omit_unknown() -> None:
     metrics = MetricsRegistry()
     metrics.update_fleet(_fleet_snapshot(gpu_utilization=42.5))
     text = metrics.render()
-    assert f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}} 42.5' in text
+    assert (
+        f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}} 42.5' in text
+    )
 
     metrics.update_fleet(_fleet_snapshot(gpu_utilization=None))
     text = metrics.render()
-    assert f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}}' not in text
+    assert (
+        f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}}' not in text
+    )
 
 
 def test_metrics_keep_connection_and_certificate_validity_independent() -> None:
@@ -222,10 +242,17 @@ def test_job_count_snapshot_aggregates_unknown_kinds() -> None:
 
 def test_metrics_endpoint_is_separately_authenticated() -> None:
     class Jobs:
-        def list(self, *, limit: int = 100): return []
-        def get(self, job_id: str): raise KeyError
-        def enqueue(self, *_args, **_kwargs): raise AssertionError
-        def list_page(self, **_kwargs): return [], None, 0
+        def list(self, *, limit: int = 100):
+            return []
+
+        def get(self, job_id: str):
+            raise KeyError
+
+        def enqueue(self, *_args, **_kwargs):
+            raise AssertionError
+
+        def list_page(self, **_kwargs):
+            return [], None, 0
 
     metrics = MetricsRegistry()
     app = create_app(
@@ -246,10 +273,17 @@ def test_metrics_endpoint_is_separately_authenticated() -> None:
 
 def test_metrics_endpoint_projects_typed_fleet_snapshot() -> None:
     class Jobs:
-        def list(self, *, limit: int = 100): return []
-        def get(self, job_id: str): raise KeyError
-        def enqueue(self, *_args, **_kwargs): raise AssertionError
-        def list_page(self, **_kwargs): return [], None, 0
+        def list(self, *, limit: int = 100):
+            return []
+
+        def get(self, job_id: str):
+            raise KeyError
+
+        def enqueue(self, *_args, **_kwargs):
+            raise AssertionError
+
+        def list_page(self, **_kwargs):
+            return [], None, 0
 
     refresh_fleet_metrics = getattr(control_api, "refresh_fleet_metrics", None)
     assert callable(refresh_fleet_metrics)
@@ -274,6 +308,15 @@ def test_metrics_endpoint_projects_typed_fleet_snapshot() -> None:
     )
 
     assert response.status_code == 200
-    assert f'vonk_node_connection_state{{node_id="{NODE}",state="online"}} 1' in response.text
-    assert f'vonk_node_inventory_freshness{{node_id="{NODE}",state="fresh"}} 1' in response.text
-    assert f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="live"}} 1' in response.text
+    assert (
+        f'vonk_node_connection_state{{node_id="{NODE}",state="online"}} 1'
+        in response.text
+    )
+    assert (
+        f'vonk_node_inventory_freshness{{node_id="{NODE}",state="fresh"}} 1'
+        in response.text
+    )
+    assert (
+        f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="live"}} 1'
+        in response.text
+    )

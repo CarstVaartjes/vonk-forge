@@ -67,39 +67,39 @@ def test_production_app_recipe_download_auth_and_status(
         )
         session.add_all(
             [
-                    CatalogDocumentRevision(
-                        id="production-model-revision",
-                        document_id="production-model-document",
-                        kind="model",
-                        publisher="vonk-forge",
-                        slug="synthetic-tiny-fp16",
-                        revision_number=1,
-                        schema_version=2,
-                        state="active",
-                        document=model_definition.model_dump(mode="json"),
-                        content_digest=model_digest,
-                        artifact_key="b" * 64,
-                        projected={},
-                        created_by="test",
-                        created_at=now,
-                    ),
-                    CatalogDocumentRevision(
-                        id="production-recipe-revision",
-                        document_id="production-recipe-document",
-                        kind="recipe",
-                        publisher=recipe.identity.publisher,
-                        slug=recipe.identity.slug,
-                        revision_number=1,
-                        schema_version=2,
-                        state="active",
-                        document=recipe.model_dump(mode="json"),
-                        content_digest=content_sha256(recipe),
-                        artifact_key="c" * 64,
-                        execution_key="a" * 64,
-                        projected={},
-                        created_by="test",
-                        created_at=now,
-                    ),
+                CatalogDocumentRevision(
+                    id="production-model-revision",
+                    document_id="production-model-document",
+                    kind="model",
+                    publisher="vonk-forge",
+                    slug="synthetic-tiny-fp16",
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=model_definition.model_dump(mode="json"),
+                    content_digest=model_digest,
+                    artifact_key="b" * 64,
+                    projected={},
+                    created_by="test",
+                    created_at=now,
+                ),
+                CatalogDocumentRevision(
+                    id="production-recipe-revision",
+                    document_id="production-recipe-document",
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=recipe.model_dump(mode="json"),
+                    content_digest=content_sha256(recipe),
+                    artifact_key="c" * 64,
+                    execution_key="a" * 64,
+                    projected={},
+                    created_by="test",
+                    created_at=now,
+                ),
             ]
         )
 
@@ -108,11 +108,15 @@ def test_production_app_recipe_download_auth_and_status(
             ("model", model_definition, "production-model-revision"),
             ("recipe", recipe, "production-recipe-revision"),
         ):
-            session.add(CatalogDocumentHead(
-                kind=kind, publisher=definition.identity.publisher,
-                slug=definition.identity.slug, active_revision_id=revision_id,
-                generation=1,
-            ))
+            session.add(
+                CatalogDocumentHead(
+                    kind=kind,
+                    publisher=definition.identity.publisher,
+                    slug=definition.identity.slug,
+                    active_revision_id=revision_id,
+                    generation=1,
+                )
+            )
 
     database_url = postgres_engine.url.render_as_string(hide_password=False)
     signing_key = tmp_path / "token-signing-key"
@@ -141,16 +145,22 @@ def test_production_app_recipe_download_auth_and_status(
             super().__init__(tmp_path / "supervisor-ack.json", **kwargs)
 
     monkeypatch.setattr(route_runtime, "AtomicRouteBundlePublisher", TemporaryPublisher)
-    monkeypatch.setattr(route_runtime, "FileSupervisorAcknowledger", TemporaryAcknowledger)
+    monkeypatch.setattr(
+        route_runtime, "FileSupervisorAcknowledger", TemporaryAcknowledger
+    )
 
     # The auth/status route proof uses the existing synthetic image fixture;
     # model-child completion is covered by dedicated model-cache composition
     # tests with a canonical artifact source.
     original_builder = availability_production.build_recipe_image_availability
+
     def image_only_builder(*args, **kwargs):
         kwargs["model_cache"] = None
         return original_builder(*args, **kwargs)
-    monkeypatch.setattr(availability_production, "build_recipe_image_availability", image_only_builder)
+
+    monkeypatch.setattr(
+        availability_production, "build_recipe_image_availability", image_only_builder
+    )
 
     lifecycles = []
     original_lifecycle = api.RecipeOperationService
@@ -164,8 +174,12 @@ def test_production_app_recipe_download_auth_and_status(
     app = production_app()
     assert [item._distributed_start_timeout_seconds for item in lifecycles] == [1800]
     codec = TokenCodec(signing_key.read_bytes())
-    operator = codec.issue(Actor("operator", "operator"), ttl_seconds=3600, now=int(time.time()))
-    viewer = codec.issue(Actor("viewer", "viewer"), ttl_seconds=3600, now=int(time.time()))
+    operator = codec.issue(
+        Actor("operator", "operator"), ttl_seconds=3600, now=int(time.time())
+    )
+    viewer = codec.issue(
+        Actor("viewer", "viewer"), ttl_seconds=3600, now=int(time.time())
+    )
     headers = {"Authorization": f"Bearer {operator}"}
     with TestClient(app) as client:
         selector = f"{recipe.identity.publisher}/{recipe.identity.slug}"

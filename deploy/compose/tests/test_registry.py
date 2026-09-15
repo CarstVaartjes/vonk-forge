@@ -15,8 +15,19 @@ def _rendered() -> dict:
             key, value = line.split("=", 1)
             env[key] = value
     result = subprocess.run(
-        ["docker", "compose", "-f", str(ROOT / "deploy/compose/compose.yaml"), "config", "--format", "json"],
-        check=True, capture_output=True, text=True, env=env,
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "deploy/compose/compose.yaml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
     )
     return json.loads(result.stdout)
 
@@ -28,8 +39,12 @@ def test_distribution_is_pinned_private_persistent_and_credential_free() -> None
     assert not registry.get("ports")
     assert set(registry["networks"]) == {"registry-edge", "registry-publisher"}
     assert rendered["networks"]["registry-edge"]["internal"] is True
-    assert any(volume["target"] == "/var/lib/registry" for volume in registry["volumes"])
-    assert not any("PASSWORD" in key or "TOKEN" in key for key in registry.get("environment", {}))
+    assert any(
+        volume["target"] == "/var/lib/registry" for volume in registry["volumes"]
+    )
+    assert not any(
+        "PASSWORD" in key or "TOKEN" in key for key in registry.get("environment", {})
+    )
 
 
 def test_registry_config_disables_delete_and_agent_sni_is_read_only_mtls() -> None:
@@ -58,12 +73,22 @@ def test_registry_caddy_adapter_has_only_ping_and_digest_pull_proxies() -> None:
     command = ["docker", "run", "--rm", "-i"]
     for key, value in environment.items():
         command.extend(("-e", f"{key}={value}"))
-    command.extend((
-        "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
-        "caddy", "adapt", "--config", "-", "--adapter", "caddyfile",
-    ))
+    command.extend(
+        (
+            "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
+            "caddy",
+            "adapt",
+            "--config",
+            "-",
+            "--adapter",
+            "caddyfile",
+        )
+    )
     result = subprocess.run(
-        command, check=True, capture_output=True, text=True,
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
         input=(ROOT / "deploy/compose/Caddyfile").read_text(),
     )
     adapted = json.loads(result.stdout)
@@ -73,7 +98,8 @@ def test_registry_caddy_adapter_has_only_ping_and_digest_pull_proxies() -> None:
         if any(str(listener).endswith(":8443") for listener in server.get("listen", []))
     )
     registry_site = next(
-        route for route in backend["routes"]
+        route
+        for route in backend["routes"]
         if route.get("match") == [{"host": ["registry.test.example"]}]
     )
     encoded = json.dumps(registry_site, sort_keys=True)
@@ -83,7 +109,9 @@ def test_registry_caddy_adapter_has_only_ping_and_digest_pull_proxies() -> None:
         assert forbidden not in encoded
 
 
-def test_operator_publisher_validates_project_and_digest_before_docker(tmp_path: Path) -> None:
+def test_operator_publisher_validates_project_and_digest_before_docker(
+    tmp_path: Path,
+) -> None:
     script = ROOT / "deploy/compose/bin/publish-release"
     environment = os.environ | {
         "COMPOSE_PROJECT_NAME": "../unsafe",
@@ -107,9 +135,7 @@ def test_operator_publisher_validates_project_and_digest_before_docker(tmp_path:
     bin_directory.mkdir()
     record = tmp_path / "docker-argv"
     docker = bin_directory / "docker"
-    docker.write_text(
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$DOCKER_ARGV_RECORD\"\n"
-    )
+    docker.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" > "$DOCKER_ARGV_RECORD"\n')
     docker.chmod(0o700)
     valid_environment = os.environ | {
         "PATH": str(bin_directory) + ":" + os.environ["PATH"],
@@ -120,17 +146,28 @@ def test_operator_publisher_validates_project_and_digest_before_docker(tmp_path:
         "REGISTRY_REPOSITORY": "site_a/node.releases",
     }
     valid = subprocess.run(
-        [str(script), str(release)], capture_output=True, text=True,
+        [str(script), str(release)],
+        capture_output=True,
+        text=True,
         env=valid_environment,
         check=False,
     )
     assert valid.returncode == 0, valid.stderr
     argv = record.read_text().splitlines()
     assert argv == [
-        "run", "--rm", "--network", "site_a_registry-publisher",
-        "-v", f"{release}:/release:ro", "-w", "/release",
+        "run",
+        "--rm",
+        "--network",
+        "site_a_registry-publisher",
+        "-v",
+        f"{release}:/release:ro",
+        "-w",
+        "/release",
         "example/oras:1.3.3@sha256:" + "a" * 64,
-        "push", "--plain-http", "registry:5000/site_a/node.releases:release-1", ".",
+        "push",
+        "--plain-http",
+        "registry:5000/site_a/node.releases:release-1",
+        ".",
     ]
 
     for changed in (
@@ -139,7 +176,9 @@ def test_operator_publisher_validates_project_and_digest_before_docker(tmp_path:
         {"RELEASE_TAG": ".starts-with-dot"},
     ):
         rejected = subprocess.run(
-            [str(script), str(release)], capture_output=True, text=True,
+            [str(script), str(release)],
+            capture_output=True,
+            text=True,
             env=valid_environment | changed,
             check=False,
         )

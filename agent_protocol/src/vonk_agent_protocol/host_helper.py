@@ -62,8 +62,12 @@ class RecipeRunInspectionBinding(WireModel):
     rank: int = Field(ge=0, le=1023, strict=True)
     role: str = Field(min_length=1, max_length=64)
     world_size: int = Field(ge=1, le=1024, strict=True)
-    local_address: str | None = Field(min_length=2, max_length=45, json_schema_extra={"format": "ip"})
-    master_address: str | None = Field(min_length=2, max_length=45, json_schema_extra={"format": "ip"})
+    local_address: str | None = Field(
+        min_length=2, max_length=45, json_schema_extra={"format": "ip"}
+    )
+    master_address: str | None = Field(
+        min_length=2, max_length=45, json_schema_extra={"format": "ip"}
+    )
     master_port: int | None = Field(ge=1024, le=65535, strict=True)
     port: int = Field(ge=1024, le=65535, strict=True)
     runtime_arguments_sha256: Digest
@@ -73,7 +77,13 @@ class RecipeRunInspectionBinding(WireModel):
     def canonical_fabric_address(cls, value: str | None) -> str | None:
         if value is not None:
             address = ipaddress.ip_address(value)
-            if str(address) != value or address.is_loopback or address.is_unspecified or address.is_multicast or address.is_link_local:
+            if (
+                str(address) != value
+                or address.is_loopback
+                or address.is_unspecified
+                or address.is_multicast
+                or address.is_link_local
+            ):
                 raise ValueError("inspection address must be canonical and routable")
         return value
 
@@ -82,7 +92,9 @@ class RecipeRunInspectionBinding(WireModel):
         if self.rank >= self.world_size:
             raise ValueError("inspection rank is outside its world")
         rendezvous = (self.local_address, self.master_address, self.master_port)
-        if (self.world_size == 1 and any(value is not None for value in rendezvous)) or (self.world_size > 1 and any(value is None for value in rendezvous)):
+        if (
+            self.world_size == 1 and any(value is not None for value in rendezvous)
+        ) or (self.world_size > 1 and any(value is None for value in rendezvous)):
             raise ValueError("inspection rendezvous is invalid")
         return self
 
@@ -96,7 +108,9 @@ class HostRuntimeRequest(WireModel):
     operation_id: Uuid4Text
     attempt: int = Field(ge=1, le=2**31 - 1)
     fence: Uuid4Text
-    arguments: list[Annotated[str, Field(min_length=1, max_length=4096, pattern=r"^[^\x00\r\n]+$")]] = Field(max_length=512)
+    arguments: list[
+        Annotated[str, Field(min_length=1, max_length=4096, pattern=r"^[^\x00\r\n]+$")]
+    ] = Field(max_length=512)
     observation: RecipeRunInspectionBinding | None = None
     installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -113,8 +127,17 @@ class HostRuntimeRequest(WireModel):
             raise ValueError("runtime installation identity does not match the action")
         if self.observation is not None:
             import hashlib
-            if self.action != "run-inspect" or self.job_id != self.observation.run_id or self.attempt != self.observation.run_generation or hashlib.sha256(canonical_message(self.arguments)).hexdigest() != self.observation.runtime_arguments_sha256:
-                raise ValueError("runtime observation binding does not match the request")
+
+            if (
+                self.action != "run-inspect"
+                or self.job_id != self.observation.run_id
+                or self.attempt != self.observation.run_generation
+                or hashlib.sha256(canonical_message(self.arguments)).hexdigest()
+                != self.observation.runtime_arguments_sha256
+            ):
+                raise ValueError(
+                    "runtime observation binding does not match the request"
+                )
         return self
 
 
@@ -224,8 +247,12 @@ class HostHelperGrantClaims(WireModel):
     authority: Literal["vonk.host-maintenance-helper"]
     request_id: Uuid4Text
     node_id: NodeId
-    issued_at: int = Field(gt=0, strict=True, le=2**63 - 1, json_schema_extra={"format": "int64"})
-    expires_at: int = Field(strict=True, le=2**63 - 1, json_schema_extra={"format": "int64"})
+    issued_at: int = Field(
+        gt=0, strict=True, le=2**63 - 1, json_schema_extra={"format": "int64"}
+    )
+    expires_at: int = Field(
+        strict=True, le=2**63 - 1, json_schema_extra={"format": "int64"}
+    )
     operation: HostOperation
 
     @model_validator(mode="after")
@@ -276,7 +303,9 @@ class RecipeRunObservationReceiptClaims(WireModel):
     request_sha256: Digest
     observation_identity_sha256: Digest
     outcome: Literal["running", "not-running"]
-    observed_at: int = Field(gt=0, strict=True, le=2**63 - 1, json_schema_extra={"format": "int64"})
+    observed_at: int = Field(
+        gt=0, strict=True, le=2**63 - 1, json_schema_extra={"format": "int64"}
+    )
 
     @classmethod
     def parse(cls, value: Any) -> RecipeRunObservationReceiptClaims:

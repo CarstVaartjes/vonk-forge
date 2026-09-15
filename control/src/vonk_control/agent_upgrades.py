@@ -224,9 +224,16 @@ class AgentUpgradeService:
                         f"Spark {node_id} already runs the requested agent build"
                     )
                 try:
-                    source = load_package_source(self._http, self._channel, node.build_digest or "", node.binary_digest or "")
+                    source = load_package_source(
+                        self._http,
+                        self._channel,
+                        node.build_digest or "",
+                        node.binary_digest or "",
+                    )
                 except (httpx.HTTPError, ValueError) as error:
-                    raise AgentUpgradeConflict(f"Spark {node_id} exact signed rollback package is unavailable") from error
+                    raise AgentUpgradeConflict(
+                        f"Spark {node_id} exact signed rollback package is unavailable"
+                    ) from error
                 sources[node_id] = source.model_dump(mode="json")
         document = {
             "sources": sources,
@@ -400,6 +407,7 @@ class AgentUpgradeService:
             if parent.payload_digest != plan_digest:
                 raise ValueError("stored agent upgrade plan is invalid")
             from vonk_agent_protocol.contracts import AgentUpgradePayload
+
             sources = parent.payload["sources"]
             if not isinstance(sources, dict) or set(sources) != set(order):
                 raise ValueError("stored rollback sources are invalid")
@@ -432,11 +440,22 @@ class AgentUpgradeService:
                     operation.kind != "agent.upgrade.v1"
                     or operation.node_id not in order
                     or operation.authority_revision != parent.authority_revision
-                    or {key: value for key, value in operation.payload.items() if key not in {"rollback", "source_package_bytes", "source_package_url"}} != package
+                    or {
+                        key: value
+                        for key, value in operation.payload.items()
+                        if key
+                        not in {
+                            "rollback",
+                            "source_package_bytes",
+                            "source_package_url",
+                        }
+                    }
+                    != package
                     or payload.rollback.source != source.package
                     or payload.source_package_bytes != source.package_bytes
                     or payload.source_package_url != source.package_url
-                    or operation.payload_digest != hashlib.sha256(canonical_message(operation.payload)).hexdigest()
+                    or operation.payload_digest
+                    != hashlib.sha256(canonical_message(operation.payload)).hexdigest()
                 ):
                     raise ValueError("stored agent upgrade operation is invalid")
             materialized = {
@@ -654,11 +673,14 @@ class AgentUpgradeService:
         from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 
         from .package_activation import matches_receipt
+
         raw_receipt = evidence.get("activation_receipt")
         if raw_receipt is None:
             return False
         receipt = PackageActivationReceipt.model_validate(raw_receipt)
-        if receipt.phase != "acknowledged" or not matches_receipt(receipt, AgentUpgradePayload.model_validate(operation.payload), node.node_id):
+        if receipt.phase != "acknowledged" or not matches_receipt(
+            receipt, AgentUpgradePayload.model_validate(operation.payload), node.node_id
+        ):
             return False
         return bool(
             observed >= dispatched
@@ -750,21 +772,30 @@ class AgentUpgradeService:
             raise AgentUpgradeConflict("stored agent upgrade package is invalid")
         stored_sources = parent.payload.get("sources")
         stored_source = (
-            stored_sources.get(node_id)
-            if isinstance(stored_sources, Mapping)
-            else None
+            stored_sources.get(node_id) if isinstance(stored_sources, Mapping) else None
         )
         if stored_source is None:
             raise AgentUpgradeConflict("stored rollback sources are invalid")
         source = AgentPackageSource.model_validate(stored_source)
         node = session.get(AgentNode, node_id)
-        if node is None or node.binary_digest != source.package.binary_sha256 or node.build_digest != source.build_digest:
-            raise AgentUpgradeConflict("rollback source no longer matches installed agent")
-        payload = {**package, "source_package_bytes": source.package_bytes,
+        if (
+            node is None
+            or node.binary_digest != source.package.binary_sha256
+            or node.build_digest != source.build_digest
+        ):
+            raise AgentUpgradeConflict(
+                "rollback source no longer matches installed agent"
+            )
+        payload = {
+            **package,
+            "source_package_bytes": source.package_bytes,
             "source_package_url": source.package_url,
-            "rollback": {"source": source.package.model_dump(mode="json"),
+            "rollback": {
+                "source": source.package.model_dump(mode="json"),
                 "attempt_nonce": secrets.token_hex(32),
-                "activation_deadline": int(self._clock().timestamp()) + 900}}
+                "activation_deadline": int(self._clock().timestamp()) + 900,
+            },
+        }
         self._operations.enqueue_in_session(
             session,
             parent.id,
@@ -796,7 +827,9 @@ class AgentUpgradeService:
             or document.get("architecture") != "linux-arm64"
             or not isinstance(document.get("package_bytes"), int)
             or isinstance(document.get("package_bytes"), bool)
-            or not 1 <= require_integer(document["package_bytes"], "package bytes") <= 1024**3
+            or not 1
+            <= require_integer(document["package_bytes"], "package bytes")
+            <= 1024**3
             or not isinstance(document.get("package_sha256"), str)
             or _SHA256.fullmatch(str(document["package_sha256"])) is None
             or not isinstance(document.get("package_signature"), str)

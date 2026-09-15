@@ -91,9 +91,7 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
     return recipe if content_sha256(recipe) == revision.content_digest else None
 
 
-_RUNTIME_CAPABILITY_LEDGER: tuple[
-    tuple[str, str, TelemetryMeasurementKind], ...
-] = (
+_RUNTIME_CAPABILITY_LEDGER: tuple[tuple[str, str, TelemetryMeasurementKind], ...] = (
     ("runtime.decode_tokens_per_second", "tokens/s", "derived"),
     ("runtime.prefill_tokens_per_second", "tokens/s", "derived"),
     ("runtime.prefill_cached_tokens_per_second", "tokens/s", "derived"),
@@ -309,7 +307,9 @@ class TelemetryMetricSummary(_StrictModel):
     device_id: Text128 | None = None
     process_id: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_INTEGER)
     process_name: Text128 | None = None
-    interface_name: Annotated[str, StringConstraints(min_length=1, max_length=64)] | None = None
+    interface_name: (
+        Annotated[str, StringConstraints(min_length=1, max_length=64)] | None
+    ) = None
     run_id: Text128 | None = None
     unit: Text32 = "unknown"
     source: Text128 = "controller-derived"
@@ -604,7 +604,10 @@ def _metric_matches(
     return (
         (requested_key is None or key == requested_key)
         and (requested_device_id is None or device_id == requested_device_id)
-        and (requested_interface_name is None or interface_name == requested_interface_name)
+        and (
+            requested_interface_name is None
+            or interface_name == requested_interface_name
+        )
         and (requested_run_id is None or run_id == requested_run_id)
     )
 
@@ -754,9 +757,7 @@ class FleetProjection:
                 id=node_id,
                 display_name=profile.display_name,
                 hostname=profile.hostname,
-                ip_address=(
-                    None if presence is None else presence.management_address
-                ),
+                ip_address=(None if presence is None else presence.management_address),
             )
 
     def read_at(self, event_cursor: int) -> FleetSnapshot:
@@ -1010,9 +1011,7 @@ class FleetProjection:
         point = response.sample
         metrics = point.metrics
         runtimes = [
-            item
-            for item in metrics.runtimes
-            if run_id is None or item.run_id == run_id
+            item for item in metrics.runtimes if run_id is None or item.run_id == run_id
         ]
         workloads = [
             item
@@ -1073,7 +1072,9 @@ class FleetProjection:
         runtimes: list[TelemetryRuntime] = []
         for run_id in sorted(runs_by_id):
             run = runs_by_id[run_id]
-            run_nodes = sorted(nodes_by_run.get(run_id, ()), key=lambda value: value.rank)
+            run_nodes = sorted(
+                nodes_by_run.get(run_id, ()), key=lambda value: value.rank
+            )
             reports = incoming_by_run.get(run_id, ())
             report = reports[0] if reports else None
             adapter = report.adapter if report is not None else "controller-managed"
@@ -1090,7 +1091,9 @@ class FleetProjection:
                     model_version=None,
                     recipe_revision=None,
                     context_limit_tokens=None,
-                    serving_node_ids=list(dict.fromkeys(value.node_id for value in run_nodes)),
+                    serving_node_ids=list(
+                        dict.fromkeys(value.node_id for value in run_nodes)
+                    ),
                     ranks=list(dict.fromkeys(value.rank for value in run_nodes)),
                     readiness=_run_readiness(run, run_nodes),
                     error=(
@@ -1101,7 +1104,9 @@ class FleetProjection:
                         else None
                     ),
                     adapter=adapter,
-                    adapter_version=report.adapter_version if report is not None else None,
+                    adapter_version=report.adapter_version
+                    if report is not None
+                    else None,
                     adapter_supported=supported,
                     adapter_reason=reason,
                 )
@@ -1116,7 +1121,14 @@ class FleetProjection:
 
         capabilities = list(metrics.capabilities)
         capability_ids = {
-            (item.key, item.scope, item.device_id, item.process_id, item.interface_name, item.run_id)
+            (
+                item.key,
+                item.scope,
+                item.device_id,
+                item.process_id,
+                item.interface_name,
+                item.run_id,
+            )
             for item in capabilities
         }
         for runtime in runtimes[:8]:
@@ -1153,7 +1165,9 @@ class FleetProjection:
                 .limit(_MAX_TELEMETRY_WORKLOADS)
             ).all()
             operation_ids = tuple(
-                item.operation_id for item in artifact_jobs if item.operation_id is not None
+                item.operation_id
+                for item in artifact_jobs
+                if item.operation_id is not None
             )
             operations = {
                 item.id: item
@@ -1161,7 +1175,9 @@ class FleetProjection:
                     select(Job).where(Job.id.in_(operation_ids))
                 )
             }
-            workload_ids = {item.job_id for item in workloads if item.job_id is not None}
+            workload_ids = {
+                item.job_id for item in workloads if item.job_id is not None
+            }
             now = _utc(self._clock())
             for artifact_job in artifact_jobs:
                 if artifact_job.id in workload_ids:
@@ -1185,7 +1201,12 @@ class FleetProjection:
                 )
                 end_for_elapsed = ended_at or (now if state == "running" else None)
                 elapsed = (
-                    max(0.0, (end_for_elapsed - _utc(artifact_job.created_at)).total_seconds())
+                    max(
+                        0.0,
+                        (
+                            end_for_elapsed - _utc(artifact_job.created_at)
+                        ).total_seconds(),
+                    )
                     if end_for_elapsed is not None
                     else None
                 )
@@ -1196,7 +1217,9 @@ class FleetProjection:
                             if operation is not None
                             else artifact_job.request_id
                         ),
-                        job_id=operation.id if operation is not None else artifact_job.id,
+                        job_id=operation.id
+                        if operation is not None
+                        else artifact_job.id,
                         run_id=artifact_job.run_id,
                         model=None,
                         recipe_revision=None,
@@ -1213,12 +1236,10 @@ class FleetProjection:
                         ),
                         started_at=started_at,
                         ended_at=ended_at,
-                        elapsed_seconds=min(elapsed, 86_400 * 365) if elapsed is not None else None,
-                        failure=(
-                            "artifact job failed"
-                            if state == "failed"
-                            else None
-                        ),
+                        elapsed_seconds=min(elapsed, 86_400 * 365)
+                        if elapsed is not None
+                        else None,
+                        failure=("artifact job failed" if state == "failed" else None),
                         title="artifact job",
                     )
                 )
@@ -1780,9 +1801,7 @@ class FleetProjection:
             id=node_id,
             display_name=node_id if profile is None else profile.display_name,
             hostname="" if profile is None else profile.hostname,
-            ip_address=(
-                None if presence is None else presence.management_address
-            ),
+            ip_address=(None if presence is None else presence.management_address),
             lifecycle="managed" if profile is None else profile.lifecycle,
             labels=dict(labels),
             connection=connection,
@@ -1846,7 +1865,9 @@ class FleetProjection:
         )
 
     @staticmethod
-    def _certificate_state(value: AgentCertificate | None, current: datetime) -> CertificateState:
+    def _certificate_state(
+        value: AgentCertificate | None, current: datetime
+    ) -> CertificateState:
         if value is None:
             return "missing"
         if (

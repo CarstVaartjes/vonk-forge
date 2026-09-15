@@ -197,12 +197,7 @@ def test_corrupt_stored_evidence_fails_operation_detail_and_evidence_route_alike
 
     assert client.get(url, headers=headers).status_code == 503
     assert client.get("/api/operations", headers=headers).status_code == 503
-    assert (
-        client.get(
-            f"{url}/evidence?attempt=1", headers=headers
-        ).status_code
-        == 503
-    )
+    assert client.get(f"{url}/evidence?attempt=1", headers=headers).status_code == 503
 
 
 def test_redaction_handles_adversarial_values_before_persistence(service):

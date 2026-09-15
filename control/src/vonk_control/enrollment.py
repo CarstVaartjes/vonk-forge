@@ -154,7 +154,9 @@ class EnrollmentService:
         """Create a one-time grant whose approved name is bound on enrollment."""
         normalized = " ".join(display_name.split())
         if not 1 <= len(normalized) <= 200:
-            raise ValueError("enrollment display name must be between one and 200 characters")
+            raise ValueError(
+                "enrollment display name must be between one and 200 characters"
+            )
         return self._create(
             None,
             actor,
@@ -173,7 +175,11 @@ class EnrollmentService:
         one-time grant when the former node row no longer exists.
         """
         return self._create(
-            node_id, actor, ttl_seconds, purpose="re-enroll", requested_display_name=None
+            node_id,
+            actor,
+            ttl_seconds,
+            purpose="re-enroll",
+            requested_display_name=None,
         )
 
     def _create(
@@ -1336,10 +1342,7 @@ def _invalidate_rotated_observation_receipts(
             )
         except RecipeExecutionContractError:
             exact_observations = False
-        if (
-            run is None
-            or not exact_observations
-        ):
+        if run is None or not exact_observations:
             continue
         run_node.state = "failed"
         run_node.observed_run_generation = None

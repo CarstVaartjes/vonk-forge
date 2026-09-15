@@ -139,7 +139,8 @@ def _input_manifest(job: ArtifactJob) -> RecipeJobInputManifest:
         raise ArtifactJobError("stored artifact input manifest is invalid") from error
     if (
         manifest.total_bytes != job.input_total_bytes
-        or recipe_job_manifest_sha256(tuple(manifest.files)) != job.input_manifest_sha256
+        or recipe_job_manifest_sha256(tuple(manifest.files))
+        != job.input_manifest_sha256
     ):
         raise ArtifactJobError("stored artifact input manifest identity is invalid")
     return manifest
@@ -149,7 +150,9 @@ def _result_evidence(value: object) -> dict[str, object] | None:
     if value is None:
         return None
     try:
-        evidence = ArtifactJobResultEvidence.model_validate_json(canonical_message(value))
+        evidence = ArtifactJobResultEvidence.model_validate_json(
+            canonical_message(value)
+        )
     except (TypeError, ValueError) as error:
         raise ArtifactJobError("stored artifact result evidence is invalid") from error
     return json.loads(canonical_message(evidence))
@@ -200,15 +203,25 @@ class ArtifactJobResponse(ArtifactJobContractModel):
     created_at: datetime
     updated_at: datetime
 
-
     @model_validator(mode="after")
     def terminal_evidence_is_consistent(self) -> ArtifactJobResponse:
         if self.state == "succeeded":
-            if self.output_manifest_sha256 is None or not self.output_files or self.result_evidence is None:
-                raise ValueError("successful artifact job requires output manifest, files and result evidence")
+            if (
+                self.output_manifest_sha256 is None
+                or not self.output_files
+                or self.result_evidence is None
+            ):
+                raise ValueError(
+                    "successful artifact job requires output manifest, files and result evidence"
+                )
             if self.status_reason is not None:
-                raise ValueError("successful artifact job cannot retain a failure reason")
-        if self.state in {"failed", "waiting-for-operator"} and not (self.status_reason or "").strip():
+                raise ValueError(
+                    "successful artifact job cannot retain a failure reason"
+                )
+        if (
+            self.state in {"failed", "waiting-for-operator"}
+            and not (self.status_reason or "").strip()
+        ):
             raise ValueError("failed or waiting artifact job requires a status reason")
         return self
 
@@ -1074,8 +1087,11 @@ class ArtifactJobService:
                 installed=installation_plan.compiled_execution_plans[
                     node.node_id
                 ].model_dump(mode="json"),
-                build=(session.get(RecipeBuild, installation.recipe_build_id)
-                       if installation.recipe_build_id is not None else None),
+                build=(
+                    session.get(RecipeBuild, installation.recipe_build_id)
+                    if installation.recipe_build_id is not None
+                    else None
+                ),
                 parameters=parameters,
                 timeout_seconds=artifact_job.timeout_seconds,
             )
@@ -1194,12 +1210,14 @@ class ArtifactJobService:
                 job.state = "cancelling" if cancel_pending else "cancelled"
                 job.status_reason = cancellation_reason
                 existing_evidence = _result_evidence(job.result_evidence)
-                job.result_evidence = _result_evidence({
-                    **(existing_evidence or {}),
-                    "cancel_request_id": request_id,
-                    "cancel_actor": actor,
-                    "cancel_reason": cancellation_reason,
-                })
+                job.result_evidence = _result_evidence(
+                    {
+                        **(existing_evidence or {}),
+                        "cancel_request_id": request_id,
+                        "cancel_actor": actor,
+                        "cancel_reason": cancellation_reason,
+                    }
+                )
                 job.completed_at = None if cancel_pending else now
                 job.updated_at = now
             return self._view_in_session(session, job)
@@ -1451,13 +1469,15 @@ class ArtifactJobService:
                 if waiting_result.reason
                 else "artifact cancellation could not safely stop the active scope"
             )[:512]
-            artifact_job.result_evidence = _result_evidence({
-                "failure_kind": "cancellation-stop-uncertain",
-                "recoverable": True,
-                "active_scope_may_remain": True,
-                "elapsed_milliseconds": waiting_result.elapsed_milliseconds,
-                "peak_memory_bytes": waiting_result.peak_memory_bytes,
-            })
+            artifact_job.result_evidence = _result_evidence(
+                {
+                    "failure_kind": "cancellation-stop-uncertain",
+                    "recoverable": True,
+                    "active_scope_may_remain": True,
+                    "elapsed_milliseconds": waiting_result.elapsed_milliseconds,
+                    "peak_memory_bytes": waiting_result.peak_memory_bytes,
+                }
+            )
             artifact_job.updated_at = now
             return
         try:
@@ -1516,10 +1536,12 @@ class ArtifactJobService:
             artifact_job.updated_at = now
             return
         artifact_job.output_manifest_sha256 = result.output_manifest_sha256
-        artifact_job.result_evidence = _result_evidence({
-            "elapsed_milliseconds": result.elapsed_milliseconds,
-            "peak_memory_bytes": result.peak_memory_bytes,
-        })
+        artifact_job.result_evidence = _result_evidence(
+            {
+                "elapsed_milliseconds": result.elapsed_milliseconds,
+                "peak_memory_bytes": result.peak_memory_bytes,
+            }
+        )
         artifact_job.state = (
             "succeeded" if succeeded else "cancelled" if cancelled else "failed"
         )
@@ -1614,7 +1636,11 @@ class ArtifactJobService:
     @staticmethod
     def _input_declaration(job: ArtifactJob, name: str) -> Mapping[str, object] | None:
         return next(
-            (item.model_dump(mode="json") for item in _input_manifest(job).files if item.name == name),
+            (
+                item.model_dump(mode="json")
+                for item in _input_manifest(job).files
+                if item.name == name
+            ),
             None,
         )
 

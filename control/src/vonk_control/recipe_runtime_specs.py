@@ -4,6 +4,7 @@ RecipeDefinition and ModelDefinition are the only authoring authorities.  The
 compiler consumes their validated projections plus a package/build handle and
 adds the platform execution invariants at the final boundary.
 """
+
 from __future__ import annotations
 
 import copy
@@ -50,7 +51,9 @@ def _recipe(value: object) -> RecipeDefinition:
     try:
         return RecipeDefinition.model_validate(raw)
     except Exception as error:
-        raise RecipeRuntimeSpecError("recipe does not satisfy RecipeDefinition v2") from error
+        raise RecipeRuntimeSpecError(
+            "recipe does not satisfy RecipeDefinition v2"
+        ) from error
 
 
 def _models(value: object) -> tuple[ModelDefinition, ...]:
@@ -67,7 +70,9 @@ def _models(value: object) -> tuple[ModelDefinition, ...]:
         try:
             result.append(ModelDefinition.model_validate(raw))
         except Exception as error:
-            raise RecipeRuntimeSpecError("canonical model projection is invalid") from error
+            raise RecipeRuntimeSpecError(
+                "canonical model projection is invalid"
+            ) from error
     return tuple(result)
 
 
@@ -78,28 +83,46 @@ def _package(value: object, resolved: Mapping[str, object]) -> object:
 
 
 def _artifact_inputs(package: object) -> dict[str, str]:
-    raw = package.get("artifact_inputs") if isinstance(package, Mapping) else getattr(package, "artifact_inputs", None)
+    raw = (
+        package.get("artifact_inputs")
+        if isinstance(package, Mapping)
+        else getattr(package, "artifact_inputs", None)
+    )
     if raw is None:
         return {}
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         raise RecipeRuntimeSpecError("package artifact projection is invalid")
     result: dict[str, str] = {}
     for item in raw:
-        if not isinstance(item, Mapping) or type(item.get("selection_id")) is not str or type(item.get("artifact_key")) is not str:
+        if (
+            not isinstance(item, Mapping)
+            or type(item.get("selection_id")) is not str
+            or type(item.get("artifact_key")) is not str
+        ):
             raise RecipeRuntimeSpecError("package artifact projection is invalid")
         if item["selection_id"] in result:
-            raise RecipeRuntimeSpecError("package artifact projection repeats a selection")
+            raise RecipeRuntimeSpecError(
+                "package artifact projection repeats a selection"
+            )
         result[item["selection_id"]] = item["artifact_key"]
     return result
 
 
 def _package_paths(package: object) -> Sequence[str] | None:
-    raw = package.get("paths") if isinstance(package, Mapping) else getattr(package, "paths", None)
+    raw = (
+        package.get("paths")
+        if isinstance(package, Mapping)
+        else getattr(package, "paths", None)
+    )
     if isinstance(package, Mapping) and "member_paths" in package:
         raise RecipeRuntimeSpecError("package contains retired member_paths authority")
     if raw is None:
         return None
-    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)) or any(type(path) is not str for path in raw):
+    if (
+        not isinstance(raw, Sequence)
+        or isinstance(raw, (str, bytes))
+        or any(type(path) is not str for path in raw)
+    ):
         raise RecipeRuntimeSpecError("package paths are invalid")
     return raw
 
@@ -119,7 +142,9 @@ def _resolved_inputs(
     if resolved_recipe is not None:
         candidate = _recipe(resolved_recipe)
         if content_sha256(candidate) != content_sha256(parsed):
-            raise RecipeRuntimeSpecError("resolved recipe projection does not match the candidate")
+            raise RecipeRuntimeSpecError(
+                "resolved recipe projection does not match the candidate"
+            )
     supplied_models = models if models is not None else resolved.get("models")
     return _models(supplied_models), _package(package_handle, resolved)
 
@@ -165,7 +190,12 @@ def compile_runtime_spec(
             rank=rank,
             settings=parameters,
         )
-    except (HarnessCompileError, ContractResolutionError, ValueError, TypeError) as error:
+    except (
+        HarnessCompileError,
+        ContractResolutionError,
+        ValueError,
+        TypeError,
+    ) as error:
         raise RecipeRuntimeSpecError(str(error)) from error
     binding = projection.binding
     if binding is None:
@@ -187,8 +217,11 @@ def compile_runtime_spec(
             "engine": parsed.runtime.engine,
             "engine_version": None,
             "metrics_format": (
-                None if telemetry.path is None else
-                "comfyui-queue" if telemetry.adapter == "comfyui" else "prometheus"
+                None
+                if telemetry.path is None
+                else "comfyui-queue"
+                if telemetry.adapter == "comfyui"
+                else "prometheus"
             ),
             "metrics_path": telemetry.path,
         },
@@ -228,9 +261,13 @@ def compile_runtime_spec(
         }
         for mount in projection.model_mounts
     ]
-    mounts.append({"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False})
+    mounts.append(
+        {"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False}
+    )
     if projection.input_mount is not None:
-        mounts.append({"source": "/run/vonk/inputs", "target": "/inputs", "read_only": True})
+        mounts.append(
+            {"source": "/run/vonk/inputs", "target": "/inputs", "read_only": True}
+        )
     lifecycle = parsed.runtime.lifecycle
     security = {
         "devices": list(projection.devices) if hasattr(projection, "devices") else [],
@@ -311,7 +348,9 @@ def compile_runtime_spec(
 def _execution_digest(projection: Mapping[str, object]) -> str:
     """Hash only normalized compiled launch behavior and platform invariants."""
     return hashlib.sha256(
-        json.dumps(projection, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        json.dumps(
+            projection, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
     ).hexdigest()
 
 
@@ -332,7 +371,9 @@ def _build_input_digest(package: object) -> str | None:
     if type(raw) is not str:
         raise RecipeRuntimeSpecError("build input digest is invalid")
     value = raw.removeprefix("sha256:")
-    if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+    if len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
         raise RecipeRuntimeSpecError("build input digest is invalid")
     return value
 
@@ -345,7 +386,9 @@ def _compiled_arguments(
         setting = getattr(recipe.settings, name, None)
         if setting is not None:
             values[name] = setting.value
-    values.update({name: setting.value for name, setting in recipe.settings.knobs.items()})
+    values.update(
+        {name: setting.value for name, setting in recipe.settings.knobs.items()}
+    )
     if supplied:
         values.update(supplied)
     result: list[dict[str, object]] = []

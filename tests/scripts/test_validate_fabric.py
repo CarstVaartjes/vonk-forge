@@ -36,7 +36,10 @@ def test_inventory_uses_two_fabric_functions_per_host(validate_module):
     head, worker = validate_module.load_hosts(ROOT / "inventory" / "cluster.toml")
 
     assert [function.name for function in head.rails] == ["function100", "function101"]
-    assert [function.name for function in worker.rails] == ["function100", "function101"]
+    assert [function.name for function in worker.rails] == [
+        "function100",
+        "function101",
+    ]
 
 
 def test_expected_fleet_nodes_bind_to_exact_inventory_ssh_aliases(validate_module):
@@ -86,9 +89,7 @@ def test_read_only_preflight_probes_each_exact_peer_on_its_bound_interface(
     assert "timeout 5 ping -n -I enP2p1s0f1np1 -c 1 -W 2 192.168.101.11" in command
 
 
-def test_local_fabric_boundary_uses_explicit_ssh_override(
-    validate_module, monkeypatch
-):
+def test_local_fabric_boundary_uses_explicit_ssh_override(validate_module, monkeypatch):
     monkeypatch.setenv("VONK_SSH_BIN", "/opt/custom/ssh-wrapper")
     rail = validate_module.Rail(
         "function100",
@@ -165,7 +166,9 @@ Avg bus bandwidth : 17.0
 
 def test_runs_head_rdma_client_through_the_head_alias(validate_module):
     """The bound remote method needs the head alias as its first argument."""
-    rail = validate_module.Rail("rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11")
+    rail = validate_module.Rail(
+        "rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11"
+    )
     head = validate_module.Host("node1", "vonk-node-1", {}, (rail, rail))
     worker = validate_module.Host("node2", "vonk-node-2", {}, (rail, rail))
 
@@ -200,7 +203,9 @@ def test_runs_head_rdma_client_through_the_head_alias(validate_module):
                 returncode=0,
             )
 
-    result = validate_module.run_one_rdma(Runner(), worker, head, rail, rail, "ib_write_bw", 12000)
+    result = validate_module.run_one_rdma(
+        Runner(), worker, head, rail, rail, "ib_write_bw", 12000
+    )
 
     assert result["passed"] is True
     assert result["client_exit_code"] == 0
@@ -209,7 +214,9 @@ def test_runs_head_rdma_client_through_the_head_alias(validate_module):
 
 def test_rejects_nonzero_rdma_server_even_with_positive_output(validate_module):
     """The client metric cannot hide a failed perftest server process."""
-    rail = validate_module.Rail("rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11")
+    rail = validate_module.Rail(
+        "rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11"
+    )
     head = validate_module.Host("node1", "vonk-node-1", {}, (rail, rail))
     worker = validate_module.Host("node2", "vonk-node-2", {}, (rail, rail))
     positive = "Transport type : IB\nLink type : Ethernet\n65536 5000 0.0 88.5 0.1\n"
@@ -221,18 +228,24 @@ def test_rejects_nonzero_rdma_server_even_with_positive_output(validate_module):
         def remote(self, host, command, *, check=True):
             if "nohup" in command:
                 return SimpleNamespace(stdout="1234\n", stderr="", returncode=0)
-            return SimpleNamespace(stdout=positive, stderr="server failure", returncode=1)
+            return SimpleNamespace(
+                stdout=positive, stderr="server failure", returncode=1
+            )
 
         def worker_via_fabric(self, command, *, check=True):
             return SimpleNamespace(stdout=positive, stderr="", returncode=0)
 
     with pytest.raises(validate_module.GateError, match="server exited 1"):
-        validate_module.run_one_rdma(Runner(), head, worker, rail, rail, "ib_write_bw", 12000)
+        validate_module.run_one_rdma(
+            Runner(), head, worker, rail, rail, "ib_write_bw", 12000
+        )
 
 
 def test_rejects_rdma_component_below_declared_floor(validate_module):
     """A positive result is not enough when it misses the accepted floor."""
-    rail = validate_module.Rail("rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11")
+    rail = validate_module.Rail(
+        "rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11"
+    )
     head = validate_module.Host("node1", "vonk-node-1", {}, (rail, rail))
     worker = validate_module.Host("node2", "vonk-node-2", {}, (rail, rail))
     positive_but_low = (
@@ -271,12 +284,40 @@ def test_rejects_rdma_component_below_declared_floor(validate_module):
 
 def aggregate_hosts(validate_module):
     head_rails = (
-        validate_module.Rail("function100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11"),
-        validate_module.Rail("function101", "enP2p1s0f1np1", "roceP2p1s0f1", 3, "192.168.101.10", "192.168.101.11"),
+        validate_module.Rail(
+            "function100",
+            "enp1s0f1np1",
+            "rocep1s0f1",
+            3,
+            "192.168.100.10",
+            "192.168.100.11",
+        ),
+        validate_module.Rail(
+            "function101",
+            "enP2p1s0f1np1",
+            "roceP2p1s0f1",
+            3,
+            "192.168.101.10",
+            "192.168.101.11",
+        ),
     )
     worker_rails = (
-        validate_module.Rail("function100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.11", "192.168.100.10"),
-        validate_module.Rail("function101", "enP2p1s0f1np1", "roceP2p1s0f1", 3, "192.168.101.11", "192.168.101.10"),
+        validate_module.Rail(
+            "function100",
+            "enp1s0f1np1",
+            "rocep1s0f1",
+            3,
+            "192.168.100.11",
+            "192.168.100.10",
+        ),
+        validate_module.Rail(
+            "function101",
+            "enP2p1s0f1np1",
+            "roceP2p1s0f1",
+            3,
+            "192.168.101.11",
+            "192.168.101.10",
+        ),
     )
     return (
         validate_module.Host("node1", "vonk-node-1", {}, head_rails),
@@ -352,7 +393,14 @@ def test_aggregate_rejects_bandwidth_below_nvidia_floor(validate_module):
 
 def test_nccl_rejects_bus_bandwidth_below_regression_floor(validate_module):
     """NET/IB selection alone cannot hide a material NCCL regression."""
-    rail = validate_module.Rail("function100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11")
+    rail = validate_module.Rail(
+        "function100",
+        "enp1s0f1np1",
+        "rocep1s0f1",
+        3,
+        "192.168.100.10",
+        "192.168.100.11",
+    )
     fabric = {
         "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
         "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
@@ -482,7 +530,11 @@ link rocep1s0f1/1 packet_seq_err 0 local_ack_timeout_err 1 roce_adp_retrans 2
     result = validate_module.parse_rdma_counters(
         output,
         expected_hcas=("rocep1s0f1",),
-        monitored_counters=("packet_seq_err", "local_ack_timeout_err", "roce_adp_retrans"),
+        monitored_counters=(
+            "packet_seq_err",
+            "local_ack_timeout_err",
+            "roce_adp_retrans",
+        ),
     )
 
     assert result == {
@@ -513,7 +565,9 @@ def test_rejects_growing_rdma_error_counter(validate_module):
         "node1/rocep1s0f1/local_ack_timeout_err": 2,
     }
 
-    with pytest.raises(validate_module.GateError, match="packet_seq_err grew from 0 to 1"):
+    with pytest.raises(
+        validate_module.GateError, match="packet_seq_err grew from 0 to 1"
+    ):
         validate_module.validate_counter_delta(before, after)
 
 
@@ -529,7 +583,14 @@ def test_accepts_unchanged_rdma_error_counters(validate_module):
 
 def test_latency_command_pins_baseline_parameters(validate_module):
     """Every future latency comparison uses the same verb, payload, and sample count."""
-    rail = validate_module.Rail("function100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11")
+    rail = validate_module.Rail(
+        "function100",
+        "enp1s0f1np1",
+        "rocep1s0f1",
+        3,
+        "192.168.100.10",
+        "192.168.100.11",
+    )
 
     command = validate_module.latency_command(
         rail, "192.168.100.11", 14000, server=False
@@ -543,7 +604,14 @@ def test_latency_command_pins_baseline_parameters(validate_module):
 
 def test_runs_fixed_latency_and_records_distribution(validate_module):
     """The live latency wrapper checks both process exits and returns parsed metrics."""
-    rail = validate_module.Rail("function100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11")
+    rail = validate_module.Rail(
+        "function100",
+        "enp1s0f1np1",
+        "rocep1s0f1",
+        3,
+        "192.168.100.10",
+        "192.168.100.11",
+    )
     head = validate_module.Host("node1", "vonk-node-1", {}, (rail, rail))
     worker = validate_module.Host("node2", "vonk-node-2", {}, (rail, rail))
     latency = """
@@ -622,8 +690,12 @@ def test_native_nccl_prerequisites_require_the_pinned_completed_build(validate_m
 
 def test_native_nccl_launch_uses_restricted_fabric_transport(validate_module):
     """MPI launch cannot weaken the dedicated Spark1-to-Spark2 SSH boundary."""
-    head_rail = validate_module.Rail("rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11")
-    worker_rail = validate_module.Rail("rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.11", "192.168.100.10")
+    head_rail = validate_module.Rail(
+        "rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11"
+    )
+    worker_rail = validate_module.Rail(
+        "rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.11", "192.168.100.10"
+    )
     fabric = {
         "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
         "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
@@ -632,7 +704,9 @@ def test_native_nccl_launch_uses_restricted_fabric_transport(validate_module):
         "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
     }
     head = validate_module.Host("node1", "vonk-node-1", fabric, (head_rail, head_rail))
-    worker = validate_module.Host("node2", "vonk-node-2", fabric, (worker_rail, worker_rail))
+    worker = validate_module.Host(
+        "node2", "vonk-node-2", fabric, (worker_rail, worker_rail)
+    )
 
     command = validate_module.nccl_launch_command(head, worker)
 
@@ -659,7 +733,9 @@ def test_native_prerequisite_checks_each_openmpi_package(validate_module):
 
 def test_worker_preflight_precedes_head_preflight(validate_module):
     """Every remote prerequisite gate starts with GPU node 2 via the fabric alias."""
-    rail = validate_module.Rail("rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11")
+    rail = validate_module.Rail(
+        "rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11"
+    )
     head = validate_module.Host("node1", "vonk-node-1", {}, (rail, rail))
     worker = validate_module.Host("node2", "vonk-node-2", {}, (rail, rail))
 
@@ -707,8 +783,16 @@ def test_remote_preflight_pins_physical_link_speed_and_interface_mtu(validate_mo
 
 def test_nccl_validation_is_worker_first_and_launch_only(validate_module):
     """Completed native artifacts are checked, not rebuilt, before the collective."""
-    rail = validate_module.Rail("rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11")
-    fabric = {"NCCL_SOCKET_IFNAME": "=enp1s0f1np1", "NCCL_IB_HCA": "=rocep1s0f1:1", "NCCL_IB_GID_INDEX": 3, "TP_SOCKET_IFNAME": "enp1s0f1np1", "GLOO_SOCKET_IFNAME": "enp1s0f1np1"}
+    rail = validate_module.Rail(
+        "rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11"
+    )
+    fabric = {
+        "NCCL_SOCKET_IFNAME": "=enp1s0f1np1",
+        "NCCL_IB_HCA": "=rocep1s0f1:1",
+        "NCCL_IB_GID_INDEX": 3,
+        "TP_SOCKET_IFNAME": "enp1s0f1np1",
+        "GLOO_SOCKET_IFNAME": "enp1s0f1np1",
+    }
     head = validate_module.Host("node1", "vonk-node-1", fabric, (rail, rail))
     worker = validate_module.Host("node2", "vonk-node-2", fabric, (rail, rail))
 
@@ -718,7 +802,11 @@ def test_nccl_validation_is_worker_first_and_launch_only(validate_module):
 
         def remote(self, host, command, *, check=True):
             self.calls.append(("head", command))
-            return SimpleNamespace(stdout="NET/IB : Using rocep1s0f1,roceP2p1s0f1\nAvg bus bandwidth : 19.3", stderr="", returncode=0)
+            return SimpleNamespace(
+                stdout="NET/IB : Using rocep1s0f1,roceP2p1s0f1\nAvg bus bandwidth : 19.3",
+                stderr="",
+                returncode=0,
+            )
 
         def worker_via_fabric(self, command, *, check=True):
             self.calls.append(("worker", command))

@@ -76,7 +76,9 @@ class Reader:
         return next(item for item in self.snapshot.items if item.uri == uri)
 
 
-def _item_with_document(item: RecipeLibraryItem, document: dict[str, object]) -> RecipeLibraryItem:
+def _item_with_document(
+    item: RecipeLibraryItem, document: dict[str, object]
+) -> RecipeLibraryItem:
     recipe = RecipeDefinition.model_validate(document)
     digest = content_sha256(recipe)
     return replace(
@@ -93,20 +95,34 @@ def _item_with_document(item: RecipeLibraryItem, document: dict[str, object]) ->
     )
 
 
-def _fixture(tmp_path: Path) -> tuple[sessionmaker, CatalogService, Reader, RecipeLibraryItem]:
+def _fixture(
+    tmp_path: Path,
+) -> tuple[sessionmaker, CatalogService, Reader, RecipeLibraryItem]:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     row = index["recipes"][0]
     package = (ROOT / row["package"]["path"]).read_bytes()
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("index.json"):
-            return httpx.Response(200, headers={"content-type": "application/json"}, content=json.dumps(index).encode())
-        return httpx.Response(200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package)
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                content=json.dumps(index).encode(),
+            )
+        return httpx.Response(
+            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
+        )
 
-    client = RecipePackageClient("http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler))
+    client = RecipePackageClient(
+        "http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(handler),
+    )
     snapshot = client.list()
     item = client.fetch(snapshot.items[0].uri)
-    snapshot = RecipeLibrarySnapshot(snapshot.commit, (item,), snapshot.repository, snapshot.catalog_entities)
+    snapshot = RecipeLibrarySnapshot(
+        snapshot.commit, (item,), snapshot.repository, snapshot.catalog_entities
+    )
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -173,7 +189,9 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
 
 @pytest.mark.parametrize("malformed", [False, True])
 def test_unchanged_catalog_refreshes_build_policy_without_refetching_recipe(
-    tmp_path: Path, malformed: bool, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    malformed: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sessions, catalog, reader, item = _fixture(tmp_path)
     sync = _sync(sessions, catalog, reader)
@@ -188,11 +206,15 @@ def test_unchanged_catalog_refreshes_build_policy_without_refetching_recipe(
     with monkeypatch.context() as previous:
         previous.setattr(catalog_entities_module, "_build_projection", previous_policy)
         first = sync.automatic()
-    builds = RecipeBuildService(sessions, bundles=SourceBundleStore(tmp_path / "bundles"))
+    builds = RecipeBuildService(
+        sessions, bundles=SourceBundleStore(tmp_path / "bundles")
+    )
     with sessions() as session:
-        revision = session.scalar(select(CatalogDocumentRevision).where(
-            CatalogDocumentRevision.kind == "recipe",
-        ))
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+            )
+        )
         assert revision is not None
         revision_id, digest = revision.id, revision.content_digest
         original_document = deepcopy(revision.document)
@@ -204,9 +226,13 @@ def test_unchanged_catalog_refreshes_build_policy_without_refetching_recipe(
             stored = deepcopy(revision.projected)
             _document_section(stored, "build_options")["layers"] = "true"
             # Deliberately corrupt persisted JSON outside the typed writer.
-            session.execute(update(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.id == revision_id,
-            ).values(projected=stored))
+            session.execute(
+                update(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.id == revision_id,
+                )
+                .values(projected=stored)
+            )
         with pytest.raises(CatalogRevisionContractError):
             sync.automatic()
         return
@@ -217,26 +243,38 @@ def test_unchanged_catalog_refreshes_build_policy_without_refetching_recipe(
     assert refreshed.id == first.id
     assert reader.fetches == [item.uri]
     with sessions() as session:
-        revisions = tuple(session.scalars(select(CatalogDocumentRevision).where(
-            CatalogDocumentRevision.kind == "recipe",
-        )))
-        assert [(row.id, row.content_digest) for row in revisions] == [(revision_id, digest)]
+        revisions = tuple(
+            session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                )
+            )
+        )
+        assert [(row.id, row.content_digest) for row in revisions] == [
+            (revision_id, digest)
+        ]
         assert revisions[0].document == original_document
     sync.automatic()
     assert builds.resolve(revision_id).input_intent_sha256 == current_input
     assert reader.fetches == [item.uri]
 
 
-def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_head(tmp_path: Path) -> None:
+def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_head(
+    tmp_path: Path,
+) -> None:
     sessions, catalog, reader, original = _fixture(tmp_path)
     sync = _sync(sessions, catalog, reader)
-    library = LibraryProjection(sessions, cursors=catalog._cursors, clock=catalog._clock)
+    library = LibraryProjection(
+        sessions, cursors=catalog._cursors, clock=catalog._clock
+    )
 
     def apply(item, commit):
         item = replace(item, library_commit=commit)
         reader.snapshot = replace(reader.snapshot, commit=commit, items=(item,))
         return sync.sync(
-            request_key=str(uuid.uuid4()), trigger="manual", actor="test",
+            request_key=str(uuid.uuid4()),
+            trigger="manual",
+            actor="test",
             expected_commit=commit,
         )
 
@@ -260,7 +298,12 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     failed_result = apply(_item_with_document(original, invalid), "3" * 40)
     assert failed_result.state == "partial"
     assert failed_result.problems
-    assert library.authoring_recipe_detail(first.identity.recipe_id).recipe.recipe_revision_id == second.recipe_revision_id
+    assert (
+        library.authoring_recipe_detail(
+            first.identity.recipe_id
+        ).recipe.recipe_revision_id
+        == second.recipe_revision_id
+    )
 
     # A newer Model head is independent of this recipe's immutable dependency.
     reference = RecipeDefinition.model_validate(original.document).models[0].model
@@ -272,40 +315,69 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
 
     pending_document = deepcopy(changed)
     _document_section(pending_document, "metadata")["title"] = "Pending local candidate"
-    pending = catalog.entities.revise(first.identity.recipe_id, pending_document, actor="test")
+    pending = catalog.entities.revise(
+        first.identity.recipe_id, pending_document, actor="test"
+    )
 
     rollback_result = apply(original, "4" * 40)
     assert rollback_result.state == "current"
     assert rollback_result.updated_count == 1
-    assert library.authoring_recipe_detail(first.identity.recipe_id).recipe.recipe_revision_id == first.identity.recipe_revision_id
-    assert catalog.get_recipe(first.identity.recipe_id).id == first.identity.recipe_revision_id
+    assert (
+        library.authoring_recipe_detail(
+            first.identity.recipe_id
+        ).recipe.recipe_revision_id
+        == first.identity.recipe_revision_id
+    )
+    assert (
+        catalog.get_recipe(first.identity.recipe_id).id
+        == first.identity.recipe_revision_id
+    )
     assert catalog.get_recipe(second.recipe_revision_id).id == second.recipe_revision_id
-    current = catalog.recipe_catalog_local_revisions([(original.publisher, original.slug)])
-    assert current[(original.publisher, original.slug)].content_sha256 == original.content_sha256
+    current = catalog.recipe_catalog_local_revisions(
+        [(original.publisher, original.slug)]
+    )
+    assert (
+        current[(original.publisher, original.slug)].content_sha256
+        == original.content_sha256
+    )
     assert catalog.entities.get_entity(old_model.document_id).id == model_head.id
     assert catalog.entities.resolve_reference(reference).id == old_model.id
 
     with sessions() as session:
-        head = session.scalar(select(CatalogDocumentHead).where(
-            CatalogDocumentHead.kind == "recipe",
-            CatalogDocumentHead.publisher == original.publisher,
-            CatalogDocumentHead.slug == original.slug,
-        ))
+        head = session.scalar(
+            select(CatalogDocumentHead).where(
+                CatalogDocumentHead.kind == "recipe",
+                CatalogDocumentHead.publisher == original.publisher,
+                CatalogDocumentHead.slug == original.slug,
+            )
+        )
         assert head.active_revision_id == first.identity.recipe_revision_id
         assert head.candidate_revision_id is None
         assert head.generation == 3
-        recipe_active = CatalogRepository().active_revision(session, first.identity.recipe_id)
+        recipe_active = CatalogRepository().active_revision(
+            session, first.identity.recipe_id
+        )
         assert recipe_active is not None
         assert recipe_active.id == first.identity.recipe_revision_id
-        assert ModelCacheService._latest_recipe_digest(session, second.content_sha256) == first.identity.content_sha256
-        revisions = list(session.scalars(select(CatalogDocumentRevision).where(
-            CatalogDocumentRevision.document_id == first.identity.recipe_id
-        )))
+        assert (
+            ModelCacheService._latest_recipe_digest(session, second.content_sha256)
+            == first.identity.content_sha256
+        )
+        revisions = list(
+            session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.document_id == first.identity.recipe_id
+                )
+            )
+        )
         assert {row.id for row in revisions if row.state == "active"} == {
-            first.identity.recipe_revision_id, second.recipe_revision_id,
+            first.identity.recipe_revision_id,
+            second.recipe_revision_id,
         }
         assert {row.id for row in revisions if row.state == "failed"} == {pending.id}
-        assert read_catalog_projection(session.get(CatalogDocumentRevision, pending.id)).failure_reason == (
+        assert read_catalog_projection(
+            session.get(CatalogDocumentRevision, pending.id)
+        ).failure_reason == (
             f"Superseded by imported recipe {original.content_sha256}."
         )
 
@@ -327,7 +399,9 @@ def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None
         identity["publisher"] = publisher
         identity["slug"] = slug
         return _item_with_document(
-            replace(item, publisher=publisher, slug=slug, source_path=f"recipes/{slug}.json"),
+            replace(
+                item, publisher=publisher, slug=slug, source_path=f"recipes/{slug}.json"
+            ),
             document,
         )
 
@@ -369,10 +443,7 @@ def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None
                 CatalogDocumentRevision.kind == "recipe"
             )
         ).all()
-        assert {
-            (row.publisher, row.slug)
-            for row in revisions
-        } == {
+        assert {(row.publisher, row.slug) for row in revisions} == {
             (item.publisher, item.slug),
             (other_publisher.publisher, other_publisher.slug),
             (same_publisher_a.publisher, same_publisher_a.slug),
@@ -383,9 +454,7 @@ def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None
 
 def test_local_revision_lookup_accepts_more_than_256_identities(tmp_path: Path) -> None:
     _sessions, service, _reader, _item = _fixture(tmp_path)
-    identities = [
-        (f"publisher-{index}", f"recipe-{index}") for index in range(257)
-    ]
+    identities = [(f"publisher-{index}", f"recipe-{index}") for index in range(257)]
 
     assert service.recipe_catalog_local_revisions(identities) == {}
 
@@ -437,7 +506,14 @@ def test_sync_fails_closed_for_unresolvable_canonical_recipe(tmp_path: Path) -> 
     assert result.skipped_count == 1
     assert result.problems[0]["code"] == "catalog.model_reference_missing"
     with sessions() as session:
-        assert session.scalars(select(CatalogDocumentRevision).where(CatalogDocumentRevision.kind == "recipe")).all() == []
+        assert (
+            session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe"
+                )
+            ).all()
+            == []
+        )
 
 
 def test_recipe_metadata_tags_do_not_change_execution_identity(tmp_path: Path) -> None:
@@ -515,7 +591,9 @@ def test_automatic_sync_retries_partial_same_commit_without_refetching_successes
     assert reader.fetches == [reader.snapshot.items[0].uri, second.uri, second.uri]
 
 
-def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(tmp_path: Path) -> None:
+def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(
+    tmp_path: Path,
+) -> None:
     sessions, service, reader, _item_value = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)
     with pytest.raises(CatalogSyncError, match="changed since"):
@@ -529,7 +607,9 @@ def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(tmp_path:
         assert session.scalars(select(CatalogDocumentRevision)).all() == []
 
 
-def test_sync_marks_reader_failure_failed_and_releases_active_slot(tmp_path: Path) -> None:
+def test_sync_marks_reader_failure_failed_and_releases_active_slot(
+    tmp_path: Path,
+) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -562,7 +642,9 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(tmp_path: Pat
         assert run.error_code == "recipe_library.unavailable"
 
 
-@pytest.mark.parametrize("damage", ["missing-problems", "string-count", "null", "invalid-problem", "extra"])
+@pytest.mark.parametrize(
+    "damage", ["missing-problems", "string-count", "null", "invalid-problem", "extra"]
+)
 def test_sync_round_trip_rejects_malformed_persisted_result(tmp_path, damage):
     sessions, service, reader, _item = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)

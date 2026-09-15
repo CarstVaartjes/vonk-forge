@@ -50,10 +50,17 @@ def _request_body(check: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def _substitute_alias(value: object, model_alias: str | None) -> object:
-    if model_alias is not None and isinstance(value, str) and value in {"$ALIAS", "$MODEL"}:
+    if (
+        model_alias is not None
+        and isinstance(value, str)
+        and value in {"$ALIAS", "$MODEL"}
+    ):
         return model_alias
     if isinstance(value, Mapping):
-        return {str(key): _substitute_alias(item, model_alias) for key, item in value.items()}
+        return {
+            str(key): _substitute_alias(item, model_alias)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_substitute_alias(item, model_alias) for item in value]
     return value
@@ -66,7 +73,9 @@ def _choices(response: Mapping[str, object]) -> list[Mapping[str, object]]:
     return [_mapping(choices[0], "serving response choice")]
 
 
-def _assert_output_cap(response: Mapping[str, object], check: Mapping[str, object], field: str) -> None:
+def _assert_output_cap(
+    response: Mapping[str, object], check: Mapping[str, object], field: str
+) -> None:
     body = _request_body(check)
     limit = body.get("max_tokens")
     if type(limit) is not int or limit < 1:
@@ -84,16 +93,22 @@ def evaluate_http_response(
     """Evaluate one real HTTP observation against one canonical check."""
 
     if observation.status < 200 or observation.status >= 300:
-        raise ServingExecutionError(f"serving endpoint returned HTTP {observation.status}")
+        raise ServingExecutionError(
+            f"serving endpoint returned HTTP {observation.status}"
+        )
     kind = check.get("kind")
     assertions = check.get("assertions")
-    if not isinstance(assertions, Sequence) or isinstance(assertions, (str, bytes, bytearray)):
+    if not isinstance(assertions, Sequence) or isinstance(
+        assertions, (str, bytes, bytearray)
+    ):
         raise ServingExecutionError("serving check assertions are invalid")
     assertions = list(assertions)
     response = _json_body(observation)
     if kind == "openai.health":
         if "endpoint.healthy" not in assertions:
-            raise ServingExecutionError("health check does not declare endpoint.healthy")
+            raise ServingExecutionError(
+                "health check does not declare endpoint.healthy"
+            )
         return {"response_shape": "health", "status": observation.status}
     if kind == "openai.embedding":
         data = response.get("data")
@@ -108,11 +123,16 @@ def evaluate_http_response(
             )
         ):
             raise ServingExecutionError("embedding response is empty")
-        return {"response_shape": "list.embedding", "embeddings": len(data) if isinstance(data, list) else 0}
+        return {
+            "response_shape": "list.embedding",
+            "embeddings": len(data) if isinstance(data, list) else 0,
+        }
     if kind == "openai.completion":
         choice = _choices(response)[0]
         text = choice.get("text")
-        if "completion.nonempty" in assertions and (not isinstance(text, str) or not text.strip()):
+        if "completion.nonempty" in assertions and (
+            not isinstance(text, str) or not text.strip()
+        ):
             raise ServingExecutionError("completion response is empty")
         if "completion.output-cap" in assertions:
             _assert_output_cap(response, check, "completion.output-cap")
@@ -132,16 +152,24 @@ def evaluate_http_response(
     observed = ["text"] if has_content else []
     if has_tools:
         observed.append("tools")
-    return {"response_shape": "chat.completion", "choices": 1, "observed_features": observed}
+    return {
+        "response_shape": "chat.completion",
+        "choices": 1,
+        "observed_features": observed,
+    }
 
 
-def evaluate_job_result(result: Mapping[str, object], check: Mapping[str, object]) -> dict[str, object]:
+def evaluate_job_result(
+    result: Mapping[str, object], check: Mapping[str, object]
+) -> dict[str, object]:
     """Evaluate a Controller artifact-job result without interpreting model bytes."""
 
     if not result:
         raise ServingExecutionError("job result is empty")
     assertions = check.get("assertions")
-    if not isinstance(assertions, Sequence) or isinstance(assertions, (str, bytes, bytearray)):
+    if not isinstance(assertions, Sequence) or isinstance(
+        assertions, (str, bytes, bytearray)
+    ):
         raise ServingExecutionError("job check assertions are invalid")
     if "artifact.output" in assertions:
         output_slot = _mapping(check.get("request"), "job request").get("output_slot")
@@ -149,18 +177,25 @@ def evaluate_job_result(result: Mapping[str, object], check: Mapping[str, object
         if not isinstance(outputs, list) or not outputs:
             raise ServingExecutionError("job result has no outputs")
         if output_slot is not None and not any(
-            isinstance(item, Mapping) and item.get("slot") == output_slot for item in outputs
+            isinstance(item, Mapping) and item.get("slot") == output_slot
+            for item in outputs
         ):
-            raise ServingExecutionError("job result does not contain the declared output slot")
+            raise ServingExecutionError(
+                "job result does not contain the declared output slot"
+            )
     if "inference.completed" in assertions:
         state = result.get("state", result.get("status"))
         if state != "succeeded":
-            raise ServingExecutionError("job result does not show a successful completion")
+            raise ServingExecutionError(
+                "job result does not show a successful completion"
+            )
     declared_outputs = result.get("outputs")
     return {
         "response_shape": "job.result",
         "result_fields": sorted(str(key) for key in result),
-        "output_count": len(declared_outputs) if isinstance(declared_outputs, list) else 0,
+        "output_count": len(declared_outputs)
+        if isinstance(declared_outputs, list)
+        else 0,
     }
 
 
@@ -180,7 +215,11 @@ def execute_http_check(
     if method not in {"GET", "POST"} or not isinstance(path, str):
         raise ServingExecutionError("serving HTTP request is invalid")
     payload = _substitute_alias(request.get("body"), model_alias)
-    data = json.dumps(payload, separators=(",", ":")).encode() if payload is not None else None
+    data = (
+        json.dumps(payload, separators=(",", ":")).encode()
+        if payload is not None
+        else None
+    )
     http_request = urllib.request.Request(
         base_url.rstrip("/") + path,
         data=data,
@@ -193,20 +232,32 @@ def execute_http_check(
         try:
             declared_length = int(raw_length) if raw_length is not None else None
         except (TypeError, ValueError) as error:
-            raise ServingExecutionError("serving response Content-Length is invalid") from error
+            raise ServingExecutionError(
+                "serving response Content-Length is invalid"
+            ) from error
         if declared_length is not None and declared_length > MAX_HTTP_RESPONSE_BYTES:
-            raise ServingExecutionError("serving response exceeds the maximum body size")
+            raise ServingExecutionError(
+                "serving response exceeds the maximum body size"
+            )
         body = response.read(MAX_HTTP_RESPONSE_BYTES + 1)
         if len(body) > MAX_HTTP_RESPONSE_BYTES:
-            raise ServingExecutionError("serving response exceeds the maximum body size")
+            raise ServingExecutionError(
+                "serving response exceeds the maximum body size"
+            )
         return body
 
     try:
         with opener(http_request, timeout=timeout_seconds) as response:
-            observation = HttpObservation(int(response.status), dict(response.headers.items()), read_bounded(response))
+            observation = HttpObservation(
+                int(response.status),
+                dict(response.headers.items()),
+                read_bounded(response),
+            )
     except urllib.error.HTTPError as error:
         body = read_bounded(error)
-        observation = HttpObservation(int(error.code), dict(error.headers.items()), body)
+        observation = HttpObservation(
+            int(error.code), dict(error.headers.items()), body
+        )
     except (OSError, ValueError) as error:
         raise ServingExecutionError(f"serving HTTP request failed: {error}") from error
     return evaluate_http_response(observation, check)

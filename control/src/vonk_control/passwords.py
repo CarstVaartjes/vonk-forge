@@ -38,6 +38,8 @@ def verify_password(verifier: str, password: str) -> PasswordVerification:
     try:
         bounded = _bounded(password)
         valid = HASHER.verify(verifier, bounded)
-        return PasswordVerification(valid, valid and HASHER.check_needs_rehash(verifier))
+        return PasswordVerification(
+            valid, valid and HASHER.check_needs_rehash(verifier)
+        )
     except (PasswordPolicyError, InvalidHashError, VerificationError):
         return PasswordVerification(False, False)

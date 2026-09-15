@@ -126,12 +126,14 @@ def _insert_synthetic_corpus(
                 created_at=stamp,
             )
         )
-        heads.append(CatalogDocumentHead(
-            kind=kind,
-            publisher=canonical.identity.publisher,
-            slug=canonical.identity.slug,
-            active_revision_id=revision_id,
-        ))
+        heads.append(
+            CatalogDocumentHead(
+                kind=kind,
+                publisher=canonical.identity.publisher,
+                slug=canonical.identity.slug,
+                active_revision_id=revision_id,
+            )
+        )
     with sessions.begin() as session:
         session.add_all(rows)
         session.flush()
@@ -191,10 +193,16 @@ def test_models_updated_since_excludes_older_rows_only(
     assert "test/charlie" not in set(recent_selectors)
     # The boundary is inclusive: a revision exactly at the cutoff is kept.
     at_middle = projection.models(limit=100, sort="updated", updated_since=_AT_MIDDLE)
-    assert [item.selector for item in at_middle.models] == _selectors(("bravo", "alpha"))
+    assert [item.selector for item in at_middle.models] == _selectors(
+        ("bravo", "alpha")
+    )
     # The surviving rows keep their relative order under either sort.
-    recent_by_name = projection.models(limit=100, sort="name", updated_since=_AFTER_OLDEST)
-    assert [item.selector for item in recent_by_name.models] == _selectors(("alpha", "bravo"))
+    recent_by_name = projection.models(
+        limit=100, sort="name", updated_since=_AFTER_OLDEST
+    )
+    assert [item.selector for item in recent_by_name.models] == _selectors(
+        ("alpha", "bravo")
+    )
     # Filtering a page must not change the facets, which describe the catalog.
     assert recent.facets == everything.facets
     assert recent.filters.updated_since == _AFTER_OLDEST.isoformat()

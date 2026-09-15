@@ -196,7 +196,9 @@ def test_main_reads_bounded_files_without_printing_keys(
     observed: list[tuple[str, str]] = []
     monkeypatch.setenv("LITELLM_MASTER_KEY_FILE", str(master))
     monkeypatch.setenv("HERMES_LITELLM_KEY_FILE", str(hermes))
-    monkeypatch.setattr(module, "reconcile", lambda first, second: observed.append((first, second)))
+    monkeypatch.setattr(
+        module, "reconcile", lambda first, second: observed.append((first, second))
+    )
 
     assert module.main() == 0
 

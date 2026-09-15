@@ -90,7 +90,8 @@ class LifecyclePreflight:
             # Consume the outstanding probe first, then recheck every other node.
             # A previously checked rank can change while its peer is probing.
             ordered_nodes = sorted(
-                nodes.items(), key=lambda item: (item[0] != checkpoint.pending_node_id, item[0])
+                nodes.items(),
+                key=lambda item: (item[0] != checkpoint.pending_node_id, item[0]),
             )
             for node_id, source_build in ordered_nodes:
                 node = session.get(AgentNode, node_id, with_for_update=True)
@@ -131,7 +132,9 @@ class LifecyclePreflight:
                         created_at = child.created_at
                         if created_at.tzinfo is None:
                             created_at = created_at.replace(tzinfo=UTC)
-                        observed_now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+                        observed_now = (
+                            now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+                        )
                         if observed_now >= created_at + PENDING_PROBE_TIMEOUT:
                             return checkpoint, "runtime_preflight.deadline_exceeded"
                         return checkpoint, None

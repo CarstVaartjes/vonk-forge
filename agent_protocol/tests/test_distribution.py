@@ -103,13 +103,17 @@ def test_distribution_preserves_safe_object_names(name: str) -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("schema_version", 2.0), ("schema_version", True),
-        ("generation", True), ("generation", 3.0),
+        ("schema_version", 2.0),
+        ("schema_version", True),
+        ("generation", True),
+        ("generation", 3.0),
         ("expires_at", "2026-09-05T12:00:00"),
         ("expires_at", "2026-09-05T12:00:00+02:00"),
     ],
 )
-def test_distribution_rejects_wrong_json_types_and_non_utc_expiry(field: str, value: object) -> None:
+def test_distribution_rejects_wrong_json_types_and_non_utc_expiry(
+    field: str, value: object
+) -> None:
     wire = _assignment().to_mapping()
     wire[field] = value
     with pytest.raises(AgentProtocolError):

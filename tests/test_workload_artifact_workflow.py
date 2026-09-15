@@ -92,8 +92,10 @@ def test_build_request_is_bounded_and_validated_before_any_publication() -> None
     assert "GITHUB_REPOSITORY_OWNER" in authorization
     assert "GITHUB_REPOSITORY" in authorization
     assert "expected_output_repository" in authorization
-    assert '${repository_name,,}-workloads' in authorization
-    assert "output repository must be owned by this GitHub organization" in authorization
+    assert "${repository_name,,}-workloads" in authorization
+    assert (
+        "output repository must be owned by this GitHub organization" in authorization
+    )
     assert "needs: [authorize-request, read-only-ci-gate]" in publisher
 
 
@@ -106,8 +108,8 @@ def test_publication_waits_for_successful_read_only_ci_on_the_exact_commit() -> 
     assert "needs.authorize-request.outputs.source_commit" in gate
     assert "gh run list" in gate
     assert "--workflow ci.yml" in gate
-    assert "--commit \"$SOURCE_COMMIT\"" in gate
-    assert "conclusion == \"success\"" in gate
+    assert '--commit "$SOURCE_COMMIT"' in gate
+    assert 'conclusion == "success"' in gate
     assert "packages: write" not in gate
     assert "id-token: write" not in gate
     assert "needs: [authorize-request, read-only-ci-gate]" in publisher
@@ -182,9 +184,7 @@ def test_build_publishes_digest_only_with_sbom_and_provenance() -> None:
 
 def test_build_normalizes_digest_affecting_timestamps_to_source_commit() -> None:
     source = workflow_step("publish-workload-artifact", "Verify exact source context")
-    build = workflow_step(
-        "publish-workload-artifact", "Build digest-only OCI artifact"
-    )
+    build = workflow_step("publish-workload-artifact", "Build digest-only OCI artifact")
 
     assert 'git -C workload-source show -s --format=%ct "$SOURCE_COMMIT"' in source
     assert "source commit timestamp is invalid" in source
@@ -206,11 +206,9 @@ def test_acceptance_identity_is_the_reproducible_runtime_manifest() -> None:
     assert "workload-artifact-output/oci-index.json" in evidence
     assert "scripts/select-workload-runtime-manifest" in evidence
     assert "runtime_digest=" in evidence
-    assert 'printf \'runtime_digest=%s\\n\'' in evidence
+    assert "printf 'runtime_digest=%s\\n'" in evidence
     assert "runtime manifest does not match selected digest" in evidence
-    assert (
-        "OCI_MANIFEST_DIGEST: ${{ steps.evidence.outputs.runtime_digest }}" in result
-    )
+    assert "OCI_MANIFEST_DIGEST: ${{ steps.evidence.outputs.runtime_digest }}" in result
 
 
 def _run_runtime_manifest_selector(
@@ -297,8 +295,7 @@ def test_runtime_manifest_selector_rejects_multiple_executables(
     tmp_path: Path,
 ) -> None:
     descriptors = [
-        _runtime_descriptor(f"sha256:{character * 64}")
-        for character in ("a", "b")
+        _runtime_descriptor(f"sha256:{character * 64}") for character in ("a", "b")
     ]
 
     result = _run_runtime_manifest_selector(
@@ -571,27 +568,28 @@ def test_sbom_validation_accepts_document_and_rejects_buildx_wrapper() -> None:
 
 def test_sigstore_attests_provenance_and_sbom_without_tuf_credentials() -> None:
     publisher = job("publish-workload-artifact")
-    provenance = workflow_step(
-        "publish-workload-artifact", "Sign workload provenance"
-    )
+    provenance = workflow_step("publish-workload-artifact", "Sign workload provenance")
     sbom = workflow_step("publish-workload-artifact", "Sign workload SBOM")
 
     assert (
         "permissions:\n      artifact-metadata: write\n      attestations: write\n      contents: read\n"
         "      id-token: write\n      packages: write"
     ) in publisher
+    assert "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in provenance
     assert (
-        "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in provenance
+        "subject-name: ${{ needs.authorize-request.outputs.output_repository }}"
+        in provenance
     )
-    assert "subject-name: ${{ needs.authorize-request.outputs.output_repository }}" in provenance
     assert "subject-digest: ${{ steps.evidence.outputs.runtime_digest }}" in provenance
     assert "steps.build.outputs.digest" not in provenance
     assert "push-to-registry: true" in provenance
     assert (
-        "predicate-type: https://vonk-forge.dev/attestations/"
-        "workload-artifact-build/v1"
+        "predicate-type: https://vonk-forge.dev/attestations/workload-artifact-build/v1"
     ) in provenance
-    assert "predicate-path: workload-artifact-output/provenance-predicate.json" in provenance
+    assert (
+        "predicate-path: workload-artifact-output/provenance-predicate.json"
+        in provenance
+    )
     evidence = workflow_step(
         "publish-workload-artifact", "Collect workload artifact evidence"
     )
@@ -606,7 +604,9 @@ def test_sigstore_attests_provenance_and_sbom_without_tuf_credentials() -> None:
         assert binding in evidence
     assert "provenance-predicate.json" in evidence
     assert "sbom-path: workload-artifact-output/sbom.json" in sbom
-    assert "subject-name: ${{ needs.authorize-request.outputs.output_repository }}" in sbom
+    assert (
+        "subject-name: ${{ needs.authorize-request.outputs.output_repository }}" in sbom
+    )
     assert "subject-digest: ${{ steps.evidence.outputs.runtime_digest }}" in sbom
     assert "steps.build.outputs.digest" not in sbom
     assert "push-to-registry: true" in sbom

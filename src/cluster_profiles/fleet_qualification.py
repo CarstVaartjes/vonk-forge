@@ -40,6 +40,8 @@ _JOB_ADAPTERS = frozenset(
 )
 _CONTROLLER_DISK_FLOOR_BYTES = 10_000_000_000
 _NODE_ID = re.compile(r"^spk_[0-9a-f]{32}$")
+
+
 class QualificationError(RuntimeError):
     """The runner cannot continue without violating a safety invariant."""
 
@@ -149,7 +151,9 @@ class _CurrentRecipe:
                     "roles": [],
                 }
                 rows_by_physical_file[physical_key] = row
-            roles_by_physical_file.setdefault(physical_key, set()).update(selected_roles)
+            roles_by_physical_file.setdefault(physical_key, set()).update(
+                selected_roles
+            )
             row["roles"] = sorted(roles_by_physical_file[physical_key])
         return sorted(
             rows_by_physical_file.values(),
@@ -173,9 +177,7 @@ class _CurrentRecipe:
     def maximum_installed_bytes_per_node(self) -> int:
         return max(
             (
-                sum(
-                    role.resources.disk.to_dict().values()
-                )
+                sum(role.resources.disk.to_dict().values())
                 for role in self.definition.topology.roles
             ),
             default=0,
@@ -194,7 +196,10 @@ class _CurrentRecipe:
     @property
     def maximum_runtime_memory_bytes_per_node(self) -> int:
         return max(
-            (role.resources.memory.startup_peak_bytes for role in self.definition.topology.roles),
+            (
+                role.resources.memory.startup_peak_bytes
+                for role in self.definition.topology.roles
+            ),
             default=0,
         )
 
@@ -483,9 +488,7 @@ def _territorial_restrictions(
         not isinstance(denied, list)
         or not denied
         or any(
-            not isinstance(item, str)
-            or not 2 <= len(item) <= 3
-            or item != item.upper()
+            not isinstance(item, str) or not 2 <= len(item) <= 3 or item != item.upper()
             for item in denied
         )
     ):
@@ -719,13 +722,21 @@ def _library_recipe_rows(
                 client.request("GET", "/api/recipe/library", query=query)
             )
         except (KeyError, TypeError, ValueError) as error:
-            raise QualificationError("current Library recipe list is invalid") from error
+            raise QualificationError(
+                "current Library recipe list is invalid"
+            ) from error
         pages.append(page)
         next_cursor = page.next_cursor
         if next_cursor is None:
             break
-        if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
-            raise QualificationError("current Library recipe pagination cursor is invalid")
+        if (
+            not isinstance(next_cursor, str)
+            or not next_cursor
+            or next_cursor in seen_cursors
+        ):
+            raise QualificationError(
+                "current Library recipe pagination cursor is invalid"
+            )
         seen_cursors.add(next_cursor)
         cursor = next_cursor
     else:
@@ -738,9 +749,7 @@ def _library_recipe_rows(
             revision_id = summary.identity.recipe_revision_id
             digest = summary.identity.content_sha256
             detail, definition, model_documents = _parse_library_detail(
-                client.request(
-                    "GET", f"/api/recipe/{_quote(summary.selector)}"
-                )
+                client.request("GET", f"/api/recipe/{_quote(summary.selector)}")
             )
             identity = detail.identity
             if (
@@ -1050,9 +1059,7 @@ def build_plan(
                 "recipe_revision_id": revision_id,
                 "blockers": [item.as_dict() for item in blockers],
                 "planned_actions": (
-                    []
-                    if blockers
-                    else ["profile-qualification-handoff"]
+                    [] if blockers else ["profile-qualification-handoff"]
                 ),
             }
         )
@@ -1062,6 +1069,7 @@ def build_plan(
             raise QualificationError(
                 f"selected recipe is absent from the current Library catalog: {missing[0]}; publish it to global vonk-forge-recipes and refresh the current catalog"
             )
+
     def _installed_bytes_order(item: Mapping[str, object]) -> tuple[int, str]:
         installed = item.get("maximum_installed_bytes_per_node")
         return (
@@ -1233,6 +1241,7 @@ class OperationMonitor:
                 )
                 raise QualificationError(f"{recipe} {step} operation timed out")
             self.sleeper(self.options.poll_interval_seconds)
+
 
 class ArtifactJobSmokeAdapter:
     """Run exact digest-bound fixtures through the durable artifact-job lifecycle."""
@@ -1444,9 +1453,7 @@ class ArtifactJobSmokeAdapter:
                         "artifact-job smoke timed out and was cancelled"
                     )
                 sleeper(poll_interval_seconds)
-                status = client.request(
-                    "GET", f"/api/artifact-jobs/{_quote(job_id)}"
-                )
+                status = client.request("GET", f"/api/artifact-jobs/{_quote(job_id)}")
             ledger.append(
                 f"{event_prefix}.completed",
                 plan_digest=plan_digest,
@@ -1850,9 +1857,7 @@ class QualificationRunner:
                 f"{key} is absent from the current Library revision; publish it to global vonk-forge-recipes and refresh the current catalog"
             )
         _detail, _definition, _models = _parse_library_detail(
-            self.client.request(
-                "GET", f"/api/recipe/{_quote(key)}"
-            )
+            self.client.request("GET", f"/api/recipe/{_quote(key)}")
         )
         identity = _detail.identity
         if (
@@ -1940,15 +1945,14 @@ class QualificationRunner:
                 continue
             try:
                 recipe_id, revision_id = self._resolve_current_recipe(digest, item)
-                detail = self.client.request(
-                    "GET", f"/api/recipe/{_quote(key)}"
+                detail = self.client.request("GET", f"/api/recipe/{_quote(key)}")
+                parsed_detail, detail_definition, detail_models = _parse_library_detail(
+                    detail
                 )
-                parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
                 selected_revision = parsed_detail.identity
                 if (
                     selected_revision.recipe_revision_id != revision_id
-                    or selected_revision.content_sha256
-                    != item.get("content_sha256")
+                    or selected_revision.content_sha256 != item.get("content_sha256")
                 ):
                     raise QualificationError(
                         f"{key} selected revision changed during capacity planning"
@@ -2356,9 +2360,7 @@ class QualificationRunner:
                     preexisting,
                     key=lambda value: tuple(
                         sorted(
-                            _string_list(
-                                value.get("node_ids"), "candidate node ids"
-                            )
+                            _string_list(value.get("node_ids"), "candidate node ids")
                         )
                     ),
                 )
@@ -3082,9 +3084,7 @@ class QualificationRunner:
                     "temporary_build_bytes_per_node": item.get(
                         "temporary_build_bytes_per_node"
                     ),
-                    "disk_requirements_by_role": item.get(
-                        "disk_requirements_by_role"
-                    ),
+                    "disk_requirements_by_role": item.get("disk_requirements_by_role"),
                     "artifact_identities": item.get("artifact_identities"),
                     "immutable_blockers": [
                         blocker
@@ -3258,11 +3258,7 @@ class QualificationRunner:
                 break
             for projection in page.recipes:
                 running_on = projection.local.running_on
-                node_ids = (
-                    list(running_on)
-                    if isinstance(running_on, list)
-                    else []
-                )
+                node_ids = list(running_on) if isinstance(running_on, list) else []
                 if not node_ids:
                     continue
                 identity = projection.identity
@@ -3294,7 +3290,11 @@ class QualificationRunner:
             next_cursor = page.next_cursor
             if next_cursor is None:
                 break
-            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
+            if (
+                not isinstance(next_cursor, str)
+                or not next_cursor
+                or next_cursor in seen_cursors
+            ):
                 errors.append(
                     {
                         "scope": "recipe",
@@ -3318,7 +3318,6 @@ class QualificationRunner:
             "installations": installations,
             "errors": errors,
         }
-
 
     def _residency_inventory(
         self, digest: str, plan: Mapping[str, object]

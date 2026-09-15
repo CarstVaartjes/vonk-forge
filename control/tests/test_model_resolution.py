@@ -12,7 +12,10 @@ class Models:
         return SnapshotEnvelope(
             repository=repository,
             revision=revision,
-            files=(ModelFile("model-00001.safetensors", 100), ModelFile("tokenizer.json", 20)),
+            files=(
+                ModelFile("model-00001.safetensors", 100),
+                ModelFile("tokenizer.json", 20),
+            ),
         )
 
 

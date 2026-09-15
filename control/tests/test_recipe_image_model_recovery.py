@@ -203,9 +203,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     assert image_transport.calls == 1
 
     _drain(cache, str(new_parent.model_child["id"]))
-    assert requests == [
-        "/models/synthetic-tiny/resolve/" + "0" * 40 + "/weights-a.bin"
-    ]
+    assert requests == ["/models/synthetic-tiny/resolve/" + "0" * 40 + "/weights-a.bin"]
     assert retained_path.read_bytes() == b"weights-b"
     assert retained_path.stat().st_ino == retained_stat.st_ino
     assert missing_path.read_bytes() == b"weights-a"

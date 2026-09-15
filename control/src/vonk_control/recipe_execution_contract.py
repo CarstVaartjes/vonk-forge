@@ -207,7 +207,9 @@ def parse_stored_build_plan(value: object) -> RecipeBuildRequest:
     try:
         return RecipeBuildRequest.model_validate_json(canonical_message(value))
     except (TypeError, ValueError) as error:
-        raise RecipeExecutionContractError("stored recipe build plan is invalid") from error
+        raise RecipeExecutionContractError(
+            "stored recipe build plan is invalid"
+        ) from error
 
 
 def build_plan_document(value: object) -> dict[str, object]:

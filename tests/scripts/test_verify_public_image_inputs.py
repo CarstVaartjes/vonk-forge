@@ -114,7 +114,9 @@ def test_secret_in_compressed_wheel_member_is_rejected(tmp_path: Path) -> None:
     result = run(repository)
 
     assert result.returncode == 1
-    assert "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl!/" in result.stderr
+    assert (
+        "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl!/" in result.stderr
+    )
     assert "vonk_agent_protocol/leak.py: github-token" in result.stderr
     assert value not in result.stdout + result.stderr
 

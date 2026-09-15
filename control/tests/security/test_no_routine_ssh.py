@@ -103,7 +103,9 @@ def test_production_worker_has_no_cluster_egress_network() -> None:
 
 
 @pytest.mark.lane  # Builds and runs the worker image.
-def test_built_worker_image_contains_no_direct_transport_executable(control_image_build_args: list[str]) -> None:
+def test_built_worker_image_contains_no_direct_transport_executable(
+    control_image_build_args: list[str],
+) -> None:
     image = "vonk-control-worker:test-no-routine-ssh"
     build = subprocess.run(
         [
@@ -137,7 +139,7 @@ def test_built_worker_image_contains_no_direct_transport_executable(control_imag
             (
                 "! command -v git; "
                 "for executable in ssh scp vonkctl; do "
-                "! command -v \"$executable\"; done; "
+                '! command -v "$executable"; done; '
                 "test ! -e /repository; test ! -e /vonk-cluster-profiles; "
                 "test ! -e /scripts"
             ),

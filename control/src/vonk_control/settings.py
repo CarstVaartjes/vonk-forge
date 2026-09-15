@@ -332,9 +332,7 @@ class Settings:
                 "recipe library sync interval must be between one minute and one day"
             )
         if not 0 <= model_cache_reserve_bytes <= 1024**4:
-            raise SettingsError(
-                "model cache reserve must be between zero and one TiB"
-            )
+            raise SettingsError("model cache reserve must be between zero and one TiB")
         if not 1 <= model_cache_parallel_downloads <= 16:
             raise SettingsError(
                 "model cache parallel downloads must be between 1 and 16"
@@ -343,7 +341,11 @@ class Settings:
             raise SettingsError(
                 "recipe image parallel preparations must be between 1 and 16"
             )
-        if not 1 <= recipe_build_parallel_preparations <= recipe_image_parallel_preparations:
+        if (
+            not 1
+            <= recipe_build_parallel_preparations
+            <= recipe_image_parallel_preparations
+        ):
             raise SettingsError(
                 "recipe build parallel preparations must not exceed image preparations"
             )
@@ -501,9 +503,9 @@ class Settings:
             raise SettingsError(
                 "recipe library raw URL must be GitHub or the fixed internal relay"
             )
-        recipe_library_package_url = os.environ.get(
-            "VONK_RECIPE_LIBRARY_PACKAGE_URL", ""
-        ).rstrip("/") or None
+        recipe_library_package_url = (
+            os.environ.get("VONK_RECIPE_LIBRARY_PACKAGE_URL", "").rstrip("/") or None
+        )
         if recipe_library_package_url is not None:
             parsed_package = urlsplit(recipe_library_package_url)
             package_loopback = parsed_package.hostname in {
@@ -696,9 +698,7 @@ class WorkerSettings:
                 "artifact job reconciliation batch limit must be between 1 and 10000"
             )
         if not 0 <= model_cache_reserve_bytes <= 1024**4:
-            raise SettingsError(
-                "model cache reserve must be between zero and one TiB"
-            )
+            raise SettingsError("model cache reserve must be between zero and one TiB")
         if not 1 <= model_cache_parallel_downloads <= 16:
             raise SettingsError(
                 "model cache parallel downloads must be between 1 and 16"
@@ -707,7 +707,11 @@ class WorkerSettings:
             raise SettingsError(
                 "recipe image parallel preparations must be between 1 and 16"
             )
-        if not 1 <= recipe_build_parallel_preparations <= recipe_image_parallel_preparations:
+        if (
+            not 1
+            <= recipe_build_parallel_preparations
+            <= recipe_image_parallel_preparations
+        ):
             raise SettingsError(
                 "recipe build parallel preparations must not exceed image preparations"
             )
@@ -744,9 +748,7 @@ def _distributed_start_timeout() -> int:
             os.environ.get("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", "1800")
         )
     except ValueError as error:
-        raise SettingsError(
-            "distributed start timeout must be an integer"
-        ) from error
+        raise SettingsError("distributed start timeout must be an integer") from error
     if not 60 <= distributed_start_timeout_seconds <= 3600:
         raise SettingsError(
             "distributed start timeout must be between 60 and 3600 seconds"

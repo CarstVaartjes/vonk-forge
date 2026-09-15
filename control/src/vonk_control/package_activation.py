@@ -1,9 +1,12 @@
 """Match root package activation evidence against one durable upgrade authority."""
+
 from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 
 
-def matches_receipt(receipt: PackageActivationReceipt, payload: AgentUpgradePayload, node_id: str) -> bool:
+def matches_receipt(
+    receipt: PackageActivationReceipt, payload: AgentUpgradePayload, node_id: str
+) -> bool:
     return (
         receipt.node_id == node_id
         and receipt.attempt_nonce == payload.rollback.attempt_nonce
@@ -14,5 +17,8 @@ def matches_receipt(receipt: PackageActivationReceipt, payload: AgentUpgradePayl
         and receipt.candidate_version == payload.package_version
         and receipt.candidate_binary_sha256 == payload.target_binary_digest
         and receipt.created_at <= payload.rollback.activation_deadline
-        and (receipt.phase != "acknowledged" or receipt.updated_at <= payload.rollback.activation_deadline)
+        and (
+            receipt.phase != "acknowledged"
+            or receipt.updated_at <= payload.rollback.activation_deadline
+        )
     )

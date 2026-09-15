@@ -45,7 +45,14 @@ def queue(tmp_path):
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = Clock()
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_ID, state="active", capabilities=[], workload_intent_ordinal=1))
+        session.add(
+            AgentNode(
+                node_id=NODE_ID,
+                state="active",
+                capabilities=[],
+                workload_intent_ordinal=1,
+            )
+        )
         session.add(
             AgentCertificate(
                 serial="serial-a",

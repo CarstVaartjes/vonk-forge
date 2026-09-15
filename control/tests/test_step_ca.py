@@ -101,23 +101,41 @@ def _b64(value: int) -> str:
 def _write_material(tmp_path: Path) -> _Material:
     tmp_path.mkdir(parents=True, exist_ok=True)
     root_key = ed25519.Ed25519PrivateKey.generate()
-    root_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Offline Root")])
+    root_name = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Offline Root")]
+    )
     root = (
-        x509.CertificateBuilder().subject_name(root_name).issuer_name(root_name)
-        .public_key(root_key.public_key()).serial_number(x509.random_serial_number())
-        .not_valid_before(NOW - timedelta(days=1)).not_valid_after(NOW + timedelta(days=3650))
+        x509.CertificateBuilder()
+        .subject_name(root_name)
+        .issuer_name(root_name)
+        .public_key(root_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(NOW - timedelta(days=1))
+        .not_valid_after(NOW + timedelta(days=3650))
         .add_extension(x509.BasicConstraints(ca=True, path_length=1), critical=True)
-        .add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), critical=True)
+        .add_extension(
+            x509.KeyUsage(False, False, False, False, False, True, True, False, False),
+            critical=True,
+        )
         .sign(root_key, algorithm=None)
     )
     intermediate_key = ed25519.Ed25519PrivateKey.generate()
-    intermediate_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Agent Intermediate")])
+    intermediate_name = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Agent Intermediate")]
+    )
     intermediate = (
-        x509.CertificateBuilder().subject_name(intermediate_name).issuer_name(root.subject)
-        .public_key(intermediate_key.public_key()).serial_number(x509.random_serial_number())
-        .not_valid_before(NOW - timedelta(days=1)).not_valid_after(NOW + timedelta(days=365))
+        x509.CertificateBuilder()
+        .subject_name(intermediate_name)
+        .issuer_name(root.subject)
+        .public_key(intermediate_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(NOW - timedelta(days=1))
+        .not_valid_after(NOW + timedelta(days=365))
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
-        .add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), critical=True)
+        .add_extension(
+            x509.KeyUsage(False, False, False, False, False, True, True, False, False),
+            critical=True,
+        )
         .sign(root_key, algorithm=None)
     )
     provisioner_key = ec.generate_private_key(ec.SECP256R1())
@@ -128,21 +146,43 @@ def _write_material(tmp_path: Path) -> _Material:
     root_path.write_bytes(root.public_bytes(serialization.Encoding.PEM))
     intermediate_path.write_bytes(intermediate.public_bytes(serialization.Encoding.PEM))
     numbers = provisioner_key.public_key().public_numbers()
-    public_jwk = {"kty": "EC", "crv": "P-256", "use": "sig", "alg": "ES256", "x": _b64(numbers.x), "y": _b64(numbers.y)}
-    thumbprint_input = json.dumps({name: public_jwk[name] for name in ("crv", "kty", "x", "y")}, sort_keys=True, separators=(",", ":")).encode()
+    public_jwk = {
+        "kty": "EC",
+        "crv": "P-256",
+        "use": "sig",
+        "alg": "ES256",
+        "x": _b64(numbers.x),
+        "y": _b64(numbers.y),
+    }
+    thumbprint_input = json.dumps(
+        {name: public_jwk[name] for name in ("crv", "kty", "x", "y")},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
     import hashlib
-    kid = base64.urlsafe_b64encode(hashlib.sha256(thumbprint_input).digest()).rstrip(b"=").decode()
+
+    kid = (
+        base64.urlsafe_b64encode(hashlib.sha256(thumbprint_input).digest())
+        .rstrip(b"=")
+        .decode()
+    )
     public_jwk["kid"] = kid
-    private_jwk = public_jwk | {"d": _b64(provisioner_key.private_numbers().private_value)}
+    private_jwk = public_jwk | {
+        "d": _b64(provisioner_key.private_numbers().private_value)
+    }
     credential_path.write_text(json.dumps(private_jwk))
     public_jwk_path.write_text(json.dumps(public_jwk))
     credential_path.chmod(0o600)
     return {
-        "root": root, "root_path": root_path,
-        "intermediate": intermediate, "intermediate_key": intermediate_key,
-        "intermediate_path": intermediate_path, "credential_path": credential_path,
+        "root": root,
+        "root_path": root_path,
+        "intermediate": intermediate,
+        "intermediate_key": intermediate_key,
+        "intermediate_path": intermediate_path,
+        "credential_path": credential_path,
         "public_jwk_path": public_jwk_path,
-        "public_jwk": public_jwk, "kid": kid,
+        "public_jwk": public_jwk,
+        "kid": kid,
     }
 
 
@@ -151,9 +191,16 @@ def _csr(node_id: str = NODE_ID) -> bytes:
     return (
         x509.CertificateSigningRequestBuilder()
         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)]))
-        .add_extension(x509.SubjectAlternativeName([
-            x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{node_id}")
-        ]), critical=False)
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [
+                    x509.UniformResourceIdentifier(
+                        f"spiffe://vonk-forge.local/node/{node_id}"
+                    )
+                ]
+            ),
+            critical=False,
+        )
         .sign(key, algorithm=None)
         .public_bytes(serialization.Encoding.PEM)
     )
@@ -169,14 +216,26 @@ def _leaf(
 ) -> x509.Certificate:
     request = x509.load_pem_x509_csr(csr_pem)
     return (
-        x509.CertificateBuilder().subject_name(request.subject)
-        .issuer_name(material["intermediate"].subject).public_key(request.public_key())
-        .serial_number(serial).not_valid_before(now).not_valid_after(
-            now + timedelta(seconds=lifetime_seconds)
+        x509.CertificateBuilder()
+        .subject_name(request.subject)
+        .issuer_name(material["intermediate"].subject)
+        .public_key(request.public_key())
+        .serial_number(serial)
+        .not_valid_before(now)
+        .not_valid_after(now + timedelta(seconds=lifetime_seconds))
+        .add_extension(
+            x509.KeyUsage(True, False, False, False, False, False, False, False, False),
+            critical=True,
         )
-        .add_extension(x509.KeyUsage(True, False, False, False, False, False, False, False, False), critical=True)
-        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
-        .add_extension(request.extensions.get_extension_for_class(x509.SubjectAlternativeName).value, critical=False)
+        .add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False
+        )
+        .add_extension(
+            request.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName
+            ).value,
+            critical=False,
+        )
         .sign(material["intermediate_key"], algorithm=None)
     )
 
@@ -221,26 +280,47 @@ def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleName
         controller_ca_path=material["root_path"],
         agent_intermediate_certificate_path=material["intermediate_path"],
         agent_ca_root_path=material["root_path"],
-        agent_ca_credential_path=material["credential_path"], agent_ca_url=CA_URL,
+        agent_ca_credential_path=material["credential_path"],
+        agent_ca_url=CA_URL,
         agent_ca_provisioner_public_jwk_path=material["public_jwk_path"],
-        agent_ca_provisioner_name="vonk-forge-agent", agent_ca_provisioner_kid=material["kid"],
-        agent_ca_timeout_seconds=2.0, agent_ca_max_response_bytes=4096,
+        agent_ca_provisioner_name="vonk-forge-agent",
+        agent_ca_provisioner_kid=material["kid"],
+        agent_ca_timeout_seconds=2.0,
+        agent_ca_max_response_bytes=4096,
         agent_ca_certificate_lifetime_seconds=86400,
         agent_artifact_root=tmp_path / "artifacts",
-        management_cidrs="10.0.0.0/24", direct_fabric_cidrs=direct_fabric_cidrs,
+        management_cidrs="10.0.0.0/24",
+        direct_fabric_cidrs=direct_fabric_cidrs,
     )
 
 
-def _success_response(request: httpx.Request, material: _Material, seen: list[_SignExchange], *, serial: int = 1234) -> httpx.Response:
+def _success_response(
+    request: httpx.Request,
+    material: _Material,
+    seen: list[_SignExchange],
+    *,
+    serial: int = 1234,
+) -> httpx.Response:
     body = json.loads(request.content)
     seen.append({"request": request, "body": body})
     leaf = _leaf(body["csr"].encode(), material, serial=serial)
     leaf_pem = leaf.public_bytes(serialization.Encoding.PEM).decode()
-    intermediate_pem = material["intermediate"].public_bytes(serialization.Encoding.PEM).decode()
-    return httpx.Response(201, json={"crt": leaf_pem, "ca": intermediate_pem, "certChain": [leaf_pem, intermediate_pem]})
+    intermediate_pem = (
+        material["intermediate"].public_bytes(serialization.Encoding.PEM).decode()
+    )
+    return httpx.Response(
+        201,
+        json={
+            "crt": leaf_pem,
+            "ca": intermediate_pem,
+            "certChain": [leaf_pem, intermediate_pem],
+        },
+    )
 
 
-def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signed_csr(tmp_path: Path) -> None:
+def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signed_csr(
+    tmp_path: Path,
+) -> None:
     seen: list[_SignExchange] = []
     holder: dict[str, _Material] = {}
 
@@ -277,7 +357,9 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     assert issued.fingerprint == certificate.fingerprint(hashes.SHA256()).hex()
 
 
-def test_sign_uses_and_validates_configured_certificate_lifetime(tmp_path: Path) -> None:
+def test_sign_uses_and_validates_configured_certificate_lifetime(
+    tmp_path: Path,
+) -> None:
     seen: list[_SignRequestBody] = []
     holder: dict[str, _Material] = {}
 
@@ -290,9 +372,11 @@ def test_sign_uses_and_validates_configured_certificate_lifetime(tmp_path: Path)
             lifetime_seconds=90,
         )
         leaf_pem = leaf.public_bytes(serialization.Encoding.PEM).decode()
-        intermediate_pem = holder["material"]["intermediate"].public_bytes(
-            serialization.Encoding.PEM
-        ).decode()
+        intermediate_pem = (
+            holder["material"]["intermediate"]
+            .public_bytes(serialization.Encoding.PEM)
+            .decode()
+        )
         return httpx.Response(
             201,
             json={
@@ -352,7 +436,9 @@ def test_renewal_uses_new_signed_csr_and_fresh_serial(tmp_path: Path) -> None:
     assert issued.serial == "5678"
 
 
-def test_revocation_is_authenticated_passive_and_idempotent_in_effect(tmp_path: Path) -> None:
+def test_revocation_is_authenticated_passive_and_idempotent_in_effect(
+    tmp_path: Path,
+) -> None:
     seen: list[dict[str, object]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -364,8 +450,21 @@ def test_revocation_is_authenticated_passive_and_idempotent_in_effect(tmp_path: 
     provider.revoke_node("5678", NOW)
 
     assert len(seen) == 2
-    assert all(set(body) == {"serial", "ott", "reasonCode", "reason", "passive"} for body in seen)
-    assert all(body | {"ott": "redacted"} == {"serial": "5678", "ott": "redacted", "reasonCode": 4, "reason": "superseded by Vonk Forge", "passive": True} for body in seen)
+    assert all(
+        set(body) == {"serial", "ott", "reasonCode", "reason", "passive"}
+        for body in seen
+    )
+    assert all(
+        body | {"ott": "redacted"}
+        == {
+            "serial": "5678",
+            "ott": "redacted",
+            "reasonCode": 4,
+            "reason": "superseded by Vonk Forge",
+            "passive": True,
+        }
+        for body in seen
+    )
     for body in seen:
         ott = body["ott"]
         assert isinstance(ott, str)
@@ -375,19 +474,33 @@ def test_revocation_is_authenticated_passive_and_idempotent_in_effect(tmp_path: 
     assert seen[0]["ott"] != seen[1]["ott"]
 
 
-def _crl_response(material: _Material, *, last_update: datetime, next_update: datetime | None) -> httpx.Response:
-    builder = x509.CertificateRevocationListBuilder().issuer_name(material["intermediate"].subject).last_update(last_update)
+def _crl_response(
+    material: _Material, *, last_update: datetime, next_update: datetime | None
+) -> httpx.Response:
+    builder = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(material["intermediate"].subject)
+        .last_update(last_update)
+    )
     if next_update is not None:
         builder = builder.next_update(next_update)
     crl = builder.sign(material["intermediate_key"], algorithm=None)
-    return httpx.Response(200, content=crl.public_bytes(serialization.Encoding.PEM), headers={"content-type": "application/x-pem-file"})
+    return httpx.Response(
+        200,
+        content=crl.public_bytes(serialization.Encoding.PEM),
+        headers={"content-type": "application/x-pem-file"},
+    )
 
 
 def test_revocation_bundle_accepts_current_bounded_signed_crl(tmp_path: Path) -> None:
     holder: dict[str, _Material] = {}
 
     def handler(_: httpx.Request) -> httpx.Response:
-        return _crl_response(holder["material"], last_update=NOW - timedelta(minutes=1), next_update=NOW + timedelta(minutes=59))
+        return _crl_response(
+            holder["material"],
+            last_update=NOW - timedelta(minutes=1),
+            next_update=NOW + timedelta(minutes=59),
+        )
 
     provider, material = _provider(tmp_path, handler)
     holder["material"] = material
@@ -406,12 +519,16 @@ def test_revocation_bundle_accepts_current_bounded_signed_crl(tmp_path: Path) ->
     ids=("stale", "future", "expired", "overlong"),
 )
 def test_revocation_bundle_rejects_stale_future_expired_or_unbounded_crl(
-    tmp_path: Path, last_update: datetime, next_update: datetime | None,
+    tmp_path: Path,
+    last_update: datetime,
+    next_update: datetime | None,
 ) -> None:
     holder: dict[str, _Material] = {}
 
     def handler(_: httpx.Request) -> httpx.Response:
-        return _crl_response(holder["material"], last_update=last_update, next_update=next_update)
+        return _crl_response(
+            holder["material"], last_update=last_update, next_update=next_update
+        )
 
     provider, material = _provider(tmp_path, handler)
     holder["material"] = material
@@ -426,8 +543,23 @@ def test_revocation_bundle_rejects_missing_next_update_window() -> None:
         _validate_crl_freshness(crl_without_window, NOW, timedelta(seconds=30))
 
 
-@pytest.mark.parametrize("mutation", ("key", "subject", "san", "eku", "usage", "issuer", "lifetime", "chain", "extra-chain"))
-def test_rejects_malformed_or_policy_mismatched_sign_responses(tmp_path: Path, mutation: str) -> None:
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "key",
+        "subject",
+        "san",
+        "eku",
+        "usage",
+        "issuer",
+        "lifetime",
+        "chain",
+        "extra-chain",
+    ),
+)
+def test_rejects_malformed_or_policy_mismatched_sign_responses(
+    tmp_path: Path, mutation: str
+) -> None:
     holder: dict[str, _Material] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -435,12 +567,20 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(tmp_path: Path, m
         body = json.loads(request.content)
         request_pem = body["csr"].encode()
         leaf = _leaf(request_pem, material)
-        other_intermediate = _write_material(tmp_path / "other") if mutation in {"issuer", "chain"} else None
+        other_intermediate = (
+            _write_material(tmp_path / "other")
+            if mutation in {"issuer", "chain"}
+            else None
+        )
         if mutation == "key":
             request_pem = _csr()
         if mutation in {"subject", "san", "eku", "usage", "lifetime", "key", "issuer"}:
             request_obj = x509.load_pem_x509_csr(request_pem)
-            node = "spk_fedcba9876543210fedcba9876543210" if mutation in {"subject", "san"} else NODE_ID
+            node = (
+                "spk_fedcba9876543210fedcba9876543210"
+                if mutation in {"subject", "san"}
+                else NODE_ID
+            )
             if mutation == "issuer":
                 assert other_intermediate is not None
                 signer = other_intermediate["intermediate_key"]
@@ -449,13 +589,59 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(tmp_path: Path, m
                 signer = material["intermediate_key"]
                 issuer = material["intermediate"].subject
             builder = (
-                x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node)]))
-                .issuer_name(issuer).public_key(request_obj.public_key()).serial_number(9876)
-                .not_valid_before(NOW).not_valid_after(NOW + (timedelta(hours=25) if mutation == "lifetime" else timedelta(hours=24)))
-                .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-                .add_extension(x509.KeyUsage(mutation != "usage", False, False, False, False, False, False, False, False), critical=True)
-                .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH if mutation == "eku" else ExtendedKeyUsageOID.CLIENT_AUTH]), critical=True)
-                .add_extension(x509.SubjectAlternativeName([x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{node}")]), critical=False)
+                x509.CertificateBuilder()
+                .subject_name(
+                    x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node)])
+                )
+                .issuer_name(issuer)
+                .public_key(request_obj.public_key())
+                .serial_number(9876)
+                .not_valid_before(NOW)
+                .not_valid_after(
+                    NOW
+                    + (
+                        timedelta(hours=25)
+                        if mutation == "lifetime"
+                        else timedelta(hours=24)
+                    )
+                )
+                .add_extension(
+                    x509.BasicConstraints(ca=False, path_length=None), critical=True
+                )
+                .add_extension(
+                    x509.KeyUsage(
+                        mutation != "usage",
+                        False,
+                        False,
+                        False,
+                        False,
+                        False,
+                        False,
+                        False,
+                        False,
+                    ),
+                    critical=True,
+                )
+                .add_extension(
+                    x509.ExtendedKeyUsage(
+                        [
+                            ExtendedKeyUsageOID.SERVER_AUTH
+                            if mutation == "eku"
+                            else ExtendedKeyUsageOID.CLIENT_AUTH
+                        ]
+                    ),
+                    critical=True,
+                )
+                .add_extension(
+                    x509.SubjectAlternativeName(
+                        [
+                            x509.UniformResourceIdentifier(
+                                f"spiffe://vonk-forge.local/node/{node}"
+                            )
+                        ]
+                    ),
+                    critical=False,
+                )
             )
             leaf = builder.sign(signer, algorithm=None)
         if mutation == "chain":
@@ -467,8 +653,12 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(tmp_path: Path, m
         ca_pem = chain_ca.public_bytes(serialization.Encoding.PEM).decode()
         chain = [leaf_pem, ca_pem]
         if mutation == "extra-chain":
-            chain.append(material["root"].public_bytes(serialization.Encoding.PEM).decode())
-        return httpx.Response(201, json={"crt": leaf_pem, "ca": ca_pem, "certChain": chain})
+            chain.append(
+                material["root"].public_bytes(serialization.Encoding.PEM).decode()
+            )
+        return httpx.Response(
+            201, json={"crt": leaf_pem, "ca": ca_pem, "certChain": chain}
+        )
 
     (tmp_path / "other").mkdir(exist_ok=True)
     provider, material = _provider(tmp_path, handler)
@@ -477,13 +667,17 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(tmp_path: Path, m
         provider.issue_node(NODE_ID, _csr(), NOW)
 
 
-def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(tmp_path: Path, monkeypatch) -> None:
+def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setenv("HTTPS_PROXY", "http://attacker.invalid:3128")
     requests: list[httpx.Request] = []
 
     def redirect(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx.Response(307, headers={"location": "https://attacker.invalid/sign"})
+        return httpx.Response(
+            307, headers={"location": "https://attacker.invalid/sign"}
+        )
 
     provider, _ = _provider(tmp_path, redirect)
     with pytest.raises(StepCAError) as caught:
@@ -499,14 +693,24 @@ def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(tmp_pat
         bounded.issue_node(NODE_ID, _csr(), NOW)
 
 
-@pytest.mark.parametrize("url", ("http://step-ca:9000", "https://step-ca:9000/path", "https://user@step-ca:9000", "https://step-ca:9000?x=1"))
+@pytest.mark.parametrize(
+    "url",
+    (
+        "http://step-ca:9000",
+        "https://step-ca:9000/path",
+        "https://user@step-ca:9000",
+        "https://step-ca:9000?x=1",
+    ),
+)
 def test_rejects_nonfixed_or_non_https_ca_urls(tmp_path: Path, url: str) -> None:
     material = _write_material(tmp_path)
     with pytest.raises(ValueError, match="CA URL"):
         StepCertificateAuthority(
-            ca_url=url, root_certificate_path=material["root_path"],
+            ca_url=url,
+            root_certificate_path=material["root_path"],
             intermediate_certificate_path=material["intermediate_path"],
-            provisioner_name="vonk-forge-agent", provisioner_kid=material["kid"],
+            provisioner_name="vonk-forge-agent",
+            provisioner_kid=material["kid"],
             credential_path=material["credential_path"],
             provisioner_public_jwk_path=material["public_jwk_path"],
         )
@@ -514,13 +718,18 @@ def test_rejects_nonfixed_or_non_https_ca_urls(tmp_path: Path, url: str) -> None
 
 def test_rejects_symlinked_root_and_credential_files(tmp_path: Path) -> None:
     material = _write_material(tmp_path)
-    for argument, target in (("root_certificate_path", material["root_path"]), ("credential_path", material["credential_path"])):
+    for argument, target in (
+        ("root_certificate_path", material["root_path"]),
+        ("credential_path", material["credential_path"]),
+    ):
         link = tmp_path / f"{argument}.link"
         link.symlink_to(target)
         values = {
-            "ca_url": CA_URL, "root_certificate_path": material["root_path"],
+            "ca_url": CA_URL,
+            "root_certificate_path": material["root_path"],
             "intermediate_certificate_path": material["intermediate_path"],
-            "provisioner_name": "vonk-forge-agent", "provisioner_kid": material["kid"],
+            "provisioner_name": "vonk-forge-agent",
+            "provisioner_kid": material["kid"],
             "credential_path": material["credential_path"],
             "provisioner_public_jwk_path": material["public_jwk_path"],
         }
@@ -529,7 +738,9 @@ def test_rejects_symlinked_root_and_credential_files(tmp_path: Path) -> None:
             StepCertificateAuthority(**values)
 
 
-def test_rejects_public_provisioner_key_with_copied_configured_kid(tmp_path: Path) -> None:
+def test_rejects_public_provisioner_key_with_copied_configured_kid(
+    tmp_path: Path,
+) -> None:
     material = _write_material(tmp_path)
     other = ec.generate_private_key(ec.SECP256R1()).public_key().public_numbers()
     copied = dict(material["public_jwk"])
@@ -538,9 +749,11 @@ def test_rejects_public_provisioner_key_with_copied_configured_kid(tmp_path: Pat
 
     with pytest.raises(ValueError, match="does not match private credential"):
         StepCertificateAuthority(
-            ca_url=CA_URL, root_certificate_path=material["root_path"],
+            ca_url=CA_URL,
+            root_certificate_path=material["root_path"],
             intermediate_certificate_path=material["intermediate_path"],
-            provisioner_name="vonk-forge-agent", provisioner_kid=material["kid"],
+            provisioner_name="vonk-forge-agent",
+            provisioner_kid=material["kid"],
             credential_path=material["credential_path"],
             provisioner_public_jwk_path=material["public_jwk_path"],
         )
@@ -573,7 +786,9 @@ def test_production_agent_service_builder_does_not_block_startup_on_step_ca(
         def check_health(self) -> None:
             raise AssertionError("API construction must not contact Step CA")
 
-    monkeypatch.setattr("vonk_control.step_ca.StepCertificateAuthority", FakeStepAuthority)
+    monkeypatch.setattr(
+        "vonk_control.step_ca.StepCertificateAuthority", FakeStepAuthority
+    )
     engine = create_engine(f"sqlite:///{tmp_path / 'runtime.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -600,9 +815,7 @@ def test_production_agent_service_builder_always_constructs_step_ca(
     monkeypatch.setattr(
         "vonk_control.step_ca.StepCertificateAuthority", DeferredStepAuthority
     )
-    settings = _builder_settings(
-        tmp_path, direct_fabric_cidrs="192.168.100.0/24"
-    )
+    settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
     build_agent_services(settings, object(), lambda: NOW)
 
     assert len(calls) == 1
@@ -622,9 +835,7 @@ def test_production_agent_service_builder_passes_configured_certificate_lifetime
     monkeypatch.setattr(
         "vonk_control.step_ca.StepCertificateAuthority", DeferredStepAuthority
     )
-    settings = _builder_settings(
-        tmp_path, direct_fabric_cidrs="192.168.100.0/24"
-    )
+    settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
     settings.agent_ca_certificate_lifetime_seconds = 90
 
     build_agent_services(settings, object(), lambda: NOW)
@@ -632,7 +843,9 @@ def test_production_agent_service_builder_passes_configured_certificate_lifetime
     assert calls[0]["certificate_lifetime_seconds"] == 90
 
 
-def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation() -> None:
+def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation() -> (
+    None
+):
     config_path = Path(__file__).resolve().parents[2] / "deploy/compose/step-ca/ca.json"
     config = json.loads(config_path.read_text())
     provisioner = config["authority"]["provisioners"][0]
@@ -640,27 +853,39 @@ def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation
     assert provisioner["type"] == "JWK" and provisioner["name"] == "vonk-forge-agent"
     assert "encryptedKey" not in provisioner and "d" not in provisioner["key"]
     assert provisioner["claims"] == {
-        "minTLSCertDuration": "24h", "maxTLSCertDuration": "24h",
-        "defaultTLSCertDuration": "24h", "disableRenewal": True,
+        "minTLSCertDuration": "24h",
+        "maxTLSCertDuration": "24h",
+        "defaultTLSCertDuration": "24h",
+        "disableRenewal": True,
         "disableSmallstepExtensions": True,
     }
     template = provisioner["options"]["x509"]["template"]
     assert "digitalSignature" in template and "clientAuth" in template
     assert "serverAuth" not in template
     assert config["crl"] == {
-        "enabled": True, "generateOnRevoke": True,
-        "cacheDuration": "1h", "renewPeriod": "30m",
+        "enabled": True,
+        "generateOnRevoke": True,
+        "cacheDuration": "1h",
+        "renewPeriod": "30m",
     }
 
 
 @pytest.mark.lane  # Starts the pinned step-ca container.
-def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_path: Path, monkeypatch) -> None:
+def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(
+    tmp_path: Path, monkeypatch
+) -> None:
     """Exercise the tracked public config against the exact production image."""
-    if shutil.which("docker") is None or subprocess.run(
-        ["docker", "info"], capture_output=True, check=False
-    ).returncode != 0:
+    if (
+        shutil.which("docker") is None
+        or subprocess.run(
+            ["docker", "info"], capture_output=True, check=False
+        ).returncode
+        != 0
+    ):
         if os.environ.get("CI"):
-            pytest.fail("Docker daemon is required for the pinned step-ca integration test")
+            pytest.fail(
+                "Docker daemon is required for the pinned step-ca integration test"
+            )
         pytest.skip("Docker daemon is required for the pinned step-ca integration test")
     tmp_path.chmod(0o777)
     root_password = tmp_path / "root-password"
@@ -669,13 +894,30 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
     intermediate_password.write_text("fixture-intermediate-password-with-entropy\n")
     user = f"{os.getuid()}:{os.getgid()}"
 
-    def step(*arguments: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([
-            "docker", "run", "--rm", "--user", user,
-            "-i",
-            "-v", f"{tmp_path}:/work", "--entrypoint", "step", STEP_CA_IMAGE,
-            *arguments,
-        ], input=input_text, capture_output=True, text=True, timeout=60, check=True)
+    def step(
+        *arguments: str, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--user",
+                user,
+                "-i",
+                "-v",
+                f"{tmp_path}:/work",
+                "--entrypoint",
+                "step",
+                STEP_CA_IMAGE,
+                *arguments,
+            ],
+            input=input_text,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
 
     root = tmp_path / "root_ca.crt"
     root_key = tmp_path / "root_ca.key"  # noqa: F841 - created by step ca init
@@ -684,22 +926,62 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
     public_jwk = tmp_path / "agent-ca-public.jwk"
     private_jwk = tmp_path / "agent-ca-credential"
     step(
-        "certificate", "create", "Vonk Forge Test Root", "/work/root_ca.crt", "/work/root_ca.key",
-        "--profile", "root-ca", "--kty", "OKP", "--curve", "Ed25519", "--not-after", "87600h",
-        "--password-file", "/work/root-password",
+        "certificate",
+        "create",
+        "Vonk Forge Test Root",
+        "/work/root_ca.crt",
+        "/work/root_ca.key",
+        "--profile",
+        "root-ca",
+        "--kty",
+        "OKP",
+        "--curve",
+        "Ed25519",
+        "--not-after",
+        "87600h",
+        "--password-file",
+        "/work/root-password",
     )
     step(
-        "certificate", "create", "Vonk Forge Test Intermediate", "/work/intermediate_ca.crt", "/work/intermediate_ca_key",
-        "--profile", "intermediate-ca", "--kty", "OKP", "--curve", "Ed25519", "--not-after", "8760h",
-        "--ca", "/work/root_ca.crt", "--ca-key", "/work/root_ca.key",
-        "--ca-password-file", "/work/root-password", "--password-file", "/work/intermediate-password",
+        "certificate",
+        "create",
+        "Vonk Forge Test Intermediate",
+        "/work/intermediate_ca.crt",
+        "/work/intermediate_ca_key",
+        "--profile",
+        "intermediate-ca",
+        "--kty",
+        "OKP",
+        "--curve",
+        "Ed25519",
+        "--not-after",
+        "8760h",
+        "--ca",
+        "/work/root_ca.crt",
+        "--ca-key",
+        "/work/root_ca.key",
+        "--ca-password-file",
+        "/work/root-password",
+        "--password-file",
+        "/work/intermediate-password",
     )
     step(
-        "crypto", "jwk", "create", "/work/agent-ca-public.jwk", "/work/agent-ca-credential",
-        "--kty", "EC", "--crv", "P-256", "--no-password", "--insecure",
+        "crypto",
+        "jwk",
+        "create",
+        "/work/agent-ca-public.jwk",
+        "/work/agent-ca-credential",
+        "--kty",
+        "EC",
+        "--crv",
+        "P-256",
+        "--no-password",
+        "--insecure",
     )
     public = json.loads(public_jwk.read_text())
-    kid = step("crypto", "jwk", "thumbprint", input_text=public_jwk.read_text()).stdout.strip()
+    kid = step(
+        "crypto", "jwk", "thumbprint", input_text=public_jwk.read_text()
+    ).stdout.strip()
     public.update({"kid": kid, "alg": "ES256", "use": "sig"})
     private = json.loads(private_jwk.read_text())
     private.update({"kid": kid, "alg": "ES256", "use": "sig"})
@@ -723,28 +1005,57 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
     database.mkdir(mode=0o777)
     database.chmod(0o777)
     container = f"vonk-step-ca-test-{uuid.uuid4().hex}"
-    subprocess.run([
-        "docker", "run", "-d", "--name", container, "-p", "127.0.0.1::9000",
-        "-v", f"{generated_config}:/home/step/config/ca.json:ro",
-        "-v", f"{root}:/run/vonk-normalized-secrets/step-ca/root-certificate:ro",
-        "-v", f"{intermediate}:/run/vonk-normalized-secrets/step-ca/intermediate-certificate:ro",
-        "-v", f"{intermediate_key}:/run/vonk-normalized-secrets/step-ca/intermediate-key:ro",
-        "-v", f"{intermediate_password}:/run/vonk-normalized-secrets/step-ca/password:ro",
-        "-v", f"{database}:/home/step/db",
-        "--entrypoint", "step-ca", STEP_CA_IMAGE,
-        "/home/step/config/ca.json", "--password-file", "/run/vonk-normalized-secrets/step-ca/password",
-    ], check=True, capture_output=True, text=True, timeout=30)
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container,
+            "-p",
+            "127.0.0.1::9000",
+            "-v",
+            f"{generated_config}:/home/step/config/ca.json:ro",
+            "-v",
+            f"{root}:/run/vonk-normalized-secrets/step-ca/root-certificate:ro",
+            "-v",
+            f"{intermediate}:/run/vonk-normalized-secrets/step-ca/intermediate-certificate:ro",
+            "-v",
+            f"{intermediate_key}:/run/vonk-normalized-secrets/step-ca/intermediate-key:ro",
+            "-v",
+            f"{intermediate_password}:/run/vonk-normalized-secrets/step-ca/password:ro",
+            "-v",
+            f"{database}:/home/step/db",
+            "--entrypoint",
+            "step-ca",
+            STEP_CA_IMAGE,
+            "/home/step/config/ca.json",
+            "--password-file",
+            "/run/vonk-normalized-secrets/step-ca/password",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     try:
         port_output = subprocess.run(
-            ["docker", "port", container, "9000/tcp"], check=True,
-            capture_output=True, text=True, timeout=10,
+            ["docker", "port", container, "9000/tcp"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
         ).stdout.strip()
         port = port_output.rsplit(":", 1)[1]
         real_getaddrinfo = socket.getaddrinfo
         monkeypatch.setattr(
-            socket, "getaddrinfo",
-            lambda host, *args, **kwargs: real_getaddrinfo("127.0.0.1" if host == "step-ca" else host, *args, **kwargs),
+            socket,
+            "getaddrinfo",
+            lambda host, *args, **kwargs: real_getaddrinfo(
+                "127.0.0.1" if host == "step-ca" else host, *args, **kwargs
+            ),
         )
+
         def authority(mapped_port: str) -> StepCertificateAuthority:
             return StepCertificateAuthority(
                 ca_url=f"https://step-ca:{mapped_port}",
@@ -780,7 +1091,9 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
         assert ExtensionOID.BASIC_CONSTRAINTS not in extensions
         assert extensions[ExtensionOID.KEY_USAGE].critical is True
         assert extensions[ExtensionOID.EXTENDED_KEY_USAGE].critical is False
-        assert extensions[ExtensionOID.EXTENDED_KEY_USAGE].value == x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH])
+        assert extensions[
+            ExtensionOID.EXTENDED_KEY_USAGE
+        ].value == x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH])
         renewed = provider.renew_node(
             NODE_ID,
             _csr(),
@@ -789,7 +1102,9 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
         )
         assert renewed.serial != issued.serial
         provider.revoke_node(issued.serial, datetime.now(UTC).replace(microsecond=0))
-        crl = x509.load_pem_x509_crl(provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0)))
+        crl = x509.load_pem_x509_crl(
+            provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0))
+        )
         assert issued.serial in {str(record.serial_number) for record in crl}
 
         subprocess.run(
@@ -849,9 +1164,7 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
         persisted_crl = x509.load_pem_x509_crl(
             provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0))
         )
-        assert issued.serial in {
-            str(record.serial_number) for record in persisted_crl
-        }
+        assert issued.serial in {str(record.serial_number) for record in persisted_crl}
     finally:
         subprocess.run(
             ["docker", "rm", "--force", container],

@@ -76,7 +76,9 @@ def install_artifact_job_routes(
         responses=bounded_error_responses(401, 503),
         operation_id="getArtifactJobCapabilities",
     )
-    def capabilities(_actor: Actor = actor_dependency) -> ArtifactJobCapabilitiesResponse:
+    def capabilities(
+        _actor: Actor = actor_dependency,
+    ) -> ArtifactJobCapabilitiesResponse:
         return ArtifactJobCapabilitiesResponse.model_validate(
             _service(service).capabilities()
         )
@@ -298,11 +300,7 @@ def install_artifact_job_routes(
         responses={
             200: {
                 "description": "Artifact result byte stream",
-                "content": {
-                    "*/*": {
-                        "schema": {"type": "string", "format": "binary"}
-                    }
-                },
+                "content": {"*/*": {"schema": {"type": "string", "format": "binary"}}},
             }
         },
         openapi_extra={"x-vonk-streaming-transport": True},

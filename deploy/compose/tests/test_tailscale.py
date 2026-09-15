@@ -484,8 +484,8 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
     assert "PrimaryRoutes" in text
     assert "grant tag:vonk-gateway TCP 443 access" in text
     assert "tailscale-service-hosts.compact" in text
-    assert '${hermes_api_service}' in text
-    assert '${hermes_dashboard_service}' in text
+    assert "${hermes_api_service}" in text
+    assert "${hermes_dashboard_service}" in text
     assert '"services/vonk-forge"' not in text
     assert "BusyBox nc exits as soon as piped stdin reaches EOF" in text
     assert "sleep 1" in text
@@ -651,12 +651,12 @@ def test_service_host_mapping_without_primary_routes_is_healthy(
     fake.write_text(
         "#!/bin/sh\n"
         'case "$*" in\n'
-        '  *"serve status --json"*) printf \'%s\\n\' '
-        "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
-        '  *"serve get-config --all"*) printf \'%s\\n\' '
-        "'{\"version\":\"0.0.1\",\"services\":{\"svc:vonk-forge\":{\"endpoints\":{\"tcp:443\":\"http://caddy:8080\"}}}}' ;;\n"
-        '  *"status --json"*) printf \'%s\\n\' '
-        "'{\"Self\":{\"CapMap\":{\"service-host\":[{\"svc:vonk-forge\":[\"100.70.230.202\"]}]},\"PrimaryRoutes\":[]}}' ;;\n"
+        "  *\"serve status --json\"*) printf '%s\\n' "
+        '\'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}}}}\' ;;\n'
+        "  *\"serve get-config --all\"*) printf '%s\\n' "
+        '\'{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}\' ;;\n'
+        "  *\"status --json\"*) printf '%s\\n' "
+        '\'{"Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.70.230.202"]}]},"PrimaryRoutes":[]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -700,12 +700,12 @@ def test_pending_advertisement_is_acceptance_only(
     fake.write_text(
         "#!/bin/sh\n"
         'case "$*" in\n'
-        '  *"serve status --json"*) printf \'%s\\n\' '
-        "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
-        '  *"serve get-config --all"*) printf \'%s\\n\' '
-        "'{\"version\":\"0.0.1\",\"services\":{\"svc:vonk-forge\":{\"endpoints\":{\"tcp:443\":\"http://caddy:8080\"},\"advertised\":false}}}' ;;\n"
-        '  *"status --json"*) printf \'%s\\n\' '
-        "'{\"Self\":{\"CapMap\":{\"service-host\":[{\"svc:vonk-forge\":[\"100.70.230.202\"]}]},\"PrimaryRoutes\":[\"100.70.230.202/32\"]}}' ;;\n"
+        "  *\"serve status --json\"*) printf '%s\\n' "
+        '\'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}}}}\' ;;\n'
+        "  *\"serve get-config --all\"*) printf '%s\\n' "
+        '\'{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"},"advertised":false}}}\' ;;\n'
+        "  *\"status --json\"*) printf '%s\\n' "
+        '\'{"Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.70.230.202"]}]},"PrimaryRoutes":["100.70.230.202/32"]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -749,11 +749,11 @@ def test_empty_pending_service_map_is_ephemeral_acceptance_only(
     fake.write_text(
         "#!/bin/sh\n"
         'case "$*" in\n'
-        '  *"serve status --json"*) printf \'%s\\n\' \'{}\' ;;\n'
-        '  *"serve get-config --all"*) printf \'%s\\n\' '
-        "'{\"version\":\"0.0.1\"}' ;;\n"
-        '  *"status --json"*) printf \'%s\\n\' '
-        "'{\"Self\":{\"CapMap\":{},\"PrimaryRoutes\":[]}}' ;;\n"
+        "  *\"serve status --json\"*) printf '%s\\n' '{}' ;;\n"
+        "  *\"serve get-config --all\"*) printf '%s\\n' "
+        '\'{"version":"0.0.1"}\' ;;\n'
+        "  *\"status --json\"*) printf '%s\\n' "
+        '\'{"Self":{"CapMap":{},"PrimaryRoutes":[]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )

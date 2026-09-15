@@ -9,7 +9,9 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "restore-pytest-file-durations"
+SCRIPT = (
+    Path(__file__).resolve().parents[2] / "scripts" / "restore-pytest-file-durations"
+)
 
 
 def _module():
@@ -21,7 +23,9 @@ def _module():
     return module
 
 
-def test_restore_merges_latest_matching_artifacts_and_skips_current_run(tmp_path, monkeypatch):
+def test_restore_merges_latest_matching_artifacts_and_skips_current_run(
+    tmp_path, monkeypatch
+):
     module = _module()
     now = datetime.now(UTC)
     calls = []
@@ -60,22 +64,28 @@ def test_restore_merges_latest_matching_artifacts_and_skips_current_run(tmp_path
 def test_restore_fails_open_on_unsupported_or_stale_input(tmp_path):
     module = _module()
     now = datetime.now(UTC)
-    assert module._valid_files(
-        {
-            "schema_version": 99,
-            "generated_at": now.isoformat(),
-            "files": {"tests/a.py": 1},
-        },
-        now=now,
-    ) == {}
-    assert module._valid_files(
-        {
-            "schema_version": 1,
-            "generated_at": (now - timedelta(days=31)).isoformat(),
-            "files": {"tests/a.py": 1, "tests/b.py": "nan", "tests/c.py": "inf"},
-        },
-        now=now,
-    ) == {}
+    assert (
+        module._valid_files(
+            {
+                "schema_version": 99,
+                "generated_at": now.isoformat(),
+                "files": {"tests/a.py": 1},
+            },
+            now=now,
+        )
+        == {}
+    )
+    assert (
+        module._valid_files(
+            {
+                "schema_version": 1,
+                "generated_at": (now - timedelta(days=31)).isoformat(),
+                "files": {"tests/a.py": 1, "tests/b.py": "nan", "tests/c.py": "inf"},
+            },
+            now=now,
+        )
+        == {}
+    )
 
     output = tmp_path / "empty.json"
     # A failed GitHub query still leaves a valid empty document for the selector.

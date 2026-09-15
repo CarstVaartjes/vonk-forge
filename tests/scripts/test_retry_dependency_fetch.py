@@ -42,14 +42,31 @@ def _fetcher(tmp_path, monkeypatch, messages, executable_name="uv"):
     return state
 
 
-@pytest.mark.parametrize(("command", "error"), [
-    (["uv", "sync", "--frozen"], "read: connection reset by peer"),
-    (["uv", "sync", "--frozen"], "Git operation failed: failed to fetch commit from https://github.com/example/repo"),
-    (["skopeo", "inspect", "docker://example"], "unexpected status from registry: 503 Service Unavailable"),
-    (["docker", "pull", "example@sha256:" + "a" * 64], "unexpected status from HEAD request: 500 Internal Server Error"),
-    (["docker", "pull", "example@sha256:" + "a" * 64], "failed to copy: unexpected status code: 504 Gateway Time-out"),
-])
-def test_transient_fetch_retries_without_publishing_partial_stdout(tmp_path, monkeypatch, capsys, error, command):
+@pytest.mark.parametrize(
+    ("command", "error"),
+    [
+        (["uv", "sync", "--frozen"], "read: connection reset by peer"),
+        (
+            ["uv", "sync", "--frozen"],
+            "Git operation failed: failed to fetch commit from https://github.com/example/repo",
+        ),
+        (
+            ["skopeo", "inspect", "docker://example"],
+            "unexpected status from registry: 503 Service Unavailable",
+        ),
+        (
+            ["docker", "pull", "example@sha256:" + "a" * 64],
+            "unexpected status from HEAD request: 500 Internal Server Error",
+        ),
+        (
+            ["docker", "pull", "example@sha256:" + "a" * 64],
+            "failed to copy: unexpected status code: 504 Gateway Time-out",
+        ),
+    ],
+)
+def test_transient_fetch_retries_without_publishing_partial_stdout(
+    tmp_path, monkeypatch, capsys, error, command
+):
     module = _module()
     state = _fetcher(tmp_path, monkeypatch, [error, error, ""], command[0])
     delays = []
@@ -62,15 +79,30 @@ def test_transient_fetch_retries_without_publishing_partial_stdout(tmp_path, mon
     assert error in captured.err
 
 
-@pytest.mark.parametrize(("command", "error"), [
-    (["uv", "sync", "--frozen"], "Git operation failed: failed to fetch: Authentication failed"),
-    (["uv", "sync", "--frozen"], "Git operation failed: failed to fetch: not our ref 1234"),
-    (["uv", "sync", "--frozen"], "No solution found when resolving dependencies"),
-    (["docker", "pull", "example@sha256:" + "a" * 64], "manifest unknown"),
-    (["docker", "pull", "example@sha256:" + "a" * 64], "x509: certificate signed by unknown authority"),
-    (["docker", "pull", "example@sha256:" + "a" * 64], "digest mismatch"),
-    (["docker", "pull", "example@sha256:" + "a" * 64], "503 Service Unavailable: unauthorized"),
-])
+@pytest.mark.parametrize(
+    ("command", "error"),
+    [
+        (
+            ["uv", "sync", "--frozen"],
+            "Git operation failed: failed to fetch: Authentication failed",
+        ),
+        (
+            ["uv", "sync", "--frozen"],
+            "Git operation failed: failed to fetch: not our ref 1234",
+        ),
+        (["uv", "sync", "--frozen"], "No solution found when resolving dependencies"),
+        (["docker", "pull", "example@sha256:" + "a" * 64], "manifest unknown"),
+        (
+            ["docker", "pull", "example@sha256:" + "a" * 64],
+            "x509: certificate signed by unknown authority",
+        ),
+        (["docker", "pull", "example@sha256:" + "a" * 64], "digest mismatch"),
+        (
+            ["docker", "pull", "example@sha256:" + "a" * 64],
+            "503 Service Unavailable: unauthorized",
+        ),
+    ],
+)
 def test_permanent_fetch_failure_is_not_retried(tmp_path, monkeypatch, error, command):
     module = _module()
     state = _fetcher(tmp_path, monkeypatch, [error, ""], command[0])
@@ -86,7 +118,10 @@ def test_transient_failure_stops_at_attempt_limit(tmp_path, monkeypatch):
     assert len(json.loads(state.read_text())) == 1
 
 
-@pytest.mark.parametrize("command", [["uv", "run", "pytest"], ["docker", "build", "."], ["docker", "run", "example"]])
+@pytest.mark.parametrize(
+    "command",
+    [["uv", "run", "pytest"], ["docker", "build", "."], ["docker", "run", "example"]],
+)
 def test_cannot_wrap_build_or_test_execution(tmp_path, monkeypatch, command):
     module = _module()
     state = _fetcher(tmp_path, monkeypatch, [""], command[0])

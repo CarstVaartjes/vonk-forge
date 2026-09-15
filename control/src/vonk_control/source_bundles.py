@@ -208,8 +208,13 @@ class DatabaseSourceBundleStore:
         with self._sessions.begin() as session:
             metadata = session.get(RecipeSourceBundle, expected_sha256)
             stored = session.get(SourceBundleArchive, expected_sha256)
-            if metadata is not None and parse_source_bundle_manifest(metadata.manifest) != manifest:
-                raise SourceBundleError("bundle.storage_collision", "stored source manifest is inconsistent")
+            if (
+                metadata is not None
+                and parse_source_bundle_manifest(metadata.manifest) != manifest
+            ):
+                raise SourceBundleError(
+                    "bundle.storage_collision", "stored source manifest is inconsistent"
+                )
             if stored is not None and stored.archive != archive:
                 raise SourceBundleError(
                     "bundle.storage_collision", "stored source bundle is inconsistent"
@@ -227,8 +232,14 @@ class DatabaseSourceBundleStore:
                         verified_at=datetime.now(UTC),
                     )
                     session.add(metadata)
-                session.add(SourceBundleArchive(sha256=expected_sha256, archive=archive))
-        return StoredBundle(Path(f"/postgresql/source-bundles/{expected_sha256}"), manifest, len(archive))
+                session.add(
+                    SourceBundleArchive(sha256=expected_sha256, archive=archive)
+                )
+        return StoredBundle(
+            Path(f"/postgresql/source-bundles/{expected_sha256}"),
+            manifest,
+            len(archive),
+        )
 
     def get(self, sha256: str) -> GeneratedSourceBundle:
         _validate_digest(sha256, "bundle.digest_invalid")
@@ -242,12 +253,16 @@ class DatabaseSourceBundleStore:
                 )
             metadata = session.get(RecipeSourceBundle, sha256)
             if metadata is None:
-                raise SourceBundleError("bundle.manifest_invalid", "stored source manifest is unavailable")
+                raise SourceBundleError(
+                    "bundle.manifest_invalid", "stored source manifest is unavailable"
+                )
             persisted = parse_source_bundle_manifest(metadata.manifest)
             archive = stored.archive
         manifest = _inspect_archive(archive, self._limits)
         if manifest != persisted:
-            raise SourceBundleError("bundle.storage_collision", "stored source manifest is inconsistent")
+            raise SourceBundleError(
+                "bundle.storage_collision", "stored source manifest is inconsistent"
+            )
         if manifest.sha256 != sha256:
             raise SourceBundleError(
                 "bundle.storage_collision", "stored source bundle is inconsistent"
@@ -259,12 +274,16 @@ def parse_source_bundle_manifest(value: object) -> SourceBundleManifest:
     try:
         return SourceBundleManifest.model_validate_json(canonical_message(value))
     except (TypeError, ValueError) as error:
-        raise SourceBundleError("bundle.manifest_invalid", "stored source manifest is invalid") from error
+        raise SourceBundleError(
+            "bundle.manifest_invalid", "stored source manifest is invalid"
+        ) from error
 
 
 def _validate_digest(value: str, code: str) -> None:
-    if len(value) != 64 or value.lower() != value or any(
-        character not in "0123456789abcdef" for character in value
+    if (
+        len(value) != 64
+        or value.lower() != value
+        or any(character not in "0123456789abcdef" for character in value)
     ):
         raise SourceBundleError(code, "source bundle digest is invalid")
 
@@ -359,11 +378,15 @@ def _inspect_archive(archive: bytes, limits: BundleLimits) -> SourceBundleManife
             )
     files.sort(key=lambda item: item.path.encode("utf-8"))
     identity = SourceBundleDigestManifest(
-        schema_version=1, files=tuple(files), total_bytes=total,
+        schema_version=1,
+        files=tuple(files),
+        total_bytes=total,
     )
-    return SourceBundleManifest.model_validate_json(canonical_message(
-        identity.model_dump(mode="json") | {"sha256": identity.digest()}
-    ))
+    return SourceBundleManifest.model_validate_json(
+        canonical_message(
+            identity.model_dump(mode="json") | {"sha256": identity.digest()}
+        )
+    )
 
 
 def _safe_path(value: str) -> str:

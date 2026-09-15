@@ -43,7 +43,9 @@ NODE_B = "spk_" + "b" * 32
 @pytest.fixture
 def controller(tmp_path: Path):
     database = tmp_path / "controller.sqlite"
-    engine = create_engine(f"sqlite:///{database}", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        f"sqlite:///{database}", connect_args={"check_same_thread": False}
+    )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
@@ -64,7 +66,9 @@ def controller(tmp_path: Path):
 
 
 def _restart_controller(database: Path, root: Path):
-    engine = create_engine(f"sqlite:///{database}", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        f"sqlite:///{database}", connect_args={"check_same_thread": False}
+    )
     sessions = sessionmaker(engine, expire_on_commit=False)
     cache = ModelCacheService(sessions, root, reserve_bytes=0, fixture_sources=True)
     return engine, sessions, cache
@@ -376,7 +380,9 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
 
         serialized_assignment = json.dumps(assignments[0].to_mapping())
         assert token not in serialized_assignment
-        assert all("source" not in object_.to_mapping() for object_ in assignments[0].objects)
+        assert all(
+            "source" not in object_.to_mapping() for object_ in assignments[0].objects
+        )
         expected = {
             str(artifacts[0]["sha256"]): model_payload,
             str(artifacts[1]["sha256"]): auxiliary_payload,
@@ -384,12 +390,15 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
         }
         for node_id in (NODE_A, NODE_B, NODE_A):
             for digest, payload in expected.items():
-                assert _read_object(
-                    distribution,
-                    node_id=node_id,
-                    plan_digest=plan_digest,
-                    digest=digest,
-                ) == payload
+                assert (
+                    _read_object(
+                        distribution,
+                        node_id=node_id,
+                        plan_digest=plan_digest,
+                        digest=digest,
+                    )
+                    == payload
+                )
 
         wrong_set = DistributionAssignment.parse(
             assignments[0].to_mapping() | {"model_artifact_set_sha256": "f" * 64}
@@ -398,11 +407,14 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
             distribution.register(wrong_set)
         assert error.value.code == "distribution.model_set_mismatch"
 
-        assert restarted_cache.verified_artifact_file(
-            artifact_set_sha256,
-            str(artifacts[0]["sha256"]),
-            "weights/model.bin",
-        )[0].read_bytes() == model_payload
+        assert (
+            restarted_cache.verified_artifact_file(
+                artifact_set_sha256,
+                str(artifacts[0]["sha256"]),
+                "weights/model.bin",
+            )[0].read_bytes()
+            == model_payload
+        )
     finally:
         restarted_engine.dispose()
 
@@ -477,12 +489,15 @@ def test_succeeded_local_recipe_build_archive_uses_the_same_verified_distributio
         }
         for node_id in (NODE_A, NODE_B, NODE_A):
             for digest, payload in expected.items():
-                assert _read_object(
-                    distribution,
-                    node_id=node_id,
-                    plan_digest=plan_digest,
-                    digest=digest,
-                ) == payload
+                assert (
+                    _read_object(
+                        distribution,
+                        node_id=node_id,
+                        plan_digest=plan_digest,
+                        digest=digest,
+                    )
+                    == payload
+                )
     finally:
         restarted_engine.dispose()
 
@@ -547,7 +562,9 @@ def test_empty_support_file_can_be_cached_and_served_as_an_immutable_object(
         restarted_engine.dispose()
 
 
-def test_empty_weight_file_is_rejected_before_transfer(controller, tmp_path: Path) -> None:
+def test_empty_weight_file_is_rejected_before_transfer(
+    controller, tmp_path: Path
+) -> None:
     _database, _engine, _sessions, cache = controller
     artifact = _artifact(
         tmp_path,
@@ -586,7 +603,9 @@ def test_empty_support_file_requires_the_canonical_empty_digest(
     assert error.value.code == "model_cache.artifact_invalid"
 
 
-def test_nonempty_artifact_pin_rejects_an_empty_source_body(controller, tmp_path: Path) -> None:
+def test_nonempty_artifact_pin_rejects_an_empty_source_body(
+    controller, tmp_path: Path
+) -> None:
     _database, _engine, _sessions, cache = controller
     artifact = _artifact(
         tmp_path,
@@ -616,7 +635,9 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(controller, tmp_path
     assert failed.state == "failed"
     assert failed.attempt == 3
     assert failed.retryable is True
-    assert failed.last_error and "before the immutable artifact size" in failed.last_error
+    assert (
+        failed.last_error and "before the immutable artifact size" in failed.last_error
+    )
     assert failed.result is None
     expected_progress = {
         "schema_version": 2,

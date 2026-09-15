@@ -17,8 +17,12 @@ MAX_JSON_BYTES = 16 * 1024 * 1024
 MAX_ACCESSOR_COUNT = 10_000_000
 COMPONENTS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
 COMPONENT_TYPES = {
-    5120: (1, "b"), 5121: (1, "B"), 5122: (2, "h"),
-    5123: (2, "H"), 5125: (4, "I"), 5126: (4, "f"),
+    5120: (1, "b"),
+    5121: (1, "B"),
+    5122: (2, "h"),
+    5123: (2, "H"),
+    5125: (4, "I"),
+    5126: (4, "f"),
 }
 IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 # These are deliberately stricter Vonk artifact profiles, not general glTF:
@@ -52,9 +56,15 @@ def normalize_glb_json_padding(path: Path) -> None:
     path.write_bytes(rebuilt)
 
 
-def _array(document: dict[str, object], name: str, *, required: bool = False) -> list[object]:
+def _array(
+    document: dict[str, object], name: str, *, required: bool = False
+) -> list[object]:
     value = document.get(name, [])
-    if not isinstance(value, list) or (required and not value) or len(value) > 1_000_000:
+    if (
+        not isinstance(value, list)
+        or (required and not value)
+        or len(value) > 1_000_000
+    ):
         qualifier = " non-empty" if required else ""
         raise ValueError(f"GLB {name} must be a bounded{qualifier} array")
     return value
@@ -110,7 +120,9 @@ class Accessor:
         if not 0 <= index < self.count:
             raise ValueError("GLB accessor read is out of range")
         return struct.unpack_from(
-            f"<{self.component_count}{self.fmt}", self.blob, self.start + index * self.stride
+            f"<{self.component_count}{self.fmt}",
+            self.blob,
+            self.start + index * self.stride,
         )
 
     def values(self) -> Iterator[tuple[int | float, ...]]:
@@ -173,7 +185,9 @@ def _parse(data: bytes) -> tuple[dict[str, object], bytes]:
     if not chunks or chunks[0][0] != JSON_CHUNK:
         raise ValueError("GLB first chunk is not JSON")
     if len(chunks) != 2 or chunks[1][0] != BIN_CHUNK:
-        raise ValueError("GLB must contain exactly one JSON chunk followed by one BIN chunk")
+        raise ValueError(
+            "GLB must contain exactly one JSON chunk followed by one BIN chunk"
+        )
     if len(chunks[0][1]) > MAX_JSON_BYTES:
         raise ValueError("GLB JSON chunk exceeds the validation limit")
     json_chunk = chunks[0][1]
@@ -211,15 +225,22 @@ def _parse(data: bytes) -> tuple[dict[str, object], bytes]:
     if (
         not isinstance(extensions_used, list)
         or not isinstance(extensions_required, list)
-        or any(not isinstance(item, str) for item in extensions_used + extensions_required)
+        or any(
+            not isinstance(item, str) for item in extensions_used + extensions_required
+        )
         or len(extensions_used) != len(set(extensions_used))
         or len(extensions_required) != len(set(extensions_required))
         or not set(extensions_required).issubset(extensions_used)
         or set(extensions_required) - {"EXT_texture_webp"}
     ):
         raise ValueError("GLB required extensions are invalid or unsupported")
-    if "EXT_texture_webp" in extensions_used and "EXT_texture_webp" not in extensions_required:
-        raise ValueError("GLB WebP textures must declare EXT_texture_webp as used and required")
+    if (
+        "EXT_texture_webp" in extensions_used
+        and "EXT_texture_webp" not in extensions_required
+    ):
+        raise ValueError(
+            "GLB WebP textures must declare EXT_texture_webp as used and required"
+        )
     asset = _object(document.get("asset"), "asset")
     if asset.get("version") != "2.0":
         raise ValueError("GLB JSON does not declare glTF 2.0")
@@ -241,8 +262,11 @@ def _accessors(
         raise ValueError("GLB buffer must be embedded")
     byte_length = buffer.get("byteLength")
     if (
-        isinstance(byte_length, bool) or not isinstance(byte_length, int)
-        or byte_length < 1 or byte_length > len(blob) or len(blob) - byte_length > 3
+        isinstance(byte_length, bool)
+        or not isinstance(byte_length, int)
+        or byte_length < 1
+        or byte_length > len(blob)
+        or len(blob) - byte_length > 3
     ):
         raise ValueError("GLB embedded buffer length is invalid")
 
@@ -255,15 +279,21 @@ def _accessors(
         _index(view.get("buffer", 0), 1, "bufferView buffer")
         start, length = view.get("byteOffset", 0), view.get("byteLength")
         if (
-            isinstance(start, bool) or not isinstance(start, int)
-            or isinstance(length, bool) or not isinstance(length, int)
-            or start < 0 or length < 1 or start + length > byte_length
+            isinstance(start, bool)
+            or not isinstance(start, int)
+            or isinstance(length, bool)
+            or not isinstance(length, int)
+            or start < 0
+            or length < 1
+            or start + length > byte_length
         ):
             raise ValueError("GLB bufferView exceeds its buffer")
         stride = view.get("byteStride")
         if stride is not None and (
-            isinstance(stride, bool) or not isinstance(stride, int)
-            or not 4 <= stride <= 252 or stride % 4
+            isinstance(stride, bool)
+            or not isinstance(stride, int)
+            or not 4 <= stride <= 252
+            or stride % 4
         ):
             raise ValueError("GLB bufferView byteStride is invalid")
         target = view.get("target")
@@ -281,10 +311,14 @@ def _accessors(
     for raw in _array(document, "accessors", required=True):
         accessor = _object(raw, "accessor")
         if "sparse" in accessor:
-            raise ValueError("GLB sparse accessors are not supported by this artifact contract")
+            raise ValueError(
+                "GLB sparse accessors are not supported by this artifact contract"
+            )
         if "normalized" in accessor and not isinstance(accessor["normalized"], bool):
             raise ValueError("GLB accessor normalized flag must be boolean")
-        view_index = _index(accessor.get("bufferView"), len(views), "accessor bufferView")
+        view_index = _index(
+            accessor.get("bufferView"), len(views), "accessor bufferView"
+        )
         component_type = accessor.get("componentType")
         kind = accessor.get("type")
         count = accessor.get("count")
@@ -296,10 +330,18 @@ def _accessors(
             or kind not in COMPONENTS
         ):
             raise ValueError("GLB accessor componentType or type is invalid")
-        if accessor.get("normalized") is True and component_type not in {5120, 5121, 5122, 5123}:
-            raise ValueError("GLB normalized accessor must use an 8-bit or 16-bit integer component")
+        if accessor.get("normalized") is True and component_type not in {
+            5120,
+            5121,
+            5122,
+            5123,
+        }:
+            raise ValueError(
+                "GLB normalized accessor must use an 8-bit or 16-bit integer component"
+            )
         if (
-            isinstance(count, bool) or not isinstance(count, int)
+            isinstance(count, bool)
+            or not isinstance(count, int)
             or not 1 <= count <= MAX_ACCESSOR_COUNT
         ):
             raise ValueError("GLB accessor count is invalid")
@@ -308,27 +350,44 @@ def _accessors(
         element_size = component_size * component_count
         offset = accessor.get("byteOffset", 0)
         if (
-            isinstance(offset, bool) or not isinstance(offset, int)
-            or offset < 0 or offset % component_size
+            isinstance(offset, bool)
+            or not isinstance(offset, int)
+            or offset < 0
+            or offset % component_size
         ):
             raise ValueError("GLB accessor byteOffset is invalid")
         view_start, view_length = views[view_index]
         stride = strides[view_index] or element_size
         if (view_start + offset) % component_size:
             raise ValueError("GLB accessor is not aligned for its component type")
-        if stride < element_size or offset + (count - 1) * stride + element_size > view_length:
+        if (
+            stride < element_size
+            or offset + (count - 1) * stride + element_size > view_length
+        ):
             raise ValueError("GLB accessor exceeds its bufferView")
 
-        result.append(Accessor(
-            blob, view_start + offset, stride, count, component_type, kind,
-            component_size, component_count, fmt, strides[view_index] is not None,
-            _bound(accessor, component_count, "min"),
-            _bound(accessor, component_count, "max"),
-            view_index,
-            targets[view_index],
-            accessor.get("normalized", False) is True,
-        ))
-    declared_strided_views = {index for index, stride in enumerate(strides) if stride is not None}
+        result.append(
+            Accessor(
+                blob,
+                view_start + offset,
+                stride,
+                count,
+                component_type,
+                kind,
+                component_size,
+                component_count,
+                fmt,
+                strides[view_index] is not None,
+                _bound(accessor, component_count, "min"),
+                _bound(accessor, component_count, "max"),
+                view_index,
+                targets[view_index],
+                accessor.get("normalized", False) is True,
+            )
+        )
+    declared_strided_views = {
+        index for index, stride in enumerate(strides) if stride is not None
+    }
     referenced_strided_views = {
         accessor.view_index for accessor in result if accessor.interleaved
     }
@@ -353,7 +412,9 @@ def _valid_png(value: bytes) -> bool:
             return False
         length = struct.unpack_from(">I", value, offset)[0]
         kind = value[offset + 4 : offset + 8]
-        if len(kind) != 4 or any(not (65 <= byte <= 90 or 97 <= byte <= 122) for byte in kind):
+        if len(kind) != 4 or any(
+            not (65 <= byte <= 90 or 97 <= byte <= 122) for byte in kind
+        ):
             return False
         if kind[0] & 0x20 == 0 and kind not in {b"IHDR", b"PLTE", b"IDAT", b"IEND"}:
             return False
@@ -374,15 +435,18 @@ def _valid_png(value: bytes) -> bool:
     kinds = [kind for kind, _payload in chunks]
     idat_indices = [index for index, kind in enumerate(kinds) if kind == b"IDAT"]
     if (
-        len(ihdr) != 13 or chunks[-1] != (b"IEND", b"")
-        or kinds.count(b"IHDR") != 1 or kinds.count(b"IEND") != 1
-        or kinds.count(b"PLTE") > 1 or not idat_indices
+        len(ihdr) != 13
+        or chunks[-1] != (b"IEND", b"")
+        or kinds.count(b"IHDR") != 1
+        or kinds.count(b"IEND") != 1
+        or kinds.count(b"PLTE") > 1
+        or not idat_indices
         or idat_indices != list(range(idat_indices[0], idat_indices[-1] + 1))
         or (b"PLTE" in kinds and kinds.index(b"PLTE") > idat_indices[0])
     ):
         return False
-    width, height, bit_depth, color_type, compression, filtering, interlace = struct.unpack(
-        ">IIBBBBB", ihdr
+    width, height, bit_depth, color_type, compression, filtering, interlace = (
+        struct.unpack(">IIBBBBB", ihdr)
     )
     allowed_depths = {
         0: {1, 2, 4, 8, 16},
@@ -393,12 +457,19 @@ def _valid_png(value: bytes) -> bool:
     }
     channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
     if (
-        not width or not height or width > 16_384 or height > 16_384
+        not width
+        or not height
+        or width > 16_384
+        or height > 16_384
         or bit_depth not in allowed_depths.get(color_type, set())
-        or compression != 0 or filtering != 0 or interlace != 0
+        or compression != 0
+        or filtering != 0
+        or interlace != 0
     ):
         return False
-    if color_type == 3 and not any(kind == b"PLTE" and payload for kind, payload in chunks):
+    if color_type == 3 and not any(
+        kind == b"PLTE" and payload for kind, payload in chunks
+    ):
         return False
     idat = b"".join(payload for kind, payload in chunks if kind == b"IDAT")
     if not idat:
@@ -413,19 +484,36 @@ def _valid_png(value: bytes) -> bool:
     except zlib.error:
         return False
     if (
-        len(decoded) != decoded_bytes or not decoder.eof
-        or decoder.unused_data or decoder.unconsumed_tail
+        len(decoded) != decoded_bytes
+        or not decoder.eof
+        or decoder.unused_data
+        or decoder.unconsumed_tail
     ):
         return False
     return all(decoded[row * (row_bytes + 1)] <= 4 for row in range(height))
 
 
 def _valid_jpeg(value: bytes) -> bool:
-    if len(value) < 12 or not value.startswith(b"\xff\xd8") or not value.endswith(b"\xff\xd9"):
+    if (
+        len(value) < 12
+        or not value.startswith(b"\xff\xd8")
+        or not value.endswith(b"\xff\xd9")
+    ):
         return False
     start_of_frame = {
-        0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
-        0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+        0xC0,
+        0xC1,
+        0xC2,
+        0xC3,
+        0xC5,
+        0xC6,
+        0xC7,
+        0xC9,
+        0xCA,
+        0xCB,
+        0xCD,
+        0xCE,
+        0xCF,
     }
     offset = 2
     saw_frame = False
@@ -484,13 +572,17 @@ def _valid_jpeg(value: bytes) -> bool:
                 precision, table_id = precision_and_id >> 4, precision_and_id & 0x0F
                 table_bytes = 64 * (precision + 1)
                 if (
-                    precision not in {0, 1} or table_id > 3
+                    precision not in {0, 1}
+                    or table_id > 3
                     or cursor + table_bytes > offset + segment_length
                 ):
                     return False
                 coefficients = value[cursor : cursor + table_bytes]
                 step = precision + 1
-                if any(not any(coefficients[index : index + step]) for index in range(0, table_bytes, step)):
+                if any(
+                    not any(coefficients[index : index + step])
+                    for index in range(0, table_bytes, step)
+                ):
                     return False
                 quantization_tables.add(table_id)
                 cursor += table_bytes
@@ -514,7 +606,9 @@ def _valid_jpeg(value: bytes) -> bool:
                     if available_codes < 0:
                         return False
                 if (
-                    table_class not in {0, 1} or table_id > 3 or not symbol_count
+                    table_class not in {0, 1}
+                    or table_id > 3
+                    or not symbol_count
                     or cursor + symbol_count > offset + segment_length
                 ):
                     return False
@@ -527,7 +621,9 @@ def _valid_jpeg(value: bytes) -> bool:
             component_count = value[offset + 2] if segment_length >= 3 else 0
             scan_components: set[int] = set()
             referenced_tables_are_valid = True
-            for component_offset in range(offset + 3, offset + 3 + 2 * component_count, 2):
+            for component_offset in range(
+                offset + 3, offset + 3 + 2 * component_count, 2
+            ):
                 component = value[component_offset]
                 tables = value[component_offset + 1]
                 scan_components.add(component)
@@ -543,7 +639,9 @@ def _valid_jpeg(value: bytes) -> bool:
                 and segment_length == 6 + 2 * component_count
                 and len(scan_components) == component_count
                 and scan_components.issubset(frame_components)
-                and all(table in quantization_tables for table in frame_components.values())
+                and all(
+                    table in quantization_tables for table in frame_components.values()
+                )
                 and referenced_tables_are_valid
                 and scan_start < len(value) - 2
                 and bool(value[scan_start:-2])
@@ -557,11 +655,9 @@ def _image_bytes(blob: bytes, view: tuple[int, int], mime_type: str) -> None:
     start, length = view
     value = blob[start : start + length]
     valid = (
-        mime_type == "image/png" and _valid_png(value)
-    ) or (
-        mime_type == "image/jpeg" and _valid_jpeg(value)
-    ) or (
-        mime_type == "image/webp" and _valid_webp(value)
+        (mime_type == "image/png" and _valid_png(value))
+        or (mime_type == "image/jpeg" and _valid_jpeg(value))
+        or (mime_type == "image/webp" and _valid_webp(value))
     )
     if valid and mime_type in {"image/jpeg", "image/webp"}:
         try:
@@ -577,7 +673,9 @@ def _image_bytes(blob: bytes, view: tuple[int, int], mime_type: str) -> None:
 
 def _valid_webp(value: bytes) -> bool:
     if (
-        len(value) < 20 or not value.startswith(b"RIFF") or value[8:12] != b"WEBP"
+        len(value) < 20
+        or not value.startswith(b"RIFF")
+        or value[8:12] != b"WEBP"
         or struct.unpack_from("<I", value, 4)[0] + 8 != len(value)
     ):
         return False
@@ -595,9 +693,13 @@ def _valid_webp(value: bytes) -> bool:
             return False
         payload = value[start:end]
         if kind == b"VP8 ":
-            frame_tag = int.from_bytes(payload[:3], "little") if len(payload) >= 3 else 1
+            frame_tag = (
+                int.from_bytes(payload[:3], "little") if len(payload) >= 3 else 1
+            )
             if (
-                len(payload) <= 10 or frame_tag & 1 or not frame_tag >> 5
+                len(payload) <= 10
+                or frame_tag & 1
+                or not frame_tag >> 5
                 or frame_tag >> 5 > len(payload) - 10
                 or payload[3:6] != b"\x9d\x01\x2a"
                 or not struct.unpack_from("<H", payload, 6)[0] & 0x3FFF
@@ -617,8 +719,10 @@ def _valid_webp(value: bytes) -> bool:
 
 
 def _textures(
-    document: dict[str, object], blob: bytes, views: list[tuple[int, int]],
-    accessors: list[Accessor]
+    document: dict[str, object],
+    blob: bytes,
+    views: list[tuple[int, int]],
+    accessors: list[Accessor],
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     images = [_object(item, "image") for item in _array(document, "images")]
     image_payloads: list[tuple[int, str]] = []
@@ -628,9 +732,13 @@ def _textures(
         view = _index(image.get("bufferView"), len(views), "image bufferView")
         if any(accessor.view_index == view for accessor in accessors):
             raise ValueError("GLB image bufferView must not be shared with an accessor")
-        raw_view = _object(_array(document, "bufferViews", required=True)[view], "bufferView")
+        raw_view = _object(
+            _array(document, "bufferViews", required=True)[view], "bufferView"
+        )
         if raw_view.get("byteStride") is not None or raw_view.get("target") is not None:
-            raise ValueError("GLB image bufferView must not declare byteStride or target")
+            raise ValueError(
+                "GLB image bufferView must not declare byteStride or target"
+            )
         mime_type = image.get("mimeType")
         if mime_type not in IMAGE_MIME_TYPES:
             raise ValueError("GLB embedded image MIME type is unsupported")
@@ -675,10 +783,14 @@ def _textures(
         used = document.get("extensionsUsed")
         required = document.get("extensionsRequired")
         if (
-            not isinstance(used, list) or "EXT_texture_webp" not in used
-            or not isinstance(required, list) or "EXT_texture_webp" not in required
+            not isinstance(used, list)
+            or "EXT_texture_webp" not in used
+            or not isinstance(required, list)
+            or "EXT_texture_webp" not in required
         ):
-            raise ValueError("GLB WebP textures must declare EXT_texture_webp as used and required")
+            raise ValueError(
+                "GLB WebP textures must declare EXT_texture_webp as used and required"
+            )
     for view, mime_type in image_payloads:
         _image_bytes(blob, views[view], mime_type)
     return images, textures
@@ -729,9 +841,13 @@ def _reachable_meshes(
     parents = [0] * len(nodes)
     for node in nodes:
         if "camera" in node:
-            raise ValueError("GLB camera nodes are not supported by this artifact contract")
+            raise ValueError(
+                "GLB camera nodes are not supported by this artifact contract"
+            )
         if "weights" in node:
-            raise ValueError("GLB morph weights are not supported by this artifact contract")
+            raise ValueError(
+                "GLB morph weights are not supported by this artifact contract"
+            )
         matrix = node.get("matrix")
         transform_fields = ("translation", "rotation", "scale")
         if matrix is not None and any(field in node for field in transform_fields):
@@ -752,7 +868,7 @@ def _reachable_meshes(
                 raise ValueError(f"GLB node {field} transform is invalid")
         rotation = _finite_numbers(node.get("rotation"))
         if rotation is not None and not math.isclose(
-            sum(item ** 2 for item in rotation),
+            sum(item**2 for item in rotation),
             1.0,
             rel_tol=1e-6,
             abs_tol=1e-6,
@@ -763,21 +879,23 @@ def _reachable_meshes(
             raise ValueError("GLB node scale collapses reachable geometry")
         matrix_values = _finite_numbers(matrix)
         if matrix_values is not None:
-            if (
-                any(abs(matrix_values[index]) > 1e-12 for index in (3, 7, 11))
-                or not math.isclose(matrix_values[15], 1.0, abs_tol=1e-12)
-            ):
+            if any(
+                abs(matrix_values[index]) > 1e-12 for index in (3, 7, 11)
+            ) or not math.isclose(matrix_values[15], 1.0, abs_tol=1e-12):
                 raise ValueError("GLB node matrix is not an affine transform")
             determinant = (
-                matrix_values[0] * (
+                matrix_values[0]
+                * (
                     matrix_values[5] * matrix_values[10]
                     - matrix_values[6] * matrix_values[9]
                 )
-                - matrix_values[4] * (
+                - matrix_values[4]
+                * (
                     matrix_values[1] * matrix_values[10]
                     - matrix_values[2] * matrix_values[9]
                 )
-                + matrix_values[8] * (
+                + matrix_values[8]
+                * (
                     matrix_values[1] * matrix_values[6]
                     - matrix_values[2] * matrix_values[5]
                 )
@@ -789,7 +907,9 @@ def _reachable_meshes(
                 tuple(matrix_values[index] for index in (4, 5, 6)),
                 tuple(matrix_values[index] for index in (8, 9, 10)),
             )
-            lengths = [math.sqrt(sum(item * item for item in column)) for column in basis]
+            lengths = [
+                math.sqrt(sum(item * item for item in column)) for column in basis
+            ]
             for first, second in ((0, 1), (0, 2), (1, 2)):
                 dot = sum(basis[first][axis] * basis[second][axis] for axis in range(3))
                 if not math.isclose(
@@ -799,7 +919,9 @@ def _reachable_meshes(
         raw_children = node.get("children", [])
         if not isinstance(raw_children, list):
             raise ValueError("GLB node children must be an array")  # noqa: TRY004
-        node_children = [_index(item, len(nodes), "node child") for item in raw_children]
+        node_children = [
+            _index(item, len(nodes), "node child") for item in raw_children
+        ]
         if len(node_children) != len(set(node_children)):
             raise ValueError("GLB node contains duplicate children")
         children.append(node_children)
@@ -825,16 +947,17 @@ def _reachable_meshes(
 
     for index in range(len(nodes)):
         visit(index)
-    scenes = [_object(item, "scene") for item in _array(document, "scenes", required=True)]
+    scenes = [
+        _object(item, "scene") for item in _array(document, "scenes", required=True)
+    ]
     scene_roots: list[list[int]] = []
     for scene in scenes:
         roots = scene.get("nodes", [])
         if not isinstance(roots, list):
             raise ValueError("GLB scene nodes must be an array")  # noqa: TRY004
         validated_roots = [_index(item, len(nodes), "scene node") for item in roots]
-        if (
-            len(validated_roots) != len(set(validated_roots))
-            or any(parents[item] for item in validated_roots)
+        if len(validated_roots) != len(set(validated_roots)) or any(
+            parents[item] for item in validated_roots
         ):
             raise ValueError("GLB scene roots are invalid")
         scene_roots.append(validated_roots)
@@ -864,35 +987,45 @@ def _triangle_primitive(
     if primitive.get("mode", 4) != 4:
         raise ValueError("GLB mesh primitive is not TRIANGLES")
     if "targets" in primitive:
-        raise ValueError("GLB morph targets are not supported by this artifact contract")
+        raise ValueError(
+            "GLB morph targets are not supported by this artifact contract"
+        )
     attributes = _object(primitive.get("attributes"), "primitive attributes")
     for name, value in attributes.items():
         attribute = accessors[_index(value, len(accessors), f"{name} accessor")]
         if attribute.start % 4 or attribute.stride % 4:
             raise ValueError("GLB vertex attributes must be four-byte aligned")
         if attribute.target not in {None, 34962}:
-            raise ValueError("GLB vertex attribute bufferView target must be ARRAY_BUFFER")
+            raise ValueError(
+                "GLB vertex attribute bufferView target must be ARRAY_BUFFER"
+            )
         if attribute.component_type == 5125:
-            raise ValueError("GLB vertex attributes must not use UNSIGNED_INT components")
+            raise ValueError(
+                "GLB vertex attributes must not use UNSIGNED_INT components"
+            )
         if attribute.component_type == 5126:
             _finite(attribute, name)
         if name == "NORMAL" and (
-            attribute.component_type != 5126 or attribute.kind != "VEC3"
+            attribute.component_type != 5126
+            or attribute.kind != "VEC3"
             or attribute.normalized
         ):
             raise ValueError("GLB NORMAL accessor must be unnormalized FLOAT VEC3")
         if name == "TANGENT" and (
-            attribute.component_type != 5126 or attribute.kind != "VEC4"
+            attribute.component_type != 5126
+            or attribute.kind != "VEC4"
             or attribute.normalized
         ):
             raise ValueError("GLB TANGENT accessor must be unnormalized FLOAT VEC4")
         if name.startswith("TEXCOORD_") and (
-            attribute.kind != "VEC2" or attribute.component_type not in {5121, 5123, 5126}
+            attribute.kind != "VEC2"
+            or attribute.component_type not in {5121, 5123, 5126}
             or (attribute.component_type != 5126 and not attribute.normalized)
         ):
             raise ValueError("GLB texture-coordinate accessor type is invalid")
         if name.startswith("JOINTS_") and (
-            attribute.kind != "VEC4" or attribute.component_type not in {5121, 5123}
+            attribute.kind != "VEC4"
+            or attribute.component_type not in {5121, 5123}
             or attribute.normalized
         ):
             raise ValueError("GLB joint accessor type or normalization is invalid")
@@ -909,13 +1042,23 @@ def _triangle_primitive(
         ):
             raise ValueError("GLB weight accessor type or normalization is invalid")
         if not name.startswith("_") and name not in {
-            "POSITION", "NORMAL", "TANGENT", "TEXCOORD_0", "TEXCOORD_1",
-            "COLOR_0", "JOINTS_0", "WEIGHTS_0",
+            "POSITION",
+            "NORMAL",
+            "TANGENT",
+            "TEXCOORD_0",
+            "TEXCOORD_1",
+            "COLOR_0",
+            "JOINTS_0",
+            "WEIGHTS_0",
         }:
             raise ValueError(f"GLB vertex attribute semantic is unsupported: {name}")
-    position = accessors[_index(attributes.get("POSITION"), len(accessors), "POSITION accessor")]
+    position = accessors[
+        _index(attributes.get("POSITION"), len(accessors), "POSITION accessor")
+    ]
     if position.component_type != 5126 or position.kind != "VEC3" or position.count < 3:
-        raise ValueError("GLB POSITION accessor must be FLOAT VEC3 with at least three vertices")
+        raise ValueError(
+            "GLB POSITION accessor must be FLOAT VEC3 with at least three vertices"
+        )
     minimum = [math.inf, math.inf, math.inf]
     maximum = [-math.inf, -math.inf, -math.inf]
     for value in position.values():
@@ -927,23 +1070,35 @@ def _triangle_primitive(
     if position.minimum is None or position.maximum is None:
         raise ValueError("GLB POSITION accessor must declare min and max bounds")
     for declared, actual in ((position.minimum, minimum), (position.maximum, maximum)):
-        if any(not math.isclose(declared[i], actual[i], rel_tol=1e-6, abs_tol=1e-7) for i in range(3)):
-            raise ValueError("GLB POSITION accessor bounds do not match its coordinates")
+        if any(
+            not math.isclose(declared[i], actual[i], rel_tol=1e-6, abs_tol=1e-7)
+            for i in range(3)
+        ):
+            raise ValueError(
+                "GLB POSITION accessor bounds do not match its coordinates"
+            )
     if max(maximum[axis] - minimum[axis] for axis in range(3)) <= 1e-8:
         raise ValueError("GLB mesh has a zero-size position extent")
-    indices = accessors[_index(primitive.get("indices"), len(accessors), "indices accessor")]
+    indices = accessors[
+        _index(primitive.get("indices"), len(accessors), "indices accessor")
+    ]
     if indices.target not in {None, 34963}:
         raise ValueError("GLB index bufferView target must be ELEMENT_ARRAY_BUFFER")
     if (
-        indices.component_type not in {5121, 5123, 5125} or indices.kind != "SCALAR"
-        or indices.count < 3 or indices.count % 3 or indices.interleaved
+        indices.component_type not in {5121, 5123, 5125}
+        or indices.kind != "SCALAR"
+        or indices.count < 3
+        or indices.count % 3
+        or indices.interleaved
         or indices.normalized
     ):
         raise ValueError("GLB indices must be unsigned SCALAR triangle indices")
     for name, value in attributes.items():
         attribute = accessors[_index(value, len(accessors), f"{name} accessor")]
         if attribute.count != position.count:
-            raise ValueError("GLB primitive vertex attribute counts do not match POSITION")
+            raise ValueError(
+                "GLB primitive vertex attribute counts do not match POSITION"
+            )
     nondegenerate = False
     triangle: list[int] = []
     for raw in indices.values():
@@ -968,7 +1123,9 @@ def _triangle_primitive(
     return position, attributes
 
 
-def validate_mesh_glb_bytes(data: bytes, *, profile: str = "geometry") -> dict[str, int]:
+def validate_mesh_glb_bytes(
+    data: bytes, *, profile: str = "geometry"
+) -> dict[str, int]:
     """Validate one in-memory artifact and return bounded structural metadata."""
     if profile not in PROFILES:
         raise ValueError(f"unsupported GLB validation profile: {profile}")
@@ -980,11 +1137,15 @@ def validate_mesh_glb_bytes(data: bytes, *, profile: str = "geometry") -> dict[s
     accessors, views = _accessors(document, blob)
     images, textures = _textures(document, blob, views, accessors)
     materials = _validate_materials(document, textures)
-    meshes = [_object(item, "mesh") for item in _array(document, "meshes", required=True)]
+    meshes = [
+        _object(item, "mesh") for item in _array(document, "meshes", required=True)
+    ]
     skins = [_object(item, "skin") for item in _array(document, "skins")]
     reachable, reachable_nodes = _reachable_meshes(document, len(meshes), len(skins))
     if reachable != set(range(len(meshes))):
-        raise ValueError("GLB contains a mesh that is unreachable from the default scene")
+        raise ValueError(
+            "GLB contains a mesh that is unreachable from the default scene"
+        )
 
     skinned_primitives: list[tuple[Accessor, dict[str, object]]] = []
     attribute_accessors: set[int] = set()
@@ -992,7 +1153,9 @@ def validate_mesh_glb_bytes(data: bytes, *, profile: str = "geometry") -> dict[s
     primitive_count = 0
     for mesh in meshes:
         if "weights" in mesh:
-            raise ValueError("GLB morph weights are not supported by this artifact contract")
+            raise ValueError(
+                "GLB morph weights are not supported by this artifact contract"
+            )
         primitives = mesh.get("primitives")
         if not isinstance(primitives, list) or not primitives:
             raise ValueError("GLB mesh has no primitives")
@@ -1010,12 +1173,31 @@ def validate_mesh_glb_bytes(data: bytes, *, profile: str = "geometry") -> dict[s
                 for name, value in attributes.items()
             )
             if profile in {"textured", "textured-pbr"}:
-                uv = accessors[_index(attributes.get("TEXCOORD_0"), len(accessors), "TEXCOORD_0 accessor")]
-                if uv.component_type != 5126 or uv.kind != "VEC2" or uv.count != position.count:
-                    raise ValueError("GLB TEXCOORD_0 must be FLOAT VEC2 matching POSITION count")
+                uv = accessors[
+                    _index(
+                        attributes.get("TEXCOORD_0"),
+                        len(accessors),
+                        "TEXCOORD_0 accessor",
+                    )
+                ]
+                if (
+                    uv.component_type != 5126
+                    or uv.kind != "VEC2"
+                    or uv.count != position.count
+                ):
+                    raise ValueError(
+                        "GLB TEXCOORD_0 must be FLOAT VEC2 matching POSITION count"
+                    )
                 _finite(uv, "TEXCOORD_0")
-                material = materials[_index(primitive.get("material"), len(materials), "primitive material")]
-                pbr = _object(material.get("pbrMetallicRoughness"), "material pbrMetallicRoughness")
+                material = materials[
+                    _index(
+                        primitive.get("material"), len(materials), "primitive material"
+                    )
+                ]
+                pbr = _object(
+                    material.get("pbrMetallicRoughness"),
+                    "material pbrMetallicRoughness",
+                )
                 base_texture = _texture_index(
                     pbr.get("baseColorTexture"), textures, "baseColorTexture"
                 )
@@ -1028,7 +1210,9 @@ def validate_mesh_glb_bytes(data: bytes, *, profile: str = "geometry") -> dict[s
                     if base_texture == metallic_texture or _texture_source(
                         textures[base_texture], len(images)
                     ) == _texture_source(textures[metallic_texture], len(images)):
-                        raise ValueError("GLB PBR textures must use distinct embedded images")
+                        raise ValueError(
+                            "GLB PBR textures must use distinct embedded images"
+                        )
             if profile == "skinned":
                 skinned_primitives.append((position, attributes))
 
@@ -1036,28 +1220,38 @@ def validate_mesh_glb_bytes(data: bytes, *, profile: str = "geometry") -> dict[s
         accessor.interleaved and index not in attribute_accessors
         for index, accessor in enumerate(accessors)
     ):
-        raise ValueError("GLB byteStride is only permitted for vertex attribute accessors")
+        raise ValueError(
+            "GLB byteStride is only permitted for vertex attribute accessors"
+        )
     attribute_views = {accessors[index].view_index for index in attribute_accessors}
     index_views = {accessors[index].view_index for index in index_accessors}
     if attribute_views & index_views:
         raise ValueError("GLB bufferView must not mix vertex attributes and indices")
     for view in attribute_views:
         view_accessors = {
-            index for index in attribute_accessors if accessors[index].view_index == view
+            index
+            for index in attribute_accessors
+            if accessors[index].view_index == view
         }
         if len(view_accessors) > 1 and not all(
             accessors[index].interleaved for index in view_accessors
         ):
-            raise ValueError("GLB shared vertex-attribute bufferView must declare byteStride")
+            raise ValueError(
+                "GLB shared vertex-attribute bufferView must declare byteStride"
+            )
 
     if profile in {"textured", "textured-pbr"} and not images:
         raise ValueError("GLB textured mesh contains no embedded images")
     if profile == "textured-pbr" and (len(images) < 2 or len(textures) < 2):
-        raise ValueError("GLB PBR mesh must contain base-color and metallic-roughness images")
+        raise ValueError(
+            "GLB PBR mesh must contain base-color and metallic-roughness images"
+        )
     if profile == "skinned":
         if len(skins) != 1:
             raise ValueError("GLB SkinTokens profile requires exactly one skin")
-        nodes = [_object(item, "node") for item in _array(document, "nodes", required=True)]
+        nodes = [
+            _object(item, "node") for item in _array(document, "nodes", required=True)
+        ]
         mesh_nodes = [node for node in nodes if "mesh" in node]
         if not mesh_nodes or any(node.get("skin") != 0 for node in mesh_nodes):
             raise ValueError("every GLB skinned mesh node must bind a skin")
@@ -1070,7 +1264,9 @@ def validate_mesh_glb_bytes(data: bytes, *, profile: str = "geometry") -> dict[s
             for joint in joints:
                 joint_index = _index(joint, len(nodes), "skin joint")
                 if joint_index not in reachable_nodes:
-                    raise ValueError("GLB skin joint is unreachable from the default scene")
+                    raise ValueError(
+                        "GLB skin joint is unreachable from the default scene"
+                    )
             if skin.get("skeleton") is not None:
                 skeleton = _index(skin["skeleton"], len(nodes), "skin skeleton")
                 if skeleton not in joints:
@@ -1087,38 +1283,77 @@ def validate_mesh_glb_bytes(data: bytes, *, profile: str = "geometry") -> dict[s
                     while cursor != skeleton and cursor in parents:
                         cursor = parents[cursor]
                     if cursor != skeleton:
-                        raise ValueError("GLB skin skeleton must be an ancestor of every joint")
-            inverse = accessors[_index(skin.get("inverseBindMatrices"), len(accessors), "inverseBindMatrices accessor")]
+                        raise ValueError(
+                            "GLB skin skeleton must be an ancestor of every joint"
+                        )
+            inverse = accessors[
+                _index(
+                    skin.get("inverseBindMatrices"),
+                    len(accessors),
+                    "inverseBindMatrices accessor",
+                )
+            ]
             if inverse.target is not None:
-                raise ValueError("GLB inverseBindMatrices bufferView must not declare a target")
+                raise ValueError(
+                    "GLB inverseBindMatrices bufferView must not declare a target"
+                )
             if inverse.view_index in attribute_views | index_views:
-                raise ValueError("GLB inverseBindMatrices bufferView must have a unique role")
-            if inverse.component_type != 5126 or inverse.kind != "MAT4" or inverse.count != len(joints):
-                raise ValueError("GLB inverseBindMatrices must be FLOAT MAT4 matching joint count")
+                raise ValueError(
+                    "GLB inverseBindMatrices bufferView must have a unique role"
+                )
+            if (
+                inverse.component_type != 5126
+                or inverse.kind != "MAT4"
+                or inverse.count != len(joints)
+            ):
+                raise ValueError(
+                    "GLB inverseBindMatrices must be FLOAT MAT4 matching joint count"
+                )
             _finite(inverse, "inverseBindMatrices")
         first_joints = _object(skins[0], "skin").get("joints")
         assert isinstance(first_joints, list)
         joint_count = len(first_joints)
         for position, attributes in skinned_primitives:
-            joints = accessors[_index(attributes.get("JOINTS_0"), len(accessors), "JOINTS_0 accessor")]
-            weights = accessors[_index(attributes.get("WEIGHTS_0"), len(accessors), "WEIGHTS_0 accessor")]
-            normals = accessors[_index(attributes.get("NORMAL"), len(accessors), "NORMAL accessor")]
+            joints = accessors[
+                _index(attributes.get("JOINTS_0"), len(accessors), "JOINTS_0 accessor")
+            ]
+            weights = accessors[
+                _index(
+                    attributes.get("WEIGHTS_0"), len(accessors), "WEIGHTS_0 accessor"
+                )
+            ]
+            normals = accessors[
+                _index(attributes.get("NORMAL"), len(accessors), "NORMAL accessor")
+            ]
             if (
-                joints.component_type not in {5121, 5123} or joints.kind != "VEC4"
+                joints.component_type not in {5121, 5123}
+                or joints.kind != "VEC4"
                 or joints.normalized
-                or weights.component_type != 5126 or weights.kind != "VEC4"
-                or normals.component_type != 5126 or normals.kind != "VEC3"
-                or joints.count != position.count or weights.count != position.count
+                or weights.component_type != 5126
+                or weights.kind != "VEC4"
+                or normals.component_type != 5126
+                or normals.kind != "VEC3"
+                or joints.count != position.count
+                or weights.count != position.count
                 or normals.count != position.count
             ):
-                raise ValueError("GLB skin vertex attributes do not match POSITION count")
+                raise ValueError(
+                    "GLB skin vertex attributes do not match POSITION count"
+                )
             _finite(normals, "NORMAL")
-            for joint_value, weight_value in zip(joints.values(), weights.values(), strict=True):
+            for joint_value, weight_value in zip(
+                joints.values(), weights.values(), strict=True
+            ):
                 if any(int(value) >= joint_count for value in joint_value):
                     raise ValueError("GLB JOINTS_0 references an unknown joint")
-                if any(not math.isfinite(float(value)) or float(value) < 0 for value in weight_value):
+                if any(
+                    not math.isfinite(float(value)) or float(value) < 0
+                    for value in weight_value
+                ):
                     raise ValueError("GLB WEIGHTS_0 contains invalid weights")
-                if not math.isclose(sum(float(value) for value in weight_value), 1.0, abs_tol=1e-3):
+                if not math.isclose(
+                    sum(float(value) for value in weight_value), 1.0, abs_tol=1e-3
+                ):
                     raise ValueError("GLB WEIGHTS_0 weights are not normalized")
     return {
         "mesh_count": len(meshes),

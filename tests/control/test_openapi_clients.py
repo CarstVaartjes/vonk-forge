@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_CLIENT = ROOT / "src/cluster_profiles/generated_control"
 TYPESCRIPT_CLIENT = ROOT / "control/web/src/api/generated.d.ts"
-PACKAGED_CLI_OPENAPI = files("cluster_profiles.schemas").joinpath("control-openapi.json")
+PACKAGED_CLI_OPENAPI = files("cluster_profiles.schemas").joinpath(
+    "control-openapi.json"
+)
 
 
 class _JSONObject(Protocol):
@@ -100,35 +102,61 @@ def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None
         assert contract["properties"]["local"] == {
             "$ref": "#/components/schemas/LibraryLocalState"
         }
-    for name, field in (("ModelLibraryResponse", "models"), ("RecipeLibraryResponse", "recipes")):
+    for name, field in (
+        ("ModelLibraryResponse", "models"),
+        ("RecipeLibraryResponse", "recipes"),
+    ):
         assert components[name]["properties"][field]["maxItems"] == 512
     assert "recipe_revision_id" in components["LibraryRecipeIdentity"]["required"]
-    assert {"LibrarySnapshot", "LibraryRecipeList", "LibraryRecipeDetail",
-            "VisualRecipeDocument", "LibraryRecipeDefinition"}.isdisjoint(components)
+    assert {
+        "LibrarySnapshot",
+        "LibraryRecipeList",
+        "LibraryRecipeDetail",
+        "VisualRecipeDocument",
+        "LibraryRecipeDefinition",
+    }.isdisjoint(components)
 
 
 def test_operator_cache_and_profile_requests_have_current_document_schema() -> None:
     components = json.loads(OPENAPI.read_text())["components"]["schemas"]
-    for name in ("ModelCacheOperatorRequest", "RecipeOperatorRequest", "FleetProfileInput"):
-        assert components[name]["properties"].get("schema_version", {}).get("const", 2) == 2
+    for name in (
+        "ModelCacheOperatorRequest",
+        "RecipeOperatorRequest",
+        "FleetProfileInput",
+    ):
+        assert (
+            components[name]["properties"].get("schema_version", {}).get("const", 2)
+            == 2
+        )
 
 
 def test_generated_profile_authoring_is_logical_and_transport_neutral() -> None:
     schema = json.loads(OPENAPI.read_text())
     operations = _operations(schema)
     components = schema["components"]["schemas"]
-    assert {"autosaveProfile", "previewProfile", "loadProfile", "getProfileProgress"} <= set(operations)
+    assert {
+        "autosaveProfile",
+        "previewProfile",
+        "loadProfile",
+        "getProfileProgress",
+    } <= set(operations)
     assert {"applyLibraryPlacement", "previewLibraryPlacement"}.isdisjoint(operations)
     authored = components["FleetProfileAssignmentInput"]
     assert {"recipe_selector", "spark_ids"} <= set(authored["required"])
-    assert {"recipe_revision_id", "plan_digest", "model_content_sha256", "invocation"}.isdisjoint(
-        authored["properties"]
-    )
+    assert {
+        "recipe_revision_id",
+        "plan_digest",
+        "model_content_sha256",
+        "invocation",
+    }.isdisjoint(authored["properties"])
     assert "scope" not in components["FleetProfileInput"]["properties"]
     from cluster_profiles.generated_control.models.fleet_profile_assignment_input import (
         FleetProfileAssignmentInput,
     )
-    assignment = FleetProfileAssignmentInput(recipe_selector="publisher/recipe", spark_ids=["Spark One"])
+
+    assignment = FleetProfileAssignmentInput(
+        recipe_selector="publisher/recipe", spark_ids=["Spark One"]
+    )
     payload = assignment.to_dict()
     assert payload["recipe_selector"] == "publisher/recipe"
     assert payload["spark_ids"] == ["Spark One"]
@@ -170,9 +198,7 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
         }
     }
     assert "downloadRecipeSourceBundle" not in typescript
-    assert not (
-        PYTHON_CLIENT / "api/default/download_recipe_source_bundle.py"
-    ).exists()
+    assert not (PYTHON_CLIENT / "api/default/download_recipe_source_bundle.py").exists()
     assert operations["getJobLog"]["x-vonk-streaming-transport"] is True
     assert "getJobLog" not in typescript
     assert not (PYTHON_CLIENT / "api/default/get_job_log.py").exists()
@@ -210,7 +236,8 @@ def test_admin_schema_is_secret_free() -> None:
     }
     operations = _operations(schema)
     assert operations["streamFleetEvents"]["security"] == [
-        {"BearerAuth": []}, {"BrowserSession": []}
+        {"BearerAuth": []},
+        {"BrowserSession": []},
     ]
     assert operations["downloadCliToken"]["security"] == [{"BrowserSession": []}]
     assert all(
@@ -303,18 +330,29 @@ def test_generated_python_models_compile() -> None:
 
 def test_profile_load_contract_does_not_accept_client_revision_pins() -> None:
     components = json.loads(OPENAPI.read_text())["components"]["schemas"]
-    assert set(components["FleetProfileLoadRequest"]["properties"]) == {"request_key", "dry_run"}
-    assert {"plan_digest", "profile_digest", "progress"} <= set(components["FleetProfileApplicationView"]["properties"])
+    assert set(components["FleetProfileLoadRequest"]["properties"]) == {
+        "request_key",
+        "dry_run",
+    }
+    assert {"plan_digest", "profile_digest", "progress"} <= set(
+        components["FleetProfileApplicationView"]["properties"]
+    )
     assert "RunPreviewRequest" not in components
 
 
 def test_generated_recipe_detail_has_one_canonical_topology() -> None:
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
     detail = schema["RecipeDetailResponse"]
-    assert detail["properties"]["document"] == {"$ref": "#/components/schemas/RecipeDefinition"}
-    assert {"topology", "definition", "placement", "profiles"}.isdisjoint(detail["properties"])
+    assert detail["properties"]["document"] == {
+        "$ref": "#/components/schemas/RecipeDefinition"
+    }
+    assert {"topology", "definition", "placement", "profiles"}.isdisjoint(
+        detail["properties"]
+    )
     model_documents = detail["properties"]["model_documents"]
-    assert model_documents["items"] == {"$ref": "#/components/schemas/LibraryRecipeModel"}
+    assert model_documents["items"] == {
+        "$ref": "#/components/schemas/LibraryRecipeModel"
+    }
     assert model_documents["maxItems"] == 32
     assert schema["LibraryRecipeModel"]["properties"]["selection"] == {
         "$ref": "#/components/schemas/RecipeModelSelection"
@@ -345,8 +383,14 @@ def test_generated_openapi_removes_retired_catalog_recipe_operations() -> None:
 
 def test_generated_library_schema_uses_shared_authority_documents() -> None:
     components = json.loads(OPENAPI.read_text())["components"]["schemas"]
-    forbidden = {"PublicRecipe", "LibraryRecipeDefinition", "ModelVersion",
-                 "Qualification", "Readiness", "RuntimeDistribution"}
+    forbidden = {
+        "PublicRecipe",
+        "LibraryRecipeDefinition",
+        "ModelVersion",
+        "Qualification",
+        "Readiness",
+        "RuntimeDistribution",
+    }
     assert forbidden.isdisjoint(components)
     assert components["LibraryModelProjection"]["properties"]["document"] == {
         "$ref": "#/components/schemas/ModelDefinition"
@@ -360,7 +404,6 @@ def test_generated_library_contract_drops_legacy_visual_artifact_identity() -> N
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
     assert "VisualArtifact" not in schema
     assert "LibraryModelArtifact" not in schema
-
 
 
 def test_generated_python_client_imports_in_the_root_locked_environment() -> None:
@@ -474,21 +517,23 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
         "$ref": "#/components/schemas/TelemetryHistoryMetadata"
     }
     assert "metadata" in history["required"]
-    assert schema["TelemetryCurrentResponse"]["properties"]["schema_version"][
-        "const"
-    ] == 2
-    assert schema["TelemetryCapabilitiesResponse"]["properties"]["schema_version"][
-        "const"
-    ] == 2
-    assert schema["TelemetryWorkloadsResponse"]["properties"]["schema_version"][
-        "const"
-    ] == 2
+    assert (
+        schema["TelemetryCurrentResponse"]["properties"]["schema_version"]["const"] == 2
+    )
+    assert (
+        schema["TelemetryCapabilitiesResponse"]["properties"]["schema_version"]["const"]
+        == 2
+    )
+    assert (
+        schema["TelemetryWorkloadsResponse"]["properties"]["schema_version"]["const"]
+        == 2
+    )
 
     typescript = TYPESCRIPT_CLIENT.read_text()
-    assert 'TelemetryPoint: {' in typescript
-    assert 'TelemetryHistoryResponse: {' in typescript
-    assert 'TelemetryPoint: {[key: string]: unknown};' not in typescript
-    assert 'TelemetryHistoryResponse: {[key: string]: unknown};' not in typescript
+    assert "TelemetryPoint: {" in typescript
+    assert "TelemetryHistoryResponse: {" in typescript
+    assert "TelemetryPoint: {[key: string]: unknown};" not in typescript
+    assert "TelemetryHistoryResponse: {[key: string]: unknown};" not in typescript
 
 
 def test_generated_python_client_parses_documented_operation_errors() -> None:

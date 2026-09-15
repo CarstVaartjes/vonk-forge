@@ -19,11 +19,20 @@ def _library_root() -> Path:
     configured = os.environ.get("VONK_RECIPE_CANONICAL_ROOT")
     if configured:
         candidates.append(Path(configured))
-    candidates.extend((Path("/opt/vonk-forge-recipes"), Path("/private/tmp/vonk-forge-recipes-canonical")))
+    candidates.extend(
+        (
+            Path("/opt/vonk-forge-recipes"),
+            Path("/private/tmp/vonk-forge-recipes-canonical"),
+        )
+    )
     for candidate in candidates:
-        if (candidate / "contracts" / "src" / "vonk_forge_contracts").is_dir() and (candidate / "recipes").is_dir():
+        if (candidate / "contracts" / "src" / "vonk_forge_contracts").is_dir() and (
+            candidate / "recipes"
+        ).is_dir():
             return candidate
-    pytest.skip("a published schema-2 recipe checkout is required for qualifier integration tests")
+    pytest.skip(
+        "a published schema-2 recipe checkout is required for qualifier integration tests"
+    )
 
 
 def _recipes(root: Path) -> list[Path]:
@@ -58,7 +67,12 @@ def test_archive_safety_rejects_traversal_and_reserved_payload_namespaces() -> N
     safe_member = namespace["_safe_member"]
     safe_member("adapters/example/Dockerfile")
     safe_member("adapters/example/weights.pt")
-    for member in ("../escape", "/absolute", "weights/model.safetensors", "oci/image.tar"):
+    for member in (
+        "../escape",
+        "/absolute",
+        "weights/model.safetensors",
+        "oci/image.tar",
+    ):
         with pytest.raises(namespace["QualificationError"]):
             safe_member(member)
 
@@ -99,7 +113,9 @@ def test_structural_examples_cover_source_job_and_dual_contracts() -> None:
         assert _run(selected["image"], root)["source_build"] is False
 
 
-def test_qualifier_local_http_persists_and_reloads_evidence_ledger(tmp_path: Path) -> None:
+def test_qualifier_local_http_persists_and_reloads_evidence_ledger(
+    tmp_path: Path,
+) -> None:
     root = _library_root()
     recipe = root / "recipes" / "qwen3-8-27b-nvfp4-dspark-sglang-single.json"
     if not recipe.is_file():
@@ -112,7 +128,12 @@ def test_qualifier_local_http_persists_and_reloads_evidence_ledger(tmp_path: Pat
         def do_POST(self) -> None:
             size = int(self.headers["Content-Length"] or 0)
             json.loads(self.rfile.read(size))
-            self._write({"choices": [{"message": {"content": "fixture response"}}], "usage": {"completion_tokens": 1}})
+            self._write(
+                {
+                    "choices": [{"message": {"content": "fixture response"}}],
+                    "usage": {"completion_tokens": 1},
+                }
+            )
 
         def _write(self, payload: dict[str, object]) -> None:
             encoded = json.dumps(payload).encode()
@@ -273,7 +294,9 @@ def test_container_gate_reports_environment_without_spark_claim(tmp_path: Path) 
     assert payload["physical_claim"] is False
 
 
-def test_container_gate_refuses_without_production_launch_adapter(tmp_path: Path) -> None:
+def test_container_gate_refuses_without_production_launch_adapter(
+    tmp_path: Path,
+) -> None:
     root = _library_root()
     engine = tmp_path / "engine.py"
     log = tmp_path / "engine.log"
@@ -290,9 +313,24 @@ if args[:1] == ['info']:
     )
     engine.chmod(0o755)
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--recipe", str(_recipes(root)[0]), "--library-root", str(root),
-         "--platform-root", str(ROOT), "--level", "container", "--engine", str(engine)],
-        cwd=ROOT, capture_output=True, text=True, check=False,
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--recipe",
+            str(_recipes(root)[0]),
+            "--library-root",
+            str(root),
+            "--platform-root",
+            str(ROOT),
+            "--level",
+            "container",
+            "--engine",
+            str(engine),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode == 3
     payload = json.loads(result.stdout)

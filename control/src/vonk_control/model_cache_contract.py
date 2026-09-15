@@ -48,9 +48,7 @@ ModelCacheCoverage = Literal["complete", "incomplete"]
 
 
 class StrictModel(StrictJSONModel):
-    model_config = ConfigDict(
-        extra="forbid", strict=True, str_strip_whitespace=True
-    )
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
 
 class CacheManifestArtifact(StrictModel):
@@ -138,7 +136,9 @@ class _ModelCacheOperationPayload(StrictModel):
     # restart.  It is deliberately optional so current in-flight operations
     # retain the same strict envelope until an operator removes them.
     removal_fence: str | None = Field(default=None, pattern=UUID_PATTERN)
-    operator_action: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.:-]{0,63}$")
+    operator_action: str | None = Field(
+        default=None, pattern=r"^[a-z][a-z0-9_.:-]{0,63}$"
+    )
     selector: str | None = Field(default=None, min_length=1, max_length=256)
     with_model: bool | None = None
     force_refresh: bool = False
@@ -171,7 +171,7 @@ ModelCacheOperationPayload = (
 
 def parse_model_cache_payload(
     kind: str, value: object
-    ) -> ModelCacheDownloadPayload | ModelCacheRepairPayload | ModelCacheRemovalPayload:
+) -> ModelCacheDownloadPayload | ModelCacheRepairPayload | ModelCacheRemovalPayload:
     """Validate decoded database JSON against the operation-kind envelope."""
 
     try:
@@ -203,7 +203,10 @@ class ModelCacheDownloadRequest(StrictModel):
 
     @model_validator(mode="after")
     def recipe_identity_is_unambiguous(self) -> ModelCacheDownloadRequest:
-        if self.recipe_revision_sha256 is not None and self.recipe_revision_id is not None:
+        if (
+            self.recipe_revision_sha256 is not None
+            and self.recipe_revision_id is not None
+        ):
             raise ValueError("recipe revision digest and ID cannot both be supplied")
         return self
 
@@ -218,7 +221,10 @@ class ModelCacheDownloadPreviewRequest(StrictModel):
 
     @model_validator(mode="after")
     def recipe_identity_is_unambiguous(self) -> ModelCacheDownloadPreviewRequest:
-        if self.recipe_revision_sha256 is not None and self.recipe_revision_id is not None:
+        if (
+            self.recipe_revision_sha256 is not None
+            and self.recipe_revision_id is not None
+        ):
             raise ValueError("recipe revision digest and ID cannot both be supplied")
         return self
 
@@ -359,9 +365,17 @@ class ModelCacheOperationProgress(StrictModel):
     def total_known_matches_value(self) -> ModelCacheOperationProgress:
         if self.total_bytes_known != (self.expected_bytes is not None):
             raise ValueError("total_bytes_known must match expected_bytes")
-        if (self.measurement.completed_bytes, self.measurement.total_bytes,
-            self.measurement.completed_items, self.measurement.total_items) != (
-            self.downloaded_bytes, self.expected_bytes, self.completed_artifacts, self.total_artifacts):
+        if (
+            self.measurement.completed_bytes,
+            self.measurement.total_bytes,
+            self.measurement.completed_items,
+            self.measurement.total_items,
+        ) != (
+            self.downloaded_bytes,
+            self.expected_bytes,
+            self.completed_artifacts,
+            self.total_artifacts,
+        ):
             raise ValueError("cache counters must match canonical measurement")
         if len(self.model_dump_json().encode("utf-8")) > 1024 * 1024:
             raise ValueError("cache progress exceeds 1 MiB")
@@ -403,7 +417,9 @@ class ModelCacheOperationResponse(StrictModel):
             parse_model_cache_result(self.kind, self.result)
         if self.state == "succeeded":
             if self.result is None or self.failure is not None:
-                raise ValueError("succeeded cache operation requires a result and no failure")
+                raise ValueError(
+                    "succeeded cache operation requires a result and no failure"
+                )
         elif self.result is not None:
             raise ValueError("cache result is only available on success")
         if self.state == "failed" and self.failure is None:
@@ -462,7 +478,9 @@ class ModelCacheUpdateResponse(StrictModel):
     model_update_to: ModelReference | None = None
     upstream_revisions: list[ModelCacheUpstreamRevision] = Field(default_factory=list)
     model_update_ambiguous: bool = False
-    model_update_candidates: list[ModelReference] = Field(default_factory=list, max_length=16)
+    model_update_candidates: list[ModelReference] = Field(
+        default_factory=list, max_length=16
+    )
     recipe_revision_sha256: Digest | None
     latest_recipe_revision_sha256: Digest | None
     model_update_available: bool

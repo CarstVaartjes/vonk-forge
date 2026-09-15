@@ -180,9 +180,7 @@ def generate(
         "weight_shard_count": len(metadata_shards),
         "total_bytes": sum(entry["size"] for entry in entries),
         "safetensors_bytes": sum(
-            entry["size"]
-            for entry in entries
-            if entry["path"].endswith(".safetensors")
+            entry["size"] for entry in entries if entry["path"].endswith(".safetensors")
         ),
         "files": entries,
     }
@@ -194,14 +192,13 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     """Validate the complete DeepSeek snapshot manifest contract."""
 
     files = manifest.get("files")
-    paths = {
-        entry.get("path")
-        for entry in files or ()
-        if isinstance(entry, Mapping)
-    }
+    paths = {entry.get("path") for entry in files or () if isinstance(entry, Mapping)}
     if manifest.get("encoder_path") != ENCODER_PATH or ENCODER_PATH not in paths:
         raise ManifestError(f"manifest must include {ENCODER_PATH}")
-    if manifest.get("weight_index_path") != WEIGHT_INDEX_PATH or WEIGHT_INDEX_PATH not in paths:
+    if (
+        manifest.get("weight_index_path") != WEIGHT_INDEX_PATH
+        or WEIGHT_INDEX_PATH not in paths
+    ):
         raise ManifestError(f"manifest must include {WEIGHT_INDEX_PATH}")
     if manifest.get("schema_version") != 1:
         raise ManifestError("unsupported manifest schema_version")
@@ -241,7 +238,9 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     if file_count != len(entries) or file_count != EXPECTED_FILE_COUNT:
         raise ManifestError(f"manifest must contain {EXPECTED_FILE_COUNT} files")
     if shard_count != len(actual_shards) or actual_shards != _expected_shards():
-        raise ManifestError(f"manifest must contain {EXPECTED_SHARD_COUNT} weight shards")
+        raise ManifestError(
+            f"manifest must contain {EXPECTED_SHARD_COUNT} weight shards"
+        )
     if total_bytes != sum(entry["size"] for entry in entries):
         raise ManifestError("manifest total_bytes mismatch")
     if safetensors_bytes != sum(
@@ -271,9 +270,7 @@ def _scan_snapshot(
     unexpected: set[str] = set()
     unsafe: set[str] = set()
     directory_flags = (
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     )
     pending = [("", os.dup(root_fd))]
     while pending:
@@ -336,7 +333,9 @@ def verify(
     """Hash every expected regular file without network access or symlink traversal."""
 
     validate_manifest(manifest)
-    root_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    root_flags = (
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    )
     try:
         root_fd = os.open(os.fspath(snapshot_dir), root_flags)
     except FileNotFoundError:
@@ -417,7 +416,9 @@ def verify(
 
 def _write_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def _main() -> int:
@@ -435,7 +436,15 @@ def _main() -> int:
     if args.command == "generate":
         manifest = generate(args.repo, args.revision)
         _write_json(args.output, manifest)
-        print(json.dumps({key: manifest[key] for key in ("file_count", "total_bytes", "safetensors_bytes")}, sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    key: manifest[key]
+                    for key in ("file_count", "total_bytes", "safetensors_bytes")
+                },
+                sort_keys=True,
+            )
+        )
         return 0
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))

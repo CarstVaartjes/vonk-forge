@@ -24,7 +24,7 @@ def test_spark_acceptance_uses_the_locked_control_environment() -> None:
         encoding="utf-8"
     )
     assert (
-        'uv run --project control --frozen --with-editable . \\\n'
+        "uv run --project control --frozen --with-editable . \\\n"
         '            --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \\\n'
-        '            python tests/acceptance/test_spark_lifecycle.py run'
+        "            python tests/acceptance/test_spark_lifecycle.py run"
     ) in workflow

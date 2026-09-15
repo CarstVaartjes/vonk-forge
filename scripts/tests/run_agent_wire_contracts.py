@@ -64,8 +64,17 @@ def main() -> int:
                     "cargo",
                     "build",
                     "--locked",
-                    *[argument for package in packages for argument in ("--package", package)],
-                    *[argument for names in packages.values() for name in names for argument in ("--example", name)],
+                    *[
+                        argument
+                        for package in packages
+                        for argument in ("--package", package)
+                    ],
+                    *[
+                        argument
+                        for names in packages.values()
+                        for name in names
+                        for argument in ("--example", name)
+                    ],
                 ],
                 cwd=repository,
                 check=True,

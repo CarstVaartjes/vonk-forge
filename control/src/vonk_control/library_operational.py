@@ -404,9 +404,7 @@ def load_placement_operational_evidence(
         "run_members": _MAX_OPERATIONAL_MEMBERS,
     }
     truncated_collections: list[EvidenceCollection] = [
-        name
-        for name in _EVIDENCE_COLLECTIONS
-        if observed_counts[name] > limits[name]
+        name for name in _EVIDENCE_COLLECTIONS if observed_counts[name] > limits[name]
     ]
     counts = PlacementEvidenceCounts(
         **observed_counts,

@@ -41,12 +41,15 @@ def _assert_current_schema(engine) -> None:
     assert _schema_tables(engine) == set(Base.metadata.tables)
     assert not LEGACY_TABLES & _schema_tables(engine)
     with engine.connect() as connection:
-        assert list(
-            MigrationContext.configure(connection).get_current_heads()
-        ) == ["0000_fresh_schema"]
-        assert connection.execute(
-            text("SELECT version_num FROM alembic_version")
-        ).scalar_one() == "0000_fresh_schema"
+        assert list(MigrationContext.configure(connection).get_current_heads()) == [
+            "0000_fresh_schema"
+        ]
+        assert (
+            connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+            == "0000_fresh_schema"
+        )
         from alembic.autogenerate import compare_metadata
 
         differences = compare_metadata(

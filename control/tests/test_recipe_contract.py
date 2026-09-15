@@ -107,7 +107,8 @@ def test_canonical_recipe_rejects_unsafe_entrypoints(model: ModelDefinition) -> 
     ],
 )
 def test_canonical_recipe_rejects_invalid_cross_field_values(
-    path: tuple[str, ...], value: object,
+    path: tuple[str, ...],
+    value: object,
 ) -> None:
     raw = _example("recipe-image.json")
     target: object = raw
@@ -196,7 +197,10 @@ def test_source_build_requires_an_exact_image_receipt(
         role="entrypoint",
         rank=0,
     )
-    assert _json_object(spec["runtime"])["image"] == f"localhost/vonk/build@sha256:{digest}"
+    assert (
+        _json_object(spec["runtime"])["image"]
+        == f"localhost/vonk/build@sha256:{digest}"
+    )
 
 
 def test_canonical_recipe_rejects_unknown_root_fields() -> None:

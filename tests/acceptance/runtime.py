@@ -235,8 +235,10 @@ def assert_bundle_contract(bundle: Path) -> None:
         content = path.read_bytes().strip()
         if not content and relative.as_posix() not in OPTIONAL_SECRET_FILES:
             raise AcceptanceError(f"bundle file {relative} is empty")
-        if content and not runtime_config and (
-            content in compose_raw or content in environment_raw
+        if (
+            content
+            and not runtime_config
+            and (content in compose_raw or content in environment_raw)
         ):
             raise AcceptanceError(
                 f"secret value {relative} leaked into bundle metadata"

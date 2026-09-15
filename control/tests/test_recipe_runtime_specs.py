@@ -150,7 +150,10 @@ def test_runtime_spec_preserves_digest_bound_snapshot_selection() -> None:
     )
 
     artifact = _json_object(_json_array(spec["artifacts"])[0])
-    assert _json_object(spec["runtime"])["image"] == f"localhost/vonk/recipe-build@sha256:{digest}"
+    assert (
+        _json_object(spec["runtime"])["image"]
+        == f"localhost/vonk/recipe-build@sha256:{digest}"
+    )
     assert artifact["path"] == "model.safetensors"
     assert _json_object(artifact["model"])["content_sha256"] == content_sha256(model)
     assert artifact["mount"] == {
@@ -195,7 +198,12 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
         "topology",
     }
     assert _json_text(runtime["image"]).endswith("@sha256:" + "d" * 64)
-    assert _json_array(runtime["entrypoint"])[-4:] == ["--host", "0.0.0.0", "--port", "8000"]
+    assert _json_array(runtime["entrypoint"])[-4:] == [
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+    ]
     assert _json_array(runtime["environment"])[1:4] == [
         {"name": "XDG_CACHE_HOME", "value": "/outputs/cache", "secret": None},
         {"name": "XDG_CONFIG_HOME", "value": "/outputs/cache/config", "secret": None},
@@ -209,7 +217,11 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
         "host_network": False,
         "network_mode": "none",
         "mounts": [
-            {"source": "/run/vonk/models/primary", "target": "/models", "read_only": True},
+            {
+                "source": "/run/vonk/models/primary",
+                "target": "/models",
+                "read_only": True,
+            },
             {"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False},
         ],
         "read_only_root": True,
@@ -238,7 +250,9 @@ def test_runtime_spec_projects_deepseek_r1_parser_into_agent_argv() -> None:
 
 def test_runtime_spec_projects_distributed_sglang_placement_authority() -> None:
     recipe = _distributed_sglang_recipe()
-    entrypoint = compile_runtime_spec(recipe, models=[_model()], role="entrypoint", rank=0)
+    entrypoint = compile_runtime_spec(
+        recipe, models=[_model()], role="entrypoint", rank=0
+    )
     worker = compile_runtime_spec(recipe, models=[_model()], role="worker", rank=1)
     entry_runtime = _json_object(entrypoint["runtime"])
     worker_runtime = _json_object(worker["runtime"])
@@ -252,7 +266,10 @@ def test_runtime_spec_projects_distributed_sglang_placement_authority() -> None:
     worker_command = _json_array(worker_runtime["entrypoint"])
     assert entry_command[entry_command.index("--node-rank") + 1] == "0"
     assert worker_command[worker_command.index("--node-rank") + 1] == "1"
-    assert entry_command[entry_command.index("--dist-init-addr") + 1] == "VONK_MASTER_ADDR:VONK_MASTER_PORT"
+    assert (
+        entry_command[entry_command.index("--dist-init-addr") + 1]
+        == "VONK_MASTER_ADDR:VONK_MASTER_PORT"
+    )
     assert entrypoint["topology"] == {
         "name": "dual-sglang",
         "mode": "distributed",
@@ -270,7 +287,11 @@ def test_runtime_spec_projects_distributed_sglang_placement_authority() -> None:
 
 
 def test_runtime_spec_compiles_one_shot_artifact_job_authority() -> None:
-    recipe = _recipe("recipe-job.json", engine="diffusers", entrypoint=["/opt/vonk/bin/diffusers-job"])
+    recipe = _recipe(
+        "recipe-job.json",
+        engine="diffusers",
+        entrypoint=["/opt/vonk/bin/diffusers-job"],
+    )
     spec = compile_runtime_spec(recipe, models=[_model()], role="entrypoint", rank=0)
     runtime = _json_object(spec["runtime"])
     security = _json_object(spec["security"])
@@ -291,7 +312,9 @@ def test_runtime_spec_compiles_one_shot_artifact_job_authority() -> None:
 
 
 def test_runtime_spec_binds_exact_auxiliary_model_versions() -> None:
-    package = {"artifact_inputs": [{"selection_id": "primary", "artifact_key": "weights"}]}
+    package = {
+        "artifact_inputs": [{"selection_id": "primary", "artifact_key": "weights"}]
+    }
     model = _model()
     spec = compile_runtime_spec(
         _recipe(), models=[model], package_handle=package, role="entrypoint", rank=0
@@ -314,7 +337,10 @@ def test_runtime_spec_preserves_exact_multi_artifact_targets_and_vllm_primary() 
 
     command = _json_array(_json_object(spec["runtime"])["entrypoint"])
     assert command[2] == "/models/target"
-    assert command[command.index("--speculative-config") + 1] == '{"method":"draft_model","model":"/models/draft"}'
+    assert (
+        command[command.index("--speculative-config") + 1]
+        == '{"method":"draft_model","model":"/models/draft"}'
+    )
     assert [
         _json_object(_json_object(artifact)["mount"])["target"]
         for artifact in _json_array(spec["artifacts"])

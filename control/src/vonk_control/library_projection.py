@@ -210,7 +210,9 @@ class LibraryProjection:
     def _local_state_snapshot(self) -> Mapping[str, Mapping[str, object]]:
         snapshot = self._local_state()
         if not isinstance(snapshot, Mapping):
-            raise LibraryProjectionError("local state provider did not return a mapping")
+            raise LibraryProjectionError(
+                "local state provider did not return a mapping"
+            )
         return snapshot
 
     def _local(
@@ -228,7 +230,9 @@ class LibraryProjection:
             raise LibraryProjectionError(f"{kind} local state is invalid")
         controller = cast(LibraryControllerState, candidate)
         running = raw.get("running_on", [])
-        if not isinstance(running, list) or not all(isinstance(item, str) for item in running):
+        if not isinstance(running, list) or not all(
+            isinstance(item, str) for item in running
+        ):
             raise LibraryProjectionError(f"{kind} running state is invalid")
         preparation_value = raw.get("preparation")
         preparation = None
@@ -236,7 +240,9 @@ class LibraryProjection:
             if not isinstance(preparation_value, Mapping):
                 raise LibraryProjectionError(f"{kind} preparation state is invalid")
             preparation = LibraryLocalProgress.model_validate(preparation_value)
-        return LibraryLocalState(controller=controller, running_on=running, preparation=preparation)
+        return LibraryLocalState(
+            controller=controller, running_on=running, preparation=preparation
+        )
 
     @staticmethod
     def _merge_local(
@@ -249,12 +255,13 @@ class LibraryProjection:
     ) -> None:
         if digest is None:
             return
-        current = result.setdefault(
-            digest, {"controller": "unknown", "running_on": []}
-        )
-        if _LOCAL_STATE_PRIORITY[controller] > _LOCAL_STATE_PRIORITY[
-            cast(LibraryControllerState, str(current["controller"]))
-        ]:
+        current = result.setdefault(digest, {"controller": "unknown", "running_on": []})
+        if (
+            _LOCAL_STATE_PRIORITY[controller]
+            > _LOCAL_STATE_PRIORITY[
+                cast(LibraryControllerState, str(current["controller"]))
+            ]
+        ):
             current["controller"] = controller
         nodes = current["running_on"]
         if not isinstance(nodes, list):
@@ -267,7 +274,10 @@ class LibraryProjection:
                 if isinstance(previous, Mapping)
                 else ""
             )
-            if previous is None or str(preparation.get("operation_id", "")) >= previous_operation:
+            if (
+                previous is None
+                or str(preparation.get("operation_id", "")) >= previous_operation
+            ):
                 current["preparation"] = dict(preparation)
 
     @staticmethod
@@ -289,7 +299,9 @@ class LibraryProjection:
         }.get(state)
         if projected_state is None:
             raise LibraryProjectionError("persisted cache operation state is invalid")
-        completed = measurement.get("completed_bytes", progress.get("downloaded_bytes", 0))
+        completed = measurement.get(
+            "completed_bytes", progress.get("downloaded_bytes", 0)
+        )
         total = measurement.get("total_bytes", progress.get("expected_bytes"))
         if type(completed) is not int or completed < 0:
             raise LibraryProjectionError("persisted cache progress bytes are invalid")
@@ -322,7 +334,9 @@ class LibraryProjection:
             run_nodes = list(session.scalars(select(RunNode)))
             runtime_receipts = list(session.scalars(select(RuntimeImageReceiptRow)))
 
-        revision_digests = {revision.id: revision.content_digest for revision in revisions}
+        revision_digests = {
+            revision.id: revision.content_digest for revision in revisions
+        }
         result: dict[str, dict[str, object]] = {}
         for cache_set in cache_sets:
             controller = _controller_state(
@@ -372,8 +386,10 @@ class LibraryProjection:
                         if digest is not None
                     )
             preparation = self._cache_progress(operation)
-            controller = "preparing" if operation.state in {"queued", "running", "partial"} else (
-                "cached" if operation.state == "succeeded" else "failed"
+            controller = (
+                "preparing"
+                if operation.state in {"queued", "running", "partial"}
+                else ("cached" if operation.state == "succeeded" else "failed")
             )
             for digest in digest_values:
                 if digest is not None and not isinstance(digest, str):
@@ -421,19 +437,35 @@ class LibraryProjection:
         running_nodes_by_installation: dict[str, list[str]] = {}
         for node in installation_nodes:
             if node.state == "installed":
-                running_nodes_by_installation.setdefault(node.installation_id, []).append(node.node_id)
-        installations_by_id = {installation.id: installation for installation in installations}
+                running_nodes_by_installation.setdefault(
+                    node.installation_id, []
+                ).append(node.node_id)
+        installations_by_id = {
+            installation.id: installation for installation in installations
+        }
         for run in runs:
-            if run.state not in {"planned", "starting", "running", "stopping", "stopped", "failed", "lost"}:
+            if run.state not in {
+                "planned",
+                "starting",
+                "running",
+                "stopping",
+                "stopped",
+                "failed",
+                "lost",
+            }:
                 raise LibraryProjectionError("persisted recipe run state is invalid")
             if run.state in {"planned", "starting", "running", "stopping"}:
                 installation = installations_by_id.get(run.installation_id)
                 plan = run.plan
                 if not isinstance(plan, Mapping):
-                    raise LibraryProjectionError("persisted recipe run plan is not a mapping")
+                    raise LibraryProjectionError(
+                        "persisted recipe run plan is not a mapping"
+                    )
                 model_digest = plan.get("model_content_sha256")
                 if model_digest is not None and not isinstance(model_digest, str):
-                    raise LibraryProjectionError("persisted recipe run model digest is invalid")
+                    raise LibraryProjectionError(
+                        "persisted recipe run model digest is invalid"
+                    )
                 run_nodes_for_run = [
                     node
                     for node in run_nodes
@@ -493,12 +525,18 @@ class LibraryProjection:
 
     @staticmethod
     def _model_usage(document: ModelDefinition) -> list[str]:
-        return sorted(fact.capability for fact in document.capabilities.facts if fact.support == "supported")
+        return sorted(
+            fact.capability
+            for fact in document.capabilities.facts
+            if fact.support == "supported"
+        )
 
     @staticmethod
     def _recipe_resources(document: RecipeDefinition) -> LibraryResourceProjection:
         roles = document.topology.roles
-        memory = max((role.resources.memory.startup_peak_bytes for role in roles), default=None)
+        memory = max(
+            (role.resources.memory.startup_peak_bytes for role in roles), default=None
+        )
         disk = max(
             (
                 role.resources.disk.image_bytes
@@ -530,15 +568,15 @@ class LibraryProjection:
             selector=self.selector(document.identity.publisher, document.identity.slug),
             identity=_model_identity(revision, document),
             document=document,
-            family=self.selector(document.identity.family.publisher, document.identity.family.slug),
+            family=self.selector(
+                document.identity.family.publisher, document.identity.family.slug
+            ),
             version=document.identity.version,
             variant=document.identity.variant,
             quantization=document.format.quantization,
             usage=self._model_usage(document),
             resources=LibraryResourceProjection(disk_bytes=document.download_bytes),
-            local=self._local(
-                revision.content_digest, kind="model", snapshot=snapshot
-            ),
+            local=self._local(revision.content_digest, kind="model", snapshot=snapshot),
             updated_at=_utc(revision.created_at),
             alignment=sorted(set(alignment)),
         )
@@ -557,9 +595,18 @@ class LibraryProjection:
         known_models = [
             model_by_key[key]
             for selection in document.models
-            if (key := (selection.model.publisher, selection.model.slug, selection.model.content_sha256)) in model_by_key
+            if (
+                key := (
+                    selection.model.publisher,
+                    selection.model.slug,
+                    selection.model.content_sha256,
+                )
+            )
+            in model_by_key
         ]
-        usage = sorted({item for model in known_models for item in self._model_usage(model)})
+        usage = sorted(
+            {item for model in known_models for item in self._model_usage(model)}
+        )
         resources = self._recipe_resources(document)
         return LibraryRecipeProjection(
             selector=self.selector(document.identity.publisher, document.identity.slug),
@@ -636,20 +683,27 @@ class LibraryProjection:
 
     @staticmethod
     def _matches_any(values: Sequence[str], selected: Sequence[str]) -> bool:
-        return not selected or bool({value.casefold() for value in values} & {value.casefold() for value in selected})
+        return not selected or bool(
+            {value.casefold() for value in values}
+            & {value.casefold() for value in selected}
+        )
 
     @staticmethod
     def _resolve_selector[T](
         items: Sequence[T], selector: str, getter: Callable[[T], tuple[str, str]]
     ) -> T:
         wanted = selector.casefold()
-        matches = [item for item in items if wanted in {
-            "/".join(getter(item)).casefold(), getter(item)[1].casefold()
-        }]
+        matches = [
+            item
+            for item in items
+            if wanted in {"/".join(getter(item)).casefold(), getter(item)[1].casefold()}
+        ]
         if not matches:
             raise KeyError(selector)
         if len(matches) > 1:
-            raise LibrarySelectorAmbiguous(selector, ["/".join(getter(item)) for item in matches])
+            raise LibrarySelectorAmbiguous(
+                selector, ["/".join(getter(item)) for item in matches]
+            )
         return matches[0]
 
     @staticmethod
@@ -732,7 +786,8 @@ class LibraryProjection:
             ]
         wanted_search = search.casefold() if search else None
         filtered = [
-            item for item in entries
+            item
+            for item in entries
             if self._matches_any(item.usage, usage)
             and self._matches_any([item.family], family)
             and self._matches_any([item.version], version)
@@ -784,23 +839,37 @@ class LibraryProjection:
         next_cursor = None
         if len(filtered) > limit and page:
             next_cursor = self._cursors.encode(
-                resource="models", order=_LIBRARY_ORDER, context=context,
+                resource="models",
+                order=_LIBRARY_ORDER,
+                context=context,
                 boundary=list(key(page[-1])),
             )
         return ModelLibraryResponse(
-            generated_at=_utc(self._clock()), models=page,
-            facets=self._facet_values(entries), next_cursor=next_cursor,
+            generated_at=_utc(self._clock()),
+            models=page,
+            facets=self._facet_values(entries),
+            next_cursor=next_cursor,
             filters=LibraryFilterValues(
-                usage=list(usage), family=list(family), version=list(version),
-                quantization=list(quantization), publisher=list(publisher),
-                alignment=list(alignment), search=search,
-                updated_since=None if updated_since is None else _utc(updated_since).isoformat(),
-                sort=sort, local_only=local_only,
-            ), freshness_policy=self._freshness,
+                usage=list(usage),
+                family=list(family),
+                version=list(version),
+                quantization=list(quantization),
+                publisher=list(publisher),
+                alignment=list(alignment),
+                search=search,
+                updated_since=None
+                if updated_since is None
+                else _utc(updated_since).isoformat(),
+                sort=sort,
+                local_only=local_only,
+            ),
+            freshness_policy=self._freshness,
         )
 
     @staticmethod
-    def _model_sort_key(sort: str) -> Callable[[LibraryModelProjection], tuple[str, ...]]:
+    def _model_sort_key(
+        sort: str,
+    ) -> Callable[[LibraryModelProjection], tuple[str, ...]]:
         if sort == "updated":
             return lambda item: (
                 item.updated_at.strftime("%Y%m%dT%H%M%SZ"),
@@ -827,7 +896,8 @@ class LibraryProjection:
             for row in model_rows
         ]
         entry = self._resolve_selector(
-            entries, selector,
+            entries,
+            selector,
             lambda item: (item.identity.publisher, item.identity.slug),
         )
         assert isinstance(entry, LibraryModelProjection)
@@ -880,7 +950,8 @@ class LibraryProjection:
             selected_keys = set()
             for selector in model_selectors:
                 selected = self._resolve_selector(
-                    model_entries, selector,
+                    model_entries,
+                    selector,
                     lambda item: (item.identity.publisher, item.identity.slug),
                 )
                 assert isinstance(selected, LibraryModelProjection)
@@ -893,9 +964,14 @@ class LibraryProjection:
                 )
         elif not all_models:
             selected_keys = {
-                (item.identity.publisher, item.identity.slug, item.identity.content_sha256)
+                (
+                    item.identity.publisher,
+                    item.identity.slug,
+                    item.identity.content_sha256,
+                )
                 for item in model_entries
-                if item.local.controller in {"cached", "preparing"} or item.local.running_on
+                if item.local.controller in {"cached", "preparing"}
+                or item.local.running_on
             }
             local_recipe_digests = set(snapshot)
         entries = [
@@ -904,20 +980,24 @@ class LibraryProjection:
         ]
         wanted_search = search.casefold() if search else None
         filtered = [
-            item for item in entries
+            item
+            for item in entries
             if (
                 selected_keys is None
                 or item.identity.content_sha256 in local_recipe_digests
                 or any(
-                    (selection.model.publisher, selection.model.slug, selection.model.content_sha256) in selected_keys
+                    (
+                        selection.model.publisher,
+                        selection.model.slug,
+                        selection.model.content_sha256,
+                    )
+                    in selected_keys
                     for selection in item.document.models
                 )
             )
             and self._matches_any(item.usage, usage)
             and self._matches_any([item.identity.publisher], publisher)
-            and self._matches_any(
-                [item.alignment] if item.alignment else [], alignment
-            )
+            and self._matches_any([item.alignment] if item.alignment else [], alignment)
             and (not sparks or item.node_count in sparks)
             and (
                 wanted_search is None
@@ -954,29 +1034,49 @@ class LibraryProjection:
             if not isinstance(boundary, list) or len(boundary) != 3:
                 raise CursorError("recipe library cursor is invalid")
             boundary_key = tuple(str(value) for value in boundary)
-            filtered = [item for item in filtered if (key(item) < boundary_key if sort == "updated" else key(item) > boundary_key)]
+            filtered = [
+                item
+                for item in filtered
+                if (
+                    key(item) < boundary_key
+                    if sort == "updated"
+                    else key(item) > boundary_key
+                )
+            ]
         page = filtered[:limit]
         next_cursor = None
         if len(filtered) > limit and page:
             next_cursor = self._cursors.encode(
-                resource="recipes", order=_LIBRARY_ORDER, context=context,
+                resource="recipes",
+                order=_LIBRARY_ORDER,
+                context=context,
                 boundary=list(key(page[-1])),
             )
         return RecipeLibraryResponse(
-            generated_at=_utc(self._clock()), recipes=page,
-            facets=self._recipe_facet_values(model_entries, entries), next_cursor=next_cursor,
+            generated_at=_utc(self._clock()),
+            recipes=page,
+            facets=self._recipe_facet_values(model_entries, entries),
+            next_cursor=next_cursor,
             filters=LibraryFilterValues(
-                model=list(model_selectors), all_models=all_models, usage=list(usage),
-                publisher=list(publisher), alignment=list(alignment),
+                model=list(model_selectors),
+                all_models=all_models,
+                usage=list(usage),
+                publisher=list(publisher),
+                alignment=list(alignment),
                 sparks=list(sparks),
                 search=search,
-                updated_since=None if updated_since is None else _utc(updated_since).isoformat(),
+                updated_since=None
+                if updated_since is None
+                else _utc(updated_since).isoformat(),
                 sort=sort,
-            ), freshness_policy=self._freshness,
+            ),
+            freshness_policy=self._freshness,
         )
 
     @staticmethod
-    def _recipe_sort_key(sort: str) -> Callable[[LibraryRecipeProjection], tuple[str, ...]]:
+    def _recipe_sort_key(
+        sort: str,
+    ) -> Callable[[LibraryRecipeProjection], tuple[str, ...]]:
         if sort == "updated":
             return lambda item: (
                 item.updated_at.strftime("%Y%m%dT%H%M%SZ"),
@@ -998,21 +1098,40 @@ class LibraryProjection:
             for row in recipe_rows
         ]
         entry = self._resolve_selector(
-            entries, selector,
+            entries,
+            selector,
             lambda item: (item.identity.publisher, item.identity.slug),
         )
         assert isinstance(entry, LibraryRecipeProjection)
-        recipe_row = next(row for row in recipe_rows if row.content_digest == entry.identity.content_sha256)
+        recipe_row = next(
+            row
+            for row in recipe_rows
+            if row.content_digest == entry.identity.content_sha256
+        )
         recipe = _canonical_recipe(recipe_row)
         model_documents = []
         for selection in recipe.models:
-            model = model_by_key.get((selection.model.publisher, selection.model.slug, selection.model.content_sha256))
+            model = model_by_key.get(
+                (
+                    selection.model.publisher,
+                    selection.model.slug,
+                    selection.model.content_sha256,
+                )
+            )
             if model is None:
-                raise LibraryProjectionError("active recipe references a missing active Model document")
-            model_documents.append(LibraryRecipeModel(selection=selection, model_document=model))
+                raise LibraryProjectionError(
+                    "active recipe references a missing active Model document"
+                )
+            model_documents.append(
+                LibraryRecipeModel(selection=selection, model_document=model)
+            )
         return RecipeDetailResponse.model_validate(
             entry.model_dump(mode="python")
-            | {"model_documents": [model.model_dump(mode="json") for model in model_documents]}
+            | {
+                "model_documents": [
+                    model.model_dump(mode="json") for model in model_documents
+                ]
+            }
         )
 
     def authoring_recipe_detail(self, recipe_id: str) -> LibraryRecipeAuthoringDetail:
@@ -1071,7 +1190,9 @@ class LibraryProjection:
             recipe=_canonical_recipe_summary(revision, document),
             definition=document,
             topology=document.topology,
-            operational_state=OperationalState(builds=[], mappings=[], installations=[], runs=[]),
+            operational_state=OperationalState(
+                builds=[], mappings=[], installations=[], runs=[]
+            ),
             placement=[],
             reasons=[],
             model_documents=model_documents,

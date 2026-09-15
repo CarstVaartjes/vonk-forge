@@ -193,8 +193,13 @@ def test_builtin_harness_compiles_shell_free_secure_projection(
     projection = _projection(slug, model=model)
 
     assert projection.command
-    assert projection.command[0].startswith("/opt/vonk/bin/") or projection.command[0].startswith("/usr/local/bin/")
-    assert not any(value in {"sh", "bash", "/bin/sh", "/bin/bash", "-c"} for value in projection.command)
+    assert projection.command[0].startswith("/opt/vonk/bin/") or projection.command[
+        0
+    ].startswith("/usr/local/bin/")
+    assert not any(
+        value in {"sh", "bash", "/bin/sh", "/bin/bash", "-c"}
+        for value in projection.command
+    )
     assert projection.contract_version == 1
     assert projection.network_mode == "none"
     assert projection.architecture == "linux/arm64"
@@ -241,7 +246,9 @@ def test_vllm_preserves_opaque_engine_options(model: ModelDefinition) -> None:
             {"name": "structured-option", "value": '{"enabled":true}'},
         ]
     )
-    projection = _projection("vllm", recipe=RecipeDefinition.model_validate(raw), model=model)
+    projection = _projection(
+        "vllm", recipe=RecipeDefinition.model_validate(raw), model=model
+    )
 
     assert "--future-engine-option" in projection.command
     index = projection.command.index("--future-engine-option")
@@ -249,7 +256,9 @@ def test_vllm_preserves_opaque_engine_options(model: ModelDefinition) -> None:
     assert "--structured-option" in projection.command
 
 
-def test_canonical_harness_preserves_value_bearing_arguments(model: ModelDefinition) -> None:
+def test_canonical_harness_preserves_value_bearing_arguments(
+    model: ModelDefinition,
+) -> None:
     raw = _recipe("vllm").model_dump(mode="json")
     raw["runtime"]["arguments"] = [
         {"name": "device", "value": "--device=/dev/nvidia0"},
@@ -257,7 +266,9 @@ def test_canonical_harness_preserves_value_bearing_arguments(model: ModelDefinit
         {"name": "mount", "value": ""},
         {"name": "option", "value": "-c"},
     ]
-    projection = _projection("vllm", recipe=RecipeDefinition.model_validate(raw), model=model)
+    projection = _projection(
+        "vllm", recipe=RecipeDefinition.model_validate(raw), model=model
+    )
 
     expected = (
         "--device",
@@ -274,13 +285,21 @@ def test_canonical_harness_preserves_value_bearing_arguments(model: ModelDefinit
 
 
 @pytest.mark.parametrize("slug", BUILTINS)
-def test_builtin_harness_preserves_unknown_environment(slug: str, model: ModelDefinition) -> None:
+def test_builtin_harness_preserves_unknown_environment(
+    slug: str, model: ModelDefinition
+) -> None:
     raw = _recipe(slug).model_dump(mode="json")
-    raw["runtime"]["environment"] = [{"name": "FUTURE_ENGINE_SETTING", "value": "preserve-me"}]
-    projection = _projection(slug, recipe=RecipeDefinition.model_validate(raw), model=model)
+    raw["runtime"]["environment"] = [
+        {"name": "FUTURE_ENGINE_SETTING", "value": "preserve-me"}
+    ]
+    projection = _projection(
+        slug, recipe=RecipeDefinition.model_validate(raw), model=model
+    )
 
     assert ("FUTURE_ENGINE_SETTING", "preserve-me") in projection.environment
-    assert projection.environment == effective_environment(slug, (("FUTURE_ENGINE_SETTING", "preserve-me"),))
+    assert projection.environment == effective_environment(
+        slug, (("FUTURE_ENGINE_SETTING", "preserve-me"),)
+    )
 
 
 @pytest.mark.parametrize("unsafe", ["LD_PRELOAD", "PATH"])
@@ -303,7 +322,9 @@ def test_vllm_injects_platform_owned_environment(model: ModelDefinition) -> None
 
 
 @pytest.mark.parametrize("slug", BUILTINS)
-def test_builtin_harness_rejects_shell_entrypoint(slug: str, model: ModelDefinition) -> None:
+def test_builtin_harness_rejects_shell_entrypoint(
+    slug: str, model: ModelDefinition
+) -> None:
     raw = _recipe(slug).model_dump(mode="json")
     raw["runtime"]["entrypoint"] = ["bash", "-c", "run"]
 
@@ -342,10 +363,14 @@ def test_job_media_contract_is_bound_to_the_canonical_interface(
     projection = _projection("diffusers", recipe=recipe, model=model)
 
     assert "--output-mime" in projection.command
-    assert projection.command[projection.command.index("--output-mime") + 1] == "image/png"
+    assert (
+        projection.command[projection.command.index("--output-mime") + 1] == "image/png"
+    )
 
 
-def test_parameter_substitution_uses_declared_typed_bounds(model: ModelDefinition) -> None:
+def test_parameter_substitution_uses_declared_typed_bounds(
+    model: ModelDefinition,
+) -> None:
     raw = _recipe("vllm").model_dump(mode="json")
     raw["runtime"]["arguments"] = [
         {"name": "max-model-len", "setting": "max_model_len"}
@@ -386,7 +411,9 @@ def test_source_build_requires_and_binds_exact_receipt(model: ModelDefinition) -
     assert projection.image == f"localhost/vonk/build@sha256:{digest}"
 
 
-def test_current_compiler_rejects_missing_source_bundle_members(model: ModelDefinition) -> None:
+def test_current_compiler_rejects_missing_source_bundle_members(
+    model: ModelDefinition,
+) -> None:
     recipe = RecipeDefinition.model_validate(_example("recipe-source-build.json"))
     digest = "a" * 64
 
@@ -403,7 +430,9 @@ def test_current_compiler_rejects_missing_source_bundle_members(model: ModelDefi
         )
 
 
-def test_distributed_sglang_compiles_rank_specific_launch(model: ModelDefinition) -> None:
+def test_distributed_sglang_compiles_rank_specific_launch(
+    model: ModelDefinition,
+) -> None:
     raw = _recipe("sglang").model_dump(mode="json")
     endpoint = copy.deepcopy(raw["topology"]["roles"][0])
     worker = copy.deepcopy(endpoint)
@@ -413,7 +442,13 @@ def test_distributed_sglang_compiles_rank_specific_launch(model: ModelDefinition
             "mode": "distributed",
             "node_count": 2,
             "roles": [endpoint, worker],
-            "parallelism": {"world_size": 2, "tensor": 2, "pipeline": 1, "data": 1, "backend": "native"},
+            "parallelism": {
+                "world_size": 2,
+                "tensor": 2,
+                "pipeline": 1,
+                "data": 1,
+                "backend": "native",
+            },
             "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
             "start_order": ["entrypoint", "worker"],
             "stop_order": ["entrypoint", "worker"],
@@ -422,7 +457,9 @@ def test_distributed_sglang_compiles_rank_specific_launch(model: ModelDefinition
     raw["runtime"]["arguments"][2]["value"] = 2
     raw["models"][0]["files"][0]["roles"] = ["entrypoint", "worker"]
     recipe = RecipeDefinition.model_validate(raw)
-    projection = _projection("sglang", recipe=recipe, model=model, role="worker", rank=1)
+    projection = _projection(
+        "sglang", recipe=recipe, model=model, role="worker", rank=1
+    )
 
     assert "--nnodes" in projection.command
     assert projection.command[projection.command.index("--nnodes") + 1] == "2"

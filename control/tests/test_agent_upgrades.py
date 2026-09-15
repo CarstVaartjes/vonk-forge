@@ -81,21 +81,34 @@ NEW_IDENTITY = {
 
 
 SOURCE = {
-    "schema_version": 2, "architecture": "linux-arm64",
+    "schema_version": 2,
+    "architecture": "linux-arm64",
     "build_digest": OLD_IDENTITY["build_digest"],
     "package_bytes": 1000,
-    "package_url": "https://install.vonkforge.ai/artifacts/agent-packages/" + "7" * 64 + "/vonk-forge-agent.deb",
-    "package": {"package_sha256": "7" * 64, "package_signature": "8" * 128,
-        "package_version": "0.1.0", "binary_sha256": OLD_IDENTITY["binary_digest"], "helper_sha256": "6" * 64},
+    "package_url": "https://install.vonkforge.ai/artifacts/agent-packages/"
+    + "7" * 64
+    + "/vonk-forge-agent.deb",
+    "package": {
+        "package_sha256": "7" * 64,
+        "package_signature": "8" * 128,
+        "package_version": "0.1.0",
+        "binary_sha256": OLD_IDENTITY["binary_digest"],
+        "helper_sha256": "6" * 64,
+    },
 }
 ACTIVATION_RECEIPT = {
-    "schema_version": 2, "node_id": NODE_A, "attempt_nonce": "9" * 64,
+    "schema_version": 2,
+    "node_id": NODE_A,
+    "attempt_nonce": "9" * 64,
     "source_package_sha256": SOURCE["package"]["package_sha256"],
-    "source_version": "0.1.0", "source_binary_sha256": OLD_IDENTITY["binary_digest"],
+    "source_version": "0.1.0",
+    "source_binary_sha256": OLD_IDENTITY["binary_digest"],
     "candidate_package_sha256": PACKAGE["package_sha256"],
     "candidate_version": PACKAGE["package_version"],
     "candidate_binary_sha256": PACKAGE["target_binary_digest"],
-    "phase": "acknowledged", "created_at": 1787788800, "updated_at": 1787788800,
+    "phase": "acknowledged",
+    "created_at": 1787788800,
+    "updated_at": 1787788800,
     "outcome": "controller_acknowledged",
 }
 NEW_IDENTITY["package_activation"] = ACTIVATION_RECEIPT
@@ -104,8 +117,14 @@ NEW_IDENTITY["package_activation"] = ACTIVATION_RECEIPT
 @pytest.fixture(autouse=True)
 def published_source(monkeypatch):
     from vonk_agent_protocol.package_source import AgentPackageSource
-    monkeypatch.setattr("vonk_control.agent_upgrades.load_package_source", lambda *_: AgentPackageSource.model_validate(SOURCE))
-    monkeypatch.setattr("vonk_control.agent_upgrades.secrets.token_hex", lambda _: "9" * 64)
+
+    monkeypatch.setattr(
+        "vonk_control.agent_upgrades.load_package_source",
+        lambda *_: AgentPackageSource.model_validate(SOURCE),
+    )
+    monkeypatch.setattr(
+        "vonk_control.agent_upgrades.secrets.token_hex", lambda _: "9" * 64
+    )
 
 
 class Clock:
@@ -172,7 +191,11 @@ def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_
         )
         assert operation is not None
         assert {key: operation.payload[key] for key in REPAIR_PACKAGE} == REPAIR_PACKAGE
-        assert set(operation.payload) == set(PACKAGE) | {"rollback", "source_package_bytes", "source_package_url"}
+        assert set(operation.payload) == set(PACKAGE) | {
+            "rollback",
+            "source_package_bytes",
+            "source_package_url",
+        }
 
 
 @pytest.mark.parametrize(
@@ -607,9 +630,20 @@ def test_controller_recovery_fence_survives_restart_and_bounds_one_retry(
 def test_source_binary_drift_prevents_dispatch(tmp_path) -> None:
     sessions, operations, _upgrades, job = _rollout(tmp_path, "source-drift")
     changed = {**OLD_IDENTITY, "binary_digest": PACKAGE["target_binary_digest"]}
-    assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity=changed) is None
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=changed,
+        )
+        is None
+    )
     with sessions() as session:
-        operation = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == job.id))
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
         assert operation is not None
         assert operation.current_attempt == 0
 
@@ -710,7 +744,10 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
         )
 
     # The generic worker queue must never consume an agent-owned rollout.
-    assert JobService(sessions, clock=clock).claim("worker", 30, kinds=("reconcile",)) is None
+    assert (
+        JobService(sessions, clock=clock).claim("worker", 30, kinds=("reconcile",))
+        is None
+    )
     assert (
         operations.claim(
             NODE_A,
@@ -1249,9 +1286,7 @@ def test_success_result_cannot_advance_without_exact_fresh_agent_identity(
 
 
 def test_success_result_uses_signed_digests_over_version_metadata(tmp_path) -> None:
-    sessions, operations, _upgrades, job = _rollout(
-        tmp_path, "version-metadata-drift"
-    )
+    sessions, operations, _upgrades, job = _rollout(tmp_path, "version-metadata-drift")
     claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
 
     evidence = _target_evidence()
@@ -1271,16 +1306,16 @@ def test_success_result_uses_signed_digests_over_version_metadata(tmp_path) -> N
 
     with sessions() as session:
         operation = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == job.id
-            )
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
         )
         stored = session.get(Job, job.id)
         assert operation is not None and operation.state == "succeeded"
         assert stored is not None and stored.state == "queued"
 
 
-def test_exact_identity_after_current_retry_continues_to_second_target(tmp_path) -> None:
+def test_exact_identity_after_current_retry_continues_to_second_target(
+    tmp_path,
+) -> None:
     clock = Clock()
     sessions, operations, _upgrades, job = _rollout(
         tmp_path, "retry-continuation", clock=clock
@@ -1313,7 +1348,13 @@ def test_exact_identity_after_current_retry_continues_to_second_target(tmp_path)
         is None
     )
 
-    operations.claim(NODE_B, "serial-b", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity=OLD_IDENTITY)
+    operations.claim(
+        NODE_B,
+        "serial-b",
+        30,
+        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+        runtime_identity=OLD_IDENTITY,
+    )
 
     # A second helper failure is not claimable a third time, but the restarted
     # agent's exact authenticated identity can still reconcile it and make the
@@ -1359,9 +1400,20 @@ def test_exact_identity_after_current_retry_continues_to_second_target(tmp_path)
 
 def test_queued_exact_target_contact_cannot_invent_an_install_attempt(tmp_path) -> None:
     sessions, operations, _upgrades, job = _rollout(tmp_path, "queued-exact-target")
-    assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity=NEW_IDENTITY) is None
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=NEW_IDENTITY,
+        )
+        is None
+    )
     with sessions() as session:
-        operation = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == job.id))
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+        )
         assert operation is not None
         assert operation.current_attempt == 0
         assert operation.state == "queued"
@@ -1530,7 +1582,10 @@ def test_all_at_once_bridge_retries_are_delayed_bounded_and_independent(
             "serial-b",
             30,
             capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-            runtime_identity={**NEW_IDENTITY, "package_activation": {**ACTIVATION_RECEIPT, "node_id": NODE_B}},
+            runtime_identity={
+                **NEW_IDENTITY,
+                "package_activation": {**ACTIVATION_RECEIPT, "node_id": NODE_B},
+            },
         )
         is None
     )
@@ -1823,17 +1878,39 @@ def _upgrade_node(
             certificate_serial,
             30,
             capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-            runtime_identity={**NEW_IDENTITY, "package_activation": {**ACTIVATION_RECEIPT, "node_id": node_id}},
+            runtime_identity={
+                **NEW_IDENTITY,
+                "package_activation": {**ACTIVATION_RECEIPT, "node_id": node_id},
+            },
         )
         is None
     )
 
 
-@pytest.mark.parametrize("receipt", [None, {**ACTIVATION_RECEIPT, "phase": "armed"}, {**ACTIVATION_RECEIPT, "attempt_nonce": "0" * 64}, {**ACTIVATION_RECEIPT, "source_package_sha256": "0" * 64}])
-def test_exact_candidate_contact_requires_acknowledged_matching_root_receipt(tmp_path, receipt):
+@pytest.mark.parametrize(
+    "receipt",
+    [
+        None,
+        {**ACTIVATION_RECEIPT, "phase": "armed"},
+        {**ACTIVATION_RECEIPT, "attempt_nonce": "0" * 64},
+        {**ACTIVATION_RECEIPT, "source_package_sha256": "0" * 64},
+    ],
+)
+def test_exact_candidate_contact_requires_acknowledged_matching_root_receipt(
+    tmp_path, receipt
+):
     sessions, operations, _upgrades, job = _rollout(tmp_path, "missing-ack")
     _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity={**NEW_IDENTITY, "package_activation": receipt}) is None
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity={**NEW_IDENTITY, "package_activation": receipt},
+        )
+        is None
+    )
     assert _operation_nodes(sessions, job.id) == [NODE_A]
     with sessions() as session:
         parent = session.get(Job, job.id)
@@ -1843,8 +1920,21 @@ def test_exact_candidate_contact_requires_acknowledged_matching_root_receipt(tmp
 def test_root_rollback_receipt_stops_canary_and_preserves_typed_outcome(tmp_path):
     sessions, operations, _upgrades, job = _rollout(tmp_path, "rollback-result")
     _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    receipt = {**ACTIVATION_RECEIPT, "phase": "rolled_back", "outcome": "source_restored_and_restarted"}
-    assert operations.claim(NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity={**OLD_IDENTITY, "package_activation": receipt}) is None
+    receipt = {
+        **ACTIVATION_RECEIPT,
+        "phase": "rolled_back",
+        "outcome": "source_restored_and_restarted",
+    }
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity={**OLD_IDENTITY, "package_activation": receipt},
+        )
+        is None
+    )
     with sessions() as session:
         parent = session.get(Job, job.id)
         assert parent is not None
@@ -1859,7 +1949,9 @@ def test_root_rollback_receipt_stops_canary_and_preserves_typed_outcome(tmp_path
     assert _operation_nodes(sessions, job.id) == [NODE_A]
 
 
-def test_acknowledged_receipt_reconciles_current_attempt_past_older_paused_job(tmp_path):
+def test_acknowledged_receipt_reconciles_current_attempt_past_older_paused_job(
+    tmp_path,
+):
     sessions, operations, upgrades, old_job = _rollout(tmp_path, "older-paused")
     old_claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     with sessions.begin() as session:
@@ -1875,31 +1967,57 @@ def test_acknowledged_receipt_reconciles_current_attempt_past_older_paused_job(t
         waiting.state = "waiting-for-operator"
     plan = upgrades.preview(None, PACKAGE, strategy="one-at-a-time")
     current = upgrades.apply(
-        None, PACKAGE, plan_digest=plan.plan_digest, actor="admin",
-        request_id=str(uuid.uuid4()), strategy="one-at-a-time",
+        None,
+        PACKAGE,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+        strategy="one-at-a-time",
     )
     claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    assert operations.claim(
-        NODE_A, "serial-a", 30,
-        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-        runtime_identity=NEW_IDENTITY,
-    ) is None
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=NEW_IDENTITY,
+        )
+        is None
+    )
     with sessions() as session:
         claim_operation = session.get(AgentOperation, claim.operation_id)
         old_operation = session.get(AgentOperation, old_claim.operation_id)
         assert claim_operation is not None and claim_operation.state == "succeeded"
-        assert old_operation is not None and old_operation.state == "waiting-for-operator"
+        assert (
+            old_operation is not None and old_operation.state == "waiting-for-operator"
+        )
     assert set(_operation_nodes(sessions, current.id)) == {NODE_A, NODE_B}
 
 
-def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(tmp_path, monkeypatch):
+def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
+    tmp_path, monkeypatch
+):
     clock = Clock()
-    sessions, operations, upgrades, job = _rollout(tmp_path, "rollback-retry", clock=clock)
+    sessions, operations, upgrades, job = _rollout(
+        tmp_path, "rollback-retry", clock=clock
+    )
     first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    rolled_back = {**ACTIVATION_RECEIPT, "phase": "rolled_back", "outcome": "source_restored_and_restarted"}
+    rolled_back = {
+        **ACTIVATION_RECEIPT,
+        "phase": "rolled_back",
+        "outcome": "source_restored_and_restarted",
+    }
+
     def contact(identity):
-        return operations.claim(NODE_A, "serial-a", 30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"], runtime_identity=identity)
+        return operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=identity,
+        )
+
     source = {**OLD_IDENTITY, "package_activation": rolled_back}
     assert contact(source) is None
     upgrades.resume(job.id)
@@ -1913,17 +2031,30 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(t
             queued = session.get(Job, job.id)
             assert queued is not None and queued.state == "queued"
     clock.advance(seconds=int(_AGENT_UPGRADE_RECOVERY_FENCE.total_seconds()))
-    monkeypatch.setattr("vonk_control.agent_upgrades.secrets.token_hex", lambda _: "8" * 64)
+    monkeypatch.setattr(
+        "vonk_control.agent_upgrades.secrets.token_hex", lambda _: "8" * 64
+    )
     # The second Spark continues reporting while the first waits out recovery.
-    assert operations.claim(NODE_B, "serial-b", 30,
-        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-        runtime_identity=OLD_IDENTITY) is None
+    assert (
+        operations.claim(
+            NODE_B,
+            "serial-b",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=OLD_IDENTITY,
+        )
+        is None
+    )
     second = contact(source)
     assert second is not None
     assert second.attempt == 2
     assert contact(source) is None
-    acknowledged = {**ACTIVATION_RECEIPT, "attempt_nonce": "8" * 64,
-        "created_at": int(clock().timestamp()), "updated_at": int(clock().timestamp())}
+    acknowledged = {
+        **ACTIVATION_RECEIPT,
+        "attempt_nonce": "8" * 64,
+        "created_at": int(clock().timestamp()),
+        "updated_at": int(clock().timestamp()),
+    }
     assert contact({**NEW_IDENTITY, "package_activation": acknowledged}) is None
     with sessions() as session:
         final_operation = session.get(AgentOperation, first.operation_id)

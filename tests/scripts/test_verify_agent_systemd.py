@@ -54,12 +54,11 @@ def test_verifier_analyzes_the_packaged_rust_agent_units() -> None:
         unit for unit in PACKAGED_UNITS if unit.endswith(".service")
     }
     assert all(
-        not unit["ambient_capabilities"]
-        for unit in report["security_units"].values()
+        not unit["ambient_capabilities"] for unit in report["security_units"].values()
     )
-    assert report["security_units"][
-        "vonk-forge-package-upgrade-recover.service"
-    ]["cap_sys_ptrace"]
+    assert report["security_units"]["vonk-forge-package-upgrade-recover.service"][
+        "cap_sys_ptrace"
+    ]
     assert all(
         not unit["cap_sys_ptrace"]
         for name, unit in report["security_units"].items()

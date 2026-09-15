@@ -61,8 +61,8 @@ from .test_recipe_operations import (
 def test_one_shot_job_inherits_activation_intent(
     tmp_path,
 ) -> None:
-    sessions, _operations, _queue, service, run_id, node_id = (
-        running_artifact_service(tmp_path)
+    sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
+        tmp_path
     )
     submitted = submitted_artifact_job(service, run_id, request_suffix=150)
     with sessions() as session:
@@ -88,10 +88,9 @@ def test_one_shot_job_inherits_activation_intent(
         assert node.workload_intent_ordinal == ordinal
 
 
-
 def test_one_shot_job_rejects_submission_after_newer_workload_intent(tmp_path) -> None:
-    sessions, _operations, _queue, service, run_id, node_id = (
-        running_artifact_service(tmp_path)
+    sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
+        tmp_path
     )
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
@@ -243,10 +242,12 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
     ]
     runtime = _mapping(document["runtime"])
     arguments = _sequence(runtime["arguments"])
-    arguments.extend([
-        {"name": "prompt", "value": None, "setting": "prompt"},
-        {"name": "seed", "value": None, "setting": "seed"},
-    ])
+    arguments.extend(
+        [
+            {"name": "prompt", "value": None, "setting": "prompt"},
+            {"name": "seed", "value": None, "setting": "seed"},
+        ]
+    )
     document["settings"]["knobs"] = {
         "prompt": {"value": "", "change_effect": "restart"},
         "seed": {"value": 0, "change_effect": "restart"},
@@ -369,21 +370,23 @@ def cancellation_result(
         node_id=claim.node_id,
         deadline=claim.deadline,
         state=state,
-        result=RecipeJobRunResult.model_validate({
-            "schema_version": 1,
-            "job_id": artifact_job.id,
-            "run_id": artifact_job.run_id,
-            "exit_code": 130,
-            "output_manifest": {
-                **recipe_job_manifest_document(empty),
-                "manifest_sha256": recipe_job_manifest_sha256(empty),
-            },
-            "evidence": {
-                "elapsed_milliseconds": 10,
-                "peak_memory_bytes": None,
-            },
-            "reason": reason,
-        }),
+        result=RecipeJobRunResult.model_validate(
+            {
+                "schema_version": 1,
+                "job_id": artifact_job.id,
+                "run_id": artifact_job.run_id,
+                "exit_code": 130,
+                "output_manifest": {
+                    **recipe_job_manifest_document(empty),
+                    "manifest_sha256": recipe_job_manifest_sha256(empty),
+                },
+                "evidence": {
+                    "elapsed_milliseconds": 10,
+                    "peak_memory_bytes": None,
+                },
+                "reason": reason,
+            }
+        ),
     )
 
 
@@ -678,12 +681,16 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
     assert completed.state == "succeeded"
     assert completed.output_manifest_sha256 == recipe_job_manifest_sha256((output,))
     from vonk_control.artifact_job_api import _view
+
     response = _view(completed)
     assert response.result_evidence is not None
     from pydantic import ValidationError
     from vonk_control.artifact_jobs import ArtifactJobResponse
+
     with pytest.raises(ValidationError, match="requires output manifest"):
-        ArtifactJobResponse.model_validate(response.model_dump() | {"output_manifest_sha256": None})
+        ArtifactJobResponse.model_validate(
+            response.model_dump() | {"output_manifest_sha256": None}
+        )
     output_path, output_media_type, output_name, output_size = service.result_blob(
         job.id, output_digest
     )
@@ -1183,7 +1190,9 @@ def test_artifact_cancel_stop_failure_remains_recoverable_and_blocks_release(
 
     view = service.get(submitted.id)
     assert view.state == "waiting-for-operator"
-    assert ArtifactJobResultEvidence.model_validate(view.result_evidence) == ArtifactJobResultEvidence.model_validate(
+    assert ArtifactJobResultEvidence.model_validate(
+        view.result_evidence
+    ) == ArtifactJobResultEvidence.model_validate(
         {
             "failure_kind": "cancellation-stop-uncertain",
             "recoverable": True,
@@ -1488,10 +1497,18 @@ def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
         assert service.get(job.id).input_files[0]["sha256"] == digest
 
 
-@pytest.mark.parametrize("damage", ["missing-files", "invalid-file", "wrong-total", "wrong-digest", "extra"])
-def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(tmp_path, damage):
-    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(tmp_path)
-    created = service.create(**artifact_create_request(run_id, "00000000-0000-4000-8000-000000000151"))
+@pytest.mark.parametrize(
+    "damage", ["missing-files", "invalid-file", "wrong-total", "wrong-digest", "extra"]
+)
+def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
+    tmp_path, damage
+):
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path
+    )
+    created = service.create(
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000151")
+    )
     assert service.get(created.id).input_declarations == created.input_declarations
     with sessions.begin() as session:
         row = session.get(ArtifactJob, created.id)
@@ -1519,15 +1536,23 @@ def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(tmp_pa
 
 
 @pytest.mark.parametrize("evidence", [[], "invalid", {"elapsed_milliseconds": "1"}])
-def test_artifact_cancel_rejects_corrupt_evidence_without_replacing_it(tmp_path, evidence):
-    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(tmp_path)
-    created = service.create(**artifact_create_request(run_id, "00000000-0000-4000-8000-000000000152"))
+def test_artifact_cancel_rejects_corrupt_evidence_without_replacing_it(
+    tmp_path, evidence
+):
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path
+    )
+    created = service.create(
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000152")
+    )
     with sessions.begin() as session:
         row = session.get(ArtifactJob, created.id)
         assert row is not None
         row.result_evidence = evidence
     with pytest.raises(ArtifactJobError, match="stored artifact result evidence"):
-        service.cancel(created.id, actor="operator", request_id="cancel-corrupt", reason="stop")
+        service.cancel(
+            created.id, actor="operator", request_id="cancel-corrupt", reason="stop"
+        )
     with sessions() as session:
         row = session.get(ArtifactJob, created.id)
         assert row is not None
@@ -1535,15 +1560,26 @@ def test_artifact_cancel_rejects_corrupt_evidence_without_replacing_it(tmp_path,
         assert row.state == created.state
 
 
-def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_values(tmp_path):
-    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(tmp_path)
-    created = service.create(**artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153"))
-    evidence = {"elapsed_milliseconds": 0, "engine": {"null": None, "empty": [], "enabled": False}}
+def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_values(
+    tmp_path,
+):
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path
+    )
+    created = service.create(
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153")
+    )
+    evidence = {
+        "elapsed_milliseconds": 0,
+        "engine": {"null": None, "empty": [], "enabled": False},
+    }
     with sessions.begin() as session:
         stored = session.get(ArtifactJob, created.id)
         assert stored is not None
         stored.result_evidence = evidence
-    cancelled = service.cancel(created.id, actor="operator", request_id="cancel-evidence", reason="stop")
+    cancelled = service.cancel(
+        created.id, actor="operator", request_id="cancel-evidence", reason="stop"
+    )
     assert cancelled.result_evidence is not None
     for key, value in evidence.items():
         assert cancelled.result_evidence[key] == value

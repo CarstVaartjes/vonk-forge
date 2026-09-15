@@ -116,15 +116,15 @@ def lane_contract(workflow_text: str) -> dict[str, object]:
     """Extract the facts the local lane must agree with from the CI job."""
     job = workflow_job(workflow_text, CI_JOB)
     tier_commands = [
-        command for command in run_commands(job) if "run_agent_wire_contracts.py" in command
+        command
+        for command in run_commands(job)
+        if "run_agent_wire_contracts.py" in command
     ]
     rust = re.search(r"rustup toolchain install (\S+)", job)
     uv = re.search(r'^\s*version:\s*"([^"]+)"\s*$', job, re.MULTILINE)
     python = re.search(r'^\s*python-version:\s*"([^"]+)"\s*$', job, re.MULTILINE)
     runner = re.search(r"^\s*runs-on:\s*(\S+)\s*$", job, re.MULTILINE)
-    revision = re.search(
-        r"cat\s+(tests/acceptance/recipe-library-revision\.txt)", job
-    )
+    revision = re.search(r"cat\s+(tests/acceptance/recipe-library-revision\.txt)", job)
     return {
         "tier_commands": tier_commands,
         "rust_toolchain": rust.group(1) if rust else None,
@@ -247,7 +247,9 @@ def require_linux_engine() -> str:
             "OrbStack (https://orbstack.dev), start it, and run "
             "`docker context use orbstack`."
         )
-    code, output = capture([docker, "info", "--format", "{{.OperatingSystem}}\t{{.OSType}}"])
+    code, output = capture(
+        [docker, "info", "--format", "{{.OperatingSystem}}\t{{.OSType}}"]
+    )
     if code != 0:
         raise LaneError(
             "cannot reach a Docker engine, so the Linux wire tier cannot run.\n"
@@ -265,7 +267,9 @@ def require_linux_engine() -> str:
     return f"{operating_system} via context {context!r}"
 
 
-def resolve_recipe_library(argument: str | None, allow_any_revision: bool) -> tuple[Path, str]:
+def resolve_recipe_library(
+    argument: str | None, allow_any_revision: bool
+) -> tuple[Path, str]:
     """Return the sibling recipe-library checkout and the pinned revision."""
     candidate = argument or os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
     library = Path(candidate).expanduser() if candidate else DEFAULT_RECIPE_LIBRARY
@@ -279,7 +283,9 @@ def resolve_recipe_library(argument: str | None, allow_any_revision: bool) -> tu
     pinned = pinned_path.read_text(encoding="utf-8").strip()
     code, head = capture(["git", "-C", str(library), "rev-parse", "HEAD"])
     if code != 0:
-        raise LaneError(f"{library} is not a git checkout, so it cannot be compared with CI")
+        raise LaneError(
+            f"{library} is not a git checkout, so it cannot be compared with CI"
+        )
     if head != pinned and not allow_any_revision:
         raise LaneError(
             f"recipe library {library} is at {head}, but CI checks out {pinned} "
@@ -357,9 +363,7 @@ def cache_is_empty(cache: Path) -> bool:
     return True
 
 
-def container_command(
-    docker: str, root: Path, library: Path, cache: Path
-) -> list[str]:
+def container_command(docker: str, root: Path, library: Path, cache: Path) -> list[str]:
     uid, gid = os.getuid(), os.getgid()
     mounts = {
         str(root): CONTAINER_WORKDIR,
@@ -395,7 +399,9 @@ def container_command(
         suffix = ":ro" if target == CONTAINER_RECIPE_LIBRARY else ""
         command += ["--volume", f"{host}:{target}{suffix}"]
     command += [
-        image_tag(), "bash", "-c",
+        image_tag(),
+        "bash",
+        "-c",
         (
             "set -euo pipefail; "
             "scripts/retry-dependency-fetch uv sync --project control --frozen; "
@@ -454,7 +460,10 @@ def main(argv: list[str] | None = None) -> int:
 
     problems = check_lane_consistency(REPO_ROOT)
     if problems:
-        print("lane: refusing to run; the CI job and this lane have drifted:", file=sys.stderr)
+        print(
+            "lane: refusing to run; the CI job and this lane have drifted:",
+            file=sys.stderr,
+        )
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
         print(
@@ -480,7 +489,9 @@ def main(argv: list[str] | None = None) -> int:
 
 def run(args: argparse.Namespace) -> int:
     started = time.monotonic()
-    library, revision = resolve_recipe_library(args.recipe_library, args.any_recipe_revision)
+    library, revision = resolve_recipe_library(
+        args.recipe_library, args.any_recipe_revision
+    )
     cache = cache_root(args.cache_root)
     docker = shutil.which("docker")
     fingerprint = dockerfile_fingerprint(REPO_ROOT)

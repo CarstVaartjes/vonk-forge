@@ -243,7 +243,9 @@ def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
     run.control = Control()
     run.browser = object()
     run.synthetic_canary_fixture = fixture
-    run._installation_failure = lambda _stage, error: lifecycle.LifecycleError(str(error))
+    run._installation_failure = lambda _stage, error: lifecycle.LifecycleError(
+        str(error)
+    )
 
     with pytest.raises(lifecycle.LifecycleError, match="exact synthetic canary Recipe"):
         run._run_synthetic_canary("spk_" + "1" * 32)
@@ -256,7 +258,10 @@ def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
 
 
 def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
-    pytest.importorskip("sqlalchemy", reason="Fleet projection contract requires the control environment")
+    pytest.importorskip(
+        "sqlalchemy",
+        reason="Fleet projection contract requires the control environment",
+    )
     lifecycle = _module()
     expected_payload = {
         "schema_version": 1,
@@ -269,7 +274,12 @@ def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
     class Control:
         @staticmethod
         def request(method, path, request_payload=None, **kwargs):
-            assert (method, path, request_payload, kwargs) == ("GET", "/api/fleet", None, {})
+            assert (method, path, request_payload, kwargs) == (
+                "GET",
+                "/api/fleet",
+                None,
+                {},
+            )
             return 200, expected_payload
 
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
@@ -449,9 +459,10 @@ def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
     replacements = run._controller_response_replacements()
 
     assert replacements["Trusted Spark management CIDRs: "] == "172.16.0.0/12"
-    assert replacements[
-        "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: "
-    ] == "198.19.42.0/24"
+    assert (
+        replacements["Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: "]
+        == "198.19.42.0/24"
+    )
 
 
 def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
@@ -895,7 +906,11 @@ def test_installer_failure_includes_redacted_controller_diagnostics(
 
     def diagnostics(command):
         observed.append(command)
-        message = "helper request rejected" if "journalctl" in command else "control enrollment failed"
+        message = (
+            "helper request rejected"
+            if "journalctl" in command
+            else "control enrollment failed"
+        )
         return subprocess.CompletedProcess(
             command,
             0,
@@ -951,11 +966,17 @@ def test_installer_failure_includes_redacted_controller_diagnostics(
             "control-api",
         ],
         [
-            "sudo", "journalctl", "--no-pager", "--lines=40",
+            "sudo",
+            "journalctl",
+            "--no-pager",
+            "--lines=40",
             "--unit=vonk-forge-agent.service",
         ],
         [
-            "sudo", "journalctl", "--no-pager", "--lines=40",
+            "sudo",
+            "journalctl",
+            "--no-pager",
+            "--lines=40",
             "--unit=vonk-forge-package-helper.service",
         ],
     ]
@@ -987,7 +1008,9 @@ def test_installer_error_survives_bounded_controller_diagnostics(
 def test_profile_application_failure_is_typed_and_redacts_provider_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pytest.importorskip("fastapi", reason="Controller contract tests run in the control suite")
+    pytest.importorskip(
+        "fastapi", reason="Controller contract tests run in the control suite"
+    )
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = object()
@@ -1007,12 +1030,15 @@ def test_profile_application_failure_is_typed_and_redacts_provider_secret(
 def test_profile_failure_cannot_erase_failure_or_service_journals(
     tmp_path: Path,
 ) -> None:
-    pytest.importorskip("fastapi", reason="Controller contract tests run in the control suite")
+    pytest.importorskip(
+        "fastapi", reason="Controller contract tests run in the control suite"
+    )
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = object()
     run.bundle = tmp_path
     run.project = "vonk-spark-42-arm64"
+
     def diagnostics(command):
         if "--unit=vonk-forge-package-helper.service" in command:
             message = "model ACL: Read-only file system"
@@ -1020,12 +1046,16 @@ def test_profile_failure_cannot_erase_failure_or_service_journals(
             message = "start job rejected"
         else:
             message = "worker start operation failed"
-        return subprocess.CompletedProcess(command, 0, stdout="x" * 20_000 + message, stderr="")
+        return subprocess.CompletedProcess(
+            command, 0, stdout="x" * 20_000 + message, stderr=""
+        )
 
     run._diagnostic_command = diagnostics
     with pytest.raises(lifecycle.LifecycleError) as failure:
         run._await_profile_application(
-            _failed_profile_application("container runtime could not start the workload"),
+            _failed_profile_application(
+                "container runtime could not start the workload"
+            ),
             label="synthetic canary profile load",
         )
     rendered = str(run._installation_failure("synthetic canary", failure.value))
@@ -1146,7 +1176,9 @@ def test_running_channel_alias_must_match_the_candidate(
     monkeypatch.setattr(
         lifecycle,
         "_read_canonical_document",
-        lambda *args: {"images": {"api": "ghcr.io/carstvaartjes/vonk-forge-api@sha256:candidate"}},
+        lambda *args: {
+            "images": {"api": "ghcr.io/carstvaartjes/vonk-forge-api@sha256:candidate"}
+        },
     )
 
     def command(argv, **kwargs):
@@ -1167,7 +1199,9 @@ def test_running_channel_alias_must_match_the_candidate(
 
 
 def test_preflight_failure_reports_only_projected_receipt_comparison_fields() -> None:
-    pytest.importorskip("fastapi", reason="Controller contract tests run in the control suite")
+    pytest.importorskip(
+        "fastapi", reason="Controller contract tests run in the control suite"
+    )
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = object()
@@ -1182,9 +1216,11 @@ def test_preflight_failure_reports_only_projected_receipt_comparison_fields() ->
         "failed_findings": None,
     }
     queries = []
+
     def psql(query):
         queries.append(query)
         return [[json.dumps(evidence)]] if "receipt_fingerprint" in query else []
+
     run._psql = psql
     operation = _failed_profile_application("runtime_preflight.retry_exhausted")
     with pytest.raises(lifecycle.LifecycleError) as failure:
@@ -1208,13 +1244,18 @@ def test_profile_run_switch_receipt_is_required_for_successful_execution() -> No
             {"0": {"operation_id": "11111111-1111-4111-8111-111111111111"}}
         )
     receipt = {"phase_results": [], "completed_phases": ["final_verify"]}
-    assert lifecycle.SparkLifecycle._profile_run_switch_result(
-        {"4": {"result": {"run_switch": receipt}}}
-    ) == receipt
+    assert (
+        lifecycle.SparkLifecycle._profile_run_switch_result(
+            {"4": {"result": {"run_switch": receipt}}}
+        )
+        == receipt
+    )
 
 
 def test_recipe_download_consumes_typed_terminal_receipt() -> None:
-    pytest.importorskip("fastapi", reason="Controller contract tests run in the control suite")
+    pytest.importorskip(
+        "fastapi", reason="Controller contract tests run in the control suite"
+    )
     lifecycle = _module()
     from vonk_agent_protocol import OperationProgress
     from vonk_control.recipe_image_availability_api import (
@@ -1276,7 +1317,9 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
 
 
 def test_profile_progress_poll_uses_current_numbered_route(monkeypatch) -> None:
-    pytest.importorskip("fastapi", reason="Controller contract tests run in the control suite")
+    pytest.importorskip(
+        "fastapi", reason="Controller contract tests run in the control suite"
+    )
     lifecycle = _module()
     pending = _failed_profile_application("pending")
     pending["state"] = "queued"
@@ -1302,7 +1345,10 @@ def test_profile_progress_poll_uses_current_numbered_route(monkeypatch) -> None:
     run.control = Control()
     monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
 
-    assert run._await_profile_application(pending, label="profile load")["state"] == "succeeded"
+    assert (
+        run._await_profile_application(pending, label="profile load")["state"]
+        == "succeeded"
+    )
     assert calls == [("GET", "/api/profile/1/progress")]
 
 

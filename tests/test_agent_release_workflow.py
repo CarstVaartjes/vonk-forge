@@ -220,7 +220,14 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
     build_digest = "sha256:" + "b" * 64
     binaries = tmp_path / "binaries"
     binaries.mkdir()
-    for name in ("vonk-agent", "vonk-monitor", "vonk-agent-helper", "vonk-build-egress", "vonk-runtime-probe", "oras"):
+    for name in (
+        "vonk-agent",
+        "vonk-monitor",
+        "vonk-agent-helper",
+        "vonk-build-egress",
+        "vonk-runtime-probe",
+        "oras",
+    ):
         raw = bytearray(384)
         raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
         struct.pack_into("<H", raw, 18, 183)
@@ -528,7 +535,10 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
         fallback_name,
         "Run inline ARM64 package lifecycle acceptance",
     ]
-    assert step_names[lifecycle_index + 3] == "Upload immutable acceptance baseline packages"
+    assert (
+        step_names[lifecycle_index + 3]
+        == "Upload immutable acceptance baseline packages"
+    )
     assert step_names[lifecycle_index + 4] == cosign_name
     inline = workflow_step_run(text, "Run inline ARM64 package lifecycle acceptance")
     assert 'test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"' in inline
@@ -785,7 +795,10 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert compile_step.count("cargo build --release --locked") == 2
     assert "--package vonk-build-egress" in compile_step
     assert "target-feature=+crt-static" in compile_step
-    assert "--package vonk-agent --package vonk-monitor --package vonk-agent-helper" in compile_step
+    assert (
+        "--package vonk-agent --package vonk-monitor --package vonk-agent-helper"
+        in compile_step
+    )
     assert "--workspace" not in compile_step
     assert "vonk-nas-setup" not in compile_step
     assert "vonk-spark-setup" not in compile_step
@@ -1003,13 +1016,15 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
     assert "runs-on: ubuntu-24.04-arm" in lifecycle
     assert "Revalidate exact current main ARM64 acceptance source" in lifecycle
     assert "+refs/heads/main:refs/remotes/origin/main" in lifecycle
-    assert "Install pinned Rust toolchain for the historical helper fixture" in lifecycle
+    assert (
+        "Install pinned Rust toolchain for the historical helper fixture" in lifecycle
+    )
     assert "rustup toolchain install 1.97.1" in lifecycle
     assert lifecycle.index("rustup toolchain install 1.97.1") < lifecycle.index(
         "actions/download-artifact@"
     )
     assert 'compatibility_cargo_dir=$(dirname "$(command -v cargo)")' in lifecycle
-    assert 'compatibility_rustup_home=$(rustup show home)' in lifecycle
+    assert "compatibility_rustup_home=$(rustup show home)" in lifecycle
     assert 'CARGO_HOME="$compatibility_cargo_home"' in lifecycle
     assert 'RUSTUP_HOME="$compatibility_rustup_home"' in lifecycle
     assert "RUSTFLAGS='-C target-feature=+crt-static'" in lifecycle
@@ -1026,7 +1041,7 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
         'BUILD_EGRESS_BINARY="$build_egress"' in environment
         for environment in recovery_invocations
     )
-    assert 'sudo install -o root -g root -m 0755' in lifecycle
+    assert "sudo install -o root -g root -m 0755" in lifecycle
     assert 'test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1' in lifecycle
     assert lifecycle.count("actions/download-artifact@") == 2
     assert "outputs.artifact_name" in lifecycle

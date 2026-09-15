@@ -38,16 +38,22 @@ def test_every_mutating_route_has_explicit_role() -> None:
         ) -> tuple[list[object], str | None, int]:
             raise AssertionError
 
-    app = create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore())
+    app = create_app(
+        jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore()
+    )
     routes = {
         (method, route.path)
         for route in app.routes
         if isinstance(route, Route)
         for method in getattr(route, "methods", set())
-        if method in {"POST", "PUT", "PATCH", "DELETE"} and route.path.startswith("/api/")
+        if method in {"POST", "PUT", "PATCH", "DELETE"}
+        and route.path.startswith("/api/")
     }
     assert routes == set(MUTATION_ROLES)
-    assert all(roles and roles <= {"viewer", "operator", "administrator"} for roles in MUTATION_ROLES.values())
+    assert all(
+        roles and roles <= {"viewer", "operator", "administrator"}
+        for roles in MUTATION_ROLES.values()
+    )
 
 
 def test_viewer_has_no_mutating_permission() -> None:

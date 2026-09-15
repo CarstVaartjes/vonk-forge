@@ -69,9 +69,7 @@ def test_rust_inventory_json_crosses_controller_route_and_repository(
 
     with services.sessions() as session:
         snapshot = session.scalar(
-            select(NodeInventorySnapshot).where(
-                NodeInventorySnapshot.node_id == NODE_A
-            )
+            select(NodeInventorySnapshot).where(NodeInventorySnapshot.node_id == NODE_A)
         )
     assert snapshot is not None
     assert snapshot.disk_free_bytes == request.disk_free_bytes

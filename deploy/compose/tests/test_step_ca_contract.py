@@ -36,8 +36,7 @@ def test_compose_keeps_root_key_out_and_provider_private_key_separate() -> None:
     assert set(rendered["services"]["step-ca"]["networks"]) == {"ca"}
     assert "ca" in rendered["services"]["control-api"]["networks"]
     assert "agent-ca-credential" in {
-        value["source"]
-        for value in rendered["services"]["control-api"]["secrets"]
+        value["source"] for value in rendered["services"]["control-api"]["secrets"]
     }
     assert "agent-ca-credential" not in json.dumps(rendered["services"]["step-ca"])
     provisioner = json.loads(
@@ -71,8 +70,8 @@ def test_public_provisioner_config_bootstrap_uses_separate_private_jwk(
             "-eu",
             "-c",
             (
-                "jq --slurpfile key \"$1\" "
-                "'.authority.provisioners[0].key=$key[0]' \"$2\" > \"$3\""
+                'jq --slurpfile key "$1" '
+                '\'.authority.provisioners[0].key=$key[0]\' "$2" > "$3"'
             ),
             "bootstrap",
             str(public_path),

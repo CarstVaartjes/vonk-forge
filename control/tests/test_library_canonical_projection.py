@@ -107,12 +107,14 @@ def _insert_canonical_rows(
                 created_at=now,
             )
         )
-        heads.append(CatalogDocumentHead(
-            kind=kind,
-            publisher=canonical.identity.publisher,
-            slug=canonical.identity.slug,
-            active_revision_id=revision_id,
-        ))
+        heads.append(
+            CatalogDocumentHead(
+                kind=kind,
+                publisher=canonical.identity.publisher,
+                slug=canonical.identity.slug,
+                active_revision_id=revision_id,
+            )
+        )
     with sessions.begin() as session:
         session.add_all(rows)
         session.add_all(revisions)
@@ -120,7 +122,9 @@ def _insert_canonical_rows(
         session.add_all(heads)
 
 
-def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path: Path) -> None:
+def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
+    tmp_path: Path,
+) -> None:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     expected_model_count = len(index["catalog_entities"])
     expected_recipe_count = len(index["recipes"])
@@ -159,18 +163,17 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     )
     model_page = projection.models(limit=100)
     assert len(model_page.models) == expected_model_count
-    assert {
-        model.identity.content_sha256 for model in model_page.models
-    } == set(expected_models)
+    assert {model.identity.content_sha256 for model in model_page.models} == set(
+        expected_models
+    )
     recipe_page = projection.recipe_library(limit=100, all_models=True)
     assert len(recipe_page.recipes) == expected_recipe_count
-    assert {
-        item.identity.recipe_id for item in recipe_page.recipes
-    } == recipe_ids
+    assert {item.identity.recipe_id for item in recipe_page.recipes} == recipe_ids
     for item in recipe_page.recipes:
-        assert item.identity.recipe_revision_id == recipe_revision_ids[
-            item.identity.content_sha256
-        ]
+        assert (
+            item.identity.recipe_revision_id
+            == recipe_revision_ids[item.identity.content_sha256]
+        )
         assert item.identity.recipe_revision_id not in {
             item.identity.recipe_id,
             item.identity.content_sha256,
@@ -251,15 +254,26 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     payload = response.json()
     assert len(payload["models"]) == expected_model_count
     assert {model["identity"]["kind"] for model in payload["models"]} == {"model"}
-    assert {model["identity"]["content_sha256"] for model in payload["models"]} == set(expected_models)
-    assert all("recipes" not in model and "source_kind" not in model for model in payload["models"])
-    library_model_schema = app.openapi()["components"]["schemas"]["LibraryModelProjection"]
-    assert library_model_schema["properties"]["local"]["$ref"].endswith("LibraryLocalState")
+    assert {model["identity"]["content_sha256"] for model in payload["models"]} == set(
+        expected_models
+    )
+    assert all(
+        "recipes" not in model and "source_kind" not in model
+        for model in payload["models"]
+    )
+    library_model_schema = app.openapi()["components"]["schemas"][
+        "LibraryModelProjection"
+    ]
+    assert library_model_schema["properties"]["local"]["$ref"].endswith(
+        "LibraryLocalState"
+    )
     recipe_response = client.get("/api/recipe/library", params={"all_models": True})
     assert recipe_response.status_code == 200
     recipe_payload = recipe_response.json()
     assert len(recipe_payload["recipes"]) == expected_recipe_count
-    assert {recipe["identity"]["recipe_id"] for recipe in recipe_payload["recipes"]} == recipe_ids
+    assert {
+        recipe["identity"]["recipe_id"] for recipe in recipe_payload["recipes"]
+    } == recipe_ids
     first_recipe = recipe_payload["recipes"][0]
     first_expected = expected_recipes[first_recipe["identity"]["content_sha256"]]
     assert first_recipe["document"] == first_expected.model_dump(mode="json")
@@ -293,15 +307,16 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     assert detail_payload["document"]["runtime"] == expected_recipe.runtime.model_dump(
         mode="json"
     )
-    assert detail_payload["document"]["topology"] == expected_recipe.topology.model_dump(
-        mode="json"
+    assert detail_payload["document"][
+        "topology"
+    ] == expected_recipe.topology.model_dump(mode="json")
+    assert detail_payload["document"][
+        "settings"
+    ] == expected_recipe.settings.model_dump(mode="json")
+    assert (
+        detail_payload["identity"]["recipe_revision_id"]
+        == recipe_revision_ids[detail_payload["identity"]["content_sha256"]]
     )
-    assert detail_payload["document"]["settings"] == expected_recipe.settings.model_dump(
-        mode="json"
-    )
-    assert detail_payload["identity"]["recipe_revision_id"] == recipe_revision_ids[
-        detail_payload["identity"]["content_sha256"]
-    ]
     assert detail_payload["identity"]["recipe_revision_id"] not in {
         detail_payload["identity"]["recipe_id"],
         detail_payload["identity"]["content_sha256"],
@@ -335,13 +350,16 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
         expected_models[selection.model.content_sha256].identity.model.slug
         for selection in multi_model_recipe.models
     ]
-    assert [entry["selection"]["files"] for entry in multi_model_payload["model_documents"]] == [
+    assert [
+        entry["selection"]["files"] for entry in multi_model_payload["model_documents"]
+    ] == [
         selection.model_dump(mode="json")["files"]
         for selection in multi_model_recipe.models
     ]
-    assert multi_model_payload["model_documents"][0]["selection"]["files"] != multi_model_payload[
-        "model_documents"
-    ][1]["selection"]["files"]
+    assert (
+        multi_model_payload["model_documents"][0]["selection"]["files"]
+        != multi_model_payload["model_documents"][1]["selection"]["files"]
+    )
 
 
 def test_database_local_projection_reads_cache_build_and_spark_evidence(
@@ -383,7 +401,9 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
     )
     node_id = "spk_" + "a" * 32
     now = datetime(2026, 9, 7, tzinfo=UTC)
-    recipe_digest = content_sha256(RecipeDefinition.model_validate(recipe_revision.document))
+    recipe_digest = content_sha256(
+        RecipeDefinition.model_validate(recipe_revision.document)
+    )
     with sessions.begin() as session:
         session.add(old_revision)
         session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
@@ -505,7 +525,9 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
     assert recipes[0].local.running_on == [node_id]
 
 
-def test_library_pagination_covers_more_than_one_page_without_gaps(tmp_path: Path) -> None:
+def test_library_pagination_covers_more_than_one_page_without_gaps(
+    tmp_path: Path,
+) -> None:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     engine = create_engine(f"sqlite:///{tmp_path / 'library-pagination.sqlite'}")
     Base.metadata.create_all(engine)

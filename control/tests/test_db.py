@@ -160,9 +160,7 @@ def test_build_engine_sets_the_lock_timeout_on_the_server(postgres_engine) -> No
 
     from vonk_control import db
 
-    engine = db.build_engine(
-        postgres_engine.url.render_as_string(hide_password=False)
-    )
+    engine = db.build_engine(postgres_engine.url.render_as_string(hide_password=False))
     try:
         with engine.connect() as connection:
             assert connection.exec_driver_sql("SHOW lock_timeout").scalar() == "30s"
