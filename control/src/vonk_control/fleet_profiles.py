@@ -29,7 +29,6 @@ from .fleet_profile_contract import (
     FleetProfileAssignmentPreview,
     FleetProfileAssignmentState,
     FleetProfileAssignmentView,
-    FleetProfileCacheRecoverySwitchAdapter,
     FleetProfileChildOperation,
     FleetProfileChildPhase,
     FleetProfileChildProgress,
@@ -2444,7 +2443,7 @@ class FleetProfileService:
             profile_digest = parent.profile_digest
             persisted_plan = _persisted_profile_plan(parent)
             cache_loss_recovery = (
-                isinstance(adapter, FleetProfileCacheRecoverySwitchAdapter)
+                adapter is not None
                 and adapter.recoverable_cache_loss(parent.id, session=session)
             )
         preview = self.preview(
@@ -2896,7 +2895,7 @@ class FleetProfileService:
 
         with self._sessions() as session:
             adapter = self._switch_adapter
-            if not isinstance(adapter, FleetProfileCacheRecoverySwitchAdapter):
+            if adapter is None:
                 return None
             rows = session.scalars(
                 select(FleetProfileApplication)

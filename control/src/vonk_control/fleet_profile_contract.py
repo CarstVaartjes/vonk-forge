@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_agent_protocol import OperationProgress
@@ -516,6 +516,13 @@ class FleetProfileSwitchAdapter(Protocol):
 
         ...
 
+    def recoverable_cache_loss(
+        self, application_id: str, *, session: Session
+    ) -> bool:
+        """Whether the current exact child failed only because managed bytes vanished."""
+
+        ...
+
     def start(
         self,
         *,
@@ -547,17 +554,6 @@ class FleetProfileSwitchAdapter(Protocol):
 
         ...
 
-
-@runtime_checkable
-class FleetProfileCacheRecoverySwitchAdapter(FleetProfileSwitchAdapter, Protocol):
-    """Optional typed extension for narrowly scoped managed-cache recovery."""
-
-    def recoverable_cache_loss(
-        self, application_id: str, *, session: Session
-    ) -> bool:
-        """Whether the current exact child failed only because managed bytes vanished."""
-
-        ...
 
 class FleetProfilePreview(_StrictModel):
     schema_version: Literal[2] = 2
@@ -626,7 +622,6 @@ __all__ = [
     "FleetProfileAssignmentPreparation",
     "FleetProfileAssignmentPreview",
     "FleetProfileAssignmentView",
-    "FleetProfileCacheRecoverySwitchAdapter",
     "FleetProfileChildOperation",
     "FleetProfileChildProgress",
     "FleetProfileChildResult",
