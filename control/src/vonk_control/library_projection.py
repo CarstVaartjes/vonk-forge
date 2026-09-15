@@ -48,6 +48,7 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .models import RuntimeImageReceipt as RuntimeImageReceiptRow
 from .request_fault import RequestFault
 
 
@@ -65,7 +66,13 @@ class LibrarySelectorAmbiguous(ValueError):
 
 
 _LIBRARY_ORDER = "catalog"
-_LOCAL_STATE_PRIORITY = {"unknown": 0, "failed": 1, "preparing": 2, "cached": 3}
+_LOCAL_STATE_PRIORITY = {
+    "unknown": 0,
+    "not_cached": 0,
+    "failed": 1,
+    "preparing": 2,
+    "cached": 3,
+}
 
 type LibraryControllerState = Literal[
     "cached", "preparing", "not_cached", "failed", "unknown"
@@ -171,6 +178,7 @@ class LibraryProjection:
         telemetry_live_seconds: int = 6,
         telemetry_delayed_seconds: int = 20,
         local_state: Callable[[], Mapping[str, Mapping[str, object]]] | None = None,
+        runtime_archive_available: Callable[[str, int], bool] | None = None,
         **_: object,
     ) -> None:
         if any(
@@ -193,6 +201,7 @@ class LibraryProjection:
             telemetry_delayed_seconds=telemetry_delayed_seconds,
         )
         self._local_state = local_state or self._database_local_state
+        self._runtime_archive_available = runtime_archive_available
 
     @staticmethod
     def selector(publisher: str, slug: str) -> str:
@@ -311,6 +320,7 @@ class LibraryProjection:
             installation_nodes = list(session.scalars(select(InstallationNode)))
             runs = list(session.scalars(select(RecipeRun)))
             run_nodes = list(session.scalars(select(RunNode)))
+            runtime_receipts = list(session.scalars(select(RuntimeImageReceiptRow)))
 
         revision_digests = {revision.id: revision.content_digest for revision in revisions}
         result: dict[str, dict[str, object]] = {}
@@ -445,6 +455,40 @@ class LibraryProjection:
                     controller="cached",
                     running_on=nodes,
                 )
+        if self._runtime_archive_available is not None:
+            available_recipe_digests: set[str] = set()
+            for build in builds:
+                digest = revision_digests.get(build.recipe_revision_id)
+                if (
+                    build.state == "succeeded"
+                    and isinstance(build.oci_layout_sha256, str)
+                    and type(build.image_bytes) is int
+                    and self._runtime_archive_available(
+                        build.oci_layout_sha256, build.image_bytes
+                    )
+                    and digest is not None
+                ):
+                    available_recipe_digests.add(digest)
+            for receipt in runtime_receipts:
+                if (
+                    receipt.state == "verified"
+                    and isinstance(receipt.oci_archive_sha256, str)
+                    and type(receipt.image_bytes) is int
+                    and self._runtime_archive_available(
+                        receipt.oci_archive_sha256, receipt.image_bytes
+                    )
+                ):
+                    available_recipe_digests.add(receipt.original_content_digest)
+            for revision in revisions:
+                if revision.kind != "recipe":
+                    continue
+                local = result.get(revision.content_digest)
+                if (
+                    local is not None
+                    and local.get("controller") == "cached"
+                    and revision.content_digest not in available_recipe_digests
+                ):
+                    local["controller"] = "not_cached"
         return result
 
     @staticmethod

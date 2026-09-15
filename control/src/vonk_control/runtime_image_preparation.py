@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import uuid
 from collections.abc import Callable, Iterable, Mapping
@@ -873,6 +874,45 @@ class FilesystemRuntimeImageStorage:
                 "runtime_image.archive_mismatch", "stored OCI archive failed content verification"
             )
         return path
+
+    def build_archive_available(self, archive_sha256: str, expected_bytes: int) -> bool:
+        """Report whether exact build bytes are present without scanning the archive.
+
+        This is the planning/projection check.  The preparation and distribution
+        paths still hash the archive before using it.  A missing file is normal
+        cache loss; unsafe types, changed sizes, and inaccessible storage remain
+        explicit failures rather than being projected as an ordinary cache miss.
+        """
+
+        if (
+            _SHA256.fullmatch(archive_sha256) is None
+            or type(expected_bytes) is not int
+            or not 1 <= expected_bytes <= self.maximum_bytes
+        ):
+            raise RuntimeImagePreparationError(
+                "runtime_image.receipt_invalid", "source-build image evidence is invalid"
+            )
+        path = self.root / archive_sha256
+        try:
+            observed = path.lstat()
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_unavailable",
+                "Controller runtime image storage could not be inspected",
+            ) from error
+        if not stat.S_ISREG(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch",
+                "stored OCI build object is not a regular archive",
+            )
+        if observed.st_size != expected_bytes:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch",
+                "stored OCI build archive length changed",
+            )
+        return True
 
     def find_published(
         self,

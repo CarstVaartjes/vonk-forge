@@ -2015,6 +2015,30 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert executor.receipts == [receipt]
 
 
+def test_fresh_preview_does_not_select_a_database_only_succeeded_build(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, build_id, _nodes = setup_services(tmp_path)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        build_archive_available=lambda _digest, _size: False,
+        memory_floor_bytes=50,
+    )
+    with sessions() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
+        assert revision is not None
+        installation = session.scalar(
+            select(RecipeInstallation).where(
+                RecipeInstallation.recipe_revision_id == revision.id
+            )
+        )
+        assert service._matching_build(session, revision.id, installation) is None
+
+
 def test_model_cache_manifest_failure_is_a_typed_blocker(tmp_path: Path) -> None:
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
     service = RunSwitchOperationService(

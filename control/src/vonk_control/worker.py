@@ -355,10 +355,16 @@ def assemble_production_worker(
         management_policy=management_policy,
         clock=clock,
     )
+    runtime_archive_available = (
+        FilesystemRuntimeImageStorage(agent_artifact_root).build_archive_available
+        if agent_artifact_root is not None
+        else None
+    )
     recipe_builds = RecipeBuildService(
         sessions,
         bundles=DatabaseSourceBundleStore(sessions),
         inventory_max_age=300,
+        build_archive_available=runtime_archive_available,
     )
     lifecycle = RecipeOperationService(
         sessions,
@@ -385,6 +391,7 @@ def assemble_production_worker(
         clock=clock,
         mappings=ClusterMappingService(sessions),
         model_cache=model_cache,
+        build_archive_available=runtime_archive_available,
         artifact_phase_executor=artifact_phase_executor,
     )
     recipe_operations = RecipeOperationWorker(

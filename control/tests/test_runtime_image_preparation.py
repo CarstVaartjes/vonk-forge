@@ -597,6 +597,26 @@ def test_build_receipt_requires_the_exact_stored_archive(tmp_path: Path) -> None
         )
 
 
+def test_build_archive_presence_is_cheap_and_requires_a_regular_exact_size_file(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+
+    assert storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE)) is False
+    archive = storage.root / ARCHIVE_DIGEST
+    archive.write_bytes(ARCHIVE)
+    assert storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE)) is True
+
+    archive.write_bytes(ARCHIVE + b"corrupt")
+    with pytest.raises(RuntimeImagePreparationError, match="length"):
+        storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE))
+
+    archive.unlink()
+    archive.symlink_to(tmp_path / "outside")
+    with pytest.raises(RuntimeImagePreparationError, match="regular archive"):
+        storage.build_archive_available(ARCHIVE_DIGEST, len(ARCHIVE))
+
+
 def test_runtime_distribution_document_is_not_a_recipe_authority(tmp_path: Path) -> None:
     with pytest.raises(RuntimeImagePreparationError, match="canonical RecipeDefinition"):
         prepare_runtime_image(

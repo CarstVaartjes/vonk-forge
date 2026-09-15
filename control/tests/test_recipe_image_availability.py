@@ -344,6 +344,98 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(tmp_path: 
         restarted.get(queued.id)
 
 
+def test_missing_succeeded_build_archive_is_recreated_automatically(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    build_id = "00000000-0000-4000-8000-000000000902"
+    with sessions.begin() as session:
+        _add_revision(session, "revision-missing-build-archive", recipe)
+        session.add(AgentNode(node_id="spark-builder", state="active"))
+        session.add(
+            RecipeBuild(
+                id=build_id,
+                recipe_revision_id="revision-missing-build-archive",
+                builder_node_id="spark-builder",
+                source_bundle_sha256="b" * 64,
+                build_input_sha256="f" * 64,
+                state="succeeded",
+                policy_report={},
+                plan={},
+                image_digest=IMAGE_DIGEST,
+                oci_layout_sha256=ARCHIVE_SHA,
+                image_bytes=len(ARCHIVE),
+                error=None,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    forced: list[bool] = []
+
+    def builder(*_: object, force: bool, **__: object) -> dict[str, object]:
+        forced.append(force)
+        (storage.root / ARCHIVE_SHA).write_bytes(ARCHIVE)
+        return {
+            "state": "succeeded",
+            "build_id": build_id,
+            "build_input_sha256": "f" * 64,
+            "image_digest": IMAGE_DIGEST,
+            "oci_layout_sha256": ARCHIVE_SHA,
+            "image_bytes": len(ARCHIVE),
+        }
+
+    class BuildTransport(Transport):
+        def inspect_archive(
+            self,
+            archive: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
+        ) -> PulledImageEvidence:
+            assert archive.read_bytes() == ARCHIVE
+            return PulledImageEvidence(
+                manifest_digest=IMAGE_DIGEST,
+                requested_manifest_digest=None,
+                config_id=CONFIG_DIGEST,
+                local_reference="docker-archive:" + str(archive),
+                architecture=expected_architecture,
+                runtime_interface=expected_runtime_interface,
+                archive_sha256=expected_archive_sha256,
+                archive_bytes=expected_archive_bytes,
+            )
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe,
+            _build_runtime(),
+        ),
+        transport=BuildTransport(),
+        builder=builder,
+        receipt_writer=lambda *_args: None,
+        clock=lambda: datetime.now(UTC),
+        automatic_attempt_limit=1,
+    )
+    queued = service.start(
+        "revision-missing-build-archive",
+        actor="operator",
+        request_id="r" * 36,
+    )
+
+    assert service.run_pending() == 1
+    completed = service.get(queued.id)
+    assert completed.state == "succeeded", completed.failure
+    assert forced == [True]
+    assert (storage.root / ARCHIVE_SHA).read_bytes() == ARCHIVE
+
+
 def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(tmp_path: Path) -> None:
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")

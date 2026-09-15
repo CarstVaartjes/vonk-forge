@@ -346,6 +346,40 @@ def test_build_resolution_reuses_exact_receipt_without_builder_admission(
     assert resolution.image_digest == "sha256:" + "b" * 64
 
 
+def test_missing_build_archive_is_not_reused_and_replans_the_same_build_input(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(
+        sessions,
+        bundles=bundles,
+        build_archive_available=lambda _digest, _size: False,
+    )
+    plan = service.plan(revision.id, node_id, now=now)
+    service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+
+    resolution = service.resolve(revision.id)
+    rebuilt = service.plan(revision.id, node_id, now=now, resolution=resolution)
+
+    assert resolution.cached is False
+    assert rebuilt.build_id == plan.build_id
+    assert rebuilt.build_input_sha256 == plan.build_input_sha256
+    with sessions() as session:
+        stored = session.get(RecipeBuild, plan.build_id)
+        assert stored is not None
+        assert stored.state == "planned"
+        assert stored.image_digest is None
+        assert stored.oci_layout_sha256 is None
+        assert stored.image_bytes is None
+
+
 def test_build_resolution_reuses_notes_only_revision_when_inputs_match(
     tmp_path: Path,
 ) -> None:

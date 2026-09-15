@@ -152,6 +152,10 @@ class RuntimeImageCacheStorage(RuntimeImageStorage, Protocol):
 
     root: Path
 
+    def build_archive_available(
+        self, archive_sha256: str, expected_bytes: int
+    ) -> bool: ...
+
 
 class ModelCacheOperationHandle(Protocol):
     """The bounded view a durable ModelCache operation exposes to its caller."""
@@ -1417,7 +1421,9 @@ class RecipeImageAvailabilityService:
                 self._identity_locks[identity_key] = lock
             return lock
 
-    def _stored_build_receipt(self, build_input_sha256: str) -> Mapping[str, object] | None:
+    def _stored_build_receipt(
+        self, build_input_sha256: str
+    ) -> tuple[Mapping[str, object] | None, bool]:
         with self._sessions() as session:
             build = session.scalar(
                 select(RecipeBuild)
@@ -1434,14 +1440,18 @@ class RecipeImageAvailabilityService:
                 or build.oci_layout_sha256 is None
                 or build.image_bytes is None
             ):
-                return None
+                return None, False
+            if not self._storage.build_archive_available(
+                build.oci_layout_sha256, build.image_bytes
+            ):
+                return None, True
             return {
                 "state": "succeeded",
                 "build_id": build.id,
                 "image_digest": build.image_digest,
                 "oci_layout_sha256": build.oci_layout_sha256,
                 "image_bytes": build.image_bytes,
-            }
+            }, False
 
     def _eligible(self, operation_id: str) -> bool:
         with self._sessions() as session:
@@ -1737,7 +1747,11 @@ class RecipeImageAvailabilityService:
             if self._builder_admission is not None:
                 self._builder_admission(recipe, runtime)
             self._update_progress(operation_id, "build", total_bytes=None)
-            build_receipt = None if force_rebuild else self._stored_build_receipt(build_input_sha256)
+            build_receipt, missing_archive = (
+                (None, False)
+                if force_rebuild
+                else self._stored_build_receipt(build_input_sha256)
+            )
             if build_receipt is None:
                 def report(value: Mapping[str, object]) -> None:
                     phase = value.get("phase", "build")
@@ -1748,7 +1762,7 @@ class RecipeImageAvailabilityService:
                     runtime,
                     operation_id=operation_id,
                     build_input_sha256=build_input_sha256,
-                    force=force_rebuild,
+                    force=force_rebuild or missing_archive,
                     progress=report,
                 )
             if not isinstance(build_receipt, Mapping):

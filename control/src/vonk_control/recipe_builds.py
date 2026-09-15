@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
@@ -378,11 +378,24 @@ class RecipeBuildService:
         *,
         bundles: SourceBundleStoreProtocol,
         inventory_max_age: int = 300,
+        build_archive_available: Callable[[str, int], bool] | None = None,
     ) -> None:
         self._sessions = sessions
         self._bundles = bundles
         self._inventory = InventoryRepository(sessions)
         self._inventory_max_age = inventory_max_age
+        self._build_archive_available = build_archive_available
+
+    def _succeeded_build_available(self, build: RecipeBuild) -> bool:
+        if not _valid_succeeded_receipt(build):
+            return False
+        if self._build_archive_available is None:
+            return True
+        assert build.oci_layout_sha256 is not None
+        assert build.image_bytes is not None
+        return self._build_archive_available(
+            build.oci_layout_sha256, build.image_bytes
+        )
 
     def check_source(self, recipe_revision_id: str) -> SourcePolicyReport:
         with self._sessions() as session:
@@ -494,7 +507,7 @@ class RecipeBuildService:
                 .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
             )
             for candidate in candidates:
-                if not _valid_succeeded_receipt(candidate):
+                if not self._succeeded_build_available(candidate):
                     continue
                 try:
                     report = parse_stored_build_policy(candidate.policy_report)
@@ -815,11 +828,23 @@ class RecipeBuildService:
                 RecipeBuild.build_input_sha256 == plan.build_input_sha256,
             )
         )
+        if (
+            existing is not None
+            and existing.state == "succeeded"
+            and _valid_succeeded_receipt(existing)
+            and not self._succeeded_build_available(existing)
+        ):
+            existing.state = "planned"
+            existing.image_digest = None
+            existing.oci_layout_sha256 = None
+            existing.image_bytes = None
+            existing.error = None
+            existing.updated_at = now
         if existing is None:
             # Reusable image bytes are keyed by executable inputs, not by
             # editorial recipe provenance. Only a succeeded receipt may cross
             # a revision boundary.
-            existing = session.scalar(
+            candidates = session.scalars(
                 select(RecipeBuild)
                 .where(
                     RecipeBuild.builder_node_id == plan.builder_node_id,
@@ -827,7 +852,14 @@ class RecipeBuildService:
                     RecipeBuild.state == "succeeded",
                 )
                 .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
-                .limit(1)
+            )
+            existing = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if self._succeeded_build_available(candidate)
+                ),
+                None,
             )
         payload = build_plan_document(copy.deepcopy(plan.agent_payload))
         if existing is None:
