@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
 from vonk_control.jobs import JobService
@@ -113,6 +114,32 @@ def test_worker_heartbeat_runs_after_idle_housekeeping(tmp_path) -> None:
 
     assert worker.run_once() is False
     assert calls == ["housekeeping", "heartbeat"]
+
+
+def test_worker_contains_a_database_wait_timeout_and_still_heartbeats(
+    tmp_path, caplog
+) -> None:
+    jobs = _service(tmp_path)
+    calls = []
+
+    def contended() -> bool:
+        raise OperationalError("SELECT 1", {}, Exception("canceling statement"))
+
+    worker = Worker(
+        jobs,
+        "worker-1",
+        {},
+        loop_heartbeat=lambda: calls.append("heartbeat"),
+        background_services=(contended,),
+    )
+
+    with caplog.at_level("INFO", logger="vonk-control-worker"):
+        assert worker.run_once() is False
+
+    # A bounded database wait is a dependency failure, not a tick failure: the
+    # loop still heartbeats and the failing source is reported for retry.
+    assert calls == ["heartbeat"]
+    assert "worker.source_failed" in caplog.text
 
 
 def test_worker_ticks_recipe_operations_before_generic_jobs(tmp_path) -> None:
