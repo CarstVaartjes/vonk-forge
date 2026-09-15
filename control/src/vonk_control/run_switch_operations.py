@@ -12,6 +12,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import logging
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -37,6 +38,7 @@ from .cluster_mappings import (
     validate_mapping_parameters,
 )
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
+from .logging import log_event
 from .model_cache import ModelCacheService
 from .model_cache_contract import ModelCacheDownloadPreviewResponse
 from .models import (
@@ -348,6 +350,7 @@ _OPERATION_KINDS = frozenset(
 )
 _MAX_RETRY_ATTEMPTS = 3
 _INSTALL_PREFLIGHT_REFRESH_REASON = "runtime preflight expired during install compilation"
+_LOGGER = logging.getLogger("vonk-control-run-switch")
 _PHASES: tuple[RunSwitchPhaseKind, ...] = (
     "transfer",
     "verify",
@@ -2368,7 +2371,21 @@ class RunSwitchOperationService:
             self._tick_cursor = str(job_ids[-1])
         advanced = False
         for job_id in job_ids:
-            advanced = self._advance(str(job_id)) or advanced
+            try:
+                advanced = self._advance(str(job_id)) or advanced
+            except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
+                # One persisted operation must never deny unrelated operations
+                # their turn.  A malformed contract is rejected and retained by
+                # ``_advance`` itself; this contains an unexpected per-job
+                # failure, reports it, and lets the rest of the batch advance.
+                log_event(
+                    _LOGGER,
+                    "run_switch.job_advance_failed",
+                    service="control-worker",
+                    job_id=str(job_id),
+                    error=type(error).__name__,
+                )
+                continue
         return advanced
 
     def _preview_run(
@@ -4717,13 +4734,30 @@ class RunSwitchOperationService:
             payload = job.payload
             raw_plan = payload.get("plan")
             if not isinstance(raw_plan, Mapping):
-                job.state = "failed"
-                job.status_reason = "run-switch persisted plan is invalid"
-                job.updated_at = now
+                _reject_invalid_operation(
+                    job, "run-switch persisted plan is invalid", now
+                )
                 session.commit()
                 return True
-            plan = _load_plan(raw_plan)
-            progress = _read_progress(job.result)
+            try:
+                plan = _load_plan(raw_plan)
+            except RunSwitchOperationConflict:
+                _reject_invalid_operation(
+                    job, "run-switch persisted plan is invalid", now
+                )
+                session.commit()
+                return True
+            try:
+                progress = _read_progress(job.result)
+            except RunSwitchOperationConflict:
+                # The stored result is the evidence of what was issued; it is
+                # retained untouched rather than replaced with a fabricated
+                # empty progress document.
+                _reject_invalid_operation(
+                    job, "run-switch persisted progress is invalid", now
+                )
+                session.commit()
+                return True
             intent_status = self._scope_intent_status(session, job)
             if intent_status == "invalid":
                 self._mark_failed(
@@ -6748,6 +6782,20 @@ def _load_plan(value: object) -> RunSwitchPlan:
         return RunSwitchPlan.model_validate_json(json.dumps(value), strict=True)
     except (TypeError, ValueError) as error:
         raise RunSwitchOperationConflict("run-switch persisted plan is invalid") from error
+
+
+def _reject_invalid_operation(job: Job, reason: str, now: datetime) -> None:
+    """Reject one malformed persisted operation while retaining its evidence.
+
+    The invalid contract is neither repaired nor replaced: the job keeps its
+    stored plan and result bytes, gains a precise operator-visible reason, and
+    stops being advanced.  Its already-issued effects still require their own
+    cancellation receipts, so this never claims they were stopped.
+    """
+
+    job.state = "failed"
+    job.status_reason = reason[:512]
+    job.updated_at = now
 
 
 __all__ = [
