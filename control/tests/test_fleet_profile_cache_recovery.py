@@ -6,13 +6,34 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from sqlalchemy import select
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.models import AgentNode, FleetProfileApplication, Job, NodeArtifact
+from vonk_control.bounded_json import require_mapping, sequence
+from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profiles import (
+    RunSwitchFleetProfileAdapter,
+    build_production_fleet_profile_service,
+)
+from vonk_control.models import (
+    AgentNode,
+    CatalogDocumentRevision,
+    FleetProfile,
+    FleetProfileApplication,
+    Job,
+    NodeArtifact,
+    NodeInventorySnapshot,
+    RecipeBuild,
+    RecipeSourceBundle,
+)
+from vonk_control.recipe_builds import RecipeBuildPlan
+from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.run_switch_operations import PhaseExecution, RunSwitchOperationService
-from vonk_control.runtime_image_preparation import RuntimeImagePreparationError
+from vonk_control.runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    RuntimeImagePreparationError,
+)
 
 from .test_fleet_profile_recovery_current import _failed_profile
 from .test_fleet_profiles import NOW, _node_id
@@ -66,6 +87,7 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         assert original_child is not None
         original_plan = deepcopy(original_child.payload["plan"])
         original_ordinal = original_child.payload["workload_intent_ordinal"]
+        assert type(original_ordinal) is int
 
     assert service.tick() is False
     with sessions.begin() as session:
@@ -87,7 +109,8 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         assert retry.progress["retry_of_application_id"] == first.id
         assert retry.progress["attempt"] == 2
         assert retry.progress["workload_intent_ordinal"] == original_ordinal + 1
-        assert tuple(retry.plan["scope"]["node_ids"]) == tuple(nodes)
+        retry_scope = require_mapping(retry.plan["scope"], "retry scope")
+        assert tuple(sequence(retry_scope["node_ids"])) == tuple(nodes)
         original_child = session.get(Job, child_id)
         assert original_child is not None
         assert original_child.payload["plan"] == original_plan
@@ -95,10 +118,11 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         assert original_child.result["failure_code"] == "runtime_image.cache_missing"
         assert len(children) == 1
 
+    adapter = cast(RunSwitchFleetProfileAdapter, service._switch_adapter)
     restarted = build_production_fleet_profile_service(
         sessions,
         clock=lifecycle._clock,
-        run_switch_operations=service._switch_adapter._run_switch,
+        run_switch_operations=adapter._run_switch,
     )
     assert restarted.tick() is True
     assert restarted.tick() in {False, True}
@@ -109,9 +133,10 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         )
         assert len(retried_children) == 2
         retry_child = next(child for child in retried_children if child.id != child_id)
+        retry_plan = require_mapping(retry_child.payload["plan"], "retry plan")
         assert all(
-            phase["subphase"] != "model-download"
-            for phase in retry_child.payload["plan"]["phases"]
+            require_mapping(phase, "retry phase")["subphase"] != "model-download"
+            for phase in sequence(retry_plan["phases"])
         )
 
 
@@ -151,6 +176,131 @@ def test_cache_recovery_refuses_access_and_integrity_failures(tmp_path: Path) ->
         assert service.tick() is False
         with sessions() as session:
             assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
+
+
+def test_cache_recovery_replans_an_actually_missing_build_archive(
+    tmp_path: Path,
+) -> None:
+    sessions, _lifecycle, service, _profile, _desired, first, child_id, nodes = (
+        _failed_profile(tmp_path)
+    )
+    adapter = cast(RunSwitchFleetProfileAdapter, service._switch_adapter)
+    run_switch = adapter._run_switch
+    lifecycle = cast(RecipeOperationService, run_switch._lifecycle)
+    with sessions.begin() as session:
+        build = session.scalar(select(RecipeBuild))
+        assert build is not None
+        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
+        assert revision is not None
+        builder = session.get(AgentNode, build.builder_node_id)
+        assert builder is not None
+        builder.binary_digest = "a" * 64
+        builder.capabilities = [*builder.capabilities, "recipe.build.v1"]
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == build.builder_node_id
+            )
+        )
+        assert snapshot is not None
+        snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
+        if session.get(RecipeSourceBundle, build.source_bundle_sha256) is None:
+            session.add(
+                RecipeSourceBundle(
+                    sha256=build.source_bundle_sha256,
+                    media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
+                    archive_bytes=1,
+                    total_bytes=1,
+                    file_count=1,
+                    storage_key="restored-source-bundle",
+                    manifest={"schema_version": 1},
+                    verified_at=NOW,
+                )
+            )
+        build_plan = RecipeBuildPlan(
+            build_id=build.id,
+            recipe_revision_id=revision.id,
+            recipe_content_sha256=revision.content_digest,
+            builder_node_id=build.builder_node_id,
+            source_bundle_sha256=build.source_bundle_sha256,
+            build_input_sha256=build.build_input_sha256,
+            agent_payload=dict(build.plan),
+            policy_report=dict(build.policy_report),
+        )
+        archive_digest = build.oci_layout_sha256
+        archive_bytes = build.image_bytes
+    assert archive_digest is not None and archive_bytes is not None
+    storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
+    (storage.root / archive_digest).unlink()
+    assert storage.build_archive_available(archive_digest, archive_bytes) is False
+    run_switch._build_archive_available = storage.build_archive_available
+
+    def replan_build(_revision_id: str, _builder_node_id: str) -> RecipeBuildPlan:
+        with sessions.begin() as session:
+            build = session.get(RecipeBuild, build_plan.build_id)
+            assert build is not None
+            build.state = "planned"
+            build.image_digest = None
+            build.oci_layout_sha256 = None
+            build.image_bytes = None
+        return build_plan
+
+    lifecycle.preview_build = replan_build
+    _typed_cache_failure(sessions, first.id, child_id, "runtime_image.cache_missing")
+
+    assert service.tick() is True
+    assert service.tick() is True
+    with sessions() as session:
+        retry = session.scalar(
+            select(FleetProfileApplication)
+            .where(FleetProfileApplication.id != first.id)
+            .order_by(FleetProfileApplication.created_at.desc())
+        )
+        assert retry is not None
+        switch_state = require_mapping(
+            retry.progress["switch_adapter"], "profile switch state"
+        )
+        retry_child = session.get(Job, switch_state["active_operation_id"])
+        assert retry_child is not None
+        child_plan = require_mapping(retry_child.payload["plan"], "child plan")
+        child_build = require_mapping(child_plan["build"], "child build")
+        child_phases = sequence(child_plan["phases"])
+        first_phase = require_mapping(child_phases[0], "first child phase")
+        assert child_build["state"] == "planned"
+        assert (
+            first_phase["subphase"] == "container-build"
+        )
+        retry_scope = require_mapping(retry.plan["scope"], "retry scope")
+        assert tuple(sequence(retry_scope["node_ids"])) == tuple(nodes)
+
+
+def test_malformed_failed_profile_does_not_block_unrelated_queued_work(
+    tmp_path: Path,
+) -> None:
+    sessions, _lifecycle, service, profile, desired, first, child_id, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    _typed_cache_failure(sessions, first.id, child_id, "runtime_image.cache_missing")
+    other = service.create(
+        FleetProfileInput(
+            name="Independent queued profile",
+            assignments=desired.assignments,
+        ),
+        actor="admin",
+    )
+    preview = service.preview(other.id)
+    queued = service.apply(
+        other.id,
+        plan_digest=preview.plan_digest,
+        request_key="00000000-0000-4000-8000-000000009002",
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        malformed = session.get(FleetProfile, profile.id)
+        assert malformed is not None
+        malformed.assignments = [{"recipe_selector": 7}]
+
+    assert service.tick() is True
+    assert service.application(queued.id).state == "running"
 
 
 class _MissingRuntimeImage(ColdStartPhaseExecutor):
