@@ -11,14 +11,51 @@ import sys
 import time
 import zipfile
 from contextlib import redirect_stdout
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from threading import Thread
 
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from cluster_profiles import cli, cli_update
+
+
+def test_update_download_identifies_product_without_following_redirects() -> None:
+    requests: list[str] = []
+
+    class ReleaseHost(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            requests.append(self.path)
+            if not self.headers.get("User-Agent", "").startswith("vonkctl/"):
+                self.send_response(403)
+            elif self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("Location", "/unexpected")
+            else:
+                self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"release")
+
+        def log_message(self, *_args) -> None:
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), ReleaseHost) as server:
+        worker = Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        origin = f"http://127.0.0.1:{server.server_port}"
+        try:
+            assert cli_update._download(f"{origin}/current.manifest", 7) == b"release"
+            with pytest.raises(cli_update.CliUpdateError, match="too large"):
+                cli_update._download(f"{origin}/oversized", 6)
+            with pytest.raises(cli_update.CliUpdateError, match="redirected"):
+                cli_update._download(f"{origin}/redirect", 7)
+            assert "/unexpected" not in requests
+        finally:
+            server.shutdown()
+            worker.join(timeout=5)
 
 
 def _signed_publication(
@@ -499,7 +536,7 @@ def test_background_module_checks_configured_channel_and_releases_lock(
         "    def __exit__(self, *args): return None\n"
         "    def read(self, maximum): return self.value[:maximum]\n"
         "class Opener:\n"
-        "    def open(self, url, timeout): return Response(base64.b64decode(objects[url]))\n"
+        "    def open(self, request, timeout): return Response(base64.b64decode(objects[request.full_url]))\n"
         "urllib.request.build_opener = lambda *args: Opener()\n"
     )
     environment = os.environ.copy()
