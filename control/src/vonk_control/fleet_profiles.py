@@ -1655,6 +1655,8 @@ class FleetProfileService:
             switch_steps: list[_PlanStepDraft] = []
             desired_installation_ids: set[str] = set()
             desired_run_ids: set[str] = set()
+            delegated_stop_ids: set[str] = set()
+            delegated_cleanup_ids: set[str] = set()
             adapter_switch_needed = False
             changed_nodes: set[str] = set()
             preparation_unavailable_reported = False
@@ -1908,6 +1910,7 @@ class FleetProfileService:
                 if run.id not in desired_run_ids:
                     adapter_switch_needed = True
                     changed_nodes.update(members)
+                    delegated_stop_ids.add(run.id)
 
             installation_policy = row.installation_policy if row is not None else "keep-cached"
             if installation_policy == "exact" and target_nodes:
@@ -1940,6 +1943,7 @@ class FleetProfileService:
                     # receives this desired retention decision.
                     adapter_switch_needed = True
                     changed_nodes.update(node_ids)
+                    delegated_cleanup_ids.add(installation.id)
                     reasons.append(
                         FleetProfileReason(
                             code="profile.cleanup_delegated",
@@ -1997,9 +2001,12 @@ class FleetProfileService:
                 builds=sum(step.kind == "build" for step in steps),
                 distributions=sum(step.kind == "distribute-image" for step in steps),
                 installs=sum(step.kind == "install" for step in steps),
-                starts=sum(step.kind in {"start", "switch"} for step in steps),
-                stops=sum(step.kind == "stop" for step in steps),
-                uninstalls=sum(step.kind == "uninstall" for step in steps),
+                starts=sum(
+                    item.desired_state == "running" and "switch" in item.actions
+                    for item in assignment_previews
+                ),
+                stops=len(delegated_stop_ids),
+                uninstalls=len(delegated_cleanup_ids),
                 blockers=blocker_count,
             )
             identity = {

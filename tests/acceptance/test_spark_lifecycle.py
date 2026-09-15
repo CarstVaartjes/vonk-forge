@@ -721,6 +721,94 @@ def _canonical_recipe_matches(observed: object, expected: object) -> bool:
         return False
 
 
+def _validate_canary_cleanup_preview(
+    preview: dict[str, object], *, node_id: str
+) -> None:
+    """Require the exact admitted delegated-cleanup intent."""
+
+    from vonk_control.fleet_profile_contract import FleetProfilePreview
+
+    try:
+        typed = FleetProfilePreview.model_validate_json(_canonical(preview))
+    except ValueError as error:
+        raise LifecycleError("synthetic canary cleanup preview is invalid") from error
+    if (
+        typed.allowed is not True
+        or typed.summary.blockers != 0
+        or typed.scope.node_ids != [node_id]
+        or len(typed.steps) != 1
+        or typed.steps[0].kind != "switch"
+        or typed.steps[0].node_ids != [node_id]
+    ):
+        raise LifecycleError("synthetic canary cleanup preview is not admitted")
+
+
+def _validate_canary_cleanup_application(
+    application: dict[str, object], *, installation_id: str, run_id: str
+) -> None:
+    """Require terminal cleanup receipts from the profile application."""
+
+    from vonk_control.fleet_profile_contract import (
+        FleetProfileApplicationView,
+        FleetProfileSwitchChildResult,
+    )
+    from vonk_control.run_switch_contract import (
+        RunSwitchCleanupVerifyResult,
+        RunSwitchStopResult,
+        RunSwitchUninstallResult,
+    )
+
+    try:
+        typed = FleetProfileApplicationView.model_validate_json(_canonical(application))
+    except ValueError as error:
+        raise LifecycleError("synthetic canary cleanup application is invalid") from error
+    step_results = typed.progress.step_results
+    if (
+        typed.state != "succeeded"
+        or len(step_results) != 1
+        or not all(step.kind == "switch" for step in step_results.values())
+    ):
+        raise LifecycleError("synthetic canary cleanup profile receipt is incomplete")
+    adapter = typed.progress.switch_adapter
+    if adapter is None or adapter.result is None:
+        raise LifecycleError("synthetic canary cleanup adapter result is missing")
+    children = adapter.result.children
+    if [child.kind for child in children] != ["stop", "cleanup"]:
+        raise LifecycleError("synthetic canary cleanup child sequence is incomplete")
+
+    stop_child, cleanup_child = children
+    if stop_child.state != "succeeded" or cleanup_child.state != "succeeded":
+        raise LifecycleError("synthetic canary cleanup child did not succeed")
+    if not isinstance(stop_child.result, FleetProfileSwitchChildResult) or not isinstance(
+        cleanup_child.result, FleetProfileSwitchChildResult
+    ):
+        raise LifecycleError("synthetic canary cleanup child receipt is missing")
+    stop_results = stop_child.result.run_switch.phase_results
+    if not any(
+        isinstance(receipt, RunSwitchStopResult) and receipt.run_id == run_id
+        for receipt in stop_results
+    ):
+        raise LifecycleError("synthetic canary stop receipt is incomplete")
+
+    cleanup_results = cleanup_child.result.run_switch.phase_results
+    uninstalled = any(
+        isinstance(receipt, RunSwitchUninstallResult)
+        and receipt.installation_id == installation_id
+        for receipt in cleanup_results
+    )
+    verified = any(
+        isinstance(receipt, RunSwitchCleanupVerifyResult)
+        and receipt.installation_id == installation_id
+        and receipt.final_verified is True
+        and receipt.removed is True
+        and receipt.active_runs == 0
+        and receipt.installation_state in {None, "uninstalled"}
+        for receipt in cleanup_results
+    )
+    if not uninstalled or not verified:
+        raise LifecycleError("synthetic canary removal receipt is incomplete")
+
+
 class LocalBrowserController:
     def __init__(
         self,
@@ -2228,27 +2316,13 @@ class SparkLifecycle:
                 "POST", "/api/profile/1/preview"
             )
             cleanup_preview = require_object(cleanup_preview_payload, "synthetic canary cleanup preview")
-            summary = require_object(cleanup_preview.get("summary"), "synthetic canary cleanup summary")
-            # Cleanup is one scope-wide Run/Switch step whose child stops the
-            # live run, plus the uninstall; an empty desired set never produces
-            # a "stop" plan step, so the switch step is the evidence that this
-            # cleanup actually stops the workload.
-            cleanup_steps = cleanup_preview.get("steps")
-            switch_covers_scope = isinstance(cleanup_steps, list) and any(
-                isinstance(step, dict)
-                and step.get("kind") == "switch"
-                and node_id in (step.get("node_ids") or ())
-                for step in cleanup_steps
-            )
-            if (
-                cleanup_preview.get("allowed") is not True
-                or summary.get("uninstalls", 0) < 1
-                or not switch_covers_scope
-            ):
+            try:
+                _validate_canary_cleanup_preview(cleanup_preview, node_id=node_id)
+            except LifecycleError as error:
                 raise LifecycleError(
                     "synthetic canary cleanup preview is not admitted: "
                     + self._preview_diagnostic(cleanup_preview)
-                )
+                ) from error
             _, cleanup_application_payload = self.control.request(
                 "POST",
                 "/api/profile/1/load",
@@ -2260,21 +2334,11 @@ class SparkLifecycle:
                 label="synthetic canary profile cleanup",
                 node_id=node_id,
             )
-            cleanup_steps = require_object(cleanup_application.get("progress"), "cleanup progress").get("step_results")
-            cleanup_kinds = (
-                {step.get("kind") for step in cleanup_steps.values() if isinstance(step, dict)}
-                if isinstance(cleanup_steps, dict)
-                else set()
+            _validate_canary_cleanup_application(
+                cleanup_application,
+                installation_id=installation_id,
+                run_id=run_id,
             )
-            # Cleanup stops the live run through one scope-wide Run/Switch step
-            # and then uninstalls it.  An empty desired set never plans a "stop"
-            # step, so a switch receipt is the stop evidence.  Report the kinds
-            # that were actually recorded: the previous message named neither.
-            if not isinstance(cleanup_steps, dict) or not cleanup_kinds >= {"switch", "uninstall"}:
-                raise LifecycleError(
-                    "synthetic canary cleanup receipts are incomplete: kinds="
-                    + json.dumps(sorted(str(kind) for kind in cleanup_kinds))
-                )
             completed.append("stopped")
             self._await_canary_endpoint(fixture.slug, published=False)
             completed.append("route-withdrawn")
@@ -2292,6 +2356,17 @@ class SparkLifecycle:
                 for node in fleet_nodes
             ):
                 raise LifecycleError("synthetic canary route cleanup left a loaded run")
+            if any(
+                isinstance(node, dict)
+                and any(
+                    isinstance(installed, dict)
+                    and installed.get("installation_id") == installation_id
+                    for installed in node.get("installed", [])
+                    if isinstance(node.get("installed"), list)
+                )
+                for node in fleet_nodes
+            ):
+                raise LifecycleError("synthetic canary cleanup left the installation present")
             completed.append("uninstalled")
         except (SliceError, ServingExecutionError, LifecycleError) as error:
             # Keep the API response concise for the lifecycle client, but make

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
@@ -1065,7 +1067,7 @@ def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
 
     assert preview.allowed is True
     assert [step.kind for step in preview.steps] == ["switch"]
-    assert preview.summary.stops == 0
+    assert preview.summary.stops == 1
     assert set(preview.steps[0].node_ids) == {_node_id(1), _node_id(2)}
     application = service.apply(
         profile.id,
@@ -2510,3 +2512,173 @@ def test_profile_preview_delegates_removal_to_the_orchestrator(
     ]
     assert delegated, [reason.code for reason in preview.reasons]
     assert installed.owner_id in delegated[0].detail
+    assert preview.summary.starts == 0
+    assert preview.summary.uninstalls == 1
+
+
+def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
+    tmp_path: Path, postgres_engine: Engine,
+) -> None:
+    """The packaged acceptance consumer follows delegated cleanup evidence."""
+
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import (
+        installed_recipe,
+        setup_services,
+        started_recipe,
+    )
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=1, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=_uuid(900)
+    )
+    run = started_recipe(
+        sessions,
+        lifecycle,
+        installation.owner_id,
+        nodes,
+        request_id=_uuid(901),
+        alias="acceptance-cleanup",
+    )
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions, clock=lifecycle._clock, switch_adapter=adapter
+    )
+    profile = service.create(
+        FleetProfileInput(
+            name="Acceptance exact cleanup",
+            installation_policy="exact",
+            assignments=[],
+        ),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(902),
+        actor="admin",
+    )
+    completed_agent_operations: set[str] = set()
+    for _ in range(30):
+        run_switch.tick()
+        service.tick()
+        current = service.application(application.id)
+        if current.state == "succeeded":
+            break
+        state = current.progress.switch_adapter
+        assert state is not None
+        active_id = state.active_operation_id
+        if active_id is None:
+            continue
+        child = run_switch.get(active_id)
+        operation_id = child.result.child_operation_id if child.result else None
+        if operation_id is None or operation_id in completed_agent_operations:
+            continue
+        with sessions() as session:
+            operation = session.get(Job, operation_id)
+            assert operation is not None
+            kind = operation.kind
+        evidence = (
+            {"stopped": True}
+            if kind == "recipe.stop"
+            else {"uninstalled": True, "removed_model_bytes": 1}
+        )
+        lifecycle.record_node_result(
+            operation_id, nodes[0], succeeded=True, evidence=evidence
+        )
+        completed_agent_operations.add(operation_id)
+    else:
+        pytest.fail(
+            "profile cleanup did not converge: "
+            + json.dumps(current.model_dump(mode="json"), default=str)
+        )
+
+    completed = service.application(application.id)
+    payload = {
+        "preview": preview.model_dump(mode="json"),
+        "application": completed.model_dump(mode="json"),
+        "installation_id": installation.owner_id,
+        "run_id": run.owner_id,
+        "node_id": nodes[0],
+    }
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import copy
+import json
+import runpy
+import sys
+
+m = runpy.run_path("tests/acceptance/test_spark_lifecycle.py")
+value = json.load(sys.stdin)
+m["_validate_canary_cleanup_preview"](
+    value["preview"], node_id=value["node_id"]
+)
+m["_validate_canary_cleanup_application"](
+    value["application"],
+    installation_id=value["installation_id"],
+    run_id=value["run_id"],
+)
+
+def rejected(changed):
+    try:
+        m["_validate_canary_cleanup_application"](
+            changed,
+            installation_id=value["installation_id"],
+            run_id=value["run_id"],
+        )
+    except m["LifecycleError"]:
+        return
+    raise AssertionError("malformed cleanup evidence was accepted")
+
+missing = copy.deepcopy(value["application"])
+missing["progress"]["switch_adapter"]["result"]["children"].pop()
+rejected(missing)
+wrong_run = copy.deepcopy(value["application"])
+children = wrong_run["progress"]["switch_adapter"]["result"]["children"]
+stop = next(child for child in children if child["kind"] == "stop")
+for receipt in stop["result"]["run_switch"]["phase_results"]:
+    if receipt.get("phase") == "stop":
+        receipt["run_id"] = "00000000-0000-4000-8000-000000000998"
+rejected(wrong_run)
+wrong = copy.deepcopy(value["application"])
+children = wrong["progress"]["switch_adapter"]["result"]["children"]
+cleanup = next(child for child in children if child["kind"] == "cleanup")
+for receipt in cleanup["result"]["run_switch"]["phase_results"]:
+    if "installation_id" in receipt:
+        receipt["installation_id"] = "00000000-0000-4000-8000-000000000999"
+rejected(wrong)
+unverified = copy.deepcopy(value["application"])
+children = unverified["progress"]["switch_adapter"]["result"]["children"]
+cleanup = next(child for child in children if child["kind"] == "cleanup")
+final = next(
+    receipt for receipt in cleanup["result"]["run_switch"]["phase_results"]
+    if receipt["phase"] == "final_verify"
+)
+final["final_verified"] = False
+rejected(unverified)
+""",
+        ],
+        cwd=Path(__file__).parents[2],
+        input=json.dumps(payload),
+        text=True,
+        check=True,
+    )
