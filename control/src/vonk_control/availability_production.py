@@ -187,6 +187,10 @@ def build_recipe_image_availability(
                     "recipe_image.recipe_invalid",
                     "selected recipe is not a canonical RecipeDefinition",
                 ) from error
+            resolved_revision_id = revision.id
+            # Build resolution consults managed storage. Close the read
+            # transaction first: a transaction contains database work only.
+            session.close()
             package_handle: Mapping[str, object] | None = None
             builder_node_id: str | None = None
             if recipe.execution.mode == "build":
@@ -248,7 +252,7 @@ def build_recipe_image_availability(
             # These fields are Controller scheduler metadata.  They are
             # persisted with the operation so a restart can reconstruct a
             # source-build plan instead of relying on process memory.
-            result = dict(runtime) | {"recipe_revision_id": revision.id}
+            result = dict(runtime) | {"recipe_revision_id": resolved_revision_id}
             if builder_node_id is not None:
                 result["builder_node_id"] = builder_node_id
             if package_handle is not None and isinstance(

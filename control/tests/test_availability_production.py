@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from types import SimpleNamespace
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -283,6 +284,95 @@ def test_source_build_without_builder_queues_provisional_parent(
     with sessions() as session:
         row = session.get(CatalogDocumentRevision, "saturated-revision")
         assert row is not None
+    production.close()
+
+
+def test_authority_resolves_builds_without_an_open_transaction(
+    tmp_path, monkeypatch
+) -> None:
+    """Build resolution touches managed storage, so the read transaction must
+    already be closed when it runs."""
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-source-build.json")
+            .read_text()
+        )
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'scope.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        session.add(
+            CatalogDocumentRevision(
+                id="scope-revision",
+                document_id="scope-document",
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=recipe.model_dump(mode="json"),
+                content_digest=content_sha256(recipe),
+                artifact_key="c" * 64,
+                execution_key="a" * 64,
+                projected={},
+                created_by="test",
+                created_at=now,
+            )
+        )
+    checked_out: list[int] = []
+
+    class Builds:
+        def resolve(self, _revision_id: str):
+            checked_out.append(cast(Any, engine.pool).checkedout())
+            return SimpleNamespace(
+                cached=False,
+                input_intent_sha256="a" * 64,
+                build_input_sha256=None,
+                build_id=None,
+            )
+
+        def plan(self, *_args, **_kwargs):
+            raise AssertionError("builder planning must remain dispatch-time")
+
+    monkeypatch.setattr(
+        availability_production,
+        "resolve_recipe_entities",
+        lambda _session, _document: {},
+    )
+    monkeypatch.setattr(
+        availability_production,
+        "_compile_consistent_runtime",
+        lambda *_args, **_kwargs: {
+            "input_intent_sha256": "a" * 64,
+            "interface": "vonk.runtime.v1",
+            "architecture": "linux/arm64",
+            "image": "sha256:" + "d" * 64,
+        },
+    )
+
+    class Settings:
+        agent_artifact_root = tmp_path / "artifacts"
+
+    production = build_recipe_image_availability(
+        sessions,
+        settings=Settings(),
+        managed_catalog_sync=None,
+        recipe_builds=Builds(),
+        recipe_operations=object(),
+        clock=lambda: now,
+    )
+    production.service.start(
+        "scope-revision",
+        actor="operator",
+        request_id="t" * 36,
+    )
+
+    assert checked_out == [0]
     production.close()
 
 
