@@ -1711,6 +1711,40 @@ class ModelCacheService:
                 for set_digest in selected
                 for membership in by_set.get(set_digest, ())
             }
+        # Managed storage is removed outside every transaction. The durable
+        # fence and the cancelled operation states committed above are what
+        # stop a late producer; the unlinks themselves are not SQL work.
+        for set_digest in selected:
+            shutil.rmtree(self._root / "partials" / set_digest, ignore_errors=True)
+        with self._lock, self._session(write=True) as session:
+            referenced = {
+                membership.artifact_sha256
+                for membership in session.scalars(select(ModelCacheSetArtifact))
+            }
+            unreferenced = [
+                artifact
+                for artifact in session.scalars(select(ModelCacheArtifact))
+                if artifact.sha256 in object_digests
+                and artifact.sha256 not in referenced
+            ]
+            removals = [
+                (artifact, self._object_path(artifact.sha256))
+                for artifact in unreferenced
+            ]
+        reclaimed = 0
+        for _artifact, path in removals:
+            try:
+                metadata = path.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISREG(metadata.st_mode):
+                reclaimed += metadata.st_size
+                path.unlink(missing_ok=True)
+        with self._lock, self._session(write=True) as session:
+            for artifact, _path in removals:
+                stored = session.get(ModelCacheArtifact, artifact.sha256)
+                if stored is not None:
+                    session.delete(stored)
             for set_digest in selected:
                 session.query(ModelCacheSetArtifact).filter(
                     ModelCacheSetArtifact.artifact_set_sha256 == set_digest
@@ -1718,23 +1752,6 @@ class ModelCacheService:
                 row = session.get(ModelCacheSet, set_digest)
                 if row is not None:
                     session.delete(row)
-                shutil.rmtree(self._root / "partials" / set_digest, ignore_errors=True)
-            referenced = {
-                membership.artifact_sha256
-                for membership in session.scalars(select(ModelCacheSetArtifact))
-            }
-            reclaimed = 0
-            for artifact in list(session.scalars(select(ModelCacheArtifact))):
-                if (
-                    artifact.sha256 not in object_digests
-                    or artifact.sha256 in referenced
-                ):
-                    continue
-                path = self._object_path(artifact.sha256)
-                if path.is_file() and not path.is_symlink():
-                    reclaimed += path.stat().st_size
-                    path.unlink(missing_ok=True)
-                session.delete(artifact)
             result = {
                 "schema_version": SCHEMA_VERSION,
                 "removed_entries": selected,
@@ -2222,7 +2239,11 @@ class ModelCacheService:
         Transfers and explicit verification retain their content checks.
         """
         specs = _unique_artifacts(manifest.artifacts)
-        cached: set[str] = set()
+        # The SQL read yields only the receipt metadata it owns. Presence and
+        # size are storage facts, so they are checked after the read transaction
+        # has closed and never inside it: no SQL lock is held across a
+        # filesystem check, and no filesystem lock is taken while SQL is open.
+        receipts: list[tuple[str, int]] = []
         with self._session() as session:
             rows = session.scalars(
                 select(ModelCacheArtifact).where(
@@ -2238,26 +2259,29 @@ class ModelCacheService:
                     or row.actual_bytes != spec.expected_bytes
                 ):
                     continue
-                try:
-                    fd = os.open(
-                        self._object_path(row.sha256),
-                        os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
-                    )
-                except (FileNotFoundError, NotADirectoryError):
+                receipts.append((row.sha256, spec.expected_bytes))
+        cached: set[str] = set()
+        for sha256, expected_bytes in receipts:
+            try:
+                fd = os.open(
+                    self._object_path(sha256),
+                    os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
+                )
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            except OSError as exc:
+                if exc.errno == errno.ELOOP:
                     continue
-                except OSError as exc:
-                    if exc.errno == errno.ELOOP:
-                        continue
-                    raise
-                try:
-                    metadata = os.fstat(fd)
-                    if (
-                        stat.S_ISREG(metadata.st_mode)
-                        and metadata.st_size == spec.expected_bytes
-                    ):
-                        cached.add(row.sha256)
-                finally:
-                    os.close(fd)
+                raise
+            try:
+                metadata = os.fstat(fd)
+                if (
+                    stat.S_ISREG(metadata.st_mode)
+                    and metadata.st_size == expected_bytes
+                ):
+                    cached.add(sha256)
+            finally:
+                os.close(fd)
         return frozenset(cached)
 
     def _partial_bytes(self, set_digest: str, spec: ArtifactSpec) -> int:
@@ -5401,24 +5425,38 @@ class ModelCacheService:
 
     def reconcile_storage(self) -> dict[str, object]:
         with self._lock:
+            with self._session() as session:
+                known = [
+                    (artifact.sha256, artifact.expected_bytes)
+                    for artifact in session.scalars(select(ModelCacheArtifact))
+                ]
+            # Reading and hashing stored objects is storage work, not SQL work.
+            # Each object is inspected and, when its size matches, content
+            # verified with the read transaction already closed.
+            observed: dict[str, int] = {}
+            for sha256, expected_bytes in known:
+                path = self._object_path(sha256)
+                try:
+                    metadata = path.lstat()
+                except FileNotFoundError:
+                    observed[sha256] = 0
+                    continue
+                if not stat.S_ISREG(metadata.st_mode):
+                    observed[sha256] = 0
+                    continue
+                actual = metadata.st_size
+                if actual == expected_bytes and verified_files.verify_path(
+                    path, sha256, expected_bytes
+                ):
+                    observed[sha256] = actual
+                else:
+                    observed[sha256] = min(actual, expected_bytes)
             with self._session(write=True) as session:
                 rows = list(session.scalars(select(ModelCacheArtifact)))
                 for artifact in rows:
                     previous = (artifact.state, artifact.actual_bytes)
-                    path = self._object_path(artifact.sha256)
-                    actual = (
-                        path.stat().st_size
-                        if path.exists() and not path.is_symlink()
-                        else 0
-                    )
-                    if (
-                        actual == artifact.expected_bytes
-                        and path.is_file()
-                        and not path.is_symlink()
-                        and verified_files.verify_path(
-                            path, artifact.sha256, artifact.expected_bytes
-                        )
-                    ):
+                    actual = observed.get(artifact.sha256, 0)
+                    if actual == artifact.expected_bytes:
                         artifact.state = "verified"
                         artifact.actual_bytes = actual
                     else:
@@ -5941,6 +5979,23 @@ class ModelCacheService:
                     object_bytes[path.name] = path.stat().st_size
                 except OSError:
                     continue
+        # Partial checkpoints are storage facts. They are measured before the
+        # read transaction opens so no SQL session spans the directory scan.
+        partial_bytes: dict[str, int] = {}
+        partial_root = self._root / "partials"
+        for partial in partial_root.glob("*/*.part"):
+            if (
+                partial.is_file()
+                and not partial.is_symlink()
+                and len(partial.stem) == _DIGEST_LENGTH
+                and _is_hex(partial.stem)
+            ):
+                try:
+                    partial_bytes[partial.stem] = max(
+                        partial_bytes.get(partial.stem, 0), partial.stat().st_size
+                    )
+                except OSError:
+                    continue
         unique_used = sum(object_bytes.values())
         with self._session(write=True) as session:
             sets = list(session.scalars(select(ModelCacheSet)))
@@ -5981,21 +6036,6 @@ class ModelCacheService:
                 for digest, size in object_bytes.items()
                 if digest not in protected_artifacts
             )
-            partial_bytes: dict[str, int] = {}
-            partial_root = self._root / "partials"
-            for partial in partial_root.glob("*/*.part"):
-                if (
-                    partial.is_file()
-                    and not partial.is_symlink()
-                    and len(partial.stem) == _DIGEST_LENGTH
-                    and _is_hex(partial.stem)
-                ):
-                    try:
-                        partial_bytes[partial.stem] = max(
-                            partial_bytes.get(partial.stem, 0), partial.stat().st_size
-                        )
-                    except OSError:
-                        continue
             in_flight_bytes = sum(
                 max(
                     0,

@@ -1054,6 +1054,54 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
     assert preview["new_bytes"] == len(data) - expected
 
 
+def test_admission_checks_storage_size_after_the_read_transaction_closes(
+    cache, tmp_path: Path, monkeypatch
+) -> None:
+    """The SQL read transaction never spans the managed-storage size check.
+
+    It fails on the wrong implementation where ``_managed_cached_objects``
+    opens and stats stored objects while its ``with self._session()`` read
+    transaction is still open, which puts a PostgreSQL lock edge on a
+    filesystem check. The service's own session helper is instrumented, so the
+    assertion observes a checked-out transaction rather than mocking it away.
+    """
+
+    service, _sessions = cache
+    model = "3" * 64
+    artifact = _artifact(tmp_path, b"admitted bytes", model_content_sha256=model)
+    _download(
+        service,
+        [artifact],
+        model_content_sha256=model,
+        request_key="00000000-0000-4000-8000-000000000018",
+    )
+    sessions_open = 0
+    checked_at_size_check: list[int] = []
+    original_session = service._session
+
+    @contextmanager
+    def counting_session(*, write: bool = False):
+        nonlocal sessions_open
+        sessions_open += 1
+        try:
+            with original_session(write=write) as session:
+                yield session
+        finally:
+            sessions_open -= 1
+
+    original_fstat = os.fstat
+
+    def recording_fstat(fd: int):
+        checked_at_size_check.append(sessions_open)
+        return original_fstat(fd)
+
+    monkeypatch.setattr(service, "_session", counting_session)
+    monkeypatch.setattr(os, "fstat", recording_fstat)
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
+    assert preview["already_cached_bytes"] == len(b"admitted bytes")
+    assert checked_at_size_check == [0]
+
+
 def test_operation_transfer_progress_counts_only_missing_objects(
     cache, tmp_path: Path
 ) -> None:

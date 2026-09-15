@@ -126,6 +126,12 @@ jobs:
       - name: Check Python types
         shell: bash
         run: scripts/check-python-types
+      # One owner per fact: a SQL transaction must not span external work, and
+      # an artifact lock is never taken inside one. The scanner and its
+      # shrink-only baseline are pure stdlib, so this needs no project sync.
+      - name: Check coordination boundaries
+        shell: bash
+        run: python3 control/tests/coordination_boundaries.py
 
   rust-quality:
     name: Rust workspace lint

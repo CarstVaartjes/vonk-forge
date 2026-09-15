@@ -1,6 +1,11 @@
 # Approach to resilient Controller integrations
 
-Status: approved direction; implementation and acceptance remain pending.
+Status: approved direction. Phase 1 is implemented: the coordination
+boundaries are machine-checked by
+`control/tests/coordination_boundaries.py` and its shrink-only baseline
+`tools/coordination-baseline.json`, and the four audited SQL-over-storage
+edges are closed. Phase 2 (artifact availability and local checkpoints moving
+from SQL to managed storage) remains pending.
 
 This is a high-level approach, not a task breakdown. The
 [architecture overview](../architecture-overview.md) owns the strict state,
@@ -61,6 +66,15 @@ dependencies. Every wait has a visible cause, an owner, a resume condition, and
 a deadline that survives restart. Timeouts supplement these boundaries; they
 cannot replace a design that prevents cycles.
 
+`control/tests/coordination_boundaries.py` now enforces the two provable rules:
+a SQL transaction never spans external work, and an artifact lock is acquired
+outside a transaction, nonblockingly, and one at a time. CI runs it, and
+`tools/coordination-baseline.json` records the remaining sites with a written
+reason under a gate that fails on both a new site and a stale entry. The
+blocking `fcntl.flock` acquisitions and the nested lock pairs still listed
+there are the next coordination package: a nonblocking claim needs a
+reschedule protocol, not a flag change.
+
 Keep failures local to the affected request, object, source, or target.
 Independent eligible work continues. Recovery uses bounded concurrency and
 backoff, preserving partial transfers and verified results. Invalid contracts,
@@ -98,6 +112,21 @@ cached assets, and exact identities. Do not add dual readers/writers, legacy
 schema compatibility, another scheduler, or new infrastructure to bridge the
 change. Arbitrary jobs, hooks, and package upgrades do not acquire automatic
 replay merely because artifact preparation supports recovery.
+
+The bounded cutover is:
+
+1. **Model object availability.** An object's verification receipt moves to
+   managed storage beside the bytes it describes. SQL keeps the logical
+   `model_cache_sets` membership that binds a profile to an exact artifact-set
+   digest, and the `model_cache_artifacts` table is deleted with its model,
+   schema entry, and test fixtures. An object whose receipt is absent is
+   unavailable for admission even when bytes are present, and an object whose
+   receipt is present but whose bytes are gone is reported as a repair
+   blocker rather than admitted.
+2. **Image and build checkpoints.** The prepared runtime-image receipt and the
+   build/transfer checkpoint already have storage-side files; the remaining SQL
+   availability columns follow the same rule, leaving SQL with the exact
+   reference a fence conditionally accepts.
 
 ## Evidence of success
 
