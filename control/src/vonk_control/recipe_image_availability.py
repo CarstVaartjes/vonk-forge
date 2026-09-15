@@ -1553,6 +1553,7 @@ class RecipeImageAvailabilityService:
             identity = identity_key if isinstance(identity_key, str) else None
             with self._identity_lock(identity):
                 stored_image = payload.get("image_result")
+                receipt = None
                 if isinstance(stored_image, Mapping):
                     try:
                         receipt = RuntimeImageReceipt(**dict(stored_image))
@@ -1561,12 +1562,9 @@ class RecipeImageAvailabilityService:
                             "runtime_image.receipt_invalid",
                             "durable runtime image result is malformed",
                         ) from error
-                    image_available = self._storage.build_archive_available(
-                        receipt.oci_archive_sha256, receipt.image_bytes
-                    )
-                else:
-                    image_available = False
-                if not image_available:
+                if receipt is None or not self._storage.build_archive_available(
+                    receipt.oci_archive_sha256, receipt.image_bytes
+                ):
                     repair_payload = (
                         dict(payload) | {"force_download": True}
                         if isinstance(stored_image, Mapping)
