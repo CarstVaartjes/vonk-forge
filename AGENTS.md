@@ -12,7 +12,7 @@ frontier recipe runnable on local Spark capacity. Read
 [docs/engineering-principles.md](docs/engineering-principles.md) before making a
 structural choice. The short form:
 
-- **Simplicity:** one Compose application, one PostgreSQL authority, one current
+- **Simplicity:** one Compose application, one owner per fact, one current
   execution path per operation. Kubernetes, a service mesh, an event bus, custom
   microservices, and a mandatory Vault are explicit non-goals. GPU nodes run
   workloads, never ingress, databases, monitoring, or the admin UI.
@@ -26,6 +26,76 @@ structural choice. The short form:
 - **Every frontier recipe:** the curated library exists to make any model
   reproducible, not to restrict what can run. Missing assets are actionable
   cache blockers and never a problem deferred to a Spark.
+
+## State ownership and resilient recovery
+
+Read the [ownership boundary](docs/architecture-overview.md#state-ownership)
+before changing persistence. PostgreSQL remains the authority for identity,
+permissions, accepted catalog revisions, saved profiles, desired fleet state,
+operation intent, leases, cancellation, reservations, and audit. It coordinates
+API and worker decisions transactionally; LiteLLM also uses this PostgreSQL
+service through its own database. Replacing PostgreSQL is outside this change.
+
+The target architecture makes managed artifact storage authoritative for model
+files, image archives, verification manifests, and local download/build
+checkpoints. Self-descriptive records use canonical typed JSON beside the work.
+Do not independently maintain these facts in SQL and files. A derived index is
+disposable, rebuilt from its owner, and never a second admission authority.
+SQL may reference an exact artifact identity without owning its availability.
+Use a database only where its transactions, coordination, or queries reduce
+total complexity; do not build a second job scheduler out of JSON files.
+
+This is a target boundary, not a claim that the ownership cutover has shipped.
+Follow the [implementation plan](docs/plans/resilient-artifact-storage.md).
+Move each producer, reader, API projection, and meaningful test together, then
+remove its obsolete persistence path. Never add dual writers, fallback readers,
+or a schema-1 compatibility path to make the transition appear complete.
+
+- Existing valid artifacts are reused; compatible partial transfers resume.
+  A failed attempt or stale status must not permanently block a new download,
+  refresh, or rebuild. Preserve the last verified result until its replacement
+  is verified and published. Rebuilding may produce a different image digest;
+  never silently substitute it into a bound plan or running workload.
+- Recover automatically within current authorization, with bounded retry rates,
+  visible next attempts, and durable checkpoints. Reconcile exact effects before
+  retrying. A fresh explicit rebuild has a new request identity; retrying an
+  existing request preserves its identity. Cancellation and newer intent win.
+- Publish complete verified artifacts with crash-safe storage ordering and
+  atomic visibility. Serialize writers per artifact and fence stale attempts.
+  A JSON `running` field proves neither a live worker nor completed bytes.
+- Invalid contracts, denied access, revoked authority, and integrity failures
+  remain explicit blockers. Repair corrupt partial work under the managed
+  storage contract; never bless it as valid or weaken a check to keep moving.
+- Garbage collection must coordinate with authoritative references and active
+  work. An unavailable database or failed scan does not prove an object unused.
+  Artifact discovery cannot recreate users, grants, profiles, or authorization.
+- Test process death, restart, duplicate requests, cancellation, storage loss,
+  and eventual recovery through the real storage and worker boundaries. Keep
+  repository, deployment, and physical acceptance claims separate.
+
+### Deadlock prevention is an architectural requirement
+
+Follow the [coordination boundaries](docs/architecture-overview.md#coordination-and-deadlock-prevention).
+Every wait must name its dependency, owner, deadline, and resume condition.
+Waiting work releases execution slots and database transactions. A parent must
+never hold a slot its child needs, and a child inherits its parent's node
+ownership instead of competing for it. Reject dependency cycles before dispatch.
+
+Never acquire or wait for an artifact lock inside a SQL transaction. Artifact
+locks use nonblocking acquisition; busy work is rescheduled. The only permitted
+nesting is an artifact lock followed by a short, nonblocking SQL ownership
+check or lease renewal.
+SQL transactions acquire explicit and implicit locks in the documented common
+order, use bounded lock/statement/transaction budgets, and never span transfer,
+build, subprocess, external HTTP, child completion, or retry sleep. On conflict,
+roll back and release resources before scheduling a bounded retry. Deadlock or
+timeout recovery must preserve intent and partial work without broadening grants.
+
+An expired lease alone does not prove an old executor stopped. A new attempt
+must fence old results and reconcile exact effects before taking over. Scope
+failures to their owner; do not turn a busy artifact, malformed history row, or
+unavailable source into a barrier for unrelated eligible work. Verify these
+rules with concurrent PostgreSQL/process tests, not mocked locks or SQLite.
 
 ## Local Linux and container testing
 
@@ -155,7 +225,8 @@ npm ci --prefix control/web
 npm run build --prefix control/web
 
 # Rust wire structures: fail if they no longer match the Pydantic schemas.
-# This is the typify step, and it is a text comparison, so it needs no cargo.
+# This runs the typify code generator with cargo, then compares its output.
+# The generator runs on macOS too; it does not build the Linux-only agent.
 UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
   uv run --project control --frozen --with-editable . \
   python scripts/generate-agent-wire --check

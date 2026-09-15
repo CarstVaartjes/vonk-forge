@@ -1,5 +1,11 @@
 # Image transfer and cache
 
+This page describes the current transfer implementation. The target
+[ownership and coordination boundary](architecture-overview.md#state-ownership)
+and [implementation plan](plans/resilient-artifact-storage.md) move remaining
+SQL-owned artifact bookkeeping to managed storage. Existing native OCI caches
+and transfer behavior remain the starting point for that work.
+
 Registry images are prepared independently from model downloads. The Controller
 uses Skopeo to fetch up to six image layers concurrently, with three retries
 and exponential backoff for transient errors. Completed OCI blobs are shared

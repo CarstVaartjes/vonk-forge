@@ -32,6 +32,15 @@ Model and Recipe are the two **authoring** contracts. Operations, progress,
 telemetry, and device messages also need wire contracts; they do not become
 additional recipe documents for users to maintain.
 
+Storage ownership is separate from schema ownership. Follow the
+[architecture boundary](architecture-overview.md#state-ownership) and pending
+[storage plan](plans/resilient-artifact-storage.md): canonical typed artifact
+records will move to managed storage, while SQL keeps coordinated intent,
+authorization, exact references, and audit. A shared DTO is not permission to
+persist two authoritative copies of its availability or checkpoint fields.
+Regenerate connected clients/wire schemas when contracts change; validate
+filesystem records with the same canonical JSON semantics as other producers.
+
 ## Cache-first profile lifecycle
 
 The Controller/NAS cache is the trusted preparation authority for profiles. A

@@ -1,5 +1,11 @@
 # Vonk Forge Control Plane Experience Design
 
+> Historical product rationale. Current product requirements are summarized in
+> [PRODUCT.md](../../../PRODUCT.md); current persistence, coordination, and
+> execution boundaries are defined in the
+> [architecture overview](../../architecture-overview.md). Dated implementation
+> descriptions below do not authorize restoring retired architecture.
+
 **Date:** 2026-08-14
 **Status:** Approved by delegated operator judgment
 

@@ -26,7 +26,16 @@ Vonk Forge joins a curated model-and-recipe library to a trusted local NAS/Contr
 
 The control plane runs on one local computer with Docker Compose—a laptop, a NAS, or a local server. Sparks enroll through an outbound native agent; PostgreSQL owns fleet and operational state, while the local NAS/Controller model and recipe-image cache is authoritative for profile authoring and apply admission. Profile choices must come from that cache and resolve to exact immutable identities. Routine operation does not require SSH, Git, direct browser-to-Spark access, or manually edited agent configuration. Models can have multiple immutable recipe revisions and topologies. A recipe may be installed on several complete Spark groups and may be running on zero or more groups.
 
-The approved source briefs remain authoritative product history and requirements:
+Current architecture and storage ownership are defined in
+[the architecture overview](docs/architecture-overview.md). PostgreSQL owns
+coordinated intent and security; the target managed-storage boundary owns
+artifact availability and local checkpoints. The
+[implementation plan](docs/plans/resilient-artifact-storage.md) tracks the
+cutover and deadlock-prevention evidence. Waiting work must leave resources
+available to its dependencies, and failed work must not block unrelated work.
+
+The retained source briefs explain product rationale and requirements. Their
+dated implementation descriptions do not override the current architecture:
 
 - `docs/superpowers/specs/2026-08-14-control-plane-experience-design.md`
 - `docs/superpowers/specs/2026-08-17-fleet-library-product-simplification-design.md`

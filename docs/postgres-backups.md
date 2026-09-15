@@ -17,6 +17,17 @@ A dump is consistent within each database; it is not an atomic snapshot across
 all databases. For a coordinated maintenance snapshot, stop application writers
 before restarting PostgreSQL to trigger its startup backup.
 
+## Backup scope
+
+PostgreSQL restores control intent, identities, permissions, and references.
+It does not restore model/image bytes. The planned
+[managed-storage ownership boundary](architecture-overview.md#state-ownership)
+also keeps artifact manifests and local checkpoints outside database dumps.
+Optional artifact backups must preserve those records together with their data
+through a consistent snapshot or quiesced writers. A surviving artifact cannot
+recreate a lost grant, profile, or approval. See the
+[recovery approach](plans/resilient-artifact-storage.md#4-converge-through-the-normal-operating-path).
+
 ## Replacing a container
 
 A normal Compose redeployment reuses `postgres-data`; no restore is needed.

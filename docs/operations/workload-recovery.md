@@ -1,5 +1,12 @@
 # Workload recovery
 
+This runbook describes implemented workload recovery. The
+[coordination architecture](../architecture-overview.md#coordination-and-deadlock-prevention)
+sets the required lock and scheduling boundaries; the
+[implementation plan](../plans/resilient-artifact-storage.md) tracks enforcement
+and artifact/build recovery work that remains pending. That plan does not make
+arbitrary jobs, hooks, or upgrades safe to replay.
+
 An accepted workload request remains the owner of its preparation, installation,
 runtime and route work until it completes, is cancelled, or is superseded by a
 newer request on the same Sparks. Temporary failures keep that request's identity

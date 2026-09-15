@@ -13,6 +13,8 @@ require routine SSH.
 | Install a controller and first Spark | [Public installation guide](https://vonkforge.ai/install) |
 | Understand what is public and what stays local | [Architecture overview](architecture-overview.md) |
 | Understand the engineering stance | [Engineering principles](engineering-principles.md) |
+| Understand state ownership and deadlock prevention | [Coordination boundaries](architecture-overview.md#coordination-and-deadlock-prevention) |
+| Implement resilient artifact storage | [Storage and coordination plan](plans/resilient-artifact-storage.md) |
 | Use the complete terminal interface | [`vonkctl` guide](runbooks/vonkctl.md) |
 | Deploy or upgrade the Docker Compose project | [Controller-host deployment](../deploy/compose/README.md) |
 | Configure Tailscale before first install | [Tailscale fresh-install preflight](runbooks/tailscale.md#fresh-install-preflight) |
@@ -36,6 +38,14 @@ flowchart LR
   audit state. The trusted Controller/NAS cache owns the exact verified model
   artifact sets and recipe images used by profile choices and apply. It remains
   usable without a hosted catalog or Git remote.
+- The target [ownership boundary](architecture-overview.md#state-ownership)
+  keeps control intent, permissions, coordination, and audit in PostgreSQL while
+  moving physical artifact state and local checkpoints to self-descriptive
+  managed storage. The implementation plan marks that cutover as pending.
+  Derived indexes are disposable; they do not create another authority.
+- Coordination has strict transaction, lock, and resource boundaries: no SQL
+  transaction waits for an artifact lock or external work, waiting parents
+  release execution slots, and children inherit their parent's node ownership.
 - The public recipe library contains immutable metadata and deterministic source
   contexts—not images, weights, credentials, or fleet state.
 - Caddy is the private local ingress. Tailscale is the default remote-access
