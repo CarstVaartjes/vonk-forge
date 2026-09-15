@@ -128,8 +128,7 @@ def _public_host(value: str) -> bool:
 def _validate_options(options: RecipeBuildOptions) -> None:
     contexts = [item.name for item in options.additional_contexts]
     if len(set(contexts)) != len(contexts) or any(
-        not _bundle_path(item.path)
-        for item in options.additional_contexts
+        not _bundle_path(item.path) for item in options.additional_contexts
     ):
         raise ValueError("additional build contexts are invalid")
     for entries in (options.annotations, options.labels, options.layer_labels):
@@ -251,9 +250,7 @@ class RecipeBuildRequest(WireModel):
     def validate_execution_policy(self) -> RecipeBuildRequest:
         if not _bundle_path(self.dockerfile):
             raise ValueError("build Dockerfile path is invalid")
-        if (
-            any(capability not in _CAPABILITIES for capability in self.capabilities)
-        ):
+        if any(capability not in _CAPABILITIES for capability in self.capabilities):
             raise ValueError("capabilities are not allowed")
         if (
             len(set(self.capabilities)) != len(self.capabilities)

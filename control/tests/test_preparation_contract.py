@@ -156,15 +156,11 @@ def test_reusable_gpu_exception_requires_compatibility_artifact() -> None:
     ("mutate", "message"),
     [
         (
-            lambda value: value["model"]["controller"].update(
-                verified_sha256="7" * 64
-            ),
+            lambda value: value["model"]["controller"].update(verified_sha256="7" * 64),
             "Controller model digest",
         ),
         (
-            lambda value: value["model"]["targets"][0].update(
-                verified_sha256="7" * 64
-            ),
+            lambda value: value["model"]["targets"][0].update(verified_sha256="7" * 64),
             "target model digest",
         ),
         (
@@ -181,7 +177,9 @@ def test_reusable_gpu_exception_requires_compatibility_artifact() -> None:
         ),
     ],
 )
-def test_ready_preparation_rejects_wrong_verified_identity(mutate, message: str) -> None:
+def test_ready_preparation_rejects_wrong_verified_identity(
+    mutate, message: str
+) -> None:
     document = _ready_document()
     mutate(document)
     with pytest.raises(ValidationError, match=message):

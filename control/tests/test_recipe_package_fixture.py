@@ -67,19 +67,34 @@ def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_p
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.url.path)
         if request.url.path.endswith("index.json"):
-            return httpx.Response(200, headers={"content-type": "application/json"}, content=index_path.read_bytes())
-        return httpx.Response(200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=(fixture / Path(request.url.path).name).read_bytes())
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                content=index_path.read_bytes(),
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": PACKAGE_MEDIA_TYPE},
+            content=(fixture / Path(request.url.path).name).read_bytes(),
+        )
 
     cache = tmp_path / "packages"
-    client = RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler))
+    client = RecipePackageClient(
+        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+    )
     snapshot = client.list()
     client.prepare(snapshot)
     assert len(snapshot.items) == expected_recipe_count
-    assert len([path for path in calls if path.endswith(".tar.gz")]) == expected_recipe_count
+    assert (
+        len([path for path in calls if path.endswith(".tar.gz")])
+        == expected_recipe_count
+    )
     client.close()
 
     calls.clear()
-    restarted = RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler))
+    restarted = RecipePackageClient(
+        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+    )
     restarted.prepare(restarted.list())
     assert calls == ["/v1/recipe-library/index.json"]
     restarted.close()
@@ -124,11 +139,19 @@ def test_publisher_package_binds_manifest_metadata_identity_and_digest(
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.url.path)
         if request.url.path.endswith("index.json"):
-            return httpx.Response(200, headers={"content-type": "application/json"}, content=_canonical(index) + b"\n")
-        return httpx.Response(200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=tampered)
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                content=_canonical(index) + b"\n",
+            )
+        return httpx.Response(
+            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=tampered
+        )
 
     client = RecipePackageClient(
-        "http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler)
+        "http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(handler),
     )
     with pytest.raises(RecipePackageError, match="invalid"):
         client.prepare(client.list())
@@ -137,7 +160,9 @@ def test_publisher_package_binds_manifest_metadata_identity_and_digest(
 
 
 def _canonical(value: object) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
 
 
 def _repack(files: dict[str, bytes]) -> bytes:
@@ -180,7 +205,11 @@ def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
     manifest["total_bytes"] = sum(int(entry["size"]) for entry in manifest["files"])
     files["manifest.json"] = _canonical(manifest) + b"\n"
     changed = _repack(files)
-    return changed, {"sha256": hashlib.sha256(changed).hexdigest(), "expected_bytes": len(changed), "recipe_content_sha256": digest}
+    return changed, {
+        "sha256": hashlib.sha256(changed).hexdigest(),
+        "expected_bytes": len(changed),
+        "recipe_content_sha256": digest,
+    }
 
 
 def _active_recipe_state(session) -> dict[str, tuple[str, str, int]]:
@@ -216,7 +245,9 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.url.path)
         if request.url.path.endswith("index.json"):
-            return httpx.Response(200, headers={"content-type": "application/json"}, content=index_bytes)
+            return httpx.Response(
+                200, headers={"content-type": "application/json"}, content=index_bytes
+            )
         name = Path(request.url.path).name
         return httpx.Response(
             200,
@@ -235,7 +266,9 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     )
     package_overrides: dict[str, bytes] = {}
     cache = tmp_path / "packages"
-    client = RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler))
+    client = RecipePackageClient(
+        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+    )
     sync = ManagedRecipeCatalogSyncService(
         sessions,
         catalog=catalog,
@@ -243,33 +276,46 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),
     )
 
-    first = sync.sync(request_key="00000000-0000-0000-0000-000000000001", trigger="manual", actor="test")
+    first = sync.sync(
+        request_key="00000000-0000-0000-0000-000000000001",
+        trigger="manual",
+        actor="test",
+    )
     assert first.state == "current"
     assert first.imported_count == expected_recipe_count
-    assert len([path for path in calls if path.endswith(".tar.gz")]) == expected_recipe_count
+    assert (
+        len([path for path in calls if path.endswith(".tar.gz")])
+        == expected_recipe_count
+    )
     with sessions() as session:
-        assert session.scalar(
-            select(func.count())
-            .select_from(CatalogDocumentRevision)
-            .where(
-                CatalogDocumentRevision.kind == "model",
-                CatalogDocumentRevision.state == "active",
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.kind == "model",
+                    CatalogDocumentRevision.state == "active",
+                )
             )
-        ) == expected_model_count
-        assert session.scalar(
-            select(func.count())
-            .select_from(CatalogDocumentRevision)
-            .where(
-                CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.state == "active",
+            == expected_model_count
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                )
             )
-        ) == expected_recipe_count
+            == expected_recipe_count
+        )
         assert session.scalar(select(func.count()).select_from(CatalogDocument)) == (
             expected_model_count + expected_recipe_count
         )
-        assert session.scalar(select(func.count()).select_from(CatalogDocumentHead)) == (
-            expected_model_count + expected_recipe_count
-        )
+        assert session.scalar(
+            select(func.count()).select_from(CatalogDocumentHead)
+        ) == (expected_model_count + expected_recipe_count)
         model_reference_count = session.scalar(
             select(func.count()).select_from(CatalogRecipeModelReference)
         )
@@ -278,16 +324,24 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     changed_index = copy.deepcopy(original_index)
     changed_row = require_sequence(changed_index["recipes"], "catalog index recipes")[0]
     assert isinstance(changed_row, dict)
-    original_package = (fixture / Path(changed_row["package"]["path"]).name).read_bytes()
+    original_package = (
+        fixture / Path(changed_row["package"]["path"]).name
+    ).read_bytes()
     changed_bytes, changed_descriptor = _changed_package(original_package)
-    changed_row["document"]["metadata"]["description"] += " (package sync fixture revision)"
+    changed_row["document"]["metadata"]["description"] += (
+        " (package sync fixture revision)"
+    )
     changed_row["content_sha256"] = changed_descriptor["recipe_content_sha256"]
     changed_row["package"].update(changed_descriptor)
     package_overrides[Path(changed_row["package"]["path"]).name] = changed_bytes
     changed_index["source_commit"] = "f" * 40
     index_bytes = _canonical(changed_index) + b"\n"
     calls.clear()
-    second = sync.sync(request_key="00000000-0000-0000-0000-000000000002", trigger="automatic", actor="test")
+    second = sync.sync(
+        request_key="00000000-0000-0000-0000-000000000002",
+        trigger="automatic",
+        actor="test",
+    )
     assert second.state == "current"
     assert second.updated_count == 1
     assert len([path for path in calls if path.endswith(".tar.gz")]) == 1
@@ -343,9 +397,13 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     failing_index["source_commit"] = "d" * 40
     failing_row = require_sequence(failing_index["recipes"], "catalog index recipes")[1]
     assert isinstance(failing_row, dict)
-    failing_original = (fixture / Path(failing_row["package"]["path"]).name).read_bytes()
+    failing_original = (
+        fixture / Path(failing_row["package"]["path"]).name
+    ).read_bytes()
     failing_bytes, failing_descriptor = _changed_package(failing_original)
-    failing_row["document"]["metadata"]["description"] += " (package sync fixture revision)"
+    failing_row["document"]["metadata"]["description"] += (
+        " (package sync fixture revision)"
+    )
     failing_row["content_sha256"] = failing_descriptor["recipe_content_sha256"]
     failing_row["package"].update(failing_descriptor)
     package_overrides[Path(failing_row["package"]["path"]).name] = failing_bytes
@@ -354,14 +412,18 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
 
     def fail_late(*args, **kwargs):
         if kwargs.get("source_path") == failing_row["source_path"]:
-            raise CatalogSyncError("fixture.apply_failed", "injected package apply failure")
+            raise CatalogSyncError(
+                "fixture.apply_failed", "injected package apply failure"
+            )
         return original_import(*args, **kwargs)
 
     monkeypatch.setattr(catalog, "import_recipe_library", fail_late)
     failing = ManagedRecipeCatalogSyncService(
         sessions,
         catalog=catalog,
-        reader=RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)),
+        reader=RecipePackageClient(
+            "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+        ),
         clock=sync._clock,
     )
     failing_result = failing.sync(
@@ -379,7 +441,9 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     current_row = require_sequence(changed_index["recipes"], "catalog index recipes")[0]
     assert isinstance(current_row, dict)
     offline = load_recipe_package(
-        cache / current_row["package"]["sha256"][:2] / f"{current_row['package']['sha256']}.tar.gz",
+        cache
+        / current_row["package"]["sha256"][:2]
+        / f"{current_row['package']['sha256']}.tar.gz",
         package_sha256=current_row["package"]["sha256"],
         publisher=current_row["document"]["identity"]["publisher"],
         slug=current_row["document"]["identity"]["slug"],

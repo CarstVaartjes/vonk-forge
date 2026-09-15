@@ -92,7 +92,9 @@ class InstallPlan:
 
     @property
     def compiled_plan_by_node(self) -> dict[str, dict[str, object]]:
-        return {node_id: dict(value) for node_id, value in self.compiled_execution_plans}
+        return {
+            node_id: dict(value) for node_id, value in self.compiled_execution_plans
+        }
 
 
 class InstallPlanConflict(RuntimeError):
@@ -138,7 +140,8 @@ class InstallAdmissionService:
         *,
         inventory_max_age: int = 300,
         disk_floor_bytes: int = 10_000_000_000,
-        compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]] | None = None,
+        compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]]
+        | None = None,
     ) -> None:
         self._sessions = sessions
         self._inventory = InventoryRepository(sessions)
@@ -180,7 +183,9 @@ class InstallAdmissionService:
             source_build = _is_source_build(revision.document)
             if source_build:
                 if build is None:
-                    raise ValueError("successful recipe build does not match the mapping")
+                    raise ValueError(
+                        "successful recipe build does not match the mapping"
+                    )
                 canonical_build_revision = session.get(
                     CatalogDocumentRevision, build.recipe_revision_id
                 )
@@ -191,9 +196,12 @@ class InstallAdmissionService:
                     or canonical_build_revision is None
                     or canonical_build_revision.kind != "recipe"
                     or canonical_build_revision.state != "active"
-                    or canonical_build_revision.content_digest != revision.content_digest
+                    or canonical_build_revision.content_digest
+                    != revision.content_digest
                 ):
-                    raise ValueError("successful recipe build does not match the mapping")
+                    raise ValueError(
+                        "successful recipe build does not match the mapping"
+                    )
             elif build is not None:
                 raise ValueError("published image install cannot use a recipe build")
             mapping_nodes = tuple(
@@ -212,10 +220,19 @@ class InstallAdmissionService:
                     )
                 )
             )
-            preflight_request = recipe_requirements(revision.document, source_build=False, minimum_free_bytes=self._disk_floor)
+            preflight_request = recipe_requirements(
+                revision.document,
+                source_build=False,
+                minimum_free_bytes=self._disk_floor,
+            )
             runtime_blockers_by_node = {
                 node.node_id: admission_blockers(
-                    preflight_request, latest_result(session, node.node_id, requirements_sha256=request_digest(preflight_request)),
+                    preflight_request,
+                    latest_result(
+                        session,
+                        node.node_id,
+                        requirements_sha256=request_digest(preflight_request),
+                    ),
                     current_fingerprint=node_fingerprint(node.capabilities),
                     now=int(now.timestamp()),
                 )
@@ -253,7 +270,10 @@ class InstallAdmissionService:
                     "exact model license authority is unavailable"
                 )
             compiled_plan_error: str | None = None
-            if compiled_execution_plans is None and self._compiled_plan_provider is not None:
+            if (
+                compiled_execution_plans is None
+                and self._compiled_plan_provider is not None
+            ):
                 try:
                     compiled_execution_plans = self._compiled_plan_provider(
                         session=session,
@@ -357,13 +377,15 @@ class InstallAdmissionService:
             if legal_admission.warning is not None:
                 warnings.append(AdmissionReason(*legal_admission.warning))
             if (
-                (self._compiled_plan_provider is not None or compiled_plan_error is not None)
-                and mapping_node.node_id not in compiled_plan_by_node
-            ):
+                self._compiled_plan_provider is not None
+                or compiled_plan_error is not None
+            ) and mapping_node.node_id not in compiled_plan_by_node:
                 detail = "Controller-issued compiled execution plan is unavailable."
                 if compiled_plan_error:
                     detail = f"{detail} {compiled_plan_error}"
-                blockers.append(AdmissionReason("install.compiled_plan_unavailable", detail))
+                blockers.append(
+                    AdmissionReason("install.compiled_plan_unavailable", detail)
+                )
             role = role_by_name.get(mapping_node.role)
             if role is None or not isinstance(role.get("resources"), dict):
                 raise TypeError("mapping role is absent from recipe topology")
@@ -393,11 +415,7 @@ class InstallAdmissionService:
                     continue
                 digest = artifact.get("sha256")
                 size = artifact.get("size_bytes")
-                if (
-                    isinstance(digest, str)
-                    and type(size) is int
-                    and size >= 0
-                ):
+                if isinstance(digest, str) and type(size) is int and size >= 0:
                     previous = artifact_sizes.setdefault(digest, size)
                     if previous != size:
                         blockers.append(
@@ -508,9 +526,8 @@ class InstallAdmissionService:
                 )
             )
             reused = reused_image + reused_artifacts
-            required_download = (
-                max(0, actual_artifact_bytes - reused_artifacts)
-                + max(0, (image_bytes or 0) - reused_image)
+            required_download = max(0, actual_artifact_bytes - reused_artifacts) + max(
+                0, (image_bytes or 0) - reused_image
             )
             required = (
                 required_download
@@ -605,8 +622,18 @@ class InstallAdmissionService:
             mapping is None
             or mapping.generation != plan.mapping_generation
             or mapping.state != "ready"
-            or (source_build and (build is None or build.state != "succeeded" or build.image_digest != plan.image_digest))
-            or (not source_build and (build is not None or not _compiled_plan_image_matches(plan)))
+            or (
+                source_build
+                and (
+                    build is None
+                    or build.state != "succeeded"
+                    or build.image_digest != plan.image_digest
+                )
+            )
+            or (
+                not source_build
+                and (build is not None or not _compiled_plan_image_matches(plan))
+            )
         ):
             raise InstallPlanConflict("mapping or build changed while reserving")
         mapping_nodes = tuple(
@@ -819,9 +846,7 @@ def _primary_model_sha256(document: Mapping[str, object]) -> str:
         else None
     )
     model = (
-        model_selection.get("model")
-        if isinstance(model_selection, Mapping)
-        else None
+        model_selection.get("model") if isinstance(model_selection, Mapping) else None
     )
     digest = model.get("content_sha256") if isinstance(model, Mapping) else None
     if (
@@ -842,8 +867,10 @@ def _recipe_image_digest(document: Mapping[str, object]) -> str:
     execution = document.get("execution")
     image = execution.get("image") if isinstance(execution, Mapping) else None
     digest = image.get("digest") if isinstance(image, Mapping) else None
-    if isinstance(digest, str) and len(digest) == 64 and all(
-        character in "0123456789abcdef" for character in digest
+    if (
+        isinstance(digest, str)
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
     ):
         return f"sha256:{digest}"
     if isinstance(digest, str) and digest.startswith("sha256:") and len(digest) == 71:
@@ -857,7 +884,11 @@ def _compiled_image_bytes(
     values: set[int] = set()
     for payload in compiled_plans.values():
         runtime_image = payload.get("runtime_image")
-        value = runtime_image.get("image_bytes") if isinstance(runtime_image, Mapping) else None
+        value = (
+            runtime_image.get("image_bytes")
+            if isinstance(runtime_image, Mapping)
+            else None
+        )
         if type(value) is int and value > 0:
             values.add(value)
     return values.pop() if len(values) == 1 else None
@@ -869,7 +900,11 @@ def _compiled_image_digest(
     values: set[str] = set()
     for payload in compiled_plans.values():
         runtime_image = payload.get("runtime_image")
-        value = runtime_image.get("image_digest") if isinstance(runtime_image, Mapping) else None
+        value = (
+            runtime_image.get("image_digest")
+            if isinstance(runtime_image, Mapping)
+            else None
+        )
         if isinstance(value, str) and value.startswith("sha256:") and len(value) == 71:
             values.add(value)
     return values.pop() if len(values) == 1 else None

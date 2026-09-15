@@ -220,10 +220,12 @@ class RecipeRunObservationGrantRequest(RecipeRunObservationIdentity):
         return self
 
     def observation_identity(self) -> dict[str, object]:
-        return RecipeRunObservationIdentity.model_validate({
-            name: getattr(self, name)
-            for name in RecipeRunObservationIdentity.model_fields
-        }).model_dump(mode="json")
+        return RecipeRunObservationIdentity.model_validate(
+            {
+                name: getattr(self, name)
+                for name in RecipeRunObservationIdentity.model_fields
+            }
+        ).model_dump(mode="json")
 
 
 class RecipeRunObservationGrantWire(WireModel):

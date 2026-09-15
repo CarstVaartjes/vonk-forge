@@ -5,6 +5,7 @@ validated RecipeDefinition/ModelDefinition projections and a package handle;
 image, cache, security and mount policy are derived here rather than authored
 in recipe documents.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -73,7 +74,9 @@ _PLATFORM_ENV_NAMES = frozenset(
 
 
 def _canonical_json(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
 
 
 def _digest(value: object) -> str:
@@ -100,7 +103,9 @@ def _recipe(value: object) -> RecipeDefinition:
             raise TypeError
         return RecipeDefinition.model_validate(raw)
     except Exception as error:
-        raise HarnessCompileError("recipe does not satisfy RecipeDefinition v2") from error
+        raise HarnessCompileError(
+            "recipe does not satisfy RecipeDefinition v2"
+        ) from error
 
 
 def _models(values: object) -> tuple[ModelDefinition, ...]:
@@ -117,7 +122,9 @@ def _models(values: object) -> tuple[ModelDefinition, ...]:
                 raise TypeError
             result.append(ModelDefinition.model_validate(raw))
         except Exception as error:
-            raise HarnessCompileError("canonical model projection is invalid") from error
+            raise HarnessCompileError(
+                "canonical model projection is invalid"
+            ) from error
     return tuple(result)
 
 
@@ -149,7 +156,11 @@ def _scalar(value: object, label: str) -> str:
 def _validate_argv_size(command: Sequence[str]) -> None:
     total = 0
     for item in command:
-        if type(item) is not str or len(item.encode("utf-8")) > _MAX_ARGV_TOKEN_BYTES or "\x00" in item:
+        if (
+            type(item) is not str
+            or len(item.encode("utf-8")) > _MAX_ARGV_TOKEN_BYTES
+            or "\x00" in item
+        ):
             raise HarnessCompileError("compiled harness argv token exceeds its bound")
         total += len(item.encode("utf-8"))
     if total > _MAX_ARGV_BYTES:
@@ -178,20 +189,29 @@ def _image(recipe: RecipeDefinition, package: object) -> tuple[str, str]:
     if type(digest) is str and digest.startswith("sha256:"):
         digest = digest[7:]
     if type(digest) is not str or _DIGEST.fullmatch(digest) is None:
-        raise HarnessCompileError("source-build recipe requires an exact built image receipt")
+        raise HarnessCompileError(
+            "source-build recipe requires an exact built image receipt"
+        )
     platform = _package_value(package, "platform", "image_platform")
     if platform is not None and platform != "linux/arm64":
         raise HarnessCompileError("built image receipt must target linux/arm64")
     reference = _package_value(package, "image_reference", "reference")
     if reference is None:
-        repository = _package_value(package, "image_repository", "repository") or "localhost/vonk/recipe-build"
+        repository = (
+            _package_value(package, "image_repository", "repository")
+            or "localhost/vonk/recipe-build"
+        )
         reference = f"{repository}@sha256:{digest}"
     if type(reference) is not str or not reference.endswith(f"@sha256:{digest}"):
-        raise HarnessCompileError("built image receipt reference does not match its digest")
+        raise HarnessCompileError(
+            "built image receipt reference does not match its digest"
+        )
     return reference, digest
 
 
-def _settings(recipe: RecipeDefinition, supplied: Mapping[str, object] | None) -> dict[str, object]:
+def _settings(
+    recipe: RecipeDefinition, supplied: Mapping[str, object] | None
+) -> dict[str, object]:
     settings = recipe.settings
     values: dict[str, object] = {}
     for name in ("context_tokens", "concurrency", "max_batch_tokens"):
@@ -200,7 +220,9 @@ def _settings(recipe: RecipeDefinition, supplied: Mapping[str, object] | None) -
             values[name] = setting.value
     values.update({name: setting.value for name, setting in settings.knobs.items()})
     if supplied is not None:
-        if not isinstance(supplied, Mapping) or any(type(name) is not str for name in supplied):
+        if not isinstance(supplied, Mapping) or any(
+            type(name) is not str for name in supplied
+        ):
             raise HarnessCompileError("canonical settings are invalid")
         unknown = set(supplied) - set(values)
         if unknown:
@@ -220,10 +242,15 @@ def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str
             or "/../" in entrypoint[0]
             or "//" in entrypoint[0]
         ):
-            raise HarnessCompileError("recipe entrypoint is outside the trusted harness path")
+            raise HarnessCompileError(
+                "recipe entrypoint is outside the trusted harness path"
+            )
     elif executable not in canonical_harness(recipe.runtime.engine).executables:
         raise HarnessCompileError("recipe entrypoint does not match its engine harness")
-    if any(type(item) is not str or not item or len(item) > 4096 or "\x00" in item for item in entrypoint):
+    if any(
+        type(item) is not str or not item or len(item) > 4096 or "\x00" in item
+        for item in entrypoint
+    ):
         raise HarnessCompileError("recipe entrypoint contains invalid argv data")
     result = list(entrypoint[1:])
     if len(recipe.runtime.arguments) > _MAX_RUNTIME_ARGUMENTS:
@@ -231,10 +258,14 @@ def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str
     for argument in recipe.runtime.arguments:
         name = argument.name.removeprefix("--")
         if _SAFE_ARG_NAME.fullmatch(name) is None:
-            raise HarnessCompileError(f"recipe argument name is invalid: {argument.name}")
+            raise HarnessCompileError(
+                f"recipe argument name is invalid: {argument.name}"
+            )
         # Preserve engine option spelling exactly; argv is not shell text.
         flag = f"--{name}"
-        value = argument.value if argument.setting is None else settings[argument.setting]
+        value = (
+            argument.value if argument.setting is None else settings[argument.setting]
+        )
         if type(value) is bool:
             if value:
                 result.append(flag)
@@ -248,10 +279,19 @@ def _environment(recipe: RecipeDefinition) -> tuple[tuple[str, str], ...]:
     supplied: list[tuple[str, str]] = []
     for item in recipe.runtime.environment:
         if item.secret is not None:
-            raise HarnessCompileError("runtime secret requires the platform secret projection")
-        if _SAFE_ENV_NAME.fullmatch(item.name) is None or item.name in _PLATFORM_ENV_NAMES:
-            raise HarnessCompileError(f"recipe environment is platform-owned or invalid: {item.name}")
-        supplied.append((item.name, _scalar(item.value, f"recipe environment {item.name}")))
+            raise HarnessCompileError(
+                "runtime secret requires the platform secret projection"
+            )
+        if (
+            _SAFE_ENV_NAME.fullmatch(item.name) is None
+            or item.name in _PLATFORM_ENV_NAMES
+        ):
+            raise HarnessCompileError(
+                f"recipe environment is platform-owned or invalid: {item.name}"
+            )
+        supplied.append(
+            (item.name, _scalar(item.value, f"recipe environment {item.name}"))
+        )
     try:
         reject_recipe_environment(recipe.runtime.engine, supplied)
         return effective_environment(recipe.runtime.engine, supplied)
@@ -259,7 +299,9 @@ def _environment(recipe: RecipeDefinition) -> tuple[tuple[str, str], ...]:
         raise HarnessCompileError(str(error)) from error
 
 
-def _model_mounts(recipe: RecipeDefinition, models: tuple[ModelDefinition, ...], role: str) -> tuple[tuple[dict[str, object], HarnessMount], ...]:
+def _model_mounts(
+    recipe: RecipeDefinition, models: tuple[ModelDefinition, ...], role: str
+) -> tuple[tuple[dict[str, object], HarnessMount], ...]:
     try:
         validate_recipe_models(recipe, models)
     except ContractResolutionError as error:
@@ -288,22 +330,28 @@ def _model_mounts(recipe: RecipeDefinition, models: tuple[ModelDefinition, ...],
                     read_only=True,
                 ),
             )
-            selected.append((
-                {
-                    "id": selector.id,
-                    "selection_id": selection.id,
-                    "file_id": selector.file_id,
-                    "path": files[selector.file_id].path,
-                    "roles": list(selector.roles),
-                    "mount": {"source": source, "target": selector.mount.target, "read_only": True},
-                    "model": {
-                        "publisher": selection.model.publisher,
-                        "slug": selection.model.slug,
-                        "content_sha256": selection.model.content_sha256,
+            selected.append(
+                (
+                    {
+                        "id": selector.id,
+                        "selection_id": selection.id,
+                        "file_id": selector.file_id,
+                        "path": files[selector.file_id].path,
+                        "roles": list(selector.roles),
+                        "mount": {
+                            "source": source,
+                            "target": selector.mount.target,
+                            "read_only": True,
+                        },
+                        "model": {
+                            "publisher": selection.model.publisher,
+                            "slug": selection.model.slug,
+                            "content_sha256": selection.model.content_sha256,
+                        },
                     },
-                },
-                mount,
-            ))
+                    mount,
+                )
+            )
     if not selected:
         raise HarnessCompileError("mapped role has no selected model files")
     return tuple(selected)
@@ -342,7 +390,9 @@ def _distributed_args(
             command.extend(("--tensor-parallel-size", str(parallelism.tensor)))
         if not has("pipeline-parallel-size"):
             command.extend(("--pipeline-parallel-size", str(parallelism.pipeline)))
-        if parallelism.backend in {"mp", "ray"} and not has("distributed-executor-backend"):
+        if parallelism.backend in {"mp", "ray"} and not has(
+            "distributed-executor-backend"
+        ):
             command.extend(("--distributed-executor-backend", parallelism.backend))
         if not has("nnodes"):
             command.extend(("--nnodes", str(topology.node_count)))
@@ -383,7 +433,11 @@ def compile_canonical_harness(
     if slug not in _BUILTINS:
         raise HarnessCompileError(f"unknown execution harness: {slug}")
     topology = recipe.topology
-    if role not in {item.name for item in topology.roles} or rank < 0 or rank >= topology.node_count:
+    if (
+        role not in {item.name for item in topology.roles}
+        or rank < 0
+        or rank >= topology.node_count
+    ):
         raise HarnessCompileError("mapped topology role or rank is invalid")
     role_decl = next(item for item in topology.roles if item.name == role)
     offset = 0
@@ -437,8 +491,14 @@ def compile_canonical_harness(
         capabilities=(),
         devices=devices,
         model_mounts=tuple(model_mounts),
-        output_mount=HarnessMount("/run/vonk/outputs", "/outputs", read_only=False, isolated=True),
-        input_mount=(HarnessMount("/run/vonk/inputs", "/inputs", read_only=True, isolated=True) if interface.adapter != "openai" else None),
+        output_mount=HarnessMount(
+            "/run/vonk/outputs", "/outputs", read_only=False, isolated=True
+        ),
+        input_mount=(
+            HarnessMount("/run/vonk/inputs", "/inputs", read_only=True, isolated=True)
+            if interface.adapter != "openai"
+            else None
+        ),
         environment=environment,
         writable_paths=writable_paths(slug),
         telemetry=telemetry_contract(slug),

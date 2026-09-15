@@ -41,8 +41,7 @@ def _api_url() -> str:
 
 def _resolve_url(path: str) -> str:
     return (
-        f"https://huggingface.co/{REPOSITORY}/resolve/{REVISION}/{path}"
-        "?download=true"
+        f"https://huggingface.co/{REPOSITORY}/resolve/{REVISION}/{path}?download=true"
     )
 
 
@@ -181,9 +180,7 @@ def test_generation_rejects_revision_mismatch() -> None:
     )
 
     with pytest.raises(ManifestError, match="revision mismatch"):
-        generate(
-            REPOSITORY, REVISION, opener=opener
-        )
+        generate(REPOSITORY, REVISION, opener=opener)
 
     assert opener.requested == [api_url]
 
@@ -202,9 +199,10 @@ def test_generation_uses_lfs_hashes_and_fetches_only_non_lfs_files() -> None:
         "sha256": f"{1:064x}",
         "blob_id": f"{1:040x}",
     }
-    assert entries["encoding/encoding_dsv4.py"]["sha256"] == hashlib.sha256(
-        b"encoder\n"
-    ).hexdigest()
+    assert (
+        entries["encoding/encoding_dsv4.py"]["sha256"]
+        == hashlib.sha256(b"encoder\n").hexdigest()
+    )
     assert manifest["file_count"] == 74
     assert manifest["weight_shard_count"] == 48
     assert manifest["safetensors_bytes"] == 1_656
@@ -292,9 +290,7 @@ def test_verification_rejects_unmanifested_entries_and_unsafe_symlinks(
     _materialize(tmp_path, files)
     (tmp_path / "rogue.txt").write_text("unexpected", encoding="utf-8")
     (tmp_path / "rogue-directory").mkdir()
-    (tmp_path / "rogue-directory/rogue-link").symlink_to(
-        tmp_path / "extra-00.txt"
-    )
+    (tmp_path / "rogue-directory/rogue-link").symlink_to(tmp_path / "extra-00.txt")
     (tmp_path / "encoding/rogue-link").symlink_to(tmp_path / "extra-00.txt")
 
     report = verify(manifest, tmp_path)

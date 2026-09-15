@@ -755,7 +755,9 @@ class TelemetryMaintenance:
                 key=metric.key,
                 scope=metric.scope,
                 device_id=metric.device_id,
-                process_id=(None if metric.process_id is None else int(metric.process_id)),
+                process_id=(
+                    None if metric.process_id is None else int(metric.process_id)
+                ),
                 process_name=metric.process_name,
                 interface_name=metric.interface_name,
                 run_id=metric.run_id,
@@ -782,9 +784,7 @@ class TelemetryMaintenance:
                     current,
                     count=count,
                     minimum=min(current.minimum, incoming.minimum),
-                    mean=(
-                        current.mean * current.count + incoming.mean * incoming.count
-                    )
+                    mean=(current.mean * current.count + incoming.mean * incoming.count)
                     / count,
                     maximum=max(current.maximum, incoming.maximum),
                 )

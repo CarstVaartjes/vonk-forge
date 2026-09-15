@@ -52,9 +52,7 @@ _PYTHON_PATHS = (
     RuntimeWritablePath("uv", "/outputs/cache/uv", True),
 )
 
-_VLLM_PATHS = (
-    RuntimeWritablePath("vllm", "/outputs/cache/vllm", True),
-)
+_VLLM_PATHS = (RuntimeWritablePath("vllm", "/outputs/cache/vllm", True),)
 
 _ENGINE_PATHS: dict[str, tuple[RuntimeWritablePath, ...]] = {
     "vllm": (*_COMMON_PATHS, *_PYTHON_PATHS, *_VLLM_PATHS),
@@ -154,9 +152,12 @@ _OPTIONAL_PATH_NAMES = frozenset(
         "TORCH_NCCL_DEBUG_INFO_PIPE_FILE",
     }
 )
-_PATH_NAMES = frozenset(
-    name for environment in _ENGINE_ENVIRONMENT.values() for name in environment
-) | _OPTIONAL_PATH_NAMES
+_PATH_NAMES = (
+    frozenset(
+        name for environment in _ENGINE_ENVIRONMENT.values() for name in environment
+    )
+    | _OPTIONAL_PATH_NAMES
+)
 _RESERVED_PATH_NAMES = _PATH_NAMES | _OPTIONAL_PATH_NAMES
 _TELEMETRY_ENV_NAMES = frozenset(
     name
@@ -179,17 +180,15 @@ def telemetry_contract(slug: str) -> EngineTelemetryContract:
     try:
         return _ENGINE_TELEMETRY[slug]
     except KeyError as exc:
-        raise _compile_error(f"runtime telemetry contract is unavailable: {slug}") from exc
+        raise _compile_error(
+            f"runtime telemetry contract is unavailable: {slug}"
+        ) from exc
 
 
-def reject_recipe_environment(
-    slug: str, supplied: Iterable[tuple[str, str]]
-) -> None:
+def reject_recipe_environment(slug: str, supplied: Iterable[tuple[str, str]]) -> None:
     """Reject reserved path variables before the platform adds its defaults."""
     if slug not in _ENGINE_ENVIRONMENT:
-        raise _compile_error(
-            f"runtime writable-path contract is unavailable: {slug}"
-        )
+        raise _compile_error(f"runtime writable-path contract is unavailable: {slug}")
     for name, _value in supplied:
         if name in _TELEMETRY_ENV_NAMES:
             raise _compile_error(
@@ -216,9 +215,7 @@ def effective_environment(
 ) -> tuple[tuple[str, str], ...]:
     supplied = tuple(supplied)
     reject_recipe_environment(slug, supplied)
-    return _merge_environment(
-        slug, supplied, allow_reserved=True
-    )
+    return _merge_environment(slug, supplied, allow_reserved=True)
 
 
 def compile_environment(
@@ -228,9 +225,7 @@ def compile_environment(
     """Compile recipe declarations while rejecting platform-owned telemetry."""
     supplied = tuple(supplied)
     reject_recipe_environment(slug, supplied)
-    return _merge_environment(
-        slug, supplied, allow_reserved=True
-    )
+    return _merge_environment(slug, supplied, allow_reserved=True)
 
 
 def materialize_environment(
@@ -238,9 +233,7 @@ def materialize_environment(
     supplied: Iterable[tuple[str, str]],
 ) -> tuple[tuple[str, str], ...]:
     """Materialize an already-centralized projection for runtime serialization."""
-    return _merge_environment(
-        slug, supplied, allow_reserved=True
-    )
+    return _merge_environment(slug, supplied, allow_reserved=True)
 
 
 def _merge_environment(
@@ -254,9 +247,7 @@ def _merge_environment(
         **dict(telemetry_contract(slug).environment),
     }
     if defaults is None:
-        raise _compile_error(
-            f"runtime writable-path contract is unavailable: {slug}"
-        )
+        raise _compile_error(f"runtime writable-path contract is unavailable: {slug}")
     supplied_map: dict[str, str] = {}
     for name, value in supplied:
         if name in supplied_map:
@@ -270,7 +261,11 @@ def _merge_environment(
                 )
     for name, expected in defaults.items():
         actual = supplied_map.get(name)
-        if actual is not None and not allow_reserved and name not in _TELEMETRY_ENV_NAMES:
+        if (
+            actual is not None
+            and not allow_reserved
+            and name not in _TELEMETRY_ENV_NAMES
+        ):
             raise _compile_error(
                 f"runtime writable path variable is platform-owned: {name}"
             )
@@ -356,7 +351,5 @@ def _compile_error(message: str) -> ValueError:
 def _environment_defaults(slug: str) -> dict[str, str]:
     defaults = _ENGINE_ENVIRONMENT.get(slug)
     if defaults is None:
-        raise _compile_error(
-            f"runtime writable-path contract is unavailable: {slug}"
-        )
+        raise _compile_error(f"runtime writable-path contract is unavailable: {slug}")
     return defaults

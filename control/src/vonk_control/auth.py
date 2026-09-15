@@ -33,10 +33,16 @@ MUTATION_ROLES = {
     ("POST", "/api/fleet/{selector}/remove"): frozenset({"administrator"}),
     ("POST", "/api/fleet/{selector}/rename"): frozenset({"administrator", "operator"}),
     ("POST", "/api/fleet/upgrade"): frozenset({"administrator"}),
-    ("POST", "/api/model/{selector}/download"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/model/{selector}/download"): frozenset(
+        {"administrator", "operator"}
+    ),
     ("POST", "/api/model/{selector}/remove"): frozenset({"administrator", "operator"}),
-    ("POST", "/api/recipe/{selector:path}/download"): frozenset({"administrator", "operator"}),
-    ("POST", "/api/recipe/{selector:path}/remove"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/recipe/{selector:path}/download"): frozenset(
+        {"administrator", "operator"}
+    ),
+    ("POST", "/api/recipe/{selector:path}/remove"): frozenset(
+        {"administrator", "operator"}
+    ),
     ("POST", "/api/recipe/update"): frozenset({"administrator", "operator"}),
     ("POST", "/api/jobs/{job_id}/resume"): frozenset({"administrator", "operator"}),
     ("PUT", "/api/profile/{number}"): frozenset({"administrator"}),
@@ -44,11 +50,21 @@ MUTATION_ROLES = {
     ("POST", "/api/profile/{number}/load"): frozenset({"administrator"}),
     ("POST", "/api/catalog/managed-recipes/sync"): frozenset({"administrator"}),
     ("PUT", "/api/catalog/source-bundles/{sha256}"): frozenset({"administrator"}),
-    ("POST", "/api/recipe/runs/{run_id}/artifact-jobs"): frozenset({"administrator", "operator"}),
-    ("PUT", "/api/artifact-jobs/{job_id}/inputs/{name}"): frozenset({"administrator", "operator"}),
-    ("POST", "/api/artifact-jobs/{job_id}/finalize"): frozenset({"administrator", "operator"}),
-    ("POST", "/api/artifact-jobs/{job_id}/submit"): frozenset({"administrator", "operator"}),
-    ("POST", "/api/artifact-jobs/{job_id}/cancel"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/recipe/runs/{run_id}/artifact-jobs"): frozenset(
+        {"administrator", "operator"}
+    ),
+    ("PUT", "/api/artifact-jobs/{job_id}/inputs/{name}"): frozenset(
+        {"administrator", "operator"}
+    ),
+    ("POST", "/api/artifact-jobs/{job_id}/finalize"): frozenset(
+        {"administrator", "operator"}
+    ),
+    ("POST", "/api/artifact-jobs/{job_id}/submit"): frozenset(
+        {"administrator", "operator"}
+    ),
+    ("POST", "/api/artifact-jobs/{job_id}/cancel"): frozenset(
+        {"administrator", "operator"}
+    ),
 }
 
 

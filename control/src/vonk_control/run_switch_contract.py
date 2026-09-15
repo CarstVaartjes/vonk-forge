@@ -57,7 +57,9 @@ RunSwitchReasonScope = Literal[
     "conflict",
     "operation",
 ]
-RunSwitchCapabilityEvidenceState = Literal["tested", "observed", "not-tested", "unknown"]
+RunSwitchCapabilityEvidenceState = Literal[
+    "tested", "observed", "not-tested", "unknown"
+]
 RunSwitchChangeEffect = Literal["none", "restart", "reprepare", "rebuild", "reinstall"]
 RunSwitchCoverage = Literal["complete", "partial", "unknown"]
 RunSwitchBuildEvidenceState = Literal[
@@ -322,7 +324,9 @@ class BuildCompatibilityEvidence(_StrictModel):
     expected_architecture: Annotated[
         str, StringConstraints(min_length=1, max_length=64)
     ]
-    observed_architecture: Annotated[str, StringConstraints(max_length=64)] | None = None
+    observed_architecture: Annotated[str, StringConstraints(max_length=64)] | None = (
+        None
+    )
     state: Literal["compatible", "incompatible", "unknown"]
     evidence_digest: Digest | None = None
     detail: Annotated[str, StringConstraints(max_length=256)] | None = None
@@ -330,7 +334,9 @@ class BuildCompatibilityEvidence(_StrictModel):
 
 class RuntimeImageStorageImpact(_StrictModel):
     build_id: UuidId | None
-    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    image_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    )
     oci_layout_sha256: Digest | None = None
     image_bytes: int | None = Field(default=None, ge=0)
     required_bytes: int | None = Field(default=None, ge=0)
@@ -354,7 +360,9 @@ class RunSwitchBuildEvidence(_StrictModel):
     # is filled only after the durable build child records its receipt.
     build_input_sha256: Digest | None = None
     builder_node_id: NodeId | None = None
-    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    image_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    )
     image_bytes: int | None = Field(default=None, ge=0)
     oci_layout_sha256: Digest | None = None
     source: BuildSourceEvidence
@@ -407,9 +415,13 @@ class RunSwitchPlan(_StrictModel):
     spark_group: SparkGroup
     mapping: MappingSelection | None
     installation_id: UuidId | None
-    installation_state: Annotated[str, StringConstraints(min_length=1, max_length=24)] | None
+    installation_state: (
+        Annotated[str, StringConstraints(min_length=1, max_length=24)] | None
+    )
     recipe_build_id: UuidId | None
-    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    image_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    )
     start_plan_digest: Digest | None
     model_capabilities: list[CapabilityEvidence] = Field(max_length=128)
     recipe_capabilities: list[CapabilityEvidence] = Field(max_length=128)
@@ -478,12 +490,12 @@ class ArtifactVerificationEvidence(_StrictModel):
     verified_digests: list[Digest] = Field(default_factory=list, max_length=256)
     downloaded_bytes: int | None = Field(default=None, ge=0)
     copied_bytes: int | None = Field(default=None, ge=0)
-    verified_image_digest: Annotated[
-        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-    ] | None = None
-    imported_image_digest: Annotated[
-        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-    ] | None = None
+    verified_image_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    ) = None
+    imported_image_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    ) = None
     verified_oci_layout_sha256: Digest | None = None
     error: Annotated[str, StringConstraints(max_length=512)] | None = None
     reason: Annotated[str, StringConstraints(max_length=512)] | None = None
@@ -515,11 +527,24 @@ class RunSwitchChildProgress(_StrictModel):
 
     operation: OperationProgress | None = None
 
-    phase: Literal[
-        "transfer", "verify", "prepare", "cleanup", "stop", "start", "final_verify",
-        "container-build", "model-download", "runtime-image", "runtime-plan",
-        "target-copy", "runtime-install",
-    ] | None = None
+    phase: (
+        Literal[
+            "transfer",
+            "verify",
+            "prepare",
+            "cleanup",
+            "stop",
+            "start",
+            "final_verify",
+            "container-build",
+            "model-download",
+            "runtime-image",
+            "runtime-plan",
+            "target-copy",
+            "runtime-install",
+        ]
+        | None
+    ) = None
     completed_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     total_bytes_known: bool = False
@@ -544,13 +569,14 @@ class ArtifactVerificationResult(_StrictModel):
     verified_image_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
     ]
-    verified_registry_manifest_digest: Annotated[
-        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-    ] | None = None
+    verified_registry_manifest_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    ) = None
     verified_oci_layout_sha256: Digest
     cached_nodes: list[NodeId] = Field(default_factory=list, max_length=32)
     cached_target_totals: dict[NodeId, int] = Field(default_factory=dict)
     evidence: list[ArtifactVerificationEvidence] = Field(default_factory=list)
+
 
 class _RunSwitchPhaseBase(_StrictModel):
     # `subphase` is declared by each concrete result rather than here. A default
@@ -562,20 +588,25 @@ class _RunSwitchPhaseBase(_StrictModel):
     # touching a published schema.
     phase: RunSwitchPhaseKind
 
+
 class RunSwitchContainerBuildResult(_RunSwitchPhaseBase):
     phase: Literal["prepare"]
     subphase: Literal["container-build"]
     build_id: UuidId
     build_input_sha256: Digest
     state: RunSwitchContainerBuildState
-    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None = None
+    image_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    ) = None
     oci_layout_sha256: Digest | None = None
     image_bytes: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def succeeded_build_has_receipt(self) -> RunSwitchContainerBuildResult:
         if self.state == "succeeded" and (
-            self.image_digest is None or self.oci_layout_sha256 is None or self.image_bytes is None
+            self.image_digest is None
+            or self.oci_layout_sha256 is None
+            or self.image_bytes is None
         ):
             raise ValueError("succeeded build phase requires complete image receipt")
         return self
@@ -598,7 +629,9 @@ class RunSwitchRuntimeImageResult(_RunSwitchPhaseBase):
             or self.runtime_image.oci_archive_sha256 != self.oci_layout_sha256
             or self.runtime_image.image_bytes != self.image_bytes
         ):
-            raise ValueError("runtime image phase identity differs from canonical receipt")
+            raise ValueError(
+                "runtime image phase identity differs from canonical receipt"
+            )
         if self.build_id is not None and self.runtime_image.build_id != self.build_id:
             raise ValueError("runtime image phase build identity differs from receipt")
         return self
@@ -622,6 +655,7 @@ class RunSwitchModelDownloadResult(ModelCacheDownloadResult):
         ):
             raise ValueError("model download evidence artifact set differs from result")
         return self
+
 
 class RunSwitchModelDownloadPendingResult(_RunSwitchPhaseBase):
     phase: Literal["transfer"]
@@ -647,8 +681,12 @@ class RunSwitchTargetTransferEvidenceResult(_RunSwitchPhaseBase):
     node_id: NodeId
     verified: Literal[True]
     verified_digests: list[Digest] = Field(min_length=1, max_length=256)
-    verified_image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
-    imported_image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+    verified_image_digest: Annotated[
+        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
+    ]
+    imported_image_digest: Annotated[
+        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
+    ]
     verified_oci_layout_sha256: Digest
     downloaded_bytes: int | None = Field(default=None, ge=0)
     copied_bytes: int | None = Field(default=None, ge=0)
@@ -661,7 +699,9 @@ class RunSwitchCachedTransferResult(_RunSwitchPhaseBase):
     verified: Literal[False]
     verified_digests: list[Digest] = Field(max_length=256)
     verified_build_id: UuidId | None
-    verified_image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+    verified_image_digest: Annotated[
+        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
+    ]
     verified_oci_layout_sha256: Digest
     cached_nodes: list[NodeId] = Field(min_length=1, max_length=32)
     cached_target_totals: dict[NodeId, int]
@@ -735,9 +775,9 @@ class RunSwitchCleanupVerifyResult(_RunSwitchPhaseBase):
     installation_id: UuidId
     removed: bool
     active_runs: int = Field(default=0, ge=0)
-    installation_state: Annotated[
-        str, StringConstraints(min_length=1, max_length=24)
-    ] | None = None
+    installation_state: (
+        Annotated[str, StringConstraints(min_length=1, max_length=24)] | None
+    ) = None
 
 
 class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):
@@ -804,7 +844,9 @@ class RunSwitchOperationResult(_StrictModel):
     item_index: int = Field(default=0, ge=0, le=31)
     phase: RunSwitchPhaseKind | None = None
     subphase: RunSwitchSubphase | None = None
-    completed_phases: list[RunSwitchPhaseKind] = Field(default_factory=list, max_length=16)
+    completed_phases: list[RunSwitchPhaseKind] = Field(
+        default_factory=list, max_length=16
+    )
     child_operation_id: UuidId | None = None
     phase_results: list[RunSwitchPhaseResult] = Field(default_factory=list)
     operation_phase_index: int | None = Field(default=None, ge=0, le=31)
@@ -816,9 +858,9 @@ class RunSwitchOperationResult(_StrictModel):
     total_bytes_known: bool = False
     members: list[RunSwitchMemberReceipt] = Field(default_factory=list, max_length=32)
     retryable: bool = False
-    failure_code: Annotated[
-        str, StringConstraints(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")
-    ] | None = None
+    failure_code: (
+        Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")] | None
+    ) = None
     retry_attempt: int | None = Field(default=None, ge=2)
     retry_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     observation_due_at: datetime | None = None
@@ -836,6 +878,7 @@ class RunSwitchOperationResult(_StrictModel):
         if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
             raise ValueError("operation completed bytes exceed total bytes")
         return self
+
 
 class RunSwitchOperation(_StrictModel):
     schema_version: Literal[2] = 2
@@ -856,11 +899,15 @@ class RunSwitchOperation(_StrictModel):
     def terminal_evidence_is_consistent(self) -> RunSwitchOperation:
         if self.state == "succeeded":
             if self.result is None or not self.result.completed_phases:
-                raise ValueError("succeeded run-switch requires completed phase evidence")
+                raise ValueError(
+                    "succeeded run-switch requires completed phase evidence"
+                )
             if self.status_reason is not None or self.result.failed_phase is not None:
                 raise ValueError("succeeded run-switch cannot retain failure evidence")
             if self.result.retryable or self.result.child_operation_id is not None:
-                raise ValueError("succeeded run-switch cannot retain pending recovery or child work")
+                raise ValueError(
+                    "succeeded run-switch cannot retain pending recovery or child work"
+                )
             if self.result.failure_code is not None:
                 raise ValueError("succeeded run-switch cannot retain failure evidence")
         if self.state == "failed" and not (self.status_reason or "").strip():

@@ -171,18 +171,30 @@ def validate_recipe_lifecycle_terminal(kind: str, state: str, value: object) -> 
         raise ValueError("terminal recipe operation requires result evidence")
     result = parse_recipe_lifecycle_result(kind, value)
     if state == "succeeded":
-        if isinstance(result, (RecipeOperationProgressResult, RecipeOperationCancellationResult)):
+        if isinstance(
+            result, (RecipeOperationProgressResult, RecipeOperationCancellationResult)
+        ):
             raise ValueError("successful recipe operation requires a terminal receipt")
-        if isinstance(result, RecipeOperationResult) and (result.failed_nodes or result.recovery_error):
-            raise ValueError("successful recipe operation cannot retain failed nodes or recovery error")
+        if isinstance(result, RecipeOperationResult) and (
+            result.failed_nodes or result.recovery_error
+        ):
+            raise ValueError(
+                "successful recipe operation cannot retain failed nodes or recovery error"
+            )
         if isinstance(result, RecipeJobRunResult) and result.exit_code != 0:
             raise ValueError("successful recipe job requires zero exit code")
     if state == "failed":
         if isinstance(result, RecipeOperationProgressResult):
             raise ValueError("failed recipe operation requires a terminal receipt")
-        if isinstance(result, RecipeOperationResult) and not (result.failed_nodes or result.recovery_error):
-            raise ValueError("failed recipe operation requires failed nodes or recovery error")
-        if isinstance(result, (RecipeOperationActivatedResult, RecipeOperationStoppedResult)):
+        if isinstance(result, RecipeOperationResult) and not (
+            result.failed_nodes or result.recovery_error
+        ):
+            raise ValueError(
+                "failed recipe operation requires failed nodes or recovery error"
+            )
+        if isinstance(
+            result, (RecipeOperationActivatedResult, RecipeOperationStoppedResult)
+        ):
             raise ValueError("failed recipe operation cannot contain a success receipt")
         if isinstance(result, RecipeJobRunResult) and result.exit_code == 0:
             raise ValueError("failed recipe job requires a nonzero exit code")

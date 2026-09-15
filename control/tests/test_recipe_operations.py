@@ -138,7 +138,9 @@ class RecordingQueue:
             payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
             payload=dict(payload),
             authority_revision=authority_revision,
-            workload_intent_ordinal=session.get(Job, parent_job_id).payload.get("workload_intent_ordinal"),
+            workload_intent_ordinal=session.get(Job, parent_job_id).payload.get(
+                "workload_intent_ordinal"
+            ),
             state="queued",
             current_attempt=0,
             created_at=NOW,
@@ -677,9 +679,7 @@ def setup_services(
                 archive_bytes=expected_archive_bytes,
             )
 
-    runtime_image_storage = FilesystemRuntimeImageStorage(
-        tmp_path / "runtime-images"
-    )
+    runtime_image_storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
     runtime_image_archive = runtime_image_storage.root / image_archive_sha256
     runtime_image_archive.write_bytes(image_archive)
     with sessions.begin() as session:
@@ -876,7 +876,8 @@ def installed_recipe(
 
 @pytest.mark.parametrize("retry_state", ["succeeded", "waiting-for-operator"])
 def test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry(
-    tmp_path: Path, retry_state: str,
+    tmp_path: Path,
+    retry_state: str,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     plan = service.preview_install(mapping_id, build_id)
@@ -1378,12 +1379,19 @@ def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) ->
     assert queue.available == 1
     with sessions() as session:
         jobs = list(session.scalars(select(Job).where(Job.kind == "recipe.install")))
-        child_operations = list(session.scalars(select(AgentOperation).where(AgentOperation.kind == "recipe.install")))
+        child_operations = list(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.kind == "recipe.install")
+            )
+        )
         assert len(jobs) == 1
         assert {item.kind for item in child_operations} == {"recipe.install"}
         assert jobs[0].payload["workload_intent_ordinal"] == 1
         assert all(item.workload_intent_ordinal == 1 for item in child_operations)
-        assert all(_required(session.get(AgentNode, node_id)).workload_intent_ordinal == 1 for node_id in nodes)
+        assert all(
+            _required(session.get(AgentNode, node_id)).workload_intent_ordinal == 1
+            for node_id in nodes
+        )
         assert all(
             "shell" not in json.dumps(item.payload).lower() for item in child_operations
         )
@@ -1677,11 +1685,13 @@ def test_distributed_start_launches_all_ranks_then_checks_collective(
     with pytest.raises(RecipeRouteNotReady):
         routes.publish_run(start.owner_id)
     with sessions.begin() as session:
-        owner = _required(session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id, RunNode.role == "entrypoint"
+        owner = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id, RunNode.role == "entrypoint"
+                )
             )
-        ))
+        )
         owner.observed_run_generation = 1
         owner.observation_receipt_sha256 = "d" * 64
         owner.observation_endpoint_ready = True
@@ -1689,11 +1699,13 @@ def test_distributed_start_launches_all_ranks_then_checks_collective(
     with pytest.raises(RecipeRouteNotReady):
         routes.publish_run(start.owner_id)
     with sessions.begin() as session:
-        worker = _required(session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id, RunNode.role == "worker"
+        worker = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id, RunNode.role == "worker"
+                )
             )
-        ))
+        )
         worker.observed_run_generation = 1
         worker.observation_receipt_sha256 = "e" * 64
         worker.observation_endpoint_ready = None
@@ -1722,9 +1734,11 @@ def test_distributed_start_rejects_changed_launch_evidence(tmp_path: Path) -> No
         request_id="t" * 36,
     )
     with sessions() as session:
-        launch = _required(session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
-        ))
+        launch = _required(
+            session.scalar(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
+        )
     evidence = start_evidence(launch.payload)
     evidence["role"] = "entrypoint"
     identity = {
@@ -1762,10 +1776,16 @@ def test_distributed_start_rejects_missing_run_generation(tmp_path: Path) -> Non
             select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
         )
         assert launch is not None
-        payload = {key: value for key, value in launch.payload.items() if key != "run_generation"}
+        payload = {
+            key: value
+            for key, value in launch.payload.items()
+            if key != "run_generation"
+        }
         launch.payload = payload
 
-    with pytest.raises(RecipeOperationConflict, match="start run generation is invalid"):
+    with pytest.raises(
+        RecipeOperationConflict, match="start run generation is invalid"
+    ):
         service.record_node_result(
             start.id,
             launch.node_id,
@@ -1793,10 +1813,16 @@ def test_tensor_parallel_start_rejects_missing_run_generation(tmp_path: Path) ->
             select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
         )
         assert child is not None
-        payload = {key: value for key, value in child.payload.items() if key != "run_generation"}
+        payload = {
+            key: value
+            for key, value in child.payload.items()
+            if key != "run_generation"
+        }
         child.payload = payload
 
-    with pytest.raises(RecipeOperationConflict, match="start run generation is invalid"):
+    with pytest.raises(
+        RecipeOperationConflict, match="start run generation is invalid"
+    ):
         service.record_node_result(
             start.id,
             child.node_id,
@@ -1831,52 +1857,80 @@ def test_worker_death_while_owner_is_healthy_never_publishes_route(
 
     assert publisher.aliases == []
     with sessions() as session:
-        owner = _required(session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.role == "entrypoint",
+        owner = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id,
+                    RunNode.role == "entrypoint",
+                )
             )
-        ))
-        worker = _required(session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.role == "worker",
+        )
+        worker = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id,
+                    RunNode.role == "worker",
+                )
             )
-        ))
+        )
         assert owner.state == "running"
         assert owner.observation_endpoint_ready is True
         assert worker.state == "failed"
 
 
-
-def test_singleton_start_grants_time_for_first_exact_observation(tmp_path: Path) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path, nodes=1)
-    installation = installed_recipe(service, mapping_id, build_id, nodes, request_id="g" * 36)
+def test_singleton_start_grants_time_for_first_exact_observation(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=1
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="g" * 36
+    )
     plan = service.preview_run(installation.owner_id, "singleton-observation-grace")
-    start = service.start(plan, plan_digest=plan.plan_digest, actor="admin", request_id="h" * 36)
+    start = service.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="h" * 36
+    )
     with sessions() as session:
-        operation = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == start.id))
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+        )
     assert operation is not None
     started_at = NOW + timedelta(microseconds=500_000)
     service._clock = lambda: started_at
-    service.record_node_result(start.id, operation.node_id, succeeded=True,
-                               evidence=start_evidence(operation.payload))
+    service.record_node_result(
+        start.id,
+        operation.node_id,
+        succeeded=True,
+        evidence=start_evidence(operation.payload),
+    )
     _bound, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
-    worker = RecipeOperationWorker(sessions, routes, clock=lambda: started_at + timedelta(milliseconds=1))
+    worker = RecipeOperationWorker(
+        sessions, routes, clock=lambda: started_at + timedelta(milliseconds=1)
+    )
     assert worker.tick() is False
     with sessions() as session:
         run = _required(session.get(RecipeRun, start.owner_id))
-        node = _required(session.scalar(select(RunNode).where(RunNode.run_id == run.id)))
+        node = _required(
+            session.scalar(select(RunNode).where(RunNode.run_id == run.id))
+        )
         assert run.observation_deadline_at is not None
-        assert run.observation_deadline_at.replace(tzinfo=UTC) == started_at + timedelta(seconds=120)
+        assert run.observation_deadline_at.replace(
+            tzinfo=UTC
+        ) == started_at + timedelta(seconds=120)
         assert run.route_state == "pending"
         assert node.state == "running"
         assert node.observed_run_generation is None
-    expired = RecipeOperationWorker(sessions, routes, clock=lambda: started_at + timedelta(seconds=120))
+    expired = RecipeOperationWorker(
+        sessions, routes, clock=lambda: started_at + timedelta(seconds=120)
+    )
     assert expired._expire_initial_observation_deadline() is True
     with sessions() as session:
-        node = _required(session.scalar(select(RunNode).where(RunNode.run_id == start.owner_id)))
+        node = _required(
+            session.scalar(select(RunNode).where(RunNode.run_id == start.owner_id))
+        )
         assert node.state == "failed"
+
 
 def test_collective_readiness_starts_distinct_observation_grace(
     tmp_path: Path,
@@ -2046,7 +2100,9 @@ def test_distributed_start_requires_enrollment_pinned_receipt_key(
         service, mapping_id, build_id, nodes, request_id="k" * 36
     )
     with sessions.begin() as session:
-        _required(session.get(AgentNode, nodes[1])).observation_receipt_public_key = None
+        _required(
+            session.get(AgentNode, nodes[1])
+        ).observation_receipt_public_key = None
 
     plan = service.preview_run(installation.owner_id, "unpinned-receipt-key")
     assert plan.allowed is False
@@ -2369,7 +2425,10 @@ def test_adopt_owned_operation_requires_the_exact_kind_and_owner(
 
     assert (
         service.adopt_owned_operation(
-            "0" * 35 + "4", kind="recipe.stop", owner_kind="run", owner_id=started.owner_id
+            "0" * 35 + "4",
+            kind="recipe.stop",
+            owner_kind="run",
+            owner_id=started.owner_id,
         )
         == stopped
     )
@@ -2395,7 +2454,10 @@ def test_adopt_owned_operation_requires_the_exact_kind_and_owner(
     )
     assert (
         service.adopt_owned_operation(
-            "0" * 35 + "3", kind="recipe.stop", owner_kind="run", owner_id=started.owner_id
+            "0" * 35 + "3",
+            kind="recipe.stop",
+            owner_kind="run",
+            owner_id=started.owner_id,
         )
         is None
     )
@@ -2424,9 +2486,11 @@ def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> Non
         request_id="1" * 35 + "b",
     )
     with sessions() as session:
-        child = _required(session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
-        ))
+        child = _required(
+            session.scalar(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
+        )
         evidence = start_evidence(child.payload)
     service.record_node_result(start.id, nodes[0], succeeded=True, evidence=evidence)
     service._agent_jobs = FailingQueue()
@@ -2923,7 +2987,10 @@ def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
         assert {child.node_id for child in children} == set(nodes)
         for child in children:
             parsed = RecipeInstallPayload.model_validate(child.payload)
-            assert parsed.compiled_execution_plan.to_mapping() == persisted_plans[child.node_id]
+            assert (
+                parsed.compiled_execution_plan.to_mapping()
+                == persisted_plans[child.node_id]
+            )
     with pytest.raises(RecipeOperationConflict, match="not retryable"):
         service.retry(first.id, actor="admin", request_id="3" * 35 + "4")
     with sessions.begin() as session:
@@ -3141,7 +3208,10 @@ def test_failed_install_retry_state_rolls_back_when_queue_write_fails(
         service.retry(first.id, actor="admin", request_id="2" * 35 + "b")
 
     with sessions() as session:
-        assert _required(session.get(RecipeInstallation, first.owner_id)).state == "partial"
+        assert (
+            _required(session.get(RecipeInstallation, first.owner_id)).state
+            == "partial"
+        )
         after = {
             node.node_id: node.state
             for node in session.scalars(
@@ -3157,21 +3227,30 @@ def test_new_install_intent_retires_only_unissued_older_install(tmp_path: Path) 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     plan = service.preview_install(mapping_id, build_id)
     old = service.install(
-        plan, plan_digest=plan.plan_digest, actor="admin", request_id="old-install-intent"
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="old-install-intent",
     )
     with sessions.begin() as session:
         _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 2
     assert service.assess_superseded_unissued("recipe.install", old.owner_id)
     assert service.reconcile_superseded_unissued("recipe.install", old.owner_id, 2)
     new = service.start_installation(
-        old.owner_id, actor="admin", request_id="new-install-intent",
+        old.owner_id,
+        actor="admin",
+        request_id="new-install-intent",
         workload_intent_ordinal=2,
     )
     with sessions() as session:
         assert _required(session.get(Job, old.id)).state == "cancelled"
-        child = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == old.id))
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == old.id)
+        )
         assert child is not None and child.state == "cancelled"
-        assert _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 2
+        assert (
+            _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 2
+        )
 
 
 def test_new_stop_intent_replans_after_unissued_old_stop(tmp_path: Path) -> None:
@@ -3180,13 +3259,18 @@ def test_new_stop_intent_replans_after_unissued_old_stop(tmp_path: Path) -> None
         service, mapping_id, build_id, nodes, request_id="installed-for-stop-intent"
     )
     run = started_recipe(
-        sessions, service, installation.owner_id, nodes,
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
         request_id="running-for-stop-intent",
     )
     old_plan = service.preview_stop(run.owner_id)
     old = service.stop(
-        run.owner_id, plan_digest=old_plan.plan_digest,
-        actor="admin", request_id="old-stop-intent",
+        run.owner_id,
+        plan_digest=old_plan.plan_digest,
+        actor="admin",
+        request_id="old-stop-intent",
     )
     with sessions.begin() as session:
         _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 4
@@ -3197,29 +3281,54 @@ def test_new_stop_intent_replans_after_unissued_old_stop(tmp_path: Path) -> None
     assert service.reconcile_superseded_unissued("recipe.stop", run.owner_id, 4)
     assert service.preview_stop(run.owner_id).plan_digest == prospective.plan_digest
     new = service.stop(
-        run.owner_id, plan_digest=prospective.plan_digest,
-        actor="admin", request_id="new-stop-intent", workload_intent_ordinal=4,
+        run.owner_id,
+        plan_digest=prospective.plan_digest,
+        actor="admin",
+        request_id="new-stop-intent",
+        workload_intent_ordinal=4,
     )
     with sessions() as session:
         assert _required(session.get(Job, old.id)).state == "cancelled"
-        assert _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 4
-        assert _required(session.get(RecipeRun, run.owner_id)).route_state == "withdrawn"
-        assert session.scalar(select(ResourceReservation.id).where(
-            ResourceReservation.owner_kind == "run",
-            ResourceReservation.owner_id == run.owner_id,
-            ResourceReservation.state == "active",
-        )) is not None
+        assert (
+            _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 4
+        )
+        assert (
+            _required(session.get(RecipeRun, run.owner_id)).route_state == "withdrawn"
+        )
+        assert (
+            session.scalar(
+                select(ResourceReservation.id).where(
+                    ResourceReservation.owner_kind == "run",
+                    ResourceReservation.owner_id == run.owner_id,
+                    ResourceReservation.state == "active",
+                )
+            )
+            is not None
+        )
     obsolete = service.cancel(
-        old.id, actor="admin", request_id=str(uuid.uuid4()), reason="new request owns the run"
+        old.id,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+        reason="new request owns the run",
     )
     assert obsolete.state == "cancelled"
-    with pytest.raises(RecipeOperationConflict, match="request key was already used differently"):
+    with pytest.raises(
+        RecipeOperationConflict, match="request key was already used differently"
+    ):
         service.cancel(
-            old.id, actor="admin", request_id="new-stop-intent", reason="new request owns the run"
+            old.id,
+            actor="admin",
+            request_id="new-stop-intent",
+            reason="new request owns the run",
         )
-    with pytest.raises(RecipeOperationConflict, match="cancellation request identity is invalid"):
+    with pytest.raises(
+        RecipeOperationConflict, match="cancellation request identity is invalid"
+    ):
         service.cancel(
-            old.id, actor="admin", request_id="not-a-uuid", reason="new request owns the run"
+            old.id,
+            actor="admin",
+            request_id="not-a-uuid",
+            reason="new request owns the run",
         )
 
 
@@ -3229,27 +3338,36 @@ def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
         service, mapping_id, build_id, nodes, request_id="installed-for-issued-stop"
     )
     run = started_recipe(
-        sessions, service, installation.owner_id, nodes,
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
         request_id="running-for-issued-stop",
     )
     plan = service.preview_stop(run.owner_id)
     old = service.stop(
-        run.owner_id, plan_digest=plan.plan_digest,
-        actor="admin", request_id="issued-old-stop",
+        run.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="issued-old-stop",
     )
     with sessions.begin() as session:
-        child = session.scalar(select(AgentOperation).where(AgentOperation.parent_job_id == old.id))
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == old.id)
+        )
         assert child is not None
         child.state = "running"
         child.current_attempt = 1
-        session.add(AgentOperationAttempt(
-            operation_id=child.id,
-            attempt=1,
-            fence=str(uuid.uuid4()),
-            lease_deadline=NOW + timedelta(minutes=1),
-            agent_certificate_serial="serial-0",
-            state="running",
-        ))
+        session.add(
+            AgentOperationAttempt(
+                operation_id=child.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=NOW + timedelta(minutes=1),
+                agent_certificate_serial="serial-0",
+                state="running",
+            )
+        )
         _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 4
         AgentJobService.request_superseded_workload_cancellation_in_session(
             session, nodes, 4, NOW
@@ -3264,42 +3382,67 @@ def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
     fresh = service.preview_stop(run.owner_id)
     assert fresh.allowed and fresh.run_state == "stopping"
     replacement = service.stop(
-        run.owner_id, plan_digest=fresh.plan_digest,
-        actor="admin", request_id="issued-new-stop", workload_intent_ordinal=4,
+        run.owner_id,
+        plan_digest=fresh.plan_digest,
+        actor="admin",
+        request_id="issued-new-stop",
+        workload_intent_ordinal=4,
     )
     with sessions() as session:
         old_job = _required(session.get(Job, old.id))
         assert old_job.state == "running"
         assert old_job.result is not None and old_job.result["cancel_requested"] is True
-        assert _required(session.get(Job, replacement.id)).payload["workload_intent_ordinal"] == 4
+        assert (
+            _required(session.get(Job, replacement.id)).payload[
+                "workload_intent_ordinal"
+            ]
+            == 4
+        )
         assert _required(session.get(RecipeRun, run.owner_id)).state == "stopping"
 
 
-def test_new_uninstall_intent_replans_after_unissued_old_uninstall(tmp_path: Path) -> None:
+def test_new_uninstall_intent_replans_after_unissued_old_uninstall(
+    tmp_path: Path,
+) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installation = installed_recipe(
-        service, mapping_id, build_id, nodes,
+        service,
+        mapping_id,
+        build_id,
+        nodes,
         request_id="installed-for-uninstall-intent",
     )
     old_plan = service.preview_uninstall(installation.owner_id)
     old = service.uninstall(
-        installation.owner_id, plan_digest=old_plan.plan_digest,
-        actor="admin", request_id="old-uninstall-intent",
+        installation.owner_id,
+        plan_digest=old_plan.plan_digest,
+        actor="admin",
+        request_id="old-uninstall-intent",
     )
     with sessions.begin() as session:
         _required(session.get(AgentNode, nodes[0])).workload_intent_ordinal = 3
     prospective = service.preview_uninstall(installation.owner_id)
     assert prospective.allowed
     assert service.assess_superseded_unissued("recipe.uninstall", installation.owner_id)
-    assert service.reconcile_superseded_unissued("recipe.uninstall", installation.owner_id, 3)
-    assert service.preview_uninstall(installation.owner_id).plan_digest == prospective.plan_digest
+    assert service.reconcile_superseded_unissued(
+        "recipe.uninstall", installation.owner_id, 3
+    )
+    assert (
+        service.preview_uninstall(installation.owner_id).plan_digest
+        == prospective.plan_digest
+    )
     new = service.uninstall(
-        installation.owner_id, plan_digest=prospective.plan_digest,
-        actor="admin", request_id="new-uninstall-intent", workload_intent_ordinal=3,
+        installation.owner_id,
+        plan_digest=prospective.plan_digest,
+        actor="admin",
+        request_id="new-uninstall-intent",
+        workload_intent_ordinal=3,
     )
     with sessions() as session:
         assert _required(session.get(Job, old.id)).state == "cancelled"
-        assert _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 3
+        assert (
+            _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 3
+        )
 
 
 def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> None:
@@ -3400,9 +3543,7 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         installation = session.get(RecipeInstallation, install.owner_id)
         assert installation is not None
         assert installation.state == "uninstalled"
-        revision = session.get(
-            CatalogDocumentRevision, installation.recipe_revision_id
-        )
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         assert revision is not None
         assert revision.kind == "recipe"
         assert revision.state == "active"
@@ -3766,7 +3907,9 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     assert retry.retry_of_application_id is None
     assert retry.progress.workload_intent_ordinal is not None
     assert first.progress.workload_intent_ordinal is not None
-    assert retry.progress.workload_intent_ordinal > first.progress.workload_intent_ordinal
+    assert (
+        retry.progress.workload_intent_ordinal > first.progress.workload_intent_ordinal
+    )
     assert profiles.tick()
     second_application = profiles.application(retry.id)
     assert second_application.current_operation_id == retry.id
@@ -4081,15 +4224,16 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
             for node_id in nodes
         )
 
-
     with sessions.begin() as session:
         exact_run = _required(session.get(RecipeRun, start.owner_id))
-        exact_worker = _required(session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.node_id == nodes[1],
+        exact_worker = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id,
+                    RunNode.node_id == nodes[1],
+                )
             )
-        ))
+        )
         exact_run.state = "starting"
         exact_worker.state = "running"
         exact_worker.updated_at = NOW + timedelta(seconds=4)
@@ -4100,12 +4244,14 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
             == ()
         )
     with sessions() as session:
-        exact_worker = _required(session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.node_id == nodes[1],
+        exact_worker = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id,
+                    RunNode.node_id == nodes[1],
+                )
             )
-        ))
+        )
         assert exact_worker.state == "running"
 
 
@@ -4131,11 +4277,13 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
     with sessions() as session:
         run = _required(session.get(RecipeRun, start.owner_id))
         installed = _required(session.get(RecipeInstallation, run.installation_id))
-        run_node = _required(session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == run.id, RunNode.node_id == observation_node
+        run_node = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == run.id, RunNode.node_id == observation_node
+                )
             )
-        ))
+        )
         start_job = _required(session.get(Job, start.id))
         launch_evidence = require_mapping(
             _required(start_job.result)["launch_evidence"], "launch evidence"
@@ -4337,12 +4485,14 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             ),
         )
     with sessions() as session:
-        worker = _required(session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.node_id == observation_node,
+        worker = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id,
+                    RunNode.node_id == observation_node,
+                )
             )
-        ))
+        )
         assert worker.endpoint is None
 
 
@@ -4371,12 +4521,14 @@ def _queued_distributed_recovery_stop(tmp_path: Path, *, engine=None):
     )
     assert recovery.tick() is True
     with sessions() as session:
-        stop_job = _required(session.scalar(
-            select(Job).where(
-                Job.kind == "recipe.stop",
-                Job.payload["owner_id"].as_string() == started.owner_id,
+        stop_job = _required(
+            session.scalar(
+                select(Job).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["owner_id"].as_string() == started.owner_id,
+                )
             )
-        ))
+        )
     return sessions, service, routes, publisher, started, stop_job, nodes
 
 
@@ -4397,19 +4549,23 @@ def _queued_distributed_recovery_restart(tmp_path: Path, *, engine=None):
         stop_job.id, nodes[1], succeeded=True, evidence={"stopped": True}
     )
     with sessions() as session:
-        restart = _required(session.scalar(
-            select(Job).where(
-                Job.kind == "recipe.start",
-                Job.payload["owner_id"].as_string() == started.owner_id,
-                Job.id != started.id,
+        restart = _required(
+            session.scalar(
+                select(Job).where(
+                    Job.kind == "recipe.start",
+                    Job.payload["owner_id"].as_string() == started.owner_id,
+                    Job.id != started.id,
+                )
             )
-        ))
-        worker_start = _required(session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == restart.id,
-                AgentOperation.node_id == nodes[1],
+        )
+        worker_start = _required(
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == restart.id,
+                    AgentOperation.node_id == nodes[1],
+                )
             )
-        ))
+        )
     return (
         sessions,
         service,
@@ -4569,12 +4725,14 @@ def test_distributed_recovery_deadline_is_rechecked_before_route_publication(
         evidence=start_evidence(worker_start.payload),
     )
     with sessions() as session:
-        owner_start = _required(session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == restart.id,
-                AgentOperation.node_id == nodes[0],
+        owner_start = _required(
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == restart.id,
+                    AgentOperation.node_id == nodes[0],
+                )
             )
-        ))
+        )
     service.record_node_result(
         restart.id,
         nodes[0],
@@ -4697,12 +4855,14 @@ def test_recovery_publication_crossing_deadline_is_immediately_withdrawn(
         evidence=start_evidence(worker_start.payload),
     )
     with sessions() as session:
-        owner_start = _required(session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == restart.id,
-                AgentOperation.node_id == nodes[0],
+        owner_start = _required(
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == restart.id,
+                    AgentOperation.node_id == nodes[0],
+                )
             )
-        ))
+        )
     service.record_node_result(
         restart.id,
         nodes[0],
@@ -4760,12 +4920,14 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
         evidence=start_evidence(worker_start.payload),
     )
     with sessions() as session:
-        owner_start = _required(session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == restart.id,
-                AgentOperation.node_id == nodes[0],
+        owner_start = _required(
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == restart.id,
+                    AgentOperation.node_id == nodes[0],
+                )
             )
-        ))
+        )
     service.record_node_result(
         restart.id,
         nodes[0],
@@ -4858,12 +5020,14 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
         evidence=start_evidence(worker_start.payload),
     )
     with sessions() as session:
-        owner_start = _required(session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == restart.id,
-                AgentOperation.node_id == nodes[0],
+        owner_start = _required(
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == restart.id,
+                    AgentOperation.node_id == nodes[0],
+                )
             )
-        ))
+        )
     service.record_node_result(
         restart.id,
         nodes[0],
@@ -5558,7 +5722,9 @@ def _blocked_install_plan(codes: tuple[str, ...]) -> InstallPlan:
                 required_bytes=0,
                 disk_floor_bytes=0,
                 free_after_bytes=None,
-                blockers=tuple(AdmissionReason(code=code, detail=code) for code in codes),
+                blockers=tuple(
+                    AdmissionReason(code=code, detail=code) for code in codes
+                ),
                 warnings=(),
             ),
         ),
@@ -5566,7 +5732,9 @@ def _blocked_install_plan(codes: tuple[str, ...]) -> InstallPlan:
     )
 
 
-def test_prepare_installation_hands_a_refreshable_preflight_refusal_to_the_probe() -> None:
+def test_prepare_installation_hands_a_refreshable_preflight_refusal_to_the_probe() -> (
+    None
+):
     # The run-switch compile phase re-plans and then prepares the plan it just
     # received.  A plan whose only objection is preflight evidence must reach
     # the caller's bounded re-probe; rejecting it here dead-ended the whole
@@ -5584,7 +5752,9 @@ def test_prepare_installation_keeps_a_real_blocker_terminal() -> None:
     service = object.__new__(RecipeOperationService)
     with pytest.raises(RecipeOperationConflict) as error:
         service.prepare_installation(
-            _blocked_install_plan(("runtime_preflight.host_changed", "node.disk_below_floor")),
+            _blocked_install_plan(
+                ("runtime_preflight.host_changed", "node.disk_below_floor")
+            ),
             actor="admin",
         )
     assert not isinstance(error.value, RecipeInstallPreflightExpired)

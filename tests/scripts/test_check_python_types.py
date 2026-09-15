@@ -129,8 +129,9 @@ def test_update_keeps_known_reasons_and_reports_new_ones(
     entries = {
         (entry["file"], entry["rule"]): entry for entry in document["exceptions"]
     }
-    assert entries[("control/tests/example.py", "reportArgumentType")]["reason"] == (
-        known["reason"]
+    assert (
+        entries[("control/tests/example.py", "reportArgumentType")]["reason"]
+        == (known["reason"])
     )
     assert entries[added]["count"] == 2
     assert entries[added]["reason"] == ""

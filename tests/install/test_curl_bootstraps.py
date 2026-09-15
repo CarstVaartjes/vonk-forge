@@ -19,7 +19,7 @@ def test_native_bootstraps_bound_and_retry_every_download() -> None:
     for kind in ("nas", "spark"):
         source = (ROOT / "install" / kind).read_text()
         assert all(value in source for value in contract)
-        assert source.count("download \"") == (2 if kind == "nas" else 3)
+        assert source.count('download "') == (2 if kind == "nas" else 3)
 
 
 def _fake_command(directory: Path, name: str, body: str) -> None:
@@ -134,9 +134,7 @@ def _run_bootstrap(
 
 @pytest.mark.parametrize(
     ("kind", "system", "machine", "arguments", "expected_arguments"),
-    (
-        ("spark", "Linux", "aarch64", (), "--package"),
-    ),
+    (("spark", "Linux", "aarch64", (), "--package"),),
 )
 def test_curl_bootstrap_verifies_and_runs_the_native_installer(
     tmp_path: Path,

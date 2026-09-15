@@ -161,7 +161,9 @@ def _stage_optional_private_key(
     if source_is_absent or source.stat().st_size == 0:
         if destination.exists() or destination.is_symlink():
             if destination.is_dir() and not destination.is_symlink():
-                raise RuntimeSecretError("optional runtime secret destination is unsafe")
+                raise RuntimeSecretError(
+                    "optional runtime secret destination is unsafe"
+                )
             destination.unlink()
         return
     stage_private_key(

@@ -86,7 +86,9 @@ def _load_frozen_corpus() -> FrozenCorpus:
     # recipe_library_root instead of silently skipping an old temporary receipt.
     package_root = recipe_library_root()
     _checkout_head(package_root)
-    index = json.loads((package_root / "catalog-index.json").read_text(encoding="utf-8"))
+    index = json.loads(
+        (package_root / "catalog-index.json").read_text(encoding="utf-8")
+    )
     if not isinstance(index, dict):
         pytest.fail("canonical catalog index is not an object")
     if (
@@ -154,8 +156,7 @@ def _transport(corpus: FrozenCorpus, calls: list[str]) -> httpx.MockTransport:
         corpus.index, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     by_name = {
-        Path(str(row["package"]["path"])).name: row
-        for row in corpus.index["recipes"]
+        Path(str(row["package"]["path"])).name: row for row in corpus.index["recipes"]
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -216,7 +217,9 @@ def _app(
         try:
             return codec.verify(value[7:], now=int(datetime.now(UTC).timestamp()))
         except AuthError:
-            raise HTTPException(status_code=401, detail="authentication failed") from None
+            raise HTTPException(
+                status_code=401, detail="authentication failed"
+            ) from None
 
     install_catalog_routes(
         app,
@@ -396,13 +399,17 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
 
     with sessions() as session:
         assert session.scalar(
-            select(func.count()).select_from(CatalogDocumentRevision).where(
+            select(func.count())
+            .select_from(CatalogDocumentRevision)
+            .where(
                 CatalogDocumentRevision.kind == "model",
                 CatalogDocumentRevision.state == "active",
             )
         ) == len(corpus.index["catalog_entities"])
         assert session.scalar(
-            select(func.count()).select_from(CatalogDocumentRevision).where(
+            select(func.count())
+            .select_from(CatalogDocumentRevision)
+            .where(
                 CatalogDocumentRevision.kind == "recipe",
                 CatalogDocumentRevision.state == "active",
             )
@@ -429,9 +436,11 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         _model_key(row): row["document"] for row in corpus.index["catalog_entities"]
     }
     assert {
-        (item.identity.publisher, item.identity.slug, item.identity.content_sha256): item.document.model_dump(
-            mode="json"
-        )
+        (
+            item.identity.publisher,
+            item.identity.slug,
+            item.identity.content_sha256,
+        ): item.document.model_dump(mode="json")
         for item in library_models
     } == expected_model_documents
 
@@ -454,9 +463,9 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         detail = RecipeDetailResponse.model_validate_json(detail_response.content)
         assert detail.identity.content_sha256 == digest
         assert detail.identity.slug == row["document"]["identity"]["slug"]
-        assert [entry.selection.model_dump() for entry in detail.model_documents] == row[
-            "document"
-        ]["models"]
+        assert [
+            entry.selection.model_dump() for entry in detail.model_documents
+        ] == row["document"]["models"]
         assert [
             entry.model_document.model_dump(mode="json")
             for entry in detail.model_documents

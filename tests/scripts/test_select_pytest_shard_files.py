@@ -13,7 +13,9 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "select-pytest-shard-
 
 
 def _module():
-    loader = importlib.machinery.SourceFileLoader("select_pytest_shard_files", str(SCRIPT))
+    loader = importlib.machinery.SourceFileLoader(
+        "select_pytest_shard_files", str(SCRIPT)
+    )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -30,9 +32,7 @@ def test_shards_keep_files_whole_and_balance_collected_case_counts() -> None:
         *(f"tests/small_{file}.py::test_one" for file in range(4)),
     ]
 
-    shards = [
-        module.select_files(node_ids, index=index, total=3) for index in range(3)
-    ]
+    shards = [module.select_files(node_ids, index=index, total=3) for index in range(3)]
 
     flattened = [path for shard in shards for path in shard]
     assert sorted(flattened) == sorted(set(flattened))

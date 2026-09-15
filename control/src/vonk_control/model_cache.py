@@ -222,7 +222,11 @@ def _retry_after_seconds(headers: Mapping[str, str], *, now: datetime) -> int | 
             continue
         # Providers use both a delta and a Unix timestamp.  Values near the
         # current epoch are timestamps; small values are delays.
-        values.append(max(0, reset - int(now.timestamp())) if reset > 1_000_000_000 else max(0, reset))
+        values.append(
+            max(0, reset - int(now.timestamp()))
+            if reset > 1_000_000_000
+            else max(0, reset)
+        )
     raw_rate_limit = headers.get("ratelimit") or headers.get("RateLimit")
     if raw_rate_limit:
         # The IETF RateLimit draft permits policy parameters such as `RateLimit:
@@ -381,8 +385,7 @@ class ArtifactSetManifest:
                 "model_cache.schema_unsupported"
                 if isinstance(error, ValidationError)
                 and any(
-                    issue.get("loc") == ("schema_version",)
-                    for issue in error.errors()
+                    issue.get("loc") == ("schema_version",) for issue in error.errors()
                 )
                 else "model_cache.manifest_invalid"
             )
@@ -430,7 +433,9 @@ def _validated_operation_payload(
         parsed = parse_model_cache_payload(operation.kind, operation.payload)
         if isinstance(parsed, (ModelCacheDownloadPayload, ModelCacheRepairPayload)):
             ArtifactSetManifest.from_document(serialize_json_value(parsed.manifest))
-        return dict(require_mapping(serialize_json_value(parsed), "cache operation payload"))
+        return dict(
+            require_mapping(serialize_json_value(parsed), "cache operation payload")
+        )
     except (TypeError, ValueError, ValidationError) as error:
         raise ModelCacheStorageError(
             "model_cache.payload_invalid",
@@ -438,7 +443,9 @@ def _validated_operation_payload(
         ) from error
 
 
-def _validated_operation_progress(operation: ModelCacheOperation) -> ModelCacheOperationProgress:
+def _validated_operation_progress(
+    operation: ModelCacheOperation,
+) -> ModelCacheOperationProgress:
     """Read one persisted operation progress document through its wire model."""
 
     try:
@@ -452,14 +459,18 @@ def _validated_operation_progress(operation: ModelCacheOperation) -> ModelCacheO
         ) from error
 
 
-def _write_operation_payload(kind: str, value: Mapping[str, object]) -> dict[str, object]:
+def _write_operation_payload(
+    kind: str, value: Mapping[str, object]
+) -> dict[str, object]:
     """Validate and normalize a newly assembled operation envelope."""
 
     try:
         parsed = parse_model_cache_payload(kind, value)
         if isinstance(parsed, (ModelCacheDownloadPayload, ModelCacheRepairPayload)):
             ArtifactSetManifest.from_document(serialize_json_value(parsed.manifest))
-        return dict(require_mapping(serialize_json_value(parsed), "cache operation payload"))
+        return dict(
+            require_mapping(serialize_json_value(parsed), "cache operation payload")
+        )
     except (TypeError, ValueError, ValidationError) as error:
         raise ModelCacheStorageError(
             "model_cache.payload_invalid",
@@ -512,10 +523,17 @@ class CacheOperationView:
 
 
 def _cache_failure(
-    code: str, detail: str, *, retryable: bool, recovery: str,
-    retry_time: str | None = None, retry_after_seconds: int | None = None,
-    required_bytes: int | None = None, free_bytes: int | None = None,
-    shortfall_bytes: int | None = None, artifact_key: str | None = None,
+    code: str,
+    detail: str,
+    *,
+    retryable: bool,
+    recovery: str,
+    retry_time: str | None = None,
+    retry_after_seconds: int | None = None,
+    required_bytes: int | None = None,
+    free_bytes: int | None = None,
+    shortfall_bytes: int | None = None,
+    artifact_key: str | None = None,
 ) -> dict[str, object]:
     """Translate an exception once, then persist the canonical public contract."""
     semantic_codes = {
@@ -529,21 +547,35 @@ def _cache_failure(
         "model_cache.interrupted": "interrupted",
     }
     recovery_actions = {
-        "access_required": ["open_model_access", "configure_hf_token", "check_access_and_resume"],
+        "access_required": [
+            "open_model_access",
+            "configure_hf_token",
+            "check_access_and_resume",
+        ],
         "access_denied": ["open_model_access", "check_access_and_resume"],
         "credentials_invalid": ["configure_hf_token", "check_access_and_resume"],
-        "resume": ["resume"], "download_again": ["download_again"],
-        "retry": ["retry"], "capacity": ["free_space", "resume"],
-        "check_access_and_resume": ["check_access_and_resume"], "inspect": ["inspect"],
+        "resume": ["resume"],
+        "download_again": ["download_again"],
+        "retry": ["retry"],
+        "capacity": ["free_space", "resume"],
+        "check_access_and_resume": ["check_access_and_resume"],
+        "inspect": ["inspect"],
     }
-    return AvailabilityOperationFailure.model_validate({
-        "code": semantic_codes.get(code, code), "detail": redact_text(detail)[:512],
-        "retryable": retryable, "recovery_actions": recovery_actions[recovery],
-        "retry_time": retry_time, "retry_after_seconds": retry_after_seconds,
-        "required_bytes": required_bytes, "free_bytes": free_bytes,
-        "shortfall_bytes": shortfall_bytes, "artifact_key": artifact_key,
-        "log_excerpt": redact_text(detail)[:1024],
-    }).model_dump(mode="json")
+    return AvailabilityOperationFailure.model_validate(
+        {
+            "code": semantic_codes.get(code, code),
+            "detail": redact_text(detail)[:512],
+            "retryable": retryable,
+            "recovery_actions": recovery_actions[recovery],
+            "retry_time": retry_time,
+            "retry_after_seconds": retry_after_seconds,
+            "required_bytes": required_bytes,
+            "free_bytes": free_bytes,
+            "shortfall_bytes": shortfall_bytes,
+            "artifact_key": artifact_key,
+            "log_excerpt": redact_text(detail)[:1024],
+        }
+    ).model_dump(mode="json")
 
 
 def _sha256_json(value: object) -> str:
@@ -578,7 +610,10 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         not value.key
         or len(value.key) > 256
         or not value.key[0].isalpha()
-        or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789_.:-" for character in value.key)
+        or any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789_.:-"
+            for character in value.key
+        )
         or not value.artifact_id
         or len(value.artifact_id) > 256
         or re.fullmatch(r"[a-z][a-z0-9_.:-]{0,255}", value.artifact_id) is None
@@ -595,10 +630,7 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or not isinstance(value.expected_bytes, int)
         or isinstance(value.expected_bytes, bool)
         or value.expected_bytes < 0
-        or (
-            value.expected_bytes == 0
-            and value.sha256 != _EMPTY_SHA256
-        )
+        or (value.expected_bytes == 0 and value.sha256 != _EMPTY_SHA256)
         or not value.roles
         or len(value.roles) > 32
         or any(not isinstance(role, str) for role in value.roles)
@@ -634,11 +666,17 @@ def _validate_manifest(value: ArtifactSetManifest) -> None:
             "model_cache.artifact_duplicate", "cache artifact keys must be unique"
         )
     _unique_artifacts(value.artifacts)
-    if any(not isinstance(item, str) or not _is_hex(item) for item in value.model_content_digests):
+    if any(
+        not isinstance(item, str) or not _is_hex(item)
+        for item in value.model_content_digests
+    ):
         raise ModelCacheResolutionError(
-            "model_cache.model_content_digests_invalid", "cache model dependency pins are invalid"
+            "model_cache.model_content_digests_invalid",
+            "cache model dependency pins are invalid",
         )
-    encoded = json.dumps(value.document(), sort_keys=True, separators=(",", ":")).encode()
+    encoded = json.dumps(
+        value.document(), sort_keys=True, separators=(",", ":")
+    ).encode()
     if len(encoded) > _MAX_MANIFEST_BYTES:
         raise ModelCacheResolutionError(
             "model_cache.manifest_too_large", "cache manifest exceeds the size limit"
@@ -760,7 +798,9 @@ def _source_for_catalog_artifact(
                 "model_cache.source_invalid",
                 "catalog Hugging Face repository is invalid",
             )
-        if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40,64}", revision):
+        if not isinstance(revision, str) or not re.fullmatch(
+            r"[0-9a-f]{40,64}", revision
+        ):
             raise ModelCacheResolutionError(
                 "model_cache.revision_invalid",
                 "catalog artifact revision is not immutable",
@@ -780,13 +820,11 @@ def _source_for_catalog_artifact(
 
 
 def _valid_repository(value: str) -> bool:
-    return (
-        bool(
-            re.fullmatch(
-                r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}/"
-                r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}",
-                value,
-            )
+    return bool(
+        re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}/"
+            r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}",
+            value,
         )
     )
 
@@ -808,7 +846,9 @@ def _parse_iso(value: str) -> datetime:
         ) from error
 
 
-def _recipe_definition(document: Mapping[str, object] | RecipeDefinition) -> RecipeDefinition:
+def _recipe_definition(
+    document: Mapping[str, object] | RecipeDefinition,
+) -> RecipeDefinition:
     if isinstance(document, RecipeDefinition):
         return document
     try:
@@ -832,14 +872,20 @@ def _recipe_model_content_digests(
     result: list[str] = []
     for selection in raw_models:
         digest = selection.model.content_sha256
-        if not isinstance(digest, str) or not _is_hex(digest) or len(digest) != _DIGEST_LENGTH:
+        if (
+            not isinstance(digest, str)
+            or not _is_hex(digest)
+            or len(digest) != _DIGEST_LENGTH
+        ):
             raise ModelCacheResolutionError(
                 "model_cache.model_pin_invalid", "canonical recipe model pin is invalid"
             )
         if digest not in result:
             result.append(digest)
     if len(result) > _MAX_ARTIFACTS:
-        raise ModelCacheResolutionError("model_cache.dependency_count", "recipe model set is too large")
+        raise ModelCacheResolutionError(
+            "model_cache.dependency_count", "recipe model set is too large"
+        )
     return result
 
 
@@ -866,7 +912,8 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[dict[str, o
             raise TypeError("catalog revision is not a model")
     except (TypeError, ValueError) as error:
         raise ModelCacheResolutionError(
-            "model_cache.model_definition_invalid", "canonical model definition is invalid"
+            "model_cache.model_definition_invalid",
+            "canonical model definition is invalid",
         ) from error
     repository = definition.source.repository
     revision = definition.source.revision
@@ -893,7 +940,11 @@ def _same_model_artifact_identity(
     """Compare selected file bytes while ignoring revision/editorial facts."""
     try:
         current = {
-            str(item["id"]): (str(item["path"]), str(item["sha256"]), require_integer(item["download_bytes"], "download bytes"))
+            str(item["id"]): (
+                str(item["path"]),
+                str(item["sha256"]),
+                require_integer(item["download_bytes"], "download bytes"),
+            )
             for item in _canonical_model_artifacts(row)
         }
     except (KeyError, TypeError, ValueError, ModelCacheResolutionError):
@@ -902,7 +953,9 @@ def _same_model_artifact_identity(
         item.artifact_id: (item.path, item.sha256, item.expected_bytes)
         for item in manifest.artifacts
     }
-    return bool(selected) and all(current.get(key) == identity for key, identity in selected.items())
+    return bool(selected) and all(
+        current.get(key) == identity for key, identity in selected.items()
+    )
 
 
 def _model_lineage_signature(
@@ -910,7 +963,11 @@ def _model_lineage_signature(
 ) -> tuple[object, object, object]:
     """Return the logical model and representation identity from ModelDefinition."""
 
-    model = document if isinstance(document, ModelDefinition) else ModelDefinition.model_validate(document)
+    model = (
+        document
+        if isinstance(document, ModelDefinition)
+        else ModelDefinition.model_validate(document)
+    )
     identity = model.identity
     publisher = identity.model.publisher
     slug = identity.model.slug
@@ -960,20 +1017,24 @@ class ModelCacheService:
     ) -> None:
         if not isinstance(root, Path):
             root = Path(root)
-        if not root.is_absolute() or any(part in {"", ".", ".."} for part in root.parts):
+        if not root.is_absolute() or any(
+            part in {"", ".", ".."} for part in root.parts
+        ):
             raise ValueError("model cache root must be an absolute normalized path")
         if root.is_symlink():
             raise ValueError("model cache root must not be a symlink")
-        if not isinstance(reserve_bytes, int) or isinstance(reserve_bytes, bool) or reserve_bytes < 0:
+        if (
+            not isinstance(reserve_bytes, int)
+            or isinstance(reserve_bytes, bool)
+            or reserve_bytes < 0
+        ):
             raise ValueError("model cache reserve must be a non-negative integer")
         if (
             not isinstance(max_parallel_downloads, int)
             or isinstance(max_parallel_downloads, bool)
             or not 1 <= max_parallel_downloads <= _MAX_PARALLEL_DOWNLOADS
         ):
-            raise ValueError(
-                "model cache parallel downloads must be between 1 and 16"
-            )
+            raise ValueError("model cache parallel downloads must be between 1 and 16")
         root.mkdir(parents=True, exist_ok=True, mode=0o750)
         for child in ("objects", "partials", "quarantine", "manifests", "locks"):
             directory = root / child
@@ -1086,7 +1147,11 @@ class ModelCacheService:
             _validate_manifest(manifest)
             return manifest
 
-        if model_digest is None and recipe_digest is None and recipe_revision_id is None:
+        if (
+            model_digest is None
+            and recipe_digest is None
+            and recipe_revision_id is None
+        ):
             raise ModelCacheResolutionError(
                 "model_cache.pin_required",
                 "an exact model definition or recipe revision is required",
@@ -1095,10 +1160,13 @@ class ModelCacheService:
             recipe_document: RecipeDefinition | None = None
             recipe_model_digests: list[str] = []
             if recipe_digest is not None or recipe_revision_id is not None:
-                recipe_document, _resolved_recipe_id, resolved_recipe_digest = self._recipe_document(
-                    session, recipe_digest, recipe_revision_id
+                recipe_document, _resolved_recipe_id, resolved_recipe_digest = (
+                    self._recipe_document(session, recipe_digest, recipe_revision_id)
                 )
-                if recipe_digest is not None and resolved_recipe_digest != recipe_digest:
+                if (
+                    recipe_digest is not None
+                    and resolved_recipe_digest != recipe_digest
+                ):
                     raise ModelCacheResolutionError(
                         "model_cache.recipe_revision_missing",
                         "exact recipe revision is not resolved",
@@ -1110,7 +1178,10 @@ class ModelCacheService:
                         "model_cache.recipe_model_missing",
                         "recipe does not bind an exact model definition",
                     )
-                if model_digest is not None and model_digest not in recipe_model_digests:
+                if (
+                    model_digest is not None
+                    and model_digest not in recipe_model_digests
+                ):
                     raise ModelCacheConflict(
                         "model_cache.pin_mismatch",
                         "recipe and requested model definitions do not match",
@@ -1219,9 +1290,7 @@ class ModelCacheService:
                 else:
                     conditions.append(CatalogDocumentRevision.slug == selector)
                 rows = list(
-                    session.scalars(
-                        select(CatalogDocumentRevision).where(*conditions)
-                    )
+                    session.scalars(select(CatalogDocumentRevision).where(*conditions))
                 )
             if len(rows) != 1:
                 if not rows:
@@ -1229,7 +1298,8 @@ class ModelCacheService:
                         "model_cache.selector_missing", "model selector was not found"
                     )
                 raise ModelCacheConflict(
-                    "model_cache.selector_ambiguous", "model selector matches multiple models"
+                    "model_cache.selector_ambiguous",
+                    "model selector matches multiple models",
                 )
             digest = rows[0].content_digest
             if not isinstance(digest, str) or _optional_digest(digest) is None:
@@ -1256,63 +1326,91 @@ class ModelCacheService:
         load operation can prepare it explicitly.
         """
 
-        if not isinstance(recipe_identity, str) or not 1 <= len(recipe_identity.strip()) <= 256:
+        if (
+            not isinstance(recipe_identity, str)
+            or not 1 <= len(recipe_identity.strip()) <= 256
+        ):
             raise ModelCacheResolutionError(
                 "model_cache.recipe_identity_invalid", "recipe identity is required"
             )
         identity = recipe_identity.strip().casefold()
         requested_model = _optional_digest(model_content_sha256)
         if model_variant is not None and (
-            not isinstance(model_variant, str) or not 1 <= len(model_variant.strip()) <= 128
+            not isinstance(model_variant, str)
+            or not 1 <= len(model_variant.strip()) <= 128
         ):
             raise ModelCacheResolutionError(
                 "model_cache.model_variant_invalid", "model variant is invalid"
             )
-        requested_variant = model_variant.strip() if isinstance(model_variant, str) else None
+        requested_variant = (
+            model_variant.strip() if isinstance(model_variant, str) else None
+        )
 
         with self._session() as session:
             if re.fullmatch(_DIGEST_PATTERN, identity):
-                seed = session.scalar(select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.content_digest == identity,
-                ))
+                seed = session.scalar(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.content_digest == identity,
+                    )
+                )
             elif re.fullmatch(UUID_PATTERN, identity):
-                seed = session.scalar(select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    (CatalogDocumentRevision.id == identity)
-                    | (CatalogDocumentRevision.document_id == identity),
-                ))
+                seed = session.scalar(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        (CatalogDocumentRevision.id == identity)
+                        | (CatalogDocumentRevision.document_id == identity),
+                    )
+                )
             elif "/" in identity:
                 publisher, slug = identity.split("/", 1)
-                seed = session.scalar(select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.publisher == publisher,
-                    CatalogDocumentRevision.slug == slug,
-                ).order_by(CatalogDocumentRevision.revision_number.desc()))
+                seed = session.scalar(
+                    select(CatalogDocumentRevision)
+                    .where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.publisher == publisher,
+                        CatalogDocumentRevision.slug == slug,
+                    )
+                    .order_by(CatalogDocumentRevision.revision_number.desc())
+                )
             else:
-                seed = session.scalar(select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.slug == identity,
-                ).order_by(CatalogDocumentRevision.revision_number.desc()))
+                seed = session.scalar(
+                    select(CatalogDocumentRevision)
+                    .where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.slug == identity,
+                    )
+                    .order_by(CatalogDocumentRevision.revision_number.desc())
+                )
             if seed is None:
                 raise ModelCacheResolutionError(
-                    "model_cache.recipe_identity_missing", "recipe identity was not found"
+                    "model_cache.recipe_identity_missing",
+                    "recipe identity was not found",
                 )
 
-            revisions = list(session.scalars(select(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.document_id == seed.document_id,
-                CatalogDocumentRevision.state == "active",
-            ).order_by(
-                CatalogDocumentRevision.revision_number.desc(),
-                CatalogDocumentRevision.id.desc(),
-            )))
+            revisions = list(
+                session.scalars(
+                    select(CatalogDocumentRevision)
+                    .where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.document_id == seed.document_id,
+                        CatalogDocumentRevision.state == "active",
+                    )
+                    .order_by(
+                        CatalogDocumentRevision.revision_number.desc(),
+                        CatalogDocumentRevision.id.desc(),
+                    )
+                )
+            )
             if not revisions:
                 raise ModelCacheResolutionError(
-                    "model_cache.recipe_revision_missing", "recipe has no active revision"
+                    "model_cache.recipe_revision_missing",
+                    "recipe has no active revision",
                 )
 
-            def compatible_model(revision: CatalogDocumentRevision) -> tuple[str, str | None]:
+            def compatible_model(
+                revision: CatalogDocumentRevision,
+            ) -> tuple[str, str | None]:
                 recipe = read_catalog_document(revision)
                 if not isinstance(recipe, RecipeDefinition):
                     raise ModelCacheResolutionError(
@@ -1322,17 +1420,23 @@ class ModelCacheService:
                 if requested_model is not None and requested_model not in digests:
                     return "", None
                 for digest in digests if requested_model is None else [requested_model]:
-                    model_revision = session.scalar(select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.kind == "model",
-                        CatalogDocumentRevision.content_digest == digest,
-                    ).order_by(
-                        (CatalogDocumentRevision.state == "active").desc(),
-                        CatalogDocumentRevision.revision_number.desc(),
-                        CatalogDocumentRevision.id.desc(),
-                    ))
+                    model_revision = session.scalar(
+                        select(CatalogDocumentRevision)
+                        .where(
+                            CatalogDocumentRevision.kind == "model",
+                            CatalogDocumentRevision.content_digest == digest,
+                        )
+                        .order_by(
+                            (CatalogDocumentRevision.state == "active").desc(),
+                            CatalogDocumentRevision.revision_number.desc(),
+                            CatalogDocumentRevision.id.desc(),
+                        )
+                    )
                     if model_revision is None:
                         continue
-                    model = ModelDefinition.model_validate(read_catalog_document(model_revision))
+                    model = ModelDefinition.model_validate(
+                        read_catalog_document(model_revision)
+                    )
                     variant = model.identity.variant
                     if requested_variant is None or variant == requested_variant:
                         return digest, variant
@@ -1340,14 +1444,18 @@ class ModelCacheService:
 
             def verified_image(revision_id: str) -> RuntimeImageReceiptRow | None:
                 receipts = session.scalars(
-                    select(RuntimeImageReceiptRow).join(
+                    select(RuntimeImageReceiptRow)
+                    .join(
                         RuntimeImageAuthorization,
-                        RuntimeImageAuthorization.receipt_id == RuntimeImageReceiptRow.id,
-                    ).where(
+                        RuntimeImageAuthorization.receipt_id
+                        == RuntimeImageReceiptRow.id,
+                    )
+                    .where(
                         RuntimeImageAuthorization.recipe_revision_id == revision_id,
                         RuntimeImageAuthorization.state == "authorized",
                         RuntimeImageReceiptRow.state == "verified",
-                    ).order_by(
+                    )
+                    .order_by(
                         RuntimeImageReceiptRow.verified_at.desc(),
                         RuntimeImageReceiptRow.id.desc(),
                     )
@@ -1366,7 +1474,15 @@ class ModelCacheService:
                         return receipt
                 return None
 
-            selected: tuple[CatalogDocumentRevision, str, str | None, RuntimeImageReceiptRow | None] | None = None
+            selected: (
+                tuple[
+                    CatalogDocumentRevision,
+                    str,
+                    str | None,
+                    RuntimeImageReceiptRow | None,
+                ]
+                | None
+            ) = None
             newest_compatible: CatalogDocumentRevision | None = None
             for revision in revisions:
                 digest, variant = compatible_model(revision)
@@ -1389,10 +1505,14 @@ class ModelCacheService:
             else:
                 revision, digest, variant, receipt = selected
 
-            model_rows = list(session.scalars(select(ModelCacheSet).where(
-                ModelCacheSet.model_content_sha256 == digest,
-                ModelCacheSet.state == "cached",
-            )))
+            model_rows = list(
+                session.scalars(
+                    select(ModelCacheSet).where(
+                        ModelCacheSet.model_content_sha256 == digest,
+                        ModelCacheSet.state == "cached",
+                    )
+                )
+            )
 
             def model_set_available(row: ModelCacheSet) -> bool:
                 manifest = ArtifactSetManifest.from_document(row.manifest)
@@ -1415,9 +1535,15 @@ class ModelCacheService:
 
             recipe_cached = receipt is not None
             image_bytes = receipt.image_bytes if receipt is not None else None
-            image_digest = receipt.platform_manifest_digest if receipt is not None else None
+            image_digest = (
+                receipt.platform_manifest_digest if receipt is not None else None
+            )
             latest = next(
-                (item for item in revisions if item.revision_number > revision.revision_number),
+                (
+                    item
+                    for item in revisions
+                    if item.revision_number > revision.revision_number
+                ),
                 None,
             )
             additional = (
@@ -1441,7 +1567,9 @@ class ModelCacheService:
                     "content_sha256": revision.content_digest,
                     "cached": recipe_cached,
                     "cache_state": "cached" if recipe_cached else "missing",
-                    "artifact_set_sha256": receipt.oci_archive_sha256 if receipt else None,
+                    "artifact_set_sha256": receipt.oci_archive_sha256
+                    if receipt
+                    else None,
                     "expected_bytes": image_bytes,
                     "verified_bytes": image_bytes,
                     "source": receipt.source if receipt else None,
@@ -1452,7 +1580,9 @@ class ModelCacheService:
                     "content_sha256": digest,
                     "cached": model_cached,
                     "cache_state": "cached" if model_cached else "missing",
-                    "artifact_set_sha256": model_set.artifact_set_sha256 if model_set else None,
+                    "artifact_set_sha256": model_set.artifact_set_sha256
+                    if model_set
+                    else None,
                     "expected_bytes": model_expected,
                     "verified_bytes": model_verified,
                     "variant": variant,
@@ -1481,7 +1611,13 @@ class ModelCacheService:
         preview = self._download_preview_for_manifest(manifest)
         if preview["blockers"]:
             raise ModelCacheConflict(
-                "model_cache.download_blocked", "; ".join(str(item) for item in require_sequence(preview["blockers"], "download blockers"))
+                "model_cache.download_blocked",
+                "; ".join(
+                    str(item)
+                    for item in require_sequence(
+                        preview["blockers"], "download blockers"
+                    )
+                ),
             )
         return self.start_download(
             actor=actor,
@@ -1489,7 +1625,8 @@ class ModelCacheService:
             plan_digest=str(preview["plan_digest"]),
             artifact_set_sha256=manifest.digest,
             selector=selector,
-            force=force or preview.get("already_cached_bytes", 0) == manifest.expected_bytes,
+            force=force
+            or preview.get("already_cached_bytes", 0) == manifest.expected_bytes,
         )
 
     def remove_model_selector(
@@ -1523,20 +1660,24 @@ class ModelCacheService:
         fence = str(uuid.uuid4())
         with self._lock, self._session(write=True) as session:
             existing = session.scalar(
-                select(ModelCacheOperation).where(ModelCacheOperation.request_key == request_key)
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == request_key
+                )
             )
             if existing is not None:
                 return self._operation_view(existing)
             rows = list(
                 session.scalars(
-                    select(ModelCacheSet).where(ModelCacheSet.model_content_sha256 == digest)
+                    select(ModelCacheSet).where(
+                        ModelCacheSet.model_content_sha256 == digest
+                    )
                 )
             )
             selected = [row.artifact_set_sha256 for row in rows]
             active = list(
                 session.scalars(
                     select(ModelCacheOperation).where(
-                        ModelCacheOperation.artifact_set_sha256.in_(selected or ["0" ]),
+                        ModelCacheOperation.artifact_set_sha256.in_(selected or ["0"]),
                         ModelCacheOperation.state.in_(("queued", "running", "partial")),
                         ModelCacheOperation.kind.in_(("download", "repair")),
                     )
@@ -1555,7 +1696,8 @@ class ModelCacheService:
                 operation.completed_at = operation.updated_at = now
                 operation.progress = cache_phase(
                     _validated_operation_progress(operation).model_dump(mode="json"),
-                    "failed", now,
+                    "failed",
+                    now,
                 )
                 cancelled.append(operation.id)
                 self._transfer_stop(operation.id).set()
@@ -1583,7 +1725,10 @@ class ModelCacheService:
             }
             reclaimed = 0
             for artifact in list(session.scalars(select(ModelCacheArtifact))):
-                if artifact.sha256 not in object_digests or artifact.sha256 in referenced:
+                if (
+                    artifact.sha256 not in object_digests
+                    or artifact.sha256 in referenced
+                ):
                     continue
                 path = self._object_path(artifact.sha256)
                 if path.is_file() and not path.is_symlink():
@@ -1603,27 +1748,36 @@ class ModelCacheService:
                 state="succeeded",
                 attempt=1,
                 artifact_set_sha256=None,
-                plan_digest=_sha256_json({"action": "remove-model", "selector": selector, "fence": fence}),
-                payload=_write_operation_payload("remove", {
-                    "schema_version": SCHEMA_VERSION,
-                    "source_policy": SOURCE_POLICY,
-                    "selected": selected,
-                    "selected_objects": sorted(object_digests),
-                    "reclaimed_bytes": reclaimed,
-                    "operator_action": "remove-model",
-                    "selector": selector,
-                    "removal_fence": fence,
-                    "result": result,
-                }),
-                progress=cache_progress({
-                    "schema_version": SCHEMA_VERSION,
-                    "phase": "completed",
-                    "completed_artifacts": len(selected),
-                    "total_artifacts": len(selected),
-                    "downloaded_bytes": reclaimed,
-                    "expected_bytes": reclaimed,
-                    "current_artifact_key": None,
-                }, previous=None, now=now),
+                plan_digest=_sha256_json(
+                    {"action": "remove-model", "selector": selector, "fence": fence}
+                ),
+                payload=_write_operation_payload(
+                    "remove",
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "source_policy": SOURCE_POLICY,
+                        "selected": selected,
+                        "selected_objects": sorted(object_digests),
+                        "reclaimed_bytes": reclaimed,
+                        "operator_action": "remove-model",
+                        "selector": selector,
+                        "removal_fence": fence,
+                        "result": result,
+                    },
+                ),
+                progress=cache_progress(
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "phase": "completed",
+                        "completed_artifacts": len(selected),
+                        "total_artifacts": len(selected),
+                        "downloaded_bytes": reclaimed,
+                        "expected_bytes": reclaimed,
+                        "current_artifact_key": None,
+                    },
+                    previous=None,
+                    now=now,
+                ),
                 actor=actor,
                 created_at=now,
                 updated_at=now,
@@ -1740,13 +1894,23 @@ class ModelCacheService:
         raw_digest = value.get("sha256")
         raw_bytes = value.get("download_bytes")
         roles = value.get("roles")
-        if not isinstance(raw_id, str) or not isinstance(raw_path, str) or not isinstance(raw_kind, str):
+        if (
+            not isinstance(raw_id, str)
+            or not isinstance(raw_path, str)
+            or not isinstance(raw_kind, str)
+        ):
             raise ModelCacheResolutionError(
-                "model_cache.artifact_invalid", "catalog artifact identity is incomplete"
+                "model_cache.artifact_invalid",
+                "catalog artifact identity is incomplete",
             )
-        if not isinstance(raw_digest, str) or not isinstance(raw_bytes, int) or not isinstance(roles, list):
+        if (
+            not isinstance(raw_digest, str)
+            or not isinstance(raw_bytes, int)
+            or not isinstance(roles, list)
+        ):
             raise ModelCacheResolutionError(
-                "model_cache.artifact_invalid", "catalog artifact integrity metadata is incomplete"
+                "model_cache.artifact_invalid",
+                "catalog artifact integrity metadata is incomplete",
             )
         if raw_kind != "huggingface.file" and not self._fixture_sources:
             raise ModelCacheResolutionError(
@@ -1793,9 +1957,7 @@ class ModelCacheService:
             ):
                 source_value = repository
             source = str(source_value)
-            revision = (
-                None if value.get("revision") is None else str(value["revision"])
-            )
+            revision = None if value.get("revision") is None else str(value["revision"])
             raw_roles = value["roles"]
             if not isinstance(raw_roles, list):
                 raise TypeError
@@ -1843,7 +2005,9 @@ class ModelCacheService:
         request_key = _request_key(request_key)
         requested_plan = _optional_digest(plan_digest)
         if requested_plan is None:
-            raise ModelCacheConflict("model_cache.plan_invalid", "download plan digest is invalid")
+            raise ModelCacheConflict(
+                "model_cache.plan_invalid", "download plan digest is invalid"
+            )
         manifest = self._resolve_requested_manifest(
             artifact_set_sha256=artifact_set_sha256,
             model_content_sha256=model_content_sha256,
@@ -1875,11 +2039,18 @@ class ModelCacheService:
                 return self._operation_view(existing)
         preview = self._download_preview_for_manifest(manifest)
         if preview["plan_digest"] != requested_plan:
-            raise ModelCacheConflict("model_cache.stale_plan", "download preview is stale")
+            raise ModelCacheConflict(
+                "model_cache.stale_plan", "download preview is stale"
+            )
         if preview["blockers"]:
             raise ModelCacheConflict(
                 "model_cache.download_blocked",
-                "; ".join(str(item) for item in require_sequence(preview["blockers"], "download blockers")),
+                "; ".join(
+                    str(item)
+                    for item in require_sequence(
+                        preview["blockers"], "download blockers"
+                    )
+                ),
             )
         transfer = None if force else preview.get("_transfer")
         if not isinstance(transfer, Mapping):
@@ -1931,7 +2102,9 @@ class ModelCacheService:
                     progress=self._progress(
                         manifest,
                         phase="queued",
-                        expected_bytes=require_integer(transfer["total_bytes"], "transfer total bytes"),
+                        expected_bytes=require_integer(
+                            transfer["total_bytes"], "transfer total bytes"
+                        ),
                     ),
                     actor=actor,
                     created_at=now,
@@ -1958,10 +2131,14 @@ class ModelCacheService:
         artifacts: Sequence[Mapping[str, object]] | None,
     ) -> ArtifactSetManifest:
         requested_set = _optional_digest(artifact_set_sha256)
-        if requested_set is not None and artifacts is None and (
-            model_content_sha256 is None
-            and recipe_revision_sha256 is None
-            and recipe_revision_id is None
+        if (
+            requested_set is not None
+            and artifacts is None
+            and (
+                model_content_sha256 is None
+                and recipe_revision_sha256 is None
+                and recipe_revision_id is None
+            )
         ):
             return self._manifest_for_set(requested_set)
         manifest = self.resolve_artifact_set(
@@ -2004,7 +2181,9 @@ class ModelCacheService:
             for digest, spec in _unique_artifacts(manifest.artifacts).items()
             if digest in cached
         )
-        transfer = self._transfer_state_for_manifest(manifest, force=False, cached=cached)
+        transfer = self._transfer_state_for_manifest(
+            manifest, force=False, cached=cached
+        )
         new_bytes = require_integer(transfer["total_bytes"], "transfer total bytes")
         storage = self.storage_summary()
         blockers = []
@@ -2155,7 +2334,9 @@ class ModelCacheService:
     ) -> dict[str, object]:
         """Persist a transfer ledger when resuming an older schema-2 row."""
         with self._session(write=True) as session:
-            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update=True
+            )
             if operation is None:
                 raise ModelCacheNotFound(
                     "model_cache.operation_missing", "cache operation was not found"
@@ -2163,9 +2344,7 @@ class ModelCacheService:
             payload = _validated_operation_payload(operation)
             return dict(require_mapping(payload["transfer"], "cache transfer ledger"))
 
-    def _operation_transfer_snapshot(
-        self, operation_id: str
-    ) -> tuple[int | None, int]:
+    def _operation_transfer_snapshot(self, operation_id: str) -> tuple[int | None, int]:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
@@ -2174,7 +2353,9 @@ class ModelCacheService:
                 )
             return self._transfer_totals(_validated_operation_payload(operation))
 
-    def _transfer_state_for_operation(self, operation_id: str) -> Mapping[str, object] | None:
+    def _transfer_state_for_operation(
+        self, operation_id: str
+    ) -> Mapping[str, object] | None:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
@@ -2289,14 +2470,25 @@ class ModelCacheService:
             for spec in unique.values():
                 entry = raw_artifacts[spec.sha256]
                 baseline, received = entry["baseline_bytes"], entry["received_bytes"]
-                members.append(OperationMemberProgress(
-                    member_id=spec.sha256, object_sha256=spec.sha256,
-                    phase={"downloading": "download", "verifying": "verify", "completed": "completed"}.get(phase, phase),
-                    completed_bytes=min(spec.expected_bytes, baseline + received),
-                    total_bytes=spec.expected_bytes,
-                    state="succeeded" if phase == "completed" or baseline == spec.expected_bytes else "running",
-                ))
-        return cache_progress(document, previous=previous, now=self._clock(), members=members)
+                members.append(
+                    OperationMemberProgress(
+                        member_id=spec.sha256,
+                        object_sha256=spec.sha256,
+                        phase={
+                            "downloading": "download",
+                            "verifying": "verify",
+                            "completed": "completed",
+                        }.get(phase, phase),
+                        completed_bytes=min(spec.expected_bytes, baseline + received),
+                        total_bytes=spec.expected_bytes,
+                        state="succeeded"
+                        if phase == "completed" or baseline == spec.expected_bytes
+                        else "running",
+                    )
+                )
+        return cache_progress(
+            document, previous=previous, now=self._clock(), members=members
+        )
 
     def _run_download(
         self,
@@ -2308,29 +2500,31 @@ class ModelCacheService:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
-                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
             operation_payload = _validated_operation_payload(operation)
             force = bool(operation_payload.get("force_refresh") is True) or force
             operation_set_digest = operation.artifact_set_sha256
             manifest = ArtifactSetManifest.from_document(operation_payload["manifest"])
             set_digest = operation_set_digest
         if set_digest is None:
-            raise ModelCacheConflict("model_cache.set_missing", "cache operation has no artifact set")
-        transfer = self._ensure_transfer_state(
-            operation_id, manifest, force=force
-        )
+            raise ModelCacheConflict(
+                "model_cache.set_missing", "cache operation has no artifact set"
+            )
+        transfer = self._ensure_transfer_state(operation_id, manifest, force=force)
         planned_total = transfer.get("total_bytes")
         planned_total = (
-            planned_total
-            if type(planned_total) is int and planned_total >= 0
-            else None
+            planned_total if type(planned_total) is int and planned_total >= 0 else None
         )
         self._set_operation_state(operation_id, "running")
         completed = 0
         try:
             with self._lock:
                 if not self._publication_allowed(operation_id, set_digest):
-                    raise InterruptedError("model download was removed before publication")
+                    raise InterruptedError(
+                        "model download was removed before publication"
+                    )
                 with self._session(write=True) as session:
                     self._ensure_set(session, manifest)
             unique_specs = list(_unique_artifacts(manifest.artifacts).values())
@@ -2388,7 +2582,9 @@ class ModelCacheService:
                 },
             )
         except InterruptedError as error:
-            self._finish_partial(operation_id, set_digest, manifest, str(error) or "download interrupted")
+            self._finish_partial(
+                operation_id, set_digest, manifest, str(error) or "download interrupted"
+            )
         except (ModelCacheError, OSError, httpx.HTTPError, ValueError) as error:
             self._finish_failed(operation_id, set_digest, manifest, error)
 
@@ -2416,7 +2612,9 @@ class ModelCacheService:
             # valid object out of order.
             event.wait(timeout=0.25)
             if self._closed.is_set() or self._transfer_stop(operation_id).is_set():
-                raise InterruptedError("model download cancelled while waiting for shared bytes")
+                raise InterruptedError(
+                    "model download cancelled while waiting for shared bytes"
+                )
             if not force and self._object_is_verified(spec):
                 self._mark_artifact_verified(spec, set_digest)
                 return
@@ -2432,11 +2630,18 @@ class ModelCacheService:
                         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
                         break
                     except BlockingIOError:
-                        if (self._transfer_stop(operation_id).wait(0.25)
-                            or self._closed.is_set()):
-                            raise InterruptedError("model download cancelled while waiting for cache lock")
+                        if (
+                            self._transfer_stop(operation_id).wait(0.25)
+                            or self._closed.is_set()
+                        ):
+                            raise InterruptedError(
+                                "model download cancelled while waiting for cache lock"
+                            )
                 self._download_locked(
-                    spec, set_digest, operation_id=operation_id, force=force,
+                    spec,
+                    set_digest,
+                    operation_id=operation_id,
+                    force=force,
                     interrupt_after_bytes=interrupt_after_bytes,
                 )
         finally:
@@ -2446,8 +2651,13 @@ class ModelCacheService:
                     current.set()
 
     def _download_locked(
-        self, spec: ArtifactSpec, set_digest: str, *, operation_id: str,
-        force: bool, interrupt_after_bytes: int | None,
+        self,
+        spec: ArtifactSpec,
+        set_digest: str,
+        *,
+        operation_id: str,
+        force: bool,
+        interrupt_after_bytes: int | None,
     ) -> None:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
@@ -2457,7 +2667,8 @@ class ModelCacheService:
                 ModelCacheRepairCheckpoint.model_validate(
                     _validated_operation_payload(operation)["repair_checkpoint"]
                 )
-                if force and is_repair else None
+                if force and is_repair
+                else None
             )
             repaired = checkpoint.completed_objects if checkpoint is not None else []
         if (not force or spec.sha256 in repaired) and self._object_is_verified(spec):
@@ -2473,13 +2684,19 @@ class ModelCacheService:
         )
         if is_repair:
             with self._session(write=True) as session:
-                operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+                operation = session.get(
+                    ModelCacheOperation, operation_id, with_for_update=True
+                )
                 assert operation is not None
                 payload = _validated_operation_payload(operation)
-                checkpoint = ModelCacheRepairCheckpoint.model_validate(payload["repair_checkpoint"])
+                checkpoint = ModelCacheRepairCheckpoint.model_validate(
+                    payload["repair_checkpoint"]
+                )
                 payload["repair_checkpoint"] = ModelCacheRepairCheckpoint(
                     transfer_id=checkpoint.transfer_id,
-                    completed_objects=list(dict.fromkeys([*checkpoint.completed_objects, spec.sha256])),
+                    completed_objects=list(
+                        dict.fromkeys([*checkpoint.completed_objects, spec.sha256])
+                    ),
                 ).model_dump(mode="json")
                 operation.payload = _write_operation_payload("repair", payload)
 
@@ -2488,8 +2705,14 @@ class ModelCacheService:
             return self._cancel_events.setdefault(operation_id, threading.Event())
 
     @contextmanager
-    def _sample_transfer(self, spec: ArtifactSpec, set_digest: str, operation_id: str,
-                         completed_artifacts: int, initial_bytes: int):
+    def _sample_transfer(
+        self,
+        spec: ArtifactSpec,
+        set_digest: str,
+        operation_id: str,
+        completed_artifacts: int,
+        initial_bytes: int,
+    ):
         """Sample transfer counters independently of socket reads and disk writes."""
         stopped = threading.Event()
         latest = [initial_bytes]
@@ -2503,8 +2726,11 @@ class ModelCacheService:
                     return
                 try:
                     self._checkpoint_artifact(
-                        spec, operation_id=operation_id, set_digest=set_digest,
-                        actual_bytes=latest[0], state="partial",
+                        spec,
+                        operation_id=operation_id,
+                        set_digest=set_digest,
+                        actual_bytes=latest[0],
+                        state="partial",
                         completed_artifacts=completed_artifacts,
                     )
                 except Exception as error:  # noqa: BLE001 - propagate sampler failures to owner
@@ -2517,9 +2743,13 @@ class ModelCacheService:
             if errors:
                 raise errors[0]
             if cancel.is_set() or self._closed.is_set():
-                raise InterruptedError("model download stopped; partial files preserved")
+                raise InterruptedError(
+                    "model download stopped; partial files preserved"
+                )
 
-        thread = threading.Thread(target=sample, name="vonk-model-progress", daemon=True)
+        thread = threading.Thread(
+            target=sample, name="vonk-model-progress", daemon=True
+        )
         thread.start()
         try:
             observe(initial_bytes)
@@ -2570,7 +2800,9 @@ class ModelCacheService:
         if offset == spec.expected_bytes and self._verify_file(part, spec):
             with self._lock:
                 if not self._publication_allowed(operation_id, set_digest):
-                    raise InterruptedError("model download was removed during verification")
+                    raise InterruptedError(
+                        "model download was removed during verification"
+                    )
                 self._publish_object(spec, part)
                 self._mark_artifact_verified(spec, set_digest)
             return
@@ -2578,13 +2810,21 @@ class ModelCacheService:
             part.unlink(missing_ok=True)
             received = 0
             offset = 0
-        if (spec.expected_bytes >= _PARALLEL_RANGE_MIN_BYTES
+        if (
+            spec.expected_bytes >= _PARALLEL_RANGE_MIN_BYTES
             and urlsplit(spec.source).scheme in {"http", "https"}
             and interrupt_after_bytes is None
             and self._download_parallel_ranges(
-                spec, part, set_digest, operation_id, completed_artifacts,
-            )):
-            self._complete_download(spec, set_digest, part, operation_id, completed_artifacts)
+                spec,
+                part,
+                set_digest,
+                operation_id,
+                completed_artifacts,
+            )
+        ):
+            self._complete_download(
+                spec, set_digest, part, operation_id, completed_artifacts
+            )
             return
         stream, effective_offset, close = self._open_source(spec, offset)
         if effective_offset != offset:
@@ -2592,9 +2832,12 @@ class ModelCacheService:
         durable_received = received
         try:
             mode = "ab" if effective_offset else "wb"
-            with part.open(mode) as output, self._sample_transfer(
-                spec, set_digest, operation_id, completed_artifacts, received
-            ) as observe:
+            with (
+                part.open(mode) as output,
+                self._sample_transfer(
+                    spec, set_digest, operation_id, completed_artifacts, received
+                ) as observe,
+            ):
 
                 def sync_received() -> None:
                     nonlocal durable_received
@@ -2622,8 +2865,13 @@ class ModelCacheService:
                             )
                         output.write(chunk)
                         received = next_received
-                        if interrupt_after_bytes is not None and received >= interrupt_after_bytes:
-                            raise InterruptedError("download interrupted at a durable checkpoint")
+                        if (
+                            interrupt_after_bytes is not None
+                            and received >= interrupt_after_bytes
+                        ):
+                            raise InterruptedError(
+                                "download interrupted at a durable checkpoint"
+                            )
                         # Ordinary buffered writes remain independent of progress.
                         # Completion/interruption syncs once; a crash resumes from
                         # the actual retained file length, never a progress counter.
@@ -2638,8 +2886,11 @@ class ModelCacheService:
                     sync_received()
         except (OSError, httpx.HTTPError, ModelCacheError):
             self._checkpoint_artifact(
-                spec, operation_id=operation_id, set_digest=set_digest,
-                actual_bytes=durable_received, state="partial",
+                spec,
+                operation_id=operation_id,
+                set_digest=set_digest,
+                actual_bytes=durable_received,
+                state="partial",
                 completed_artifacts=completed_artifacts,
             )
             raise
@@ -2658,16 +2909,28 @@ class ModelCacheService:
                 "source ended before the immutable artifact size",
                 recovery="resume",
             )
-        self._complete_download(spec, set_digest, part, operation_id, completed_artifacts)
+        self._complete_download(
+            spec, set_digest, part, operation_id, completed_artifacts
+        )
 
-    def _complete_download(self, spec: ArtifactSpec, set_digest: str, part: Path,
-                           operation_id: str, completed_artifacts: int) -> None:
+    def _complete_download(
+        self,
+        spec: ArtifactSpec,
+        set_digest: str,
+        part: Path,
+        operation_id: str,
+        completed_artifacts: int,
+    ) -> None:
         if self._transfer_stop(operation_id).is_set() or self._closed.is_set():
             raise InterruptedError("model download stopped; partial files preserved")
         received = spec.expected_bytes
         self._checkpoint_artifact(
-            spec, operation_id=operation_id, set_digest=set_digest,
-            actual_bytes=received, state="verifying", completed_artifacts=completed_artifacts,
+            spec,
+            operation_id=operation_id,
+            set_digest=set_digest,
+            actual_bytes=received,
+            state="verifying",
+            completed_artifacts=completed_artifacts,
         )
         if not self._verify_file(part, spec):
             self._checkpoint_artifact(
@@ -2682,8 +2945,11 @@ class ModelCacheService:
                 "downloaded artifact failed SHA-256 verification",
                 recovery="download_again",
             )
-        if (self._transfer_stop(operation_id).is_set() or self._closed.is_set()
-            or self.get_operation(operation_id).state == "cancelled"):
+        if (
+            self._transfer_stop(operation_id).is_set()
+            or self._closed.is_set()
+            or self.get_operation(operation_id).state == "cancelled"
+        ):
             raise InterruptedError("model download cancelled during verification")
         # Removal and publication share this process lock.  The durable
         # operation state is checked while holding it, closing the race where
@@ -2699,7 +2965,9 @@ class ModelCacheService:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None or operation.state == "cancelled":
                 return False
-            payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+            payload = (
+                operation.payload if isinstance(operation.payload, Mapping) else {}
+            )
             if payload.get("removal_fence") is not None:
                 return False
             return session.get(ModelCacheSet, set_digest) is not None
@@ -2717,8 +2985,7 @@ class ModelCacheService:
             parsed.scheme != "https"
             or hostname is None
             or port is not None
-            or hostname.lower().rstrip(".")
-            not in self._trusted_source_hosts
+            or hostname.lower().rstrip(".") not in self._trusted_source_hosts
             or _is_private_host(hostname)
         ):
             raise ModelCacheStorageError(
@@ -2726,8 +2993,14 @@ class ModelCacheService:
                 "production cache downloads require a trusted HTTPS artifact host",
             )
 
-    def _download_parallel_ranges(self, spec: ArtifactSpec, part: Path, set_digest: str,
-                                  operation_id: str, completed_artifacts: int) -> bool:
+    def _download_parallel_ranges(
+        self,
+        spec: ArtifactSpec,
+        part: Path,
+        set_digest: str,
+        operation_id: str,
+        completed_artifacts: int,
+    ) -> bool:
         self._validate_http_download(spec)
         # Range segments and atomic assembly coexist temporarily. Reserve the
         # worst-case additional footprint across this process's active files.
@@ -2735,19 +3008,29 @@ class ModelCacheService:
         # peak total is prefix + 2*object, but growth is at most 2*object.
         # Existing range segments make growth smaller, never larger. A tight
         # disk uses the ordinary sequential stream instead.
-        if (self._http is not None and not self._fixture_sources
-            and getattr(self._http, "follow_redirects", False)):
-            raise ModelCacheStorageError("model_cache.redirect_forbidden",
-                                        "production cache HTTP clients must not follow redirects")
+        if (
+            self._http is not None
+            and not self._fixture_sources
+            and getattr(self._http, "follow_redirects", False)
+        ):
+            raise ModelCacheStorageError(
+                "model_cache.redirect_forbidden",
+                "production cache HTTP clients must not follow redirects",
+            )
         reservation = 2 * spec.expected_bytes
         with self._lock:
             free = shutil.disk_usage(self._root).free
             if free - self._reserve_bytes - self._range_reserved_bytes < reservation:
-                cleanup_ranges(part, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS)
+                cleanup_ranges(
+                    part, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS
+                )
                 self._checkpoint_artifact(
-                    spec, operation_id=operation_id, set_digest=set_digest,
+                    spec,
+                    operation_id=operation_id,
+                    set_digest=set_digest,
                     actual_bytes=part.stat().st_size if part.exists() else 0,
-                    state="partial", completed_artifacts=completed_artifacts,
+                    state="partial",
+                    completed_artifacts=completed_artifacts,
                 )
                 return False
             self._range_reserved_bytes += reservation
@@ -2755,36 +3038,54 @@ class ModelCacheService:
         owns_client = client is None
         try:
             if client is None:
-                client = httpx.Client(follow_redirects=False, timeout=httpx.Timeout(30.0),
-                                      trust_env=False)
+                client = httpx.Client(
+                    follow_redirects=False, timeout=httpx.Timeout(30.0), trust_env=False
+                )
 
             def open_range(start: int, end: int) -> httpx.Response:
                 return self._open_http_response(
-                    client, spec.source,
+                    client,
+                    spec.source,
                     {"Range": f"bytes={start}-{end}", "Accept-Encoding": "identity"},
                 )
 
             with self._sample_transfer(
-                spec, set_digest, operation_id, completed_artifacts,
-                range_partial_bytes(part, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS),
+                spec,
+                set_digest,
+                operation_id,
+                completed_artifacts,
+                range_partial_bytes(
+                    part, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS
+                ),
             ) as observe:
                 completed = download_ranges(
-                    part, spec.expected_bytes, open_range, self._transfer_stop(operation_id),
-                    observe, workers=_PARALLEL_RANGE_WORKERS,
+                    part,
+                    spec.expected_bytes,
+                    open_range,
+                    self._transfer_stop(operation_id),
+                    observe,
+                    workers=_PARALLEL_RANGE_WORKERS,
                 )
             if not completed:
                 self._checkpoint_artifact(
-                    spec, operation_id=operation_id, set_digest=set_digest,
+                    spec,
+                    operation_id=operation_id,
+                    set_digest=set_digest,
                     actual_bytes=part.stat().st_size if part.exists() else 0,
-                    state="partial", completed_artifacts=completed_artifacts,
+                    state="partial",
+                    completed_artifacts=completed_artifacts,
                 )
             return completed
         except (OSError, httpx.HTTPError, ValueError, ModelCacheError):
             self._checkpoint_artifact(
-                spec, operation_id=operation_id, set_digest=set_digest,
-                actual_bytes=range_partial_bytes(part, spec.expected_bytes,
-                                                 workers=_PARALLEL_RANGE_WORKERS),
-                state="partial", completed_artifacts=completed_artifacts,
+                spec,
+                operation_id=operation_id,
+                set_digest=set_digest,
+                actual_bytes=range_partial_bytes(
+                    part, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS
+                ),
+                state="partial",
+                completed_artifacts=completed_artifacts,
             )
             raise
         finally:
@@ -2818,7 +3119,8 @@ class ModelCacheService:
             if offset > size:
                 handle.close()
                 raise ModelCacheStorageError(
-                    "model_cache.source_size_mismatch", "cache file source is shorter than its checkpoint"
+                    "model_cache.source_size_mismatch",
+                    "cache file source is shorter than its checkpoint",
                 )
             handle.seek(offset)
             return handle, offset, handle.close
@@ -2852,7 +3154,8 @@ class ModelCacheService:
                 if owns_client:
                     client.close()
                 raise ModelCacheStorageError(
-                    "model_cache.range_invalid", "cache source returned an invalid byte range"
+                    "model_cache.range_invalid",
+                    "cache source returned an invalid byte range",
                 )
         return (
             response.iter_bytes(),
@@ -2885,8 +3188,11 @@ class ModelCacheService:
                 cooldown = self._hf_cooldown_until
             if cooldown is not None and cooldown > self._clock():
                 raise ModelCacheStorageError(
-                    "model_cache.rate_limited", "Hugging Face download cooldown is active",
-                    retry_after_seconds=max(1, int((cooldown - self._clock()).total_seconds())),
+                    "model_cache.rate_limited",
+                    "Hugging Face download cooldown is active",
+                    retry_after_seconds=max(
+                        1, int((cooldown - self._clock()).total_seconds())
+                    ),
                     recovery="resume",
                 )
         authenticated = False
@@ -2915,9 +3221,14 @@ class ModelCacheService:
             if status_code == 429:
                 retry_after = _retry_after_seconds(response.headers, now=self._clock())
                 if source_is_huggingface:
-                    until = self._clock() + timedelta(seconds=retry_after or _RETRY_BASE_SECONDS)
+                    until = self._clock() + timedelta(
+                        seconds=retry_after or _RETRY_BASE_SECONDS
+                    )
                     with self._lock:
-                        if self._hf_cooldown_until is None or until > self._hf_cooldown_until:
+                        if (
+                            self._hf_cooldown_until is None
+                            or until > self._hf_cooldown_until
+                        ):
                             self._hf_cooldown_until = until
                 response.close()
                 raise ModelCacheStorageError(
@@ -3066,11 +3377,14 @@ class ModelCacheService:
                     return
             # Bound this process-local fast path to the current sampling window.
             self._progress_checkpoint_at = {
-                key: value for key, value in self._progress_checkpoint_at.items()
+                key: value
+                for key, value in self._progress_checkpoint_at.items()
                 if 0 <= (now - value).total_seconds() < 1
             }
             with self._session(write=True) as session:
-                operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+                operation = session.get(
+                    ModelCacheOperation, operation_id, with_for_update=True
+                )
                 if operation is not None and operation.state == "cancelled":
                     self._transfer_stop(operation_id).set()
                     return
@@ -3078,8 +3392,15 @@ class ModelCacheService:
                     return
                 if operation is not None and not force_progress:
                     prior = _validated_operation_progress(operation).measurement
-                    if (prior.phase == "download" and prior.observed_at is not None
-                        and 0 <= (now - datetime.fromisoformat(prior.observed_at)).total_seconds() < 1):
+                    if (
+                        prior.phase == "download"
+                        and prior.observed_at is not None
+                        and 0
+                        <= (
+                            now - datetime.fromisoformat(prior.observed_at)
+                        ).total_seconds()
+                        < 1
+                    ):
                         self._progress_checkpoint_at[operation_id] = now
                         return
                 artifact = session.get(ModelCacheArtifact, spec.sha256)
@@ -3087,7 +3408,9 @@ class ModelCacheService:
                     published = (
                         artifact.state == "verified"
                         and artifact.verified_at is not None
-                        and artifact.actual_bytes == artifact.expected_bytes == spec.expected_bytes
+                        and artifact.actual_bytes
+                        == artifact.expected_bytes
+                        == spec.expected_bytes
                     )
                     # Refresh bytes belong to the operation's transfer ledger.
                     # The last verified object remains published until its
@@ -3100,13 +3423,21 @@ class ModelCacheService:
                     payload = _validated_operation_payload(operation)
                     manifest = ArtifactSetManifest.from_document(payload["manifest"])
                     raw_transfer = payload.get("transfer")
-                    transfer = dict(raw_transfer) if isinstance(raw_transfer, Mapping) else {}
+                    transfer = (
+                        dict(raw_transfer) if isinstance(raw_transfer, Mapping) else {}
+                    )
                     raw_artifacts = transfer.get("artifacts")
-                    artifacts = dict(raw_artifacts) if isinstance(raw_artifacts, Mapping) else {}
+                    artifacts = (
+                        dict(raw_artifacts)
+                        if isinstance(raw_artifacts, Mapping)
+                        else {}
+                    )
                     raw_entry = artifacts.get(spec.sha256)
                     entry = dict(raw_entry) if isinstance(raw_entry, Mapping) else {}
                     baseline = entry.get("baseline_bytes")
-                    baseline = baseline if type(baseline) is int and baseline >= 0 else 0
+                    baseline = (
+                        baseline if type(baseline) is int and baseline >= 0 else 0
+                    )
                     previous_received = entry.get("received_bytes")
                     previous_received = (
                         previous_received
@@ -3131,11 +3462,18 @@ class ModelCacheService:
                     )
                     payload["transfer"] = transfer
                     claim = payload.get("claim")
-                    if isinstance(claim, Mapping) and claim.get("owner") == self._claim_owner:
+                    if (
+                        isinstance(claim, Mapping)
+                        and claim.get("owner") == self._claim_owner
+                    ):
                         payload["claim"] = dict(claim) | {
-                            "expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS))
+                            "expires_at": _iso(
+                                now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)
+                            )
                         }
-                    operation.payload = _write_operation_payload(operation.kind, payload)
+                    operation.payload = _write_operation_payload(
+                        operation.kind, payload
+                    )
                     old_progress = _validated_operation_progress(operation)
                     old_downloaded = old_progress.downloaded_bytes
                     old_completed = old_progress.completed_artifacts
@@ -3201,7 +3539,9 @@ class ModelCacheService:
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
-            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update=True
+            )
             if operation is not None and operation.state == "cancelled":
                 return
             row = session.get(ModelCacheSet, set_digest)
@@ -3218,7 +3558,8 @@ class ModelCacheService:
                     "failure": _cache_failure(
                         "model_cache.interrupted",
                         f"{detail[:480]}; preserved bytes remain available to resume",
-                        retryable=True, recovery="resume",
+                        retryable=True,
+                        recovery="resume",
                     )
                 }
                 payload.pop("claim", None)
@@ -3235,7 +3576,9 @@ class ModelCacheService:
                     current_artifact_key=operation.current_artifact_key,
                     transfer=mapping(payload.get("transfer")),
                 )
-                operation.progress = cache_phase(operation.progress, "downloading", now, waiting=True)
+                operation.progress = cache_phase(
+                    operation.progress, "downloading", now, waiting=True
+                )
                 operation.updated_at = now
 
     def _finish_failed(
@@ -3259,17 +3602,24 @@ class ModelCacheService:
                 measured_required = manifest.expected_bytes
                 measured_free = self.storage_summary().free_bytes
                 required_bytes, free_bytes, shortfall_bytes = (
-                    measured_required, measured_free, max(0, measured_required - measured_free)
+                    measured_required,
+                    measured_free,
+                    max(0, measured_required - measured_free),
                 )
             except (OSError, RuntimeError, ValueError):
                 pass
         failure_code = getattr(error, "code", None)
         if isinstance(error, OSError) and error.errno == errno.ENOSPC:
             failure_code = "model_cache.capacity"
-        if not isinstance(failure_code, str) or re.fullmatch(r"[a-z][a-z0-9_.:-]{0,95}", failure_code) is None:
+        if (
+            not isinstance(failure_code, str)
+            or re.fullmatch(r"[a-z][a-z0-9_.:-]{0,95}", failure_code) is None
+        ):
             failure_code = "model_cache.operation_failed"
         with self._session(write=True) as session:
-            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update=True
+            )
             if operation is not None and operation.state == "cancelled":
                 return
             row = session.get(ModelCacheSet, set_digest)
@@ -3278,7 +3628,9 @@ class ModelCacheService:
                 manifest_document = manifest.document()
                 all_valid = all(
                     self._object_is_verified(
-                        ArtifactSpec.from_manifest(require_mapping(item, "artifact manifest entry"))
+                        ArtifactSpec.from_manifest(
+                            require_mapping(item, "artifact manifest entry")
+                        )
                     )
                     for item in require_sequence(
                         manifest_document["artifacts"], "artifact manifest"
@@ -3305,7 +3657,9 @@ class ModelCacheService:
                     if type(operator_retries) is int and operator_retries >= 0
                     else 0
                 )
-                bounded_retry = retryable and automatic_attempts < _MAX_OPERATION_ATTEMPTS
+                bounded_retry = (
+                    retryable and automatic_attempts < _MAX_OPERATION_ATTEMPTS
+                )
                 operation.state = "queued" if bounded_retry else "failed"
                 operation.last_error = detail[:512]
                 retry_delay = getattr(error, "retry_after_seconds", None)
@@ -3321,18 +3675,30 @@ class ModelCacheService:
                     next_retry_at=_iso(next_retry) if bounded_retry else None,
                     retry_after_seconds=retry_delay if bounded_retry else None,
                 )
-                provider_rate_limited = getattr(error, "code", None) == "model_cache.rate_limited"
-                if provider_rate_limited and self._manifest_has_huggingface_source(manifest):
+                provider_rate_limited = (
+                    getattr(error, "code", None) == "model_cache.rate_limited"
+                )
+                if provider_rate_limited and self._manifest_has_huggingface_source(
+                    manifest
+                ):
                     self._record_huggingface_cooldown(next_retry)
                 failure_payload = _cache_failure(
-                    failure_code, detail, retryable=retryable,
+                    failure_code,
+                    detail,
+                    retryable=retryable,
                     recovery=getattr(error, "recovery", None)
                     or ("capacity" if failure_code == "model_cache.capacity" else None)
                     or ("resume" if bounded_retry else "retry"),
-                    retry_time=_iso(next_retry) if bounded_retry or provider_rate_limited else None,
-                    retry_after_seconds=retry_delay if bounded_retry or provider_rate_limited else None,
-                    required_bytes=required_bytes, free_bytes=free_bytes,
-                    shortfall_bytes=shortfall_bytes, artifact_key=failed_artifact_key,
+                    retry_time=_iso(next_retry)
+                    if bounded_retry or provider_rate_limited
+                    else None,
+                    retry_after_seconds=retry_delay
+                    if bounded_retry or provider_rate_limited
+                    else None,
+                    required_bytes=required_bytes,
+                    free_bytes=free_bytes,
+                    shortfall_bytes=shortfall_bytes,
+                    artifact_key=failed_artifact_key,
                 )
                 operation_payload = operation_payload | {
                     "failure": failure_payload,
@@ -3348,7 +3714,9 @@ class ModelCacheService:
                 else:
                     operation.completed_at = now
                 operation_payload.pop("claim", None)
-                operation.payload = _write_operation_payload(operation.kind, operation_payload)
+                operation.payload = _write_operation_payload(
+                    operation.kind, operation_payload
+                )
                 operation.progress = cache_phase(
                     _validated_operation_progress(operation).model_dump(mode="json"),
                     "queued" if bounded_retry else "failed",
@@ -3367,7 +3735,9 @@ class ModelCacheService:
 
         request_key = _request_key(request_key)
         with self._lock, self._session(write=True) as session:
-            previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            previous = session.get(
+                ModelCacheOperation, operation_id, with_for_update=True
+            )
             if previous is None:
                 raise ModelCacheNotFound(
                     "model_cache.operation_missing", "cache operation was not found"
@@ -3390,8 +3760,7 @@ class ModelCacheService:
                 return self._operation_view(existing)
             failure = self._canonical_failure(previous)
             retryable = (
-                isinstance(failure, Mapping)
-                and failure.get("retryable") is True
+                isinstance(failure, Mapping) and failure.get("retryable") is True
             )
             previous_payload = _validated_operation_payload(previous)
             raw_retry = previous_payload["retry"]
@@ -3464,7 +3833,9 @@ class ModelCacheService:
             "credentials_invalid",
         }
         with self._lock, self._session(write=True) as session:
-            previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            previous = session.get(
+                ModelCacheOperation, operation_id, with_for_update=True
+            )
             if previous is None:
                 raise ModelCacheNotFound(
                     "model_cache.operation_missing", "cache operation was not found"
@@ -3552,12 +3923,16 @@ class ModelCacheService:
             safe_detail = redact_text(error.detail)[:512]
             now = self._clock()
             failure_payload = _cache_failure(
-                error.code, safe_detail, retryable=False,
+                error.code,
+                safe_detail,
+                retryable=False,
                 recovery=error.recovery or "check_access_and_resume",
                 artifact_key=failed_artifact_key,
             )
             with self._lock, self._session(write=True) as session:
-                previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+                previous = session.get(
+                    ModelCacheOperation, operation_id, with_for_update=True
+                )
                 if previous is None:
                     raise ModelCacheNotFound(
                         "model_cache.operation_missing", "cache operation was not found"
@@ -3580,7 +3955,9 @@ class ModelCacheService:
 
         now = self._clock()
         with self._lock, self._session(write=True) as session:
-            previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            previous = session.get(
+                ModelCacheOperation, operation_id, with_for_update=True
+            )
             if previous is None:
                 raise ModelCacheNotFound(
                     "model_cache.operation_missing", "cache operation was not found"
@@ -3591,7 +3968,9 @@ class ModelCacheService:
             payload.pop("claim", None)
             retry = payload.get("retry")
             retry = dict(retry) if isinstance(retry, Mapping) else {}
-            retry.update(automatic_attempts=1, next_retry_at=None, retry_after_seconds=None)
+            retry.update(
+                automatic_attempts=1, next_retry_at=None, retry_after_seconds=None
+            )
             payload["retry"] = retry
             payload["resume_of"] = previous.id
             payload["access_recheck"] = {
@@ -3640,14 +4019,18 @@ class ModelCacheService:
         failed_artifact_key: str | None = None,
     ) -> None:
         unique_specs = _unique_artifacts(manifest.artifacts)
-        exact = next(
-            (
-                spec
-                for spec in unique_specs.values()
-                if failed_artifact_key in {spec.key, spec.artifact_id}
-            ),
-            None,
-        ) if failed_artifact_key else None
+        exact = (
+            next(
+                (
+                    spec
+                    for spec in unique_specs.values()
+                    if failed_artifact_key in {spec.key, spec.artifact_id}
+                ),
+                None,
+            )
+            if failed_artifact_key
+            else None
+        )
         if exact is not None and _is_hf_canonical_url(exact.source):
             specs = [exact]
         else:
@@ -3691,9 +4074,13 @@ class ModelCacheService:
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
-            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update=True
+            )
             if operation is None:
-                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
             if operation.state == "cancelled":
                 return
             if state == "running":
@@ -3736,9 +4123,13 @@ class ModelCacheService:
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
-            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update=True
+            )
             if operation is None:
-                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
             if operation.state == "cancelled":
                 return
             old_progress = _validated_operation_progress(operation)
@@ -3755,7 +4146,9 @@ class ModelCacheService:
                 transfer=(
                     transfer
                     if transfer is not None
-                    else mapping(_validated_operation_payload(operation).get("transfer"))
+                    else mapping(
+                        _validated_operation_payload(operation).get("transfer")
+                    )
                 ),
             )
             operation.current_artifact_key = current_artifact_key
@@ -3765,15 +4158,23 @@ class ModelCacheService:
     def cancel_operation(self, operation_id: str) -> CacheOperationView:
         """Stop queued/running transfers without deleting resumable cache files."""
         with self._lock, self._session(write=True) as session:
-            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update=True
+            )
             if operation is None:
-                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
             if operation.state == "cancelled":
                 return self._operation_view(operation)
             if operation.kind not in {"download", "repair"} or operation.state not in {
-                "queued", "running", "partial"
+                "queued",
+                "running",
+                "partial",
             }:
-                raise ModelCacheConflict("model_cache.not_cancellable", "cache transfer is not active")
+                raise ModelCacheConflict(
+                    "model_cache.not_cancellable", "cache transfer is not active"
+                )
             operation.state = "cancelled"
             operation.completed_at = operation.updated_at = self._clock()
             payload = _validated_operation_payload(operation)
@@ -3781,7 +4182,8 @@ class ModelCacheService:
             operation.payload = _write_operation_payload(operation.kind, payload)
             operation.progress = cache_phase(
                 _validated_operation_progress(operation).model_dump(mode="json"),
-                "failed", self._clock(),
+                "failed",
+                self._clock(),
             )
             row = session.get(ModelCacheSet, operation.artifact_set_sha256)
             if row is not None and row.state != "cached":
@@ -3794,7 +4196,9 @@ class ModelCacheService:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
-                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
             return self._operation_view(operation)
 
     def get_operator_operation(
@@ -3805,7 +4209,9 @@ class ModelCacheService:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
-                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
             if operation.kind not in {"download", "remove"}:
                 raise ModelCacheResolutionError(
                     "model_cache.operation_not_observable",
@@ -3829,7 +4235,9 @@ class ModelCacheService:
         with self._session() as session:
             rows = session.scalars(
                 select(ModelCacheOperation)
-                .order_by(ModelCacheOperation.created_at.desc(), ModelCacheOperation.id.desc())
+                .order_by(
+                    ModelCacheOperation.created_at.desc(), ModelCacheOperation.id.desc()
+                )
                 .limit(limit)
             )
             return tuple(self._operation_view(row) for row in rows)
@@ -3857,10 +4265,7 @@ class ModelCacheService:
         if boundary is not None:
             boundary_time = _parse_iso(boundary[0])
             for index, row in enumerate(rows):
-                if (
-                    _datetime(row.created_at) == boundary_time
-                    and row.id == boundary[1]
-                ):
+                if _datetime(row.created_at) == boundary_time and row.id == boundary[1]:
                     start = index + 1
                     break
             else:
@@ -3896,27 +4301,32 @@ class ModelCacheService:
             progress=serialize_json_value(progress),  # type: ignore[arg-type]
             result=(
                 parse_model_cache_result(operation.kind, result)
-                if result is not None else None
+                if result is not None
+                else None
             ),
             last_error=operation.last_error,
             created_at=_iso(operation.created_at) or "",
             updated_at=_iso(operation.updated_at) or "",
             completed_at=_iso(operation.completed_at),
-            retryable=(
-                failure is not None and failure["retryable"] is True
-            ),
+            retryable=(failure is not None and failure["retryable"] is True),
             failure=failure,
         )
         ModelCacheOperationResponse.model_validate(view, from_attributes=True)
         return view
 
     @staticmethod
-    def _canonical_failure(operation: ModelCacheOperation) -> Mapping[str, object] | None:
+    def _canonical_failure(
+        operation: ModelCacheOperation,
+    ) -> Mapping[str, object] | None:
         """Read the one current persisted failure contract without repair/defaults."""
         raw = _validated_operation_payload(operation).get("failure")
-        return (None if raw is None else
-                AvailabilityOperationFailure.model_validate(raw).model_dump(mode="json"))
-
+        return (
+            None
+            if raw is None
+            else AvailabilityOperationFailure.model_validate(raw).model_dump(
+                mode="json"
+            )
+        )
 
     def resume_operations(self, *, limit: int = 16) -> int:
         """Return durable cache work for the Controller worker to resume.
@@ -3932,13 +4342,9 @@ class ModelCacheService:
                 session.scalar(
                     select(func.count())
                     .select_from(ModelCacheOperation)
+                    .where(ModelCacheOperation.kind.in_(["download", "repair"]))
                     .where(
-                        ModelCacheOperation.kind.in_(["download", "repair"])
-                    )
-                    .where(
-                        ModelCacheOperation.state.in_(
-                            ["queued", "running", "partial"]
-                        )
+                        ModelCacheOperation.state.in_(["queued", "running", "partial"])
                     )
                 ),
                 "cache operation count",
@@ -3990,7 +4396,9 @@ class ModelCacheService:
                     len(
                         [
                             future
-                            for future in require_sequence(record.get("futures", []), "futures")
+                            for future in require_sequence(
+                                record.get("futures", []), "futures"
+                            )
                             if isinstance(future, Future) and not future.done()
                         ]
                     )
@@ -3999,7 +4407,9 @@ class ModelCacheService:
             )
             if not capacity:
                 return completed
-            claimed = self._claim_operations(limit=min(requested, capacity), respect_backoff=True)
+            claimed = self._claim_operations(
+                limit=min(requested, capacity), respect_backoff=True
+            )
             for operation_id, kind in claimed:
                 with self._session() as session:
                     operation = session.get(ModelCacheOperation, operation_id)
@@ -4024,7 +4434,11 @@ class ModelCacheService:
                 for operation_id in list(self._background_operations):
                     before = self._available_transfer_slots()
                     record = self._background_operations.get(operation_id, {})
-                    futures = require_sequence(record.get("futures", []), "futures") if isinstance(record, Mapping) else []
+                    futures = (
+                        require_sequence(record.get("futures", []), "futures")
+                        if isinstance(record, Mapping)
+                        else []
+                    )
                     pending = sum(
                         1
                         for future in futures
@@ -4047,7 +4461,9 @@ class ModelCacheService:
                 len(
                     [
                         future
-                        for future in require_sequence(record.get("futures", []), "futures")
+                        for future in require_sequence(
+                            record.get("futures", []), "futures"
+                        )
                         if isinstance(future, Future) and not future.done()
                     ]
                 )
@@ -4061,16 +4477,22 @@ class ModelCacheService:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
-                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
             manifest = ArtifactSetManifest.from_document(
                 _validated_operation_payload(operation)["manifest"]
             )
             set_digest = operation.artifact_set_sha256
         if set_digest is None:
-            raise ModelCacheConflict("model_cache.set_missing", "cache operation has no artifact set")
+            raise ModelCacheConflict(
+                "model_cache.set_missing", "cache operation has no artifact set"
+            )
         transfer = self._ensure_transfer_state(operation_id, manifest, force=force)
         planned_total = transfer.get("total_bytes")
-        planned_total = planned_total if type(planned_total) is int and planned_total >= 0 else None
+        planned_total = (
+            planned_total if type(planned_total) is int and planned_total >= 0 else None
+        )
         with self._session(write=True) as session:
             self._ensure_set(session, manifest)
         self._set_operation_state(operation_id, "running")
@@ -4113,10 +4535,16 @@ class ModelCacheService:
         if not isinstance(futures, list):
             futures = []
             record["futures"] = futures
-        pending = sum(1 for future in futures if isinstance(future, Future) and not future.done())
-        while pending < capacity and require_integer(record["next_index"], "next index") < len(specs):
+        pending = sum(
+            1 for future in futures if isinstance(future, Future) and not future.done()
+        )
+        while pending < capacity and require_integer(
+            record["next_index"], "next index"
+        ) < len(specs):
             spec = specs[require_integer(record["next_index"], "next index")]
-            record["next_index"] = require_integer(record["next_index"], "next index") + 1
+            record["next_index"] = (
+                require_integer(record["next_index"], "next index") + 1
+            )
             future = self._executor.submit(
                 self._download_one_unique,
                 spec,
@@ -4138,7 +4566,11 @@ class ModelCacheService:
             futures = require_sequence(record.get("futures", []), "futures")
             if not isinstance(futures, list):
                 futures = []
-            done = [future for future in futures if isinstance(future, Future) and future.done()]
+            done = [
+                future
+                for future in futures
+                if isinstance(future, Future) and future.done()
+            ]
             future_specs = record.get("future_specs")
             future_specs = future_specs if isinstance(future_specs, dict) else {}
             first_error = record.get("failure")
@@ -4189,7 +4621,10 @@ class ModelCacheService:
                 finished += 1
                 continue
             specs = require_sequence(record.get("specs", []), "background specs")
-            if require_integer(record.get("next_index", 0), "next index") >= len(specs) and not futures:
+            if (
+                require_integer(record.get("next_index", 0), "next index") >= len(specs)
+                and not futures
+            ):
                 manifest = record["manifest"]
                 if isinstance(manifest, ArtifactSetManifest):
                     self._finish_background_success(
@@ -4241,11 +4676,18 @@ class ModelCacheService:
                     continue
                 operation_payload = _validated_operation_payload(operation)
                 claim = operation_payload.get("claim")
-                if isinstance(claim, Mapping) and claim.get("owner") == self._claim_owner:
+                if (
+                    isinstance(claim, Mapping)
+                    and claim.get("owner") == self._claim_owner
+                ):
                     operation_payload["claim"] = dict(claim) | {
-                        "expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS))
+                        "expires_at": _iso(
+                            now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)
+                        )
                     }
-                    operation.payload = _write_operation_payload(operation.kind, operation_payload)
+                    operation.payload = _write_operation_payload(
+                        operation.kind, operation_payload
+                    )
                     operation.updated_at = now
 
     def _finish_background_success(
@@ -4299,7 +4741,11 @@ class ModelCacheService:
                     session.scalars(
                         select(ModelCacheOperation)
                         .where(ModelCacheOperation.kind.in_(["download", "repair"]))
-                        .where(ModelCacheOperation.state.in_(["queued", "running", "partial", "failed"]))
+                        .where(
+                            ModelCacheOperation.state.in_(
+                                ["queued", "running", "partial", "failed"]
+                            )
+                        )
                         .order_by(ModelCacheOperation.updated_at.desc())
                         .limit(256)
                     )
@@ -4309,7 +4755,9 @@ class ModelCacheService:
                 session.scalars(
                     select(ModelCacheOperation.id)
                     .where(ModelCacheOperation.kind.in_(["download", "repair"]))
-                    .where(ModelCacheOperation.state.in_(["queued", "running", "partial"]))
+                    .where(
+                        ModelCacheOperation.state.in_(["queued", "running", "partial"])
+                    )
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
                     .limit(max(limit * 4, limit))
                 )
@@ -4363,7 +4811,10 @@ class ModelCacheService:
                         continue
                     if owner != self._claim_owner:
                         try:
-                            if isinstance(expires, str) and datetime.fromisoformat(expires) > now:
+                            if (
+                                isinstance(expires, str)
+                                and datetime.fromisoformat(expires) > now
+                            ):
                                 continue
                         except ValueError:
                             pass
@@ -4371,7 +4822,9 @@ class ModelCacheService:
                             operation.state = "partial"
                 payload["claim"] = {
                     "owner": self._claim_owner,
-                    "expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)),
+                    "expires_at": _iso(
+                        now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)
+                    ),
                 }
                 operation.payload = _write_operation_payload(operation.kind, payload)
                 operation.updated_at = now
@@ -4426,7 +4879,9 @@ class ModelCacheService:
             candidate = _datetime(datetime.fromisoformat(retry_at))
             if candidate > now and (latest is None or candidate > latest):
                 latest = candidate
-        self._hf_cooldown_until = latest if latest is not None and latest > now else None
+        self._hf_cooldown_until = (
+            latest if latest is not None and latest > now else None
+        )
 
     def repair_preview(self, artifact_set_sha256: str) -> dict[str, object]:
         digest = _optional_digest(artifact_set_sha256)
@@ -4469,11 +4924,15 @@ class ModelCacheService:
         assert digest is not None and requested_plan is not None
         preview = self.repair_preview(digest)
         if preview["plan_digest"] != requested_plan:
-            raise ModelCacheConflict("model_cache.stale_plan", "repair preview is stale")
+            raise ModelCacheConflict(
+                "model_cache.stale_plan", "repair preview is stale"
+            )
         request_key = _request_key(request_key)
         with self._session() as session:
             existing = session.scalar(
-                select(ModelCacheOperation).where(ModelCacheOperation.request_key == request_key)
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == request_key
+                )
             )
             if existing is not None:
                 _validated_operation_payload(existing)
@@ -4485,12 +4944,17 @@ class ModelCacheService:
                 return self._operation_view(existing)
         manifest = self._manifest_for_set(digest)
         transfer = self._transfer_state_for_manifest(manifest, force=True)
-        if require_integer(transfer["total_bytes"], "transfer total bytes") > self.storage_summary().available_bytes:
+        if (
+            require_integer(transfer["total_bytes"], "transfer total bytes")
+            > self.storage_summary().available_bytes
+        ):
             raise ModelCacheConflict(
                 "model_cache.download_blocked", "insufficient-reserved-storage"
             )
         payload = {
-            "repair_checkpoint": ModelCacheRepairCheckpoint(transfer_id=uuid.uuid4().hex, completed_objects=[]).model_dump(mode="json"),
+            "repair_checkpoint": ModelCacheRepairCheckpoint(
+                transfer_id=uuid.uuid4().hex, completed_objects=[]
+            ).model_dump(mode="json"),
             "schema_version": SCHEMA_VERSION,
             "source_policy": SOURCE_POLICY,
             "artifact_set_sha256": digest,
@@ -4526,7 +4990,9 @@ class ModelCacheService:
                     progress=self._progress(
                         manifest,
                         phase="queued",
-                        expected_bytes=require_integer(transfer["total_bytes"], "transfer total bytes"),
+                        expected_bytes=require_integer(
+                            transfer["total_bytes"], "transfer total bytes"
+                        ),
                     ),
                     actor=actor,
                     created_at=self._clock(),
@@ -4541,7 +5007,9 @@ class ModelCacheService:
         with self._session() as session:
             row = session.get(ModelCacheSet, digest)
             if row is None:
-                raise ModelCacheNotFound("model_cache.entry_missing", "cache entry was not found")
+                raise ModelCacheNotFound(
+                    "model_cache.entry_missing", "cache entry was not found"
+                )
             manifest = ArtifactSetManifest.from_document(row.manifest)
             if manifest.digest != digest:
                 raise ModelCacheConflict(
@@ -4550,7 +5018,9 @@ class ModelCacheService:
                 )
             return manifest
 
-    def manifest_for_artifact_set(self, artifact_set_sha256: str) -> ArtifactSetManifest:
+    def manifest_for_artifact_set(
+        self, artifact_set_sha256: str
+    ) -> ArtifactSetManifest:
         """Return the persisted immutable manifest for an exact artifact set.
 
         Consumers that prepare or distribute a model use this boundary rather
@@ -4723,7 +5193,11 @@ class ModelCacheService:
         """
         set_digest = _optional_digest(artifact_set_sha256)
         object_digest = _optional_digest(artifact_sha256)
-        if set_digest is None or object_digest is None or not _valid_relative_path(artifact_path):
+        if (
+            set_digest is None
+            or object_digest is None
+            or not _valid_relative_path(artifact_path)
+        ):
             raise ModelCacheNotFound(
                 "model_cache.artifact_missing", "verified cache artifact was not found"
             )
@@ -4822,7 +5296,9 @@ class ModelCacheService:
         with self._session(write=True) as session:
             row = session.get(ModelCacheSet, digest)
             if row is None:
-                raise ModelCacheNotFound("model_cache.entry_missing", "cache entry was not found")
+                raise ModelCacheNotFound(
+                    "model_cache.entry_missing", "cache entry was not found"
+                )
             self._refresh_protection(session, row)
             manifest = ArtifactSetManifest.from_document(row.manifest)
             artifacts = []
@@ -4886,8 +5362,10 @@ class ModelCacheService:
         with self._session() as session:
             rows = list(
                 session.scalars(
-                    select(ModelCacheSet)
-                    .order_by(ModelCacheSet.updated_at.desc(), ModelCacheSet.artifact_set_sha256.desc())
+                    select(ModelCacheSet).order_by(
+                        ModelCacheSet.updated_at.desc(),
+                        ModelCacheSet.artifact_set_sha256.desc(),
+                    )
                 )
             )
         total = len(rows)
@@ -4903,7 +5381,8 @@ class ModelCacheService:
                     break
             else:
                 raise ModelCacheConflict(
-                    "model_cache.cursor_invalid", "cache inventory cursor boundary is stale"
+                    "model_cache.cursor_invalid",
+                    "cache inventory cursor boundary is stale",
                 )
         page = rows[start : start + limit]
         entries = [self.get_entry(row.artifact_set_sha256) for row in page]
@@ -4927,12 +5406,18 @@ class ModelCacheService:
                 for artifact in rows:
                     previous = (artifact.state, artifact.actual_bytes)
                     path = self._object_path(artifact.sha256)
-                    actual = path.stat().st_size if path.exists() and not path.is_symlink() else 0
+                    actual = (
+                        path.stat().st_size
+                        if path.exists() and not path.is_symlink()
+                        else 0
+                    )
                     if (
                         actual == artifact.expected_bytes
                         and path.is_file()
                         and not path.is_symlink()
-                        and verified_files.verify_path(path, artifact.sha256, artifact.expected_bytes)
+                        and verified_files.verify_path(
+                            path, artifact.sha256, artifact.expected_bytes
+                        )
                     ):
                         artifact.state = "verified"
                         artifact.actual_bytes = actual
@@ -4943,7 +5428,12 @@ class ModelCacheService:
                         artifact.updated_at = self._clock()
                 sets = list(session.scalars(select(ModelCacheSet)))
                 for row in sets:
-                    previous = (row.state, row.verified_bytes, row.protected, row.protected_reasons)
+                    previous = (
+                        row.state,
+                        row.verified_bytes,
+                        row.protected,
+                        row.protected_reasons,
+                    )
                     manifest = ArtifactSetManifest.from_document(row.manifest)
                     verified = self._verified_bytes(session, row.artifact_set_sha256)
                     row.verified_bytes = verified
@@ -4954,7 +5444,12 @@ class ModelCacheService:
                             else "needs-repair"
                         )
                     self._refresh_protection(session, row)
-                    if previous != (row.state, row.verified_bytes, row.protected, row.protected_reasons):
+                    if previous != (
+                        row.state,
+                        row.verified_bytes,
+                        row.protected,
+                        row.protected_reasons,
+                    ):
                         row.updated_at = self._clock()
             return self.storage_summary().document()
 
@@ -4967,7 +5462,9 @@ class ModelCacheService:
             cache_model_digests = self._cache_model_content_digests(row)
             installations = session.scalars(
                 select(RecipeInstallation).where(
-                    RecipeInstallation.state.in_(["planned", "installing", "installed", "partial"]),
+                    RecipeInstallation.state.in_(
+                        ["planned", "installing", "installed", "partial"]
+                    ),
                 )
             )
             if any(
@@ -5004,9 +5501,15 @@ class ModelCacheService:
         try:
             manifest = ArtifactSetManifest.from_document(row.manifest)
         except ModelCacheError:
-            return {row.model_content_sha256} if row.model_content_sha256 is not None else set()
+            return (
+                {row.model_content_sha256}
+                if row.model_content_sha256 is not None
+                else set()
+            )
         return set(manifest.model_content_digests) or (
-            {row.model_content_sha256} if row.model_content_sha256 is not None else set()
+            {row.model_content_sha256}
+            if row.model_content_sha256 is not None
+            else set()
         )
 
     def _recipe_references_cache(
@@ -5049,7 +5552,11 @@ class ModelCacheService:
             if not isinstance(revision_id, str) or not revision_id:
                 continue
             revision = session.get(CatalogDocumentRevision, revision_id)
-            if revision is None or revision.kind != "recipe" or revision.state != "active":
+            if (
+                revision is None
+                or revision.kind != "recipe"
+                or revision.state != "active"
+            ):
                 continue
             if (
                 row.recipe_revision_sha256 is not None
@@ -5073,14 +5580,19 @@ class ModelCacheService:
             latest_recipe = self._latest_recipe_digest(
                 session, row.recipe_revision_sha256
             )
-            recipe_update = latest_recipe is not None and latest_recipe != row.recipe_revision_sha256
+            recipe_update = (
+                latest_recipe is not None
+                and latest_recipe != row.recipe_revision_sha256
+            )
         return model_update, recipe_update
 
     @staticmethod
     def _model_update_candidate(
         session: Session, manifest: ArtifactSetManifest
     ) -> tuple[CatalogDocumentRevision, CatalogDocumentRevision] | None:
-        current, candidates = ModelCacheService._model_update_candidates(session, manifest)
+        current, candidates = ModelCacheService._model_update_candidates(
+            session, manifest
+        )
         if current is None or len(candidates) != 1:
             return None
         return current, candidates[0]
@@ -5103,12 +5615,14 @@ class ModelCacheService:
         )
         if current is None:
             current = session.scalar(
-                select(CatalogDocumentRevision).where(
+                select(CatalogDocumentRevision)
+                .where(
                     CatalogDocumentRevision.kind == "model",
                     CatalogDocumentRevision.publisher == ref.publisher,
                     CatalogDocumentRevision.slug == ref.slug,
                     CatalogDocumentRevision.state == "active",
-                ).order_by(CatalogDocumentRevision.revision_number.asc())
+                )
+                .order_by(CatalogDocumentRevision.revision_number.asc())
             )
         if current is None:
             return None, []
@@ -5128,7 +5642,9 @@ class ModelCacheService:
             candidate_document = read_catalog_document(candidate)
             if not isinstance(candidate_document, ModelDefinition):
                 continue
-            same_lineage = _model_lineage_signature(candidate_document) == current_signature
+            same_lineage = (
+                _model_lineage_signature(candidate_document) == current_signature
+            )
             if not same_lineage and not _supersedes_revision(candidate, current):
                 continue
             if not _same_model_artifact_identity(candidate, manifest) and (
@@ -5157,8 +5673,7 @@ class ModelCacheService:
         if current is None:
             return None
         latest = session.scalar(
-            select(CatalogDocumentRevision)
-            .where(
+            select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",
                 CatalogDocumentRevision.document_id == current.document_id,
                 CatalogDocumentRevision.state == "active",
@@ -5167,7 +5682,9 @@ class ModelCacheService:
         )
         return None if latest is None else latest.content_digest
 
-    def _check_upstream_revision(self, repository: str, revision: str) -> dict[str, object]:
+    def _check_upstream_revision(
+        self, repository: str, revision: str
+    ) -> dict[str, object]:
         """Inspect provider metadata only; catalog import owns accepting new pins."""
         result: dict[str, object] = {
             "repository": repository,
@@ -5181,7 +5698,9 @@ class ModelCacheService:
         client = self._http or httpx.Client(timeout=20, follow_redirects=False)
         try:
             response = self._open_http_response(
-                client, f"https://huggingface.co/api/models/{repository}/revision/main", {}
+                client,
+                f"https://huggingface.co/api/models/{repository}/revision/main",
+                {},
             )
             try:
                 response.read()
@@ -5189,7 +5708,9 @@ class ModelCacheService:
             finally:
                 response.close()
             latest = document.get("sha") if isinstance(document, dict) else None
-            if not isinstance(latest, str) or not re.fullmatch(r"[0-9a-f]{40,64}", latest):
+            if not isinstance(latest, str) or not re.fullmatch(
+                r"[0-9a-f]{40,64}", latest
+            ):
                 raise ModelCacheResolutionError(
                     "model_cache.upstream_revision_invalid",
                     "provider metadata did not identify an immutable revision",
@@ -5201,7 +5722,9 @@ class ModelCacheService:
         except (ModelCacheError, httpx.HTTPError, ValueError, OSError) as error:
             # Provider failures must not hide accepted catalog updates or
             # expose signed URLs/credentials in the public response.
-            result["error_code"] = getattr(error, "code", "model_cache.upstream_check_failed")
+            result["error_code"] = getattr(
+                error, "code", "model_cache.upstream_check_failed"
+            )
         finally:
             if own_client:
                 client.close()
@@ -5227,7 +5750,9 @@ class ModelCacheService:
                     exhausted = True
                     break
                 try:
-                    future = self._upstream_executor.submit(self._check_upstream_revision, *key)
+                    future = self._upstream_executor.submit(
+                        self._check_upstream_revision, *key
+                    )
                 except RuntimeError:
                     self._upstream_slots.release()
                     break
@@ -5235,7 +5760,11 @@ class ModelCacheService:
                 pending[future] = key
             if not pending:
                 break
-            done, _ = wait(pending, timeout=max(0, deadline - time.monotonic()), return_when=FIRST_COMPLETED)
+            done, _ = wait(
+                pending,
+                timeout=max(0, deadline - time.monotonic()),
+                return_when=FIRST_COMPLETED,
+            )
             if not done:
                 break
             for future in done:
@@ -5245,22 +5774,27 @@ class ModelCacheService:
                 except Exception:  # noqa: BLE001 - diagnostics must not hide local catalog results
                     # A diagnostic/provider bug cannot hide the catalog page.
                     results[key] = {
-                        "repository": key[0], "pinned_revision": key[1],
-                        "latest_revision": None, "status": "check-failed",
+                        "repository": key[0],
+                        "pinned_revision": key[1],
+                        "latest_revision": None,
+                        "status": "check-failed",
                         "checked_at": _iso(self._clock()),
                         "error_code": "model_cache.upstream_check_failed",
                     }
         for future in pending:
             future.cancel()
         for repository, revision in ordered:
-            results.setdefault((repository, revision), {
-                "repository": repository,
-                "pinned_revision": revision,
-                "latest_revision": None,
-                "status": "check-failed",
-                "checked_at": _iso(self._clock()),
-                "error_code": "model_cache.upstream_check_budget_exhausted",
-            })
+            results.setdefault(
+                (repository, revision),
+                {
+                    "repository": repository,
+                    "pinned_revision": revision,
+                    "latest_revision": None,
+                    "status": "check-failed",
+                    "checked_at": _iso(self._clock()),
+                    "error_code": "model_cache.upstream_check_budget_exhausted",
+                },
+            )
         return results
 
     def discover_updates(
@@ -5318,7 +5852,9 @@ class ModelCacheService:
                 model_update_candidates: list[dict[str, object]] = []
                 model_update_ambiguous = False
                 latest_recipe = None
-                current_model, candidates = self._model_update_candidates(session, manifest)
+                current_model, candidates = self._model_update_candidates(
+                    session, manifest
+                )
                 if current_model is not None and len(candidates) == 1:
                     latest = candidates[0]
                     latest_model = latest.content_digest
@@ -5340,7 +5876,9 @@ class ModelCacheService:
                     for spec in manifest.artifacts:
                         if spec.kind != "huggingface.file" or spec.revision is None:
                             continue
-                        repository = "/".join(urlsplit(spec.source).path.strip("/").split("/")[:2])
+                        repository = "/".join(
+                            urlsplit(spec.source).path.strip("/").split("/")[:2]
+                        )
                         key = (repository, spec.revision)
                         if key not in sources:
                             sources.append(key)
@@ -5370,12 +5908,13 @@ class ModelCacheService:
         # All catalog values above are detached JSON snapshots. Provider I/O
         # must not retain a DB connection or transaction while waiting.
         if check_upstream:
-            upstream_checks = self._check_upstream_revisions([
-                key for sources in upstream_sources.values() for key in sources
-            ])
+            upstream_checks = self._check_upstream_revisions(
+                [key for sources in upstream_sources.values() for key in sources]
+            )
             for entry in result:
                 entry["upstream_revisions"] = [
-                    upstream_checks[key] for key in upstream_sources[entry["artifact_set_sha256"]]
+                    upstream_checks[key]
+                    for key in upstream_sources[entry["artifact_set_sha256"]]
                 ]
         return {
             "schema_version": SCHEMA_VERSION,
@@ -5432,8 +5971,7 @@ class ModelCacheService:
                 row.sha256: row for row in session.scalars(select(ModelCacheArtifact))
             }
             protected_bytes = sum(
-                object_bytes.get(digest, 0)
-                for digest in protected_artifacts
+                object_bytes.get(digest, 0) for digest in protected_artifacts
             )
             # Any on-disk object that is not protected can be reclaimed.  This
             # includes orphaned files left by an interrupted atomic publish;
@@ -5506,12 +6044,13 @@ class ModelCacheService:
         return self._root / "partials" / set_digest / f"{digest}.part"
 
 
-
 def _request_key(value: str) -> str:
     try:
         return str(uuid.UUID(value))
     except (ValueError, AttributeError, TypeError) as error:
-        raise ModelCacheConflict("model_cache.request_key_invalid", "request key is invalid") from error
+        raise ModelCacheConflict(
+            "model_cache.request_key_invalid", "request key is invalid"
+        ) from error
 
 
 def _is_private_host(value: str) -> bool:
@@ -5536,9 +6075,7 @@ def _is_hf_authority(value: str | None) -> bool:
     if not value:
         return False
     host = value.lower().rstrip(".")
-    return (
-        host == _HF_CANONICAL_HOST or host.endswith((".huggingface.co", ".hf.co"))
-    )
+    return host == _HF_CANONICAL_HOST or host.endswith((".huggingface.co", ".hf.co"))
 
 
 def _is_hf_canonical_url(value: str) -> bool:
@@ -5583,16 +6120,29 @@ def _valid_relative_path(value: str) -> bool:
     )
 
 
-def _contains_digest(value: object, model_digest: str | None, recipe_digest: str | None) -> bool:
+def _contains_digest(
+    value: object, model_digest: str | None, recipe_digest: str | None
+) -> bool:
     if model_digest is None and recipe_digest is None:
         return False
     if isinstance(value, Mapping):
-        return any(_contains_digest(child, model_digest, recipe_digest) for child in value.values()) or (
-            (model_digest is not None and value.get("model_content_sha256") == model_digest)
-            or (recipe_digest is not None and value.get("recipe_revision_sha256") == recipe_digest)
+        return any(
+            _contains_digest(child, model_digest, recipe_digest)
+            for child in value.values()
+        ) or (
+            (
+                model_digest is not None
+                and value.get("model_content_sha256") == model_digest
+            )
+            or (
+                recipe_digest is not None
+                and value.get("recipe_revision_sha256") == recipe_digest
+            )
         )
     if isinstance(value, list):
-        return any(_contains_digest(child, model_digest, recipe_digest) for child in value)
+        return any(
+            _contains_digest(child, model_digest, recipe_digest) for child in value
+        )
     return False
 
 

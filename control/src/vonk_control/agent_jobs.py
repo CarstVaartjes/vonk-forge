@@ -66,9 +66,7 @@ ResultConsumer = Callable[
 ContactConsumer = Callable[[Session, AgentSource], None]
 # The protocol owns this closed set; the Controller aliases it locally so
 # ``_finish`` cannot be handed any string.
-AgentResultState = Literal[
-    "succeeded", "failed", "cancelled", "waiting-for-operator"
-]
+AgentResultState = Literal["succeeded", "failed", "cancelled", "waiting-for-operator"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +154,8 @@ def superseded_cancellation_deadline(result: object) -> datetime | None:
     if requested_at.tzinfo is None:
         return None
     return requested_at + timedelta(seconds=_SUPERSEDED_CANCELLATION_SECONDS)
+
+
 _RUNTIME_CAPABILITIES = frozenset({"agent.runtime.rust.v1", "runtime.vonk.v1"})
 _NEXT_CAPABILITIES = _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
 _OPTIONAL_CAPABILITIES = frozenset(
@@ -191,7 +191,8 @@ def _failure_result(
         "recovery": "inspect-before-resume" if uncertain else "retry-or-inspect",
         "failure_kind": (
             FailureKind.UNCERTAIN_EFFECT.value
-            if uncertain else FailureKind.INVALID_CONTRACT.value
+            if uncertain
+            else FailureKind.INVALID_CONTRACT.value
         ),
     }
     if not uncertain:
@@ -220,9 +221,7 @@ def _lease_expiry_reason(
 
     parts = [f"attempt {max(1, operation.current_attempt)} lease expired"]
     if previous is not None:
-        parts.append(
-            f"lease deadline {_aware(previous.lease_deadline).isoformat()}"
-        )
+        parts.append(f"lease deadline {_aware(previous.lease_deadline).isoformat()}")
     parts.append(
         "last accepted contact never observed"
         if node.last_seen_at is None
@@ -401,7 +400,12 @@ class AgentJobService:
     ) -> None:
         """Cancel older overlapping orders without declaring issued effects finished."""
         scope = tuple(sorted(set(targets)))
-        if not scope or len(scope) != len(targets) or type(ordinal) is not int or ordinal < 1:
+        if (
+            not scope
+            or len(scope) != len(targets)
+            or type(ordinal) is not int
+            or ordinal < 1
+        ):
             raise ValueError("workload cancellation scope is invalid")
         parent_ids = tuple(
             session.scalars(
@@ -422,7 +426,11 @@ class AgentJobService:
             parent = session.scalar(
                 select(Job).where(Job.id == parent_id).with_for_update(of=Job)
             )
-            if parent is None or parent.state not in {"queued", "running", "waiting-for-operator"}:
+            if parent is None or parent.state not in {
+                "queued",
+                "running",
+                "waiting-for-operator",
+            }:
                 continue
             children = tuple(
                 session.scalars(
@@ -453,19 +461,28 @@ class AgentJobService:
                     child.state = "cancelled"
                     child.status_reason = "superseded by newer workload intent"
                     child.updated_at = now
-            if any(child.state in {"running", "waiting-for-operator"} for child in children):
-                previous = dict(parent.result) if isinstance(parent.result, Mapping) else {}
+            if any(
+                child.state in {"running", "waiting-for-operator"} for child in children
+            ):
+                previous = (
+                    dict(parent.result) if isinstance(parent.result, Mapping) else {}
+                )
                 if previous.get("cancel_requested") is not True:
                     parent.result = {
                         **previous,
                         "cancel_requested": True,
-                        "cancel_request_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{parent.id}:{ordinal}")),
+                        "cancel_request_id": str(
+                            uuid.uuid5(uuid.NAMESPACE_URL, f"{parent.id}:{ordinal}")
+                        ),
                         "cancel_actor": "controller",
                         "cancel_requested_at": _aware(now).isoformat(),
                         "reason": "superseded by newer workload intent",
                     }
                 elif "cancel_requested_at" not in previous:
-                    parent.result = {**previous, "cancel_requested_at": _aware(now).isoformat()}
+                    parent.result = {
+                        **previous,
+                        "cancel_requested_at": _aware(now).isoformat(),
+                    }
                 parent.state = "running"
             elif all(child.state == "cancelled" for child in children):
                 parent.state = "cancelled"
@@ -478,20 +495,27 @@ class AgentJobService:
     ) -> tuple[SupersededAgentEffect, ...]:
         """Read only: identify older issued effects still awaiting a stop receipt."""
         scope = tuple(sorted(set(targets)))
-        if not scope or len(scope) != len(targets) or type(current_ordinal) is not int or current_ordinal < 1:
+        if (
+            not scope
+            or len(scope) != len(targets)
+            or type(current_ordinal) is not int
+            or current_ordinal < 1
+        ):
             raise ValueError("workload observation scope is invalid")
-        candidates = tuple(session.scalars(
-            select(StoredOperation)
-            .where(
-                StoredOperation.node_id.in_(scope),
-                StoredOperation.kind.in_(_WORKLOAD_INTENT_OPERATIONS),
-                StoredOperation.workload_intent_ordinal.is_not(None),
-                StoredOperation.workload_intent_ordinal < current_ordinal,
-                StoredOperation.current_attempt > 0,
-                StoredOperation.state.in_({"running", "waiting-for-operator"}),
+        candidates = tuple(
+            session.scalars(
+                select(StoredOperation)
+                .where(
+                    StoredOperation.node_id.in_(scope),
+                    StoredOperation.kind.in_(_WORKLOAD_INTENT_OPERATIONS),
+                    StoredOperation.workload_intent_ordinal.is_not(None),
+                    StoredOperation.workload_intent_ordinal < current_ordinal,
+                    StoredOperation.current_attempt > 0,
+                    StoredOperation.state.in_({"running", "waiting-for-operator"}),
+                )
+                .order_by(StoredOperation.parent_job_id, StoredOperation.id)
             )
-            .order_by(StoredOperation.parent_job_id, StoredOperation.id)
-        ))
+        )
         pending = []
         for operation in candidates:
             parent = session.get(Job, operation.parent_job_id)
@@ -505,26 +529,39 @@ class AgentJobService:
                 None if parent is None else parent.result
             )
             if (
-                parent is None or attempt is None or deadline is None
-                or operation.workload_intent_ordinal != parent.payload.get("workload_intent_ordinal")
+                parent is None
+                or attempt is None
+                or deadline is None
+                or operation.workload_intent_ordinal
+                != parent.payload.get("workload_intent_ordinal")
                 or operation.node_id not in parent.targets
                 or AgentJobService._target_scope(parent.targets) is None
             ):
                 raise ValueError("superseded agent effect identity is invalid")
-            observation_deadline = max(deadline, _aware(attempt.lease_deadline)) + timedelta(seconds=960)
+            observation_deadline = max(
+                deadline, _aware(attempt.lease_deadline)
+            ) + timedelta(seconds=960)
             observe_due_at = min(
                 observation_deadline,
-                max(_aware(now) + timedelta(seconds=2), min(_aware(attempt.lease_deadline), _aware(now) + timedelta(seconds=30))),
+                max(
+                    _aware(now) + timedelta(seconds=2),
+                    min(
+                        _aware(attempt.lease_deadline),
+                        _aware(now) + timedelta(seconds=30),
+                    ),
+                ),
             )
-            pending.append(SupersededAgentEffect(
-                parent_job_id=parent.id,
-                operation_id=operation.id,
-                node_id=operation.node_id,
-                kind=operation.kind,
-                failure_kind=FailureKind.UNCERTAIN_EFFECT,
-                observe_due_at=observe_due_at,
-                observation_deadline=observation_deadline,
-            ))
+            pending.append(
+                SupersededAgentEffect(
+                    parent_job_id=parent.id,
+                    operation_id=operation.id,
+                    node_id=operation.node_id,
+                    kind=operation.kind,
+                    failure_kind=FailureKind.UNCERTAIN_EFFECT,
+                    observe_due_at=observe_due_at,
+                    observation_deadline=observation_deadline,
+                )
+            )
         return tuple(pending)
 
     def set_result_consumer(self, consumer: ResultConsumer) -> None:
@@ -696,7 +733,8 @@ class AgentJobService:
                 StoredOperation.node_id == node_id,
                 or_(
                     StoredOperation.workload_intent_ordinal.is_(None),
-                    StoredOperation.workload_intent_ordinal == AgentNode.workload_intent_ordinal,
+                    StoredOperation.workload_intent_ordinal
+                    == AgentNode.workload_intent_ordinal,
                 ),
                 Job.result["cancel_requested"].as_boolean().is_not(True),
                 or_(
@@ -715,11 +753,13 @@ class AgentJobService:
                         == StoredOperation.current_attempt,
                         or_(
                             and_(
-                                StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
+                                StoredOperation.kind
+                                == AgentOperation.AGENT_UPGRADE.value,
                                 upgrade_safety_elapsed,
                             ),
                             and_(
-                                StoredOperation.kind != AgentOperation.AGENT_UPGRADE.value,
+                                StoredOperation.kind
+                                != AgentOperation.AGENT_UPGRADE.value,
                                 or_(
                                     StoredOperation.retry_due_at.is_(None),
                                     StoredOperation.retry_due_at <= now,
@@ -757,9 +797,9 @@ class AgentJobService:
         with self._claim_lock, self._sessions.begin() as session:
             now = self._clock()
             candidate_id = session.scalar(
-                self._claimable_operations(node_id, now, capabilities).with_only_columns(
-                    StoredOperation.id
-                )
+                self._claimable_operations(
+                    node_id, now, capabilities
+                ).with_only_columns(StoredOperation.id)
             )
             upgrade_id = None
             if (
@@ -862,16 +902,20 @@ class AgentJobService:
                 )
                 return None
             if operation.kind in _MUTATING_OPERATIONS:
-                candidates = tuple(session.scalars(
-                    select(StoredOperation)
-                    .where(
-                        StoredOperation.node_id == node_id,
-                        StoredOperation.id != operation.id,
-                        StoredOperation.kind.in_(_MUTATING_OPERATIONS),
-                        StoredOperation.state.in_({"running", "waiting-for-operator"}),
+                candidates = tuple(
+                    session.scalars(
+                        select(StoredOperation)
+                        .where(
+                            StoredOperation.node_id == node_id,
+                            StoredOperation.id != operation.id,
+                            StoredOperation.kind.in_(_MUTATING_OPERATIONS),
+                            StoredOperation.state.in_(
+                                {"running", "waiting-for-operator"}
+                            ),
+                        )
+                        .order_by(StoredOperation.id)
                     )
-                    .order_by(StoredOperation.id)
-                ))
+                )
                 active_mutations_list = []
                 for old in candidates:
                     if old.state == "running":
@@ -882,7 +926,8 @@ class AgentJobService:
                         and old.current_attempt > 0
                         and old.workload_intent_ordinal is not None
                         and operation.workload_intent_ordinal is not None
-                        and old.workload_intent_ordinal < operation.workload_intent_ordinal
+                        and old.workload_intent_ordinal
+                        < operation.workload_intent_ordinal
                     ):
                         old_parent = session.get(Job, old.parent_job_id)
                         if (
@@ -901,17 +946,22 @@ class AgentJobService:
                     operation.kind == AgentOperation.RECIPE_STOP.value
                     and current_ordinal is not None
                 )
-                if operation.kind == AgentOperation.RECIPE_STOP.value and current_ordinal is not None:
+                if (
+                    operation.kind == AgentOperation.RECIPE_STOP.value
+                    and current_ordinal is not None
+                ):
                     for old in active_mutations:
                         old_parent = session.get(Job, old.parent_job_id)
                         if (
-                            old.kind not in {
+                            old.kind
+                            not in {
                                 AgentOperation.RECIPE_START.value,
                                 AgentOperation.RECIPE_STOP.value,
                             }
                             or old.workload_intent_ordinal is None
                             or old.workload_intent_ordinal >= current_ordinal
-                            or old.payload.get("run_id") != operation.payload.get("run_id")
+                            or old.payload.get("run_id")
+                            != operation.payload.get("run_id")
                             or old_parent is None
                             or not isinstance(old_parent.result, Mapping)
                             or old_parent.result.get("cancel_requested") is not True
@@ -930,9 +980,13 @@ class AgentJobService:
                     )
                     .with_for_update(of=AgentOperationAttempt)
                 )
-                if previous is not None and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
+                if (
+                    previous is not None
+                    and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
+                ):
                     resumable_progress = (
-                        None if previous.progress is None
+                        None
+                        if previous.progress is None
                         else validate_progress_update(None, previous.progress)
                     )
                 if previous is not None and previous.state in {
@@ -963,14 +1017,23 @@ class AgentJobService:
                 import secrets
 
                 from vonk_agent_protocol.contracts import AgentUpgradePayload
+
                 payload = AgentUpgradePayload.model_validate(operation.payload)
-                if runtime_identity.binary_digest != payload.rollback.source.binary_sha256:
+                if (
+                    runtime_identity.binary_digest
+                    != payload.rollback.source.binary_sha256
+                ):
                     return None
                 # A new claim owns a fresh watchdog authority. The retry query
                 # already enforced the full previous rollback safety fence.
                 document = payload.model_dump(mode="json")
-                document["rollback"].update(attempt_nonce=secrets.token_hex(32), activation_deadline=int(now.timestamp()) + 900)
-                payload_bytes = canonical_payload(AgentOperation.AGENT_UPGRADE, document)
+                document["rollback"].update(
+                    attempt_nonce=secrets.token_hex(32),
+                    activation_deadline=int(now.timestamp()) + 900,
+                )
+                payload_bytes = canonical_payload(
+                    AgentOperation.AGENT_UPGRADE, document
+                )
                 operation.payload = json.loads(payload_bytes)
                 operation.payload_digest = hashlib.sha256(payload_bytes).hexdigest()
             operation.current_attempt += 1
@@ -1045,6 +1108,7 @@ class AgentJobService:
         from vonk_agent_protocol.contracts import AgentUpgradePayload
 
         from .package_activation import matches_receipt
+
         receipt = runtime_identity.package_activation
         if operation is None or operation.current_attempt == 0 or receipt is None:
             return
@@ -1052,11 +1116,18 @@ class AgentJobService:
         if not matches_receipt(receipt, payload, node_id):
             return
         if receipt.phase in {"rolled_back", "rollback_failed"}:
-            if receipt.phase == "rolled_back" and runtime_identity.binary_digest != payload.rollback.source.binary_sha256:
+            if (
+                receipt.phase == "rolled_back"
+                and runtime_identity.binary_digest
+                != payload.rollback.source.binary_sha256
+            ):
                 return
-            current = session.scalar(select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == operation.current_attempt))
+            current = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
+                )
+            )
             # The same terminal receipt is reported until the next install.
             # It must not revoke an operator-authorized retry of that outcome.
             if (
@@ -1064,7 +1135,8 @@ class AgentJobService:
                 and operation.retry_disposition_attempt == operation.current_attempt
                 and current is not None
                 and isinstance(current.result, dict)
-                and current.result.get("package_activation") == receipt.model_dump(mode="json")
+                and current.result.get("package_activation")
+                == receipt.model_dump(mode="json")
             ):
                 return
             operation.state = "waiting-for-operator"
@@ -1073,11 +1145,16 @@ class AgentJobService:
             operation.updated_at = now
             if current is not None:
                 current.state = "failed"
-                current.result = {"reason": "agent package " + receipt.phase, "package_activation": receipt.model_dump(mode="json")}
+                current.result = {
+                    "reason": "agent package " + receipt.phase,
+                    "package_activation": receipt.model_dump(mode="json"),
+                }
             parent = session.get(Job, operation.parent_job_id)
             if parent is not None:
                 parent.state = "waiting-for-operator"
-                parent.status_reason = "Spark package " + receipt.phase + "; rollout stopped"
+                parent.status_reason = (
+                    "Spark package " + receipt.phase + "; rollout stopped"
+                )
                 parent.updated_at = now
             return
         if receipt.phase != "acknowledged" or (
@@ -1108,7 +1185,10 @@ class AgentJobService:
             .with_for_update(of=AgentOperationAttempt)
         )
         if attempt is None or attempt.state not in {
-            "running", "waiting-for-operator", "expired", "failed",
+            "running",
+            "waiting-for-operator",
+            "expired",
+            "failed",
         }:
             return
         message = AgentResult.model_validate(
@@ -1254,10 +1334,12 @@ class AgentJobService:
                 current_operation.kind in _WORKLOAD_INTENT_OPERATIONS
                 and current_operation.workload_intent_ordinal is None
             )
-            or current_operation.workload_intent_ordinal != job.payload.get("workload_intent_ordinal")
+            or current_operation.workload_intent_ordinal
+            != job.payload.get("workload_intent_ordinal")
             or (
                 current_operation.workload_intent_ordinal is not None
-                and current_operation.workload_intent_ordinal != node.workload_intent_ordinal
+                and current_operation.workload_intent_ordinal
+                != node.workload_intent_ordinal
             )
             or node.state != "active"
             or node.revoked_at is not None
@@ -1401,12 +1483,17 @@ class AgentJobService:
                     None if parent is None else parent.result
                 )
                 if cancellation_deadline is None:
-                    raise StaleAgentAttempt("superseded cancellation authority is invalid")
+                    raise StaleAgentAttempt(
+                        "superseded cancellation authority is invalid"
+                    )
                 if _aware(now) >= cancellation_deadline:
                     raise StaleAgentAttempt("superseded cancellation authority expired")
                 deadline = min(
                     cancellation_deadline,
-                    max(_aware(attempt.lease_deadline), _aware(now) + timedelta(seconds=lease_seconds)),
+                    max(
+                        _aware(attempt.lease_deadline),
+                        _aware(now) + timedelta(seconds=lease_seconds),
+                    ),
                 )
                 attempt.lease_deadline = deadline
                 return AgentDirective(
@@ -1439,18 +1526,31 @@ class AgentJobService:
             if message.progress is not None:
                 try:
                     current_progress = dict(message.progress)
-                    if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value and attempt.progress:
+                    if (
+                        operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
+                        and attempt.progress
+                    ):
                         # A restarted transfer walks already durable objects again.
                         # Replayed offsets are not loss of retained operation bytes.
                         for key in ("completed_bytes", "completed_items"):
                             if key in current_progress and key in attempt.progress:
-                                current_progress[key] = max(current_progress[key], attempt.progress[key])
-                    validated = validate_progress_update(attempt.progress, current_progress, partial=False)
-                    write_progress = progress_write_due(attempt.progress, validated, _aware(now))
+                                current_progress[key] = max(
+                                    current_progress[key], attempt.progress[key]
+                                )
+                    validated = validate_progress_update(
+                        attempt.progress, current_progress, partial=False
+                    )
+                    write_progress = progress_write_due(
+                        attempt.progress, validated, _aware(now)
+                    )
                     if write_progress:
-                        attempt.progress = observe_progress(attempt.progress, validated, _aware(now))
+                        attempt.progress = observe_progress(
+                            attempt.progress, validated, _aware(now)
+                        )
                 except (TypeError, ValueError) as error:
-                    raise ValueError(f"operation progress is invalid: {error}") from error
+                    raise ValueError(
+                        f"operation progress is invalid: {error}"
+                    ) from error
             if write_progress:
                 attempt.lease_deadline = deadline
                 operation.updated_at = now
@@ -1474,10 +1574,12 @@ class AgentJobService:
                     update(ArtifactDistributionAssignment)
                     .where(
                         ArtifactDistributionAssignment.node_id == operation.node_id,
-                        ArtifactDistributionAssignment.plan_digest == operation.authority_revision,
+                        ArtifactDistributionAssignment.plan_digest
+                        == operation.authority_revision,
                         ArtifactDistributionAssignment.state == "active",
                         ArtifactDistributionAssignment.expires_at > now,
-                        ArtifactDistributionAssignment.expires_at < now + timedelta(minutes=30),
+                        ArtifactDistributionAssignment.expires_at
+                        < now + timedelta(minutes=30),
                     )
                     .values(expires_at=now + timedelta(hours=1), updated_at=now)
                 )
@@ -1498,18 +1600,24 @@ class AgentJobService:
         """Identify an exact old cancellation for a benign heartbeat response."""
         with self._sessions() as session:
             attempt = session.scalar(
-                select(AgentOperationAttempt).where(AgentOperationAttempt.fence == fence.fence)
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.fence == fence.fence
+                )
             )
             operation = (
                 session.get(StoredOperation, attempt.operation_id)
-                if attempt is not None else None
+                if attempt is not None
+                else None
             )
             parent = (
                 session.get(Job, operation.parent_job_id)
-                if operation is not None else None
+                if operation is not None
+                else None
             )
             if (
-                attempt is None or operation is None or parent is None
+                attempt is None
+                or operation is None
+                or parent is None
                 or operation.kind not in _WORKLOAD_INTENT_OPERATIONS
                 or operation.id != fence.operation_id
                 or operation.parent_job_id != fence.job_id
@@ -1517,7 +1625,8 @@ class AgentJobService:
                 or attempt.attempt != fence.attempt
                 or operation.current_attempt != attempt.attempt
                 or _aware(fence.deadline) > _aware(attempt.lease_deadline)
-                or operation.workload_intent_ordinal != parent.payload.get("workload_intent_ordinal")
+                or operation.workload_intent_ordinal
+                != parent.payload.get("workload_intent_ordinal")
                 or not isinstance(parent.result, Mapping)
                 or parent.result.get("cancel_requested") is not True
                 or self._target_scope(parent.targets) is None
@@ -1526,7 +1635,8 @@ class AgentJobService:
                 return False
             contact_serial = (
                 source.identity.certificate_serial
-                if source is not None else attempt.agent_certificate_serial
+                if source is not None
+                else attempt.agent_certificate_serial
             )
             identity = self._lock_identity(session, operation.node_id, contact_serial)
             now = self._clock()
@@ -1540,7 +1650,8 @@ class AgentJobService:
                     operation.state == "cancelled"
                     or (
                         operation.workload_intent_ordinal is not None
-                        and operation.workload_intent_ordinal < node.workload_intent_ordinal
+                        and operation.workload_intent_ordinal
+                        < node.workload_intent_ordinal
                     )
                 )
             )
@@ -1591,32 +1702,37 @@ class AgentJobService:
 
     @staticmethod
     def _schedule_safe_retry(
-        operation: StoredOperation, now: datetime, retry_after_seconds: int | None = None
+        operation: StoredOperation,
+        now: datetime,
+        retry_after_seconds: int | None = None,
     ) -> None:
         if operation.kind not in _RESTART_REISSUE_OPERATIONS:
-            raise ValueError("operation cannot be reissued without effect reconciliation")
+            raise ValueError(
+                "operation cannot be reissued without effect reconciliation"
+            )
         retry_after = (
-            None if retry_after_seconds is None
+            None
+            if retry_after_seconds is None
             else _aware(now) + timedelta(seconds=retry_after_seconds)
         )
         due = RecoveryPolicy().next_attempt(
-            operation.id, operation.current_attempt, _aware(now), retry_after=retry_after
+            operation.id,
+            operation.current_attempt,
+            _aware(now),
+            retry_after=retry_after,
         )
         if due is None:
             operation.retry_disposition = None
             operation.retry_disposition_attempt = None
             operation.retry_due_at = None
-            operation.status_reason = (
-                f"exact {operation.kind} retry budget exhausted; inspect the last attempt"
-            )
+            operation.status_reason = f"exact {operation.kind} retry budget exhausted; inspect the last attempt"
             return
         operation.retry_disposition = _RETRY_DISPOSITION
         operation.retry_disposition_attempt = operation.current_attempt
         operation.retry_due_at = due
         previous_reason = operation.status_reason
         schedule_reason = (
-            f"exact {operation.kind} interrupted; "
-            f"retry scheduled at {due.isoformat()}"
+            f"exact {operation.kind} interrupted; retry scheduled at {due.isoformat()}"
         )
         operation.status_reason = (
             f"{previous_reason}; {schedule_reason}"
@@ -1647,11 +1763,16 @@ class AgentJobService:
                     AgentOperationAttempt.agent_certificate_serial,
                     StoredOperation.parent_job_id,
                 )
-                .join(AgentOperationAttempt, AgentOperationAttempt.operation_id == StoredOperation.id)
+                .join(
+                    AgentOperationAttempt,
+                    AgentOperationAttempt.operation_id == StoredOperation.id,
+                )
                 .where(AgentOperationAttempt.fence == message.fence)
             ).one_or_none()
             if hint is None:
-                raise StaleAgentAttempt("agent operation lease, certificate, or fence is stale")
+                raise StaleAgentAttempt(
+                    "agent operation lease, certificate, or fence is stale"
+                )
             operation_id, node_id, serial, parent_job_id = hint
             scopes = self._lock_operation_scopes(session, (operation_id,), node_id)
             if scopes is None or scopes[operation_id][0] != parent_job_id:
@@ -1660,7 +1781,9 @@ class AgentJobService:
             # the node's durable ledger. Authenticate current contact under
             # its fresh certificate; the expired attempt remains bound to the
             # original serial and fence for diagnostics only.
-            contact_serial = source.identity.certificate_serial if source is not None else serial
+            contact_serial = (
+                source.identity.certificate_serial if source is not None else serial
+            )
             identity = self._lock_identity(session, node_id, contact_serial)
             now = self._clock()
             if identity is None or not self._identity_is_active(*identity, now):
@@ -1675,8 +1798,11 @@ class AgentJobService:
                 .with_for_update(of=AgentOperationAttempt)
             )
             if (
-                parent is None or operation is None or attempt is None
-                or node.state != "active" or node.revoked_at is not None
+                parent is None
+                or operation is None
+                or attempt is None
+                or node.state != "active"
+                or node.revoked_at is not None
                 or self._target_scope(parent.targets) != scopes[operation_id][1]
                 or operation.authority_revision != parent.authority_revision
                 or operation.parent_job_id != message.job_id
@@ -1687,8 +1813,12 @@ class AgentJobService:
                 or attempt.agent_certificate_serial != serial
                 or _aware(message.deadline) > _aware(attempt.lease_deadline)
             ):
-                raise StaleAgentAttempt("agent operation authority or expired attempt is stale")
-            validate_result_for_operation(operation.kind, message.result, state=message.state)
+                raise StaleAgentAttempt(
+                    "agent operation authority or expired attempt is stale"
+                )
+            validate_result_for_operation(
+                operation.kind, message.result, state=message.state
+            )
             evidence = _document(message.result)
             if message.state in {"failed", "waiting-for-operator"}:
                 evidence = sanitize_failure_evidence(evidence)
@@ -1726,7 +1856,8 @@ class AgentJobService:
                 message.state == "cancelled"
                 and superseded_intent
                 and operation.kind in _WORKLOAD_INTENT_OPERATIONS
-                and operation.workload_intent_ordinal == parent.payload.get("workload_intent_ordinal")
+                and operation.workload_intent_ordinal
+                == parent.payload.get("workload_intent_ordinal")
                 and isinstance(parent.result, Mapping)
                 and superseded_cancellation_deadline(parent.result) is not None
                 and operation.current_attempt == attempt.attempt
@@ -1742,8 +1873,7 @@ class AgentJobService:
                     )
                     or (
                         operation.kind != AgentOperation.RECIPE_JOB_RUN.value
-                        and
-                        evidence.get("error_code") == "operation_cancelled"
+                        and evidence.get("error_code") == "operation_cancelled"
                         and evidence.get("uncertain") is not True
                     )
                 )
@@ -1763,9 +1893,14 @@ class AgentJobService:
                 _aware(attempt.lease_deadline) <= _aware(now) or superseded_intent
             ):
                 attempt.state = "expired"
-                if operation.current_attempt == attempt.attempt and operation.state == "running":
+                if (
+                    operation.current_attempt == attempt.attempt
+                    and operation.state == "running"
+                ):
                     operation.state = "waiting-for-operator"
-                    operation.status_reason = _lease_expiry_reason(operation, attempt, node, now)
+                    operation.status_reason = _lease_expiry_reason(
+                        operation, attempt, node, now
+                    )
                     operation.updated_at = now
                     if parent.state in {"queued", "running"}:
                         self._aggregate_parent(session, operation.parent_job_id)
@@ -1818,7 +1953,9 @@ class AgentJobService:
                     or cancellation_deadline is None
                     or _aware(now) >= cancellation_deadline
                 ):
-                    raise StaleAgentAttempt("superseded operation has no completion authority")
+                    raise StaleAgentAttempt(
+                        "superseded operation has no completion authority"
+                    )
             if isinstance(fence, AgentResult):
                 if fence.state != state or (
                     result is not None and _document(fence.result) != _document(result)
@@ -1829,19 +1966,21 @@ class AgentJobService:
                 canonical_result = (
                     result if result is not None else {"reason": self._reason(reason)}
                 )
-                message = AgentResult.model_validate_json(canonical_message(
-                    {
-                        "schema_version": 1,
-                        "job_id": operation.parent_job_id,
-                        "operation_id": operation.id,
-                        "attempt": attempt.attempt,
-                        "fence": attempt.fence,
-                        "node_id": operation.node_id,
-                        "deadline": _aware(attempt.lease_deadline),
-                        "state": state,
-                        "result": canonical_result,
-                    }
-                ))
+                message = AgentResult.model_validate_json(
+                    canonical_message(
+                        {
+                            "schema_version": 1,
+                            "job_id": operation.parent_job_id,
+                            "operation_id": operation.id,
+                            "attempt": attempt.attempt,
+                            "fence": attempt.fence,
+                            "node_id": operation.node_id,
+                            "deadline": _aware(attempt.lease_deadline),
+                            "state": state,
+                            "result": canonical_result,
+                        }
+                    )
+                )
             validate_result_for_operation(
                 operation.kind,
                 message.result,
@@ -1867,32 +2006,45 @@ class AgentJobService:
                         message_result["diagnostics"] = sanitize_diagnostics(
                             diagnostics
                         ).model_dump(mode="json")
-                    message = AgentResult.model_validate_json(canonical_message(
-                        {
-                            **message.model_dump(mode="json"),
-                            "result": message_result,
-                        }
-                    ))
+                    message = AgentResult.model_validate_json(
+                        canonical_message(
+                            {
+                                **message.model_dump(mode="json"),
+                                "result": message_result,
+                            }
+                        )
+                    )
                 except (TypeError, ValueError) as error:
                     raise ValueError(
                         f"operation failure evidence is invalid: {error}"
                     ) from error
             else:
                 message_result = _document(message.result)
-            if state == "succeeded" and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
+            if (
+                state == "succeeded"
+                and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
+            ):
                 # Final authoritative evidence closes a last sample that may
                 # have been coalesced immediately before result publication.
-                final_progress = {"phase": "completed", "completed_bytes": message_result["downloaded_bytes"]}
+                final_progress = {
+                    "phase": "completed",
+                    "completed_bytes": message_result["downloaded_bytes"],
+                }
                 if attempt.progress and attempt.progress.get("total_items") is not None:
                     final_progress["completed_items"] = attempt.progress["total_items"]
-                final_progress = validate_progress_update(attempt.progress, final_progress)
-                attempt.progress = observe_progress(attempt.progress, final_progress, _aware(now))
+                final_progress = validate_progress_update(
+                    attempt.progress, final_progress
+                )
+                attempt.progress = observe_progress(
+                    attempt.progress, final_progress, _aware(now)
+                )
             attempt.result = message_result
             attempt.state = state
             distribution_retry = (
                 state == "failed"
                 and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
-                and classify(kind_for_agent_error(message_result)) is RecoveryDecision.RETRY
+                and classify(kind_for_agent_error(message_result))
+                is RecoveryDecision.RETRY
                 and not (
                     isinstance(parent.result, Mapping)
                     and parent.result.get("cancel_requested") is True
@@ -1901,7 +2053,8 @@ class AgentJobService:
             start_observation_retry = (
                 state == "failed"
                 and operation.kind == AgentOperation.RECIPE_START.value
-                and message_result.get("error_code") == "runtime_observation_unavailable"
+                and message_result.get("error_code")
+                == "runtime_observation_unavailable"
                 and message_result.get("failure_kind")
                 == FailureKind.TEMPORARY_DEPENDENCY.value
                 and not (
@@ -2011,7 +2164,8 @@ class AgentJobService:
                 operation.kind in _WORKLOAD_INTENT_OPERATIONS
                 and operation.workload_intent_ordinal is None
             )
-            or operation.workload_intent_ordinal != parent.payload.get("workload_intent_ordinal")
+            or operation.workload_intent_ordinal
+            != parent.payload.get("workload_intent_ordinal")
             or (
                 operation.workload_intent_ordinal is not None
                 and operation.workload_intent_ordinal != node.workload_intent_ordinal
@@ -2092,11 +2246,18 @@ class AgentJobService:
             not isinstance(value, str) or not value for value in values
         ):
             raise ValueError("agent capabilities are invalid")
-        return tuple(sorted({
-            value for value in values
-            if value in _KNOWN_CAPABILITIES
-            or re.fullmatch(r"runtime\.preflight\.fingerprint\.[0-9a-f]{64}", value)
-        }))
+        return tuple(
+            sorted(
+                {
+                    value
+                    for value in values
+                    if value in _KNOWN_CAPABILITIES
+                    or re.fullmatch(
+                        r"runtime\.preflight\.fingerprint\.[0-9a-f]{64}", value
+                    )
+                }
+            )
+        )
 
     @staticmethod
     def _validate_agent_contract(

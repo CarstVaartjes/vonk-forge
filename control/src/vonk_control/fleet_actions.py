@@ -3,6 +3,7 @@
 The service is deliberately control-plane only; no browser SSH or direct host
 command execution is permitted.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -71,8 +72,15 @@ class FleetActionService:
             self._services.enrollment.revoke_node(node_id, actor.subject)
         except RemoteRevocationUncertain as error:
             job = self._services.jobs.enqueue(
-                "fleet.revoke", actor.subject, "fleet", (node_id,),
-                {"terminal": True, "remote_revocation": "uncertain", "error": str(error)},
+                "fleet.revoke",
+                actor.subject,
+                "fleet",
+                (node_id,),
+                {
+                    "terminal": True,
+                    "remote_revocation": "uncertain",
+                    "error": str(error),
+                },
                 request_id=request_id,
             )
             with self._services.sessions.begin() as session:
@@ -83,11 +91,24 @@ class FleetActionService:
                 row.result = {"rollback": {"state": "required", "reason": str(error)}}
                 row.updated_at = _now(self._services.clock)
             self._audit(request_id, actor, "fleet.revoke", None, (node_id,))
-            return FleetAction(str(job.id), "revoke", "failed", (node_id,), {}, str(error), {"state": "required", "reason": str(error)})
+            return FleetAction(
+                str(job.id),
+                "revoke",
+                "failed",
+                (node_id,),
+                {},
+                str(error),
+                {"state": "required", "reason": str(error)},
+            )
         except (EnrollmentDenied, ValueError) as error:
             raise FleetActionError(str(error)) from error
         job = self._services.jobs.enqueue(
-            "fleet.revoke", actor.subject, "fleet", (node_id,), {"terminal": True}, request_id=request_id
+            "fleet.revoke",
+            actor.subject,
+            "fleet",
+            (node_id,),
+            {"terminal": True},
+            request_id=request_id,
         )
         with self._services.sessions.begin() as session:
             row = session.get(Job, job.id)
@@ -96,7 +117,9 @@ class FleetActionService:
             row.result = {"terminal": True}
             row.updated_at = _now(self._services.clock)
         self._audit(request_id, actor, "fleet.revoke", None, (node_id,))
-        return FleetAction(str(job.id), "revoke", "succeeded", (node_id,), {"terminal": True})
+        return FleetAction(
+            str(job.id), "revoke", "succeeded", (node_id,), {"terminal": True}
+        )
 
     def get(self, action_id: str) -> FleetAction:
         try:
@@ -106,7 +129,15 @@ class FleetActionService:
         if job.kind != "fleet.revoke":
             raise FleetActionError("Fleet action not found")
         rollback = job.result.get("rollback") if isinstance(job.result, dict) else None
-        return FleetAction(str(job.id), "revoke", job.state, tuple(job.targets), dict(job.payload), job.status_reason, rollback if isinstance(rollback, dict) else None)
+        return FleetAction(
+            str(job.id),
+            "revoke",
+            job.state,
+            tuple(job.targets),
+            dict(job.payload),
+            job.status_reason,
+            rollback if isinstance(rollback, dict) else None,
+        )
 
     def _active_node(self, node_id: str) -> AgentNode:
         with self._services.sessions() as session:
@@ -116,5 +147,14 @@ class FleetActionService:
             session.expunge(node)
             return node
 
-    def _audit(self, request_id: str, actor: Actor, action: str, authority_revision: str | None, targets: tuple[str, ...]) -> None:
-        self._services.audits.append(AuditRecord(request_id, actor.subject, action, authority_revision, targets))
+    def _audit(
+        self,
+        request_id: str,
+        actor: Actor,
+        action: str,
+        authority_revision: str | None,
+        targets: tuple[str, ...],
+    ) -> None:
+        self._services.audits.append(
+            AuditRecord(request_id, actor.subject, action, authority_revision, targets)
+        )

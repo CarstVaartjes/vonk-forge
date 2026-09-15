@@ -32,10 +32,10 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-        Base,
-        FleetProfile,
-        FleetProfileApplication,
-        Job,
+    Base,
+    FleetProfile,
+    FleetProfileApplication,
+    Job,
 )
 from vonk_control.operation_api import (
     JobProgress,
@@ -54,7 +54,12 @@ NODE_ID = "spk_" + "1" * 32
 
 
 def _profile_operation_plan(
-    *, profile_id: str, profile_digest: str, plan_digest: str, node_ids: list[str], now: datetime
+    *,
+    profile_id: str,
+    profile_digest: str,
+    plan_digest: str,
+    node_ids: list[str],
+    now: datetime,
 ) -> dict[str, object]:
     """Build the same complete preview document persisted by profile apply."""
 
@@ -142,6 +147,7 @@ class ProjectedFleet:
             authority_revision=COMMIT,
             nodes=[],
         )
+
 
 def _client(*, fleet_projection=None, operations=None, role="operator"):
     codec = TokenCodec(b"k" * 32)
@@ -286,7 +292,9 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
         "total_bytes_known": True,
         "members": [],
     }
-    assert serialize_json_value(operation_api._progress_projection({"phase": "verify"})) == {
+    assert serialize_json_value(
+        operation_api._progress_projection({"phase": "verify"})
+    ) == {
         "phase": "verify",
         "activity": "waiting",
         "completed_bytes": 0,
@@ -415,7 +423,8 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
 
 @pytest.mark.parametrize("profile_state", ["running", "failed", "waiting-for-operator"])
 def test_profile_operation_provider_is_registered_through_the_global_api(
-    tmp_path, profile_state,
+    tmp_path,
+    profile_state,
 ) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'profile-operations.sqlite'}")
     Base.metadata.create_all(engine)
@@ -427,14 +436,14 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     now = datetime(2026, 8, 15, 12, tzinfo=UTC)
     with sessions.begin() as session:
         session.add(
-                FleetProfile(
-                    id=profile_id,
-                    number=1,
-                    name="Studio",
+            FleetProfile(
+                id=profile_id,
+                number=1,
+                name="Studio",
                 description="",
                 installation_policy="keep-cached",
                 assignments=[],
-                    labels={},
+                labels={},
                 favorite=False,
                 created_by="admin",
                 created_at=now,
@@ -482,7 +491,8 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
                     result={"changed": False, "completed_steps": 0},
                     status_reason=(
                         "Spark could not start: token=private-credential"
-                        if profile_state != "running" else None
+                        if profile_state != "running"
+                        else None
                     ),
                     actor="admin",
                     created_at=created_at,
@@ -692,8 +702,6 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
     encoded = json.dumps(response.json(), sort_keys=True)
     assert "payload" not in encoded
     assert "result" not in encoded
-
-
 
 
 def test_operator_resume_is_rbac_guarded_strict_and_audited() -> None:
@@ -1058,8 +1066,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     queued_target = _first_diagnostic_target(queued)
     assert queued_target["retry_queued"] is True
     assert (
-        queued_target["retry_not_before"]
-        == (now + timedelta(seconds=240)).isoformat()
+        queued_target["retry_not_before"] == (now + timedelta(seconds=240)).isoformat()
     )
     queued_next_action = queued["next_action"]
     assert queued_next_action is not None
@@ -1107,9 +1114,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     specific_next_action = specific["next_action"]
     assert specific_next_action is not None
     assert isinstance(specific_next_action, str)
-    assert (
-        "Resume queues the retry behind a new safety delay" in specific_next_action
-    )
+    assert "Resume queues the retry behind a new safety delay" in specific_next_action
 
 
 def test_durable_operation_cursor_rejects_cross_job_replay_and_tampering(
@@ -1205,6 +1210,7 @@ def test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault() -> N
     ``ValueError``, and the routes answered that with 422 "cursor is invalid",
     blaming the request for a cursor the caller never sent.
     """
+
     def unavailable(*_args: object) -> NoReturn:
         raise BoundedJSONError("stored operation progress is invalid")
 
@@ -1227,37 +1233,69 @@ def test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault() -> N
     assert listed.json()["detail"] == "operation projection unavailable"
 
 
-
-
-
-
-
-
 def test_parallel_job_byte_aggregate_is_independent_of_operation_page(tmp_path) -> None:
     now = datetime.now(UTC)
     engine = create_engine(f"sqlite:///{tmp_path / 'parallel-progress.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    job = Job(request_id="33333333-3333-4333-8333-333333333333", kind="reconcile", state="running",
-              actor="operator", authority_revision=COMMIT, targets=[NODE_ID, "spk_"+"2"*32],
-              payload_digest="e"*64, payload={}, current_attempt=1, created_at=now, updated_at=now)
+    job = Job(
+        request_id="33333333-3333-4333-8333-333333333333",
+        kind="reconcile",
+        state="running",
+        actor="operator",
+        authority_revision=COMMIT,
+        targets=[NODE_ID, "spk_" + "2" * 32],
+        payload_digest="e" * 64,
+        payload={},
+        current_attempt=1,
+        created_at=now,
+        updated_at=now,
+    )
     with sessions.begin() as session:
         session.add(job)
         session.flush()
         for index, target in enumerate(job.targets, 1):
             session.add(AgentNode(node_id=target, state="active", capabilities=[]))
-            operation = AgentOperation(parent_job_id=job.id, node_id=target, kind="node.probe",
-                                       payload_digest=f"{index:064x}", payload={}, authority_revision=COMMIT,
-                                       state="running", current_attempt=1, created_at=now, updated_at=now)
+            operation = AgentOperation(
+                parent_job_id=job.id,
+                node_id=target,
+                kind="node.probe",
+                payload_digest=f"{index:064x}",
+                payload={},
+                authority_revision=COMMIT,
+                state="running",
+                current_attempt=1,
+                created_at=now,
+                updated_at=now,
+            )
             session.add(operation)
             session.flush()
-            session.add(AgentOperationAttempt(operation_id=operation.id, attempt=1, fence=f"00000000-0000-4000-8000-{index:012d}",
-                lease_deadline=now+timedelta(minutes=1), agent_certificate_serial=f"serial-{index}", state="running",
-                progress={"phase":"copying", "completed_bytes":index*10, "total_bytes":index*100,
-                          "total_bytes_known":True, "bytes_per_second":float(index*10), "eta_seconds":9.0,
-                          "observed_at":now.isoformat(), "last_progress_at":now.isoformat()}))
-    services = operation_api.durable_operation_services(sessions, tmp_path / "routes", clock=lambda: now,
-                                                        cursors=TokenCodec(b"k"*32).cursor_codec())
+            session.add(
+                AgentOperationAttempt(
+                    operation_id=operation.id,
+                    attempt=1,
+                    fence=f"00000000-0000-4000-8000-{index:012d}",
+                    lease_deadline=now + timedelta(minutes=1),
+                    agent_certificate_serial=f"serial-{index}",
+                    state="running",
+                    progress={
+                        "phase": "copying",
+                        "completed_bytes": index * 10,
+                        "total_bytes": index * 100,
+                        "total_bytes_known": True,
+                        "bytes_per_second": float(index * 10),
+                        "eta_seconds": 9.0,
+                        "observed_at": now.isoformat(),
+                        "last_progress_at": now.isoformat(),
+                    },
+                )
+            )
+    services = operation_api.durable_operation_services(
+        sessions,
+        tmp_path / "routes",
+        clock=lambda: now,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+    )
     first = services.job_operations(job.id, None, 1)
     assert len(first.items) == 1 and first.next_cursor
     second = services.job_operations(job.id, first.next_cursor, 1)
@@ -1283,15 +1321,12 @@ def test_stored_evidence_projections_keep_absence_and_corruption_distinct() -> N
     assert operation_api._provenance_projection(None, identifier) is None
     assert operation_api._provenance_projection({}, identifier) is None
     assert (
-        operation_api._provenance_projection({"provenance": None}, identifier)
-        is None
+        operation_api._provenance_projection({"provenance": None}, identifier) is None
     )
     with pytest.raises(
         BoundedJSONError, match="provenance for operation .* is invalid"
     ):
-        operation_api._provenance_projection(
-            {"provenance": {"source": 7}}, identifier
-        )
+        operation_api._provenance_projection({"provenance": {"source": 7}}, identifier)
     with pytest.raises(
         BoundedJSONError, match="provenance for operation .* is invalid"
     ):

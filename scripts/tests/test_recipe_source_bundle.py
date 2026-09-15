@@ -39,9 +39,10 @@ def test_source_bundle_cli_is_deterministic_and_emits_canonical_manifest(
     second_result = json.loads(two.stdout)
 
     assert first_result == second_result
-    assert first_result["source_sha256"] == hashlib.sha256(
-        (first / "manifest.json").read_bytes()
-    ).hexdigest()
+    assert (
+        first_result["source_sha256"]
+        == hashlib.sha256((first / "manifest.json").read_bytes()).hexdigest()
+    )
     first_archive = first / f"{first_result['source_sha256']}.tar"
     second_archive = second / f"{second_result['source_sha256']}.tar"
     assert first_archive.read_bytes() == second_archive.read_bytes()

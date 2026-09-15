@@ -101,7 +101,9 @@ def test_newer_telemetry_replaces_latest_and_replay_does_not(telemetry) -> None:
 
     repository.record_batch(NODE_A, (sample(sequence=4),))
 
-    assert repository.latest((NODE_A,))[NODE_A].observed_at == START + timedelta(seconds=5)
+    assert repository.latest((NODE_A,))[NODE_A].observed_at == START + timedelta(
+        seconds=5
+    )
     assert [
         item.observed_at
         for item in repository.history(NODE_A, START, NOW, 1_500, resolution="raw")

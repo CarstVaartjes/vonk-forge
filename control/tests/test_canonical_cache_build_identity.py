@@ -44,7 +44,12 @@ def _sessions():
 
 
 def _model_document(
-    *, path: str, file_digest: str, roles: list[str], publisher: str = "owner", slug: str = "model"
+    *,
+    path: str,
+    file_digest: str,
+    roles: list[str],
+    publisher: str = "owner",
+    slug: str = "model",
 ) -> dict[str, object]:
     document = json.loads(
         files("vonk_forge_contracts")

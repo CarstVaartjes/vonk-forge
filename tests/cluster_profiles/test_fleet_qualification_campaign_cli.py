@@ -20,6 +20,8 @@ from cluster_profiles.qualification_locking import node_locks
 NODE_A = "spk_" + "1" * 32
 NODE_B = "spk_" + "2" * 32
 REAL_AUTHORITY_LOADER = campaign_cli._load_authority
+
+
 @pytest.fixture(autouse=True)
 def _reviewed_test_authority(monkeypatch: pytest.MonkeyPatch) -> None:
     authority = campaign_cli.CampaignAuthority(
@@ -80,7 +82,12 @@ class _Client:
                 "generated_at": "2026-09-07T00:00:00Z",
                 "next_cursor": None,
                 "freshness_policy": {},
-                "facets": {"usage": [], "family": [], "version": [], "quantization": []},
+                "facets": {
+                    "usage": [],
+                    "family": [],
+                    "version": [],
+                    "quantization": [],
+                },
                 "filters": {},
                 "recipes": [
                     {
@@ -95,8 +102,12 @@ class _Client:
                         "usage": [],
                         # Derived from the canonical document so the fixture
                         # cannot drift from the projection contract.
-                        "alignment": item["detail"]["definition"]["metadata"].get("alignment"),
-                        "node_count": item["detail"]["definition"]["topology"]["node_count"],
+                        "alignment": item["detail"]["definition"]["metadata"].get(
+                            "alignment"
+                        ),
+                        "node_count": item["detail"]["definition"]["topology"][
+                            "node_count"
+                        ],
                     }
                     for selector, item in self._details.items()
                 ],
@@ -324,7 +335,6 @@ except QualificationError as error:
             text=True,
         )
     assert completed.returncode == 0, completed.stderr
-
 
 
 def test_preview_writes_both_private_plans_and_evidence(

@@ -354,7 +354,9 @@ def test_fleet_excludes_revoked_agent_nodes() -> None:
     assert [node.id for node in projection.read().nodes] == []
 
 
-def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set() -> None:
+def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set() -> (
+    None
+):
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1525,9 +1527,13 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
         node.state = "revoked"
         node.revoked_at = NOW
 
-    registered_visible = FleetProjection(
-        Repository({NODE_A: nodes[NODE_A]}), sessions, clock=lambda: NOW
-    ).read().nodes[0]
+    registered_visible = (
+        FleetProjection(
+            Repository({NODE_A: nodes[NODE_A]}), sessions, clock=lambda: NOW
+        )
+        .read()
+        .nodes[0]
+    )
     external_install = next(
         value
         for value in registered_visible.installed
@@ -1740,7 +1746,9 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
         projection.read()
 
 
-def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronological() -> None:
+def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronological() -> (
+    None
+):
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1828,15 +1836,15 @@ def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronolog
         )
         for point in document["points"]
     ] == [
-            (
-                "00000000-0000-4000-8000-000000000202",
-                "2026-08-15T11:40:00Z",
-                2.0,
+        (
+            "00000000-0000-4000-8000-000000000202",
+            "2026-08-15T11:40:00Z",
+            2.0,
         ),
-            (
-                "00000000-0000-4000-8000-000000000203",
-                "2026-08-15T11:50:00Z",
-                3.0,
+        (
+            "00000000-0000-4000-8000-000000000203",
+            "2026-08-15T11:50:00Z",
+            3.0,
         ),
     ]
     with pytest.raises(KeyError, match=EXTRA_NODE):

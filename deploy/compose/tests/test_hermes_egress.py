@@ -15,5 +15,7 @@ def test_hermes_has_no_general_egress_or_host_firewall_setup_step() -> None:
         "hermes-inference",
         "tailnet-hermes-edge",
     }
-    assert all(compose["networks"][name]["internal"] is True for name in service["networks"])
+    assert all(
+        compose["networks"][name]["internal"] is True for name in service["networks"]
+    )
     assert not (ROOT / "deploy/compose/bin/harden-hermes-egress").exists()

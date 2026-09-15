@@ -75,7 +75,9 @@ def serialize_json_value(value: RootModel, *, by_alias: bool = True) -> object: 
 
 
 @overload
-def serialize_json_value(value: BaseModel, *, by_alias: bool = True) -> dict[str, object]: ...
+def serialize_json_value(
+    value: BaseModel, *, by_alias: bool = True
+) -> dict[str, object]: ...
 
 
 @overload
@@ -135,7 +137,10 @@ class ControllerAPIRoute(APIRoute):
             if errors:
                 return result
             status_code = self.status_code or 200
-            if isinstance(injected_response, Response) and injected_response.status_code:
+            if (
+                isinstance(injected_response, Response)
+                and injected_response.status_code
+            ):
                 status_code = injected_response.status_code
             response = response_class(
                 content=serialize_json_value(value, by_alias=by_alias),
@@ -161,6 +166,7 @@ __all__ = [
     "apply_optional_none_policy",
     "serialize_json_value",
 ]
+
 
 def stored_document_detail(error: Exception) -> str | None:
     """Describe a stored document that will not validate, without its input.

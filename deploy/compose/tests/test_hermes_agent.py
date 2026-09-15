@@ -165,7 +165,8 @@ def _run_entrypoint(
         capture_output=True,
         check=False,
         text=True,
-        env=os.environ | {
+        env=os.environ
+        | {
             "HERMES_ENTRYPOINT_TEST_ROOT": str(root),
             "HERMES_ENTRYPOINT_TEST_ONLY": "1",
         },
@@ -174,9 +175,19 @@ def _run_entrypoint(
 
 @pytest.mark.parametrize(
     "payload",
-    (None, b"", b"short", b"a" * 31, b"a" * 32 + b" b", b"a" * 32 + b"\nsecond\n", b"a" * 4097),
+    (
+        None,
+        b"",
+        b"short",
+        b"a" * 31,
+        b"a" * 32 + b" b",
+        b"a" * 32 + b"\nsecond\n",
+        b"a" * 4097,
+    ),
 )
-def test_entrypoint_rejects_unsafe_api_keys(tmp_path: Path, payload: bytes | None) -> None:
+def test_entrypoint_rejects_unsafe_api_keys(
+    tmp_path: Path, payload: bytes | None
+) -> None:
     result = _run_entrypoint(tmp_path, payload)
     assert result.returncode != 0
     assert b"a" * 31 not in result.stderr.encode()
@@ -190,14 +201,18 @@ def test_entrypoint_rejects_symlink_and_accepts_32_byte_key(tmp_path: Path) -> N
 
 @pytest.mark.parametrize(
     "payload",
-    (None, b"", b"sk-short\n", b"not-sk-" + b"a" * 64 + b"\n", b"sk-" + b"a" * 64 + b" b\n"),
+    (
+        None,
+        b"",
+        b"sk-short\n",
+        b"not-sk-" + b"a" * 64 + b"\n",
+        b"sk-" + b"a" * 64 + b" b\n",
+    ),
 )
 def test_entrypoint_rejects_invalid_litellm_client_keys(
     tmp_path: Path, payload: bytes | None
 ) -> None:
-    result = _run_entrypoint(
-        tmp_path, b"a" * 32 + b"\n", litellm_payload=payload
-    )
+    result = _run_entrypoint(tmp_path, b"a" * 32 + b"\n", litellm_payload=payload)
 
     assert result.returncode != 0
     assert "LiteLLM client key file is invalid" in result.stderr

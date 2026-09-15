@@ -33,9 +33,24 @@ def _assignment(
             # The fixture models the NAS cache's opaque manifest identity.
             "model_artifact_set_sha256": "b" * 64,
             "objects": [
-                {"name": "weights/model.bin", "sha256": model_digest, "bytes": 13, "kind": "model"},
-                {"name": "config/tokenizer.json", "sha256": config_digest, "bytes": 7, "kind": "model"},
-                {"name": "image.oci.tar", "sha256": archive_digest, "bytes": 11, "kind": "oci-archive"},
+                {
+                    "name": "weights/model.bin",
+                    "sha256": model_digest,
+                    "bytes": 13,
+                    "kind": "model",
+                },
+                {
+                    "name": "config/tokenizer.json",
+                    "sha256": config_digest,
+                    "bytes": 7,
+                    "kind": "model",
+                },
+                {
+                    "name": "image.oci.tar",
+                    "sha256": archive_digest,
+                    "bytes": 11,
+                    "kind": "oci-archive",
+                },
             ],
             "oci_image_digest": "sha256:" + "d" * 64,
             "oci_archive_sha256": archive_digest,
@@ -51,7 +66,9 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
     archive_digest = source.put(b"oci archive")
     service = DistributionService(source, clock=clock)
     assignment = _assignment(NODE_A, model_digest, config_digest, archive_digest)
-    source.register_artifact_set(assignment.model_artifact_set_sha256, assignment.objects)
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
     source.register_runtime_image(assignment.oci_image_digest, archive_digest)
     service.register(assignment)
     service.register(
@@ -86,10 +103,13 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
     assert response.content == b"del pa"
     assert response.headers["etag"] == f'"sha256:{model_digest}"'
     assert response.headers["content-range"] == "bytes 2-7/13"
-    assert client.get(
-        "/agent/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
-        headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=0-1,3-4"},
-    ).status_code == 416
+    assert (
+        client.get(
+            "/agent/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
+            headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=0-1,3-4"},
+        ).status_code
+        == 416
+    )
 
     second = client.get(
         "/agent/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
@@ -98,25 +118,48 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
     assert second.status_code == 200 and second.content == b"model payload"
 
 
-def test_distribution_rejects_unassigned_wrong_node_and_corrupt_object(agent_system) -> None:
+def test_distribution_rejects_unassigned_wrong_node_and_corrupt_object(
+    agent_system,
+) -> None:
     client, services, _, clock = agent_system
     source = MemoryVerifiedObjectSource()
     model_digest = source.put(b"model payload")
     archive_digest = source.put(b"oci archive")
     service = DistributionService(source, clock=clock)
-    assignment = _assignment(NODE_A, model_digest, source.put(b"config!"), archive_digest)
-    source.register_artifact_set(assignment.model_artifact_set_sha256, assignment.objects)
+    assignment = _assignment(
+        NODE_A, model_digest, source.put(b"config!"), archive_digest
+    )
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
     source.register_runtime_image(assignment.oci_image_digest, archive_digest)
     service.register(assignment)
     object.__setattr__(services, "distribution", service)
     path = "/agent/distribution/objects/" + model_digest
-    assert client.get(path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_B, "serial-b")).status_code == 403
-    assert client.get(path + "?plan_digest=" + "e" * 64, headers=agent_headers(NODE_A, "serial-a")).status_code == 403
+    assert (
+        client.get(
+            path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_B, "serial-b")
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            path + "?plan_digest=" + "e" * 64, headers=agent_headers(NODE_A, "serial-a")
+        ).status_code
+        == 403
+    )
     source.objects[model_digest] = b"tampered payload"
-    assert client.get(path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_A, "serial-a")).status_code == 503
+    assert (
+        client.get(
+            path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_A, "serial-a")
+        ).status_code
+        == 503
+    )
 
 
-def test_distribution_assignment_survives_controller_service_restart(agent_system) -> None:
+def test_distribution_assignment_survives_controller_service_restart(
+    agent_system,
+) -> None:
     _client, _services, _tokens, clock = agent_system
     sessions = _services.sessions
     source = MemoryVerifiedObjectSource()
@@ -126,19 +169,30 @@ def test_distribution_assignment_survives_controller_service_restart(agent_syste
         source.put(b"config!"),
         source.put(b"oci archive"),
     )
-    source.register_artifact_set(assignment.model_artifact_set_sha256, assignment.objects)
-    source.register_runtime_image(assignment.oci_image_digest, assignment.oci_archive_sha256)
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(
+        assignment.oci_image_digest, assignment.oci_archive_sha256
+    )
     DistributionService(source, clock=clock, sessions=sessions).register(assignment)
 
     restarted = DistributionService(source, clock=clock, sessions=sessions)
-    assert restarted.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest).assignment_id == assignment.assignment_id
+    assert (
+        restarted.authorize(
+            node_id=NODE_A, plan_digest=assignment.plan_digest
+        ).assignment_id
+        == assignment.assignment_id
+    )
     restarted.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
     with pytest.raises(DistributionError) as caught:
         restarted.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
     assert caught.value.code == "distribution.revoked"
 
 
-def test_separate_api_process_serves_worker_registered_model_files(agent_system, tmp_path) -> None:
+def test_separate_api_process_serves_worker_registered_model_files(
+    agent_system, tmp_path
+) -> None:
     client, services, _, clock = agent_system
     image_source = MemoryVerifiedObjectSource()
     model_digest = image_source.put(b"model payload")
@@ -162,13 +216,22 @@ def test_separate_api_process_serves_worker_registered_model_files(agent_system,
         def resolve_verified_artifact_set(self, digest):
             assert digest == assignment.model_artifact_set_sha256
             return tuple(
-                {"path": item.name, "sha256": item.sha256, "bytes": item.bytes, "file": tmp_path / item.sha256}
+                {
+                    "path": item.name,
+                    "sha256": item.sha256,
+                    "bytes": item.bytes,
+                    "file": tmp_path / item.sha256,
+                }
                 for item in model_objects
             )
 
         def verified_artifact_file(self, set_digest, digest, path):
             assert set_digest == assignment.model_artifact_set_sha256
-            item = next(item for item in model_objects if item.sha256 == digest and item.name == path)
+            item = next(
+                item
+                for item in model_objects
+                if item.sha256 == digest and item.name == path
+            )
             return tmp_path / item.sha256, item.bytes, item.sha256
 
     def process_service():
@@ -205,7 +268,9 @@ def test_distribution_binds_opaque_cache_and_image_identities(agent_system) -> N
         source.put(b"oci archive"),
     )
     source.register_artifact_set("c" * 64, assignment.objects)
-    source.register_runtime_image(assignment.oci_image_digest, assignment.oci_archive_sha256)
+    source.register_runtime_image(
+        assignment.oci_image_digest, assignment.oci_archive_sha256
+    )
     with pytest.raises(DistributionError) as caught:
         DistributionService(source, clock=clock).register(assignment)
     assert caught.value.code == "distribution.model_set_mismatch"
@@ -226,14 +291,27 @@ def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> Non
             return self.Manifest()
 
         def resolve_verified_artifact_set(self, set_digest):
-            return ({"path": "weights/model.bin", "sha256": digest, "bytes": len(payload), "file": path},)
+            return (
+                {
+                    "path": "weights/model.bin",
+                    "sha256": digest,
+                    "bytes": len(payload),
+                    "file": path,
+                },
+            )
 
         def verified_artifact_file(self, set_digest, object_digest, object_path):
-            assert set_digest == "b" * 64 and object_digest == digest and object_path == "weights/model.bin"
+            assert (
+                set_digest == "b" * 64
+                and object_digest == digest
+                and object_path == "weights/model.bin"
+            )
             return path, len(payload), digest
 
     source = ModelCacheVerifiedObjectSource.from_service(Cache())
-    obj = DistributionObject(name="weights/model.bin", sha256=digest, bytes=len(payload), kind="model")
+    obj = DistributionObject(
+        name="weights/model.bin", sha256=digest, bytes=len(payload), kind="model"
+    )
     assert source.verify_artifact_set("b" * 64, (obj,))
     opened = source.open_verified(digest, len(payload))
     assert opened.stream.read() == payload

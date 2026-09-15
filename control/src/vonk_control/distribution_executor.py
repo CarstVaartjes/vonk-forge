@@ -85,7 +85,8 @@ def _phase_receipt(
         if isinstance(assignments, Mapping):
             normalized["assignments"] = {
                 node_id: DistributionAssignment.parse(raw)
-                if isinstance(raw, Mapping) else raw
+                if isinstance(raw, Mapping)
+                else raw
                 for node_id, raw in assignments.items()
             }
         receipt = _PHASE_RECEIPT_ADAPTER.validate_python(normalized, strict=True)
@@ -192,17 +193,20 @@ class DurableDistributionPhaseExecutor:
             cached = self._cached_targets(plan, targets)
             if len(cached) == len(targets):
                 return PhaseExecution(
-                    result=_phase_receipt(self._verification_result(
-                        plan,
-                        progress,
-                        skipped=True,
-                        cached_nodes=cached,
-                        cached_target_totals={
-                            node_id: self._target_bytes(plan, node_id)
-                            for node_id in cached
-                        },
-                        verified_registry_manifest_digest=plan.image_digest,
-                    ), phase=phase)
+                    result=_phase_receipt(
+                        self._verification_result(
+                            plan,
+                            progress,
+                            skipped=True,
+                            cached_nodes=cached,
+                            cached_target_totals={
+                                node_id: self._target_bytes(plan, node_id)
+                                for node_id in cached
+                            },
+                            verified_registry_manifest_digest=plan.image_digest,
+                        ),
+                        phase=phase,
+                    )
                 )
             return PhaseExecution(
                 result=_phase_receipt(
@@ -213,7 +217,10 @@ class DurableDistributionPhaseExecutor:
         intent_ordinal = progress.get("workload_intent_ordinal")
         if type(intent_ordinal) is int and intent_ordinal > 0:
             adopted = self._adopt_child(
-                plan, phase, actor=actor, request_key=request_key,
+                plan,
+                phase,
+                actor=actor,
+                request_key=request_key,
                 workload_intent_ordinal=intent_ordinal,
             )
             if adopted is not None:
@@ -221,33 +228,40 @@ class DurableDistributionPhaseExecutor:
         cached = self._cached_targets(plan, targets)
         missing = tuple(node_id for node_id in targets if node_id not in cached)
         if not missing:
-            return PhaseExecution(result=_phase_receipt({
-                "skipped": True,
-                "verified": phase.kind == "verify",
-                "verified_digests": list(plan.storage.artifact_digests),
-                "verified_build_id": self._runtime_identity(plan, progress)[3],
-                "verified_image_digest": (
-                    plan.preparation.runtime_image.image_digest
-                    if plan.preparation is not None
-                    else plan.image_digest
-                ),
-                "verified_oci_layout_sha256": (
-                    plan.preparation.runtime_image.oci_layout_sha256
-                    if plan.preparation is not None
-                    else plan.build.oci_layout_sha256
-                ),
-                "cached_nodes": list(targets),
-                "cached_target_totals": {
-                    node_id: self._target_bytes(plan, node_id)
-                    for node_id in targets
-                },
-            }, phase=phase))
+            return PhaseExecution(
+                result=_phase_receipt(
+                    {
+                        "skipped": True,
+                        "verified": phase.kind == "verify",
+                        "verified_digests": list(plan.storage.artifact_digests),
+                        "verified_build_id": self._runtime_identity(plan, progress)[3],
+                        "verified_image_digest": (
+                            plan.preparation.runtime_image.image_digest
+                            if plan.preparation is not None
+                            else plan.image_digest
+                        ),
+                        "verified_oci_layout_sha256": (
+                            plan.preparation.runtime_image.oci_layout_sha256
+                            if plan.preparation is not None
+                            else plan.build.oci_layout_sha256
+                        ),
+                        "cached_nodes": list(targets),
+                        "cached_target_totals": {
+                            node_id: self._target_bytes(plan, node_id)
+                            for node_id in targets
+                        },
+                    },
+                    phase=phase,
+                )
+            )
         if type(intent_ordinal) is not int or intent_ordinal < 1:
             raise RuntimeError("distribution requires its authorized workload intent")
         model_objects, model_set_digest, model_set_bytes = self._model_objects(
             plan, progress
         )
-        image_digest, layout_digest, image_bytes, build_id = self._runtime_identity(plan, progress)
+        image_digest, layout_digest, image_bytes, build_id = self._runtime_identity(
+            plan, progress
+        )
         effective_execution_key = self._runtime_execution_key(progress)
         archive = self._archive(
             plan,
@@ -281,15 +295,18 @@ class DurableDistributionPhaseExecutor:
         )
         return PhaseExecution(
             operation_id=child_id,
-            result=_phase_receipt({
-                "cached_nodes": list(cached),
-                # Persist the exact assignment already verified against the
-                # succeeded build and cache manifest for the verify phase.
-                "assignments": {
-                    node_id: assignment.to_mapping()
-                    for node_id, assignment in assignments.items()
+            result=_phase_receipt(
+                {
+                    "cached_nodes": list(cached),
+                    # Persist the exact assignment already verified against the
+                    # succeeded build and cache manifest for the verify phase.
+                    "assignments": {
+                        node_id: assignment.to_mapping()
+                        for node_id, assignment in assignments.items()
+                    },
                 },
-            }, phase=phase),
+                phase=phase,
+            ),
         )
 
     def get(self, operation_id: str) -> Any:
@@ -301,16 +318,19 @@ class DurableDistributionPhaseExecutor:
             # durable child before projecting it so a restart cannot leave a
             # completed set of node operations looking queued.
             self._operations._aggregate_parent(session, child.id)
-            operations = list(session.scalars(
-                select(AgentOperation)
-                .where(AgentOperation.parent_job_id == child.id)
-                .order_by(AgentOperation.node_id)
-            ))
+            operations = list(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == child.id)
+                    .order_by(AgentOperation.node_id)
+                )
+            )
             members = []
             measured_members = []
             evidence = []
             cached_nodes = tuple(
-                value for value in sequence(child.payload.get("cached_nodes")) or ()
+                value
+                for value in sequence(child.payload.get("cached_nodes")) or ()
                 if isinstance(value, str)
             )
             cached_totals = child.payload.get("target_totals", {})
@@ -338,20 +358,24 @@ class DurableDistributionPhaseExecutor:
 
             for node_id in cached_nodes:
                 total = self._int(cached_totals.get(node_id))
-                members.append({
-                    "node_id": node_id,
-                    "phase": "transfer",
-                    "state": "succeeded",
-                    "completed_bytes": total or 0,
-                    "total_bytes": total,
-                    "error": None,
-                    "cached": True,
-                })
+                members.append(
+                    {
+                        "node_id": node_id,
+                        "phase": "transfer",
+                        "state": "succeeded",
+                        "completed_bytes": total or 0,
+                        "total_bytes": total,
+                        "error": None,
+                        "cached": True,
+                    }
+                )
             for operation in operations:
-                attempt = session.scalar(select(AgentOperationAttempt).where(
-                    AgentOperationAttempt.operation_id == operation.id,
-                    AgentOperationAttempt.attempt == operation.current_attempt,
-                ))
+                attempt = session.scalar(
+                    select(AgentOperationAttempt).where(
+                        AgentOperationAttempt.operation_id == operation.id,
+                        AgentOperationAttempt.attempt == operation.current_attempt,
+                    )
+                )
                 raw = (attempt.progress if attempt is not None else None) or {}
                 result = (attempt.result if attempt is not None else None) or {}
                 member_state = self._member_state(operation.state)
@@ -368,43 +392,82 @@ class DurableDistributionPhaseExecutor:
                 ):
                     member_state = "failed"
                     evidence_error = "distributed transfer byte evidence mismatch"
-                members.append({
-                    "node_id": operation.node_id,
-                    "phase": "transfer",
-                    "state": member_state,
-                    # The agent's terminal distribution evidence reports the
-                    # aggregate payload under ``downloaded_bytes``. Preserve
-                    # that exact handoff in the durable child projection;
-                    # otherwise a successful import appears pending with zero
-                    # bytes even though its result body is complete.
-                    "completed_bytes": (
-                        (
-                            self._int(raw.get("bytes"))
-                            or self._int(raw.get("completed_bytes"))
-                            if member_state != "succeeded"
-                            else terminal_downloaded
-                        )
-                        or 0
-                    ),
-                    "total_bytes": self._int(raw.get("total_bytes")) or expected_total,
-                    "error": evidence_error
-                    or (result.get("reason") if isinstance(result, Mapping) else None),
-                })
+                members.append(
+                    {
+                        "node_id": operation.node_id,
+                        "phase": "transfer",
+                        "state": member_state,
+                        # The agent's terminal distribution evidence reports the
+                        # aggregate payload under ``downloaded_bytes``. Preserve
+                        # that exact handoff in the durable child projection;
+                        # otherwise a successful import appears pending with zero
+                        # bytes even though its result body is complete.
+                        "completed_bytes": (
+                            (
+                                self._int(raw.get("bytes"))
+                                or self._int(raw.get("completed_bytes"))
+                                if member_state != "succeeded"
+                                else terminal_downloaded
+                            )
+                            or 0
+                        ),
+                        "total_bytes": self._int(raw.get("total_bytes"))
+                        or expected_total,
+                        "error": evidence_error
+                        or (
+                            result.get("reason")
+                            if isinstance(result, Mapping)
+                            else None
+                        ),
+                    }
+                )
                 if raw:
-                    measured = project_progress(OperationProgress.model_validate(raw), self._clock())
-                    values = {key: value for key, value in measured.model_dump(mode="python").items() if key in OperationMemberProgress.model_fields}
+                    measured = project_progress(
+                        OperationProgress.model_validate(raw), self._clock()
+                    )
+                    values = {
+                        key: value
+                        for key, value in measured.model_dump(mode="python").items()
+                        if key in OperationMemberProgress.model_fields
+                    }
                     if member_state not in {"running", "pending"}:
-                        values.update(bytes_per_second=None, smoothed_bytes_per_second=None, eta_seconds=None, activity=None)
-                    values.update(member_id=operation.node_id, state=member_state, completed_bytes=members[-1]["completed_bytes"], total_bytes=members[-1]["total_bytes"])
-                    measured_members.append(OperationMemberProgress.model_validate(values))
+                        values.update(
+                            bytes_per_second=None,
+                            smoothed_bytes_per_second=None,
+                            eta_seconds=None,
+                            activity=None,
+                        )
+                    values.update(
+                        member_id=operation.node_id,
+                        state=member_state,
+                        completed_bytes=members[-1]["completed_bytes"],
+                        total_bytes=members[-1]["total_bytes"],
+                    )
+                    measured_members.append(
+                        OperationMemberProgress.model_validate(values)
+                    )
                 else:
-                    measured_members.append(OperationMemberProgress(member_id=operation.node_id, phase="pending" if member_state == "pending" else "transfer", state=member_state, completed_bytes=members[-1]["completed_bytes"], total_bytes=members[-1]["total_bytes"]))
+                    measured_members.append(
+                        OperationMemberProgress(
+                            member_id=operation.node_id,
+                            phase="pending"
+                            if member_state == "pending"
+                            else "transfer",
+                            state=member_state,
+                            completed_bytes=members[-1]["completed_bytes"],
+                            total_bytes=members[-1]["total_bytes"],
+                        )
+                    )
                 if isinstance(result, Mapping) and result:
                     evidence.append(_evidence_projection(operation.node_id, result))
             by_node = {str(item["node_id"]): item for item in members}
             target_order = child.payload.get("target_order", list(by_node))
             if isinstance(target_order, list):
-                members = [by_node[node_id] for node_id in target_order if isinstance(node_id, str) and node_id in by_node]
+                members = [
+                    by_node[node_id]
+                    for node_id in target_order
+                    if isinstance(node_id, str) and node_id in by_node
+                ]
             state = child.state
             if state == "succeeded" and any(
                 item.get("state") == "failed" for item in members
@@ -418,9 +481,15 @@ class DurableDistributionPhaseExecutor:
                 ),
                 None,
             )
-            completed = sum(self._int(item.get("completed_bytes")) or 0 for item in members)
+            completed = sum(
+                self._int(item.get("completed_bytes")) or 0 for item in members
+            )
             totals = [self._int(item.get("total_bytes")) for item in members]
-            total = sum(value for value in totals if value is not None) if all(value is not None for value in totals) else None
+            total = (
+                sum(value for value in totals if value is not None)
+                if all(value is not None for value in totals)
+                else None
+            )
             payload = {
                 "progress": {
                     "phase": "transfer",
@@ -434,8 +503,18 @@ class DurableDistributionPhaseExecutor:
             }
             for node_id in cached_nodes:
                 item = by_node[node_id]
-                measured_members.append(OperationMemberProgress(member_id=node_id, phase="transfer", state="succeeded", completed_bytes=item["completed_bytes"], total_bytes=item["total_bytes"]))
-            payload["progress"]["operation"] = aggregate_progress(measured_members).model_dump(mode="json", exclude_none=True)
+                measured_members.append(
+                    OperationMemberProgress(
+                        member_id=node_id,
+                        phase="transfer",
+                        state="succeeded",
+                        completed_bytes=item["completed_bytes"],
+                        total_bytes=item["total_bytes"],
+                    )
+                )
+            payload["progress"]["operation"] = aggregate_progress(
+                measured_members
+            ).model_dump(mode="json", exclude_none=True)
             if child.status_reason or projection_reason:
                 payload["reason"] = child.status_reason or projection_reason
             if state != child.state:
@@ -499,7 +578,12 @@ class DurableDistributionPhaseExecutor:
         workload_intent_ordinal: int,
     ) -> PhaseExecution | None:
         """Adopt persisted work before consulting mutable cache availability."""
-        child_request = str(uuid.uuid5(uuid.UUID(request_key), f"artifact-distribution:{phase.kind}:{phase.index}"))
+        child_request = str(
+            uuid.uuid5(
+                uuid.UUID(request_key),
+                f"artifact-distribution:{phase.kind}:{phase.index}",
+            )
+        )
         with self._sessions() as session:
             child = session.scalar(select(Job).where(Job.request_id == child_request))
             if child is None:
@@ -511,13 +595,17 @@ class DurableDistributionPhaseExecutor:
                 or child.payload.get("plan_digest") != plan.plan_digest
                 or child.payload.get("phase") != phase.kind
                 or child.payload.get("target_order") != list(phase.node_ids)
-                or child.payload.get("workload_intent_ordinal") != workload_intent_ordinal
+                or child.payload.get("workload_intent_ordinal")
+                != workload_intent_ordinal
             ):
                 raise RuntimeError("distribution child request key was reused")
-            receipt = _phase_receipt({
-                "cached_nodes": child.payload.get("cached_nodes"),
-                "assignments": child.payload.get("assignments"),
-            }, phase=phase)
+            receipt = _phase_receipt(
+                {
+                    "cached_nodes": child.payload.get("cached_nodes"),
+                    "assignments": child.payload.get("assignments"),
+                },
+                phase=phase,
+            )
             assignments = child.payload.get("assignments")
             cached = child.payload.get("cached_nodes")
             if (
@@ -547,15 +635,23 @@ class DurableDistributionPhaseExecutor:
         workload_intent_ordinal: int,
         target_bytes: int | None = None,
     ) -> str:
-        child_request = str(uuid.uuid5(uuid.UUID(request_key), f"artifact-distribution:{phase.kind}:{phase.index}"))
+        child_request = str(
+            uuid.uuid5(
+                uuid.UUID(request_key),
+                f"artifact-distribution:{phase.kind}:{phase.index}",
+            )
+        )
         now = self._clock()
         with self._sessions() as session:
-            existing = session.scalar(select(Job).where(Job.request_id == child_request))
+            existing = session.scalar(
+                select(Job).where(Job.request_id == child_request)
+            )
             if existing is not None:
                 if (
                     existing.kind != "artifact-distribution"
                     or existing.payload.get("plan_digest") != plan.plan_digest
-                    or existing.payload.get("workload_intent_ordinal") != workload_intent_ordinal
+                    or existing.payload.get("workload_intent_ordinal")
+                    != workload_intent_ordinal
                 ):
                     raise RuntimeError("distribution child request key was reused")
                 return existing.id
@@ -594,7 +690,9 @@ class DurableDistributionPhaseExecutor:
                     {
                         "node_id": node_id,
                         "state": "succeeded" if node_id in cached else "pending",
-                        "completed_bytes": target_totals[node_id] if node_id in cached else 0,
+                        "completed_bytes": target_totals[node_id]
+                        if node_id in cached
+                        else 0,
                         "total_bytes": target_totals[node_id],
                         "error": None,
                         "cached": node_id in cached,
@@ -613,7 +711,13 @@ class DurableDistributionPhaseExecutor:
                 actor=actor,
                 authority_revision=plan.plan_digest,
                 targets=list(assignments),
-                payload_digest=self._digest({"plan_digest": plan.plan_digest, "phase": phase.kind, "workload_intent_ordinal": workload_intent_ordinal}),
+                payload_digest=self._digest(
+                    {
+                        "plan_digest": plan.plan_digest,
+                        "phase": phase.kind,
+                        "workload_intent_ordinal": workload_intent_ordinal,
+                    }
+                ),
                 payload={
                     "plan_digest": plan.plan_digest,
                     "workload_intent_ordinal": workload_intent_ordinal,
@@ -684,7 +788,9 @@ class DurableDistributionPhaseExecutor:
                         break
         if not isinstance(model_set_digest, str):
             raise TypeError("exact model preparation identity is unavailable")
-        source = getattr(self._distribution.source, "model_source", self._distribution.source)
+        source = getattr(
+            self._distribution.source, "model_source", self._distribution.source
+        )
         getter = getattr(source, "objects_for_set", None)
         if not isinstance(getter, Callable):
             raise TypeError("verified model cache manifest provider is unavailable")
@@ -696,7 +802,9 @@ class DurableDistributionPhaseExecutor:
             raise RuntimeError("verified model cache manifest does not match the plan")
         actual_bytes = sum(item.bytes for item in objects)
         if model_set_bytes is not None and actual_bytes != model_set_bytes:
-            raise RuntimeError("verified model cache byte total does not match the plan")
+            raise RuntimeError(
+                "verified model cache byte total does not match the plan"
+            )
         return objects, model_set_digest, actual_bytes
 
     @staticmethod
@@ -719,7 +827,9 @@ class DurableDistributionPhaseExecutor:
             for raw in reversed(phase_results):
                 if not isinstance(raw, Mapping):
                     continue
-                candidate = raw.get("result") if isinstance(raw.get("result"), Mapping) else raw
+                candidate = (
+                    raw.get("result") if isinstance(raw.get("result"), Mapping) else raw
+                )
                 if not isinstance(candidate, Mapping):
                     continue
                 runtime_receipt = candidate.get("runtime_image")
@@ -727,9 +837,12 @@ class DurableDistributionPhaseExecutor:
                     candidate = {**candidate, **runtime_receipt}
                 if candidate.get("source") == "published":
                     image_digest = candidate.get("image_digest") or image_digest
-                    layout_digest = candidate.get(
-                        "oci_layout_sha256", candidate.get("oci_archive_sha256")
-                    ) or layout_digest
+                    layout_digest = (
+                        candidate.get(
+                            "oci_layout_sha256", candidate.get("oci_archive_sha256")
+                        )
+                        or layout_digest
+                    )
                     image_bytes = candidate.get("image_bytes") or image_bytes
                 else:
                     image_digest = image_digest or candidate.get("image_digest")
@@ -793,19 +906,24 @@ class DurableDistributionPhaseExecutor:
                 if plan.recipe_revision_id is not None:
                     authorization = session.scalar(
                         select(RuntimeImageAuthorization).where(
-                            RuntimeImageAuthorization.recipe_revision_id == plan.recipe_revision_id,
+                            RuntimeImageAuthorization.recipe_revision_id
+                            == plan.recipe_revision_id,
                             RuntimeImageAuthorization.source == "controller-build",
                             RuntimeImageAuthorization.build_id == build.id,
                             RuntimeImageAuthorization.effective_execution_key
                             == effective_execution_key,
-                            RuntimeImageAuthorization.platform_manifest_digest == image_digest,
-                            RuntimeImageAuthorization.oci_archive_sha256 == layout_digest,
+                            RuntimeImageAuthorization.platform_manifest_digest
+                            == image_digest,
+                            RuntimeImageAuthorization.oci_archive_sha256
+                            == layout_digest,
                             RuntimeImageAuthorization.image_bytes == image_bytes,
                             RuntimeImageAuthorization.state == "authorized",
                         )
                     )
                     if authorization is None:
-                        raise RuntimeError("current recipe is not authorized for OCI build receipt")
+                        raise RuntimeError(
+                            "current recipe is not authorized for OCI build receipt"
+                        )
                     receipt = session.scalar(
                         select(RuntimeImageReceipt).where(
                             RuntimeImageReceipt.id == authorization.receipt_id,
@@ -822,7 +940,8 @@ class DurableDistributionPhaseExecutor:
                             == authorization.local_image_config_id,
                             RuntimeImageReceipt.oci_archive_sha256
                             == authorization.oci_archive_sha256,
-                            RuntimeImageReceipt.image_bytes == authorization.image_bytes,
+                            RuntimeImageReceipt.image_bytes
+                            == authorization.image_bytes,
                         )
                     )
                     if receipt is None:
@@ -832,12 +951,15 @@ class DurableDistributionPhaseExecutor:
                 if plan.recipe_revision_id is not None:
                     authorization = session.scalar(
                         select(RuntimeImageAuthorization).where(
-                            RuntimeImageAuthorization.recipe_revision_id == plan.recipe_revision_id,
+                            RuntimeImageAuthorization.recipe_revision_id
+                            == plan.recipe_revision_id,
                             RuntimeImageAuthorization.source == "published",
                             RuntimeImageAuthorization.effective_execution_key
                             == effective_execution_key,
-                            RuntimeImageAuthorization.platform_manifest_digest == image_digest,
-                            RuntimeImageAuthorization.oci_archive_sha256 == layout_digest,
+                            RuntimeImageAuthorization.platform_manifest_digest
+                            == image_digest,
+                            RuntimeImageAuthorization.oci_archive_sha256
+                            == layout_digest,
                             RuntimeImageAuthorization.image_bytes == image_bytes,
                             RuntimeImageAuthorization.state == "authorized",
                         )
@@ -861,24 +983,35 @@ class DurableDistributionPhaseExecutor:
                                 == authorization.local_image_config_id,
                                 RuntimeImageReceipt.oci_archive_sha256
                                 == authorization.oci_archive_sha256,
-                                RuntimeImageReceipt.image_bytes == authorization.image_bytes,
+                                RuntimeImageReceipt.image_bytes
+                                == authorization.image_bytes,
                             )
                         )
                 else:
                     receipt = session.scalar(
                         select(RuntimeImageReceipt).where(
                             RuntimeImageReceipt.source == "published",
-                            RuntimeImageReceipt.original_content_digest == plan.recipe_content_sha256,
-                            RuntimeImageReceipt.effective_execution_key == effective_execution_key,
+                            RuntimeImageReceipt.original_content_digest
+                            == plan.recipe_content_sha256,
+                            RuntimeImageReceipt.effective_execution_key
+                            == effective_execution_key,
                             RuntimeImageReceipt.state == "verified",
-                            RuntimeImageReceipt.platform_manifest_digest == image_digest,
+                            RuntimeImageReceipt.platform_manifest_digest
+                            == image_digest,
                             RuntimeImageReceipt.oci_archive_sha256 == layout_digest,
                             RuntimeImageReceipt.image_bytes == image_bytes,
                         )
                     )
                 if receipt is None:
-                    raise RuntimeError("published runtime image receipt authority changed")
-        return DistributionObject(name="image.oci.tar", sha256=layout_digest, bytes=image_bytes, kind="oci-archive")
+                    raise RuntimeError(
+                        "published runtime image receipt authority changed"
+                    )
+        return DistributionObject(
+            name="image.oci.tar",
+            sha256=layout_digest,
+            bytes=image_bytes,
+            kind="oci-archive",
+        )
 
     def _assignment(
         self,
@@ -899,37 +1032,50 @@ class DurableDistributionPhaseExecutor:
         assignment_bytes = bytearray(hashlib.sha256(seed.encode("utf-8")).digest()[:16])
         assignment_bytes[6] = (assignment_bytes[6] & 0x0F) | 0x40
         assignment_bytes[8] = (assignment_bytes[8] & 0x3F) | 0x80
-        return DistributionAssignment.parse({
-            "schema_version": 2,
-            "assignment_id": str(uuid.UUID(bytes=bytes(assignment_bytes))),
-            "plan_digest": plan.plan_digest,
-            "generation": generation,
-            "node_id": node_id,
-            "expires_at": (plan.generated_at.astimezone(UTC) + timedelta(hours=1)).isoformat(),
-            "model_artifact_set_sha256": model_set_digest,
-            "objects": [item.to_mapping() for item in (*model_objects, archive)],
-            "oci_image_digest": image_digest,
-            "oci_archive_sha256": archive.sha256,
-        })
+        return DistributionAssignment.parse(
+            {
+                "schema_version": 2,
+                "assignment_id": str(uuid.UUID(bytes=bytes(assignment_bytes))),
+                "plan_digest": plan.plan_digest,
+                "generation": generation,
+                "node_id": node_id,
+                "expires_at": (
+                    plan.generated_at.astimezone(UTC) + timedelta(hours=1)
+                ).isoformat(),
+                "model_artifact_set_sha256": model_set_digest,
+                "objects": [item.to_mapping() for item in (*model_objects, archive)],
+                "oci_image_digest": image_digest,
+                "oci_archive_sha256": archive.sha256,
+            }
+        )
 
     @staticmethod
-    def _cached_targets(plan: RunSwitchPlan, targets: tuple[str, ...]) -> tuple[str, ...]:
+    def _cached_targets(
+        plan: RunSwitchPlan, targets: tuple[str, ...]
+    ) -> tuple[str, ...]:
         preparation = plan.preparation
         if preparation is None:
             return ()
         model = {item.node_id: item for item in preparation.model.targets}
         image = {item.node_id: item for item in preparation.runtime_image.targets}
-        return tuple(node_id for node_id in targets if (
-            model.get(node_id) is not None
-            and model[node_id].state == "ready"
-            and getattr(model[node_id], "verified_at", None) is not None
-            and model[node_id].verified_sha256 == preparation.model.artifact_set_sha256
-            and image.get(node_id) is not None
-            and image[node_id].state == "ready"
-            and getattr(image[node_id], "verified_at", None) is not None
-            and image[node_id].verified_sha256 == preparation.runtime_image.oci_layout_sha256
-            and image[node_id].imported_image_digest == preparation.runtime_image.image_digest
-        ))
+        return tuple(
+            node_id
+            for node_id in targets
+            if (
+                model.get(node_id) is not None
+                and model[node_id].state == "ready"
+                and getattr(model[node_id], "verified_at", None) is not None
+                and model[node_id].verified_sha256
+                == preparation.model.artifact_set_sha256
+                and image.get(node_id) is not None
+                and image[node_id].state == "ready"
+                and getattr(image[node_id], "verified_at", None) is not None
+                and image[node_id].verified_sha256
+                == preparation.runtime_image.oci_layout_sha256
+                and image[node_id].imported_image_digest
+                == preparation.runtime_image.image_digest
+            )
+        )
 
     @staticmethod
     def _target_bytes(plan: RunSwitchPlan, node_id: str) -> int:
@@ -955,7 +1101,9 @@ class DurableDistributionPhaseExecutor:
         )
         expected_registry = plan.image_digest
         expected_layout = plan.build.oci_layout_sha256 or (
-            preparation.runtime_image.oci_layout_sha256 if preparation is not None else None
+            preparation.runtime_image.oci_layout_sha256
+            if preparation is not None
+            else None
         )
         phase_results = progress.get("phase_results", [])
         if not isinstance(phase_results, list):
@@ -987,7 +1135,9 @@ class DurableDistributionPhaseExecutor:
             if not isinstance(assignments, Mapping):
                 continue
             for node_id, assignment_raw in assignments.items():
-                if not isinstance(node_id, str) or not isinstance(assignment_raw, Mapping):
+                if not isinstance(node_id, str) or not isinstance(
+                    assignment_raw, Mapping
+                ):
                     continue
                 try:
                     assignment = DistributionAssignment.parse(assignment_raw)
@@ -996,8 +1146,11 @@ class DurableDistributionPhaseExecutor:
                 if (
                     assignment.plan_digest == plan.plan_digest
                     and assignment.node_id in targets
-                    and assignment.model_artifact_set_sha256 == (
-                        preparation.model.artifact_set_sha256 if preparation is not None else None
+                    and assignment.model_artifact_set_sha256
+                    == (
+                        preparation.model.artifact_set_sha256
+                        if preparation is not None
+                        else None
                     )
                 ):
                     expected_image = assignment.oci_image_digest
@@ -1028,18 +1181,25 @@ class DurableDistributionPhaseExecutor:
                     if isinstance(item_node_id, str) and item_node_id in targets:
                         receipts[item_node_id] = item
         cached_nodes = set(cached)
-        cached_nodes.update({
-            value for value in sequence(progress.get("cached_nodes")) or ()
-            if isinstance(value, str)
-        })
+        cached_nodes.update(
+            {
+                value
+                for value in sequence(progress.get("cached_nodes")) or ()
+                if isinstance(value, str)
+            }
+        )
         for candidate in phase_results:
             if isinstance(candidate, Mapping):
                 raw_cached = candidate.get("cached_nodes")
                 if isinstance(raw_cached, list):
-                    cached_nodes.update(value for value in raw_cached if isinstance(value, str))
+                    cached_nodes.update(
+                        value for value in raw_cached if isinstance(value, str)
+                    )
         missing = set(targets) - cached_nodes
         if missing - receipts.keys():
-            raise RuntimeError("verification requires terminal evidence from every target")
+            raise RuntimeError(
+                "verification requires terminal evidence from every target"
+            )
         for node_id in missing:
             receipt = receipts[node_id]
             if receipt.get("verified") is not True:
@@ -1052,7 +1212,9 @@ class DurableDistributionPhaseExecutor:
             if receipt.get("imported_image_digest") != expected_image:
                 raise RuntimeError(f"target {node_id} image import evidence is missing")
             if receipt.get("verified_oci_layout_sha256") != expected_layout:
-                raise RuntimeError(f"target {node_id} OCI archive evidence is not exact")
+                raise RuntimeError(
+                    f"target {node_id} OCI archive evidence is not exact"
+                )
         return self._verification_result(
             plan,
             progress,
@@ -1065,7 +1227,12 @@ class DurableDistributionPhaseExecutor:
 
     @staticmethod
     def _member_state(value: str) -> str:
-        return {"queued": "pending", "running": "running", "succeeded": "succeeded", "failed": "failed"}.get(value, "unknown")
+        return {
+            "queued": "pending",
+            "running": "running",
+            "succeeded": "succeeded",
+            "failed": "failed",
+        }.get(value, "unknown")
 
     @staticmethod
     def _int(value: object) -> int | None:
@@ -1123,25 +1290,37 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         preparation = plan.preparation
         model = preparation.model if preparation is not None else None
         artifact_set_sha256 = (
-            model.artifact_set_sha256 if model is not None else plan.storage.artifact_set_sha256
+            model.artifact_set_sha256
+            if model is not None
+            else plan.storage.artifact_set_sha256
         )
         model_content_sha256 = (
-            model.model_content_sha256 if model is not None else plan.model_content_sha256
+            model.model_content_sha256
+            if model is not None
+            else plan.model_content_sha256
         )
         recipe_revision_sha256 = (
-            model.recipe_revision_sha256 if model is not None else plan.recipe_content_sha256
+            model.recipe_revision_sha256
+            if model is not None
+            else plan.recipe_content_sha256
         )
         artifact_count = (
-            model.artifact_count if model is not None else len(plan.storage.artifact_digests)
+            model.artifact_count
+            if model is not None
+            else len(plan.storage.artifact_digests)
         )
         artifact_set_bytes = (
-            model.artifact_set_bytes if model is not None else plan.storage.artifact_set_bytes
+            model.artifact_set_bytes
+            if model is not None
+            else plan.storage.artifact_set_bytes
         )
         if not artifact_set_sha256 or not artifact_count or not artifact_set_bytes:
             raise RuntimeError("exact model preparation is unavailable")
         preview_method = getattr(self._model_cache, "download_preview", None)
         start_method = getattr(self._model_cache, "start_download", None)
-        if not isinstance(preview_method, Callable) or not isinstance(start_method, Callable):
+        if not isinstance(preview_method, Callable) or not isinstance(
+            start_method, Callable
+        ):
             raise TypeError("model-cache download provider is unavailable")
         # An exact persisted set is sufficient to resolve the opaque manifest.
         # When a recipe revision ID is available, include the model pin as an
@@ -1169,8 +1348,14 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         # persists that same manifest with the durable child operation.
         manifest = preview.get("_manifest")
         if manifest is None:
-            manifest_getter = getattr(self._model_cache, "manifest_for_artifact_set", None)
-            manifest = manifest_getter(artifact_set_sha256) if callable(manifest_getter) else None
+            manifest_getter = getattr(
+                self._model_cache, "manifest_for_artifact_set", None
+            )
+            manifest = (
+                manifest_getter(artifact_set_sha256)
+                if callable(manifest_getter)
+                else None
+            )
         if (
             getattr(manifest, "digest", None) != artifact_set_sha256
             or getattr(manifest, "recipe_revision_sha256", None)
@@ -1178,30 +1363,46 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         ):
             raise RuntimeError("model-cache manifest recipe identity is not exact")
         blockers = preview.get("blockers", [])
-        if isinstance(blockers, Sequence) and not isinstance(blockers, (str, bytes, bytearray)) and blockers:
-            raise RuntimeError("model-cache download is blocked: " + "; ".join(map(str, blockers)))
+        if (
+            isinstance(blockers, Sequence)
+            and not isinstance(blockers, (str, bytes, bytearray))
+            and blockers
+        ):
+            raise RuntimeError(
+                "model-cache download is blocked: " + "; ".join(map(str, blockers))
+            )
         expected_bytes = preview.get("expected_bytes")
         if type(expected_bytes) is not int or expected_bytes < 1:
             raise RuntimeError("model-cache download total is unavailable")
         if preview.get("new_bytes") == 0:
-            return PhaseExecution(result=_phase_receipt({
-                "schema_version": 2,
-                "skipped": True,
-                "coverage": "complete",
-                "artifact_set_sha256": artifact_set_sha256,
-                # The set is already covered, so this phase transferred no
-                # bytes.  ``expected_bytes`` is the immutable set size while
-                # ``new_bytes`` is the operation's transfer envelope.
-                "downloaded_bytes": 0,
-                "total_bytes": 0,
-                "progress": {
-                    "phase": "model-download",
-                    "completed_bytes": 0,
-                    "total_bytes": 0,
-                    "total_bytes_known": True,
-                },
-            }, phase=phase))
-        cache_request_key = str(uuid.uuid5(uuid.UUID(request_key), f"model-download:{phase.index}:{artifact_set_sha256}"))
+            return PhaseExecution(
+                result=_phase_receipt(
+                    {
+                        "schema_version": 2,
+                        "skipped": True,
+                        "coverage": "complete",
+                        "artifact_set_sha256": artifact_set_sha256,
+                        # The set is already covered, so this phase transferred no
+                        # bytes.  ``expected_bytes`` is the immutable set size while
+                        # ``new_bytes`` is the operation's transfer envelope.
+                        "downloaded_bytes": 0,
+                        "total_bytes": 0,
+                        "progress": {
+                            "phase": "model-download",
+                            "completed_bytes": 0,
+                            "total_bytes": 0,
+                            "total_bytes_known": True,
+                        },
+                    },
+                    phase=phase,
+                )
+            )
+        cache_request_key = str(
+            uuid.uuid5(
+                uuid.UUID(request_key),
+                f"model-download:{phase.index}:{artifact_set_sha256}",
+            )
+        )
         view = start_method(
             actor=actor,
             request_key=cache_request_key,
@@ -1242,7 +1443,9 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 )
             )
             if revision is None:
-                raise RuntimeError("runtime image preparation recipe revision is unavailable")
+                raise RuntimeError(
+                    "runtime image preparation recipe revision is unavailable"
+                )
             build = (
                 session.get(RecipeBuild, plan.recipe_build_id)
                 if plan.recipe_build_id is not None
@@ -1252,7 +1455,9 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             execution = revision.document.get("execution")
             if isinstance(execution, Mapping) and execution.get("mode") == "build":
                 if build is None or build.state != "succeeded":
-                    raise RuntimeError("runtime image preparation build receipt is unavailable")
+                    raise RuntimeError(
+                        "runtime image preparation build receipt is unavailable"
+                    )
                 package_handle = {
                     "image_digest": build.image_digest,
                     "image_reference": f"localhost/vonk/recipe-build@{build.image_digest}",
@@ -1261,9 +1466,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 }
             entities = resolve_recipe_entities(session, revision.document)
             parameters = (
-                dict(plan.mapping.parameters)
-                if plan.mapping is not None
-                else {}
+                dict(plan.mapping.parameters) if plan.mapping is not None else {}
             )
             resolved_models = sequence(entities["models"])
             if resolved_models is None:
@@ -1271,7 +1474,9 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                     "canonical model projection is invalid"
                 )
             runtime_specs = {}
-            for node in sorted(plan.spark_group.nodes, key=lambda item: (item.rank, item.node_id)):
+            for node in sorted(
+                plan.spark_group.nodes, key=lambda item: (item.rank, item.node_id)
+            ):
                 runtime_spec = compile_runtime_spec(
                     revision.document,
                     resolved_entities=entities,
@@ -1288,20 +1493,26 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                     else None
                 )
                 if not isinstance(execution_key, str):
-                    raise TypeError("runtime image preparation execution identity is unavailable")
+                    raise TypeError(
+                        "runtime image preparation execution identity is unavailable"
+                    )
                 runtime_specs[execution_key] = runtime_spec
         # Each role/rank has its own execution identity. Persist all of them
         # before install admission compiles the group. The preparer reuses the
         # immutable archive; close the read session before its receipt writes.
         raw = None
         for runtime_spec in runtime_specs.values():
-            receipt = self._runtime_image_preparer(revision.document, runtime_spec, build)
+            receipt = self._runtime_image_preparer(
+                revision.document, runtime_spec, build
+            )
             to_mapping = getattr(receipt, "to_mapping", None)
             prepared = to_mapping() if callable(to_mapping) else receipt
             if not isinstance(prepared, Mapping):
                 raise TypeError("runtime image preparation returned invalid evidence")
             if raw is not None and prepared != raw:
-                raise RuntimeError("runtime image preparation returned different images for the group")
+                raise RuntimeError(
+                    "runtime image preparation returned different images for the group"
+                )
             raw = prepared
         if raw is None:
             raise RuntimeError("runtime image preparation returned no evidence")
@@ -1378,12 +1589,10 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 evidence = dict(view.result)
             else:
                 dump = getattr(view.result, "model_dump", None)
-                evidence = (
-                    dump(mode="json")
-                    if callable(dump)
-                    else {}
-                )
-            parsed_evidence = ModelCacheDownloadResult.model_validate(evidence, strict=True)
+                evidence = dump(mode="json") if callable(dump) else {}
+            parsed_evidence = ModelCacheDownloadResult.model_validate(
+                evidence, strict=True
+            )
             if parsed_evidence.artifact_set_sha256 != view.artifact_set_sha256:
                 raise RuntimeError("model-cache completion identity is not exact")
             if parsed_evidence.coverage == "complete":

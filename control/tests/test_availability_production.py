@@ -94,7 +94,9 @@ def test_scheduler_close_is_idempotent_and_stops_new_claims() -> None:
     assert scheduler.tick() == 0
 
 
-def test_production_factory_separates_api_service_and_worker_scheduler(tmp_path) -> None:
+def test_production_factory_separates_api_service_and_worker_scheduler(
+    tmp_path,
+) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'availability.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -130,10 +132,16 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
     tmp_path, monkeypatch
 ) -> None:
     recipe = RecipeDefinition.model_validate(
-        json.loads(files("vonk_forge_contracts").joinpath("examples", "recipe-image.json").read_text())
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-image.json")
+            .read_text()
+        )
     )
     model = json.loads(
-        files("vonk_forge_contracts").joinpath("examples", "model-definition.json").read_text()
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
     )
     engine = create_engine(f"sqlite:///{tmp_path / 'authority.sqlite'}")
     Base.metadata.create_all(engine)
@@ -143,7 +151,9 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
         catalog = CatalogEntityService(session, clock=lambda: now)
         model_revision = catalog.create_draft(model, actor="test")
         catalog.resolve(model_revision.id, actor="test")
-        recipe_revision = catalog.create_draft(recipe.model_dump(mode="json"), actor="test")
+        recipe_revision = catalog.create_draft(
+            recipe.model_dump(mode="json"), actor="test"
+        )
         catalog.resolve(recipe_revision.id, actor="test")
         recipe_revision_id = recipe_revision.id
 
@@ -189,29 +199,48 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
     production.close()
 
 
-def test_source_build_without_builder_queues_provisional_parent(tmp_path, monkeypatch) -> None:
+def test_source_build_without_builder_queues_provisional_parent(
+    tmp_path, monkeypatch
+) -> None:
     recipe = RecipeDefinition.model_validate(
-        json.loads(files("vonk_forge_contracts").joinpath("examples", "recipe-source-build.json").read_text())
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-source-build.json")
+            .read_text()
+        )
     )
     engine = create_engine(f"sqlite:///{tmp_path / 'saturated.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     now = datetime.now(UTC)
     with sessions.begin() as session:
-        session.add(CatalogDocumentRevision(
-            id="saturated-revision", document_id="saturated-document", kind="recipe",
-            publisher=recipe.identity.publisher, slug=recipe.identity.slug,
-            revision_number=1, schema_version=2, state="active",
-            document=recipe.model_dump(mode="json"), content_digest=content_sha256(recipe),
-            artifact_key="c" * 64, execution_key="a" * 64, projected={},
-            created_by="test", created_at=now,
-        ))
+        session.add(
+            CatalogDocumentRevision(
+                id="saturated-revision",
+                document_id="saturated-document",
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=recipe.model_dump(mode="json"),
+                content_digest=content_sha256(recipe),
+                artifact_key="c" * 64,
+                execution_key="a" * 64,
+                projected={},
+                created_by="test",
+                created_at=now,
+            )
+        )
 
     class Builds:
         def resolve(self, _revision_id: str):
             return SimpleNamespace(
-                cached=False, input_intent_sha256="a" * 64,
-                build_input_sha256=None, build_id=None,
+                cached=False,
+                input_intent_sha256="a" * 64,
+                build_input_sha256=None,
+                build_id=None,
             )
 
         def plan(self, *_args, **_kwargs):
@@ -237,11 +266,17 @@ def test_source_build_without_builder_queues_provisional_parent(tmp_path, monkey
         agent_artifact_root = tmp_path / "artifacts"
 
     production = build_recipe_image_availability(
-        sessions, settings=Settings(), managed_catalog_sync=None,
-        recipe_builds=Builds(), recipe_operations=object(), clock=lambda: now,
+        sessions,
+        settings=Settings(),
+        managed_catalog_sync=None,
+        recipe_builds=Builds(),
+        recipe_operations=object(),
+        clock=lambda: now,
     )
     queued = production.service.start(
-        "saturated-revision", actor="operator", request_id="s" * 36,
+        "saturated-revision",
+        actor="operator",
+        request_id="s" * 36,
     )
     assert queued.state == "queued"
     assert queued.build_input_sha256 is None
@@ -839,32 +874,58 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
 
     engine = create_engine("sqlite://")
     AgentOperation.metadata.tables[AgentOperation.__tablename__].create(engine)
-    AgentOperationAttempt.metadata.tables[AgentOperationAttempt.__tablename__].create(engine)
+    AgentOperationAttempt.metadata.tables[AgentOperationAttempt.__tablename__].create(
+        engine
+    )
     sessions = sessionmaker(bind=engine)
     now = datetime.now(UTC)
     with sessions.begin() as session:
-        session.add(AgentOperation(
-            id="operation", parent_job_id="build-job", node_id="builder", kind="recipe.build.v1",
-            payload_digest="a" * 64, payload={}, authority_revision="current", state="running",
-            current_attempt=2, created_at=now, updated_at=now,
-        ))
+        session.add(
+            AgentOperation(
+                id="operation",
+                parent_job_id="build-job",
+                node_id="builder",
+                kind="recipe.build.v1",
+                payload_digest="a" * 64,
+                payload={},
+                authority_revision="current",
+                state="running",
+                current_attempt=2,
+                created_at=now,
+                updated_at=now,
+            )
+        )
         for attempt, completed in [(1, 999), (2, 128)]:
-            session.add(AgentOperationAttempt(
-                id=f"attempt-{attempt}", operation_id="operation", attempt=attempt,
-                fence=f"fence-{attempt}", lease_deadline=now, agent_certificate_serial="serial",
-                state="running", progress={
-                    "phase": "uploading", "completed_bytes": completed,
-                    "total_bytes": 256, "total_bytes_known": True,
-                    "members": [],
-                },
-            ))
+            session.add(
+                AgentOperationAttempt(
+                    id=f"attempt-{attempt}",
+                    operation_id="operation",
+                    attempt=attempt,
+                    fence=f"fence-{attempt}",
+                    lease_deadline=now,
+                    agent_certificate_serial="serial",
+                    state="running",
+                    progress={
+                        "phase": "uploading",
+                        "completed_bytes": completed,
+                        "total_bytes": 256,
+                        "total_bytes_known": True,
+                        "members": [],
+                    },
+                )
+            )
     with sessions() as session:
-        progress = availability_production._build_progress(session, "build-job", "builder")
+        progress = availability_production._build_progress(
+            session, "build-job", "builder"
+        )
         assert progress is not None
         assert progress.phase == "uploading"
         assert progress.completed_bytes == 128
         assert progress.total_bytes == 256
-        assert availability_production._build_progress(session, "build-job", "other") is None
+        assert (
+            availability_production._build_progress(session, "build-job", "other")
+            is None
+        )
         current = session.get(AgentOperationAttempt, "attempt-2")
         assert current is not None
         stale_progress: dict[str, object] = {"completed_bytes": 128}

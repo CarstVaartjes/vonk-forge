@@ -67,7 +67,9 @@ class StrictJSONModel(BaseModel):
 class WireModel(StrictJSONModel, Mapping[str, Any]):
     """Immutable JSON message with exact structure and scalar types."""
 
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True, allow_inf_nan=False)
+    model_config = ConfigDict(
+        extra="forbid", strict=True, frozen=True, allow_inf_nan=False
+    )
 
     def __getitem__(self, key: str) -> Any:
         if key in self.__class__.model_fields:
@@ -115,7 +117,9 @@ class OperationMemberProgress(WireModel):
     total_bytes: int | None = Field(default=None, strict=True, ge=0)
     bytes_per_second: float | None = Field(default=None, strict=True, ge=0, le=10**15)
     eta_seconds: float | None = Field(default=None, strict=True, ge=0, le=10**9)
-    smoothed_bytes_per_second: float | None = Field(default=None, strict=True, ge=0, le=10**15)
+    smoothed_bytes_per_second: float | None = Field(
+        default=None, strict=True, ge=0, le=10**15
+    )
     completed_items: int | None = Field(default=None, strict=True, ge=0)
     total_items: int | None = Field(default=None, strict=True, ge=0)
     elapsed_seconds: float | None = Field(default=None, strict=True, ge=0)
@@ -135,7 +139,10 @@ class OperationMemberProgress(WireModel):
     def totals_are_consistent(self) -> OperationMemberProgress:
         if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
             raise ValueError("completed bytes cannot exceed total bytes")
-        if self.total_items is not None and (self.completed_items or 0) > self.total_items:
+        if (
+            self.total_items is not None
+            and (self.completed_items or 0) > self.total_items
+        ):
             raise ValueError("completed items cannot exceed total items")
         return self
 
@@ -151,7 +158,9 @@ class OperationProgress(WireModel):
     total_bytes_known: bool = False
     bytes_per_second: float | None = Field(default=None, strict=True, ge=0, le=10**15)
     eta_seconds: float | None = Field(default=None, strict=True, ge=0, le=10**9)
-    smoothed_bytes_per_second: float | None = Field(default=None, strict=True, ge=0, le=10**15)
+    smoothed_bytes_per_second: float | None = Field(
+        default=None, strict=True, ge=0, le=10**15
+    )
     completed_items: int | None = Field(default=None, strict=True, ge=0)
     total_items: int | None = Field(default=None, strict=True, ge=0)
     elapsed_seconds: float | None = Field(default=None, strict=True, ge=0)
@@ -159,7 +168,9 @@ class OperationProgress(WireModel):
     last_progress_at: str | None = Field(default=None, max_length=64)
     activity: Literal["active", "waiting", "possibly_stalled"] | None = None
     checkpoint: OperationCheckpoint | None = None
-    members: list[OperationMemberProgress] = Field(default_factory=list, max_length=1024)
+    members: list[OperationMemberProgress] = Field(
+        default_factory=list, max_length=1024
+    )
 
     @field_validator("observed_at", "last_progress_at")
     @classmethod
@@ -176,7 +187,10 @@ class OperationProgress(WireModel):
             )
         if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
             raise ValueError("completed bytes cannot exceed total bytes")
-        if self.total_items is not None and (self.completed_items or 0) > self.total_items:
+        if (
+            self.total_items is not None
+            and (self.completed_items or 0) > self.total_items
+        ):
             raise ValueError("completed items cannot exceed total items")
         member_ids = [member.member_id for member in self.members]
         if len(member_ids) != len(set(member_ids)):

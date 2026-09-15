@@ -301,7 +301,8 @@ def assemble_production_worker(
     recipe_image_artifact_root: Path | None = None,
     recipe_image_parallel_preparations: int = 4,
     recipe_build_parallel_preparations: int = 2,
-    compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]] | None = None,
+    compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]]
+    | None = None,
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
 ) -> Worker:
@@ -515,8 +516,10 @@ if __name__ == "__main__":
     settings = WorkerSettings.from_env_and_secrets()
     wait_for_database(settings.database_url)
     sessions = session_factory(build_engine(settings.database_url))
+
     def clock() -> datetime:
         return datetime.now(UTC)
+
     jobs = JobService(sessions, clock=clock)
     address_policy = ManagementAddressPolicy.parse(
         settings.management_cidrs,
@@ -537,9 +540,7 @@ if __name__ == "__main__":
             clock=clock,
         ),
     )
-    runtime_image_storage = FilesystemRuntimeImageStorage(
-        settings.agent_artifact_root
-    )
+    runtime_image_storage = FilesystemRuntimeImageStorage(settings.agent_artifact_root)
     model_cache = ModelCacheService(
         sessions,
         settings.model_cache_root,
@@ -571,9 +572,7 @@ if __name__ == "__main__":
             }
         identity = runtime_spec.get("identity")
         effective_execution_key = (
-            identity.get("execution_sha256")
-            if isinstance(identity, Mapping)
-            else None
+            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
         )
         if not isinstance(effective_execution_key, str):
             raise TypeError("compiled runtime execution identity is unavailable")
@@ -589,7 +588,9 @@ if __name__ == "__main__":
                     )
                 )
                 if revision is None or revision.content_digest is None:
-                    raise ValueError("active recipe revision for runtime receipt is unavailable")
+                    raise ValueError(
+                        "active recipe revision for runtime receipt is unavailable"
+                    )
                 persist_runtime_image_receipt(
                     session,
                     recipe_revision_id=revision.id,
@@ -610,25 +611,37 @@ if __name__ == "__main__":
         )
 
     def resolve_runtime_image_receipt(document, image_digest, runtime_spec):
-        runtime = runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
+        runtime = (
+            runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
+        )
         if not isinstance(runtime, Mapping):
-            raise TypeError("runtime image preparation is required: runtime projection is unavailable")
+            raise TypeError(
+                "runtime image preparation is required: runtime projection is unavailable"
+            )
         architecture = runtime.get("architecture")
         interface = runtime.get("interface", runtime.get("runtime_interface"))
         if not isinstance(architecture, str) or not isinstance(interface, str):
-            raise TypeError("runtime image preparation is required: platform identity is unavailable")
+            raise TypeError(
+                "runtime image preparation is required: platform identity is unavailable"
+            )
         receipt = runtime_image_storage.find_verified(
             image_digest,
             expected_architecture=architecture,
             expected_runtime_interface=interface,
         )
         if receipt is None:
-            raise ValueError("runtime image preparation is required before compile/install")
+            raise ValueError(
+                "runtime image preparation is required before compile/install"
+            )
         identity = runtime_spec.get("identity")
-        execution_key = identity.get("execution_sha256") if isinstance(identity, Mapping) else None
+        execution_key = (
+            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
+        )
         recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
         if not isinstance(execution_key, str):
-            raise TypeError("runtime image preparation execution identity is unavailable")
+            raise TypeError(
+                "runtime image preparation execution identity is unavailable"
+            )
         with sessions() as session:
             revision = session.scalar(
                 select(CatalogDocumentRevision).where(
@@ -638,7 +651,9 @@ if __name__ == "__main__":
                 )
             )
             if revision is None:
-                raise ValueError("durable runtime image receipt is unavailable before compile/install")
+                raise ValueError(
+                    "durable runtime image receipt is unavailable before compile/install"
+                )
             resolve_persisted_runtime_image_receipt(
                 session,
                 recipe_revision_id=revision.id,
@@ -647,7 +662,9 @@ if __name__ == "__main__":
                 receipt=receipt,
             )
         if revision is None:
-            raise ValueError("durable runtime image receipt is unavailable before compile/install")
+            raise ValueError(
+                "durable runtime image receipt is unavailable before compile/install"
+            )
         return receipt
 
     execution_plans = ControllerExecutionPlanService(
@@ -655,8 +672,11 @@ if __name__ == "__main__":
         runtime_image_resolver=resolve_runtime_image_receipt,
     )
     from .deployment_observer import DeploymentObserver
+
     deployment_observer = DeploymentObserver(
-        sessions, channel=os.environ.get("VONK_INSTALL_CHANNEL", "stable"), clock=clock,
+        sessions,
+        channel=os.environ.get("VONK_INSTALL_CHANNEL", "stable"),
+        clock=clock,
     )
     worker = assemble_production_worker(
         distributed_start_timeout_seconds=settings.distributed_start_timeout_seconds,

@@ -21,11 +21,16 @@ from vonk_control.recipe_image_availability_api import (
 )
 
 
-@pytest.mark.parametrize("mutation", [{}, {"model_content_digests": [12]}, {"model_content_digests": None}])
-def test_model_child_requires_typed_model_references(mutation: dict[str, object]) -> None:
+@pytest.mark.parametrize(
+    "mutation", [{}, {"model_content_digests": [12]}, {"model_content_digests": None}]
+)
+def test_model_child_requires_typed_model_references(
+    mutation: dict[str, object],
+) -> None:
     with pytest.raises(ValidationError):
         _child(
-            {"id": "model-child", "state": "queued", "progress": {"phase": "download"}} | mutation,
+            {"id": "model-child", "state": "queued", "progress": {"phase": "download"}}
+            | mutation,
             kind="model-cache",
         )
 
@@ -86,8 +91,18 @@ def test_completed_result_projection_is_strict_and_exposes_both_children() -> No
         recipe_content_sha256="a" * 64,
         model_digest=None,
         build_input_sha256=None,
-        progress={"phase": "available", "completed_bytes": 20, "total_bytes": 20, "total_bytes_known": True},
-        image_progress={"phase": "available", "completed_bytes": 20, "total_bytes": 20, "total_bytes_known": True},
+        progress={
+            "phase": "available",
+            "completed_bytes": 20,
+            "total_bytes": 20,
+            "total_bytes_known": True,
+        },
+        image_progress={
+            "phase": "available",
+            "completed_bytes": 20,
+            "total_bytes": 20,
+            "total_bytes_known": True,
+        },
         result={
             "schema_version": 2,
             "recipe_content_sha256": "a" * 64,
@@ -110,7 +125,11 @@ def test_completed_result_projection_is_strict_and_exposes_both_children() -> No
             "id": "model-child",
             "state": "succeeded",
             "model_content_digests": ["d" * 64],
-            "progress": {"phase": "download", "completed_bytes": 0, "total_bytes_known": False},
+            "progress": {
+                "phase": "download",
+                "completed_bytes": 0,
+                "total_bytes_known": False,
+            },
         },
     )
     response = _view_document(view)
@@ -118,19 +137,36 @@ def test_completed_result_projection_is_strict_and_exposes_both_children() -> No
     assert response.result.model_child_id == "model-child"
     assert response.result.model_content_digests == ["d" * 64]
     assert response.children[0].model_content_digests == ["d" * 64]
-    assert {child.kind for child in response.children} == {"model-cache", "runtime-image"}
+    assert {child.kind for child in response.children} == {
+        "model-cache",
+        "runtime-image",
+    }
 
 
 def test_openapi_uses_typed_recipe_models_and_conflict_schema() -> None:
     app = FastAPI()
     install_recipe_operator_routes(app, actor_dependency=lambda: None, service=None)
     schema = app.openapi()
-    assert schema["paths"]["/api/recipe/{selector}/download"]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("RecipeOperatorRequest")
-    assert schema["paths"]["/api/recipe/{selector}/download"]["post"]["responses"]["202"]["content"]["application/json"]["schema"]["$ref"].endswith("RecipeImageAvailabilityResponse")
-    assert schema["paths"]["/api/recipe/{selector}/remove"]["post"]["responses"]["202"]["content"]["application/json"]["schema"]["$ref"].endswith("RecipeOperatorResponse")
-    assert schema["paths"]["/api/recipe/update"]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("RecipeUpdateRequest")
+    assert schema["paths"]["/api/recipe/{selector}/download"]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]["$ref"].endswith("RecipeOperatorRequest")
+    assert schema["paths"]["/api/recipe/{selector}/download"]["post"]["responses"][
+        "202"
+    ]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "RecipeImageAvailabilityResponse"
+    )
+    assert schema["paths"]["/api/recipe/{selector}/remove"]["post"]["responses"]["202"][
+        "content"
+    ]["application/json"]["schema"]["$ref"].endswith("RecipeOperatorResponse")
+    assert schema["paths"]["/api/recipe/update"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]["$ref"].endswith("RecipeUpdateRequest")
     assert RecipeOperatorRequest.model_fields.keys() >= {"request_key", "with_model"}
-    assert RecipeUpdateRequest.model_fields.keys() >= {"request_key", "selectors", "all"}
+    assert RecipeUpdateRequest.model_fields.keys() >= {
+        "request_key",
+        "selectors",
+        "all",
+    }
     assert "RecipeImageAvailabilityErrorResponse" not in schema["components"]["schemas"]
     assert "RecipeOperatorResponse" in schema["components"]["schemas"]
     for (method, path), operation_id in RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS.items():

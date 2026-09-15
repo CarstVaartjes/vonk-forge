@@ -707,7 +707,11 @@ def create_app(
                         )
                     except _RequestBodyTooLarge:
                         body_too_large = True
-                    except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey):
+                    except (
+                        UnicodeDecodeError,
+                        json.JSONDecodeError,
+                        _DuplicateJsonKey,
+                    ):
                         invalid_login_document = True
                 if body_too_large:
                     response = Response(status_code=413)
@@ -752,7 +756,9 @@ def create_app(
         response.headers["x-request-id"] = request_id
         response.headers["x-content-type-options"] = "nosniff"
         if response.status_code >= 400 and "x-vonk-error-code" not in response.headers:
-            response.headers["x-vonk-error-code"] = _http_error_code(response.status_code)
+            response.headers["x-vonk-error-code"] = _http_error_code(
+                response.status_code
+            )
         if request.url.path.startswith("/api/auth/"):
             response.headers["cache-control"] = "no-store"
         if metrics is not None:
@@ -1253,7 +1259,9 @@ def create_app(
             jobs.get(job_id)
             return JobLogsResponse(job_id=job_id, digests=list(job_logs.list(job_id)))
         except JobLogCorruptError:
-            raise HTTPException(status_code=503, detail="job logs unavailable") from None
+            raise HTTPException(
+                status_code=503, detail="job logs unavailable"
+            ) from None
         except (KeyError, ValueError):
             raise HTTPException(status_code=404, detail="job not found") from None
 
@@ -1281,7 +1289,9 @@ def create_app(
         except JobLogCorruptError:
             # The log exists but no longer matches its digest. Answering 404
             # would report corrupt retained evidence as absent.
-            raise HTTPException(status_code=503, detail="job logs unavailable") from None
+            raise HTTPException(
+                status_code=503, detail="job logs unavailable"
+            ) from None
         except (KeyError, ValueError):
             raise HTTPException(status_code=404, detail="job log not found") from None
 
@@ -1755,7 +1765,9 @@ def production_app() -> FastAPI:
         artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
         fleet_services=build_fleet_operator_services(
-            agent_services=(agent_services if settings.agent_runtime == "enabled" else None),
+            agent_services=(
+                agent_services if settings.agent_runtime == "enabled" else None
+            ),
             upgrades=agent_upgrades,
             sessions=sessions,
             job_logs=DatabaseJobLogStore(sessions, clock=clock),

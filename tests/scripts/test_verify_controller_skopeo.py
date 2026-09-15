@@ -22,7 +22,7 @@ def test_controller_skopeo_verification_is_digest_bound_and_rootless() -> None:
     assert "--privileged" not in source
     assert "docker.sock" not in source
     assert "source_child=$(skopeo inspect" in source
-    assert "test \"$source_child\" = \"$expected_child\"" in source
+    assert 'test "$source_child" = "$expected_child"' in source
     # skopeo rejects a reference carrying both a tag and a digest, so the
     # reviewed source is reduced to bare repository plus index digest.
     assert 'skopeo_source="quay.io/skopeo/stable@${source_reference##*@}"' in source

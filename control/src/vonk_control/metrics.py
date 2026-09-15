@@ -25,27 +25,33 @@ if TYPE_CHECKING:
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
 _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-_JOB_KINDS = frozenset({
-    "agent-upgrade",
-    "artifact-distribution",
-    "fleet.revoke",
-    "recipe.run-switch.v2",
-    "recipe.stop.v2",
-})
-_JOB_STATES = frozenset({"queued", "running", "waiting-for-operator", "succeeded", "failed", "expired"})
+_JOB_KINDS = frozenset(
+    {
+        "agent-upgrade",
+        "artifact-distribution",
+        "fleet.revoke",
+        "recipe.run-switch.v2",
+        "recipe.stop.v2",
+    }
+)
+_JOB_STATES = frozenset(
+    {"queued", "running", "waiting-for-operator", "succeeded", "failed", "expired"}
+)
 _ROUTE_STATES = frozenset({"published", "maintenance", "unavailable"})
 _AGENT_STATES = frozenset({"active", "retired"})
-_AGENT_OPERATIONS = frozenset({
-    "agent.upgrade.v1",
-    "artifact.distribution.v1",
-    "recipe.build.v1",
-    "recipe.image.import.v1",
-    "recipe.install",
-    "recipe.start",
-    "recipe.job.run.v1",
-    "recipe.stop",
-    "recipe.uninstall",
-})
+_AGENT_OPERATIONS = frozenset(
+    {
+        "agent.upgrade.v1",
+        "artifact.distribution.v1",
+        "recipe.build.v1",
+        "recipe.image.import.v1",
+        "recipe.install",
+        "recipe.start",
+        "recipe.job.run.v1",
+        "recipe.stop",
+        "recipe.uninstall",
+    }
+)
 _VERSION_BUCKETS = frozenset({"supported", "old", "new", "incompatible"})
 _CONNECTION_STATES = ("online", "offline", "unregistered")
 _CERTIFICATE_STATES = (
@@ -111,7 +117,12 @@ class MetricsRegistry:
 
     @staticmethod
     def _number(value: float, field: str) -> float:
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 or not math.isfinite(value):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or value < 0
+            or not math.isfinite(value)
+        ):
             raise ValueError(f"{field} must be a nonnegative finite number")
         return float(value)
 
@@ -147,9 +158,7 @@ class MetricsRegistry:
                 None if inventory is None else inventory.host_memory_free_bytes,
                 None if inventory is None else inventory.disk_free_bytes,
                 None if telemetry is None else telemetry.age_seconds,
-                None
-                if telemetry is None
-                else telemetry.sample.gpu_utilization_percent,
+                None if telemetry is None else telemetry.sample.gpu_utilization_percent,
             )
         with self._lock:
             self._nodes = nodes
@@ -183,9 +192,13 @@ class MetricsRegistry:
         with self._lock:
             self._backup_age = age
 
-    def observe_api(self, method: str, status_code: int, duration_seconds: float) -> None:
+    def observe_api(
+        self, method: str, status_code: int, duration_seconds: float
+    ) -> None:
         safe_method = method if method in _METHODS else "OTHER"
-        status_class = f"{status_code // 100}xx" if 100 <= status_code <= 599 else "other"
+        status_class = (
+            f"{status_code // 100}xx" if 100 <= status_code <= 599 else "other"
+        )
         duration = self._number(duration_seconds, "API duration")
         with self._lock:
             key = (safe_method, status_class)
@@ -200,16 +213,27 @@ class MetricsRegistry:
         leases: dict[tuple[str, str], float],
     ) -> None:
         safe_nodes = {}
-        for node_id, (state, version_bucket, last_seen_age, certificate_expiry) in nodes.items():
+        for node_id, (
+            state,
+            version_bucket,
+            last_seen_age,
+            certificate_expiry,
+        ) in nodes.items():
             if _NODE.fullmatch(node_id) is None:
                 raise ValueError("metrics node ID must be a stable generated ID")
             safe_state = state if state in _AGENT_STATES else "other"
-            safe_version = version_bucket if version_bucket in _VERSION_BUCKETS else "incompatible"
+            safe_version = (
+                version_bucket if version_bucket in _VERSION_BUCKETS else "incompatible"
+            )
             safe_nodes[node_id] = (
                 safe_state,
                 safe_version,
-                None if last_seen_age is None else self._number(last_seen_age, "last-seen age"),
-                None if certificate_expiry is None else self._number(certificate_expiry, "certificate expiry"),
+                None
+                if last_seen_age is None
+                else self._number(last_seen_age, "last-seen age"),
+                None
+                if certificate_expiry is None
+                else self._number(certificate_expiry, "certificate expiry"),
             )
         safe_operations: dict[tuple[str, str], int] = defaultdict(int)
         for (operation, state), count in operations.items():
@@ -240,7 +264,9 @@ class MetricsRegistry:
             route_state = self._route_state
             backup_age = self._backup_age
             api_counts = dict(self._api_counts)
-            api_durations = {key: tuple(values) for key, values in self._api_durations.items()}
+            api_durations = {
+                key: tuple(values) for key, values in self._api_durations.items()
+            }
             agent_nodes = dict(self._agent_nodes)
             agent_operations = dict(self._agent_operations)
             agent_leases = dict(self._agent_leases)
@@ -249,25 +275,31 @@ class MetricsRegistry:
             "# TYPE vonk_route_state gauge",
         ]
         for state in sorted(_ROUTE_STATES):
-            lines.append(f'vonk_route_state{{state="{state}"}} {1 if state == route_state else 0}')
+            lines.append(
+                f'vonk_route_state{{state="{state}"}} {1 if state == route_state else 0}'
+            )
         if backup_age is not None:
-            lines.extend((
-                "# HELP vonk_control_backup_age_seconds Age of the last successful encrypted control backup.",
-                "# TYPE vonk_control_backup_age_seconds gauge",
-                f"vonk_control_backup_age_seconds {backup_age:g}",
-            ))
-        lines.extend((
-            "# HELP vonk_node_connection_state Current authenticated Fleet connection state.",
-            "# TYPE vonk_node_connection_state gauge",
-            "# HELP vonk_node_certificate_state Current Fleet certificate validity state.",
-            "# TYPE vonk_node_certificate_state gauge",
-            "# HELP vonk_node_inventory_freshness Current admission inventory freshness.",
-            "# TYPE vonk_node_inventory_freshness gauge",
-            "# HELP vonk_node_telemetry_freshness Current telemetry freshness.",
-            "# TYPE vonk_node_telemetry_freshness gauge",
-            "# HELP vonk_node_telemetry_gpu_utilization_percent Current typed GPU utilization telemetry.",
-            "# TYPE vonk_node_telemetry_gpu_utilization_percent gauge",
-        ))
+            lines.extend(
+                (
+                    "# HELP vonk_control_backup_age_seconds Age of the last successful encrypted control backup.",
+                    "# TYPE vonk_control_backup_age_seconds gauge",
+                    f"vonk_control_backup_age_seconds {backup_age:g}",
+                )
+            )
+        lines.extend(
+            (
+                "# HELP vonk_node_connection_state Current authenticated Fleet connection state.",
+                "# TYPE vonk_node_connection_state gauge",
+                "# HELP vonk_node_certificate_state Current Fleet certificate validity state.",
+                "# TYPE vonk_node_certificate_state gauge",
+                "# HELP vonk_node_inventory_freshness Current admission inventory freshness.",
+                "# TYPE vonk_node_inventory_freshness gauge",
+                "# HELP vonk_node_telemetry_freshness Current telemetry freshness.",
+                "# TYPE vonk_node_telemetry_freshness gauge",
+                "# HELP vonk_node_telemetry_gpu_utilization_percent Current typed GPU utilization telemetry.",
+                "# TYPE vonk_node_telemetry_gpu_utilization_percent gauge",
+            )
+        )
         for node_id, (
             connection_state,
             certificate_state,
@@ -300,58 +332,85 @@ class MetricsRegistry:
                     f"{1 if state == telemetry_freshness else 0}"
                 )
             if memory is not None:
-                lines.append(f"vonk_node_inventory_host_memory_free_bytes{{{label}}} {memory}")
+                lines.append(
+                    f"vonk_node_inventory_host_memory_free_bytes{{{label}}} {memory}"
+                )
             if disk is not None:
                 lines.append(f"vonk_node_inventory_disk_free_bytes{{{label}}} {disk}")
             if telemetry_age is not None:
-                lines.append(f"vonk_node_telemetry_age_seconds{{{label}}} {telemetry_age:g}")
+                lines.append(
+                    f"vonk_node_telemetry_age_seconds{{{label}}} {telemetry_age:g}"
+                )
             if gpu_utilization is not None:
                 lines.append(
                     f"vonk_node_telemetry_gpu_utilization_percent{{{label}}} "
                     f"{gpu_utilization:g}"
                 )
-        lines.extend(("# HELP vonk_jobs Number of control jobs by bounded kind and state.", "# TYPE vonk_jobs gauge"))
+        lines.extend(
+            (
+                "# HELP vonk_jobs Number of control jobs by bounded kind and state.",
+                "# TYPE vonk_jobs gauge",
+            )
+        )
         for (kind, state), count in sorted(jobs.items()):
             lines.append(f'vonk_jobs{{kind="{kind}",state="{state}"}} {count}')
-        lines.extend((
-            "# HELP vonk_agent_state Current durable outbound-agent lifecycle state.",
-            "# TYPE vonk_agent_state gauge",
-            "# HELP vonk_agent_version_compatibility Agent protocol compatibility bucket.",
-            "# TYPE vonk_agent_version_compatibility gauge",
-            "# HELP vonk_agent_last_seen_age_seconds Age of the latest authenticated agent contact.",
-            "# TYPE vonk_agent_last_seen_age_seconds gauge",
-            "# HELP vonk_agent_certificate_expiry_seconds Seconds until the active agent certificate expires.",
-            "# TYPE vonk_agent_certificate_expiry_seconds gauge",
-        ))
-        for node_id, (state, version_bucket, last_seen_age, certificate_expiry) in sorted(agent_nodes.items()):
+        lines.extend(
+            (
+                "# HELP vonk_agent_state Current durable outbound-agent lifecycle state.",
+                "# TYPE vonk_agent_state gauge",
+                "# HELP vonk_agent_version_compatibility Agent protocol compatibility bucket.",
+                "# TYPE vonk_agent_version_compatibility gauge",
+                "# HELP vonk_agent_last_seen_age_seconds Age of the latest authenticated agent contact.",
+                "# TYPE vonk_agent_last_seen_age_seconds gauge",
+                "# HELP vonk_agent_certificate_expiry_seconds Seconds until the active agent certificate expires.",
+                "# TYPE vonk_agent_certificate_expiry_seconds gauge",
+            )
+        )
+        for node_id, (
+            state,
+            version_bucket,
+            last_seen_age,
+            certificate_expiry,
+        ) in sorted(agent_nodes.items()):
             label = f'node_id="{node_id}"'
             lines.append(f'vonk_agent_state{{{label},state="{state}"}} 1')
             lines.append(
                 f'vonk_agent_version_compatibility{{{label},version_bucket="{version_bucket}"}} 1'
             )
             if last_seen_age is not None:
-                lines.append(f"vonk_agent_last_seen_age_seconds{{{label}}} {last_seen_age:g}")
+                lines.append(
+                    f"vonk_agent_last_seen_age_seconds{{{label}}} {last_seen_age:g}"
+                )
             if certificate_expiry is not None:
                 lines.append(
                     f"vonk_agent_certificate_expiry_seconds{{{label}}} {certificate_expiry:g}"
                 )
-        lines.extend((
-            "# HELP vonk_agent_operations Durable agent operations by bounded kind and state.",
-            "# TYPE vonk_agent_operations gauge",
-        ))
+        lines.extend(
+            (
+                "# HELP vonk_agent_operations Durable agent operations by bounded kind and state.",
+                "# TYPE vonk_agent_operations gauge",
+            )
+        )
         for (operation, state), count in sorted(agent_operations.items()):
             lines.append(
                 f'vonk_agent_operations{{operation="{operation}",state="{state}"}} {count}'
             )
-        lines.extend((
-            "# HELP vonk_agent_operation_lease_age_seconds Age since the active operation lease was last updated.",
-            "# TYPE vonk_agent_operation_lease_age_seconds gauge",
-        ))
+        lines.extend(
+            (
+                "# HELP vonk_agent_operation_lease_age_seconds Age since the active operation lease was last updated.",
+                "# TYPE vonk_agent_operation_lease_age_seconds gauge",
+            )
+        )
         for (node_id, operation), age in sorted(agent_leases.items()):
             lines.append(
                 f'vonk_agent_operation_lease_age_seconds{{node_id="{node_id}",operation="{operation}"}} {age:g}'
             )
-        lines.extend(("# HELP vonk_api_requests_total API responses by method and status class.", "# TYPE vonk_api_requests_total counter"))
+        lines.extend(
+            (
+                "# HELP vonk_api_requests_total API responses by method and status class.",
+                "# TYPE vonk_api_requests_total counter",
+            )
+        )
         for (method, status_class), count in sorted(api_counts.items()):
             labels = f'method="{method}",status_class="{status_class}"'
             lines.append(f"vonk_api_requests_total{{{labels}}} {count}")
@@ -359,10 +418,18 @@ class MetricsRegistry:
             cumulative = 0
             for bucket in _BUCKETS:
                 cumulative = sum(value <= bucket for value in values)
-                lines.append(f'vonk_api_request_duration_seconds_bucket{{{labels},le="{bucket:g}"}} {cumulative}')
-            lines.append(f'vonk_api_request_duration_seconds_bucket{{{labels},le="+Inf"}} {len(values)}')
-            lines.append(f"vonk_api_request_duration_seconds_sum{{{labels}}} {sum(values):g}")
-            lines.append(f"vonk_api_request_duration_seconds_count{{{labels}}} {len(values)}")
+                lines.append(
+                    f'vonk_api_request_duration_seconds_bucket{{{labels},le="{bucket:g}"}} {cumulative}'
+                )
+            lines.append(
+                f'vonk_api_request_duration_seconds_bucket{{{labels},le="+Inf"}} {len(values)}'
+            )
+            lines.append(
+                f"vonk_api_request_duration_seconds_sum{{{labels}}} {sum(values):g}"
+            )
+            lines.append(
+                f"vonk_api_request_duration_seconds_count{{{labels}}} {len(values)}"
+            )
         lines.append("# EOF")
         return "\n".join(lines) + "\n"
 
@@ -390,7 +457,9 @@ class OperationalMetricsCollector:
     def refresh(self) -> None:
         now = _aware(self._clock())
         with self._sessions() as session:
-            agent_nodes = list(session.scalars(select(AgentNode).order_by(AgentNode.node_id)))
+            agent_nodes = list(
+                session.scalars(select(AgentNode).order_by(AgentNode.node_id))
+            )
             certificates = list(
                 session.scalars(
                     select(AgentCertificate)
@@ -414,17 +483,26 @@ class OperationalMetricsCollector:
             )
             lease_rows = list(
                 session.execute(
-                    select(AgentOperation.node_id, AgentOperation.kind, AgentOperation.updated_at)
+                    select(
+                        AgentOperation.node_id,
+                        AgentOperation.kind,
+                        AgentOperation.updated_at,
+                    )
                     .join(
                         AgentOperationAttempt,
                         (AgentOperationAttempt.operation_id == AgentOperation.id)
-                        & (AgentOperationAttempt.attempt == AgentOperation.current_attempt),
+                        & (
+                            AgentOperationAttempt.attempt
+                            == AgentOperation.current_attempt
+                        ),
                     )
                     .where(
                         AgentOperation.state == "running",
                         AgentOperationAttempt.state == "running",
                     )
-                    .order_by(AgentOperation.node_id, AgentOperation.kind, AgentOperation.id)
+                    .order_by(
+                        AgentOperation.node_id, AgentOperation.kind, AgentOperation.id
+                    )
                 )
             )
         active_certificates: dict[str, AgentCertificate] = {}
@@ -447,7 +525,9 @@ class OperationalMetricsCollector:
                 if certificate is None
                 else max(0.0, (_aware(certificate.not_after) - now).total_seconds()),
             )
-        operations = {(kind, state): int(count) for kind, state, count in operation_rows}
+        operations = {
+            (kind, state): int(count) for kind, state, count in operation_rows
+        }
         leases: dict[tuple[str, str], float] = {}
         for node_id, operation, updated_at in lease_rows:
             key = (node_id, operation)

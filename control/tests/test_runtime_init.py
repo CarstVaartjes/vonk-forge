@@ -125,7 +125,9 @@ def test_optional_huggingface_secret_is_normalized_only_when_present(
     assert projected.stat().st_mode & 0o777 == 0o400
 
     token.unlink()
-    runtime_init._stage_optional_private_key(source / "hf-token", destination / "hf-token")
+    runtime_init._stage_optional_private_key(
+        source / "hf-token", destination / "hf-token"
+    )
     assert not projected.exists()
 
 

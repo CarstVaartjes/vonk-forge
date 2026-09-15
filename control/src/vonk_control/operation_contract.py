@@ -146,7 +146,9 @@ class AvailabilityOperationFailure(BaseModel):
         return self
 
 
-OperationFailure = AgentFailureResult | AvailabilityOperationFailure | OperationFailureEvidence
+OperationFailure = (
+    AgentFailureResult | AvailabilityOperationFailure | OperationFailureEvidence
+)
 
 
 class OperationEvidenceProvenance(BaseModel):
@@ -176,8 +178,10 @@ class OperationRecovery(BaseModel):
 
 
 def validate_progress_update(
-    previous: Mapping[str, object] | None, current: Mapping[str, object],
-    *, partial: bool = True,
+    previous: Mapping[str, object] | None,
+    current: Mapping[str, object],
+    *,
+    partial: bool = True,
 ) -> dict[str, object]:
     """Validate monotonic bytes/checkpoint updates within one leased attempt."""
 
@@ -294,7 +298,15 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
         # a hard upper bound on durable/operator-visible diagnostic data.
         result = {
             key: result[key]
-            for key in ("error_code", "failure_kind", "retry_after_seconds", "summary", "reason", "uncertain", "retryable")
+            for key in (
+                "error_code",
+                "failure_kind",
+                "retry_after_seconds",
+                "summary",
+                "reason",
+                "uncertain",
+                "retryable",
+            )
             if key in result
         }
         result["detail"] = "failure evidence truncated"

@@ -124,7 +124,9 @@ def admission_blockers(
     return tuple(blockers)
 
 
-def latest_result(session, node_id: str, *, requirements_sha256: str | None = None) -> RuntimePreflightResult | None:
+def latest_result(
+    session, node_id: str, *, requirements_sha256: str | None = None
+) -> RuntimePreflightResult | None:
     """Read validated fenced evidence, including failures, without a new store."""
     from sqlalchemy import select
 
@@ -138,7 +140,11 @@ def latest_result(session, node_id: str, *, requirements_sha256: str | None = No
             AgentOperation.kind == "runtime.preflight.v1",
             AgentOperationAttempt.attempt == AgentOperation.current_attempt,
             AgentOperation.state == "succeeded",
-            *([AgentOperation.payload_digest == requirements_sha256] if requirements_sha256 is not None else []),
+            *(
+                [AgentOperation.payload_digest == requirements_sha256]
+                if requirements_sha256 is not None
+                else []
+            ),
         )
         .order_by(AgentOperation.updated_at.desc(), AgentOperation.id.desc())
         .limit(1)

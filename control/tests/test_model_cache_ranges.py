@@ -207,7 +207,7 @@ def test_resumed_range_peak_growth_fits_two_object_reservation(
     if retained_segment:
         start = 3 * len(data) // 4
         segment = target.with_name(f"{target.name}.range-{start}-{len(data) - 1}")
-        segment.write_bytes(data[start:start + retained_segment])
+        segment.write_bytes(data[start : start + retained_segment])
     initial_bytes = sum(path.stat().st_size for path in tmp_path.iterdir())
     observed_peak = []
     real_replace = os.replace
@@ -220,9 +220,11 @@ def test_resumed_range_peak_growth_fits_two_object_reservation(
 
     monkeypatch.setattr(os, "replace", publish)
     assert download_ranges(
-        target, len(data),
-        lambda start, end: response(start, end, len(data), data[start:end + 1]),
-        Event(), lambda value: None,
+        target,
+        len(data),
+        lambda start, end: response(start, end, len(data), data[start : end + 1]),
+        Event(),
+        lambda value: None,
     )
     assert target.read_bytes() == data
     assert observed_peak == [resume_prefix + 2 * len(data)]

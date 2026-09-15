@@ -40,7 +40,9 @@ def _service(
     )
 
 
-def test_configured_huggingface_token_is_used_on_canonical_request(tmp_path: Path) -> None:
+def test_configured_huggingface_token_is_used_on_canonical_request(
+    tmp_path: Path,
+) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

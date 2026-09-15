@@ -126,8 +126,12 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
 
     @model_validator(mode="after")
     def terminal_evidence_is_consistent(self) -> RecipeImageAvailabilityResponse:
-        if self.state == "succeeded" and (self.result is None or self.failure is not None):
-            raise ValueError("successful image availability requires a result and no failure")
+        if self.state == "succeeded" and (
+            self.result is None or self.failure is not None
+        ):
+            raise ValueError(
+                "successful image availability requires a result and no failure"
+            )
         if self.state == "failed" and self.failure is None:
             raise ValueError("failed image availability requires failure evidence")
         if self.state != "succeeded" and self.result is not None:
@@ -139,7 +143,9 @@ class RecipeOperatorRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
-    request_key: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+    request_key: str = Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
     with_model: bool = False
 
 
@@ -166,7 +172,9 @@ class RecipeUpdateRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
-    request_key: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+    request_key: str = Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
     selectors: list[str] | None = Field(default=None, max_length=100)
     all: bool = False
 
@@ -202,14 +210,14 @@ def _progress(value: object) -> OperationProgress:
         raw["total_bytes"] = raw["expected_bytes"]
     raw.setdefault("phase", "download")
     raw.setdefault("total_bytes_known", raw.get("total_bytes") is not None)
-    return OperationProgress.model_validate({
-        key: raw[key]
-        for key in OperationProgress.model_fields
-        if key in raw
-    })
+    return OperationProgress.model_validate(
+        {key: raw[key] for key in OperationProgress.model_fields if key in raw}
+    )
 
 
-def _child(value: object, *, kind: RecipeImageAvailabilityChildKind) -> RecipeImageAvailabilityChild:
+def _child(
+    value: object, *, kind: RecipeImageAvailabilityChildKind
+) -> RecipeImageAvailabilityChild:
     raw = dict(value) if isinstance(value, dict) else {}
     if kind == "runtime-image":
         raw["model_content_digests"] = []
@@ -218,7 +226,9 @@ def _child(value: object, *, kind: RecipeImageAvailabilityChildKind) -> RecipeIm
     )
 
 
-def _view_document(view: RecipeImageAvailabilityView) -> RecipeImageAvailabilityResponse:
+def _view_document(
+    view: RecipeImageAvailabilityView,
+) -> RecipeImageAvailabilityResponse:
     document = view.document()
     result = document.get("result")
     result_model = None
@@ -230,11 +240,11 @@ def _view_document(view: RecipeImageAvailabilityView) -> RecipeImageAvailability
             result_payload
             | {
                 "model_child_id": child.get("id") if isinstance(child, dict) else None,
-                "artifact_set_sha256": child.get("artifact_set_sha256") if isinstance(child, dict) else None,
+                "artifact_set_sha256": child.get("artifact_set_sha256")
+                if isinstance(child, dict)
+                else None,
                 "model_content_digests": (
-                    child["model_content_digests"]
-                    if isinstance(child, dict)
-                    else []
+                    child["model_content_digests"] if isinstance(child, dict) else []
                 ),
             }
         )
@@ -245,43 +255,54 @@ def _view_document(view: RecipeImageAvailabilityView) -> RecipeImageAvailability
     # image_progress is intentionally optional while the runtime image child
     # has not been created. Once present, it is required to be a typed object.
     if view.image_progress is not None:
-        children.append(_child({
-            "id": view.id,
-            "request_key": view.request_id,
-            "state": view.image_state or view.state,
-            "progress": view.image_progress,
-            "failure": view.image_failure,
-        }, kind="runtime-image"))
-    return RecipeImageAvailabilityResponse.model_validate({
-        "id": str(document["id"]),
-        "request_id": str(document["request_id"]),
-        "kind": document["kind"],
-        "state": document["state"],
-        "attempt": require_integer(document["attempt"], "attempt"),
-        "recipe_revision_id": str(document["recipe_revision_id"]),
-        "recipe_content_sha256": str(document["recipe_content_sha256"]),
-        "progress": _progress(document.get("progress")),
-        "children": children,
-        "result": result_model,
-        "failure": (
-            AvailabilityOperationFailure.model_validate(failure)
-            if isinstance(failure, dict)
-            else None
-        ),
-        "actions": [
-            RecipeImageAvailabilityAction.model_validate({"key": item})
-            for item in require_sequence(
-                document.get("supported_actions", []), "supported actions"
+        children.append(
+            _child(
+                {
+                    "id": view.id,
+                    "request_key": view.request_id,
+                    "state": view.image_state or view.state,
+                    "progress": view.image_progress,
+                    "failure": view.image_failure,
+                },
+                kind="runtime-image",
             )
-        ],
-        "created_at": str(document["created_at"]),
-        "updated_at": str(document["updated_at"]),
-    })
+        )
+    return RecipeImageAvailabilityResponse.model_validate(
+        {
+            "id": str(document["id"]),
+            "request_id": str(document["request_id"]),
+            "kind": document["kind"],
+            "state": document["state"],
+            "attempt": require_integer(document["attempt"], "attempt"),
+            "recipe_revision_id": str(document["recipe_revision_id"]),
+            "recipe_content_sha256": str(document["recipe_content_sha256"]),
+            "progress": _progress(document.get("progress")),
+            "children": children,
+            "result": result_model,
+            "failure": (
+                AvailabilityOperationFailure.model_validate(failure)
+                if isinstance(failure, dict)
+                else None
+            ),
+            "actions": [
+                RecipeImageAvailabilityAction.model_validate({"key": item})
+                for item in require_sequence(
+                    document.get("supported_actions", []), "supported actions"
+                )
+            ],
+            "created_at": str(document["created_at"]),
+            "updated_at": str(document["updated_at"]),
+        }
+    )
 
 
-def _service(service: RecipeImageAvailabilityService | None) -> RecipeImageAvailabilityService:
+def _service(
+    service: RecipeImageAvailabilityService | None,
+) -> RecipeImageAvailabilityService:
     if service is None:
-        raise HTTPException(status_code=503, detail="recipe image availability is unavailable")
+        raise HTTPException(
+            status_code=503, detail="recipe image availability is unavailable"
+        )
     return service
 
 
@@ -300,7 +321,9 @@ def _recipe_error(error: BaseException) -> HTTPException:
         return HTTPException(status_code=409, detail=str(error))
     if code.endswith("invalid"):
         return HTTPException(status_code=422, detail=str(error))
-    return HTTPException(status_code=503, detail="recipe image availability is unavailable")
+    return HTTPException(
+        status_code=503, detail="recipe image availability is unavailable"
+    )
 
 
 def install_recipe_operator_routes(
@@ -321,45 +344,51 @@ def install_recipe_operator_routes(
         cancelled_operations = require_sequence(
             result.get("cancelled_operations", []), "cancelled operations"
         )
-        return RecipeOperatorResponse.model_validate({
-            "schema_version": integer(result.get("schema_version"), default=2),
-            "action": "remove",
-            "selector": str(result["selector"]),
-            "request_key": str(result["request_key"]),
-            "operation_id": str(result["operation_id"]),
-            "recipe_revision_id": str(result["recipe_revision_id"]),
-            "state": result["state"],
-            "progress": OperationProgress(
-                phase="completed",
-                completed_bytes=reclaimed_bytes,
-                total_bytes=reclaimed_bytes,
-                total_bytes_known=True,
-                completed_items=len(cancelled_operations),
-                total_items=len(cancelled_operations),
-            ),
-            "reclaimed_bytes": reclaimed_bytes,
-            "preserved": [
-                str(item)
-                for item in require_sequence(result.get("preserved", []), "preserved")
-            ],
-            "next_actions": [
-                str(item)
-                for item in require_sequence(result.get("next_actions", []), "next actions")
-            ],
-            "cancelled_operations": [str(item) for item in cancelled_operations],
-            "cancelled_builds": [
-                str(item)
-                for item in require_sequence(
-                    result.get("cancelled_builds", []), "cancelled builds"
-                )
-            ],
-            "model_removals": [
-                str(item)
-                for item in require_sequence(
-                    result.get("model_removals", []), "model removals"
-                )
-            ],
-        })
+        return RecipeOperatorResponse.model_validate(
+            {
+                "schema_version": integer(result.get("schema_version"), default=2),
+                "action": "remove",
+                "selector": str(result["selector"]),
+                "request_key": str(result["request_key"]),
+                "operation_id": str(result["operation_id"]),
+                "recipe_revision_id": str(result["recipe_revision_id"]),
+                "state": result["state"],
+                "progress": OperationProgress(
+                    phase="completed",
+                    completed_bytes=reclaimed_bytes,
+                    total_bytes=reclaimed_bytes,
+                    total_bytes_known=True,
+                    completed_items=len(cancelled_operations),
+                    total_items=len(cancelled_operations),
+                ),
+                "reclaimed_bytes": reclaimed_bytes,
+                "preserved": [
+                    str(item)
+                    for item in require_sequence(
+                        result.get("preserved", []), "preserved"
+                    )
+                ],
+                "next_actions": [
+                    str(item)
+                    for item in require_sequence(
+                        result.get("next_actions", []), "next actions"
+                    )
+                ],
+                "cancelled_operations": [str(item) for item in cancelled_operations],
+                "cancelled_builds": [
+                    str(item)
+                    for item in require_sequence(
+                        result.get("cancelled_builds", []), "cancelled builds"
+                    )
+                ],
+                "model_removals": [
+                    str(item)
+                    for item in require_sequence(
+                        result.get("model_removals", []), "model removals"
+                    )
+                ],
+            }
+        )
 
     @app.get(
         "/api/recipe/operations/{operation_id}",
@@ -398,13 +427,17 @@ def install_recipe_operator_routes(
         _mutating(actor, "/api/recipe/{selector:path}/download")
         try:
             if service is None:
-                raise HTTPException(status_code=503, detail="recipe image availability is unavailable")
-            return _view_document(service.start_selector(
-                selector,
-                actor=actor.subject,
-                request_id=body.request_key,
-                force=True,
-            ))
+                raise HTTPException(
+                    status_code=503, detail="recipe image availability is unavailable"
+                )
+            return _view_document(
+                service.start_selector(
+                    selector,
+                    actor=actor.subject,
+                    request_id=body.request_key,
+                    force=True,
+                )
+            )
         except HTTPException:
             raise
         except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
@@ -426,7 +459,9 @@ def install_recipe_operator_routes(
         _mutating(actor, "/api/recipe/{selector:path}/remove")
         try:
             if service is None:
-                raise HTTPException(status_code=503, detail="recipe image availability is unavailable")
+                raise HTTPException(
+                    status_code=503, detail="recipe image availability is unavailable"
+                )
             result = service.remove_selector(
                 selector,
                 actor=actor.subject,
@@ -454,14 +489,18 @@ def install_recipe_operator_routes(
         _mutating(actor, "/api/recipe/update")
         try:
             if service is None:
-                raise HTTPException(status_code=503, detail="recipe image availability is unavailable")
+                raise HTTPException(
+                    status_code=503, detail="recipe image availability is unavailable"
+                )
             views = service.update(
                 actor=actor.subject,
                 request_id=body.request_key,
                 selectors=body.selectors,
                 all=body.all,
             )
-            return RecipeUpdateResponse(updates=[_view_document(view) for view in views])
+            return RecipeUpdateResponse(
+                updates=[_view_document(view) for view in views]
+            )
         except HTTPException:
             raise
         except (RecipeImageAvailabilityError, KeyError, ValueError) as error:

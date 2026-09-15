@@ -30,7 +30,8 @@ agent_system = _agent_system
 
 
 def test_rust_claim_producer_uses_the_controller_request_contract(
-    agent_system, enrollment_wire_probe: Path,
+    agent_system,
+    enrollment_wire_probe: Path,
 ) -> None:
     from vonk_agent_protocol.claims import ClaimRequest
 
@@ -38,19 +39,26 @@ def test_rust_claim_producer_uses_the_controller_request_contract(
     raw = _roundtrip(
         enrollment_wire_probe,
         json.dumps(PACKAGED_RUNTIME_IDENTITY).encode(),
-        "--claim", NODE_A,
+        "--claim",
+        NODE_A,
     )
     parsed = ClaimRequest.model_validate_json(raw)
     assert parsed.node_id == NODE_A
     assert parsed.protocol_version == 3
-    assert parsed.runtime_identity.observation_receipt_public_key == (
-        PACKAGED_RUNTIME_IDENTITY["observation_receipt_public_key"]
+    assert (
+        parsed.runtime_identity.observation_receipt_public_key
+        == (PACKAGED_RUNTIME_IDENTITY["observation_receipt_public_key"])
     )
     # Submit the production serializer's bytes unchanged, bypassing the
     # convenience client's automatic claim fixture completion.
     response = client.request(
-        "POST", "/agent/claim", content=raw,
-        headers={**agent_headers(NODE_A, "serial-a"), "content-type": "application/json"},
+        "POST",
+        "/agent/claim",
+        content=raw,
+        headers={
+            **agent_headers(NODE_A, "serial-a"),
+            "content-type": "application/json",
+        },
     )
     assert response.status_code == 204, response.text
 
@@ -58,7 +66,9 @@ def test_rust_claim_producer_uses_the_controller_request_contract(
     del invalid["observation_receipt_public_key"]
     rejected = subprocess.run(
         [str(enrollment_wire_probe), "--claim", NODE_A],
-        input=json.dumps(invalid).encode() + b"\n", capture_output=True, check=False,
+        input=json.dumps(invalid).encode() + b"\n",
+        capture_output=True,
+        check=False,
     )
     assert rejected.returncode != 0
 
@@ -185,18 +195,24 @@ def test_controller_renewal_uses_the_same_issued_response(
 @pytest.mark.parametrize("path", ["/agent/renew", "/agent/renew/activate"])
 @pytest.mark.parametrize("missing", [True, False])
 def test_certificate_rotation_requires_explicit_node_identity(
-    agent_system, path: str, missing: bool,
+    agent_system,
+    path: str,
+    missing: bool,
 ) -> None:
     from vonk_agent_protocol.enrollment import ActivateRequest, RenewRequest
 
     client, _services, _sessions, _clock = agent_system
     body: dict[str, object] = (
-        {"csr": _csr_for(NODE_A).decode()} if path.endswith("renew") else {"generation": 2}
+        {"csr": _csr_for(NODE_A).decode()}
+        if path.endswith("renew")
+        else {"generation": 2}
     )
     if not missing:
         body["node_id"] = None
     response = client.post(
-        path, headers=agent_headers(NODE_A, "serial-a"), json=body,
+        path,
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=body,
     )
     assert response.status_code == 422
     model = RenewRequest if path.endswith("renew") else ActivateRequest

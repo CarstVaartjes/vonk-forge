@@ -262,6 +262,7 @@ def test_territorial_license_run_admission_is_informational(tmp_path) -> None:
         "run.license_territorial_restrictions_informational"
     )
 
+
 @pytest.mark.parametrize("platform_floor", [None, 50])
 def test_system_reserve_is_a_floor_not_workload_memory(
     tmp_path, platform_floor

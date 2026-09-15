@@ -15,6 +15,8 @@ _PRIORITY = {
     "description": 4,
     "lifecycle": 5,
 }
+
+
 def _ordered(value: object) -> object:
     if isinstance(value, Mapping):
         keys = sorted(value, key=lambda key: (_PRIORITY.get(str(key), 100), str(key)))
@@ -31,7 +33,13 @@ def serialize_document(path: str, document: Mapping[str, object]) -> bytes:
     if not isinstance(ordered, dict):
         raise TypeError("typed documents must be objects")
     if path.endswith(".json"):
-        return (json.dumps(ordered, ensure_ascii=False, sort_keys=False, indent=2) + "\n").encode()
+        return (
+            json.dumps(ordered, ensure_ascii=False, sort_keys=False, indent=2) + "\n"
+        ).encode()
     if path.endswith(".toml"):
-        return tomli_w.dumps(ordered, multiline_strings=False).replace("\r\n", "\n").encode()
+        return (
+            tomli_w.dumps(ordered, multiline_strings=False)
+            .replace("\r\n", "\n")
+            .encode()
+        )
     raise ValueError("typed proposals support only JSON and TOML documents")

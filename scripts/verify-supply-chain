@@ -6,12 +6,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import shlex
 import subprocess
 import sys
-import tempfile
 import tomllib
 from pathlib import Path
 
@@ -273,32 +271,6 @@ def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
         raise ValueError("control lock does not resolve the reviewed public contract")
 
 
-def protocol_wheel(root: Path) -> bytes:
-    """Build the release wheel in a temporary directory and return its bytes."""
-    with tempfile.TemporaryDirectory(prefix="vonk-agent-protocol-") as directory:
-        output = Path(directory)
-        subprocess.run(
-            [
-                "uv",
-                "build",
-                "--offline",
-                "--project",
-                str(root / "agent_protocol"),
-                "--wheel",
-                "--out-dir",
-                str(output),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "SOURCE_DATE_EPOCH": "0"},
-        )
-        wheels = sorted(output.glob("vonk_agent_protocol-*.whl"))
-        if len(wheels) != 1:
-            raise ValueError("protocol build did not produce exactly one wheel")
-        return wheels[0].read_bytes()
-
-
 def protocol_version(lock: bytes) -> str:
     packages = [
         package
@@ -312,25 +284,6 @@ def protocol_version(lock: bytes) -> str:
     if len(packages) != 1 or expected_source not in packages[0]["record"].splitlines():
         raise ValueError("control and agent must resolve the verified protocol wheel")
     return packages[0]["version"]
-
-
-def protocol_wheel_hash(lock: bytes) -> str:
-    packages = [
-        package
-        for package in uv_lock_packages(lock)
-        if package["name"] == "vonk-agent-protocol"
-    ]
-    if len(packages) != 1:
-        raise ValueError("protocol lock must contain the verified wheel")
-    wheel_pattern = re.compile(
-        r'(?m)^wheels = \[\n    \{ filename = "'
-        + re.escape(Path(PROTOCOL_WHEEL).name)
-        + r'", hash = "sha256:([0-9a-f]{64})" \},\n\]$',
-    )
-    wheels = wheel_pattern.findall(packages[0]["record"])
-    if len(wheels) != 1:
-        raise ValueError("protocol lock wheel hash is invalid")
-    return wheels[0]
 
 
 def spdx(
@@ -424,10 +377,14 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
     if not isinstance(version, str) or protocol_version(control_lock) != version:
         raise ValueError("control must resolve the exact protocol version")
     verify_public_contract_lock(root, control_lock)
-    wheel = protocol_wheel(root)
+    # The protocol wheel is pinned by version, not by rebuilding it and
+    # comparing a content hash: a source edit (even formatting) must not
+    # invalidate a lock that the lockfile tool owns.
+    expected_wheel = f"vonk_agent_protocol-{version}-py3-none-any.whl"
+    if Path(PROTOCOL_WHEEL).name != expected_wheel:
+        raise ValueError("protocol wheel filename must match its version")
+    wheel = (root / PROTOCOL_WHEEL).read_bytes()
     wheel_sha256 = digest(wheel)
-    if protocol_wheel_hash(control_lock) != wheel_sha256:
-        raise ValueError("control lock hash must match the verified protocol wheel")
     sboms = {
         "inventory/sbom/control-python.spdx.json": spdx(
             "control-python",

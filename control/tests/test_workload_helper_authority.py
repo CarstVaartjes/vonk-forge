@@ -73,7 +73,9 @@ def test_issuer_signs_exact_workload_helper_binding_with_distinct_key_purpose() 
     }
 
 
-def test_issuer_accepts_the_request_identity_already_bound_into_the_body_digest() -> None:
+def test_issuer_accepts_the_request_identity_already_bound_into_the_body_digest() -> (
+    None
+):
     authority = grant_issuer()
     request_id = "50000000-0000-4000-8000-000000000005"
 
@@ -94,7 +96,9 @@ def test_issuer_accepts_the_request_identity_already_bound_into_the_body_digest(
     assert grant.claims.request_id == request_id
 
 
-def test_grant_signature_cannot_be_reused_as_an_undomained_or_update_signature() -> None:
+def test_grant_signature_cannot_be_reused_as_an_undomained_or_update_signature() -> (
+    None
+):
     authority = grant_issuer()
     grant = authority.issue_grant(
         node_id="spk_" + "1" * 32,
@@ -148,7 +152,9 @@ def test_issuer_refuses_non_workload_operation_even_when_string_shaped() -> None
         )
 
 
-def test_issuer_defines_object_receipt_authority_with_a_separate_signature_domain() -> None:
+def test_issuer_defines_object_receipt_authority_with_a_separate_signature_domain() -> (
+    None
+):
     authority = receipt_issuer()
 
     receipt = authority.issue_object_receipt(object_digest="e" * 64, size=8192)

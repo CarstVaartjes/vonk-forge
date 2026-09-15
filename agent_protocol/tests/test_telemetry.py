@@ -175,7 +175,17 @@ def test_report_rejects_unversioned_rich_metrics_and_unknown_fields() -> None:
         "",
         "café\u0000",
     ],
-    ids=["null", "bool", "signed64-min", "signed64-max", "large-int", "float", "max-float", "empty-text", "unicode-control-text"],
+    ids=[
+        "null",
+        "bool",
+        "signed64-min",
+        "signed64-max",
+        "large-int",
+        "float",
+        "max-float",
+        "empty-text",
+        "unicode-control-text",
+    ],
 )
 def test_metric_scalar_boundary_accepts_json_scalars(value: object) -> None:
     assert validate_telemetry_scalar(value) == value
@@ -197,14 +207,27 @@ def test_metric_scalar_boundary_accepts_json_scalars(value: object) -> None:
         {},
         "x" * (MAX_TELEMETRY_SCALAR_STRING_CHARS + 1),
     ],
-    ids=["signed64-underflow", "signed64-overflow", "positive-infinity", "negative-infinity", "nan", "array", "object", "overlong-text"],
+    ids=[
+        "signed64-underflow",
+        "signed64-overflow",
+        "positive-infinity",
+        "negative-infinity",
+        "nan",
+        "array",
+        "object",
+        "overlong-text",
+    ],
 )
-def test_metric_scalar_boundary_rejects_non_scalars_and_out_of_range_values(value: object) -> None:
+def test_metric_scalar_boundary_rejects_non_scalars_and_out_of_range_values(
+    value: object,
+) -> None:
     with pytest.raises(ValueError):
         validate_telemetry_scalar(value)
     invalid = report()
     invalid["samples"][0]["metrics"]["series"][0]["value"] = value  # type: ignore[index]
-    with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)|scalar"):
+    with pytest.raises(
+        AgentProtocolError, match="schema (validation|is invalid)|scalar"
+    ):
         TelemetryRequest.parse(invalid)
 
 
@@ -256,12 +279,19 @@ def test_report_rejects_malformed_collection_shapes(path: tuple[object, ...]) ->
 
 
 @pytest.mark.parametrize("rank", [-1, 2**32, True])
-def test_runtime_rank_rejects_values_outside_native_placement_identity(rank: int) -> None:
+def test_runtime_rank_rejects_values_outside_native_placement_identity(
+    rank: int,
+) -> None:
 
     value = {
-        "run_id": "run-1", "engine_id": "run-1", "backend": "future-engine",
-        "serving_node_ids": [], "ranks": [rank], "readiness": "unknown",
-        "adapter": "future-engine", "adapter_supported": False,
+        "run_id": "run-1",
+        "engine_id": "run-1",
+        "backend": "future-engine",
+        "serving_node_ids": [],
+        "ranks": [rank],
+        "readiness": "unknown",
+        "adapter": "future-engine",
+        "adapter_supported": False,
         "adapter_reason": "No supported metrics contract",
     }
     with pytest.raises(ValidationError):
@@ -270,10 +300,17 @@ def test_runtime_rank_rejects_values_outside_native_placement_identity(rank: int
 
 def test_runtime_rank_preserves_native_placement_upper_bound() -> None:
 
-    value = TelemetryRuntime.model_validate({
-        "run_id": "run-1", "engine_id": "run-1", "backend": "future-engine",
-        "serving_node_ids": [], "ranks": [0, 2**32 - 1], "readiness": "unknown",
-        "adapter": "future-engine", "adapter_supported": False,
-        "adapter_reason": "No supported metrics contract",
-    })
+    value = TelemetryRuntime.model_validate(
+        {
+            "run_id": "run-1",
+            "engine_id": "run-1",
+            "backend": "future-engine",
+            "serving_node_ids": [],
+            "ranks": [0, 2**32 - 1],
+            "readiness": "unknown",
+            "adapter": "future-engine",
+            "adapter_supported": False,
+            "adapter_reason": "No supported metrics contract",
+        }
+    )
     assert value.ranks == [0, 2**32 - 1]

@@ -38,11 +38,15 @@ from .test_runtime_image_preparation import (
 class _ModelObjectSource(MemoryVerifiedObjectSource):
     """Memory source that also answers the exact model-set lookup."""
 
-    def objects_for_set(self, artifact_set_sha256: str) -> tuple[DistributionObject, ...]:
+    def objects_for_set(
+        self, artifact_set_sha256: str
+    ) -> tuple[DistributionObject, ...]:
         return self.artifact_manifests[artifact_set_sha256]
 
 
-def test_direct_image_receipt_flows_from_prepare_to_target_verify(tmp_path: Path) -> None:
+def test_direct_image_receipt_flows_from_prepare_to_target_verify(
+    tmp_path: Path,
+) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = prepare_runtime_image(
         _recipe("recipe-image.json"),
@@ -55,7 +59,9 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(tmp_path: Path
     sessions = sessionmaker(engine, expire_on_commit=False)
     revision_id = "revision-direct"
     model_set_digest = "a" * 64
-    model = DistributionObject(name="weights.bin", sha256="b" * 64, bytes=7, kind="model")
+    model = DistributionObject(
+        name="weights.bin", sha256="b" * 64, bytes=7, kind="model"
+    )
     source = _ModelObjectSource()
     source.register_artifact_set(model_set_digest, (model,))
     executor = DurableDistributionPhaseExecutor(
@@ -110,7 +116,11 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(tmp_path: Path
 
     executor._ensure_child = ensure_child
     phase = RunSwitchPhase(
-        index=0, kind="transfer", state="planned", node_ids=list(nodes), detail="transfer phase"
+        index=0,
+        kind="transfer",
+        state="planned",
+        node_ids=list(nodes),
+        detail="transfer phase",
     )
     first = executor.execute(
         plan,
@@ -118,7 +128,10 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(tmp_path: Path
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress={"workload_intent_ordinal": 1, "phase_results": [runtime_result, runtime_plan_result]},
+        progress={
+            "workload_intent_ordinal": 1,
+            "phase_results": [runtime_result, runtime_plan_result],
+        },
     )
     assert first.operation_id == "child-direct"
     assignment = next(iter(captured.values())).to_mapping()
@@ -128,13 +141,21 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(tmp_path: Path
     verify = executor.execute(
         plan,
         RunSwitchPhase(
-            index=1, kind="verify", state="planned", node_ids=list(nodes), detail="verify phase"
+            index=1,
+            kind="verify",
+            state="planned",
+            node_ids=list(nodes),
+            detail="verify phase",
         ),
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000001",
         progress={
-            "phase_results": [runtime_result, runtime_plan_result, {"assignments": {nodes[0]: assignment}}],
+            "phase_results": [
+                runtime_result,
+                runtime_plan_result,
+                {"assignments": {nodes[0]: assignment}},
+            ],
             "evidence": [
                 {
                     "node_id": nodes[0],

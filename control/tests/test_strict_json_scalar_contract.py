@@ -229,9 +229,7 @@ def test_fastapi_presence_policy_traverses_mapping_response_values() -> None:
         response = client.get("/presence")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "nested": {"required_nullable": None, "enabled": False}
-    }
+    assert response.json() == {"nested": {"required_nullable": None, "enabled": False}}
 
 
 def test_model_library_json_roundtrip_preserves_datetime_and_strict_tags() -> None:
@@ -254,7 +252,10 @@ def test_model_library_json_roundtrip_preserves_datetime_and_strict_tags() -> No
             ModelLibraryResponse.model_validate_json(json.dumps(payload))
 
     mapping = snapshot.model_dump()
-    assert ModelLibraryResponse.model_validate(mapping).generated_at == snapshot.generated_at
+    assert (
+        ModelLibraryResponse.model_validate(mapping).generated_at
+        == snapshot.generated_at
+    )
 
 
 def test_library_identity_json_roundtrip_preserves_uuid_wire_text() -> None:
@@ -342,12 +343,33 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
         return body
 
     with TestClient(app) as client:
-        assert client.post("/cache", json={"request_key": "00000000-0000-4000-8000-000000000001", "with_model": "yes"}).status_code == 422
-        assert client.post("/cache", json={"request_key": "00000000-0000-4000-8000-000000000001", "with_model": True}).status_code == 200
+        assert (
+            client.post(
+                "/cache",
+                json={
+                    "request_key": "00000000-0000-4000-8000-000000000001",
+                    "with_model": "yes",
+                },
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                "/cache",
+                json={
+                    "request_key": "00000000-0000-4000-8000-000000000001",
+                    "with_model": True,
+                },
+            ).status_code
+            == 200
+        )
         assert (
             client.post(
                 "/image",
-                json={"request_key": "00000000-0000-4000-8000-000000000001", "with_model": 1},
+                json={
+                    "request_key": "00000000-0000-4000-8000-000000000001",
+                    "with_model": 1,
+                },
             ).status_code
             == 422
         )
@@ -359,8 +381,7 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
                     "observed_at": "2026-01-01T00:00:00Z",
                     "runs": [],
                 },
-            )
-            .status_code
+            ).status_code
             == 422
         )
         assert (
@@ -371,8 +392,7 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
                     "observed_at": "2026-01-01T00:00:00Z",
                     "runs": [],
                 },
-            )
-            .status_code
+            ).status_code
             == 422
         )
         assert (
@@ -383,11 +403,16 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
                     "observed_at": "2026-01-01T00:00:00Z",
                     "runs": [],
                 },
-            )
-            .status_code
+            ).status_code
             == 200
         )
 
     schemas = app.openapi()["components"]["schemas"]
-    assert schemas["ModelCacheOperatorRequest"]["properties"]["with_model"]["type"] == "boolean"
-    assert schemas["RecipeOperatorRequest"]["properties"]["with_model"]["type"] == "boolean"
+    assert (
+        schemas["ModelCacheOperatorRequest"]["properties"]["with_model"]["type"]
+        == "boolean"
+    )
+    assert (
+        schemas["RecipeOperatorRequest"]["properties"]["with_model"]["type"]
+        == "boolean"
+    )

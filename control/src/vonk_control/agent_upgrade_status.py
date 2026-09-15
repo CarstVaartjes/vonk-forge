@@ -18,7 +18,7 @@ RECOVERABLE_AGENT_UPGRADE_REASONS = frozenset(
         "agent upgrade helper is unavailable",
         "agent upgrade did not restart the service",
         "agent upgrade helper rejected the request: package_preflight_failed",
-    "agent upgrade helper rejected the request: package_verification_failed",
+        "agent upgrade helper rejected the request: package_verification_failed",
         "agent upgrade helper rejected the request: package_metadata_failed",
         "agent upgrade helper rejected the request: package_custody_failed",
         "agent upgrade helper rejected the request: package_install_failed",

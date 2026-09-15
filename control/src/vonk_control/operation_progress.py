@@ -188,7 +188,13 @@ def aggregate_progress(members: Sequence[OperationMemberProgress]) -> OperationP
         and all(member.eta_seconds is not None for member in active)
     )
     phases = {member.phase for member in active or members}
-    phase = next(iter(phases)) if len(phases) == 1 else "transfer" if phases and phases <= TRANSFER_PHASES else "prepare"
+    phase = (
+        next(iter(phases))
+        if len(phases) == 1
+        else "transfer"
+        if phases and phases <= TRANSFER_PHASES
+        else "prepare"
+    )
     timestamps = [
         member.last_progress_at for member in members if member.last_progress_at
     ]

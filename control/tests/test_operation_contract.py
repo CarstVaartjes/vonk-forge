@@ -58,14 +58,17 @@ def test_progress_makes_unknown_totals_explicit_with_canonical_fields() -> None:
     assert known.model_dump(mode="json")["total_bytes"] == 100
 
 
-@pytest.mark.parametrize("field", [
-    "bytes_done",
-    "bytes_completed",
-    "bytes_total",
-    "rate",
-    "rate_bytes_per_second",
-    "total_unknown",
-])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "bytes_done",
+        "bytes_completed",
+        "bytes_total",
+        "rate",
+        "rate_bytes_per_second",
+        "total_unknown",
+    ],
+)
 def test_progress_retired_aliases_are_rejected(field: str) -> None:
     with pytest.raises(ValidationError, match=field):
         OperationProgress.model_validate({"phase": "download", field: 10})
@@ -182,22 +185,33 @@ def test_uncertain_operations_require_inspection_before_resume() -> None:
 
 def test_partial_progress_preserves_omitted_members_but_clears_explicit_empty() -> None:
     previous = {
-        "phase": "transfer", "completed_bytes": 10,
-        "total_bytes": 100, "total_bytes_known": True,
+        "phase": "transfer",
+        "completed_bytes": 10,
+        "total_bytes": 100,
+        "total_bytes_known": True,
         "members": [{"member_id": "node", "phase": "transfer", "completed_bytes": 10}],
     }
     retained = validate_progress_update(previous, {"phase": "verify"})
     assert retained["completed_bytes"] == 10
     assert retained["total_bytes"] == 100
-    members = require_sequence(retained["members"], "retained members must be a sequence")
+    members = require_sequence(
+        retained["members"], "retained members must be a sequence"
+    )
     member = require_mapping(members[0], "retained member must be an object")
     assert member["member_id"] == "node"
     cleared = validate_progress_update(previous, {"phase": "verify", "members": []})
     assert cleared["members"] == []
     assert cleared["completed_bytes"] == 10
-    snapshot = validate_progress_update(previous, {
-        "phase": "verify", "completed_bytes": 10, "total_bytes_known": False, "members": [],
-    }, partial=False)
+    snapshot = validate_progress_update(
+        previous,
+        {
+            "phase": "verify",
+            "completed_bytes": 10,
+            "total_bytes_known": False,
+            "members": [],
+        },
+        partial=False,
+    )
     assert snapshot["members"] == []
     assert snapshot["total_bytes_known"] is False
     assert "total_bytes" not in snapshot
@@ -205,5 +219,8 @@ def test_partial_progress_preserves_omitted_members_but_clears_explicit_empty() 
 
 def test_canonical_progress_retains_default_zero_false_and_empty_members() -> None:
     assert normalize_operation_progress({"phase": "queued"}) == {
-        "phase": "queued", "completed_bytes": 0, "total_bytes_known": False, "members": [],
+        "phase": "queued",
+        "completed_bytes": 0,
+        "total_bytes_known": False,
+        "members": [],
     }

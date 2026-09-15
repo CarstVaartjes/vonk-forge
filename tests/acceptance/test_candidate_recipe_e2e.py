@@ -253,7 +253,12 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
     base_url = os.environ.get("VONK_ACCEPTANCE_CONTROL_URL")
     package_index_url = os.environ.get("VONK_ACCEPTANCE_PACKAGE_INDEX_URL")
     token_path = _path("VONK_ACCEPTANCE_TOKEN_FILE")
-    if not base_url or not package_index_url or token_path is None or not token_path.is_file():
+    if (
+        not base_url
+        or not package_index_url
+        or token_path is None
+        or not token_path.is_file()
+    ):
         pytest.skip(
             "set VONK_ACCEPTANCE_CONTROL_URL, VONK_ACCEPTANCE_PACKAGE_INDEX_URL "
             "and VONK_ACCEPTANCE_TOKEN_FILE for connected Controller checks"
@@ -297,7 +302,10 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
 
         sync = client.post(
             "/api/catalog/managed-recipes/sync",
-            json={"request_key": request_key, "expected_commit": index["source_commit"]},
+            json={
+                "request_key": request_key,
+                "expected_commit": index["source_commit"],
+            },
         )
         assert sync.status_code == 200, sync.text[:1024]
         sync_payload = sync.json()
@@ -315,7 +323,9 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         assert model_response.status_code == 200, model_response.text[:1024]
         model_payload = model_response.json()
         ModelLibraryResponse.from_dict(model_payload)
-        assert model_payload["next_cursor"] is None, "acceptance must inspect the whole catalog"
+        assert model_payload["next_cursor"] is None, (
+            "acceptance must inspect the whole catalog"
+        )
         actual_models = {
             _identity_key(row["document"], row["identity"]["content_sha256"]): row
             for row in model_payload["models"]
@@ -331,7 +341,9 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         assert recipe_response.status_code == 200, recipe_response.text[:1024]
         recipe_payload = recipe_response.json()
         RecipeLibraryResponse.from_dict(recipe_payload)
-        assert recipe_payload["next_cursor"] is None, "acceptance must inspect the whole catalog"
+        assert recipe_payload["next_cursor"] is None, (
+            "acceptance must inspect the whole catalog"
+        )
         recipes = {
             _identity_key(row["document"], row["identity"]["content_sha256"]): row
             for row in recipe_payload["recipes"]
@@ -342,18 +354,25 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         assert candidate["document"] == entry["document"]
         identity = candidate["identity"]
         assert identity["recipe_revision_id"] not in {
-            identity["recipe_id"], identity["content_sha256"]
+            identity["recipe_id"],
+            identity["content_sha256"],
         }
 
-        detail_response = client.get("/api/recipe/" + quote(candidate["selector"], safe=""))
+        detail_response = client.get(
+            "/api/recipe/" + quote(candidate["selector"], safe="")
+        )
         assert detail_response.status_code == 200, detail_response.text[:1024]
         detail_payload = detail_response.json()
         RecipeDetailResponse.from_dict(detail_payload)
         assert detail_payload["identity"] == identity
         assert detail_payload["document"] == entry["document"]
         selections = entry["document"]["models"]
-        assert [item["selection"] for item in detail_payload["model_documents"]] == selections
-        assert [item["model_document"] for item in detail_payload["model_documents"]] == [
+        assert [
+            item["selection"] for item in detail_payload["model_documents"]
+        ] == selections
+        assert [
+            item["model_document"] for item in detail_payload["model_documents"]
+        ] == [
             expected_models[
                 _identity_key(selection["model"], selection["model"]["content_sha256"])
             ]
@@ -368,8 +387,20 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         "VONK_CONTROL_TOKEN_FILE": os.fspath(token_path),
     }
     listed = subprocess.run(
-        [os.fspath(cli), "--json", "recipe", "library", "--all-models", "--limit", "512"],
-        check=False, capture_output=True, text=True, env=cli_env, timeout=timeout,
+        [
+            os.fspath(cli),
+            "--json",
+            "recipe",
+            "library",
+            "--all-models",
+            "--limit",
+            "512",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=cli_env,
+        timeout=timeout,
     )
     assert listed.returncode == 0, listed.stderr[-2048:]
     cli_payload = json.loads(listed.stdout)
@@ -380,14 +411,20 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         for row in cli_payload["recipes"]
     } == expected_recipe_keys
     cli_candidate = next(
-        row for row in cli_payload["recipes"] if row["selector"] == candidate["selector"]
+        row
+        for row in cli_payload["recipes"]
+        if row["selector"] == candidate["selector"]
     )
     assert cli_candidate["identity"] == identity
     assert cli_candidate["document"] == entry["document"]
 
     shown = subprocess.run(
         [os.fspath(cli), "--json", "recipe", "detail", candidate["selector"]],
-        check=False, capture_output=True, text=True, env=cli_env, timeout=timeout,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=cli_env,
+        timeout=timeout,
     )
     assert shown.returncode == 0, shown.stderr[-2048:]
     cli_detail = json.loads(shown.stdout)

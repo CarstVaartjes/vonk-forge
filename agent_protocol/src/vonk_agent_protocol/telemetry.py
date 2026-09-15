@@ -32,8 +32,15 @@ MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
 MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
 
 TelemetryScope = Literal[
-    "node", "accelerator", "memory", "storage", "network", "runtime",
-    "workload", "service", "benchmark"
+    "node",
+    "accelerator",
+    "memory",
+    "storage",
+    "network",
+    "runtime",
+    "workload",
+    "service",
+    "benchmark",
 ]
 TelemetrySupport = Literal["available", "unsupported", "unavailable", "stale"]
 TelemetryFreshness = Literal["fresh", "delayed", "stale"]
@@ -166,7 +173,9 @@ class TelemetrySeries(TelemetryWireModel):
             json_schema_extra=_NO_CONTROL_SCHEMA,
         ),
     ]
-    _parse_observed_at = field_validator("observed_at", "received_at", mode="before")(_rfc3339_datetime)
+    _parse_observed_at = field_validator("observed_at", "received_at", mode="before")(
+        _rfc3339_datetime
+    )
 
     @field_validator("value", mode="before")
     @classmethod
@@ -222,7 +231,9 @@ class TelemetryProvenance(TelemetryWireModel):
     collector_version: TelemetryIdentifier
     host_uptime_seconds: int | None = Field(default=None, ge=0, le=2**63 - 1)
     source_observed_at: datetime | None = None
-    _parse_source_observed_at = field_validator("source_observed_at", mode="before")(_rfc3339_datetime)
+    _parse_source_observed_at = field_validator("source_observed_at", mode="before")(
+        _rfc3339_datetime
+    )
 
 
 class TelemetryRuntime(TelemetryWireModel):
@@ -235,7 +246,9 @@ class TelemetryRuntime(TelemetryWireModel):
     model_version: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     recipe_revision: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     context_limit_tokens: int | None = Field(default=None, ge=1, le=2**63 - 1)
-    serving_node_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(max_length=64)
+    serving_node_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
+        max_length=64
+    )
     # Rank identity is shared with the compiled placement and native u32 rank.
     ranks: list[Annotated[int, Field(ge=0, le=2**32 - 1)]] = Field(max_length=64)
     readiness: TelemetryRunState
@@ -265,7 +278,9 @@ class TelemetryWorkload(TelemetryWireModel):
     engine_id: Annotated[str, Field(min_length=1, max_length=128)]
     state: TelemetryWorkloadState
     origin_node_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
-    executor_node_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(max_length=64)
+    executor_node_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = (
+        Field(max_length=64)
+    )
     created_at: datetime | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -276,7 +291,9 @@ class TelemetryWorkload(TelemetryWireModel):
     progress_max: float | None = Field(default=None, gt=0, le=1_000_000)
     eta_seconds: float | None = Field(default=None, ge=0, le=86_400 * 365)
     eta_source: Annotated[str, Field(min_length=1, max_length=64)] | None = None
-    _parse_times = field_validator("created_at", "started_at", "ended_at", mode="before")(_rfc3339_datetime)
+    _parse_times = field_validator(
+        "created_at", "started_at", "ended_at", mode="before"
+    )(_rfc3339_datetime)
 
     @model_validator(mode="after")
     def workload_identity_and_state(self) -> TelemetryWorkload:
@@ -302,7 +319,15 @@ class TelemetryMetrics(TelemetryWireModel):
     @model_validator(mode="after")
     def bounded_and_unique(self) -> TelemetryMetrics:
         def identity(item: TelemetrySeries | TelemetryCapability) -> tuple[object, ...]:
-            return (item.key, item.scope, item.device_id, item.process_id, item.interface_name, item.run_id)
+            return (
+                item.key,
+                item.scope,
+                item.device_id,
+                item.process_id,
+                item.interface_name,
+                item.run_id,
+            )
+
         series = [identity(item) for item in self.series]
         capabilities = [identity(item) for item in self.capabilities]
         if len(series) != len(set(series)):
@@ -313,7 +338,9 @@ class TelemetryMetrics(TelemetryWireModel):
 
 
 class TelemetrySample(TelemetryWireModel):
-    boot_id: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+    boot_id: str = Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    )
     observed_at: datetime
     cpu_utilization_percent: float | None = Field(ge=0, le=100, allow_inf_nan=False)
     load_average_1m: float | None = Field(ge=0, le=1_000_000, allow_inf_nan=False)
@@ -326,12 +353,18 @@ class TelemetrySample(TelemetryWireModel):
     gpu_memory_free_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
     temperature_c: float | None = Field(ge=-100, le=300, allow_inf_nan=False)
     power_watts: float | None = Field(ge=0, le=100_000, allow_inf_nan=False)
-    network_receive_bytes_per_second: float | None = Field(ge=0, le=MAX_TELEMETRY_RATE, allow_inf_nan=False)
-    network_transmit_bytes_per_second: float | None = Field(ge=0, le=MAX_TELEMETRY_RATE, allow_inf_nan=False)
+    network_receive_bytes_per_second: float | None = Field(
+        ge=0, le=MAX_TELEMETRY_RATE, allow_inf_nan=False
+    )
+    network_transmit_bytes_per_second: float | None = Field(
+        ge=0, le=MAX_TELEMETRY_RATE, allow_inf_nan=False
+    )
     gap_samples: int = Field(ge=0, le=MAX_TELEMETRY_SCALAR_INTEGER)
     details: TelemetryDetails
     metrics: TelemetryMetrics
-    _parse_observed_at = field_validator("observed_at", mode="before")(_rfc3339_datetime)
+    _parse_observed_at = field_validator("observed_at", mode="before")(
+        _rfc3339_datetime
+    )
 
     @field_validator("boot_id")
     @classmethod
@@ -342,8 +375,14 @@ class TelemetrySample(TelemetryWireModel):
 
     @model_validator(mode="after")
     def internally_consistent(self) -> TelemetrySample:
-        for total, available in ((self.memory_total_bytes, self.memory_available_bytes), (self.disk_total_bytes, self.disk_free_bytes), (self.gpu_memory_total_bytes, self.gpu_memory_free_bytes)):
-            if (total is None) is not (available is None) or (total is not None and available is not None and available > total):
+        for total, available in (
+            (self.memory_total_bytes, self.memory_available_bytes),
+            (self.disk_total_bytes, self.disk_free_bytes),
+            (self.gpu_memory_total_bytes, self.gpu_memory_free_bytes),
+        ):
+            if (total is None) is not (available is None) or (
+                total is not None and available is not None and available > total
+            ):
                 raise ValueError("telemetry capacity values are inconsistent")
         return self
 
@@ -356,7 +395,10 @@ class TelemetryRequest(TelemetryWireModel):
     def ordered_unique_samples(self) -> TelemetryRequest:
         previous_observed_at: datetime | None = None
         for sample in self.samples:
-            if previous_observed_at is not None and sample.observed_at <= previous_observed_at:
+            if (
+                previous_observed_at is not None
+                and sample.observed_at <= previous_observed_at
+            ):
                 raise ValueError("telemetry observations are not ordered")
             previous_observed_at = sample.observed_at
         return self
@@ -366,13 +408,17 @@ class TelemetryRequest(TelemetryWireModel):
         try:
             encoded = canonical_message(raw)
         except (ValidationError, TypeError, ValueError) as error:
-            raise AgentProtocolError(f"telemetry report schema is invalid: {error}") from error
+            raise AgentProtocolError(
+                f"telemetry report schema is invalid: {error}"
+            ) from error
         if len(encoded) > MAX_TELEMETRY_REPORT_BYTES:
             raise AgentProtocolError("telemetry report is too large")
         try:
             return cls.model_validate_json(encoded)
         except ValidationError as error:
-            raise AgentProtocolError(f"telemetry report schema is invalid: {error}") from error
+            raise AgentProtocolError(
+                f"telemetry report schema is invalid: {error}"
+            ) from error
 
     def document(self) -> dict[str, Any]:
         return json.loads(canonical_message(self.model_dump(mode="json")))

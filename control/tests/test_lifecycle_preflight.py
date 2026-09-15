@@ -78,7 +78,9 @@ def _finish(sessions, checkpoint, now, *, failed=None, fingerprint="a" * 64):
 
 
 def _setup(tmp_path, *, node_count=1):
-    sessions, _lifecycle, queue, _, _, nodes = setup_services(tmp_path, nodes=node_count)
+    sessions, _lifecycle, queue, _, _, nodes = setup_services(
+        tmp_path, nodes=node_count
+    )
     _clear(sessions)
     clock = SimpleNamespace(now=NOW)
     with sessions() as session:
@@ -131,16 +133,18 @@ def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path
     )
     assert claim is not None and claim.job_id == pending.pending_job_id
     # Exercise the HTTP request contract against IDs from the real dispatcher.
-    request = HostRuntimeGrantRequest.model_validate({
-        "node_id": claim.node_id,
-        "job_id": claim.job_id,
-        "operation_id": claim.operation_id,
-        "attempt": claim.attempt,
-        "fence": claim.fence,
-        "action": "runtime-preflight",
-        "request_sha256": "e" * 64,
-        "expires_in_seconds": 10,
-    })
+    request = HostRuntimeGrantRequest.model_validate(
+        {
+            "node_id": claim.node_id,
+            "job_id": claim.job_id,
+            "operation_id": claim.operation_id,
+            "attempt": claim.attempt,
+            "fence": claim.fence,
+            "action": "runtime-preflight",
+            "request_sha256": "e" * 64,
+            "expires_in_seconds": 10,
+        }
+    )
     issuer = HostHelperGrantIssuer(
         ed25519.Ed25519PrivateKey.from_private_bytes(b"m" * 32),
         clock=lambda: clock.now,
@@ -235,7 +239,8 @@ def test_changed_earlier_rank_is_reprobed_after_pending_peer_completes(tmp_path)
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.capabilities = [
-            value for value in node.capabilities
+            value
+            for value in node.capabilities
             if not value.startswith("runtime.preflight.fingerprint.")
         ] + ["runtime.preflight.fingerprint." + "b" * 64]
     _finish(sessions, second, clock.now)
@@ -278,7 +283,9 @@ def test_pending_probe_deadline_survives_restart_and_progress_updates(tmp_path, 
     assert timed_out.receipts == {}
 
 
-def test_completed_probe_is_consumed_even_when_controller_resumes_after_deadline(tmp_path):
+def test_completed_probe_is_consumed_even_when_controller_resumes_after_deadline(
+    tmp_path,
+):
     sessions, _, clock, node_id, service, arguments = _setup(tmp_path)
     checkpoint, _ = service.ensure(**arguments, previous=None)
     _finish(sessions, checkpoint, clock.now)
@@ -289,7 +296,9 @@ def test_completed_probe_is_consumed_even_when_controller_resumes_after_deadline
 
 
 @pytest.mark.parametrize("probe_completed", [True, False])
-def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(tmp_path, probe_completed):
+def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(
+    tmp_path, probe_completed
+):
     from vonk_control.run_switch_contract import RunSwitchApplyRequest
 
     from .test_recipe_operations import installed_recipe
@@ -304,10 +313,23 @@ def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(tm
     installed_recipe(lifecycle, mapping, build, nodes, request_id=str(uuid.uuid4()))
     _clear(sessions)
     artifacts = RecordingArtifactExecutor(child_transfer=True)
-    service = _service(sessions, NOW, lifecycle, artifacts, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        artifacts,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
     request = _request(sessions, nodes[0])
     plan = service.preview(request, actor="admin")
-    operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
     service.tick()
     pending = service.get(operation.operation_id)
     pending_result = pending.result
@@ -322,7 +344,13 @@ def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(tm
     assert pending_progress.phase == "runtime-preflight"
     if probe_completed:
         _finish(sessions, pending_preflight, NOW)
-    restarted = _service(sessions, NOW + timedelta(seconds=180), lifecycle, artifacts, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
+    restarted = _service(
+        sessions,
+        NOW + timedelta(seconds=180),
+        lifecycle,
+        artifacts,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
     restarted.tick()
     active = restarted.get(operation.operation_id)
     if not probe_completed:

@@ -53,8 +53,14 @@ def _library_detail(
         json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     identity = definition.identity
-    rid = recipe_id or str(recipe.get("__recipe_id") or uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:{identity.publisher}/{identity.slug}"))
-    rev = revision_id or str(recipe.get("__revision_id") or uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:{rid}:revision"))
+    rid = recipe_id or str(
+        recipe.get("__recipe_id")
+        or uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:{identity.publisher}/{identity.slug}")
+    )
+    rev = revision_id or str(
+        recipe.get("__revision_id")
+        or uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:{rid}:revision")
+    )
     model_documents = []
     for selection in canonical["models"]:
         model = json.loads(
@@ -103,7 +109,12 @@ def _library_detail(
         },
         "definition": canonical,
         "topology": canonical["topology"],
-        "operational_state": {"builds": [], "mappings": [], "installations": [], "runs": []},
+        "operational_state": {
+            "builds": [],
+            "mappings": [],
+            "installations": [],
+            "runs": [],
+        },
         "placement": [],
         "reasons": [],
         "model_documents": model_documents,

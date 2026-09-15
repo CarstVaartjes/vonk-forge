@@ -47,7 +47,13 @@ class LiteLlmGeneration:
 
 
 class LiteLlmPublisher:
-    def __init__(self, root: Path, *, validate: Callable[[bytes], bool], apply: Callable[[bytes], None]) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        validate: Callable[[bytes], bool],
+        apply: Callable[[bytes], None],
+    ) -> None:
         if root.is_symlink():
             raise LiteLlmPolicyError("LiteLLM state root must not be a symlink")
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -58,13 +64,19 @@ class LiteLlmPublisher:
     @staticmethod
     def render(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
         if routes.state != "published" or not routes.aliases:
-            raise LiteLlmPolicyError("LiteLLM models require a published route snapshot")
-        if any(not isinstance(value, str) or not value for value in routes.aliases.values()):
+            raise LiteLlmPolicyError(
+                "LiteLLM models require a published route snapshot"
+            )
+        if any(
+            not isinstance(value, str) or not value for value in routes.aliases.values()
+        ):
             raise LiteLlmPolicyError("LiteLLM routes must be already-rendered strings")
         models = dict(policy.models)
         unknown = set(models) - set(routes.aliases)
         if unknown:
-            raise LiteLlmPolicyError("LiteLLM policy contains models outside published aliases")
+            raise LiteLlmPolicyError(
+                "LiteLLM policy contains models outside published aliases"
+            )
         if not models and not policy.deployments:
             raise LiteLlmPolicyError("LiteLLM policy must publish at least one model")
         model_list = []
@@ -81,18 +93,27 @@ class LiteLlmPublisher:
             ):
                 raise LiteLlmPolicyError("LiteLLM upstream model is invalid")
             rpm, tpm = quota["requests_per_minute"], quota["tokens_per_minute"]
-            if not isinstance(rpm, int) or not isinstance(tpm, int) or not 1 <= rpm <= 100_000 or not 1 <= tpm <= 100_000_000:
-                raise LiteLlmPolicyError("LiteLLM model quotas are outside allowed bounds")
-            model_list.append({
-                "model_name": alias,
-                "litellm_params": {
-                    "model": f"openai/{upstream_model}",
-                    "api_base": routes.aliases[alias].rstrip("/"),
-                    "api_key": "os.environ/LITELLM_UPSTREAM_KEY",
-                    "rpm": rpm,
-                    "tpm": tpm,
-                },
-            })
+            if (
+                not isinstance(rpm, int)
+                or not isinstance(tpm, int)
+                or not 1 <= rpm <= 100_000
+                or not 1 <= tpm <= 100_000_000
+            ):
+                raise LiteLlmPolicyError(
+                    "LiteLLM model quotas are outside allowed bounds"
+                )
+            model_list.append(
+                {
+                    "model_name": alias,
+                    "litellm_params": {
+                        "model": f"openai/{upstream_model}",
+                        "api_base": routes.aliases[alias].rstrip("/"),
+                        "api_key": "os.environ/LITELLM_UPSTREAM_KEY",
+                        "rpm": rpm,
+                        "tpm": tpm,
+                    },
+                }
+            )
         deployments = sorted(policy.deployments, key=lambda item: item.priority)
         if len({item.priority for item in deployments}) != len(deployments):
             raise LiteLlmPolicyError("Hermes deployment priorities must be unique")
@@ -100,33 +121,37 @@ class LiteLlmPublisher:
             raise LiteLlmPolicyError("Hermes deployment workloads must be unique")
         for deployment in deployments:
             LiteLlmPublisher._validate_hermes_deployment(deployment)
-            model_list.append({
-                "model_name": deployment.model_name,
-                "litellm_params": {
-                    "model": f"openai/{deployment.workload}",
-                    "api_base": deployment.api_base,
-                    "api_key": "os.environ/LITELLM_UPSTREAM_KEY",
-                    "order": deployment.priority,
-                    "rpm": deployment.requests_per_minute,
-                    "tpm": deployment.tokens_per_minute,
-                },
-            })
+            model_list.append(
+                {
+                    "model_name": deployment.model_name,
+                    "litellm_params": {
+                        "model": f"openai/{deployment.workload}",
+                        "api_base": deployment.api_base,
+                        "api_key": "os.environ/LITELLM_UPSTREAM_KEY",
+                        "order": deployment.priority,
+                        "rpm": deployment.requests_per_minute,
+                        "tpm": deployment.tokens_per_minute,
+                    },
+                }
+            )
         router_settings = {
             "enable_pre_call_checks": True,
             "routing_strategy": "simple-shuffle",
         }
         if deployments:
-            router_settings.update({
-                "allowed_fails": 0,
-                "num_retries": 1,
-                "retry_policy": {
-                    "AuthenticationErrorRetries": 0,
-                    "BadRequestErrorRetries": 0,
-                    "ContentPolicyViolationErrorRetries": 0,
-                    "RateLimitErrorRetries": 1,
-                    "TimeoutErrorRetries": 1,
-                },
-            })
+            router_settings.update(
+                {
+                    "allowed_fails": 0,
+                    "num_retries": 1,
+                    "retry_policy": {
+                        "AuthenticationErrorRetries": 0,
+                        "BadRequestErrorRetries": 0,
+                        "ContentPolicyViolationErrorRetries": 0,
+                        "RateLimitErrorRetries": 1,
+                        "TimeoutErrorRetries": 1,
+                    },
+                }
+            )
         document = {
             "general_settings": {
                 "database_url": "os.environ/LITELLM_DATABASE_URL",
@@ -143,7 +168,9 @@ class LiteLlmPublisher:
             "model_list": model_list,
             "router_settings": router_settings,
         }
-        return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        return (
+            json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
 
     @staticmethod
     def _validate_hermes_deployment(deployment: LiteLlmDeployment) -> None:
@@ -151,19 +178,28 @@ class LiteLlmPublisher:
             raise LiteLlmPolicyError("Hermes deployment alias must be hermes-agent")
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", deployment.workload):
             raise LiteLlmPolicyError("Hermes deployment workload is invalid")
-        if isinstance(deployment.priority, bool) or not isinstance(deployment.priority, int) or deployment.priority < 1:
+        if (
+            isinstance(deployment.priority, bool)
+            or not isinstance(deployment.priority, int)
+            or deployment.priority < 1
+        ):
             raise LiteLlmPolicyError("Hermes deployment priority is invalid")
         for value in (deployment.requests_per_minute, deployment.tokens_per_minute):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise LiteLlmPolicyError("Hermes deployment quota is invalid")
-        if deployment.requests_per_minute > 100_000 or deployment.tokens_per_minute > 100_000_000:
+        if (
+            deployment.requests_per_minute > 100_000
+            or deployment.tokens_per_minute > 100_000_000
+        ):
             raise LiteLlmPolicyError("Hermes deployment quota is invalid")
         try:
             parsed = urlsplit(deployment.api_base)
             address = ipaddress.ip_address(parsed.hostname or "")
             port = parsed.port
         except ValueError as error:
-            raise LiteLlmPolicyError("Hermes deployment must use a local IP URL") from error
+            raise LiteLlmPolicyError(
+                "Hermes deployment must use a local IP URL"
+            ) from error
         if (
             parsed.scheme != "http"
             or not isinstance(address, ipaddress.IPv4Address)
@@ -202,7 +238,9 @@ class LiteLlmPublisher:
                 "routing_strategy": "simple-shuffle",
             },
         }
-        return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        return (
+            json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
 
     def publish(self, routes: RouteState, policy: LiteLlmPolicy) -> LiteLlmGeneration:
         content = self.render(routes, policy)
@@ -214,9 +252,7 @@ class LiteLlmPublisher:
             raise LiteLlmPolicyError("empty LiteLLM route digest is invalid")
         return self._publish_content(self.render_empty(), route_digest)
 
-    def _publish_content(
-        self, content: bytes, route_digest: str
-    ) -> LiteLlmGeneration:
+    def _publish_content(self, content: bytes, route_digest: str) -> LiteLlmGeneration:
         if self._validate(content) is not True:
             raise LiteLlmPolicyError("LiteLLM candidate failed validation")
         current = self.active(optional=True)
@@ -226,22 +262,33 @@ class LiteLlmPublisher:
         try:
             directory.mkdir(mode=0o700)
             target = directory / "config.yaml"
-            descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+            descriptor = os.open(
+                target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+            )
             with os.fdopen(descriptor, "wb") as output:
-                output.write(content); output.flush(); os.fsync(output.fileno())
+                output.write(content)
+                output.flush()
+                os.fsync(output.fileno())
             self._apply(content)
         except LiteLlmPolicyError:
             raise
         except Exception as error:
-            raise LiteLlmPolicyError("LiteLLM candidate apply failed; previous generation retained") from error
+            raise LiteLlmPolicyError(
+                "LiteLLM candidate apply failed; previous generation retained"
+            ) from error
         generation = LiteLlmGeneration(number, route_digest, digest, str(target))
-        pointer = (json.dumps(generation.__dict__, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        pointer = (
+            json.dumps(generation.__dict__, sort_keys=True, separators=(",", ":"))
+            + "\n"
+        ).encode()
         descriptor, temporary_raw = tempfile.mkstemp(prefix=".active-", dir=self._root)
         temporary = Path(temporary_raw)
         try:
             os.fchmod(descriptor, 0o600)
             with os.fdopen(descriptor, "wb") as output:
-                output.write(pointer); output.flush(); os.fsync(output.fileno())
+                output.write(pointer)
+                output.flush()
+                os.fsync(output.fileno())
             os.replace(temporary, self._root / "active.json")
         finally:
             temporary.unlink(missing_ok=True)
@@ -257,10 +304,22 @@ class LiteLlmPublisher:
             raise LiteLlmPolicyError("LiteLLM active pointer is unsafe")
         try:
             raw = json.loads(pointer.read_bytes())
-            generation = LiteLlmGeneration(raw["generation"], raw["route_digest"], raw["config_sha256"], raw["path"])
+            generation = LiteLlmGeneration(
+                raw["generation"],
+                raw["route_digest"],
+                raw["config_sha256"],
+                raw["path"],
+            )
             config = Path(generation.path)
-            if config.is_symlink() or not config.is_file() or hashlib.sha256(config.read_bytes()).hexdigest() != generation.config_sha256:
+            if (
+                config.is_symlink()
+                or not config.is_file()
+                or hashlib.sha256(config.read_bytes()).hexdigest()
+                != generation.config_sha256
+            ):
                 raise LiteLlmPolicyError("LiteLLM active generation checksum mismatch")
             return generation
         except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
-            raise LiteLlmPolicyError("LiteLLM active generation is unreadable") from error
+            raise LiteLlmPolicyError(
+                "LiteLLM active generation is unreadable"
+            ) from error

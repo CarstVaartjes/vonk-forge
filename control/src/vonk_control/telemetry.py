@@ -257,7 +257,9 @@ class TelemetryMetricView:
     aggregation: str = "mean"
 
 
-def _merge_metric_views(left: TelemetryMetricView, right: TelemetryMetricView) -> TelemetryMetricView:
+def _merge_metric_views(
+    left: TelemetryMetricView, right: TelemetryMetricView
+) -> TelemetryMetricView:
     """Merge rollup values while preserving their series identity."""
 
     count = left.count + right.count
@@ -273,7 +275,9 @@ def _merge_metric_views(left: TelemetryMetricView, right: TelemetryMetricView) -
             key=right.key or left.key,
             scope=right.scope or left.scope,
             device_id=right.device_id or left.device_id,
-            process_id=right.process_id if right.process_id is not None else left.process_id,
+            process_id=right.process_id
+            if right.process_id is not None
+            else left.process_id,
             process_name=right.process_name or left.process_name,
             interface_name=right.interface_name or left.interface_name,
             run_id=right.run_id or left.run_id,
@@ -288,7 +292,9 @@ def _merge_metric_views(left: TelemetryMetricView, right: TelemetryMetricView) -
         key=right.key or left.key,
         scope=right.scope or left.scope,
         device_id=right.device_id or left.device_id,
-        process_id=right.process_id if right.process_id is not None else left.process_id,
+        process_id=right.process_id
+        if right.process_id is not None
+        else left.process_id,
         process_name=right.process_name or left.process_name,
         interface_name=right.interface_name or left.interface_name,
         run_id=right.run_id or left.run_id,
@@ -642,7 +648,9 @@ class TelemetryRepository:
                         scope=metric.scope,
                         device_id=metric.device_id,
                         process_id=(
-                            None if metric.process_id is None else int(metric.process_id)
+                            None
+                            if metric.process_id is None
+                            else int(metric.process_id)
                         ),
                         process_name=metric.process_name,
                         interface_name=metric.interface_name,
@@ -722,7 +730,9 @@ class TelemetryRepository:
                         scope=metric.scope,
                         device_id=metric.device_id,
                         process_id=(
-                            None if metric.process_id is None else int(metric.process_id)
+                            None
+                            if metric.process_id is None
+                            else int(metric.process_id)
                         ),
                         process_name=metric.process_name,
                         interface_name=metric.interface_name,
@@ -741,9 +751,7 @@ class TelemetryRepository:
             start_of_day = _stored_utc(bucket.bucket_start).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
-            source_count, gaps, metrics = grouped.get(
-                start_of_day, (0, 0, {})
-            )
+            source_count, gaps, metrics = grouped.get(start_of_day, (0, 0, {}))
             source_count += int(bucket.source_sample_count)
             gaps += int(bucket.gap_samples)
             for name, metric in metrics_by_bucket[

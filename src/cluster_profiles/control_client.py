@@ -145,7 +145,12 @@ class ControlResponseTooLarge(ControlClientError):
 
 
 class ControlTransportError(ControlClientError):
-    def __init__(self, message: str = "control API request failed", *, context: ErrorContext | None = None) -> None:
+    def __init__(
+        self,
+        message: str = "control API request failed",
+        *,
+        context: ErrorContext | None = None,
+    ) -> None:
         super().__init__(message, context=context)
 
 
@@ -218,7 +223,11 @@ class ControlHTTPError(ControlClientError):
         self.required_bytes = required_bytes
         self.free_bytes = free_bytes
         self.shortfall_bytes = shortfall_bytes
-        self.log_excerpt = _sanitize_remote_text(log_excerpt, "", sensitive_values=sensitive_values) if log_excerpt else None
+        self.log_excerpt = (
+            _sanitize_remote_text(log_excerpt, "", sensitive_values=sensitive_values)
+            if log_excerpt
+            else None
+        )
         self.detail = _sanitize_remote_text(
             detail,
             "control API request failed",
@@ -320,9 +329,11 @@ def _sanitize_remote_text(
 @lru_cache(maxsize=1)
 def _control_openapi() -> dict[str, object]:
     try:
-        raw = files("cluster_profiles.schemas").joinpath(
-            "control-openapi.json"
-        ).read_text()
+        raw = (
+            files("cluster_profiles.schemas")
+            .joinpath("control-openapi.json")
+            .read_text()
+        )
         schema = json.loads(raw)
         Draft202012Validator.check_schema(schema)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, SchemaError):
@@ -392,9 +403,7 @@ def _request_contract(
     request_body = operation.get("requestBody")
     if not isinstance(request_body, dict):
         if payload is not None:
-            raise ControlClientError(
-                "control API request has no OpenAPI request body"
-            )
+            raise ControlClientError("control API request has no OpenAPI request body")
         return
     if payload is None:
         if request_body.get("required") is True:
@@ -424,14 +433,10 @@ def _request_media_contract(path: str, method: str, media_type: str) -> None:
         raise ControlClientError("control API request has no OpenAPI request body")
     content = request_body.get("content")
     if not isinstance(content, dict) or media_type not in content:
-        raise ControlClientError(
-            "control API request content type is not documented"
-        )
+        raise ControlClientError("control API request content type is not documented")
 
 
-def _response_definition(
-    path: str, method: str, status: int
-) -> dict[str, object]:
+def _response_definition(path: str, method: str, status: int) -> dict[str, object]:
     operation = _operation(path, method)
     responses = operation.get("responses")
     if not isinstance(responses, dict):
@@ -485,9 +490,7 @@ def _validate_generated_request(request: httpx.Request) -> None:
                     "control API request contains invalid JSON"
                 ) from None
             if not isinstance(payload, Mapping):
-                raise ControlClientError(
-                    "control API request must be a JSON object"
-                )
+                raise ControlClientError("control API request must be a JSON object")
             _request_contract(route_path, request.method, payload)
         else:
             _request_media_contract(
@@ -516,7 +519,9 @@ def _validate_generated_response(
         try:
             decoded = json.loads(response.content)
         except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ControlMalformedResponse("control API returned invalid JSON") from None
+            raise ControlMalformedResponse(
+                "control API returned invalid JSON"
+            ) from None
         _response_contract(route_path, request.method, response.status_code, decoded)
     else:
         _response_definition(route_path, request.method, response.status_code)
@@ -775,11 +780,15 @@ class ControlClient:
             code = headers.get("x-vonk-error-code")
         if not isinstance(code, str) or not code:
             code = None
-        recovery_value = getattr(parsed, "recovery_actions", getattr(parsed, "recovery", ()))
+        recovery_value = getattr(
+            parsed, "recovery_actions", getattr(parsed, "recovery", ())
+        )
         if isinstance(recovery_value, str):
             recovery = (recovery_value,)
         elif isinstance(recovery_value, (list, tuple)):
-            recovery = tuple(item for item in recovery_value if isinstance(item, str))[:8]
+            recovery = tuple(item for item in recovery_value if isinstance(item, str))[
+                :8
+            ]
         else:
             recovery = ()
         retry_time = getattr(parsed, "retry_time", None)
@@ -838,13 +847,17 @@ class ControlClient:
                     transport.response.status_code,
                     None,
                     transport.response.headers,
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
+                    if transport.request
+                    else "control.http",
                     endpoint=str(transport.request.url) if transport.request else None,
                 )
             raise ControlMalformedResponse(
                 "control API response exceeds the nesting limit",
                 context=protocol_context(
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
+                    if transport.request
+                    else "control.http",
                     endpoint=str(transport.request.url) if transport.request else None,
                 ),
             ) from None
@@ -854,13 +867,17 @@ class ControlClient:
                     transport.response.status_code,
                     None,
                     transport.response.headers,
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
+                    if transport.request
+                    else "control.http",
                     endpoint=str(transport.request.url) if transport.request else None,
                 )
             raise ControlMalformedResponse(
                 "control API returned invalid JSON",
                 context=protocol_context(
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
+                    if transport.request
+                    else "control.http",
                     endpoint=str(transport.request.url) if transport.request else None,
                 ),
             ) from None
@@ -870,13 +887,17 @@ class ControlClient:
                     transport.response.status_code,
                     None,
                     transport.response.headers,
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
+                    if transport.request
+                    else "control.http",
                     endpoint=str(transport.request.url) if transport.request else None,
                 )
             raise ControlMalformedResponse(
                 "control API response does not match the generated schema",
                 context=protocol_context(
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}" if transport.request else "control.http",
+                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
+                    if transport.request
+                    else "control.http",
                     endpoint=str(transport.request.url) if transport.request else None,
                 ),
             ) from None
@@ -885,7 +906,9 @@ class ControlClient:
             response.status_code,
             response.parsed,
             response.headers,
-            operation=f"{request.method} {safe_endpoint(str(request.url))}" if request else "control.http",
+            operation=f"{request.method} {safe_endpoint(str(request.url))}"
+            if request
+            else "control.http",
             endpoint=str(request.url) if request else None,
         )
         if 200 <= response.status_code < 300 and response.parsed is not None:
@@ -932,9 +955,7 @@ class ControlClient:
         if extra_headers is not None:
             headers.update(extra_headers)
         if payload is not None:
-            data = json.dumps(
-                payload, sort_keys=True, separators=(",", ":")
-            ).encode()
+            data = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(
             self._base + path, data=data, headers=headers, method=method
@@ -981,7 +1002,9 @@ class ControlClient:
                     )
                 _response_contract(route_path, method, status, problem)
             detail = problem.get("detail") if isinstance(problem, dict) else None
-            problem_context = problem.get("context") if isinstance(problem, Mapping) else None
+            problem_context = (
+                problem.get("context") if isinstance(problem, Mapping) else None
+            )
             error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
             fields, body_retry_after = _structured_http_error_fields(problem)
             if fields.get("code") is None:
@@ -1104,7 +1127,9 @@ class ControlClient:
                 operation="read artifact input", path=source, error=error
             )
             raise ControlClientError(
-                context.render("artifact input must be a readable regular non-symlink file"),
+                context.render(
+                    "artifact input must be a readable regular non-symlink file"
+                ),
                 context=context,
             ) from None
         finally:
@@ -1213,7 +1238,9 @@ class ControlClient:
                     raise ControlResponseTooLarge(
                         "control API response exceeds safety limit"
                     )
-                error_media_type = error.headers.get("content-type", "").split(";", 1)[0]
+                error_media_type = error.headers.get("content-type", "").split(";", 1)[
+                    0
+                ]
                 _response_media_contract(
                     path,
                     "GET",
@@ -1262,9 +1289,9 @@ class ControlClient:
                 ) from None
             with response_context as response:
                 if not 200 <= response.status < 300:
-                    response_media_type = response.headers.get("content-type", "").split(
-                        ";", 1
-                    )[0]
+                    response_media_type = response.headers.get(
+                        "content-type", ""
+                    ).split(";", 1)[0]
                     _response_media_contract(
                         path,
                         "GET",

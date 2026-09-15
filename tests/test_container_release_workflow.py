@@ -367,24 +367,36 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
 
 
 @pytest.mark.parametrize("fault", ["transient", "digest", "revision", "sbom"])
-def test_published_image_fetch_recovery_still_verifies_identity_and_attestations(tmp_path, fault):
+def test_published_image_fetch_recovery_still_verifies_identity_and_attestations(
+    tmp_path, fault
+):
     revision = "a" * 40
     digest = "sha256:" + "b" * 64
     manifest = {
         "mediaType": "application/vnd.oci.image.index.v1+json",
         "manifests": [
-            image_descriptor("amd64", "c"), image_descriptor("arm64", "d"),
-            attestation_descriptor("c", "e"), attestation_descriptor("d", "f"),
+            image_descriptor("amd64", "c"),
+            image_descriptor("arm64", "d"),
+            attestation_descriptor("c", "e"),
+            attestation_descriptor("d", "f"),
         ],
     }
     documents = {
         "Manifest": manifest,
-        "Provenance": {f"linux/{arch}": {
-            "predicateType": "https://slsa.dev/provenance/v1", "revision": revision,
-        } for arch in ("amd64", "arm64")},
-        "SBOM": {f"linux/{arch}": {
-            "SPDXID": "SPDXRef-DOCUMENT", "spdxVersion": "SPDX-2.3",
-        } for arch in ("amd64", "arm64")},
+        "Provenance": {
+            f"linux/{arch}": {
+                "predicateType": "https://slsa.dev/provenance/v1",
+                "revision": revision,
+            }
+            for arch in ("amd64", "arm64")
+        },
+        "SBOM": {
+            f"linux/{arch}": {
+                "SPDXID": "SPDXRef-DOCUMENT",
+                "spdxVersion": "SPDX-2.3",
+            }
+            for arch in ("amd64", "arm64")
+        },
     }
     if fault == "sbom":
         documents["SBOM"].pop("linux/arm64")
@@ -393,7 +405,7 @@ def test_published_image_fetch_recovery_still_verifies_identity_and_attestations
     requests = tmp_path / "requests"
     # Stub only the remote reads. Execute the real shell, retry helper, jq
     # validation and multiarch verifier against their documented CLI responses.
-    fake = f'''#!/usr/bin/env python3
+    fake = f"""#!/usr/bin/env python3
 import json, pathlib, sys
 log = pathlib.Path({str(requests)!r})
 args = sys.argv[1:]
@@ -405,23 +417,35 @@ if {fault!r} == "transient" and ".Provenance" in key and key not in previous:
     print("connection reset by peer", file=sys.stderr)
     sys.exit(1)
 if "--config" in args:
-    print(json.dumps({{"config": {{"Labels": {{"org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge", "org.opencontainers.image.revision": {('0' * 40 if fault == 'revision' else revision)!r}}}}}}}))
+    print(json.dumps({{"config": {{"Labels": {{"org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge", "org.opencontainers.image.revision": {("0" * 40 if fault == "revision" else revision)!r}}}}}}}))
 elif args[0] == "inspect":
-    print({('sha256:' + '0' * 64 if fault == 'digest' else digest)!r})
+    print({("sha256:" + "0" * 64 if fault == "digest" else digest)!r})
 else:
     documents = {documents!r}
     field = next(field for field in documents if "." + field in key)
     print(json.dumps(documents[field]))
-'''
+"""
     for name in ("docker", "skopeo"):
         tool = tool_bin / name
         tool.write_text(fake)
         tool.chmod(0o755)
     result = subprocess.run(
-        [ROOT / "scripts/verify-published-image", "api",
-         "ghcr.io/carstvaartjes/vonk-forge-api", digest, "dev-sha-" + revision],
-        cwd=ROOT, capture_output=True, text=True, check=False,
-        env={**os.environ, "PATH": f"{tool_bin}:{os.environ['PATH']}", "RUNNER_TEMP": str(tmp_path)},
+        [
+            ROOT / "scripts/verify-published-image",
+            "api",
+            "ghcr.io/carstvaartjes/vonk-forge-api",
+            digest,
+            "dev-sha-" + revision,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "PATH": f"{tool_bin}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+        },
     )
     assert (result.returncode == 0) == (fault == "transient"), result.stderr
     calls = requests.read_text().splitlines()
@@ -1414,7 +1438,10 @@ def reusable_image_repo(tmp_path):
     policy = runpy.run_path(str(ROOT / "scripts/dev-image-inputs"))
     repo = tmp_path / "repo"
     repo.mkdir()
-    for name in (*policy["POLICY"], *(p for paths in policy["CONTEXTS"].values() for p in paths)):
+    for name in (
+        *policy["POLICY"],
+        *(p for paths in policy["CONTEXTS"].values() for p in paths),
+    ):
         source = ROOT / name
         destination = repo / name
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1422,7 +1449,9 @@ def reusable_image_repo(tmp_path):
             shutil.copytree(source, destination, dirs_exist_ok=True)
         else:
             shutil.copy2(source, destination)
-    subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "init", "-b", "main", str(repo)], check=True, capture_output=True
+    )
     for key, value in (("user.email", "test@example.com"), ("user.name", "Test")):
         subprocess.run(["git", "config", key, value], cwd=repo, check=True)
     return repo
@@ -1430,17 +1459,30 @@ def reusable_image_repo(tmp_path):
 
 def _image_commit(repo: Path) -> str:
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
-    subprocess.run(["git", "-c", "commit.gpgsign=false", "commit", "-qm", "inputs"], cwd=repo, check=True)
-    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", "commit", "-qm", "inputs"],
+        cwd=repo,
+        check=True,
+    )
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
 
 
 def _image_inputs(repo: Path, *args: str):
-    return subprocess.run([repo / "scripts/dev-image-inputs", *args], cwd=repo,
-                          check=False, capture_output=True, text=True)
+    return subprocess.run(
+        [repo / "scripts/dev-image-inputs", *args],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 @pytest.mark.parametrize("role", ["hermes", "litellm"])
-def test_image_cache_inputs_are_the_actual_isolated_build_context(reusable_image_repo, tmp_path, role):
+def test_image_cache_inputs_are_the_actual_isolated_build_context(
+    reusable_image_repo, tmp_path, role
+):
     repo = reusable_image_repo
     original = _image_commit(repo)
     original_key = _image_inputs(repo, "key", role, original).stdout
@@ -1452,8 +1494,14 @@ def test_image_cache_inputs_are_the_actual_isolated_build_context(reusable_image
     result = _image_inputs(repo, "prepare", role, current, str(context))
     assert result.returncode == 0, result.stderr
     assert not (context / "unrelated-controller.py").exists()
-    copied = "entrypoint.sh" if role == "hermes" else "agent_protocol/src/vonk_agent_protocol/route_activation.py"
-    source = repo / ("deploy/compose/hermes-agent/entrypoint.sh" if role == "hermes" else copied)
+    copied = (
+        "entrypoint.sh"
+        if role == "hermes"
+        else "agent_protocol/src/vonk_agent_protocol/route_activation.py"
+    )
+    source = repo / (
+        "deploy/compose/hermes-agent/entrypoint.sh" if role == "hermes" else copied
+    )
     assert (context / copied).read_bytes() == source.read_bytes()
     assert (context / copied).stat().st_mode & 0o777 == source.stat().st_mode & 0o777
     source.write_text(source.read_text() + "\n# changed input\n")
@@ -1461,8 +1509,12 @@ def test_image_cache_inputs_are_the_actual_isolated_build_context(reusable_image
     assert _image_inputs(repo, "matches", role, original, changed).returncode != 0
 
 
-@pytest.mark.parametrize("change", ["mode", "delete", "rename", "dockerfile", "policy", "symlink", "sibling"])
-def test_image_reuse_rejects_changed_or_unrelated_source(reusable_image_repo, tmp_path, change):
+@pytest.mark.parametrize(
+    "change", ["mode", "delete", "rename", "dockerfile", "policy", "symlink", "sibling"]
+)
+def test_image_reuse_rejects_changed_or_unrelated_source(
+    reusable_image_repo, tmp_path, change
+):
     repo = reusable_image_repo
     original = _image_commit(repo)
     source = repo / "deploy/compose/hermes-agent/entrypoint.sh"
@@ -1484,20 +1536,37 @@ def test_image_reuse_rejects_changed_or_unrelated_source(reusable_image_repo, tm
         # Identical inputs from a sibling branch are not accepted ancestors.
         (repo / "first").write_text("one")
         original = _image_commit(repo)
-        subprocess.run(["git", "checkout", "-b", "sibling", "HEAD~1"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "checkout", "-b", "sibling", "HEAD~1"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
         (repo / "second").write_text("two")
     current = _image_commit(repo)
     assert _image_inputs(repo, "matches", "hermes", original, current).returncode != 0
     if change == "symlink":
-        assert _image_inputs(repo, "prepare", "hermes", current, str(tmp_path / "context")).returncode != 0
+        assert (
+            _image_inputs(
+                repo, "prepare", "hermes", current, str(tmp_path / "context")
+            ).returncode
+            != 0
+        )
 
 
-@pytest.mark.parametrize("fault", [None, "missing", "signature", "changed", "platform_revision", "sbom", "digest"])
-def test_cached_image_is_reverified_before_current_run_receipt(reusable_image_repo, tmp_path, fault):
+@pytest.mark.parametrize(
+    "fault",
+    [None, "missing", "signature", "changed", "platform_revision", "sbom", "digest"],
+)
+def test_cached_image_is_reverified_before_current_run_receipt(
+    reusable_image_repo, tmp_path, fault
+):
     repo = reusable_image_repo
     built = _image_commit(repo)
     if fault == "changed":
-        (repo / "deploy/compose/litellm/config_supervisor.py").write_text("changed smoke input\n")
+        (repo / "deploy/compose/litellm/config_supervisor.py").write_text(
+            "changed smoke input\n"
+        )
     else:
         (repo / "controller-change").write_text("unrelated\n")
     accepted = _image_commit(repo)
@@ -1505,26 +1574,39 @@ def test_cached_image_is_reverified_before_current_run_receipt(reusable_image_re
     cache = tmp_path / "cache"
     if fault != "missing":
         cache.mkdir()
-        (cache / "image.json").write_text(json.dumps({"digest": digest, "build_commit": built}))
+        (cache / "image.json").write_text(
+            json.dumps({"digest": digest, "build_commit": built})
+        )
         (cache / "provenance.json").write_text("signed bundle fixture")
     manifest = {
         "mediaType": "application/vnd.oci.image.index.v1+json",
-        "manifests": [image_descriptor("amd64", "c"), image_descriptor("arm64", "d"),
-                      attestation_descriptor("c", "e"), attestation_descriptor("d", "f")],
+        "manifests": [
+            image_descriptor("amd64", "c"),
+            image_descriptor("arm64", "d"),
+            attestation_descriptor("c", "e"),
+            attestation_descriptor("d", "f"),
+        ],
     }
     documents = {
         "Manifest": manifest,
-        "Provenance": {f"linux/{arch}": {"predicateType": "https://slsa.dev/provenance/v1", "revision": built}
-                       for arch in ("amd64", "arm64")},
-        "SBOM": {f"linux/{arch}": {"SPDXID": "SPDXRef-DOCUMENT", "spdxVersion": "SPDX-2.3"}
-                 for arch in ("amd64", "arm64")},
+        "Provenance": {
+            f"linux/{arch}": {
+                "predicateType": "https://slsa.dev/provenance/v1",
+                "revision": built,
+            }
+            for arch in ("amd64", "arm64")
+        },
+        "SBOM": {
+            f"linux/{arch}": {"SPDXID": "SPDXRef-DOCUMENT", "spdxVersion": "SPDX-2.3"}
+            for arch in ("amd64", "arm64")
+        },
     }
     if fault == "sbom":
         documents["SBOM"].pop("linux/arm64")
     tool_bin = tmp_path / "bin"
     tool_bin.mkdir()
     requests = tmp_path / "requests"
-    fake = f'''#!/usr/bin/env python3
+    fake = f"""#!/usr/bin/env python3
 import json, pathlib, sys
 args = sys.argv[1:]
 with pathlib.Path({str(requests)!r}).open("a") as f: f.write(pathlib.Path(sys.argv[0]).name + " " + " ".join(args) + "\\n")
@@ -1532,7 +1614,7 @@ if pathlib.Path(sys.argv[0]).name == "gh":
     assert args[:2] == ["attestation", "verify"]
     if "--bundle" in args:
         assert args[args.index("--source-digest") + 1] == {built!r}
-        assert args[args.index("--bundle") + 1] == {str(cache / 'provenance.json')!r}
+        assert args[args.index("--bundle") + 1] == {str(cache / "provenance.json")!r}
     else:
         assert args[args.index("--source-digest") + 1] == {accepted!r}
     sys.exit(1 if {fault!r} == "signature" else 0)
@@ -1541,20 +1623,37 @@ if "--config" in args:
     print(json.dumps({{"config": {{"Labels": {{"org.opencontainers.image.revision": revision,
         "org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge"}}}}}}))
 elif args[0] == "inspect":
-    print({('sha256:' + '0' * 64 if fault == 'digest' else digest)!r})
+    print({("sha256:" + "0" * 64 if fault == "digest" else digest)!r})
 else:
     documents = {documents!r}
     field = next(field for field in documents if "." + field in " ".join(args))
     print(json.dumps(documents[field]))
-'''
+"""
     for name in ("gh", "skopeo", "docker"):
         (tool_bin / name).write_text(fake)
         (tool_bin / name).chmod(0o755)
-    environment = {**os.environ, "PATH": f"{tool_bin}:{os.environ['PATH']}", "RUNNER_TEMP": str(tmp_path)}
+    environment = {
+        **os.environ,
+        "PATH": f"{tool_bin}:{os.environ['PATH']}",
+        "RUNNER_TEMP": str(tmp_path),
+    }
     receipt = tmp_path / "litellm.role-receipt.json"
-    result = subprocess.run([repo / "scripts/reuse-development-image", "litellm", accepted,
-                             str(cache), str(receipt), "123", "2"], cwd=repo, env=environment,
-                            capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        [
+            repo / "scripts/reuse-development-image",
+            "litellm",
+            accepted,
+            str(cache),
+            str(receipt),
+            "123",
+            "2",
+        ],
+        cwd=repo,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     assert (result.returncode == 0) == (fault in (None, "missing")), result.stderr
     assert receipt.exists() == (fault is None)
     if fault is None:
@@ -1563,16 +1662,42 @@ else:
         assert document["manifest_digest"] == digest
         # Current-generation tag verification must preserve original provenance,
         # while still demanding exact current-source inputs on every architecture.
-        checked = subprocess.run([repo / "scripts/verify-published-image", "litellm",
-            "ghcr.io/carstvaartjes/vonk-forge-litellm", digest, "dev-sha-" + accepted],
-            cwd=repo, env=environment, capture_output=True, text=True, check=False)
+        checked = subprocess.run(
+            [
+                repo / "scripts/verify-published-image",
+                "litellm",
+                "ghcr.io/carstvaartjes/vonk-forge-litellm",
+                digest,
+                "dev-sha-" + accepted,
+            ],
+            cwd=repo,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         assert checked.returncode == 0, checked.stderr
-        stable = subprocess.run(["bash", "-c", step_run("validate-release-images", "Validate accepted LiteLLM image")],
-            cwd=repo, env={**environment, "LITELLM_IMAGE": "ghcr.io/carstvaartjes/vonk-forge-litellm",
-                "DEV_SOURCE": "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-" + accepted,
-                "GITHUB_SHA": accepted, "GITHUB_REPOSITORY": "CarstVaartjes/vonk-forge",
-                "IMAGE_VERSION_TAG": "v0.1.1", "GITHUB_OUTPUT": str(tmp_path / "stable-output")},
-            capture_output=True, text=True, check=False)
+        stable = subprocess.run(
+            [
+                "bash",
+                "-c",
+                step_run("validate-release-images", "Validate accepted LiteLLM image"),
+            ],
+            cwd=repo,
+            env={
+                **environment,
+                "LITELLM_IMAGE": "ghcr.io/carstvaartjes/vonk-forge-litellm",
+                "DEV_SOURCE": "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-"
+                + accepted,
+                "GITHUB_SHA": accepted,
+                "GITHUB_REPOSITORY": "CarstVaartjes/vonk-forge",
+                "IMAGE_VERSION_TAG": "v0.1.1",
+                "GITHUB_OUTPUT": str(tmp_path / "stable-output"),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         assert stable.returncode == 0, stable.stderr
         assert (tmp_path / "stable-output").read_text() == f"digest={digest}\n"
         assert "build " not in requests.read_text()

@@ -40,9 +40,7 @@ def test_frontend_change_selects_web_and_its_control_owner() -> None:
 
 
 def test_control_contract_change_selects_backend_and_generation() -> None:
-    selected = _module().select(
-        ["control/src/vonk_control/models.py"], "pull_request"
-    )
+    selected = _module().select(["control/src/vonk_control/models.py"], "pull_request")
     assert selected["control"] is True
     assert selected["generated"] is True
     assert selected["web"] is False
@@ -61,9 +59,7 @@ def test_packaged_openapi_change_selects_generated_gate(path: str) -> None:
 
 
 def test_shared_ci_authority_selects_every_family() -> None:
-    assert all(
-        _module().select([".github/workflows/ci.yml"], "pull_request").values()
-    )
+    assert all(_module().select([".github/workflows/ci.yml"], "pull_request").values())
 
 
 def test_non_pr_execution_is_conservative() -> None:
@@ -100,13 +96,37 @@ def test_deleted_rust_file_selects_rust_family(tmp_path: Path) -> None:
     deleted.write_text("fn main() {}\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(tmp_path), "add", "rust/deleted.rs"], check=True)
     subprocess.run(
-        ["git", "-C", str(tmp_path), "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "initial"],
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "initial",
+        ],
         check=True,
     )
     deleted.unlink()
     diff = subprocess.run(
-        ["git", "-C", str(tmp_path), "diff", "--name-only", "--diff-filter=ACMRD", "HEAD"],
-        check=True, capture_output=True, text=True,
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "diff",
+            "--name-only",
+            "--diff-filter=ACMRD",
+            "HEAD",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.splitlines()
     selected = _module().select(diff, "pull_request")
     assert selected["rust"] is True

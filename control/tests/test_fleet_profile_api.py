@@ -52,7 +52,9 @@ def test_profile_operator_routes_are_singular_and_unversioned() -> None:
     assert unused.json()["number"] == 2
     assert unused.json()["status"] == "not-created"
 
-    assert client.get("/api/profile/2/status", headers=_headers(codec)).status_code == 404
+    assert (
+        client.get("/api/profile/2/status", headers=_headers(codec)).status_code == 404
+    )
 
 
 def test_profile_request_lookup_is_authenticated_and_reports_missing_key() -> None:

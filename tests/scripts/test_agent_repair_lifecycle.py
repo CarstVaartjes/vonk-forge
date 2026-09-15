@@ -52,9 +52,7 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
         production_phases | boot_crashpoints | {"none"}
     )
     assert "systemctl --system kill --kill-whom=all --signal=SIGKILL" in harness
-    wants_proof = harness.index(
-        "systemctl --system show --property=Wants --value"
-    )
+    wants_proof = harness.index("systemctl --system show --property=Wants --value")
     simulated_boot_start = harness.index(
         'systemctl --system start "$recovery_unit"', wants_proof
     )
@@ -361,9 +359,7 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     assert "let digest = hash_reader(&held)?;" in probe
     assert "if before != after" in probe
     assert "schema_version=1" not in probe
-    assert (
-        '"schema_version=2 setpriv_sha256={} probe_sha256={}"' in probe
-    )
+    assert '"schema_version=2 setpriv_sha256={} probe_sha256={}"' in probe
     assert probe.count('"schema_version=2 nonce={}') == 2
 
     manager = runner[
@@ -378,11 +374,11 @@ def test_repair_probe_parser_and_manager_identity_contract_is_closed() -> None:
     )
     assert (
         '"^schema_version=2 nonce=$probe_nonce authority_sha256=$authority_sha256 '
-        'helper_pid=' in manager
+        "helper_pid=" in manager
     )
     assert (
         '"^schema_version=2 nonce=$probe_nonce authority_sha256=$authority_sha256 '
-        'agent_pid=' in manager
+        "agent_pid=" in manager
     )
     assert manager.index('probe_unit_absent "$probe_unit"') < manager.index(
         "probe_output=$(/usr/bin/systemd-run"

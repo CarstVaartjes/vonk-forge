@@ -24,9 +24,14 @@ class CachedFileVerifier:
     @staticmethod
     def _identity(value: os.stat_result) -> tuple[int, ...]:
         return (
-            value.st_dev, value.st_ino, value.st_size,
-            value.st_mtime_ns, value.st_ctime_ns,
-            value.st_mode, value.st_uid, value.st_nlink,
+            value.st_dev,
+            value.st_ino,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+            value.st_mode,
+            value.st_uid,
+            value.st_nlink,
         )
 
     def verify(self, source: BinaryIO, digest: str, expected_bytes: int) -> bool:
@@ -44,7 +49,10 @@ class CachedFileVerifier:
         while chunk := source.read(1024 * 1024):
             hasher.update(chunk)
         source.seek(0)
-        if self._identity(os.fstat(source.fileno())) != identity or hasher.hexdigest() != digest:
+        if (
+            self._identity(os.fstat(source.fileno())) != identity
+            or hasher.hexdigest() != digest
+        ):
             return False
         with self._lock:
             self._verified[key] = None
@@ -55,7 +63,9 @@ class CachedFileVerifier:
 
     def verify_path(self, path: Path, digest: str, expected_bytes: int) -> bool:
         try:
-            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+            fd = os.open(
+                path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+            )
             with os.fdopen(fd, "rb") as source:
                 return self.verify(source, digest, expected_bytes)
         except OSError:

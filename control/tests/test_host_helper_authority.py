@@ -130,10 +130,14 @@ def runtime_service(
     operation_id = "30000000-0000-4000-8000-000000000003"
     fence = "40000000-0000-4000-8000-000000000004"
     with sessions.begin() as session:
-        session.add(AgentNode(
-            node_id=node_id, state="active", capabilities=[operation_kind],
-            workload_intent_ordinal=node_intent,
-        ))
+        session.add(
+            AgentNode(
+                node_id=node_id,
+                state="active",
+                capabilities=[operation_kind],
+                workload_intent_ordinal=node_intent,
+            )
+        )
         session.add(
             AgentCertificate(
                 serial="certificate-1",
@@ -157,7 +161,9 @@ def runtime_service(
                 result={
                     "cancel_requested": True,
                     "cancel_requested_at": NOW.isoformat(),
-                } if cancel_requested else None,
+                }
+                if cancel_requested
+                else None,
                 created_at=NOW,
                 updated_at=NOW,
             )
@@ -290,10 +296,13 @@ def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
 @pytest.mark.parametrize("operation_kind", ["recipe.start", "recipe.job.run.v1"])
 @pytest.mark.parametrize("node_intent", [1, 2])
 def test_cancellation_permits_only_stop_under_the_original_live_fence(
-    operation_kind: str, node_intent: int,
+    operation_kind: str,
+    node_intent: int,
 ) -> None:
     service = runtime_service(
-        operation_kind=operation_kind, cancel_requested=True, node_intent=node_intent,
+        operation_kind=operation_kind,
+        cancel_requested=True,
+        node_intent=node_intent,
     )
 
     arguments = {
@@ -315,7 +324,9 @@ def test_cancellation_permits_only_stop_under_the_original_live_fence(
             service.issue_grant(**arguments, action=action)
     for changes in ({"fence": "0" * 36}, {"certificate_serial": "wrong-certificate"}):
         with pytest.raises(HostHelperAuthorityError, match="stale"):
-            service.issue_grant(**{**arguments, **changes}, action=ContainerRuntimeAction.STOP)
+            service.issue_grant(
+                **{**arguments, **changes}, action=ContainerRuntimeAction.STOP
+            )
 
 
 def test_superseded_attempt_needs_recorded_cancellation_even_for_stop() -> None:
@@ -337,7 +348,8 @@ def test_superseded_attempt_needs_recorded_cancellation_even_for_stop() -> None:
 def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
     service = runtime_service(
         operation_payload={"phase": "collective-readiness"},
-        cancel_requested=True, node_intent=2,
+        cancel_requested=True,
+        node_intent=2,
     )
     arguments = {
         "node_id": "spk_" + "1" * 32,
@@ -413,7 +425,10 @@ def test_runtime_preflight_grant_is_bound_to_its_own_fenced_operation() -> None:
     assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
     assert operation.action == "runtime-preflight"
     assert operation.request_sha256 == "e" * 64
-    for changes in [{"fence": "50000000-0000-4000-8000-000000000005"}, {"action": ContainerRuntimeAction.START}]:
+    for changes in [
+        {"fence": "50000000-0000-4000-8000-000000000005"},
+        {"action": ContainerRuntimeAction.START},
+    ]:
         with pytest.raises(HostHelperAuthorityError):
             service.issue_grant(**{**arguments, **changes})
     with pytest.raises(HostHelperAuthorityError):
@@ -436,38 +451,101 @@ def test_runtime_authority_never_issues_a_grant_past_the_attempt_lease() -> None
 
 
 def upgrade_payload():
-    return {"schema_version": 1, "architecture": "linux-arm64", "package_sha256": "a" * 64,
-        "package_signature": "b" * 128, "package_bytes": 1000, "package_version": "0.1.2",
+    return {
+        "schema_version": 1,
+        "architecture": "linux-arm64",
+        "package_sha256": "a" * 64,
+        "package_signature": "b" * 128,
+        "package_bytes": 1000,
+        "package_version": "0.1.2",
         "package_url": "https://install.vonkforge.ai/artifacts/candidate/vonk-forge-agent.deb",
-        "target_binary_digest": "c" * 64, "target_build_digest": "sha256:" + "d" * 64,
+        "target_binary_digest": "c" * 64,
+        "target_build_digest": "sha256:" + "d" * 64,
         "source_package_url": "https://install.vonkforge.ai/artifacts/source/vonk-forge-agent.deb",
         "source_package_bytes": 999,
-        "rollback": {"attempt_nonce": "e" * 64, "activation_deadline": int(NOW.timestamp()) + 900,
-            "source": {"package_sha256": "f" * 64, "package_signature": "1" * 128,
-                "package_version": "0.1.1", "binary_sha256": "2" * 64, "helper_sha256": "3" * 64}}}
+        "rollback": {
+            "attempt_nonce": "e" * 64,
+            "activation_deadline": int(NOW.timestamp()) + 900,
+            "source": {
+                "package_sha256": "f" * 64,
+                "package_signature": "1" * 128,
+                "package_version": "0.1.1",
+                "binary_sha256": "2" * 64,
+                "helper_sha256": "3" * 64,
+            },
+        },
+    }
 
 
 def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity():
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+
     payload = upgrade_payload()
-    service = runtime_service(operation_kind="agent.upgrade.v1", operation_payload=payload)
-    receipt = PackageActivationReceipt(schema_version=2, node_id="spk_" + "1" * 32,
-        source_package_sha256="f" * 64, source_version="0.1.1", source_binary_sha256="2" * 64,
-        candidate_package_sha256="a" * 64, candidate_version="0.1.2", candidate_binary_sha256="c" * 64,
-        attempt_nonce="e" * 64, phase="armed", created_at=int(NOW.timestamp()), updated_at=int(NOW.timestamp()), outcome="watchdog_armed")
-    identity = AgentRuntimeIdentity(architecture="linux-arm64", semantic_version="0.1.2",
-        build_digest="sha256:" + "d" * 64, binary_digest="c" * 64, self_test_passed=True,
-        observation_receipt_public_key="4" * 64)
-    grant = service.issue_package_activation_grant(node_id=receipt.node_id, receipt=receipt, runtime_identity=identity, certificate_serial="certificate-1")
-    assert grant.claims.operation.to_mapping() == {"type": "confirm-package-activation", "package_sha256": "a" * 64, "attempt_nonce": "e" * 64}
-    issuer().public_key.verify(bytes.fromhex(grant.signature.value), host_helper_grant_signing_bytes(grant.claims))
-    for changed in ({"attempt_nonce": "0" * 64}, {"source_package_sha256": "0" * 64}, {"phase": "rolled_back"}, {"candidate_binary_sha256": "0" * 64}):
-        invalid = PackageActivationReceipt.model_validate({**receipt.model_dump(mode="json"), **changed})
+    service = runtime_service(
+        operation_kind="agent.upgrade.v1", operation_payload=payload
+    )
+    receipt = PackageActivationReceipt(
+        schema_version=2,
+        node_id="spk_" + "1" * 32,
+        source_package_sha256="f" * 64,
+        source_version="0.1.1",
+        source_binary_sha256="2" * 64,
+        candidate_package_sha256="a" * 64,
+        candidate_version="0.1.2",
+        candidate_binary_sha256="c" * 64,
+        attempt_nonce="e" * 64,
+        phase="armed",
+        created_at=int(NOW.timestamp()),
+        updated_at=int(NOW.timestamp()),
+        outcome="watchdog_armed",
+    )
+    identity = AgentRuntimeIdentity(
+        architecture="linux-arm64",
+        semantic_version="0.1.2",
+        build_digest="sha256:" + "d" * 64,
+        binary_digest="c" * 64,
+        self_test_passed=True,
+        observation_receipt_public_key="4" * 64,
+    )
+    grant = service.issue_package_activation_grant(
+        node_id=receipt.node_id,
+        receipt=receipt,
+        runtime_identity=identity,
+        certificate_serial="certificate-1",
+    )
+    assert grant.claims.operation.to_mapping() == {
+        "type": "confirm-package-activation",
+        "package_sha256": "a" * 64,
+        "attempt_nonce": "e" * 64,
+    }
+    issuer().public_key.verify(
+        bytes.fromhex(grant.signature.value),
+        host_helper_grant_signing_bytes(grant.claims),
+    )
+    for changed in (
+        {"attempt_nonce": "0" * 64},
+        {"source_package_sha256": "0" * 64},
+        {"phase": "rolled_back"},
+        {"candidate_binary_sha256": "0" * 64},
+    ):
+        invalid = PackageActivationReceipt.model_validate(
+            {**receipt.model_dump(mode="json"), **changed}
+        )
         with pytest.raises(HostHelperAuthorityError):
-            service.issue_package_activation_grant(node_id=receipt.node_id, receipt=invalid, runtime_identity=identity, certificate_serial="certificate-1")
+            service.issue_package_activation_grant(
+                node_id=receipt.node_id,
+                receipt=invalid,
+                runtime_identity=identity,
+                certificate_serial="certificate-1",
+            )
     with pytest.raises(HostHelperAuthorityError):
-        service.issue_package_activation_grant(node_id=receipt.node_id, receipt=receipt, runtime_identity=identity.model_copy(update={"binary_digest": "0" * 64}), certificate_serial="certificate-1")
+        service.issue_package_activation_grant(
+            node_id=receipt.node_id,
+            receipt=receipt,
+            runtime_identity=identity.model_copy(update={"binary_digest": "0" * 64}),
+            certificate_serial="certificate-1",
+        )
 
 
 INSTALLATION_ID = "70000000-0000-4000-8000-000000000007"
@@ -511,8 +589,9 @@ def cleanup_grant_arguments(installation_id: str) -> _CleanupGrantArguments:
     }
 
 
-def test_cleanup_grants_bind_only_installations_in_canonical_operation_payload(
-) -> None:
+def test_cleanup_grants_bind_only_installations_in_canonical_operation_payload() -> (
+    None
+):
     operation_kind = "recipe.uninstall"
     payload = RecipeUninstallPayload(
         schema_version=1,
@@ -540,14 +619,18 @@ def test_cleanup_grants_bind_only_installations_in_canonical_operation_payload(
             host_helper_grant_signing_bytes(grant.claims),
         )
     for installation_id in unauthorized:
-        with pytest.raises(HostHelperAuthorityError, match="installation is unauthorized"):
+        with pytest.raises(
+            HostHelperAuthorityError, match="installation is unauthorized"
+        ):
             service.issue_grant(**cleanup_grant_arguments(installation_id))
 
 
 def test_runtime_authority_rejects_installation_binding_on_noncleanup_action() -> None:
     arguments = cleanup_grant_arguments(INSTALLATION_ID)
     arguments["action"] = ContainerRuntimeAction.START
-    with pytest.raises(HostHelperAuthorityError, match="installation binding is invalid"):
+    with pytest.raises(
+        HostHelperAuthorityError, match="installation binding is invalid"
+    ):
         runtime_service().issue_grant(**arguments)
 
 
@@ -559,7 +642,9 @@ def test_cleanup_authority_rejects_malformed_persisted_payload() -> None:
         "recipe_content_sha256": "b" * 64,
     }
     # The required nullable cleanup field cannot disappear from stored authority.
-    service = runtime_service(operation_kind="recipe.uninstall", operation_payload=payload)
+    service = runtime_service(
+        operation_kind="recipe.uninstall", operation_payload=payload
+    )
     with pytest.raises(HostHelperAuthorityError, match="cleanup authority is invalid"):
         service.issue_grant(**cleanup_grant_arguments(INSTALLATION_ID))
 
@@ -570,9 +655,14 @@ def test_runtime_grant_request_enforces_cleanup_identity_and_null_policy() -> No
     document.pop("certificate_serial")
     document["action"] = "installation-cleanup"
     document["expires_in_seconds"] = 30
-    assert HostRuntimeGrantRequest.model_validate(document).installation_id == INSTALLATION_ID
+    assert (
+        HostRuntimeGrantRequest.model_validate(document).installation_id
+        == INSTALLATION_ID
+    )
     for missing in ({}, {"installation_id": None}):
-        incomplete = {key: value for key, value in document.items() if key != "installation_id"}
+        incomplete = {
+            key: value for key, value in document.items() if key != "installation_id"
+        }
         with pytest.raises(ValidationError, match="installation binding"):
             HostRuntimeGrantRequest.model_validate(incomplete | missing)
     ordinary = document | {"action": "start"}
@@ -580,6 +670,8 @@ def test_runtime_grant_request_enforces_cleanup_identity_and_null_policy() -> No
         HostRuntimeGrantRequest.model_validate(ordinary)
     ordinary.pop("installation_id")
     omitted = HostRuntimeGrantRequest.model_validate(ordinary)
-    explicit_null = HostRuntimeGrantRequest.model_validate(ordinary | {"installation_id": None})
+    explicit_null = HostRuntimeGrantRequest.model_validate(
+        ordinary | {"installation_id": None}
+    )
     assert canonical_message(omitted) == canonical_message(explicit_null)
     assert "installation_id" not in json.loads(canonical_message(explicit_null))

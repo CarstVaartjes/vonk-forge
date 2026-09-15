@@ -61,11 +61,17 @@ class StepCertificateAuthority(CertificateAuthority):
     ) -> None:
         parsed = urlsplit(ca_url)
         if (
-            parsed.scheme != "https" or not parsed.hostname or parsed.path not in {"", "/"}
-            or parsed.username is not None or parsed.password is not None
-            or parsed.query or parsed.fragment
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.path not in {"", "/"}
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
         ):
-            raise ValueError("CA URL must be a fixed HTTPS origin without credentials, path, query, or fragment")
+            raise ValueError(
+                "CA URL must be a fixed HTTPS origin without credentials, path, query, or fragment"
+            )
         if _NAME.fullmatch(provisioner_name) is None:
             raise ValueError("provisioner name is invalid")
         if _KID.fullmatch(provisioner_kid) is None:
@@ -77,9 +83,13 @@ class StepCertificateAuthority(CertificateAuthority):
         if (
             isinstance(certificate_lifetime_seconds, bool)
             or not isinstance(certificate_lifetime_seconds, int)
-            or not 90 <= certificate_lifetime_seconds <= _DEFAULT_CERTIFICATE_LIFETIME_SECONDS
+            or not 90
+            <= certificate_lifetime_seconds
+            <= _DEFAULT_CERTIFICATE_LIFETIME_SECONDS
         ):
-            raise ValueError("certificate lifetime must be an integer between 90 and 86400 seconds")
+            raise ValueError(
+                "certificate lifetime must be an integer between 90 and 86400 seconds"
+            )
         if not 0 <= clock_skew_seconds <= 60:
             raise ValueError("CA clock skew must be between zero and 60 seconds")
 
@@ -95,30 +105,48 @@ class StepCertificateAuthority(CertificateAuthority):
             credential_jwk = jwt.PyJWK.from_json(credential_pem.decode("ascii"))
             credential = credential_jwk.key
         except (UnicodeDecodeError, ValueError, jwt.PyJWTError) as error:
-            raise ValueError("provisioner credential must be a private EC P-256 JWK") from error
-        if not isinstance(credential, ec.EllipticCurvePrivateKey) or not isinstance(credential.curve, ec.SECP256R1):
+            raise ValueError(
+                "provisioner credential must be a private EC P-256 JWK"
+            ) from error
+        if not isinstance(credential, ec.EllipticCurvePrivateKey) or not isinstance(
+            credential.curve, ec.SECP256R1
+        ):
             raise ValueError(  # noqa: TRY004 - all invalid provider configuration is ValueError
                 "provisioner credential must be a private EC P-256 JWK"
             )
-        if credential_jwk.algorithm_name != "ES256" or credential_jwk.key_id != provisioner_kid:
-            raise ValueError("provisioner credential metadata does not match configured key ID")
+        if (
+            credential_jwk.algorithm_name != "ES256"
+            or credential_jwk.key_id != provisioner_kid
+        ):
+            raise ValueError(
+                "provisioner credential metadata does not match configured key ID"
+            )
         try:
             public_mapping = json.loads(public_jwk_bytes)
             public_jwk = jwt.PyJWK.from_dict(public_mapping)
         except (ValueError, TypeError, jwt.PyJWTError) as error:
-            raise ValueError("provisioner public metadata must be an EC P-256 JWK") from error
+            raise ValueError(
+                "provisioner public metadata must be an EC P-256 JWK"
+            ) from error
         if not isinstance(public_mapping, dict) or "d" in public_mapping:
-            raise ValueError("provisioner public metadata must not contain private key material")
+            raise ValueError(
+                "provisioner public metadata must not contain private key material"
+            )
         if (
             not isinstance(public_jwk.key, ec.EllipticCurvePublicKey)
             or not isinstance(public_jwk.key.curve, ec.SECP256R1)
             or public_jwk.algorithm_name != "ES256"
             or public_jwk.key_id != provisioner_kid
-            or public_jwk.key.public_numbers() != credential.public_key().public_numbers()
+            or public_jwk.key.public_numbers()
+            != credential.public_key().public_numbers()
         ):
-            raise ValueError("provisioner public metadata does not match private credential")
+            raise ValueError(
+                "provisioner public metadata does not match private credential"
+            )
         if _jwk_thumbprint(public_mapping) != provisioner_kid:
-            raise ValueError("provisioner key ID must equal the RFC 7638 public JWK thumbprint")
+            raise ValueError(
+                "provisioner key ID must equal the RFC 7638 public JWK thumbprint"
+            )
 
         context = ssl.create_default_context(cadata=root_pem.decode("ascii"))
         context.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -135,10 +163,15 @@ class StepCertificateAuthority(CertificateAuthority):
             follow_redirects=False,
             trust_env=False,
             transport=transport,
-            headers={"accept": "application/json", "user-agent": "vonk-forge-control/1"},
+            headers={
+                "accept": "application/json",
+                "user-agent": "vonk-forge-control/1",
+            },
         )
 
-    def issue_node(self, node_id: str, csr_pem: bytes, now: datetime) -> IssuedCertificate:
+    def issue_node(
+        self, node_id: str, csr_pem: bytes, now: datetime
+    ) -> IssuedCertificate:
         return self._sign(node_id, csr_pem, now)
 
     def check_health(self) -> None:
@@ -164,7 +197,9 @@ class StepCertificateAuthority(CertificateAuthority):
             raise ValueError("certificate serial must be a positive decimal integer")
         body = {
             "serial": serial,
-            "ott": self._token(serial, f"{self._ca_url}/1.0/revoke", timestamp, sans=None),
+            "ott": self._token(
+                serial, f"{self._ca_url}/1.0/revoke", timestamp, sans=None
+            ),
             "reasonCode": 4,
             "reason": "superseded by Vonk Forge",
             "passive": True,
@@ -175,17 +210,25 @@ class StepCertificateAuthority(CertificateAuthority):
 
     def revocation_bundle(self, now: datetime) -> bytes:
         timestamp = _utc_timestamp(now)
-        raw = self._request("GET", "/1.0/crl?pem=true", None, accept="application/x-pem-file")
+        raw = self._request(
+            "GET", "/1.0/crl?pem=true", None, accept="application/x-pem-file"
+        )
         try:
             crl = x509.load_pem_x509_crl(raw)
         except ValueError as error:
-            raise StepCAError("step-ca returned an invalid revocation bundle") from error
+            raise StepCAError(
+                "step-ca returned an invalid revocation bundle"
+            ) from error
         if crl.issuer != self._intermediate.subject:
             raise StepCAError("step-ca revocation bundle issuer is invalid")
         try:
-            _signature_verifying_key(self._intermediate).verify(crl.signature, crl.tbs_certlist_bytes)
+            _signature_verifying_key(self._intermediate).verify(
+                crl.signature, crl.tbs_certlist_bytes
+            )
         except Exception as error:
-            raise StepCAError("step-ca revocation bundle signature is invalid") from error
+            raise StepCAError(
+                "step-ca revocation bundle signature is invalid"
+            ) from error
         _validate_crl_freshness(crl, timestamp, self._clock_skew)
         return crl.public_bytes(serialization.Encoding.PEM)
 
@@ -203,30 +246,48 @@ class StepCertificateAuthority(CertificateAuthority):
         request = _load_node_csr(node_id, csr_pem)
         normalized_csr = request.public_bytes(serialization.Encoding.PEM)
         endpoint = f"{self._ca_url}/1.0/sign"
-        response = self._json_request("POST", "/1.0/sign", {
-            "csr": normalized_csr.decode("ascii"),
-            "ott": self._token(
-                node_id, endpoint, timestamp,
-                sans=[f"spiffe://vonk-forge.local/node/{node_id}"],
-                request_id=request_id,
-            ),
-            "notBefore": _rfc3339(timestamp),
-            "notAfter": _rfc3339(timestamp + self._certificate_lifetime),
-        })
-        if not isinstance(response, dict) or not {"crt", "ca", "certChain"} <= set(response):
+        response = self._json_request(
+            "POST",
+            "/1.0/sign",
+            {
+                "csr": normalized_csr.decode("ascii"),
+                "ott": self._token(
+                    node_id,
+                    endpoint,
+                    timestamp,
+                    sans=[f"spiffe://vonk-forge.local/node/{node_id}"],
+                    request_id=request_id,
+                ),
+                "notBefore": _rfc3339(timestamp),
+                "notAfter": _rfc3339(timestamp + self._certificate_lifetime),
+            },
+        )
+        if not isinstance(response, dict) or not {"crt", "ca", "certChain"} <= set(
+            response
+        ):
             raise StepCAError("step-ca returned an invalid sign response")
         if set(response) - {"crt", "ca", "certChain", "tlsOptions"}:
             raise StepCAError("step-ca returned unexpected sign response fields")
         if not isinstance(response["crt"], str) or not isinstance(response["ca"], str):
             raise StepCAError("step-ca returned invalid certificate PEM")
         chain = response["certChain"]
-        if not isinstance(chain, list) or len(chain) != 2 or not all(isinstance(value, str) for value in chain):
+        if (
+            not isinstance(chain, list)
+            or len(chain) != 2
+            or not all(isinstance(value, str) for value in chain)
+        ):
             raise StepCAError("step-ca returned an invalid certificate chain")
         if chain != [response["crt"], response["ca"]]:
             raise StepCAError("step-ca returned inconsistent certificate chain fields")
-        leaf = _one_certificate(response["crt"].encode("ascii"), "leaf", provider_error=True)
-        intermediate = _one_certificate(response["ca"].encode("ascii"), "intermediate", provider_error=True)
-        if intermediate.fingerprint(hashes.SHA256()) != self._intermediate.fingerprint(hashes.SHA256()):
+        leaf = _one_certificate(
+            response["crt"].encode("ascii"), "leaf", provider_error=True
+        )
+        intermediate = _one_certificate(
+            response["ca"].encode("ascii"), "intermediate", provider_error=True
+        )
+        if intermediate.fingerprint(hashes.SHA256()) != self._intermediate.fingerprint(
+            hashes.SHA256()
+        ):
             raise StepCAError("step-ca returned an unexpected intermediate")
         self._validate_leaf(node_id, request, leaf, timestamp)
         return IssuedCertificate(
@@ -246,18 +307,28 @@ class StepCertificateAuthority(CertificateAuthority):
         leaf: x509.Certificate,
         requested_at: datetime,
     ) -> None:
-        if leaf.subject != x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)]):
+        if leaf.subject != x509.Name(
+            [x509.NameAttribute(NameOID.COMMON_NAME, node_id)]
+        ):
             raise StepCAError("step-ca returned a mismatched certificate subject")
         if leaf.issuer != self._intermediate.subject:
             raise StepCAError("step-ca returned a mismatched certificate issuer")
         try:
-            _signature_verifying_key(self._intermediate).verify(leaf.signature, leaf.tbs_certificate_bytes)
+            _signature_verifying_key(self._intermediate).verify(
+                leaf.signature, leaf.tbs_certificate_bytes
+            )
         except Exception as error:
-            raise StepCAError("step-ca returned a certificate with an invalid signature") from error
-        request_key = request.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+            raise StepCAError(
+                "step-ca returned a certificate with an invalid signature"
+            ) from error
+        request_key = request.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
         if not isinstance(leaf.public_key(), ed25519.Ed25519PublicKey):
             raise StepCAError("step-ca returned a certificate with the wrong key type")
-        leaf_key = leaf.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        leaf_key = leaf.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
         if leaf_key != request_key:
             raise StepCAError("step-ca returned a certificate for another public key")
         required_extensions = {
@@ -271,44 +342,93 @@ class StepCertificateAuthority(CertificateAuthority):
             ExtensionOID.AUTHORITY_KEY_IDENTIFIER,
         }
         extension_oids = {value.oid for value in leaf.extensions}
-        if not required_extensions <= extension_oids or not extension_oids <= allowed_extensions:
-            raise StepCAError("step-ca returned an unexpected certificate extension profile")
+        if (
+            not required_extensions <= extension_oids
+            or not extension_oids <= allowed_extensions
+        ):
+            raise StepCAError(
+                "step-ca returned an unexpected certificate extension profile"
+            )
         criticality = {value.oid: value.critical for value in leaf.extensions}
-        if criticality[ExtensionOID.KEY_USAGE] is not True or criticality[ExtensionOID.EXTENDED_KEY_USAGE] is not False or criticality[ExtensionOID.SUBJECT_ALTERNATIVE_NAME] is not False:
-            raise StepCAError("step-ca returned invalid certificate extension criticality")
+        if (
+            criticality[ExtensionOID.KEY_USAGE] is not True
+            or criticality[ExtensionOID.EXTENDED_KEY_USAGE] is not False
+            or criticality[ExtensionOID.SUBJECT_ALTERNATIVE_NAME] is not False
+        ):
+            raise StepCAError(
+                "step-ca returned invalid certificate extension criticality"
+            )
         if ExtensionOID.BASIC_CONSTRAINTS in extension_oids:
-            basic_constraints = leaf.extensions.get_extension_for_class(x509.BasicConstraints)
-            if basic_constraints.critical is not True or basic_constraints.value != x509.BasicConstraints(False, None):
+            basic_constraints = leaf.extensions.get_extension_for_class(
+                x509.BasicConstraints
+            )
+            if (
+                basic_constraints.critical is not True
+                or basic_constraints.value != x509.BasicConstraints(False, None)
+            ):
                 raise StepCAError("step-ca returned a CA certificate")
-        expected_usage = x509.KeyUsage(True, False, False, False, False, False, False, False, False)
-        if leaf.extensions.get_extension_for_class(x509.KeyUsage).value != expected_usage:
+        expected_usage = x509.KeyUsage(
+            True, False, False, False, False, False, False, False, False
+        )
+        if (
+            leaf.extensions.get_extension_for_class(x509.KeyUsage).value
+            != expected_usage
+        ):
             raise StepCAError("step-ca returned invalid key usage")
         expected_eku = x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH])
-        if leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value != expected_eku:
+        if (
+            leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+            != expected_eku
+        ):
             raise StepCAError("step-ca returned invalid extended key usage")
-        expected_san = x509.SubjectAlternativeName([
-            x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{node_id}")
-        ])
-        if leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value != expected_san:
+        expected_san = x509.SubjectAlternativeName(
+            [
+                x509.UniformResourceIdentifier(
+                    f"spiffe://vonk-forge.local/node/{node_id}"
+                )
+            ]
+        )
+        if (
+            leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+            != expected_san
+        ):
             raise StepCAError("step-ca returned a mismatched node URI SAN")
         if ExtensionOID.AUTHORITY_KEY_IDENTIFIER in extension_oids:
             try:
-                intermediate_skid = self._intermediate.extensions.get_extension_for_class(
-                    x509.SubjectKeyIdentifier
-                ).value.digest
+                intermediate_skid = (
+                    self._intermediate.extensions.get_extension_for_class(
+                        x509.SubjectKeyIdentifier
+                    ).value.digest
+                )
             except x509.ExtensionNotFound as error:
-                raise StepCAError("step-ca returned an unverifiable authority key identifier") from error
-            authority_id = leaf.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier).value
+                raise StepCAError(
+                    "step-ca returned an unverifiable authority key identifier"
+                ) from error
+            authority_id = leaf.extensions.get_extension_for_class(
+                x509.AuthorityKeyIdentifier
+            ).value
             if authority_id.key_identifier != intermediate_skid:
-                raise StepCAError("step-ca returned a mismatched authority key identifier")
+                raise StepCAError(
+                    "step-ca returned a mismatched authority key identifier"
+                )
         if ExtensionOID.SUBJECT_KEY_IDENTIFIER in extension_oids:
             expected_skid = x509.SubjectKeyIdentifier.from_public_key(leaf.public_key())
-            if leaf.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value != expected_skid:
-                raise StepCAError("step-ca returned a mismatched subject key identifier")
-        if leaf.not_valid_after_utc - leaf.not_valid_before_utc != self._certificate_lifetime:
+            if (
+                leaf.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+                != expected_skid
+            ):
+                raise StepCAError(
+                    "step-ca returned a mismatched subject key identifier"
+                )
+        if (
+            leaf.not_valid_after_utc - leaf.not_valid_before_utc
+            != self._certificate_lifetime
+        ):
             raise StepCAError("step-ca returned an invalid certificate lifetime")
         if abs(leaf.not_valid_before_utc - requested_at) > self._clock_skew:
-            raise StepCAError("step-ca returned a certificate outside the allowed clock skew")
+            raise StepCAError(
+                "step-ca returned a certificate outside the allowed clock skew"
+            )
 
     def _token(
         self,
@@ -332,24 +452,34 @@ class StepCertificateAuthority(CertificateAuthority):
         if sans is not None:
             claims["sans"] = sans
         return jwt.encode(
-            claims, self._credential, algorithm="ES256",
+            claims,
+            self._credential,
+            algorithm="ES256",
             headers={"kid": self._provisioner_kid, "typ": "JWT"},
         )
 
-    def _json_request(self, method: str, path: str, body: dict[str, object] | None) -> object:
+    def _json_request(
+        self, method: str, path: str, body: dict[str, object] | None
+    ) -> object:
         raw = self._request(method, path, body, accept="application/json")
         try:
             return json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise StepCAError("step-ca returned malformed JSON") from error
 
-    def _request(self, method: str, path: str, body: dict[str, object] | None, *, accept: str) -> bytes:
+    def _request(
+        self, method: str, path: str, body: dict[str, object] | None, *, accept: str
+    ) -> bytes:
         try:
-            with self._client.stream(method, f"{self._ca_url}{path}", json=body, headers={"accept": accept}) as response:
+            with self._client.stream(
+                method, f"{self._ca_url}{path}", json=body, headers={"accept": accept}
+            ) as response:
                 if response.is_redirect:
                     raise StepCAError("step-ca redirects are forbidden")
                 if not response.is_success:
-                    raise StepCAError(f"step-ca request failed with status {response.status_code}")
+                    raise StepCAError(
+                        f"step-ca request failed with status {response.status_code}"
+                    )
                 output = bytearray()
                 for chunk in response.iter_bytes():
                     if len(output) + len(chunk) > self._max_response_bytes:
@@ -362,7 +492,9 @@ class StepCertificateAuthority(CertificateAuthority):
             raise StepCAError("step-ca request failed") from error
 
 
-def _signature_verifying_key(certificate: x509.Certificate) -> ed25519.Ed25519PublicKey | ed448.Ed448PublicKey:
+def _signature_verifying_key(
+    certificate: x509.Certificate,
+) -> ed25519.Ed25519PublicKey | ed448.Ed448PublicKey:
     """Return the certificate key that verifies with only signature and data.
 
     step-ca signs with Ed25519 keys, whose ``verify`` takes exactly the
@@ -376,16 +508,22 @@ def _signature_verifying_key(certificate: x509.Certificate) -> ed25519.Ed25519Pu
     raise ValueError("certificate public key cannot verify a signature")
 
 
-def _one_certificate(pem: bytes, label: str, *, provider_error: bool = False) -> x509.Certificate:
+def _one_certificate(
+    pem: bytes, label: str, *, provider_error: bool = False
+) -> x509.Certificate:
     try:
         certificate = x509.load_pem_x509_certificate(pem)
     except ValueError as error:
         exception = StepCAError if provider_error else ValueError
-        raise exception(f"{label} certificate must be exactly one valid PEM certificate") from error
+        raise exception(
+            f"{label} certificate must be exactly one valid PEM certificate"
+        ) from error
     normalized = certificate.public_bytes(serialization.Encoding.PEM)
     if pem.strip() != normalized.strip():
         exception = StepCAError if provider_error else ValueError
-        raise exception(f"{label} certificate must be exactly one valid PEM certificate")
+        raise exception(
+            f"{label} certificate must be exactly one valid PEM certificate"
+        )
     return certificate
 
 
@@ -397,38 +535,65 @@ def _verify_ca_chain(
     if root.subject != root.issuer:
         raise ValueError("root certificate must be self-issued")
     try:
-        _signature_verifying_key(root).verify(root.signature, root.tbs_certificate_bytes)
+        _signature_verifying_key(root).verify(
+            root.signature, root.tbs_certificate_bytes
+        )
     except Exception as error:
         raise ValueError("root certificate self-signature is invalid") from error
     try:
-        root_constraints = root.extensions.get_extension_for_class(x509.BasicConstraints).value
+        root_constraints = root.extensions.get_extension_for_class(
+            x509.BasicConstraints
+        ).value
         root_usage = root.extensions.get_extension_for_class(x509.KeyUsage).value
     except x509.ExtensionNotFound as error:
-        raise ValueError("root certificate must contain CA constraints and key usage") from error
-    if not root_constraints.ca or root_constraints.path_length is not None and root_constraints.path_length < 1:
+        raise ValueError(
+            "root certificate must contain CA constraints and key usage"
+        ) from error
+    if (
+        not root_constraints.ca
+        or root_constraints.path_length is not None
+        and root_constraints.path_length < 1
+    ):
         raise ValueError("root certificate cannot issue the configured intermediate")
     if not root_usage.key_cert_sign or not root_usage.crl_sign:
         raise ValueError("root certificate must permit certificate and CRL signing")
     if intermediate.issuer != root.subject:
         raise ValueError("intermediate certificate is not issued by configured root")
     try:
-        _signature_verifying_key(root).verify(intermediate.signature, intermediate.tbs_certificate_bytes)
+        _signature_verifying_key(root).verify(
+            intermediate.signature, intermediate.tbs_certificate_bytes
+        )
     except Exception as error:
         raise ValueError("intermediate certificate signature is invalid") from error
     try:
-        constraints = intermediate.extensions.get_extension_for_class(x509.BasicConstraints).value
+        constraints = intermediate.extensions.get_extension_for_class(
+            x509.BasicConstraints
+        ).value
         usage = intermediate.extensions.get_extension_for_class(x509.KeyUsage).value
     except x509.ExtensionNotFound as error:
-        raise ValueError("intermediate certificate must contain CA constraints and key usage") from error
-    if constraints != x509.BasicConstraints(True, 0) or not usage.key_cert_sign or not usage.crl_sign:
-        raise ValueError("intermediate certificate is not a path-length-zero signing CA")
+        raise ValueError(
+            "intermediate certificate must contain CA constraints and key usage"
+        ) from error
+    if (
+        constraints != x509.BasicConstraints(True, 0)
+        or not usage.key_cert_sign
+        or not usage.crl_sign
+    ):
+        raise ValueError(
+            "intermediate certificate is not a path-length-zero signing CA"
+        )
     now = datetime.now(UTC)
     if root.not_valid_before_utc > now or root.not_valid_after_utc <= now:
         raise ValueError("root certificate is not currently valid")
-    if intermediate.not_valid_before_utc > now or intermediate.not_valid_after_utc <= now:
+    if (
+        intermediate.not_valid_before_utc > now
+        or intermediate.not_valid_after_utc <= now
+    ):
         raise ValueError("intermediate certificate is not currently valid")
     if intermediate.not_valid_after_utc <= now + certificate_lifetime:
-        raise ValueError("intermediate certificate cannot cover configured leaf lifetime")
+        raise ValueError(
+            "intermediate certificate cannot cover configured leaf lifetime"
+        )
     if intermediate.not_valid_after_utc > root.not_valid_after_utc:
         raise ValueError("intermediate certificate outlives configured root")
 
@@ -441,15 +606,25 @@ def _jwk_thumbprint(value: dict[str, object]) -> str:
     try:
         canonical = json.dumps(
             {name: value[name] for name in ("crv", "kty", "x", "y")},
-            sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
         ).encode("ascii")
     except (KeyError, UnicodeEncodeError) as error:
-        raise ValueError("provisioner public metadata is missing thumbprint fields") from error
-    return base64.urlsafe_b64encode(hashlib.sha256(canonical).digest()).rstrip(b"=").decode("ascii")
+        raise ValueError(
+            "provisioner public metadata is missing thumbprint fields"
+        ) from error
+    return (
+        base64.urlsafe_b64encode(hashlib.sha256(canonical).digest())
+        .rstrip(b"=")
+        .decode("ascii")
+    )
 
 
 def _validate_crl_freshness(
-    crl: x509.CertificateRevocationList, timestamp: datetime, clock_skew: timedelta,
+    crl: x509.CertificateRevocationList,
+    timestamp: datetime,
+    clock_skew: timedelta,
 ) -> None:
     last_update = crl.last_update_utc
     next_update = crl.next_update_utc

@@ -80,7 +80,9 @@ def _service(tmp_path: Path, sessions, *, maximum: int = 4, handler=None, clock=
     return service, client
 
 
-def _artifact(index: str, data: bytes, *, host: str = "example.test") -> dict[str, object]:
+def _artifact(
+    index: str, data: bytes, *, host: str = "example.test"
+) -> dict[str, object]:
     return {
         "id": f"weights-{index}",
         "path": f"weights-{index}.bin",
@@ -131,9 +133,7 @@ def test_single_job_saturates_all_controller_transfer_slots(tmp_path: Path) -> N
     started = threading.Event()
     release = threading.Event()
     lock = threading.Lock()
-    responses = {
-        f"/weights-{index}": f"payload-{index}".encode() for index in range(5)
-    }
+    responses = {f"/weights-{index}": f"payload-{index}".encode() for index in range(5)}
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal active, maximum
@@ -149,7 +149,9 @@ def test_single_job_saturates_all_controller_transfer_slots(tmp_path: Path) -> N
         return httpx.Response(200, request=request, content=data)
 
     service, client = _service(tmp_path, sessions, handler=handler)
-    artifacts = [_artifact(str(index), f"payload-{index}".encode()) for index in range(5)]
+    artifacts = [
+        _artifact(str(index), f"payload-{index}".encode()) for index in range(5)
+    ]
     operation = _start(
         service,
         artifacts,
@@ -173,9 +175,9 @@ def test_two_jobs_each_start_before_surplus_slots_are_round_robin_allocated(
     started: list[str] = []
     release = threading.Event()
     lock = threading.Lock()
-    responses = {
-        f"/weights-a{index}": f"a-{index}".encode() for index in range(3)
-    } | {f"/weights-b{index}": f"b-{index}".encode() for index in range(3)}
+    responses = {f"/weights-a{index}": f"a-{index}".encode() for index in range(3)} | {
+        f"/weights-b{index}": f"b-{index}".encode() for index in range(3)
+    }
 
     def handler(request: httpx.Request) -> httpx.Response:
         with lock:
@@ -218,7 +220,9 @@ def test_two_jobs_each_start_before_surplus_slots_are_round_robin_allocated(
     client.close()
 
 
-def test_failed_future_waits_for_sibling_before_finalizing_failure(tmp_path: Path) -> None:
+def test_failed_future_waits_for_sibling_before_finalizing_failure(
+    tmp_path: Path,
+) -> None:
     sessions = _database(tmp_path)
     sibling_started = threading.Event()
     release_sibling = threading.Event()
@@ -327,8 +331,12 @@ def test_postgres_concurrent_claims_are_distinct(
     @contextmanager
     def pause_before_lock(*, write=False):
         with original_session(write=write) as session:
+
             def before_lock(state):
-                if state.statement._for_update_arg is not None and not second_loaded.is_set():
+                if (
+                    state.statement._for_update_arg is not None
+                    and not second_loaded.is_set()
+                ):
                     second_loaded.set()
                     assert first_committed.wait(timeout=10)
 
@@ -337,7 +345,9 @@ def test_postgres_concurrent_claims_are_distinct(
 
     monkeypatch.setattr(second, "_session", pause_before_lock)
     with ThreadPoolExecutor(max_workers=1) as executor:
-        pending = executor.submit(second._claim_operations, limit=1, respect_backoff=True)
+        pending = executor.submit(
+            second._claim_operations, limit=1, respect_backoff=True
+        )
         try:
             assert second_loaded.wait(timeout=10)
             first_claim = first._claim_operations(limit=1, respect_backoff=True)
@@ -378,7 +388,9 @@ def test_hf_rate_limit_cooldown_survives_restart_but_local_work_progresses(
     )
     hf = _artifact("hf", b"hf", host="huggingface.co")
     local = _artifact("local", b"local")
-    hf["source"] = "https://huggingface.co/acme/model/resolve/" + "a" * 40 + "/weights-hf"
+    hf["source"] = (
+        "https://huggingface.co/acme/model/resolve/" + "a" * 40 + "/weights-hf"
+    )
     first = _start(service, [hf], "00000000-0000-4000-8000-000000000307")
     service.tick()
     for _ in range(100):
@@ -458,8 +470,12 @@ def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
     service.close()
 
 
-def _model_document(slug: str, digest_byte: str, *, supersedes: str | None = None) -> dict[str, object]:
-    source = resources.files("vonk_forge_contracts").joinpath("examples/model-definition.json")
+def _model_document(
+    slug: str, digest_byte: str, *, supersedes: str | None = None
+) -> dict[str, object]:
+    source = resources.files("vonk_forge_contracts").joinpath(
+        "examples/model-definition.json"
+    )
     document = copy.deepcopy(json.loads(source.read_text(encoding="utf-8")))
     document["identity"]["publisher"] = "upstream"
     document["identity"]["slug"] = slug
@@ -478,7 +494,9 @@ def _model_document(slug: str, digest_byte: str, *, supersedes: str | None = Non
     return canonical
 
 
-def _insert_model_revision(sessions, document: dict[str, object], *, created_at: datetime) -> str:
+def _insert_model_revision(
+    sessions, document: dict[str, object], *, created_at: datetime
+) -> str:
     supersedes = document.pop("_supersedes", None)
     digest = content_sha256(ModelDefinition.model_validate(document))
     identity = document["identity"]
@@ -510,9 +528,7 @@ def _insert_model_revision(sessions, document: dict[str, object], *, created_at:
                 document=document,
                 content_digest=digest,
                 projected=(
-                    {"supersedes": supersedes}
-                    if isinstance(supersedes, str)
-                    else {}
+                    {"supersedes": supersedes} if isinstance(supersedes, str) else {}
                 ),
                 created_by="test",
                 created_at=created_at,
@@ -521,7 +537,9 @@ def _insert_model_revision(sessions, document: dict[str, object], *, created_at:
     return digest
 
 
-def test_update_discovery_uses_nested_lineage_and_explicit_supersedes(tmp_path: Path) -> None:
+def test_update_discovery_uses_nested_lineage_and_explicit_supersedes(
+    tmp_path: Path,
+) -> None:
     sessions = _database(tmp_path)
     service, _ = _service(tmp_path, sessions)
     current_doc = _model_document("source-revision-1", "1")
@@ -543,7 +561,9 @@ def test_update_discovery_uses_nested_lineage_and_explicit_supersedes(tmp_path: 
     service.close()
 
 
-def test_update_discovery_reports_incomparable_lineage_candidates(tmp_path: Path) -> None:
+def test_update_discovery_reports_incomparable_lineage_candidates(
+    tmp_path: Path,
+) -> None:
     sessions = _database(tmp_path)
     service, _ = _service(tmp_path, sessions)
     current_doc = _model_document("source-revision-1", "3")
@@ -551,8 +571,16 @@ def test_update_discovery_reports_incomparable_lineage_candidates(tmp_path: Path
     manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
     with sessions.begin() as session:
         service._ensure_set(session, manifest)
-    _insert_model_revision(sessions, _model_document("candidate-a", "4"), created_at=NOW + timedelta(hours=1))
-    _insert_model_revision(sessions, _model_document("candidate-b", "5"), created_at=NOW + timedelta(hours=2))
+    _insert_model_revision(
+        sessions,
+        _model_document("candidate-a", "4"),
+        created_at=NOW + timedelta(hours=1),
+    )
+    _insert_model_revision(
+        sessions,
+        _model_document("candidate-b", "5"),
+        created_at=NOW + timedelta(hours=2),
+    )
     update = _first_update(
         service.discover_updates(artifact_set_sha256=manifest.digest)
     )
@@ -644,9 +672,10 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if request.url.path.endswith("weights-z-hf") and request.headers.get(
-            "authorization"
-        ) == "Bearer bad-token":
+        if (
+            request.url.path.endswith("weights-z-hf")
+            and request.headers.get("authorization") == "Bearer bad-token"
+        ):
             return httpx.Response(403, request=request)
         if request.url.path.endswith("weights-z-hf") and rate_limit_once[0]:
             rate_limit_once[0] = False
@@ -655,7 +684,9 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
                 request=request,
                 headers={"RateLimit": '"resolvers";r=0;t=30'},
             )
-        content = public_data if request.url.path.endswith("weights-a-public") else hf_data
+        content = (
+            public_data if request.url.path.endswith("weights-a-public") else hf_data
+        )
         return httpx.Response(200, request=request, content=content)
 
     client = httpx.Client(
@@ -892,7 +923,9 @@ def test_failed_model_cache_detail_redacts_signed_source_url(tmp_path: Path) -> 
     service.close()
 
 
-def test_two_controller_services_share_one_upstream_object_transfer(tmp_path: Path) -> None:
+def test_two_controller_services_share_one_upstream_object_transfer(
+    tmp_path: Path,
+) -> None:
     sessions = _database(tmp_path)
     entered = threading.Event()
     release = threading.Event()
@@ -973,21 +1006,33 @@ def test_upstream_check_is_explicit_metadata_only_and_keeps_pin(tmp_path: Path) 
     assert update["model_update_available"] is False
     assert service.manifest_for_artifact_set(manifest.digest) == manifest
     newer = _model_document("source-revision-2", "2", supersedes=current_digest)
-    new_digest = _insert_model_revision(sessions, newer, created_at=NOW + timedelta(hours=1))
-    assert service.resolve_artifact_set(model_content_sha256=new_digest).digest != manifest.digest
+    new_digest = _insert_model_revision(
+        sessions, newer, created_at=NOW + timedelta(hours=1)
+    )
+    assert (
+        service.resolve_artifact_set(model_content_sha256=new_digest).digest
+        != manifest.digest
+    )
     assert _first_update(service.discover_updates())["model_update_available"] is True
     service.close()
 
 
-def test_failed_upstream_metadata_check_does_not_hide_catalog_update(tmp_path: Path) -> None:
+def test_failed_upstream_metadata_check_does_not_hide_catalog_update(
+    tmp_path: Path,
+) -> None:
     sessions = _database(tmp_path)
     service, _ = _service(tmp_path, sessions, handler=lambda _: httpx.Response(503))
-    current_digest = _insert_model_revision(sessions, _model_document("old", "1"), created_at=NOW)
+    current_digest = _insert_model_revision(
+        sessions, _model_document("old", "1"), created_at=NOW
+    )
     manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
     with sessions.begin() as session:
         service._ensure_set(session, manifest)
-    _insert_model_revision(sessions, _model_document("new", "2", supersedes=current_digest),
-                           created_at=NOW + timedelta(hours=1))
+    _insert_model_revision(
+        sessions,
+        _model_document("new", "2", supersedes=current_digest),
+        created_at=NOW + timedelta(hours=1),
+    )
     update = _first_update(service.discover_updates(check_upstream=True))
     assert update["model_update_available"] is True
     revisions = require_sequence(
@@ -1000,7 +1045,9 @@ def test_failed_upstream_metadata_check_does_not_hide_catalog_update(tmp_path: P
     service.close()
 
 
-def test_inventory_cursor_survives_unchanged_storage_reconciliation(tmp_path: Path) -> None:
+def test_inventory_cursor_survives_unchanged_storage_reconciliation(
+    tmp_path: Path,
+) -> None:
     sessions = _database(tmp_path)
     service, _ = _service(tmp_path, sessions)
     for index in ("1", "2"):
@@ -1022,10 +1069,7 @@ def test_inventory_cursor_survives_unchanged_storage_reconciliation(tmp_path: Pa
     page_entries = require_sequence(page["entries"], "cache inventory entries")
     following_entry = require_mapping(following_entries[0], "cache inventory entry")
     page_entry = require_mapping(page_entries[0], "cache inventory entry")
-    assert (
-        following_entry["artifact_set_sha256"]
-        != page_entry["artifact_set_sha256"]
-    )
+    assert following_entry["artifact_set_sha256"] != page_entry["artifact_set_sha256"]
     assert following["_next_boundary"] is None
     service.close()
 
@@ -1036,10 +1080,12 @@ def test_upstream_page_budget_bounds_concurrency_and_latency(tmp_path, monkeypat
     release = threading.Event()
     calls = []
     monkeypatch.setattr("vonk_control.model_cache._UPSTREAM_CHECK_SECONDS", 0.05)
+
     def check(repository, revision):
         calls.append(repository)
         release.wait(2)
         return {"status": "current"}
+
     monkeypatch.setattr(service, "_check_upstream_revision", check)
     keys = [(f"acme/model-{index}", "a" * 40) for index in range(12)]
     started = time.monotonic()
@@ -1048,7 +1094,10 @@ def test_upstream_page_budget_bounds_concurrency_and_latency(tmp_path, monkeypat
         assert time.monotonic() - started < 0.5
         assert len(calls) == 4
         assert list(result) == keys
-        assert all(row["error_code"] == "model_cache.upstream_check_budget_exhausted" for row in result.values())
+        assert all(
+            row["error_code"] == "model_cache.upstream_check_budget_exhausted"
+            for row in result.values()
+        )
     finally:
         release.set()
         service.close()

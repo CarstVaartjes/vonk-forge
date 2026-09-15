@@ -32,13 +32,16 @@ def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None
         members = set(archive.namelist())
 
     assert "vonk_control/schemas/test-report-v1.schema.json" in members
-    assert not {
-        "vonk_control/schemas/catalog-entity-v1.schema.json",
-        "vonk_control/schemas/harness-evidence-v1.schema.json",
-        "vonk_control/catalog_contract.py",
-        "vonk_control/catalog_seeds.py",
-        "vonk_control/harnesses/registry.py",
-    } & members
+    assert (
+        not {
+            "vonk_control/schemas/catalog-entity-v1.schema.json",
+            "vonk_control/schemas/harness-evidence-v1.schema.json",
+            "vonk_control/catalog_contract.py",
+            "vonk_control/catalog_seeds.py",
+            "vonk_control/harnesses/registry.py",
+        }
+        & members
+    )
     assert "vonk_control/schemas/recipe-v1.schema.json" not in members
 
     fixture = tmp_path / "synthetic-canonical-recipe.json"

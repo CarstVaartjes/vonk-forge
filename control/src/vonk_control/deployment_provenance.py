@@ -59,7 +59,8 @@ def local_deployment_observations() -> DeploymentObservations:
     path = os.environ.get("VONK_DEPLOYMENT_OBSERVATIONS_FILE")
     observations = (
         DeploymentObservations.model_validate_json(Path(path).read_bytes())
-        if path else DeploymentObservations()
+        if path
+        else DeploymentObservations()
     )
     if observations.controller is None and CONTROLLER_BUILD_METADATA.is_file():
         build = ControllerBuildMetadata.model_validate_json(
@@ -93,6 +94,7 @@ class DeploymentProvenanceService:
         now = _utc(self._clock())
         observations = self._observations()
         from .deployment_observer import stored_observation
+
         with self._sessions() as session:
             if observations.repository is None:
                 observations.repository = stored_observation(session, "repository")

@@ -32,9 +32,7 @@ def test_python_compatibility_rewrites_qualified_recursive_json_values() -> None
         "components": {
             "schemas": {
                 "vonk_forge_contracts__recipe__JsonValue": {"anyOf": []},
-                "vonk_forge_contracts__recipe__RuntimeArgumentValue": {
-                    "anyOf": []
-                },
+                "vonk_forge_contracts__recipe__RuntimeArgumentValue": {"anyOf": []},
                 "KeepExact": {"type": "string"},
             }
         },
@@ -43,12 +41,16 @@ def test_python_compatibility_rewrites_qualified_recursive_json_values() -> None
     generated = module._generated_client_schema(document, python_compatibility=True)
 
     assert "/stream" not in generated["paths"]
-    assert generated["components"]["schemas"][
-        "vonk_forge_contracts__recipe__JsonValue"
-    ] == {}
-    assert generated["components"]["schemas"][
-        "vonk_forge_contracts__recipe__RuntimeArgumentValue"
-    ] == {}
+    assert (
+        generated["components"]["schemas"]["vonk_forge_contracts__recipe__JsonValue"]
+        == {}
+    )
+    assert (
+        generated["components"]["schemas"][
+            "vonk_forge_contracts__recipe__RuntimeArgumentValue"
+        ]
+        == {}
+    )
     assert generated["components"]["schemas"]["KeepExact"] == {"type": "string"}
     assert document["components"]["schemas"][
         "vonk_forge_contracts__recipe__JsonValue"

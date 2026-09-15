@@ -36,7 +36,9 @@ class _Session(Session):
         return self.revision
 
 
-def _revision(*, state: str = "active", digest: str | None = None) -> CatalogDocumentRevision:
+def _revision(
+    *, state: str = "active", digest: str | None = None
+) -> CatalogDocumentRevision:
     document = _document()
     recipe = contracts.RecipeDefinition.model_validate(document)
     return CatalogDocumentRevision(
@@ -54,9 +56,10 @@ def test_active_canonical_revision_is_consumed() -> None:
     resolved = _active_recipe_revision(_Session(revision), "revision")
     assert resolved is not None
     assert resolved[0] is revision
-    assert resolved[1].identity.slug == contracts.RecipeDefinition.model_validate(
-        _document()
-    ).identity.slug
+    assert (
+        resolved[1].identity.slug
+        == contracts.RecipeDefinition.model_validate(_document()).identity.slug
+    )
     assert _canonical_recipe(revision) is not None
 
 
@@ -68,7 +71,9 @@ def test_active_canonical_revision_is_consumed() -> None:
         _revision(digest="0" * 64),
     ],
 )
-def test_missing_or_stale_revision_fails_closed(revision: CatalogDocumentRevision | None) -> None:
+def test_missing_or_stale_revision_fails_closed(
+    revision: CatalogDocumentRevision | None,
+) -> None:
     assert _active_recipe_revision(_Session(revision), "revision") is None
     assert revision is None or _canonical_recipe(revision) is None
 
@@ -99,7 +104,9 @@ def _runtime_receipt_fixture(
         original_content_digest=revision_digest,
         effective_execution_key="c" * 64,
         source=source,
-        registry_manifest_digest=("sha256:" + "d" * 64 if source == "published" else None),
+        registry_manifest_digest=(
+            "sha256:" + "d" * 64 if source == "published" else None
+        ),
         platform_manifest_digest=platform_digest,
         local_image_config_id="sha256:" + "e" * 64,
         oci_archive_sha256="f" * 64,

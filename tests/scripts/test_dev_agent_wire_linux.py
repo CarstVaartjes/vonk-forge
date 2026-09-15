@@ -32,7 +32,9 @@ def _lane_root(tmp_path: Path, module) -> Path:
     for relative in (module.CI_WORKFLOW, module.DOCKERFILE):
         destination = tmp_path / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text((ROOT / relative).read_text(encoding="utf-8"), encoding="utf-8")
+        destination.write_text(
+            (ROOT / relative).read_text(encoding="utf-8"), encoding="utf-8"
+        )
     return tmp_path
 
 
@@ -61,9 +63,9 @@ def test_local_lane_refuses_a_drifted_rust_toolchain(tmp_path: Path) -> None:
 
     problems = module.check_lane_consistency(root)
 
-    assert any("1.98.0" in problem and module.RUST_TOOLCHAIN in problem for problem in problems), (
-        problems
-    )
+    assert any(
+        "1.98.0" in problem and module.RUST_TOOLCHAIN in problem for problem in problems
+    ), problems
 
 
 def test_local_lane_refuses_a_paraphrased_wire_command(tmp_path: Path) -> None:
@@ -99,7 +101,9 @@ def test_local_lane_refuses_a_drifted_base_image(tmp_path: Path) -> None:
 def test_local_lane_refuses_a_base_image_pinned_by_tag_alone(tmp_path: Path) -> None:
     module = _module()
     root = _lane_root(tmp_path, module)
-    _mutate(root, module.DOCKERFILE, f"FROM {module.BASE_IMAGE}", f"FROM {module.CI_RUNNER}")
+    _mutate(
+        root, module.DOCKERFILE, f"FROM {module.BASE_IMAGE}", f"FROM {module.CI_RUNNER}"
+    )
 
     problems = module.check_lane_consistency(root)
 

@@ -44,7 +44,10 @@ def kind_for_agent_error(evidence: Mapping[str, object]) -> FailureKind:
             return FailureKind(raw_kind)
         except ValueError:
             return FailureKind.INVALID_CONTRACT
-    if evidence.get("uncertain") is True or evidence.get("error_code") == "operation_outcome_uncertain":
+    if (
+        evidence.get("uncertain") is True
+        or evidence.get("error_code") == "operation_outcome_uncertain"
+    ):
         return FailureKind.UNCERTAIN_EFFECT
     if evidence.get("error_code") == "agent_lease_expired":
         return FailureKind.UNCERTAIN_EFFECT
@@ -72,11 +75,17 @@ class RecoveryPolicy:
         """
         if not operation_id or failed_attempts < 1:
             raise ValueError("operation ID and positive failure count are required")
-        if self.max_failures < 1 or self.base_delay_seconds < 1 or self.max_delay_seconds < self.base_delay_seconds:
+        if (
+            self.max_failures < 1
+            or self.base_delay_seconds < 1
+            or self.max_delay_seconds < self.base_delay_seconds
+        ):
             raise ValueError("invalid recovery policy")
         if failed_attempts >= self.max_failures:
             return None
-        if now.tzinfo is None or (retry_after is not None and retry_after.tzinfo is None):
+        if now.tzinfo is None or (
+            retry_after is not None and retry_after.tzinfo is None
+        ):
             raise ValueError("recovery times must be timezone aware")
         cap = min(
             self.max_delay_seconds,
@@ -88,7 +97,9 @@ class RecoveryPolicy:
             hashlib.sha256(f"{operation_id}:{failed_attempts}".encode()).digest()[:8],
             "big",
         )
-        scheduled = now.astimezone(UTC) + timedelta(seconds=lower + entropy % (upper - lower + 1))
+        scheduled = now.astimezone(UTC) + timedelta(
+            seconds=lower + entropy % (upper - lower + 1)
+        )
         if retry_after is not None:
             scheduled = max(scheduled, retry_after.astimezone(UTC))
         return scheduled

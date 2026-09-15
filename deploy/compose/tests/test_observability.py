@@ -12,7 +12,10 @@ def test_grafana_is_only_reachable_via_caddy_and_has_no_anonymous_admin() -> Non
     assert "ports" not in grafana
     assert set(grafana["networks"]) == {"application", "ingress"}
     assert grafana["environment"]["GF_AUTH_ANONYMOUS_ENABLED"] == "false"
-    assert grafana["environment"]["GF_SECURITY_ADMIN_PASSWORD__FILE"] == "/run/vonk-normalized-secrets/grafana-admin-password"
+    assert (
+        grafana["environment"]["GF_SECURITY_ADMIN_PASSWORD__FILE"]
+        == "/run/vonk-normalized-secrets/grafana-admin-password"
+    )
     caddy = (ROOT / "deploy/compose/Caddyfile").read_text()
     assert "handle /grafana/*" in caddy and "grafana:3000" in caddy
 
@@ -20,9 +23,7 @@ def test_grafana_is_only_reachable_via_caddy_and_has_no_anonymous_admin() -> Non
 def test_agent_alerts_use_bounded_operational_metrics() -> None:
     document = json.loads((ROOT / "deploy/compose/prometheus/alerts.yaml").read_text())
     alerts = {
-        rule["alert"]: rule
-        for group in document["groups"]
-        for rule in group["rules"]
+        rule["alert"]: rule for group in document["groups"] for rule in group["rules"]
     }
     expected_metrics = {
         "NodeInventoryStale": "vonk_node_inventory_freshness",
@@ -59,9 +60,7 @@ def test_fleet_dashboard_uses_only_produced_metrics() -> None:
         (ROOT / "deploy/compose/grafana/dashboards/fleet.json").read_text()
     )
     expressions = {
-        target["expr"]
-        for panel in dashboard["panels"]
-        for target in panel["targets"]
+        target["expr"] for panel in dashboard["panels"] for target in panel["targets"]
     }
     assert "vonk_node_telemetry_gpu_utilization_percent" in expressions
     assert not any(

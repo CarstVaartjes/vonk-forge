@@ -133,9 +133,7 @@ def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
 
 def test_profile_switch_state_rejects_malformed_persisted_progress() -> None:
     with pytest.raises(FleetProfileConflict, match="progress is invalid"):
-        RunSwitchFleetProfileAdapter._state(
-            FleetProfileApplication(progress="invalid")
-        )
+        RunSwitchFleetProfileAdapter._state(FleetProfileApplication(progress="invalid"))
     with pytest.raises(FleetProfileConflict, match="progress is invalid"):
         RunSwitchFleetProfileAdapter._state(
             FleetProfileApplication(progress={"switch_adapter": "invalid"})
@@ -376,9 +374,7 @@ class _SwitchAdapter:
     ) -> None:
         self.cancellations.append((targets, ordinal))
 
-    def recoverable_cache_loss(
-        self, application_id: str, *, session: Session
-    ) -> bool:
+    def recoverable_cache_loss(self, application_id: str, *, session: Session) -> bool:
         del application_id, session
         return False
 
@@ -408,9 +404,7 @@ class _SwitchAdapter:
             }
         )
         progress = [
-            FleetProfileChildProgress(
-                phase="model-download", bytes=0, total_bytes=100
-            ),
+            FleetProfileChildProgress(phase="model-download", bytes=0, total_bytes=100),
             FleetProfileChildProgress(
                 phase="container-download", bytes=100, total_bytes=100
             ),
@@ -427,9 +421,7 @@ class _SwitchAdapter:
         ]
         self._states[operation_id] = 0
         self._operations[operation_id] = [
-            FleetProfileChildOperation(
-                id=operation_id, state="running", progress=item
-            )
+            FleetProfileChildOperation(id=operation_id, state="running", progress=item)
             for item in progress
         ] + [
             FleetProfileChildOperation(
@@ -441,7 +433,9 @@ class _SwitchAdapter:
         ]
         return self._operations[operation_id][0]
 
-    def get(self, operation_id: str, *, session: object = None) -> FleetProfileChildOperation:
+    def get(
+        self, operation_id: str, *, session: object = None
+    ) -> FleetProfileChildOperation:
         states = self._operations[operation_id]
         index = min(self._states[operation_id] + 1, len(states) - 1)
         self._states[operation_id] = index
@@ -518,35 +512,35 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
         session.add_all(
             [
                 CatalogDocumentRevision(
-                id=revision_id,
-                document_id=recipe_id,
-                kind="recipe",
-                publisher=recipe.identity.publisher,
-                slug=recipe.identity.slug,
-                revision_number=1,
-                state="active",
-                schema_version=2,
-                document=document,
-                content_digest=content_sha256(recipe),
-                execution_key="b" * 64,
-                created_by="admin",
-                created_at=NOW,
-            ),
+                    id=revision_id,
+                    document_id=recipe_id,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    revision_number=1,
+                    state="active",
+                    schema_version=2,
+                    document=document,
+                    content_digest=content_sha256(recipe),
+                    execution_key="b" * 64,
+                    created_by="admin",
+                    created_at=NOW,
+                ),
                 CatalogDocumentRevision(
-                id=model_revision_id,
-                document_id=model_id,
-                kind="model",
-                publisher=model.identity.publisher,
-                slug=model.identity.slug,
-                revision_number=1,
-                state="active",
-                schema_version=2,
-                document=model.model_dump(mode="json"),
-                content_digest=content_sha256(model),
-                artifact_key="a" * 64,
-                created_by="admin",
-                created_at=NOW,
-            ),
+                    id=model_revision_id,
+                    document_id=model_id,
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    revision_number=1,
+                    state="active",
+                    schema_version=2,
+                    document=model.model_dump(mode="json"),
+                    content_digest=content_sha256(model),
+                    artifact_key="a" * 64,
+                    created_by="admin",
+                    created_at=NOW,
+                ),
             ]
         )
     return recipe_id, revision_id
@@ -629,7 +623,9 @@ def _seed_dual_solo_without_runtime_state(
             .where(CatalogDocumentRevision.id == dual_revision_id)
             .values(
                 document=dual_document,
-                content_digest=content_sha256(RecipeDefinition.model_validate(dual_document)),
+                content_digest=content_sha256(
+                    RecipeDefinition.model_validate(dual_document)
+                ),
             )
         )
         _nested_object(solo_document, "identity")["slug"] = "synthetic-tiny-solo"
@@ -699,7 +695,10 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
     assert item["kind"] == "fleet-profile.apply"
     assert item["progress"] == {"phase": "prepare"}
 
-def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progress() -> None:
+
+def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progress() -> (
+    None
+):
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     with sessions.begin() as session:
@@ -714,9 +713,7 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
             )
         )
     adapter = _SwitchAdapter()
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=adapter
-    )
+    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
     profile_input = _input(revision_id).model_copy(
         update={"scope": FleetProfileScope(node_ids=[_node_id(1), _node_id(2)])}
     )
@@ -787,13 +784,17 @@ def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> N
     )
     first_preview = service.preview(first_profile.id)
     first = service.apply(
-        first_profile.id, plan_digest=first_preview.plan_digest,
-        request_key=_uuid(971), actor="admin",
+        first_profile.id,
+        plan_digest=first_preview.plan_digest,
+        request_key=_uuid(971),
+        actor="admin",
     )
     second_preview = service.preview(second_profile.id)
     second = service.apply(
-        second_profile.id, plan_digest=second_preview.plan_digest,
-        request_key=_uuid(972), actor="admin",
+        second_profile.id,
+        plan_digest=second_preview.plan_digest,
+        request_key=_uuid(972),
+        actor="admin",
     )
     assert first.state == second.state == "queued"
     assert first.created_at == second.created_at
@@ -867,8 +868,7 @@ def test_preview_isolates_an_unreadable_pending_plan() -> None:
     assert preview.allowed is True
     assert [step.node_ids for step in preview.steps] == [[_node_id(1)]]
     assert all(
-        reason.code != "profile.pending_record_unreadable"
-        for reason in preview.reasons
+        reason.code != "profile.pending_record_unreadable" for reason in preview.reasons
     )
     # The damaged order is preserved for its own worker to quarantine.
     with sessions() as session:
@@ -900,8 +900,7 @@ def test_preview_reports_an_unreadable_pending_plan_without_a_scope() -> None:
 
     assert preview.allowed is False
     assert any(
-        reason.code == "profile.pending_record_unreadable"
-        for reason in preview.reasons
+        reason.code == "profile.pending_record_unreadable" for reason in preview.reasons
     )
 
 
@@ -1018,7 +1017,9 @@ def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
 
 def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() -> None:
     sessions = _database()
-    _dual_revision_id, _solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
+    _dual_revision_id, _solo_revision_id = _seed_dual_solo_without_runtime_state(
+        sessions
+    )
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -1031,9 +1032,7 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
             )
         )
     adapter = _SwitchAdapter()
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=adapter
-    )
+    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
     profile = service.create(
         FleetProfileInput.model_validate(
             {
@@ -1077,9 +1076,7 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
     assert replayed_child.id == running.current_operation_id
     assert len(adapter.starts) == 1
 
-    resumed = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=adapter
-    )
+    resumed = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
     for _ in range(8):
         if resumed.application(application.id).state == "succeeded":
             break
@@ -1110,7 +1107,9 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
 
 def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
     sessions = _database()
-    dual_revision_id, _solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
+    dual_revision_id, _solo_revision_id = _seed_dual_solo_without_runtime_state(
+        sessions
+    )
     with sessions.begin() as session:
         session.add(
             ClusterMapping(
@@ -1255,9 +1254,7 @@ def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
         )
 
     adapter = _SwitchAdapter()
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=adapter
-    )
+    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
     profile = service.create(
         FleetProfileInput.model_validate(
             {
@@ -1317,9 +1314,7 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
             )
         )
     adapter = _SwitchAdapter()
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=adapter
-    )
+    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
     profile = service.create(
         FleetProfileInput(
             name="All idle",
@@ -1366,32 +1361,36 @@ def test_all_idle_profile_supersedes_a_queued_load_without_a_run() -> None:
         node = session.get(AgentNode, _node_id(1))
         assert node is not None
         node.workload_intent_ordinal = 1
-        session.add(Job(
-            id=_uuid(820),
-            request_id=_uuid(821),
-            kind="recipe.run-switch.v2",
-            state="queued",
-            actor="admin",
-            authority_revision="a" * 64,
-            targets=[_node_id(1)],
-            payload_digest="b" * 64,
-            payload={"workload_intent_ordinal": 1},
-            result={},
-            created_at=NOW,
-            updated_at=NOW,
-        ))
+        session.add(
+            Job(
+                id=_uuid(820),
+                request_id=_uuid(821),
+                kind="recipe.run-switch.v2",
+                state="queued",
+                actor="admin",
+                authority_revision="a" * 64,
+                targets=[_node_id(1)],
+                payload_digest="b" * 64,
+                payload={"workload_intent_ordinal": 1},
+                result={},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
     adapter = _SwitchAdapter()
-    service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=adapter
+    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
+    profile = service.create(
+        FleetProfileInput(name="Idle", assignments=[]), actor="admin"
     )
-    profile = service.create(FleetProfileInput(name="Idle", assignments=[]), actor="admin")
 
     preview = service.preview(profile.id)
 
     assert [step.node_ids for step in preview.steps] == [[_node_id(1)]]
     application = service.apply(
-        profile.id, plan_digest=preview.plan_digest,
-        request_key=_uuid(822), actor="admin",
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(822),
+        actor="admin",
     )
     assert application.state == "queued"
     assert adapter.cancellations == [((_node_id(1),), 2)]
@@ -2038,25 +2037,23 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
         clock=lambda: NOW,
         preparation_provider=changing_observation_provider,
     )
-    assert digest_service.preview(profile.id).plan_digest == digest_service.preview(
-        profile.id
-    ).plan_digest
+    assert (
+        digest_service.preview(profile.id).plan_digest
+        == digest_service.preview(profile.id).plan_digest
+    )
 
     assert [item.assignment_id for item in preview.preparations] == sorted(
         item.assignment_id for item in preview.preparations
     )
     assert len(preview.preparations) == 2
     assert {
-        item.preparation.model.artifact_set_sha256
-        for item in preview.preparations
+        item.preparation.model.artifact_set_sha256 for item in preview.preparations
     } == {preview.preparations[0].preparation.model.artifact_set_sha256}
     assert {
-        item.preparation.runtime_image.image_digest
-        for item in preview.preparations
+        item.preparation.runtime_image.image_digest for item in preview.preparations
     } == {"sha256:" + "d" * 64}
     assert {
-        item.preparation.model.artifact_set_bytes
-        for item in preview.preparations
+        item.preparation.model.artifact_set_bytes for item in preview.preparations
     } == {100}
 
 
@@ -2066,8 +2063,8 @@ def test_profile_rejects_preparation_evidence_for_another_scope() -> None:
     service = FleetProfileService(
         sessions,
         clock=lambda: NOW,
-        preparation_provider=lambda _session, _assignment, _node_ids: _exact_preparation(
-            (_node_id(2),)
+        preparation_provider=lambda _session, _assignment, _node_ids: (
+            _exact_preparation((_node_id(2),))
         ),
     )
     profile = service.create(_input(revision_id), actor="admin")
@@ -2130,7 +2127,9 @@ def test_profile_validation_rejects_unknown_sparks_and_recipe_topology_drift() -
     profile = service.create(FleetProfileInput.model_validate(value), actor="admin")
     preview = service.preview(profile.id)
     assert not preview.allowed
-    assert any(reason.code == "profile.topology_incomplete" for reason in preview.reasons)
+    assert any(
+        reason.code == "profile.topology_incomplete" for reason in preview.reasons
+    )
 
 
 def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> None:
@@ -2234,7 +2233,9 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
 def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
-    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter())
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
     profile = service.create(_input(revision_id), actor="admin")
 
     with pytest.raises(FleetProfileConflict, match="stale"):
@@ -2248,7 +2249,9 @@ def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
     assert updated.profile_digest != profile.profile_digest
 
 
-def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation() -> None:
+def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation() -> (
+    None
+):
     sessions = _database()
     _recipe_id, dual_revision_id = _seed(sessions)
     revisions = CatalogDocumentRevision.__table__
@@ -2359,80 +2362,144 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
         session.add_all(
             [
                 ClusterMappingNode(
-                    id=_uuid(11), mapping_id=_uuid(10), node_id=_node_id(1), rank=0,
-                    role="entrypoint", endpoint_owner=True, created_at=NOW,
+                    id=_uuid(11),
+                    mapping_id=_uuid(10),
+                    node_id=_node_id(1),
+                    rank=0,
+                    role="entrypoint",
+                    endpoint_owner=True,
+                    created_at=NOW,
                 ),
                 ClusterMappingNode(
-                    id=_uuid(12), mapping_id=_uuid(10), node_id=_node_id(2), rank=1,
-                    role="worker", endpoint_owner=False, created_at=NOW,
+                    id=_uuid(12),
+                    mapping_id=_uuid(10),
+                    node_id=_node_id(2),
+                    rank=1,
+                    role="worker",
+                    endpoint_owner=False,
+                    created_at=NOW,
                 ),
             ]
         )
         session.add(
             RecipeBuild(
-                id=_uuid(13), recipe_revision_id=dual_revision_id,
-                builder_node_id=_node_id(1), source_bundle_sha256="b" * 64,
-                build_input_sha256="c" * 64, state="succeeded", policy_report={}, plan={},
-                image_digest=f"sha256:{'d' * 64}", oci_layout_sha256="e" * 64,
-                image_bytes=1024, created_at=NOW, updated_at=NOW,
+                id=_uuid(13),
+                recipe_revision_id=dual_revision_id,
+                builder_node_id=_node_id(1),
+                source_bundle_sha256="b" * 64,
+                build_input_sha256="c" * 64,
+                state="succeeded",
+                policy_report={},
+                plan={},
+                image_digest=f"sha256:{'d' * 64}",
+                oci_layout_sha256="e" * 64,
+                image_bytes=1024,
+                created_at=NOW,
+                updated_at=NOW,
             )
         )
         session.add(
             RecipeInstallation(
-                id=_uuid(14), recipe_revision_id=dual_revision_id, mapping_id=_uuid(10),
-                mapping_generation=1, recipe_build_id=_uuid(13),
-                image_digest=f"sha256:{'d' * 64}", plan_digest="f" * 64,
-                plan={}, state="installed", actor="admin", created_at=NOW, updated_at=NOW,
+                id=_uuid(14),
+                recipe_revision_id=dual_revision_id,
+                mapping_id=_uuid(10),
+                mapping_generation=1,
+                recipe_build_id=_uuid(13),
+                image_digest=f"sha256:{'d' * 64}",
+                plan_digest="f" * 64,
+                plan={},
+                state="installed",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
             )
         )
         session.add_all(
             [
                 InstallationNode(
-                    id=_uuid(15), installation_id=_uuid(14), node_id=_node_id(1), rank=0,
-                    role="entrypoint", state="installed", required_bytes=1,
-                    installed_bytes=1, updated_at=NOW,
+                    id=_uuid(15),
+                    installation_id=_uuid(14),
+                    node_id=_node_id(1),
+                    rank=0,
+                    role="entrypoint",
+                    state="installed",
+                    required_bytes=1,
+                    installed_bytes=1,
+                    updated_at=NOW,
                 ),
                 InstallationNode(
-                    id=_uuid(16), installation_id=_uuid(14), node_id=_node_id(2), rank=1,
-                    role="worker", state="installed", required_bytes=1,
-                    installed_bytes=1, updated_at=NOW,
+                    id=_uuid(16),
+                    installation_id=_uuid(14),
+                    node_id=_node_id(2),
+                    rank=1,
+                    role="worker",
+                    state="installed",
+                    required_bytes=1,
+                    installed_bytes=1,
+                    updated_at=NOW,
                 ),
             ]
         )
         session.add(
             RecipeRun(
-                id=_uuid(17), installation_id=_uuid(14), mapping_id=_uuid(10),
-                mapping_generation=1, alias="dual-chat", plan_digest="1" * 64, plan={},
-                state="running", route_state="published", route_generation=1,
-                route_digest="2" * 64, actor="admin", created_at=NOW, updated_at=NOW,
+                id=_uuid(17),
+                installation_id=_uuid(14),
+                mapping_id=_uuid(10),
+                mapping_generation=1,
+                alias="dual-chat",
+                plan_digest="1" * 64,
+                plan={},
+                state="running",
+                route_state="published",
+                route_generation=1,
+                route_digest="2" * 64,
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
             )
         )
         session.add_all(
             [
                 RunNode(
-                    id=_uuid(18), run_id=_uuid(17), node_id=_node_id(1), rank=0,
-                    role="entrypoint", state="running", port=8000,
-                    reserved_memory_bytes=1, updated_at=NOW,
+                    id=_uuid(18),
+                    run_id=_uuid(17),
+                    node_id=_node_id(1),
+                    rank=0,
+                    role="entrypoint",
+                    state="running",
+                    port=8000,
+                    reserved_memory_bytes=1,
+                    updated_at=NOW,
                 ),
                 RunNode(
-                    id=_uuid(19), run_id=_uuid(17), node_id=_node_id(2), rank=1,
-                    role="worker", state="running", port=8001,
-                    reserved_memory_bytes=1, updated_at=NOW,
+                    id=_uuid(19),
+                    run_id=_uuid(17),
+                    node_id=_node_id(2),
+                    rank=1,
+                    role="worker",
+                    state="running",
+                    port=8001,
+                    reserved_memory_bytes=1,
+                    updated_at=NOW,
                 ),
             ]
         )
 
-    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter())
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
     profile_a = service.create(
         FleetProfileInput.model_validate(
             {
                 "name": "Dual",
-                "assignments": [{
-                    "recipe_selector": "vonk-forge/synthetic-tiny-image",
-                    "spark_ids": [_node_id(1), _node_id(2)],
-                    "desired_state": "running",
-                    "assignment_name": "dual-chat",
-                }],
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                        "spark_ids": [_node_id(1), _node_id(2)],
+                        "desired_state": "running",
+                        "assignment_name": "dual-chat",
+                    }
+                ],
             }
         ),
         actor="admin",
@@ -2441,12 +2508,14 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
         FleetProfileInput.model_validate(
             {
                 "name": "Solo and idle",
-                "assignments": [{
-                    "recipe_selector": "vonk-forge/synthetic-tiny-solo",
-                    "spark_ids": [_node_id(1)],
-                    "desired_state": "running",
-                    "assignment_name": "solo-chat",
-                }],
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/synthetic-tiny-solo",
+                        "spark_ids": [_node_id(1)],
+                        "desired_state": "running",
+                        "assignment_name": "solo-chat",
+                    }
+                ],
             }
         ),
         actor="admin",
@@ -2482,7 +2551,9 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
     assert back_to_a.summary.installs == 0
 
 
-@pytest.mark.parametrize("damage", ["numeric-variant", "missing-spark-ids", "extra", "invalid-root"])
+@pytest.mark.parametrize(
+    "damage", ["numeric-variant", "missing-spark-ids", "extra", "invalid-root"]
+)
 def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -2641,13 +2712,9 @@ def test_child_operation_state_distinguishes_absence_from_corruption() -> None:
 
     assert _operation_state(None, default="running") == "running"
     assert _operation_state("succeeded", default="queued") == "succeeded"
-    with pytest.raises(
-        FleetProfileConflict, match="child operation state is invalid"
-    ):
+    with pytest.raises(FleetProfileConflict, match="child operation state is invalid"):
         _operation_state("not-a-state", default="running")
-    with pytest.raises(
-        FleetProfileConflict, match="child operation state is invalid"
-    ):
+    with pytest.raises(FleetProfileConflict, match="child operation state is invalid"):
         _operation_state(7, default="running")
 
 
@@ -2681,11 +2748,13 @@ def _exact_cleanup_profile(tmp_path: Path):
         sessions, clock=lifecycle._clock, switch_adapter=adapter
     )
     profile = service.create(
-        FleetProfileInput.model_validate({
-            "name": "Exact cleanup",
-            "installation_policy": "exact",
-            "assignments": [],
-        }),
+        FleetProfileInput.model_validate(
+            {
+                "name": "Exact cleanup",
+                "installation_policy": "exact",
+                "assignments": [],
+            }
+        ),
         actor="admin",
     )
     return sessions, lifecycle, adapter, service, profile, installed, nodes
@@ -2726,7 +2795,9 @@ def test_profile_preview_delegates_removal_to_the_orchestrator(
 
     assert [step.kind for step in preview.steps] == ["switch"]
     delegated = [
-        reason for reason in preview.reasons if reason.code == "profile.cleanup_delegated"
+        reason
+        for reason in preview.reasons
+        if reason.code == "profile.cleanup_delegated"
     ]
     assert delegated, [reason.code for reason in preview.reasons]
     assert installed.owner_id in delegated[0].detail
@@ -2735,7 +2806,8 @@ def test_profile_preview_delegates_removal_to_the_orchestrator(
 
 
 def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
-    tmp_path: Path, postgres_engine: Engine,
+    tmp_path: Path,
+    postgres_engine: Engine,
 ) -> None:
     """The packaged acceptance consumer follows delegated cleanup evidence."""
 

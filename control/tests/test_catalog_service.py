@@ -27,8 +27,14 @@ def _item(tmp_path: Path):
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("index.json"):
-            return httpx.Response(200, headers={"content-type": "application/json"}, content=json.dumps(index).encode())
-        return httpx.Response(200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package)
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                content=json.dumps(index).encode(),
+            )
+        return httpx.Response(
+            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
+        )
 
     client = RecipePackageClient(
         "http://127.0.0.1",
@@ -51,7 +57,9 @@ def service(tmp_path: Path) -> CatalogService:
     )
 
 
-def test_import_persists_canonical_model_recipe_and_package_identity(service: CatalogService, tmp_path: Path) -> None:
+def test_import_persists_canonical_model_recipe_and_package_identity(
+    service: CatalogService, tmp_path: Path
+) -> None:
     client, item = _item(tmp_path)
     handle = item.package_handle
     assert handle is not None
@@ -77,7 +85,9 @@ def test_import_persists_canonical_model_recipe_and_package_identity(service: Ca
     client.close()
 
 
-def test_import_is_idempotent_and_persists_active_canonical_revision(service: CatalogService, tmp_path: Path) -> None:
+def test_import_is_idempotent_and_persists_active_canonical_revision(
+    service: CatalogService, tmp_path: Path
+) -> None:
     client, item = _item(tmp_path)
     kwargs = {
         "library_commit": item.library_commit,
@@ -103,7 +113,9 @@ def test_import_is_idempotent_and_persists_active_canonical_revision(service: Ca
     client.close()
 
 
-def test_import_rejects_changed_recipe_digest(service: CatalogService, tmp_path: Path) -> None:
+def test_import_rejects_changed_recipe_digest(
+    service: CatalogService, tmp_path: Path
+) -> None:
     client, item = _item(tmp_path)
     changed = copy.deepcopy(item.document)
     metadata = changed["metadata"]
@@ -145,4 +157,7 @@ def test_resolve_recipe_revision_resolves_active_model_references(
         )
     finally:
         client.close()
-    assert service.resolve_recipe_revision(item.document, actor="test") == item.content_sha256
+    assert (
+        service.resolve_recipe_revision(item.document, actor="test")
+        == item.content_sha256
+    )

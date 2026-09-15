@@ -322,7 +322,9 @@ def _recovery_authority(
         run_plan = run_plan_document(run.plan)
         installation_plan = installation_plan_document(installation.plan)
     except RecipeExecutionContractError as error:
-        raise DistributedLifecycleError("distributed recovery plan is invalid") from error
+        raise DistributedLifecycleError(
+            "distributed recovery plan is invalid"
+        ) from error
     if (
         run.installation_id != installation.id
         or run.mapping_id != installation.mapping_id
@@ -573,7 +575,9 @@ def _enqueue_recovery_stop(
         )
     )
     if len(start_jobs) != 1:
-        raise DistributedLifecycleError("distributed recovery lacks its start authority")
+        raise DistributedLifecycleError(
+            "distributed recovery lacks its start authority"
+        )
     start_ordinal = start_jobs[0].payload.get("workload_intent_ordinal")
     target_nodes = tuple(
         session.scalars(
@@ -589,7 +593,9 @@ def _enqueue_recovery_stop(
         or tuple(node.node_id for node in target_nodes) != tuple(targets)
         or any(node.workload_intent_ordinal != start_ordinal for node in target_nodes)
     ):
-        raise DistributedLifecycleError("distributed recovery start authority was superseded")
+        raise DistributedLifecycleError(
+            "distributed recovery start authority was superseded"
+        )
     job_payload["workload_intent_ordinal"] = start_ordinal
     job = Job(
         id=job_id,

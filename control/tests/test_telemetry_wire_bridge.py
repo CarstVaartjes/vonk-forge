@@ -27,7 +27,9 @@ def telemetry_wire_probe() -> Path:
             path = Path(__file__).resolve().parents[2] / path
         path = path.resolve()
         if not path.is_file() or not os.access(path, os.X_OK):
-            raise AssertionError(f"configured telemetry wire probe is not executable: {path}")
+            raise AssertionError(
+                f"configured telemetry wire probe is not executable: {path}"
+            )
         return path
 
     repository = Path(__file__).resolve().parents[2]
@@ -49,7 +51,9 @@ def telemetry_wire_probe() -> Path:
     )
     target = target_root / "debug" / "examples" / "telemetry_wire_probe"
     if not target.is_file() or not os.access(target, os.X_OK):
-        raise AssertionError(f"cargo did not produce an executable wire probe: {target}")
+        raise AssertionError(
+            f"cargo did not produce an executable wire probe: {target}"
+        )
     return target
 
 

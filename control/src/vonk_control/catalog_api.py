@@ -152,7 +152,9 @@ def _problem(request: Request, error: CatalogError) -> JSONResponse:
     )
 
 
-def _recipe_library_problem(request: Request, error: RecipeLibraryError) -> JSONResponse:
+def _recipe_library_problem(
+    request: Request, error: RecipeLibraryError
+) -> JSONResponse:
     """Map bounded reader failures to the managed-sync HTTP contract."""
     status_code = 503 if error.code in _RECIPE_LIBRARY_UNAVAILABLE_CODES else 422
     return _catalog_problem(
@@ -188,7 +190,6 @@ def _managed_sync(value: CatalogSyncView) -> dict[str, object]:
             value.completed_at.isoformat() if value.completed_at is not None else None
         ),
     }
-
 
 
 def install_catalog_routes(
@@ -396,7 +397,6 @@ def install_catalog_routes(
                 detail="no managed recipe catalog sync has run yet",
             )
         return _managed_sync(value)
-
 
 
 __all__ = ["CATALOG_OPERATION_IDS", "CatalogProblem", "install_catalog_routes"]

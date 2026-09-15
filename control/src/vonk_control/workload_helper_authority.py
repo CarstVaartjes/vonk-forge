@@ -50,9 +50,7 @@ def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
             or stat.S_IMODE(before.st_mode) & 0o077
             or not 1 <= before.st_size <= 16 * 1024
         ):
-            raise WorkloadHelperAuthorityError(
-                "workload helper private key is unsafe"
-            )
+            raise WorkloadHelperAuthorityError("workload helper private key is unsafe")
         raw = os.read(descriptor, 16 * 1024 + 1)
         after = os.fstat(descriptor)
         identity = lambda value: (
@@ -158,11 +156,11 @@ class WorkloadHelperGrantIssuer:
         if (
             not isinstance(expires_in_seconds, int)
             or isinstance(expires_in_seconds, bool)
-            or not 1
-            <= expires_in_seconds
-            <= MAX_PACKAGE_HELPER_GRANT_SECONDS
+            or not 1 <= expires_in_seconds <= MAX_PACKAGE_HELPER_GRANT_SECONDS
         ):
-            raise WorkloadHelperAuthorityError("workload helper grant expiry is invalid")
+            raise WorkloadHelperAuthorityError(
+                "workload helper grant expiry is invalid"
+            )
         now = self._now()
         try:
             if request_id is None:
@@ -351,7 +349,9 @@ class WorkloadHelperAuthorityService:
             digest = item.get("object_digest")
             size = item.get("size")
             if digest in seen or digest not in allowed or allowed[digest] != size:
-                raise WorkloadHelperAuthorityError("workload helper object is not authorized")
+                raise WorkloadHelperAuthorityError(
+                    "workload helper object is not authorized"
+                )
             seen.add(digest)
             result.append(
                 self._receipt_issuer.issue_object_receipt(
@@ -442,7 +442,9 @@ class WorkloadHelperAuthorityService:
                 or not isinstance(payload, dict)
                 or payload.get("release_digest") != release_digest
             ):
-                raise WorkloadHelperAuthorityError("workload helper operation authority is stale")
+                raise WorkloadHelperAuthorityError(
+                    "workload helper operation authority is stale"
+                )
 
     def _release_objects(self, release_digest: str) -> dict[str, int]:
         if (
@@ -456,6 +458,7 @@ class WorkloadHelperAuthorityService:
         path = self._workload_target_root / release_digest
         try:
             from vonk_agent_protocol.workload_packages import PackageReleaseLock
+
             metadata = path.stat(follow_symlinks=False)
             if (
                 not path.is_file()
@@ -472,14 +475,19 @@ class WorkloadHelperAuthorityService:
             if lock.canonical_bytes != raw:
                 raise ValueError("workload release target is not canonical")
         except Exception as error:
-            raise WorkloadHelperAuthorityError("workload release target is unavailable") from error
+            raise WorkloadHelperAuthorityError(
+                "workload release target is unavailable"
+            ) from error
         if lock.digest != release_digest:
-            raise WorkloadHelperAuthorityError("workload release target identity is invalid")
+            raise WorkloadHelperAuthorityError(
+                "workload release target identity is invalid"
+            )
         allowed: dict[str, int] = {}
         for descriptor in (*lock.components, lock.adapter):
             digest = descriptor.digest.removeprefix("sha256:")
             allowed[digest] = descriptor.size
         return allowed
+
 
 __all__ = [
     "WorkloadHelperAuthorityError",

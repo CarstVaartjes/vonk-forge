@@ -40,8 +40,14 @@ def test_sync_imports_canonical_models_and_recipe_once(tmp_path: Path) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("index.json"):
-            return httpx.Response(200, headers={"content-type": "application/json"}, content=json.dumps(index).encode())
-        return httpx.Response(200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package)
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                content=json.dumps(index).encode(),
+            )
+        return httpx.Response(
+            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
+        )
 
     client = RecipePackageClient(
         "http://127.0.0.1",

@@ -147,7 +147,7 @@ class HostHelperGrantIssuer:
             (
                 ExecuteContainerRuntimeRequestOperation,
                 InstallVonkDebOperation,
-    ConfirmPackageActivationOperation,
+                ConfirmPackageActivationOperation,
                 RestartVonkUnitOperation,
                 ScheduleRebootOperation,
             ),
@@ -223,9 +223,7 @@ class HostRuntimeAuthorityService:
         ContainerRuntimeAction.STOP: frozenset(
             {"recipe.start", "recipe.stop", "recipe.job.run.v1"}
         ),
-        ContainerRuntimeAction.INSTALLATION_CLEANUP: frozenset(
-            {"recipe.uninstall"}
-        ),
+        ContainerRuntimeAction.INSTALLATION_CLEANUP: frozenset({"recipe.uninstall"}),
     }
 
     def __init__(
@@ -480,7 +478,9 @@ class HostRuntimeAuthorityService:
         ):
             raise HostHelperAuthorityError("recipe run observation grant was replayed")
         if pending.consumed is not False:
-            raise RecipeRunObservationReplayError("recipe run observation grant was replayed")
+            raise RecipeRunObservationReplayError(
+                "recipe run observation grant was replayed"
+            )
         pending.consumed = True
         receipt_digest = hashlib.sha256(
             canonical_message(receipt.to_mapping())
@@ -497,9 +497,13 @@ class HostRuntimeAuthorityService:
         now: datetime,
     ) -> str:
         try:
-            identity = RecipeRunObservationIdentity.model_validate(dict(identity)).model_dump(mode="json")
+            identity = RecipeRunObservationIdentity.model_validate(
+                dict(identity)
+            ).model_dump(mode="json")
         except ValidationError as error:
-            raise HostHelperAuthorityError("recipe run observation identity is invalid") from error
+            raise HostHelperAuthorityError(
+                "recipe run observation identity is invalid"
+            ) from error
         run = session.get(RecipeRun, identity.get("run_id"))
         installation = session.get(RecipeInstallation, identity.get("installation_id"))
         revision = session.get(
@@ -576,28 +580,30 @@ class HostRuntimeAuthorityService:
                 break
         if launch is None:
             raise HostHelperAuthorityError("recipe run launch evidence is unavailable")
-        expected = RecipeRunObservationIdentity.model_validate({
-            "schema_version": 1,
-            "node_id": node_id,
-            "run_id": run.id,
-            "installation_id": installation.id,
-            "recipe_revision_id": revision.id,
-            "recipe_content_sha256": revision.content_digest,
-            "mapping_id": mapping.id,
-            "mapping_generation": run.mapping_generation,
-            "run_generation": run.run_generation,
-            "image_digest": installation.image_digest.removeprefix("sha256:"),
-            "artifact_set_digest": launch.get("artifact_set_digest"),
-            "model_identity": launch.get("model_identity"),
-            "rank": run_node.rank,
-            "role": run_node.role,
-            "world_size": launch.get("world_size"),
-            "local_address": launch.get("local_address"),
-            "master_address": launch.get("master_address"),
-            "master_port": launch.get("master_port"),
-            "port": run_node.port,
-            "runtime_arguments_sha256": launch.get("runtime_arguments_sha256"),
-        }).model_dump(mode="json")
+        expected = RecipeRunObservationIdentity.model_validate(
+            {
+                "schema_version": 1,
+                "node_id": node_id,
+                "run_id": run.id,
+                "installation_id": installation.id,
+                "recipe_revision_id": revision.id,
+                "recipe_content_sha256": revision.content_digest,
+                "mapping_id": mapping.id,
+                "mapping_generation": run.mapping_generation,
+                "run_generation": run.run_generation,
+                "image_digest": installation.image_digest.removeprefix("sha256:"),
+                "artifact_set_digest": launch.get("artifact_set_digest"),
+                "model_identity": launch.get("model_identity"),
+                "rank": run_node.rank,
+                "role": run_node.role,
+                "world_size": launch.get("world_size"),
+                "local_address": launch.get("local_address"),
+                "master_address": launch.get("master_address"),
+                "master_port": launch.get("master_port"),
+                "port": run_node.port,
+                "runtime_arguments_sha256": launch.get("runtime_arguments_sha256"),
+            }
+        ).model_dump(mode="json")
         if dict(identity) != expected:
             raise HostHelperAuthorityError("recipe run observation identity is stale")
         return hashlib.sha256(canonical_message(expected)).hexdigest()
@@ -649,8 +655,13 @@ class HostRuntimeAuthorityService:
             ):
                 raise HostHelperAuthorityError("agent upgrade authority is stale")
             payload = AgentUpgradePayload.model_validate(operation.payload)
-            if payload.rollback.activation_deadline <= int(now.timestamp()) + expires_in_seconds:
-                raise HostHelperAuthorityError("package activation deadline has expired")
+            if (
+                payload.rollback.activation_deadline
+                <= int(now.timestamp()) + expires_in_seconds
+            ):
+                raise HostHelperAuthorityError(
+                    "package activation deadline has expired"
+                )
         grant = self._issuer.issue_grant(
             node_id=node_id,
             operation=InstallVonkDebOperation(
@@ -667,32 +678,64 @@ class HostRuntimeAuthorityService:
             )
         return grant
 
-    def issue_package_activation_grant(self, *, node_id: str, receipt: PackageActivationReceipt,
-        runtime_identity: AgentRuntimeIdentity, certificate_serial: str) -> SignedHostHelperGrant:
+    def issue_package_activation_grant(
+        self,
+        *,
+        node_id: str,
+        receipt: PackageActivationReceipt,
+        runtime_identity: AgentRuntimeIdentity,
+        certificate_serial: str,
+    ) -> SignedHostHelperGrant:
         now = self._clock()
         with self._sessions() as session:
             node = session.get(AgentNode, node_id)
             certificate = session.get(AgentCertificate, certificate_serial)
-            if node is None or node.state != "active" or node.revoked_at is not None or certificate is None or certificate.node_id != node_id or certificate.revoked_at is not None:
+            if (
+                node is None
+                or node.state != "active"
+                or node.revoked_at is not None
+                or certificate is None
+                or certificate.node_id != node_id
+                or certificate.revoked_at is not None
+            ):
                 raise HostHelperAuthorityError("activation node identity is invalid")
-            operations = session.scalars(select(StoredAgentOperation).where(
-                StoredAgentOperation.node_id == node_id,
-                StoredAgentOperation.kind == "agent.upgrade.v1",
-                StoredAgentOperation.state.in_({"running", "waiting-for-operator"})))
+            operations = session.scalars(
+                select(StoredAgentOperation).where(
+                    StoredAgentOperation.node_id == node_id,
+                    StoredAgentOperation.kind == "agent.upgrade.v1",
+                    StoredAgentOperation.state.in_({"running", "waiting-for-operator"}),
+                )
+            )
             matching = []
             for operation in operations:
                 payload = AgentUpgradePayload.model_validate(operation.payload)
                 if matches_receipt(receipt, payload, node_id):
                     matching.append(payload)
             if len(matching) != 1:
-                raise HostHelperAuthorityError("activation receipt has no unique upgrade authority")
+                raise HostHelperAuthorityError(
+                    "activation receipt has no unique upgrade authority"
+                )
             payload = matching[0]
-            if receipt.phase != "armed" or payload.rollback.activation_deadline <= int(now.timestamp()) + 30 or runtime_identity.binary_digest != payload.target_binary_digest or runtime_identity.build_digest != payload.target_build_digest or runtime_identity.architecture != payload.architecture or runtime_identity.self_test_passed is not True:
-                raise HostHelperAuthorityError("candidate activation identity is invalid")
-        return self._issuer.issue_grant(node_id=node_id,
-            operation=ConfirmPackageActivationOperation(type="confirm-package-activation",
-                package_sha256=payload.package_sha256, attempt_nonce=payload.rollback.attempt_nonce),
-            expires_in_seconds=30)
+            if (
+                receipt.phase != "armed"
+                or payload.rollback.activation_deadline <= int(now.timestamp()) + 30
+                or runtime_identity.binary_digest != payload.target_binary_digest
+                or runtime_identity.build_digest != payload.target_build_digest
+                or runtime_identity.architecture != payload.architecture
+                or runtime_identity.self_test_passed is not True
+            ):
+                raise HostHelperAuthorityError(
+                    "candidate activation identity is invalid"
+                )
+        return self._issuer.issue_grant(
+            node_id=node_id,
+            operation=ConfirmPackageActivationOperation(
+                type="confirm-package-activation",
+                package_sha256=payload.package_sha256,
+                attempt_nonce=payload.rollback.attempt_nonce,
+            ),
+            expires_in_seconds=30,
+        )
 
     def _check_attempt(
         self,
@@ -717,7 +760,9 @@ class HostRuntimeAuthorityService:
                 and isinstance(parent.result, Mapping)
                 and parent.result.get("cancel_requested") is True
             )
-            cancellation_stop = cancellation_requested and action is ContainerRuntimeAction.STOP
+            cancellation_stop = (
+                cancellation_requested and action is ContainerRuntimeAction.STOP
+            )
             cancellation_deadline = superseded_cancellation_deadline(
                 parent.result if parent is not None else None
             )
@@ -774,9 +819,11 @@ class HostRuntimeAuthorityService:
                     and (
                         type(operation.workload_intent_ordinal) is not int
                         or operation.workload_intent_ordinal < 1
-                        or operation.workload_intent_ordinal != parent.payload.get("workload_intent_ordinal")
+                        or operation.workload_intent_ordinal
+                        != parent.payload.get("workload_intent_ordinal")
                         or (
-                            operation.workload_intent_ordinal != node.workload_intent_ordinal
+                            operation.workload_intent_ordinal
+                            != node.workload_intent_ordinal
                             and not cancellation_stop
                         )
                     )

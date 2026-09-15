@@ -118,7 +118,11 @@ from .telemetry import (
     TelemetrySeries,
     TelemetryWorkload,
 )
-from .package_upgrade import PackageActivationReceipt, PackageRollbackAuthority, PackageRollbackSource
+from .package_upgrade import (
+    PackageActivationReceipt,
+    PackageRollbackAuthority,
+    PackageRollbackSource,
+)
 from .wire_model import (
     OperationCheckpoint,
     OperationMemberProgress,

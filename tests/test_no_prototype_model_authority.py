@@ -17,12 +17,19 @@ def test_root_tests_do_not_import_control_implementation() -> None:
         imports_control = any(
             (
                 isinstance(node, ast.Import)
-                and any(alias.name == "vonk_control" or alias.name.startswith("vonk_control.") for alias in node.names)
+                and any(
+                    alias.name == "vonk_control"
+                    or alias.name.startswith("vonk_control.")
+                    for alias in node.names
+                )
             )
             or (
                 isinstance(node, ast.ImportFrom)
                 and node.module is not None
-                and (node.module == "vonk_control" or node.module.startswith("vonk_control."))
+                and (
+                    node.module == "vonk_control"
+                    or node.module.startswith("vonk_control.")
+                )
             )
             for node in ast.walk(tree)
         )
@@ -30,16 +37,26 @@ def test_root_tests_do_not_import_control_implementation() -> None:
             offenders.append(path)
             continue
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            if not isinstance(node, ast.Call) or not isinstance(
+                node.func, ast.Attribute
+            ):
                 continue
-            if node.func.attr not in {"insert", "append"} or not isinstance(node.func.value, ast.Attribute):
+            if node.func.attr not in {"insert", "append"} or not isinstance(
+                node.func.value, ast.Attribute
+            ):
                 continue
-            if node.func.value.attr != "path" or not isinstance(node.func.value.value, ast.Name):
+            if node.func.value.attr != "path" or not isinstance(
+                node.func.value.value, ast.Name
+            ):
                 continue
             if node.func.value.value.id != "sys":
                 continue
             source = ast.unparse(node)
-            if "control" in source and "src" in source and path not in contract_boundary_tests:
+            if (
+                "control" in source
+                and "src" in source
+                and path not in contract_boundary_tests
+            ):
                 offenders.append(path)
                 break
     assert offenders == []

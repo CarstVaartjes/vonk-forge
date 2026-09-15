@@ -30,9 +30,7 @@ def build_engine(database_url: str) -> Engine:
         if "postgres" in database_url
         else {}
     )
-    return create_engine(
-        database_url, pool_pre_ping=True, connect_args=connect_args
-    )
+    return create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:

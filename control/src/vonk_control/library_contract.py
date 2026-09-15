@@ -145,10 +145,6 @@ class LibraryModelIdentity(_StrictModel):
     content_sha256: Digest
 
 
-
-
-
-
 class LibraryRecipeSummary(LibraryRecipeIdentity):
     recipe_document: RecipeDefinition
     capabilities: list[Text64] = Field(max_length=64)
@@ -190,9 +186,7 @@ class LibraryResourceProjection(_StrictModel):
 
     memory_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
     disk_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
-    runtime_memory_bytes: int | None = Field(
-        default=None, ge=0, le=_MAX_SIGNED_BIGINT
-    )
+    runtime_memory_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
     image_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
 
 
@@ -289,7 +283,6 @@ class RecipeLibraryResponse(_StrictModel):
     next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
     filters: LibraryFilterValues = Field(default_factory=LibraryFilterValues)
     freshness_policy: FreshnessPolicy
-
 
 
 class OperationalBuild(_StrictModel):

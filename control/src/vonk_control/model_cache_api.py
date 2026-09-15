@@ -40,6 +40,7 @@ MODEL_CACHE_OPERATION_IDS = {
     ("post", "/api/model/{selector}/remove"): "removeModel",
 }
 
+
 def _model_operator_response(
     operation: Any, *, action: ModelCacheOperatorAction, selector: str
 ) -> ModelCacheOperatorResponse:
@@ -68,9 +69,7 @@ def _model_operator_response(
             else []
         ),
         next_actions=(
-            ["retry"]
-            if operation.state == "failed" and operation.retryable
-            else []
+            ["retry"] if operation.state == "failed" and operation.retryable else []
         ),
         cancelled_operations=list(cancelled),
         result=result,
@@ -108,7 +107,9 @@ def install_model_operator_routes(
         if actor.role not in MUTATION_ROLES[("POST", route)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
-    def audit(request: Request, actor: Actor, action: str, selector: str, operation_id: str) -> None:
+    def audit(
+        request: Request, actor: Actor, action: str, selector: str, operation_id: str
+    ) -> None:
         if audits is not None:
             audits.append(
                 AuditRecord(
@@ -172,7 +173,9 @@ def install_model_operator_routes(
                 force=True,
             )
             audit(request, actor, "model.download", selector, operation.id)
-            return _model_operator_response(operation, action="download", selector=selector)
+            return _model_operator_response(
+                operation, action="download", selector=selector
+            )
         except HTTPException:
             raise
         except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
@@ -199,7 +202,9 @@ def install_model_operator_routes(
                 request_key=body.request_key,
             )
             audit(request, actor, "model.remove", selector, operation.id)
-            return _model_operator_response(operation, action="remove", selector=selector)
+            return _model_operator_response(
+                operation, action="remove", selector=selector
+            )
         except HTTPException:
             raise
         except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
@@ -283,7 +288,9 @@ class ModelCacheOperationProvider:
     def _summary(self, operation: Any) -> dict[str, object]:
         progress = dict(operation.progress)
         result = (
-            None if operation.result is None else operation.result.model_dump(mode="json")
+            None
+            if operation.result is None
+            else operation.result.model_dump(mode="json")
         )
         retryable = operation.state == "failed" and operation.retryable
         return {
@@ -305,6 +312,7 @@ class ModelCacheOperationProvider:
     def _progress(value: Mapping[str, object]) -> dict[str, object]:
         return project_cache_progress(value)
 
+
 def model_cache_operation_provider(
     service: ModelCacheService,
     cursors: Any | None = None,
@@ -323,9 +331,7 @@ def register_model_cache_operation_provider(
     """Attach the cache family to the current shared Activity services."""
     if services is None or service is None:
         return services
-    provider = model_cache_operation_provider(
-        service, services.cursor_codec
-    )
+    provider = model_cache_operation_provider(service, services.cursor_codec)
     existing = services.operation_providers
     if any(item.family == "model-cache" for item in existing):
         return services

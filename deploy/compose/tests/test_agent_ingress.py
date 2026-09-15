@@ -567,18 +567,18 @@ def test_agent_package_relay_matches_only_digest_bound_package_documents() -> No
     )
     assert re.fullmatch(
         matcher,
-        "/artifacts/dev/agent-builds/"
-        + "a" * 64
-        + "/"
-        + "b" * 64
-        + "/package.json",
+        "/artifacts/dev/agent-builds/" + "a" * 64 + "/" + "b" * 64 + "/package.json",
     )
     for denied in (
         "/artifacts/dev/agent-builds/" + "a" * 63 + "/" + "b" * 64 + "/package.json",
         "/artifacts/dev/agent-builds/" + "a" * 64 + "/" + "b" * 63 + "/package.json",
         "/artifacts/test/agent-builds/" + "a" * 64 + "/" + "b" * 64 + "/package.json",
         "/artifacts/dev/agent-builds/" + "a" * 64 + "/" + "b" * 64 + "/other.json",
-        "/artifacts/dev/agent-builds/" + "a" * 64 + "/" + "b" * 64 + "/package.json/extra",
+        "/artifacts/dev/agent-builds/"
+        + "a" * 64
+        + "/"
+        + "b" * 64
+        + "/package.json/extra",
     ):
         assert re.fullmatch(matcher, denied) is None
     assert package_route["match"][0]["method"] == ["GET"]

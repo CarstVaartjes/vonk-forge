@@ -95,7 +95,9 @@ def _request(
     except urllib.error.HTTPError as error:
         return error.code, _decode_response(error)
     except (OSError, urllib.error.URLError) as error:
-        raise ProvisionError("LiteLLM key management endpoint is unavailable") from error
+        raise ProvisionError(
+            "LiteLLM key management endpoint is unavailable"
+        ) from error
 
 
 def _key_info(master_key: str, hermes_key: str) -> tuple[int, dict[str, Any]]:

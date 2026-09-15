@@ -125,7 +125,9 @@ def _json(value: object) -> bytes:
     try:
         return canonical_message(value)
     except (TypeError, ValueError) as error:
-        raise CatalogRevisionContractError("catalog persisted value is not JSON") from error
+        raise CatalogRevisionContractError(
+            "catalog persisted value is not JSON"
+        ) from error
 
 
 @lru_cache(maxsize=1)
@@ -142,7 +144,9 @@ def read_catalog_projection(
 
     try:
         projection_type = (
-            ModelRevisionProjection if revision.kind == "model" else RecipeRevisionProjection
+            ModelRevisionProjection
+            if revision.kind == "model"
+            else RecipeRevisionProjection
         )
         if revision.kind not in {"model", "recipe"}:
             raise ValueError("unknown catalog revision kind")
@@ -153,7 +157,11 @@ def read_catalog_projection(
             assert isinstance(parsed, RecipeRevisionProjection)
             if recipe.execution.mode == "build" and any(
                 value is None
-                for value in (parsed.build_resources, parsed.build_security, parsed.build_options)
+                for value in (
+                    parsed.build_resources,
+                    parsed.build_security,
+                    parsed.build_options,
+                )
             ):
                 raise ValueError("source-build projection is incomplete")
             if parsed.test_report is not None and not _test_report_validator().is_valid(
@@ -196,13 +204,15 @@ def write_catalog_projection(
     )
 
 
-def read_catalog_document(revision: CatalogDocumentRevision) -> ModelDefinition | RecipeDefinition:
+def read_catalog_document(
+    revision: CatalogDocumentRevision,
+) -> ModelDefinition | RecipeDefinition:
     """Read and authenticate one persisted canonical public document."""
 
     try:
         if revision.kind == "model":
-            parsed: ModelDefinition | RecipeDefinition = ModelDefinition.model_validate_json(
-                _json(revision.document)
+            parsed: ModelDefinition | RecipeDefinition = (
+                ModelDefinition.model_validate_json(_json(revision.document))
             )
         elif revision.kind == "recipe":
             parsed = RecipeDefinition.model_validate_json(_json(revision.document))
@@ -214,7 +224,10 @@ def read_catalog_document(revision: CatalogDocumentRevision) -> ModelDefinition 
             raise CatalogRevisionContractError(
                 f"catalog revision {revision.id} document digest does not match"
             )
-        if parsed.identity.publisher != revision.publisher or parsed.identity.slug != revision.slug:
+        if (
+            parsed.identity.publisher != revision.publisher
+            or parsed.identity.slug != revision.slug
+        ):
             raise CatalogRevisionContractError(
                 f"catalog revision {revision.id} document identity does not match"
             )

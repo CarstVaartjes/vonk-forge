@@ -13,7 +13,10 @@ from vonk_control.worker import HandlerRequest, Worker
 def _service(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}")
     Base.metadata.create_all(engine)
-    return JobService(sessionmaker(engine, expire_on_commit=False), clock=lambda: datetime(2026, 8, 3, tzinfo=UTC))
+    return JobService(
+        sessionmaker(engine, expire_on_commit=False),
+        clock=lambda: datetime(2026, 8, 3, tzinfo=UTC),
+    )
 
 
 def test_worker_dispatches_registered_handler_and_persists_result(tmp_path) -> None:
@@ -49,7 +52,9 @@ def test_worker_handler_receives_pinned_job_metadata(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("kind", ["recipe.image.availability.v2", "future-coordinator"])
-def test_generic_worker_leaves_unregistered_jobs_for_their_owner(tmp_path, kind) -> None:
+def test_generic_worker_leaves_unregistered_jobs_for_their_owner(
+    tmp_path, kind
+) -> None:
     jobs = _service(tmp_path)
     pending = jobs.enqueue(kind, "admin", "abc", [], {"retry_after_at": "later"})
     assert Worker(jobs, "worker-1", {}).run_once() is False
@@ -72,9 +77,11 @@ def test_worker_does_not_mask_unexpected_programming_error(tmp_path) -> None:
         Worker(
             jobs,
             "worker-1",
-            {"probe": lambda _request: (_ for _ in ()).throw(
-                AssertionError("programming defect")
-            )},
+            {
+                "probe": lambda _request: (_ for _ in ()).throw(
+                    AssertionError("programming defect")
+                )
+            },
         ).run_once()
 
 
@@ -302,9 +309,7 @@ def test_due_telemetry_housekeeping_does_not_consume_worker_source_turn(
     ]
 
 
-def test_failing_source_does_not_starve_a_healthy_durable_job(
-    tmp_path, caplog
-) -> None:
+def test_failing_source_does_not_starve_a_healthy_durable_job(tmp_path, caplog) -> None:
     """A source that keeps failing must not deny unrelated jobs their turn."""
 
     jobs = _service(tmp_path)

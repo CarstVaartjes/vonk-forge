@@ -128,7 +128,11 @@ def _target(node: str, *, image: bool = False) -> SimpleNamespace:
 def test_complete_two_node_distribution_is_a_verified_skip() -> None:
     nodes = ("spk_" + "a" * 32, "spk_" + "b" * 32)
     preparation = SimpleNamespace(
-        model=SimpleNamespace(artifact_set_sha256="b" * 64, artifact_set_bytes=0, targets=[_target(node) for node in nodes]),
+        model=SimpleNamespace(
+            artifact_set_sha256="b" * 64,
+            artifact_set_bytes=0,
+            targets=[_target(node) for node in nodes],
+        ),
         runtime_image=SimpleNamespace(
             image_digest="sha256:" + "d" * 64,
             oci_layout_sha256="e" * 64,
@@ -148,7 +152,14 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
         *_unused_executor_services(lambda: datetime.now(UTC)),
         clock=lambda: datetime.now(UTC),
     )
-    result = executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress={})
+    result = executor.execute(
+        plan,
+        phase,
+        item_index=0,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress={},
+    )
     assert result.operation_id is None
     assert result.result == {
         "phase": "transfer",
@@ -171,10 +182,18 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             node = session.get(AgentNode, node_id)
             assert node is not None
             node.workload_intent_ordinal = 7
-    model = DistributionObject(name="weights/model.bin", sha256="a" * 64, bytes=10, kind="model")
-    config = DistributionObject(name="config/tokenizer.json", sha256="b" * 64, bytes=5, kind="model")
-    archive = DistributionObject(name="image.oci.tar", sha256="c" * 64, bytes=11, kind="oci-archive")
-    source = MemoryVerifiedObjectSource({"a" * 64: b"x" * 10, "b" * 64: b"y" * 5, "c" * 64: b"z" * 11})
+    model = DistributionObject(
+        name="weights/model.bin", sha256="a" * 64, bytes=10, kind="model"
+    )
+    config = DistributionObject(
+        name="config/tokenizer.json", sha256="b" * 64, bytes=5, kind="model"
+    )
+    archive = DistributionObject(
+        name="image.oci.tar", sha256="c" * 64, bytes=11, kind="oci-archive"
+    )
+    source = MemoryVerifiedObjectSource(
+        {"a" * 64: b"x" * 10, "b" * 64: b"y" * 5, "c" * 64: b"z" * 11}
+    )
     source.register_artifact_set("d" * 64, (model, config))
     source.register_runtime_image("sha256:" + "e" * 64, archive.sha256)
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
@@ -194,16 +213,48 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         services.sessions, services.operations, distribution, clock=clock
     )
     targets = [
-        SimpleNamespace(node_id=NODE_A, state="preparing", verified_sha256=None, imported_image_digest=None, verified_at=None),
-        SimpleNamespace(node_id=NODE_B, state="ready", verified_sha256="d" * 64, imported_image_digest=None, verified_at=datetime.now(UTC)),
+        SimpleNamespace(
+            node_id=NODE_A,
+            state="preparing",
+            verified_sha256=None,
+            imported_image_digest=None,
+            verified_at=None,
+        ),
+        SimpleNamespace(
+            node_id=NODE_B,
+            state="ready",
+            verified_sha256="d" * 64,
+            imported_image_digest=None,
+            verified_at=datetime.now(UTC),
+        ),
     ]
     image_targets = [
-        SimpleNamespace(node_id=NODE_A, state="preparing", verified_sha256=None, imported_image_digest=None, verified_at=None),
-        SimpleNamespace(node_id=NODE_B, state="ready", verified_sha256="c" * 64, imported_image_digest="sha256:" + "e" * 64, verified_at=datetime.now(UTC)),
+        SimpleNamespace(
+            node_id=NODE_A,
+            state="preparing",
+            verified_sha256=None,
+            imported_image_digest=None,
+            verified_at=None,
+        ),
+        SimpleNamespace(
+            node_id=NODE_B,
+            state="ready",
+            verified_sha256="c" * 64,
+            imported_image_digest="sha256:" + "e" * 64,
+            verified_at=datetime.now(UTC),
+        ),
     ]
     preparation = SimpleNamespace(
-        model=SimpleNamespace(artifact_set_sha256="d" * 64, artifact_set_bytes=15, targets=targets),
-        runtime_image=SimpleNamespace(image_digest="sha256:" + "e" * 64, oci_layout_sha256="c" * 64, image_bytes=11, build_id=None, targets=image_targets),
+        model=SimpleNamespace(
+            artifact_set_sha256="d" * 64, artifact_set_bytes=15, targets=targets
+        ),
+        runtime_image=SimpleNamespace(
+            image_digest="sha256:" + "e" * 64,
+            oci_layout_sha256="c" * 64,
+            image_bytes=11,
+            build_id=None,
+            targets=image_targets,
+        ),
     )
     plan = _plan(
         preparation=preparation,
@@ -217,8 +268,25 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         mapping=None,
     )
     phase = _phase(kind="transfer", node_ids=[NODE_A, NODE_B], index=0)
-    build_progress = {"workload_intent_ordinal": 7, "phase_results": [{"build_id": str(uuid4()), "image_digest": "sha256:" + "e" * 64, "oci_layout_sha256": "c" * 64, "image_bytes": 11}]}
-    first = executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress=build_progress)
+    build_progress = {
+        "workload_intent_ordinal": 7,
+        "phase_results": [
+            {
+                "build_id": str(uuid4()),
+                "image_digest": "sha256:" + "e" * 64,
+                "oci_layout_sha256": "c" * 64,
+                "image_bytes": 11,
+            }
+        ],
+    }
+    first = executor.execute(
+        plan,
+        phase,
+        item_index=0,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress=build_progress,
+    )
     assert first.operation_id is not None
     pending = executor.get(first.operation_id)
     assert pending.result["progress"]["members"][0]["completed_bytes"] == 0
@@ -249,28 +317,40 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             "authority_revision": plan.plan_digest,
             "plan_digest": plan.plan_digest,
         }
-        assert distribution.authorize(node_id=NODE_A, plan_digest=plan.plan_digest).assignment_id == operation["assignment_id"]
+        assert (
+            distribution.authorize(
+                node_id=NODE_A, plan_digest=plan.plan_digest
+            ).assignment_id
+            == operation["assignment_id"]
+        )
         stored.state = "succeeded"
         stored.current_attempt = 1
-        session.add(AgentOperationAttempt(
-            operation_id=stored.id,
-            attempt=1,
-            fence=str(uuid4()),
-            lease_deadline=clock.now,
-            agent_certificate_serial="serial-a",
-            state="succeeded",
-            # The heartbeat is intentionally stale and partial; terminal
-            # evidence below is the authoritative aggregate.
-            progress={"phase": "copying", "completed_bytes": 3, "total_bytes": 26, "total_bytes_known": True},
-            result={
-                "downloaded_bytes": 26,
-                "verified": True,
-                "verified_digests": ["a" * 64, "b" * 64],
-                "verified_image_digest": "sha256:" + "e" * 64,
-                "imported_image_digest": "sha256:" + "e" * 64,
-                "verified_oci_layout_sha256": "c" * 64,
-            },
-        ))
+        session.add(
+            AgentOperationAttempt(
+                operation_id=stored.id,
+                attempt=1,
+                fence=str(uuid4()),
+                lease_deadline=clock.now,
+                agent_certificate_serial="serial-a",
+                state="succeeded",
+                # The heartbeat is intentionally stale and partial; terminal
+                # evidence below is the authoritative aggregate.
+                progress={
+                    "phase": "copying",
+                    "completed_bytes": 3,
+                    "total_bytes": 26,
+                    "total_bytes_known": True,
+                },
+                result={
+                    "downloaded_bytes": 26,
+                    "verified": True,
+                    "verified_digests": ["a" * 64, "b" * 64],
+                    "verified_image_digest": "sha256:" + "e" * 64,
+                    "imported_image_digest": "sha256:" + "e" * 64,
+                    "verified_oci_layout_sha256": "c" * 64,
+                },
+            )
+        )
     view = executor.get(first.operation_id)
     assert view.state == "succeeded"
     assert [member["node_id"] for member in view.result["members"]] == [NODE_A, NODE_B]
@@ -282,11 +362,32 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         assert persisted.result["progress"]["completed_bytes"] == 52
         assert persisted.result["progress"]["members"][0]["state"] == "succeeded"
     executor.source_available = False
-    replay = executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress=build_progress)
+    replay = executor.execute(
+        plan,
+        phase,
+        item_index=0,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress=build_progress,
+    )
     assert replay.operation_id == first.operation_id
     with pytest.raises(RuntimeError, match="distribution child request key was reused"):
-        executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress={**build_progress, "workload_intent_ordinal": 8})
-    verify = executor.execute(plan, _phase(kind="verify", node_ids=[NODE_A, NODE_B], index=1), item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress={"cached_nodes": [NODE_B], "evidence": view.result["evidence"]})
+        executor.execute(
+            plan,
+            phase,
+            item_index=0,
+            actor="test",
+            request_key="00000000-0000-4000-8000-000000000001",
+            progress={**build_progress, "workload_intent_ordinal": 8},
+        )
+    verify = executor.execute(
+        plan,
+        _phase(kind="verify", node_ids=[NODE_A, NODE_B], index=1),
+        item_index=0,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress={"cached_nodes": [NODE_B], "evidence": view.result["evidence"]},
+    )
     assert verify.result is not None
     assert verify.result["verified"] is True
 
@@ -309,7 +410,14 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         assert child is not None
         child.targets = [NODE_B]
     with pytest.raises(RuntimeError, match="distribution child target scope changed"):
-        executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress=build_progress)
+        executor.execute(
+            plan,
+            phase,
+            item_index=0,
+            actor="test",
+            request_key="00000000-0000-4000-8000-000000000001",
+            progress=build_progress,
+        )
 
 
 def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
@@ -350,26 +458,30 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
             model=SimpleNamespace(
                 artifact_set_sha256=artifact_digest,
                 artifact_set_bytes=7,
-                targets=[SimpleNamespace(
-                    node_id=node_id,
-                    state="ready",
-                    verified_sha256=artifact_digest,
-                    verified_at=datetime.now(UTC),
-                    imported_image_digest=None,
-                )],
+                targets=[
+                    SimpleNamespace(
+                        node_id=node_id,
+                        state="ready",
+                        verified_sha256=artifact_digest,
+                        verified_at=datetime.now(UTC),
+                        imported_image_digest=None,
+                    )
+                ],
             ),
             runtime_image=SimpleNamespace(
                 build_id=build_id,
                 image_digest=image_digest,
                 oci_layout_sha256=layout_digest,
                 image_bytes=11,
-                targets=[SimpleNamespace(
-                    node_id=node_id,
-                    state="ready",
-                    verified_sha256=layout_digest,
-                    verified_at=datetime.now(UTC),
-                    imported_image_digest=image_digest,
-                )],
+                targets=[
+                    SimpleNamespace(
+                        node_id=node_id,
+                        state="ready",
+                        verified_sha256=layout_digest,
+                        verified_at=datetime.now(UTC),
+                        imported_image_digest=image_digest,
+                    )
+                ],
             ),
         ),
         storage=SimpleNamespace(artifact_digests=[artifact_digest]),
@@ -418,13 +530,17 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
     assert result["verified_build_id"] == build_id
     _validate_artifact_execution(plan, _phase(kind="verify"), result)
 
-    with pytest.raises(RunSwitchOperationConflict, match="runtime-build-verification-mismatch"):
+    with pytest.raises(
+        RunSwitchOperationConflict, match="runtime-build-verification-mismatch"
+    ):
         _validate_artifact_execution(
             plan,
             _phase(kind="verify"),
             {key: value for key, value in result.items() if key != "verified_build_id"},
         )
-    with pytest.raises(RunSwitchOperationConflict, match="runtime-build-verification-mismatch"):
+    with pytest.raises(
+        RunSwitchOperationConflict, match="runtime-build-verification-mismatch"
+    ):
         _validate_artifact_execution(
             plan,
             _phase(kind="verify"),
@@ -452,7 +568,9 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
     _client, services, _tokens, clock = agent_system
     source = MemoryVerifiedObjectSource()
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
-    executor = DurableDistributionPhaseExecutor(services.sessions, services.operations, distribution, clock=clock)
+    executor = DurableDistributionPhaseExecutor(
+        services.sessions, services.operations, distribution, clock=clock
+    )
     # The failure path is intentionally checked at the durable projection
     # boundary; no fabricated verification receipt can make it succeed.
     with services.sessions.begin() as session:
@@ -460,28 +578,60 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
         assert node is not None
         node.workload_intent_ordinal = 1
         child = Job(
-            id=str(uuid4()), request_id=str(uuid4()), kind="artifact-distribution", state="queued",
-            actor="test", authority_revision="f" * 64, targets=[NODE_A], payload_digest="0" * 64,
-            payload={"workload_intent_ordinal": 1, "cached_nodes": [], "target_totals": {NODE_A: 26}}, result=None,
-            created_at=clock.now, updated_at=clock.now,
+            id=str(uuid4()),
+            request_id=str(uuid4()),
+            kind="artifact-distribution",
+            state="queued",
+            actor="test",
+            authority_revision="f" * 64,
+            targets=[NODE_A],
+            payload_digest="0" * 64,
+            payload={
+                "workload_intent_ordinal": 1,
+                "cached_nodes": [],
+                "target_totals": {NODE_A: 26},
+            },
+            result=None,
+            created_at=clock.now,
+            updated_at=clock.now,
         )
         session.add(child)
         session.flush()
         services.operations.enqueue_in_session(
-            session, child.id, NODE_A, "artifact.distribution.v1", "f" * 64,
+            session,
+            child.id,
+            NODE_A,
+            "artifact.distribution.v1",
+            "f" * 64,
             ArtifactDistributionPayload(
-                schema_version=1, authority_revision="f" * 64, plan_digest="f" * 64,
+                schema_version=1,
+                authority_revision="f" * 64,
+                plan_digest="f" * 64,
             ).model_dump(mode="json"),
             operation_id=str(uuid4()),
         )
-        operation = session.query(AgentOperation).filter_by(parent_job_id=child.id).one()
+        operation = (
+            session.query(AgentOperation).filter_by(parent_job_id=child.id).one()
+        )
         operation.state = "failed"
         operation.current_attempt = 1
-        session.add(AgentOperationAttempt(
-            operation_id=operation.id, attempt=1, fence=str(uuid4()), lease_deadline=clock.now,
-            agent_certificate_serial="serial-a", state="failed", progress={"phase": "copying", "completed_bytes": 2, "total_bytes": 26, "total_bytes_known": True},
-            result={"reason": "digest mismatch"},
-        ))
+        session.add(
+            AgentOperationAttempt(
+                operation_id=operation.id,
+                attempt=1,
+                fence=str(uuid4()),
+                lease_deadline=clock.now,
+                agent_certificate_serial="serial-a",
+                state="failed",
+                progress={
+                    "phase": "copying",
+                    "completed_bytes": 2,
+                    "total_bytes": 26,
+                    "total_bytes_known": True,
+                },
+                result={"reason": "digest mismatch"},
+            )
+        )
         child_id = child.id
     view = executor.get(child_id)
     assert view.state == "failed"
@@ -490,14 +640,25 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
 
 
 @pytest.mark.parametrize("image_prepared", [True, False])
-def test_model_download_is_a_durable_cache_child_with_exact_pins(image_prepared: bool) -> None:
+def test_model_download_is_a_durable_cache_child_with_exact_pins(
+    image_prepared: bool,
+) -> None:
     calls: list[dict[str, object]] = []
     cache_view = SimpleNamespace(
         id=str(uuid4()),
         state="queued",
         artifact_set_sha256="d" * 64,
         progress=cache_progress(
-            {"phase": "downloading", "completed_artifacts": 0, "total_artifacts": 1, "downloaded_bytes": 3, "expected_bytes": 15}, previous=None, now=datetime.now(UTC)),
+            {
+                "phase": "downloading",
+                "completed_artifacts": 0,
+                "total_artifacts": 1,
+                "downloaded_bytes": 3,
+                "expected_bytes": 15,
+            },
+            previous=None,
+            now=datetime.now(UTC),
+        ),
         last_error=None,
         result=None,
     )
@@ -528,17 +689,20 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(image_prepared:
         def get_operation(self, operation_id):
             if operation_id != cache_view.id:
                 from vonk_control.model_cache import ModelCacheNotFound
+
                 raise ModelCacheNotFound("model_cache.operation_missing", "missing")
             return cache_view
 
     plan = _plan(
-        preparation=SimpleNamespace(model=SimpleNamespace(
-            artifact_set_sha256="d" * 64,
-            model_content_sha256="a" * 64,
-            recipe_revision_sha256="b" * 64,
-            artifact_count=2,
-            artifact_set_bytes=15,
-        )),
+        preparation=SimpleNamespace(
+            model=SimpleNamespace(
+                artifact_set_sha256="d" * 64,
+                model_content_sha256="a" * 64,
+                recipe_revision_sha256="b" * 64,
+                artifact_count=2,
+                artifact_set_bytes=15,
+            )
+        ),
         recipe_revision_id=str(uuid4()),
     )
     if not image_prepared:
@@ -581,7 +745,10 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(image_prepared:
         progress={},
     )
     assert replay.operation_id == cache_view.id
-    assert _call_argument(calls[1], "start")["request_key"] == _call_argument(calls[3], "start")["request_key"]
+    assert (
+        _call_argument(calls[1], "start")["request_key"]
+        == _call_argument(calls[3], "start")["request_key"]
+    )
     projected = executor.get(cache_view.id)
     assert projected.state == "queued"
     assert projected.progress["completed_bytes"] == 3
@@ -594,12 +761,16 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(image_prepared:
     else:
         plan.storage.missing_nas_bytes = 12
     receipt = {
-        "artifact_set_sha256": "d" * 64, "coverage": "complete",
-        "downloaded_bytes": 12, "total_bytes": 12,
+        "artifact_set_sha256": "d" * 64,
+        "coverage": "complete",
+        "downloaded_bytes": 12,
+        "total_bytes": 12,
     }
     _validate_artifact_execution(plan, phase, receipt)
     with pytest.raises(RunSwitchOperationConflict, match="artifact-set-mismatch"):
-        _validate_artifact_execution(plan, phase, {**receipt, "artifact_set_sha256": "f" * 64})
+        _validate_artifact_execution(
+            plan, phase, {**receipt, "artifact_set_sha256": "f" * 64}
+        )
     with pytest.raises(RunSwitchOperationConflict, match="byte-evidence-mismatch"):
         _validate_artifact_execution(plan, phase, {**receipt, "downloaded_bytes": 11})
 
@@ -872,6 +1043,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             )
         )
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
     (storage.root / archive_digest).write_bytes(archive_payload)
     distribution = build_distribution_service_from_components(
@@ -962,7 +1134,9 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         len(model_payload) + len(auxiliary_payload)
     )
 
-    copy_phase = _phase(kind="transfer", subphase="target-copy", index=1, node_ids=list(nodes))
+    copy_phase = _phase(
+        kind="transfer", subphase="target-copy", index=1, node_ids=list(nodes)
+    )
     with services.sessions.begin() as session:
         for node_id in nodes:
             node = session.get(AgentNode, node_id)
@@ -1006,11 +1180,18 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                     attempt=1,
                     fence=str(uuid.uuid4()),
                     lease_deadline=now,
-                    agent_certificate_serial="serial-a" if node == NODE_A else "serial-b",
+                    agent_certificate_serial="serial-a"
+                    if node == NODE_A
+                    else "serial-b",
                     state="succeeded",
                     # Keep the heartbeat partial to prove terminal
                     # downloaded_bytes is the authoritative total.
-                    progress={"phase": "copying", "completed_bytes": 1, "total_bytes": target_bytes, "total_bytes_known": True},
+                    progress={
+                        "phase": "copying",
+                        "completed_bytes": 1,
+                        "total_bytes": target_bytes,
+                        "total_bytes_known": True,
+                    },
                     result={
                         "downloaded_bytes": target_bytes,
                         "verified": True,
@@ -1089,9 +1270,14 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     copy_view = executor.get(copy_child.operation_id)
     member_progress = copy_view.result["progress"]["members"]
     (tmp_path / "run-switch-plan").mkdir()
-    plan_sessions, _plan_lifecycle, _plan_queue, _plan_mapping_id, _plan_build_id, plan_nodes = (
-        setup_services(tmp_path / "run-switch-plan", nodes=2)
-    )
+    (
+        plan_sessions,
+        _plan_lifecycle,
+        _plan_queue,
+        _plan_mapping_id,
+        _plan_build_id,
+        plan_nodes,
+    ) = setup_services(tmp_path / "run-switch-plan", nodes=2)
     with plan_sessions() as session:
         plan_revision = session.scalar(
             select(CatalogDocumentRevision).where(
@@ -1102,7 +1288,9 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         assert plan_revision is not None
         plan_recipe = RecipeDefinition.model_validate(plan_revision.document)
         plan_model_digest = plan_recipe.models[0].model.content_sha256
-    operation_plan = RunSwitchOperationService(plan_sessions, clock=lambda: NOW).preview(
+    operation_plan = RunSwitchOperationService(
+        plan_sessions, clock=lambda: NOW
+    ).preview(
         RunSwitchPreviewRequest(
             model_content_sha256=plan_model_digest,
             recipe_revision_id=plan_revision.id,
@@ -1166,12 +1354,17 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert {
         _member_totals(item)
         for item in require_sequence(family_progress["members"], "operation members")
-    } == {(plan_nodes[0], expected_target_bytes, expected_target_bytes), (plan_nodes[1], expected_target_bytes, expected_target_bytes)}
+    } == {
+        (plan_nodes[0], expected_target_bytes, expected_target_bytes),
+        (plan_nodes[1], expected_target_bytes, expected_target_bytes),
+    }
     restarted_provider = RunSwitchOperationService(
         services.sessions,
         clock=clock,
     ).activity_provider()
-    assert _operation_progress(restarted_provider.get_operation(run_id)) == family_progress
+    assert (
+        _operation_progress(restarted_provider.get_operation(run_id)) == family_progress
+    )
 
     cursors = TokenCodec(b"p" * 32).cursor_codec()
     merged = merge_operation_providers(
@@ -1188,7 +1381,10 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert {
         _member_totals(item)
         for item in require_sequence(merged_progress["members"], "operation members")
-    } == {(plan_nodes[0], expected_target_bytes, expected_target_bytes), (plan_nodes[1], expected_target_bytes, expected_target_bytes)}
+    } == {
+        (plan_nodes[0], expected_target_bytes, expected_target_bytes),
+        (plan_nodes[1], expected_target_bytes, expected_target_bytes),
+    }
 
     unknown_id = str(uuid.uuid4())
     with services.sessions.begin() as session:
@@ -1213,13 +1409,15 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                     "completed_bytes": 0,
                     "total_bytes": None,
                     "total_bytes_known": False,
-                    "members": [{
-                        "node_id": plan_nodes[0],
-                        "phase": "transfer",
-                        "state": "running",
-                        "completed_bytes": 0,
-                        "total_bytes": None,
-                    }],
+                    "members": [
+                        {
+                            "node_id": plan_nodes[0],
+                            "phase": "transfer",
+                            "state": "running",
+                            "completed_bytes": 0,
+                            "total_bytes": None,
+                        }
+                    ],
                 },
                 created_at=now,
                 updated_at=now,
@@ -1230,11 +1428,15 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert unknown_progress.get("total_bytes") is None
     assert unknown_progress["total_bytes_known"] is False
     unknown_members = require_sequence(unknown_progress["members"], "operation members")
-    assert require_mapping(unknown_members[0], "operation member").get("total_bytes") is None
+    assert (
+        require_mapping(unknown_members[0], "operation member").get("total_bytes")
+        is None
+    )
 
 
 def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
-    agent_system, tmp_path: Path  # noqa: F811
+    agent_system,  # noqa: F811
+    tmp_path: Path,
 ) -> None:
     _client, services, _tokens, clock = agent_system
     recipe_document = json.loads(
@@ -1248,7 +1450,9 @@ def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
     registry_digest = "sha256:" + "d" * 64
     image_digest = "sha256:" + "e" * 64
     assert registry_digest != image_digest
-    assert recipe_document["execution"]["image"]["digest"] == registry_digest.removeprefix("sha256:")
+    assert recipe_document["execution"]["image"][
+        "digest"
+    ] == registry_digest.removeprefix("sha256:")
     archive_payload = b"coincident build archive"
     archive_digest = hashlib.sha256(archive_payload).hexdigest()
     recipe_id = str(uuid.uuid4())

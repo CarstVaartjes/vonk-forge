@@ -22,7 +22,9 @@ AUTHORITY = "a" * 64
 BINARY_SOURCE = "d" * 40
 PACKAGING_SOURCE = "b" * 40
 RELEASE_KEY = "f" * 64
-VERSION = f"0.1.0~dev.700+g{BINARY_SOURCE[:12]}+repair.spk2818d189042b4c77aefa7796f4befd23.1"
+VERSION = (
+    f"0.1.0~dev.700+g{BINARY_SOURCE[:12]}+repair.spk2818d189042b4c77aefa7796f4befd23.1"
+)
 SIGNATURE = "c" * 128
 TARGET_BINARY = "d" * 64
 TARGET_BUILD = f"sha256:{'e' * 64}"
@@ -630,7 +632,10 @@ def test_public_verification_installs_a_strict_no_redirect_handler(
     handler = handlers[0]
     no_redirect = PUBLICATION._NoRedirect
     assert isinstance(handler, no_redirect)
-    assert no_redirect.redirect_request(handler, None, None, 302, "", None, "elsewhere") is None
+    assert (
+        no_redirect.redirect_request(handler, None, None, 302, "", None, "elsewhere")
+        is None
+    )
 
 
 def test_apt_metadata_rejects_node_bound_repair_version() -> None:

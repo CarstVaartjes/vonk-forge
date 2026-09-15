@@ -199,9 +199,7 @@ def test_hermes_reconciler_repairs_a_missing_commit_tag_to_the_verified_digest(
 
 
 def test_hermes_reconciler_rejects_conflicting_immutable_tags(tmp_path: Path) -> None:
-    result = _run_hermes(
-        _hermes_tools(tmp_path, commit_digest="sha256:" + "c" * 64)
-    )
+    result = _run_hermes(_hermes_tools(tmp_path, commit_digest="sha256:" + "c" * 64))
 
     assert result.returncode != 0
     assert "conflicting" in result.stderr
@@ -291,7 +289,14 @@ def _run_release(
     immutable_after_edit: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        (str(RELEASE), REPOSITORY, "v1.2.3", SHA, "Vonk Forge 1.2.3", *map(str, assets)),
+        (
+            str(RELEASE),
+            REPOSITORY,
+            "v1.2.3",
+            SHA,
+            "Vonk Forge 1.2.3",
+            *map(str, assets),
+        ),
         cwd=ROOT,
         env={
             "PATH": f"{tools}:{os.environ['PATH']}",
@@ -327,8 +332,7 @@ def test_github_release_reconciler_creates_then_replays_the_exact_asset_set(
     assert release["isDraft"] is False
     assert release["isImmutable"] is True
     assert {
-        name: base64.b64decode(content)
-        for name, content in release["assets"].items()
+        name: base64.b64decode(content) for name, content in release["assets"].items()
     } == {"one.txt": b"first\n", "two.txt": b"second\n"}
 
 
@@ -435,9 +439,7 @@ def test_github_release_reconciler_fails_closed_on_an_unknown_lookup_error(
     asset = tmp_path / "one.txt"
     asset.write_bytes(b"expected\n")
 
-    result = _run_release(
-        tools, state, (asset,), view_error="release API returned 503"
-    )
+    result = _run_release(tools, state, (asset,), view_error="release API returned 503")
 
     assert result.returncode != 0
     assert json.loads(state.read_text(encoding="utf-8")) == {}

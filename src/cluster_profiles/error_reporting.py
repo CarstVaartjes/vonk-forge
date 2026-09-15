@@ -16,7 +16,9 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Literal
 
-ErrorSource = Literal["remote_rejection", "transport", "local_io", "protocol", "unknown"]
+ErrorSource = Literal[
+    "remote_rejection", "transport", "local_io", "protocol", "unknown"
+]
 TransportKind = Literal["dns", "connect", "tls", "timeout", "body", "protocol"]
 ErrorDecision = Literal["retry", "defer", "exit"]
 
@@ -33,7 +35,11 @@ def safe_endpoint(value: object) -> str | None:
         parsed = urllib.parse.urlsplit(value)
     except ValueError:
         return None
-    path = parsed.path if parsed.scheme or parsed.netloc else value.split("?", 1)[0].split("#", 1)[0]
+    path = (
+        parsed.path
+        if parsed.scheme or parsed.netloc
+        else value.split("?", 1)[0].split("#", 1)[0]
+    )
     if not path.startswith("/") or "\x00" in path:
         return None
     return path[:512]
@@ -71,7 +77,9 @@ def classify_transport_error(error: BaseException) -> TransportKind | None:
         return "tls"
     if isinstance(error, socket.gaierror):
         return "dns"
-    if isinstance(error, (ConnectionError, ConnectionRefusedError, ConnectionResetError)):
+    if isinstance(
+        error, (ConnectionError, ConnectionRefusedError, ConnectionResetError)
+    ):
         return "connect"
     if isinstance(error, urllib.error.URLError):
         reason = error.reason
@@ -83,7 +91,12 @@ def classify_transport_error(error: BaseException) -> TransportKind | None:
     return None
 
 
-def decision_for(*, retryable: bool, retry_after_seconds: int | None = None, source: ErrorSource = "unknown") -> ErrorDecision:
+def decision_for(
+    *,
+    retryable: bool,
+    retry_after_seconds: int | None = None,
+    source: ErrorSource = "unknown",
+) -> ErrorDecision:
     if retryable:
         return "defer" if retry_after_seconds is not None else "retry"
     if source == "remote_rejection" and retry_after_seconds is not None:
@@ -114,7 +127,10 @@ class ErrorContext:
             raise ValueError("error endpoint must be a path")
         if safe_code(self.code) != self.code:
             raise ValueError("error code is invalid")
-        if self.request_id is not None and safe_request_id(self.request_id) != self.request_id:
+        if (
+            self.request_id is not None
+            and safe_request_id(self.request_id) != self.request_id
+        ):
             raise ValueError("error request ID is invalid")
         if self.http_status is not None and not 100 <= self.http_status <= 599:
             raise ValueError("error HTTP status is invalid")
@@ -148,7 +164,9 @@ class ErrorContext:
         return f"{self.operation} {self.code}{status}: {bounded}{request} [{self.decision}]"
 
 
-def transport_context(*, operation: str, endpoint: object, error: BaseException) -> ErrorContext:
+def transport_context(
+    *, operation: str, endpoint: object, error: BaseException
+) -> ErrorContext:
     kind = classify_transport_error(error)
     return ErrorContext(
         operation=operation,
@@ -160,11 +178,15 @@ def transport_context(*, operation: str, endpoint: object, error: BaseException)
         decision=decision_for(
             retryable=kind in {"dns", "connect", "timeout"}, source="transport"
         ),
-        errno=getattr(error, "errno", None) if isinstance(getattr(error, "errno", None), int) else None,
+        errno=getattr(error, "errno", None)
+        if isinstance(getattr(error, "errno", None), int)
+        else None,
     )
 
 
-def local_io_context(*, operation: str, path: object, error: BaseException) -> ErrorContext:
+def local_io_context(
+    *, operation: str, path: object, error: BaseException
+) -> ErrorContext:
     """Build a context that names only the validated operational path."""
 
     errno = getattr(error, "errno", None)

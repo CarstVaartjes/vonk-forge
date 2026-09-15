@@ -30,7 +30,11 @@ def module():
         ("installer-setups.yml", "scripts/select-pytest-shard-files", False),
         ("installer-setups.yml", "rust/crates/vonk-nas-setup/src/lib.rs", True),
         ("agent-release.yml", "packaging/debian/postinst", True),
-        ("dev-images.yml", "control/src/vonk_control/harnesses/canonical_metadata.py", True),
+        (
+            "dev-images.yml",
+            "control/src/vonk_control/harnesses/canonical_metadata.py",
+            True,
+        ),
         ("dev-images.yml", "docs/something.md", False),
     ],
 )
@@ -99,12 +103,24 @@ def test_latest_exact_dispatch_supersedes_older_push(monkeypatch):
         {"id": 10, "run_number": 543, "event": "pull_request"},
     ]
     for item in runs:
-        item.update(head_sha=SOURCE, head_branch="main", status="completed", conclusion="success")
+        item.update(
+            head_sha=SOURCE,
+            head_branch="main",
+            status="completed",
+            conclusion="success",
+        )
+
     def command(*args):
-        assert "head_sha=" in args[-1]  # No ancestor lookup may replace this exact producer.
+        assert (
+            "head_sha=" in args[-1]
+        )  # No ancestor lookup may replace this exact producer.
         return json.dumps({"workflow_runs": runs})
+
     monkeypatch.setattr(resolver, "run", command)
-    assert resolver.resolve("agent-release.yml", SOURCE, "owner/repo") == (0, (9, 542, SOURCE))
+    assert resolver.resolve("agent-release.yml", SOURCE, "owner/repo") == (
+        0,
+        (9, 542, SOURCE),
+    )
 
 
 def test_renaming_an_input_out_of_its_area_is_a_change(tmp_path, monkeypatch):

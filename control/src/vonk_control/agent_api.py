@@ -241,8 +241,10 @@ def _runtime_image_receipt_matches(
         != getattr(receipt, "local_image_config_id", None)
         or getattr(authorization, "oci_archive_sha256", None)
         != getattr(receipt, "oci_archive_sha256", None)
-        or getattr(authorization, "image_bytes", None) != getattr(receipt, "image_bytes", None)
-        or getattr(authorization, "build_id", None) != getattr(receipt, "build_id", None)
+        or getattr(authorization, "image_bytes", None)
+        != getattr(receipt, "image_bytes", None)
+        or getattr(authorization, "build_id", None)
+        != getattr(receipt, "build_id", None)
     ):
         return False
     source = runtime_image.get("source")
@@ -1543,7 +1545,9 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=409,
                 detail="recipe run observation grant is already pending",
-                headers={"x-vonk-error-code": "controller.recipe_run.observation_pending"},
+                headers={
+                    "x-vonk-error-code": "controller.recipe_run.observation_pending"
+                },
             ) from None
         except (TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
@@ -1997,9 +2001,12 @@ def install_agent_routes(
                 source=source,
             )
         except StaleAgentAttempt as error:
-            if required.operations.known_superseded_cancellation(message, source=source):
+            if required.operations.known_superseded_cancellation(
+                message, source=source
+            ):
                 logging.getLogger(__name__).info(
-                    "ignored heartbeat for superseded cancelled operation %s", message.operation_id
+                    "ignored heartbeat for superseded cancelled operation %s",
+                    message.operation_id,
                 )
                 raise HTTPException(
                     status_code=409,
@@ -2386,7 +2393,9 @@ def install_agent_routes(
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
         if required.distribution is None:
-            raise HTTPException(status_code=503, detail="agent distribution is unavailable")
+            raise HTTPException(
+                status_code=503, detail="agent distribution is unavailable"
+            )
         try:
             assignment = required.distribution.authorize(
                 node_id=identity.node_id,
@@ -2411,7 +2420,9 @@ def install_agent_routes(
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
         if required.distribution is None:
-            raise HTTPException(status_code=503, detail="agent distribution is unavailable")
+            raise HTTPException(
+                status_code=503, detail="agent distribution is unavailable"
+            )
         plan_digest = request.query_params.get("plan_digest")
         if plan_digest is None:
             raise HTTPException(status_code=403, detail="assignment is required")
@@ -2428,7 +2439,11 @@ def install_agent_routes(
         requested_range = request.headers.get("range")
         # A mismatched If-Range deliberately degrades to a complete response,
         # allowing a client with an old checkpoint to safely restart.
-        if requested_range is not None and if_range not in {None, etag, f"sha256:{object_spec.sha256}"}:
+        if requested_range is not None and if_range not in {
+            None,
+            etag,
+            f"sha256:{object_spec.sha256}",
+        }:
             requested_range = None
         try:
             selected = _range(requested_range, opened.size, required.max_range_bytes)
@@ -2452,7 +2467,9 @@ def install_agent_routes(
                     # bounding memory and honoring the exact selected range.
                     chunk = opened.stream.read(min(1024 * 1024, remaining))
                     if not chunk:
-                        raise RuntimeError("verified object was truncated during transfer")
+                        raise RuntimeError(
+                            "verified object was truncated during transfer"
+                        )
                     remaining -= len(chunk)
                     yield chunk
             finally:
@@ -2465,7 +2482,9 @@ def install_agent_routes(
             "ETag": etag,
         }
         if code == status.HTTP_206_PARTIAL_CONTENT:
-            headers["Content-Range"] = f"bytes {start}-{start + length - 1}/{opened.size}"
+            headers["Content-Range"] = (
+                f"bytes {start}-{start + length - 1}/{opened.size}"
+            )
         return StreamingResponse(
             chunks(),
             status_code=code,
@@ -2544,9 +2563,7 @@ def install_agent_routes(
             "required": True,
             "content": {
                 "application/json": {
-                    "schema": {
-                        "$ref": "#/components/schemas/EnrollmentSubmitRequest"
-                    }
+                    "schema": {"$ref": "#/components/schemas/EnrollmentSubmitRequest"}
                 }
             },
         }

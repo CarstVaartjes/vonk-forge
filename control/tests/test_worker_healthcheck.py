@@ -29,7 +29,9 @@ def _heartbeat(*, completed_at: datetime = NOW) -> ControlProcessHeartbeat:
     )
 
 
-def test_worker_readiness_requires_a_fresh_completed_loop_from_exact_process(tmp_path) -> None:
+def test_worker_readiness_requires_a_fresh_completed_loop_from_exact_process(
+    tmp_path,
+) -> None:
     sessions = _sessions(tmp_path)
     with sessions.begin() as session:
         session.add(_heartbeat())

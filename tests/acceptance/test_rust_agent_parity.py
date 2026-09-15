@@ -111,4 +111,6 @@ def test_rust_claim_capabilities_cover_current_controller_contract() -> None:
     known = _controller_known_capabilities()
     assert advertised, "Rust agent must advertise at least one capability"
     assert {"agent.runtime.rust.v1", "runtime.vonk.v1"} <= known
-    assert known <= advertised, f"Controller capabilities absent from Rust: {known - advertised}"
+    assert known <= advertised, (
+        f"Controller capabilities absent from Rust: {known - advertised}"
+    )

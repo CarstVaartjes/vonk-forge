@@ -32,8 +32,16 @@ class AuditRecord:
 
     def __post_init__(self) -> None:
         """Keep audit projections free of bearer keys and private credentials."""
-        values = (self.request_id, self.actor, self.action, self.authority_revision, *self.targets)
-        if any(_contains_secret_material(value) for value in values if value is not None):
+        values = (
+            self.request_id,
+            self.actor,
+            self.action,
+            self.authority_revision,
+            *self.targets,
+        )
+        if any(
+            _contains_secret_material(value) for value in values if value is not None
+        ):
             raise ValueError("audit record contains secret material")
         if self.occurred_at is not None and (
             self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() is None
@@ -45,10 +53,12 @@ def _contains_secret_material(value: str) -> bool:
     lowered = value.lower()
     return (
         "private key" in lowered
-        or "begin " in lowered and " key" in lowered
+        or "begin " in lowered
+        and " key" in lowered
         or "bearer " in lowered
         or lowered.startswith(("grant_", "token_", "v1."))
     )
+
 
 @dataclass(frozen=True)
 class IdentityHistoryRecord:
@@ -61,13 +71,27 @@ class IdentityHistoryRecord:
     revoked_at: object | None
 
 
-def _identity_history_rows(sessions: sessionmaker[Session], limit: int) -> list[IdentityHistoryRecord]:
+def _identity_history_rows(
+    sessions: sessionmaker[Session], limit: int
+) -> list[IdentityHistoryRecord]:
     from sqlalchemy import select
 
     with sessions() as session:
-        nodes = session.scalars(select(AgentNode).order_by(AgentNode.node_id).limit(limit)).all()
-        certificates = {row.node_id: row for row in session.scalars(select(AgentCertificate).order_by(AgentCertificate.generation.desc())).all()}
-        enrollments = {row.node_id: row for row in session.scalars(select(AgentEnrollment).order_by(AgentEnrollment.created_at)).all()}
+        nodes = session.scalars(
+            select(AgentNode).order_by(AgentNode.node_id).limit(limit)
+        ).all()
+        certificates = {
+            row.node_id: row
+            for row in session.scalars(
+                select(AgentCertificate).order_by(AgentCertificate.generation.desc())
+            ).all()
+        }
+        enrollments = {
+            row.node_id: row
+            for row in session.scalars(
+                select(AgentEnrollment).order_by(AgentEnrollment.created_at)
+            ).all()
+        }
         records: list[IdentityHistoryRecord] = []
         for node in nodes:
             certificate = certificates.get(node.node_id)
@@ -85,6 +109,7 @@ def _identity_history_rows(sessions: sessionmaker[Session], limit: int) -> list[
             )
         return records
 
+
 class MemoryAuditStore:
     def __init__(self, clock=lambda: datetime.now(UTC)) -> None:
         self._events: list[AuditRecord] = []
@@ -92,7 +117,9 @@ class MemoryAuditStore:
 
     def append(self, event: AuditRecord) -> None:
         self._events.append(
-            event if event.occurred_at is not None else replace(event, occurred_at=self._clock())
+            event
+            if event.occurred_at is not None
+            else replace(event, occurred_at=self._clock())
         )
 
     def for_request(self, request_id: str) -> AuditRecord:
@@ -103,6 +130,7 @@ class MemoryAuditStore:
 
     def list(self, *, limit: int = 100) -> list[AuditRecord]:
         return list(reversed(self._events[-limit:]))
+
     def identity_history(self, *, limit: int = 100) -> list[IdentityHistoryRecord]:
         del limit
         return []
@@ -116,20 +144,24 @@ class SqlAuditStore:
     def append(self, event: AuditRecord) -> None:
         occurred_at = event.occurred_at or self._clock()
         with self._sessions.begin() as session:
-            session.add(AuditEvent(
-                request_id=event.request_id,
-                actor=event.actor,
-                action=event.action,
-                authority_revision=event.authority_revision,
-                targets=list(event.targets),
-                occurred_at=occurred_at,
-            ))
+            session.add(
+                AuditEvent(
+                    request_id=event.request_id,
+                    actor=event.actor,
+                    action=event.action,
+                    authority_revision=event.authority_revision,
+                    targets=list(event.targets),
+                    occurred_at=occurred_at,
+                )
+            )
 
     def list(self, *, limit: int = 100) -> list[AuditRecord]:
         from sqlalchemy import select
 
         with self._sessions() as session:
-            rows = session.scalars(select(AuditEvent).order_by(AuditEvent.occurred_at.desc()).limit(limit))
+            rows = session.scalars(
+                select(AuditEvent).order_by(AuditEvent.occurred_at.desc()).limit(limit)
+            )
             return [
                 AuditRecord(
                     row.request_id,
@@ -143,5 +175,6 @@ class SqlAuditStore:
                 )
                 for row in rows
             ]
+
     def identity_history(self, *, limit: int = 100) -> list[IdentityHistoryRecord]:
         return _identity_history_rows(self._sessions, limit)

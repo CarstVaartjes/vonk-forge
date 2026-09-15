@@ -110,16 +110,22 @@ class _Transport:
     def inspect_archive(self, *_args: object, **_kwargs: object) -> PulledImageEvidence:
         # This double only exercises the published pull path; archive
         # inspection belongs to the controller-build path.
-        raise NotImplementedError("published transport double does not inspect archives")
+        raise NotImplementedError(
+            "published transport double does not inspect archives"
+        )
 
 
 class _ModelSource(MemoryVerifiedObjectSource):
     """Verified source exposing the exact model set the plan selects."""
 
-    def objects_for_set(self, artifact_set_sha256: str) -> tuple[DistributionObject, ...]:
+    def objects_for_set(
+        self, artifact_set_sha256: str
+    ) -> tuple[DistributionObject, ...]:
         del artifact_set_sha256
         return (
-            DistributionObject(name="model.safetensors", sha256=MODEL_DIGEST, bytes=1024, kind="model"),
+            DistributionObject(
+                name="model.safetensors", sha256=MODEL_DIGEST, bytes=1024, kind="model"
+            ),
         )
 
 
@@ -134,7 +140,9 @@ class _ModelCache:
             recipe_revision_sha256=self.recipe_digest,
         )
 
-    def verified_model_objects_for_set(self, digest: str) -> tuple[dict[str, object], ...]:
+    def verified_model_objects_for_set(
+        self, digest: str
+    ) -> tuple[dict[str, object], ...]:
         assert digest == MODEL_SET_DIGEST
         return (
             {
@@ -210,7 +218,9 @@ class _Queue:
             parent_job_id=parent_job_id,
             node_id=node_id,
             kind=operation,
-            payload_digest=hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest(),
+            payload_digest=hashlib.sha256(
+                json.dumps(payload, sort_keys=True).encode()
+            ).hexdigest(),
             payload=dict(payload),
             authority_revision=authority_revision,
             workload_intent_ordinal=parent.payload.get("workload_intent_ordinal"),
@@ -290,7 +300,16 @@ class _TargetExecutor(CompositeDistributionPhaseExecutor):
         target_bytes=None,
         workload_intent_ordinal,
     ) -> str:
-        del plan, phase, actor, request_key, cached, target_order, target_bytes, workload_intent_ordinal
+        del (
+            plan,
+            phase,
+            actor,
+            request_key,
+            cached,
+            target_order,
+            target_bytes,
+            workload_intent_ordinal,
+        )
         child_id = str(uuid.uuid4())
         self.assignments.update(
             {node_id: value.to_mapping() for node_id, value in assignments.items()}
@@ -473,7 +492,9 @@ def _make_service(
                     session,
                     recipe_revision_id=revision_id,
                     original_content_digest=recipe_digest,
-                    effective_execution_key=runtime_spec["identity"]["execution_sha256"],
+                    effective_execution_key=runtime_spec["identity"][
+                        "execution_sha256"
+                    ],
                     receipt=receipt,
                     verified_at=NOW,
                 )
@@ -516,7 +537,9 @@ def _make_service(
     lifecycle = RecipeOperationService(
         sessions,
         install_admission=admission,
-        run_admission=RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=50),
+        run_admission=RunAdmissionService(
+            sessions, inventory_max_age=300, memory_floor_bytes=50
+        ),
         agent_jobs=queue,
         clock=lambda: NOW,
         mappings=ClusterMappingService(sessions),
@@ -604,13 +627,19 @@ def test_dual_spark_preparation_authorizes_both_execution_roles_for_one_image(
 def test_direct_published_image_real_run_switch_path_persists_receipt_before_compile_and_uses_platform_identity(
     tmp_path: Path,
 ) -> None:
-    service, sessions, revision_id, recipe_digest, mapping_id, executor, events = _make_service(tmp_path)
+    service, sessions, revision_id, recipe_digest, mapping_id, executor, events = (
+        _make_service(tmp_path)
+    )
     del mapping_id
     request = RunSwitchPreviewRequest(
         model_content_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
         recipe_revision_id=revision_id,
         spark_group=SparkGroup(
-            nodes=[SparkGroupNode(node_id=NODE_ID, rank=0, role="entrypoint", endpoint_owner=True)]
+            nodes=[
+                SparkGroupNode(
+                    node_id=NODE_ID, rank=0, role="entrypoint", endpoint_owner=True
+                )
+            ]
         ),
         alias="synthetic-tiny",
     )
@@ -619,7 +648,9 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
     assert preview.recipe_build_id is None
     assert all(phase.subphase != "container-build" for phase in preview.phases)
     operation = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(mode="json"), request_key=str(uuid.uuid4())),
+        RunSwitchApplyRequest(
+            **request.model_dump(mode="json"), request_key=str(uuid.uuid4())
+        ),
         actor="test",
     )
     for _ in range(20):
@@ -640,9 +671,17 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
         progress = row.result or {}
         results = require_sequence(progress.get("phase_results", []), "phase results")
         assert events.index("runtime-image-db-committed") < events.index("target-copy")
-        assert any(item.get("compiled_plan_persisted") is True for item in results if isinstance(item, dict))
+        assert any(
+            item.get("compiled_plan_persisted") is True
+            for item in results
+            if isinstance(item, dict)
+        )
         runtime_result = require_mapping(
-            next(item for item in results if isinstance(item, dict) and "runtime_image" in item),
+            next(
+                item
+                for item in results
+                if isinstance(item, dict) and "runtime_image" in item
+            ),
             "runtime result",
         )
         runtime = require_mapping(runtime_result["runtime_image"], "runtime image")
@@ -659,7 +698,9 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
             installation_plan["compiled_execution_plans"], "compiled execution plans"
         )
         compiled = require_mapping(compiled_plans[NODE_ID], "compiled plan")
-        compiled_runtime = require_mapping(compiled["runtime_image"], "compiled runtime image")
+        compiled_runtime = require_mapping(
+            compiled["runtime_image"], "compiled runtime image"
+        )
         assert compiled_runtime["image_digest"] == PLATFORM_DIGEST
         assert compiled_runtime["registry_manifest_digest"] == REGISTRY_DIGEST
         assert compiled_runtime["platform_manifest_digest"] == PLATFORM_DIGEST
@@ -704,8 +745,12 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
     response = _read_spec_endpoint(sessions, tmp_path, installation_id)
     assert response.status_code == 200
     assert response.json() == compiled_spec
-    assert response.json()["runtime_image"]["registry_manifest_digest"] == REGISTRY_DIGEST
-    assert response.json()["runtime_image"]["platform_manifest_digest"] == PLATFORM_DIGEST
+    assert (
+        response.json()["runtime_image"]["registry_manifest_digest"] == REGISTRY_DIGEST
+    )
+    assert (
+        response.json()["runtime_image"]["platform_manifest_digest"] == PLATFORM_DIGEST
+    )
 
     assert executor.assignments[NODE_ID]["oci_image_digest"] == PLATFORM_DIGEST
     assert executor.assignments[NODE_ID]["oci_archive_sha256"] == ARCHIVE_DIGEST
@@ -716,7 +761,11 @@ def _direct_request(revision_id: str) -> RunSwitchPreviewRequest:
         model_content_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
         recipe_revision_id=revision_id,
         spark_group=SparkGroup(
-            nodes=[SparkGroupNode(node_id=NODE_ID, rank=0, role="entrypoint", endpoint_owner=True)]
+            nodes=[
+                SparkGroupNode(
+                    node_id=NODE_ID, rank=0, role="entrypoint", endpoint_owner=True
+                )
+            ]
         ),
         alias="synthetic-tiny",
     )
@@ -736,7 +785,9 @@ class _NoopJobs:
         return [], None, 0
 
 
-def _read_spec_endpoint(sessions: sessionmaker[Session], tmp_path: Path, installation_id: str):
+def _read_spec_endpoint(
+    sessions: sessionmaker[Session], tmp_path: Path, installation_id: str
+):
     presence = AgentPresenceService(
         sessions,
         ManagementAddressPolicy.parse("10.0.0.0/24"),
@@ -796,15 +847,19 @@ def test_direct_run_switch_accepts_the_receipt_recorded_by_availability(
     """
 
     availability_key = "a" * 64
-    service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, events = _make_service(
-        tmp_path,
-        availability_key=availability_key,
+    service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, events = (
+        _make_service(
+            tmp_path,
+            availability_key=availability_key,
+        )
     )
     request = _direct_request(revision_id)
     preview = service.preview(request, actor="test")
     assert preview.allowed is True
     operation = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(mode="json"), request_key=str(uuid.uuid4())),
+        RunSwitchApplyRequest(
+            **request.model_dump(mode="json"), request_key=str(uuid.uuid4())
+        ),
         actor="test",
     )
     for _ in range(20):
@@ -815,7 +870,10 @@ def test_direct_run_switch_accepts_the_receipt_recorded_by_availability(
             if row.state in {"succeeded", "failed"}:
                 break
             progress = row.result or {}
-            if progress.get("phase") == "prepare" and progress.get("subphase") == "runtime-install":
+            if (
+                progress.get("phase") == "prepare"
+                and progress.get("subphase") == "runtime-install"
+            ):
                 break
     with sessions() as session:
         row = session.get(Job, operation.operation_id)
@@ -836,7 +894,9 @@ def test_direct_run_switch_accepts_the_receipt_recorded_by_availability(
             launch_identity,
         }
         launch_row = next(
-            item for item in receipts if item.effective_execution_key != availability_key
+            item
+            for item in receipts
+            if item.effective_execution_key != availability_key
         )
         # This is the equality the Spark agent authorizes the install with.
         assert launch_row.effective_execution_key == launch_identity
@@ -846,13 +906,17 @@ def test_direct_run_switch_accepts_the_receipt_recorded_by_availability(
 def test_direct_run_switch_rejects_filesystem_only_receipt_before_compile(
     tmp_path: Path,
 ) -> None:
-    service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, _events = _make_service(
-        tmp_path,
-        persist_db=False,
+    service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, _events = (
+        _make_service(
+            tmp_path,
+            persist_db=False,
+        )
     )
     request = _direct_request(revision_id)
     operation = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(mode="json"), request_key=str(uuid.uuid4())),
+        RunSwitchApplyRequest(
+            **request.model_dump(mode="json"), request_key=str(uuid.uuid4())
+        ),
         actor="test",
     )
     for _ in range(10):
@@ -874,13 +938,17 @@ def test_direct_run_switch_rejects_filesystem_only_receipt_before_compile(
 def test_direct_run_switch_rejects_conflicting_db_receipt_during_target_copy(
     tmp_path: Path,
 ) -> None:
-    service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, _events = _make_service(
-        tmp_path,
-        tamper_db="platform",
+    service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, _events = (
+        _make_service(
+            tmp_path,
+            tamper_db="platform",
+        )
     )
     request = _direct_request(revision_id)
     operation = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(mode="json"), request_key=str(uuid.uuid4())),
+        RunSwitchApplyRequest(
+            **request.model_dump(mode="json"), request_key=str(uuid.uuid4())
+        ),
         actor="test",
     )
     for _ in range(10):
@@ -901,13 +969,17 @@ def test_direct_run_switch_rejects_conflicting_db_receipt_during_target_copy(
 def test_direct_run_switch_rejects_conflicting_db_archive_during_target_copy(
     tmp_path: Path,
 ) -> None:
-    service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, _events = _make_service(
-        tmp_path,
-        tamper_db="archive",
+    service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, _events = (
+        _make_service(
+            tmp_path,
+            tamper_db="archive",
+        )
     )
     request = _direct_request(revision_id)
     operation = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(mode="json"), request_key=str(uuid.uuid4())),
+        RunSwitchApplyRequest(
+            **request.model_dump(mode="json"), request_key=str(uuid.uuid4())
+        ),
         actor="test",
     )
     for _ in range(10):

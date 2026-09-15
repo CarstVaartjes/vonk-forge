@@ -105,12 +105,16 @@ def test_postgres_source_bundle_metadata_roundtrip_and_strict_reads(postgres_eng
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n", "empty": b""})
     store = DatabaseSourceBundleStore(sessions)
     first = store.put(bundle.sha256, io.BytesIO(bundle.archive))
-    assert store.put(bundle.sha256, io.BytesIO(bundle.archive)).manifest == first.manifest
+    assert (
+        store.put(bundle.sha256, io.BytesIO(bundle.archive)).manifest == first.manifest
+    )
     assert store.get(bundle.sha256).manifest == first.manifest
     with sessions() as session:
         stored = session.get(RecipeSourceBundle, bundle.sha256)
         assert stored is not None
-        parsed = SourceBundleManifest.model_validate_json(canonical_message(stored.manifest))
+        parsed = SourceBundleManifest.model_validate_json(
+            canonical_message(stored.manifest)
+        )
         assert parsed == bundle.manifest
     with sessions.begin() as session:
         stored = session.get(RecipeSourceBundle, bundle.sha256)

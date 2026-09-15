@@ -48,7 +48,10 @@ FLEET_OPERATION_IDS = {
     ("get", "/api/fleet/{selector}"): "getFleetNode",
     ("get", "/api/fleet/{selector}/metrics/history"): "getFleetMetricsHistory",
     ("get", "/api/fleet/{selector}/metrics/current"): "getFleetMetricsCurrent",
-    ("get", "/api/fleet/{selector}/metrics/capabilities"): "getFleetMetricsCapabilities",
+    (
+        "get",
+        "/api/fleet/{selector}/metrics/capabilities",
+    ): "getFleetMetricsCapabilities",
     ("get", "/api/fleet/{selector}/metrics/workloads"): "getFleetMetricsWorkloads",
     ("get", "/api/fleet/{selector}/loginfo"): "getFleetLogInfo",
     ("post", "/api/fleet/{selector}/rename"): "renameFleetNode",
@@ -62,7 +65,9 @@ FLEET_OPERATION_IDS = {
 class FleetRenameRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
-    display_name: str = Field(min_length=1, max_length=80, pattern=r"^[^\x00-\x1f\x7f]+$")
+    display_name: str = Field(
+        min_length=1, max_length=80, pattern=r"^[^\x00-\x1f\x7f]+$"
+    )
 
 
 class FleetEnrollRequest(StrictJSONModel):
@@ -132,9 +137,13 @@ class FleetProvenanceProvider(Protocol):
 
 
 class FleetEnrollmentProvider(Protocol):
-    def create_named(self, *, name: str, ttl_seconds: int, actor: str, request_id: str) -> Mapping[str, object]: ...
+    def create_named(
+        self, *, name: str, ttl_seconds: int, actor: str, request_id: str
+    ) -> Mapping[str, object]: ...
 
-    def create_reenrollment(self, node_id: str, actor: str, ttl_seconds: int, request_id: str) -> Mapping[str, object]: ...
+    def create_reenrollment(
+        self, node_id: str, actor: str, ttl_seconds: int, request_id: str
+    ) -> Mapping[str, object]: ...
 
     def revoke_node(self, node_id: str, actor: str) -> None: ...
 
@@ -142,7 +151,9 @@ class FleetEnrollmentProvider(Protocol):
 class FleetUpgradeProvider(Protocol):
     def current_package(self) -> Mapping[str, object]: ...
 
-    def preview(self, node_ids: Sequence[str], package: Mapping[str, object], *, strategy: str) -> Any: ...
+    def preview(
+        self, node_ids: Sequence[str], package: Mapping[str, object], *, strategy: str
+    ) -> Any: ...
 
     def apply(
         self,
@@ -344,20 +355,31 @@ def build_fleet_operator_services(
 def _node(snapshot: FleetSnapshot, selector: str) -> FleetNode:
     wanted = selector.casefold()
     matches = [
-        value for value in snapshot.nodes
-        if wanted in {value.id.casefold(), value.display_name.casefold(), value.hostname.casefold()}
+        value
+        for value in snapshot.nodes
+        if wanted
+        in {
+            value.id.casefold(),
+            value.display_name.casefold(),
+            value.hostname.casefold(),
+        }
     ]
     if not matches:
         raise KeyError(selector)
     if len(matches) > 1:
-        raise LibrarySelectorAmbiguous(selector, [value.display_name for value in matches])
+        raise LibrarySelectorAmbiguous(
+            selector, [value.display_name for value in matches]
+        )
     return matches[0]
 
 
 def _operator_error(error: Exception) -> HTTPException:
     if isinstance(error, LibrarySelectorAmbiguous):
         candidates = ", ".join(error.candidates[:16])
-        return HTTPException(status_code=422, detail=f"selector is ambiguous: {error.selector}; candidates: {candidates}")
+        return HTTPException(
+            status_code=422,
+            detail=f"selector is ambiguous: {error.selector}; candidates: {candidates}",
+        )
     if isinstance(error, KeyError):
         return HTTPException(status_code=404, detail="operator object not found")
     if isinstance(error, (CursorError, RequestFault)):
@@ -431,7 +453,9 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet projection unavailable")
         return fleet_projection
 
-    def audit(request: Request, actor: Actor, action: str, targets: tuple[str, ...]) -> None:
+    def audit(
+        request: Request, actor: Actor, action: str, targets: tuple[str, ...]
+    ) -> None:
         if audits is not None:
             audits.append(
                 AuditRecord(
@@ -485,16 +509,24 @@ def install_operator_projection_routes(
         maximum_points: Annotated[int, Query(ge=1, le=3_000)] = 1_500,
         key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
         device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        interface_name: Annotated[
+            str | None, Query(min_length=1, max_length=64)
+        ] = None,
         run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated,
     ) -> TelemetryHistoryResponse:
         node = _node(snapshot(), selector)
         try:
             return fleet().telemetry_history(
-                node.id, start=start, end=end, resolution=resolution,
-                maximum_points=maximum_points, key=key, device_id=device_id,
-                interface_name=interface_name, run_id=run_id,
+                node.id,
+                start=start,
+                end=end,
+                resolution=resolution,
+                maximum_points=maximum_points,
+                key=key,
+                device_id=device_id,
+                interface_name=interface_name,
+                run_id=run_id,
             )
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
@@ -509,15 +541,20 @@ def install_operator_projection_routes(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
         device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        interface_name: Annotated[
+            str | None, Query(min_length=1, max_length=64)
+        ] = None,
         run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated,
     ) -> TelemetryCurrentResponse:
         node = _node(snapshot(), selector)
         try:
             return fleet().telemetry_current(
-                node.id, key=key, device_id=device_id,
-                interface_name=interface_name, run_id=run_id,
+                node.id,
+                key=key,
+                device_id=device_id,
+                interface_name=interface_name,
+                run_id=run_id,
             )
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
@@ -567,17 +604,25 @@ def install_operator_projection_routes(
         since: Annotated[datetime | None, Query()] = None,
         lines: Annotated[int, Query(ge=1, le=1_000)] = 100,
         recipe: Annotated[str | None, Query(max_length=256)] = None,
-        source: Annotated[Literal["client", "monitor", "runtime", "job"] | None, Query()] = None,
+        source: Annotated[
+            Literal["client", "monitor", "runtime", "job"] | None, Query()
+        ] = None,
         follow: Annotated[bool, Query()] = False,
         _actor: Actor = authenticated,
     ) -> FleetLogResponse:
         node = _node(snapshot(), selector)
         if fleet_services is None or fleet_services.logs is None:
-            raise HTTPException(status_code=503, detail="fleet log evidence unavailable")
+            raise HTTPException(
+                status_code=503, detail="fleet log evidence unavailable"
+            )
         try:
             value = fleet_services.logs.list(
-                node.id, since=since, lines=lines, recipe=recipe,
-                source=source, follow=follow,
+                node.id,
+                since=since,
+                lines=lines,
+                recipe=recipe,
+                source=source,
+                follow=follow,
             )
             return FleetLogResponse.model_validate(value)
         except (OSError, RuntimeError, TypeError, ValueError) as error:
@@ -636,8 +681,10 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
         try:
             value = fleet_services.enrollment.create_named(
-                name=body.name, ttl_seconds=body.ttl_seconds,
-                actor=actor.subject, request_id=request.state.request_id,
+                name=body.name,
+                ttl_seconds=body.ttl_seconds,
+                actor=actor.subject,
+                request_id=request.state.request_id,
             )
             result = FleetActionResponse.model_validate({"action": "enroll", **value})
             audit(request, actor, "fleet.node.enroll", (body.name,))
@@ -691,7 +738,9 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet removal unavailable")
         try:
             fleet_services.enrollment.revoke_node(node.id, actor.subject)
-            result = FleetActionResponse(action="remove", state="accepted", node_id=node.id)
+            result = FleetActionResponse(
+                action="remove", state="accepted", node_id=node.id
+            )
             audit(request, actor, "fleet.node.remove", (node.id,))
             return result
         except (OSError, RuntimeError, TypeError, ValueError) as error:
@@ -716,17 +765,27 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=422, detail="choose all or selectors")
         fleet_snapshot = snapshot()
         try:
-            nodes = list(fleet_snapshot.nodes) if body.all else [_node(fleet_snapshot, value) for value in body.selectors or []]
+            nodes = (
+                list(fleet_snapshot.nodes)
+                if body.all
+                else [_node(fleet_snapshot, value) for value in body.selectors or []]
+            )
             node_ids = list(dict.fromkeys(node.id for node in nodes))
             package = fleet_services.upgrades.current_package()
-            plan = fleet_services.upgrades.preview(node_ids, package, strategy=body.strategy)
+            plan = fleet_services.upgrades.preview(
+                node_ids, package, strategy=body.strategy
+            )
             job = fleet_services.upgrades.apply(
-                node_ids, package, plan_digest=plan.plan_digest,
-                actor=actor.subject, request_id=request.state.request_id,
+                node_ids,
+                package,
+                plan_digest=plan.plan_digest,
+                actor=actor.subject,
+                request_id=request.state.request_id,
                 strategy=body.strategy,
             )
             result = FleetActionResponse(
-                action="upgrade", state=str(getattr(job, "state", "accepted")),
+                action="upgrade",
+                state=str(getattr(job, "state", "accepted")),
                 operation_id=str(getattr(job, "id", "")) or None,
                 plan_digest=plan.plan_digest,
                 targets=node_ids,

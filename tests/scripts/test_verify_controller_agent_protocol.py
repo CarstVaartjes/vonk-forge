@@ -6,7 +6,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-controller-agent-protocol"
 
 
-def test_agent_protocol_image_verifier_uses_installed_wheel_without_source_mount() -> None:
+def test_agent_protocol_image_verifier_uses_installed_wheel_without_source_mount() -> (
+    None
+):
     source = SCRIPT.read_text(encoding="utf-8")
     assert "--interactive" in source
     assert "--read-only" in source

@@ -68,9 +68,10 @@ def test_request_parser_accepts_only_a_bounded_exact_build_contract() -> None:
     assert request.output_repository == "ghcr.io/carstvaartjes/vonk-forge-workloads"
     assert request.context == "adapters/deepseek/ds4"
     assert request.dockerfile == "adapters/deepseek/ds4/Dockerfile"
-    assert request.digest == module.WorkloadArtifactBuild.parse(
-        copy.deepcopy(_request_document())
-    ).digest
+    assert (
+        request.digest
+        == module.WorkloadArtifactBuild.parse(copy.deepcopy(_request_document())).digest
+    )
     assert request.digest.startswith("sha256:")
 
 

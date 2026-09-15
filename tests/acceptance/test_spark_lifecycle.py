@@ -237,7 +237,9 @@ def _canary_index_path(library_root: Path) -> Path:
             "VONK_SYNTHETIC_CANARY_INDEX must select the exact producer fixture"
         )
     relative = PurePosixPath(selected)
-    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+    if relative.is_absolute() or any(
+        part in {"", ".", ".."} for part in relative.parts
+    ):
         raise LifecycleError("synthetic canary index path is invalid")
     path = (library_root / Path(*relative.parts)).resolve()
     if not path.is_relative_to(library_root) or not path.is_file():
@@ -257,7 +259,9 @@ def _package_archive_path(
         if candidate.is_file()
     }
     if len(candidates) != 1:
-        raise LifecycleError("canonical synthetic canary package archive is unavailable")
+        raise LifecycleError(
+            "canonical synthetic canary package archive is unavailable"
+        )
     archive = candidates.pop()
     if not archive.is_relative_to(library_root):
         raise LifecycleError("synthetic canary package escapes the recipe library")
@@ -289,8 +293,17 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         entry = index["recipes"][0]
         raw_recipe = entry["document"]
         package = entry["package"]
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
-        raise LifecycleError("canonical synthetic canary package index is invalid") from error
+    except (
+        OSError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        KeyError,
+        IndexError,
+        TypeError,
+    ) as error:
+        raise LifecycleError(
+            "canonical synthetic canary package index is invalid"
+        ) from error
     try:
         recipe_contract = RecipeDefinition.model_validate(raw_recipe)
         recipe = recipe_contract.model_dump(mode="json")
@@ -302,7 +315,9 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
             and value["document"].get("kind") == "model"
         ]
     except (KeyError, TypeError, ValueError) as error:
-        raise LifecycleError("canonical synthetic canary contract is invalid") from error
+        raise LifecycleError(
+            "canonical synthetic canary contract is invalid"
+        ) from error
     if recipe != raw_recipe or len(recipe_contract.models) != 1:
         raise LifecycleError("canonical synthetic canary Recipe is not canonical")
     model_reference = recipe_contract.models[0].model
@@ -332,8 +347,7 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         or entry["content_sha256"] != content_sha256(recipe_contract)
         or package.get("media_type")
         != "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
-        or package.get("recipe_content_sha256")
-        not in {None, entry["content_sha256"]}
+        or package.get("recipe_content_sha256") not in {None, entry["content_sha256"]}
     ):
         raise LifecycleError("canonical synthetic canary contract is invalid")
     roles = recipe_contract.topology.roles
@@ -369,7 +383,9 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
             raise LifecycleError("canonical synthetic canary package size is invalid")
         package_bytes = archive_path.read_bytes()
     except OSError as error:
-        raise LifecycleError("canonical synthetic canary package is unavailable") from error
+        raise LifecycleError(
+            "canonical synthetic canary package is unavailable"
+        ) from error
     if (
         package.get("expected_bytes") != len(package_bytes)
         or package.get("sha256") != hashlib.sha256(package_bytes).hexdigest()
@@ -392,8 +408,16 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
                 raise tarfile.TarError("canonical package entrypoint is not a file")
             manifest = json.loads(manifest_stream.read())
             packaged_recipe = json.loads(recipe_stream.read())
-    except (KeyError, OSError, tarfile.TarError, AttributeError, json.JSONDecodeError) as error:
-        raise LifecycleError("canonical synthetic canary package closure is invalid") from error
+    except (
+        KeyError,
+        OSError,
+        tarfile.TarError,
+        AttributeError,
+        json.JSONDecodeError,
+    ) as error:
+        raise LifecycleError(
+            "canonical synthetic canary package closure is invalid"
+        ) from error
     if (
         not isinstance(manifest, dict)
         or manifest.get("schema_version") != 2
@@ -402,7 +426,9 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         or manifest.get("recipe_content_sha256") != entry["content_sha256"]
         or packaged_recipe != recipe
     ):
-        raise LifecycleError("canonical synthetic canary Recipe differs from its package")
+        raise LifecycleError(
+            "canonical synthetic canary Recipe differs from its package"
+        )
     return CanonicalCanaryFixture(
         index_path=index_path,
         index_bytes=index_bytes,
@@ -601,8 +627,17 @@ def _configure_canonical_canary_library(
         )
         caddy_path = bundle / "secrets/runtime-configs" / caddy_source
         caddy = caddy_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError, TypeError, KeyError, StopIteration, yaml.YAMLError) as error:
-        raise LifecycleError("canonical canary Controller package boundary is invalid") from error
+    except (
+        OSError,
+        UnicodeDecodeError,
+        TypeError,
+        KeyError,
+        StopIteration,
+        yaml.YAMLError,
+    ) as error:
+        raise LifecycleError(
+            "canonical canary Controller package boundary is invalid"
+        ) from error
     if (
         not isinstance(control_environment, dict)
         or not isinstance(caddy_service, dict)
@@ -625,9 +660,7 @@ def _configure_canonical_canary_library(
     # only to the leaf, so make every bind-mounted ancestor traversable by
     # Caddy explicitly even under a private umask.
     package_directories = [
-        path
-        for path in package_target.parents
-        if path.is_relative_to(serving_root)
+        path for path in package_target.parents if path.is_relative_to(serving_root)
     ]
     for directory in (
         serving_root,
@@ -649,9 +682,7 @@ def _configure_canonical_canary_library(
     volumes = caddy_service.setdefault("volumes", [])
     if not isinstance(volumes, list):
         raise LifecycleError("canonical canary Caddy volumes are invalid")
-    volumes.append(
-        "./secrets/synthetic-recipe-library:/srv/vonk-recipe-library:ro"
-    )
+    volumes.append("./secrets/synthetic-recipe-library:/srv/vonk-recipe-library:ro")
     caddy_path.write_text(
         caddy.rstrip()
         + f"\n\nhttp://:{CANARY_PACKAGE_PORT} {{\n"
@@ -714,9 +745,9 @@ def _canonical_recipe_matches(observed: object, expected: object) -> bool:
     from vonk_forge_contracts import RecipeDefinition
 
     try:
-        return RecipeDefinition.model_validate(observed) == RecipeDefinition.model_validate(
-            expected
-        )
+        return RecipeDefinition.model_validate(
+            observed
+        ) == RecipeDefinition.model_validate(expected)
     except ValueError:
         return False
 
@@ -761,7 +792,9 @@ def _validate_canary_cleanup_application(
     try:
         typed = FleetProfileApplicationView.model_validate_json(_canonical(application))
     except ValueError as error:
-        raise LifecycleError("synthetic canary cleanup application is invalid") from error
+        raise LifecycleError(
+            "synthetic canary cleanup application is invalid"
+        ) from error
     step_results = typed.progress.step_results
     if (
         typed.state != "succeeded"
@@ -779,9 +812,9 @@ def _validate_canary_cleanup_application(
     stop_child, cleanup_child = children
     if stop_child.state != "succeeded" or cleanup_child.state != "succeeded":
         raise LifecycleError("synthetic canary cleanup child did not succeed")
-    if not isinstance(stop_child.result, FleetProfileSwitchChildResult) or not isinstance(
-        cleanup_child.result, FleetProfileSwitchChildResult
-    ):
+    if not isinstance(
+        stop_child.result, FleetProfileSwitchChildResult
+    ) or not isinstance(cleanup_child.result, FleetProfileSwitchChildResult):
         raise LifecycleError("synthetic canary cleanup child receipt is missing")
     stop_results = stop_child.result.run_switch.phase_results
     if not any(
@@ -1073,10 +1106,12 @@ class SparkLifecycle:
         if result.returncode not in allowed_returncodes:
             detail = (
                 "; " + self._redact_diagnostics(result.stderr or result.stdout)
-                if report_failure_output else ""
+                if report_failure_output
+                else ""
             )
             raise LifecycleError(
-                f"acceptance command failed: {Path(command[0]).name} {command[1] if len(command) > 1 else ''}".rstrip() + detail
+                f"acceptance command failed: {Path(command[0]).name} {command[1] if len(command) > 1 else ''}".rstrip()
+                + detail
             )
         return result
 
@@ -1174,9 +1209,7 @@ class SparkLifecycle:
             remaining -= len(entry) + 1
         return "\n".join(rendered)
 
-    def _installation_failure(
-        self, stage: str, error: Exception
-    ) -> LifecycleError:
+    def _installation_failure(self, stage: str, error: Exception) -> LifecycleError:
         sections: list[tuple[str, str]] = [("installer error", str(error))]
         if getattr(self, "bundle", None) is not None:
             # Service states come first: a restarting or unhealthy worker is the
@@ -1193,12 +1226,17 @@ class SparkLifecycle:
                     sections.append(
                         (f"{service} diagnostics", logs.stdout or logs.stderr)
                     )
-            for unit in ("vonk-forge-agent.service", "vonk-forge-package-helper.service"):
+            for unit in (
+                "vonk-forge-agent.service",
+                "vonk-forge-package-helper.service",
+            ):
                 journal = self._diagnostic_command(
                     ["sudo", "journalctl", "--no-pager", "--lines=40", f"--unit={unit}"]
                 )
                 if journal is not None:
-                    sections.append((f"{unit} diagnostics", journal.stdout or journal.stderr))
+                    sections.append(
+                        (f"{unit} diagnostics", journal.stdout or journal.stderr)
+                    )
         diagnostics = self._bounded_diagnostics(sections)
         return LifecycleError(
             f"{stage} failed; {diagnostics or 'installer diagnostics unavailable'}"
@@ -1337,12 +1375,8 @@ class SparkLifecycle:
             agent_source_address=f"172.31.{self.synthetic_fabric_octet}.1",
         )
         library_root = self._required_environment("VONK_RECIPE_LIBRARY_ROOT")
-        self.synthetic_canary_fixture = _canonical_canary_fixture(
-            Path(library_root)
-        )
-        _configure_canonical_canary_library(
-            self.bundle, self.synthetic_canary_fixture
-        )
+        self.synthetic_canary_fixture = _canonical_canary_fixture(Path(library_root))
+        _configure_canonical_canary_library(self.bundle, self.synthetic_canary_fixture)
         self._assert_project_is_empty()
         self._assert_compose_image_graph()
         try:
@@ -1882,7 +1916,9 @@ class SparkLifecycle:
         try:
             verify_effective_sandbox()
         except (SandboxError, OSError, subprocess.SubprocessError) as error:
-            raise self._installation_failure("Spark service sandbox verification", error) from error
+            raise self._installation_failure(
+                "Spark service sandbox verification", error
+            ) from error
         self._prepare_podman_apparmor_profile()
         candidate = self._wait_for_agent_identity(
             package_version=str(self.graph["candidate_version"]), timeout=180
@@ -1958,7 +1994,8 @@ class SparkLifecycle:
         assert self.control is not None
         try:
             _, response = self.control.request(
-                "POST", "/api/fleet/enroll",
+                "POST",
+                "/api/fleet/enroll",
                 {"name": "Acceptance Spark", "ttl_seconds": 600},
             )
             envelope = require_object(response, "Fleet enrollment")
@@ -2132,11 +2169,15 @@ class SparkLifecycle:
             completed.append("recipe-resolved")
             fleet_before = self._fleet_snapshot()
             fleet_nodes = fleet_before.get("nodes")
-            fleet_node_ids = {
-                node.get("id")
-                for node in fleet_nodes
-                if isinstance(node, dict) and isinstance(node.get("id"), str)
-            } if isinstance(fleet_nodes, list) else set()
+            fleet_node_ids = (
+                {
+                    node.get("id")
+                    for node in fleet_nodes
+                    if isinstance(node, dict) and isinstance(node.get("id"), str)
+                }
+                if isinstance(fleet_nodes, list)
+                else set()
+            )
             if fleet_node_ids != {node_id}:
                 raise LifecycleError(
                     "synthetic canary requires a disposable fleet with exactly one enrolled Spark"
@@ -2158,7 +2199,9 @@ class SparkLifecycle:
                 fixture=fixture,
                 recipe_revision_id=revision_id,
             )
-            download_result = require_object(download.get("result"), "recipe download result")
+            download_result = require_object(
+                download.get("result"), "recipe download result"
+            )
             if (
                 download_result.get("recipe_content_sha256")
                 != fixture.recipe_content_sha256
@@ -2166,12 +2209,18 @@ class SparkLifecycle:
                 not in download_result.get("model_content_digests", [])
                 or not isinstance(download_result.get("source"), str)
                 or not download_result["source"]
-                or re.fullmatch(r"sha256:[0-9a-f]{64}", str(download_result.get("image_digest"))) is None
-                or SHA256.fullmatch(str(download_result.get("oci_archive_sha256"))) is None
+                or re.fullmatch(
+                    r"sha256:[0-9a-f]{64}", str(download_result.get("image_digest"))
+                )
+                is None
+                or SHA256.fullmatch(str(download_result.get("oci_archive_sha256")))
+                is None
                 or type(download_result.get("image_bytes")) is not int
                 or download_result["image_bytes"] <= 0
             ):
-                raise LifecycleError("synthetic canary recipe download receipts are incomplete")
+                raise LifecycleError(
+                    "synthetic canary recipe download receipts are incomplete"
+                )
             completed.append("source-verified")
 
             profile_payload = {
@@ -2196,10 +2245,10 @@ class SparkLifecycle:
             profile_revision = saved.get("revision")
             if type(profile_revision) is not int or profile_revision < 1:
                 raise LifecycleError("synthetic canary profile revision is invalid")
-            _, preview_payload = self.control.request(
-                "POST", "/api/profile/1/preview"
+            _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
+            preview = require_object(
+                preview_payload, "synthetic canary profile preview"
             )
-            preview = require_object(preview_payload, "synthetic canary profile preview")
             if (
                 preview.get("allowed") is not True
                 or not isinstance(preview.get("plan_digest"), str)
@@ -2218,21 +2267,31 @@ class SparkLifecycle:
                 preview["preparations"][0], "synthetic canary preparation"
             ).get("preparation")
             preparation = require_object(preparation, "synthetic canary preparation")
-            model_preparation = require_object(preparation.get("model"), "model preparation")
+            model_preparation = require_object(
+                preparation.get("model"), "model preparation"
+            )
             runtime_preparation = require_object(
                 preparation.get("runtime_image"), "runtime image preparation"
             )
             if (
-                model_preparation.get("model_content_sha256") != fixture.model_content_sha256
-                or SHA256.fullmatch(str(model_preparation.get("artifact_set_sha256"))) is None
+                model_preparation.get("model_content_sha256")
+                != fixture.model_content_sha256
+                or SHA256.fullmatch(str(model_preparation.get("artifact_set_sha256")))
+                is None
                 or type(model_preparation.get("artifact_set_bytes")) is not int
                 or model_preparation["artifact_set_bytes"] <= 0
-                or re.fullmatch(r"sha256:[0-9a-f]{64}", str(runtime_preparation.get("image_digest"))) is None
-                or SHA256.fullmatch(str(runtime_preparation.get("oci_layout_sha256"))) is None
+                or re.fullmatch(
+                    r"sha256:[0-9a-f]{64}", str(runtime_preparation.get("image_digest"))
+                )
+                is None
+                or SHA256.fullmatch(str(runtime_preparation.get("oci_layout_sha256")))
+                is None
                 or type(runtime_preparation.get("image_bytes")) is not int
                 or runtime_preparation["image_bytes"] <= 0
             ):
-                raise LifecycleError("synthetic canary preparation receipts are incomplete")
+                raise LifecycleError(
+                    "synthetic canary preparation receipts are incomplete"
+                )
 
             _, application_payload = self.control.request(
                 "POST",
@@ -2245,25 +2304,36 @@ class SparkLifecycle:
                 allowed=(202,),
             )
             application = self._await_profile_application(
-                require_object(application_payload, "synthetic canary profile application"),
+                require_object(
+                    application_payload, "synthetic canary profile application"
+                ),
                 label="synthetic canary profile load",
                 node_id=node_id,
             )
-            profile_progress = require_object(application.get("progress"), "profile progress")
+            profile_progress = require_object(
+                application.get("progress"), "profile progress"
+            )
             step_results = profile_progress.get("step_results")
             if not isinstance(step_results, dict) or not step_results:
-                raise LifecycleError("synthetic canary profile child receipts are missing")
+                raise LifecycleError(
+                    "synthetic canary profile child receipts are missing"
+                )
             run_result = self._profile_run_switch_result(step_results)
             phase_results = run_result.get("phase_results")
             if not isinstance(phase_results, list):
                 raise LifecycleError("synthetic canary profile run receipt is invalid")
-            installation_id = self._canary_phase_identity(phase_results, "installation_id")
+            installation_id = self._canary_phase_identity(
+                phase_results, "installation_id"
+            )
             run_id = self._canary_phase_identity(phase_results, "run_id")
             image = next(
                 (
-                    value for value in phase_results
+                    value
+                    for value in phase_results
                     if isinstance(value, dict)
-                    and re.fullmatch(r"sha256:[0-9a-f]{64}", str(value.get("image_digest")))
+                    and re.fullmatch(
+                        r"sha256:[0-9a-f]{64}", str(value.get("image_digest"))
+                    )
                     and SHA256.fullmatch(str(value.get("oci_layout_sha256")))
                     and type(value.get("image_bytes")) is int
                     and value["image_bytes"] > 0
@@ -2271,11 +2341,21 @@ class SparkLifecycle:
                 None,
             )
             final_verify = next(
-                (value for value in phase_results if isinstance(value, dict) and value.get("phase") == "final_verify"),
+                (
+                    value
+                    for value in phase_results
+                    if isinstance(value, dict) and value.get("phase") == "final_verify"
+                ),
                 None,
             )
             install_phase = next(
-                (value for value in phase_results if isinstance(value, dict) and value.get("phase") == "prepare" and value.get("subphase") == "runtime-install"),
+                (
+                    value
+                    for value in phase_results
+                    if isinstance(value, dict)
+                    and value.get("phase") == "prepare"
+                    and value.get("subphase") == "runtime-install"
+                ),
                 None,
             )
             if (
@@ -2287,8 +2367,12 @@ class SparkLifecycle:
                 or final_verify.get("healthy") is not True
                 or final_verify.get("route_state") != "published"
             ):
-                raise LifecycleError("synthetic canary profile execution receipts are incomplete")
-            completed.extend(("image-built", "image-distributed", "installed", "running"))
+                raise LifecycleError(
+                    "synthetic canary profile execution receipts are incomplete"
+                )
+            completed.extend(
+                ("image-built", "image-distributed", "installed", "running")
+            )
             self._await_canary_endpoint(fixture.slug, published=True)
             completed.append("route-published")
             inference_key = self._read_secret("litellm-master-key")
@@ -2310,12 +2394,16 @@ class SparkLifecycle:
             _, cleanup_saved_payload = self.control.request(
                 "PUT", "/api/profile/1", cleanup_payload
             )
-            cleanup_saved = require_object(cleanup_saved_payload, "synthetic canary cleanup save")
+            cleanup_saved = require_object(
+                cleanup_saved_payload, "synthetic canary cleanup save"
+            )
             profile_revision = cleanup_saved.get("revision")
             _, cleanup_preview_payload = self.control.request(
                 "POST", "/api/profile/1/preview"
             )
-            cleanup_preview = require_object(cleanup_preview_payload, "synthetic canary cleanup preview")
+            cleanup_preview = require_object(
+                cleanup_preview_payload, "synthetic canary cleanup preview"
+            )
             try:
                 _validate_canary_cleanup_preview(cleanup_preview, node_id=node_id)
             except LifecycleError as error:
@@ -2326,11 +2414,17 @@ class SparkLifecycle:
             _, cleanup_application_payload = self.control.request(
                 "POST",
                 "/api/profile/1/load",
-                {"request_key": self._canary_request_key(fixture, node_id, "profile-cleanup")},
+                {
+                    "request_key": self._canary_request_key(
+                        fixture, node_id, "profile-cleanup"
+                    )
+                },
                 allowed=(202,),
             )
             cleanup_application = self._await_profile_application(
-                require_object(cleanup_application_payload, "synthetic canary cleanup application"),
+                require_object(
+                    cleanup_application_payload, "synthetic canary cleanup application"
+                ),
                 label="synthetic canary profile cleanup",
                 node_id=node_id,
             )
@@ -2366,7 +2460,9 @@ class SparkLifecycle:
                 )
                 for node in fleet_nodes
             ):
-                raise LifecycleError("synthetic canary cleanup left the installation present")
+                raise LifecycleError(
+                    "synthetic canary cleanup left the installation present"
+                )
             completed.append("uninstalled")
         except (SliceError, ServingExecutionError, LifecycleError) as error:
             # Keep the API response concise for the lifecycle client, but make
@@ -2460,23 +2556,38 @@ class SparkLifecycle:
         )
 
         try:
-            typed = RecipeImageAvailabilityResponse.model_validate_json(_canonical(operation))
+            typed = RecipeImageAvailabilityResponse.model_validate_json(
+                _canonical(operation)
+            )
         except (TypeError, ValueError) as error:
-            raise LifecycleError("synthetic canary recipe download response is invalid") from error
-        if typed.recipe_revision_id != recipe_revision_id or typed.recipe_content_sha256 != fixture.recipe_content_sha256:
+            raise LifecycleError(
+                "synthetic canary recipe download response is invalid"
+            ) from error
+        if (
+            typed.recipe_revision_id != recipe_revision_id
+            or typed.recipe_content_sha256 != fixture.recipe_content_sha256
+        ):
             raise LifecycleError("synthetic canary recipe download identity differs")
         deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
         while typed.state in {"queued", "running", "partial"}:
             if time.monotonic() >= deadline:
-                raise LifecycleError("synthetic canary recipe download did not converge")
+                raise LifecycleError(
+                    "synthetic canary recipe download did not converge"
+                )
             time.sleep(1)
-            _, payload = self.control.request("GET", f"/api/recipe/operations/{typed.id}")
+            _, payload = self.control.request(
+                "GET", f"/api/recipe/operations/{typed.id}"
+            )
             try:
                 typed = RecipeImageAvailabilityResponse.model_validate_json(
-                    _canonical(require_object(payload, "synthetic canary recipe download"))
+                    _canonical(
+                        require_object(payload, "synthetic canary recipe download")
+                    )
                 )
             except (TypeError, ValueError) as error:
-                raise LifecycleError("synthetic canary recipe download response is invalid") from error
+                raise LifecycleError(
+                    "synthetic canary recipe download response is invalid"
+                ) from error
         if typed.state != "succeeded" or typed.result is None:
             failure = typed.failure.model_dump(mode="json") if typed.failure else None
             raise LifecycleError(
@@ -2496,7 +2607,9 @@ class SparkLifecycle:
         from vonk_control.fleet_profile_contract import FleetProfileApplicationView
 
         try:
-            typed = FleetProfileApplicationView.model_validate_json(_canonical(operation))
+            typed = FleetProfileApplicationView.model_validate_json(
+                _canonical(operation)
+            )
         except (TypeError, ValueError) as error:
             raise LifecycleError(f"{label} response is invalid") from error
         deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
@@ -2540,7 +2653,13 @@ class SparkLifecycle:
                                     f"={job.get('state')}"
                                     f" progress={json.dumps(job.get('progress'), sort_keys=True)[:160]}"
                                 )
-                    except (KeyError, OSError, SliceError, TypeError, ValueError) as error:
+                    except (
+                        KeyError,
+                        OSError,
+                        SliceError,
+                        TypeError,
+                        ValueError,
+                    ) as error:
                         parts.append(
                             "jobs unavailable: "
                             + self._redact_diagnostics(str(error), limit=200)
@@ -2563,7 +2682,13 @@ class SparkLifecycle:
                                     f"/{operation.get('attempt')}"
                                     f" progress={json.dumps(operation.get('progress'), sort_keys=True)[:160]}"
                                 )
-                    except (KeyError, OSError, SliceError, TypeError, ValueError) as error:
+                    except (
+                        KeyError,
+                        OSError,
+                        SliceError,
+                        TypeError,
+                        ValueError,
+                    ) as error:
                         parts.append(
                             "operations unavailable: "
                             + self._redact_diagnostics(str(error), limit=200)
@@ -2595,15 +2720,17 @@ class SparkLifecycle:
                 else None
             )
             details = self._redact_diagnostics(
-                json.dumps({
-                    "id": typed.id,
-                    "state": typed.state,
-                    "status_reason": typed.status_reason,
-                    "current_step": typed.current_step,
-                    "total_steps": typed.total_steps,
-                    "current_label": typed.progress.current_label,
-                    "preflight": preflight,
-                })
+                json.dumps(
+                    {
+                        "id": typed.id,
+                        "state": typed.state,
+                        "status_reason": typed.status_reason,
+                        "current_step": typed.current_step,
+                        "total_steps": typed.total_steps,
+                        "current_label": typed.progress.current_label,
+                        "preflight": preflight,
+                    }
+                )
             )
             raise LifecycleError(f"{label} failed: {details}")
         return typed.model_dump(mode="json")
@@ -2652,7 +2779,9 @@ class SparkLifecycle:
         )
 
     @staticmethod
-    def _profile_run_switch_result(step_results: dict[str, object]) -> dict[str, object]:
+    def _profile_run_switch_result(
+        step_results: dict[str, object],
+    ) -> dict[str, object]:
         for value in step_results.values():
             if not isinstance(value, dict):
                 continue
@@ -2671,7 +2800,9 @@ class SparkLifecycle:
         _, payload = self.control.request("GET", "/api/fleet")
         try:
             return FleetSnapshot.model_validate_json(
-                json.dumps(require_object(payload, "Fleet snapshot"), separators=(",", ":"))
+                json.dumps(
+                    require_object(payload, "Fleet snapshot"), separators=(",", ":")
+                )
             ).model_dump(mode="json")
         except (TypeError, ValueError) as error:
             raise LifecycleError("Fleet snapshot response is invalid") from error
@@ -2701,10 +2832,13 @@ class SparkLifecycle:
                 fleet_nodes = fleet.get("nodes")
                 if isinstance(fleet_nodes, list):
                     for node in fleet_nodes:
-                        if not isinstance(node, dict) or not isinstance(node.get("loaded"), list):
+                        if not isinstance(node, dict) or not isinstance(
+                            node.get("loaded"), list
+                        ):
                             continue
                         runs.extend(
-                            run for run in node["loaded"]
+                            run
+                            for run in node["loaded"]
                             if isinstance(run, dict) and run.get("alias") == alias
                         )
             if published and any(
@@ -3055,10 +3189,15 @@ class SparkLifecycle:
                 agent_mismatches = []
                 if not isinstance(node_id, str) or NODE_ID.fullmatch(node_id) is None:
                     agent_mismatches.append("node_id")
-                if not isinstance(agent.get("display_name"), str) or not agent["display_name"]:
+                if (
+                    not isinstance(agent.get("display_name"), str)
+                    or not agent["display_name"]
+                ):
                     agent_mismatches.append("display_name")
                 inventory = agent.get("inventory")
-                if not isinstance(inventory, dict) or inventory.get("freshness") not in {"fresh", "stale"}:
+                if not isinstance(inventory, dict) or inventory.get(
+                    "freshness"
+                ) not in {"fresh", "stale"}:
                     agent_mismatches.append("inventory")
                 elif "recipe.build.v1" not in inventory.get("capabilities", []):
                     agent_mismatches.append("recipe_builder_capability")

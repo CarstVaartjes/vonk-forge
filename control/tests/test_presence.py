@@ -48,9 +48,7 @@ def test_management_address_policy_accepts_secret_file_line_format() -> None:
 
 
 def test_management_address_policy_accepts_exact_host_routes() -> None:
-    policy = ManagementAddressPolicy.parse(
-        "192.168.1.211/32,2001:db8:42::211/128"
-    )
+    policy = ManagementAddressPolicy.parse("192.168.1.211/32,2001:db8:42::211/128")
 
     assert policy.validate("192.168.1.211") == "192.168.1.211"
     assert policy.validate("2001:db8:42::211") == "2001:db8:42::211"

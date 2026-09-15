@@ -40,7 +40,9 @@ def _token(tmp_path: Path) -> Path:
         (TimeoutError("timed out"), "timeout"),
     ],
 )
-def test_transport_classifier_preserves_proven_source(error: BaseException, kind: str) -> None:
+def test_transport_classifier_preserves_proven_source(
+    error: BaseException, kind: str
+) -> None:
     assert classify_transport_error(error) == kind
 
 
@@ -60,7 +62,10 @@ def test_local_io_keeps_safe_path_and_errno() -> None:
 
 
 def test_endpoint_drops_query_and_userinfo() -> None:
-    assert safe_endpoint("https://user:secret@example.test/api/jobs?token=secret") == "/api/jobs"
+    assert (
+        safe_endpoint("https://user:secret@example.test/api/jobs?token=secret")
+        == "/api/jobs"
+    )
 
 
 def test_error_context_omits_unavailable_request_id() -> None:
@@ -78,7 +83,9 @@ def test_error_context_omits_unavailable_request_id() -> None:
 
 
 @pytest.mark.parametrize("status", [401, 403])
-def test_http_errors_keep_status_code_and_request_id(tmp_path: Path, status: int) -> None:
+def test_http_errors_keep_status_code_and_request_id(
+    tmp_path: Path, status: int
+) -> None:
     headers = Message()
     headers["Content-Type"] = "application/json"
     headers["X-Request-ID"] = "00000000-0000-4000-8000-000000000099"
@@ -113,7 +120,9 @@ def test_http_errors_keep_status_code_and_request_id(tmp_path: Path, status: int
             body,
         )
 
-    client = ControlClient("https://forge.example.test", _token(tmp_path), opener=opener)
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
     expected = ControlUnauthorized if status == 401 else ControlForbidden
     with pytest.raises(expected) as raised:
         client.request("GET", "/api/jobs/00000000-0000-4000-8000-000000000001/logs")
@@ -128,7 +137,9 @@ def test_transport_error_does_not_swallow_source(tmp_path: Path) -> None:
     def opener(*_args, **_kwargs):
         raise urllib.error.URLError(socket.gaierror(-2, "no such host"))
 
-    client = ControlClient("https://forge.example.test", _token(tmp_path), opener=opener)
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
     with pytest.raises(ControlTransportError) as raised:
         client.request("GET", "/api/jobs")
     assert raised.value.context is not None

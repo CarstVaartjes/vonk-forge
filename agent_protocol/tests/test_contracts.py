@@ -238,8 +238,7 @@ def test_claim_copies_canonical_payload_before_becoming_frozen() -> None:
     payload = valid_claim()["payload"]
     assert isinstance(payload, dict)
     source = valid_claim() | {
-        "payload": payload
-        | {"run_id": "00000000-0000-4000-8000-000000000005"}
+        "payload": payload | {"run_id": "00000000-0000-4000-8000-000000000005"}
     }
     source["payload_digest"] = hashlib.sha256(
         canonical_message(source["payload"])
@@ -462,7 +461,9 @@ def test_signed_agent_upgrade_payload_is_accepted_by_runtime_and_schema() -> Non
         "target_binary_digest": "d" * 64,
         "target_build_digest": "sha256:" + "e" * 64,
         "source_package_bytes": 4_000_000,
-        "source_package_url": "https://install.vonkforge.ai/artifacts/agent-packages/" + "a" * 64 + "/vonk-forge-agent.deb",
+        "source_package_url": "https://install.vonkforge.ai/artifacts/agent-packages/"
+        + "a" * 64
+        + "/vonk-forge-agent.deb",
         "rollback": {
             "source": {
                 "package_sha256": "a" * 64,
@@ -492,7 +493,8 @@ def test_agent_upgrade_success_uses_the_current_typed_result() -> None:
         "self_test_passed": True,
         "status": "upgraded",
         "activation_receipt": {
-            "schema_version": 2, "node_id": "spk_" + "1" * 32,
+            "schema_version": 2,
+            "node_id": "spk_" + "1" * 32,
             "source_package_sha256": "a" * 64,
             "source_version": "0.1.0~dev.329+g0123456789ab",
             "source_binary_sha256": "c" * 64,
@@ -500,7 +502,9 @@ def test_agent_upgrade_success_uses_the_current_typed_result() -> None:
             "candidate_version": "0.1.0~dev.330+g0123456789ab",
             "candidate_binary_sha256": "d" * 64,
             "attempt_nonce": "f" * 64,
-            "phase": "acknowledged", "created_at": 100, "updated_at": 130,
+            "phase": "acknowledged",
+            "created_at": 100,
+            "updated_at": 130,
             "outcome": "controller_acknowledged",
         },
     }
@@ -821,9 +825,7 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
 
     with pytest.raises(AgentProtocolError, match="large"):
         AgentClaim.parse(
-            claim_for_operation(
-                "recipe.stop", {"value": "x" * MAX_DOCUMENT_BYTES}
-            )
+            claim_for_operation("recipe.stop", {"value": "x" * MAX_DOCUMENT_BYTES})
         )
 
 
@@ -887,7 +889,12 @@ def test_lease_only_progress_omission_and_null_have_identical_canonical_bytes() 
     assert omitted.progress is None
     assert canonical_message(omitted) == canonical_message(explicit)
     assert "progress" not in json.loads(canonical_message(omitted))
-    measured = AgentProgress.model_validate(valid_attempt() | {"progress": {"phase": "queued"}})
+    measured = AgentProgress.model_validate(
+        valid_attempt() | {"progress": {"phase": "queued"}}
+    )
     assert json.loads(canonical_message(measured))["progress"] == {
-        "phase": "queued", "completed_bytes": 0, "total_bytes_known": False, "members": [],
+        "phase": "queued",
+        "completed_bytes": 0,
+        "total_bytes_known": False,
+        "members": [],
     }

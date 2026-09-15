@@ -56,9 +56,7 @@ def source_policy_recipe() -> dict[str, Any]:
     """Adapt the canonical source-build document at the policy parser seam."""
 
     canonical = canonical_example("recipe-source-build.json")
-    return _source_policy_document(
-        canonical, canonical["execution"]["build"], "c" * 64
-    )
+    return _source_policy_document(canonical, canonical["execution"]["build"], "c" * 64)
 
 
 def topology_document() -> dict[str, Any]:

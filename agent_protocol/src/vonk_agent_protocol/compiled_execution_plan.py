@@ -154,7 +154,9 @@ class CompiledRuntimeTelemetry(_Strict):
             _safe_path(self.metrics_path, absolute=True)
             if any(char in self.metrics_path for char in "?#\r\n"):
                 raise ValueError("metrics path is invalid")
-        if "\x00" in self.engine or (self.engine_version and "\x00" in self.engine_version):
+        if "\x00" in self.engine or (
+            self.engine_version and "\x00" in self.engine_version
+        ):
             raise ValueError("engine identity is invalid")
         return self
 
@@ -250,11 +252,7 @@ class CompiledArtifact(_Strict):
             or len(value) > 512
             or "\\" in value
             or "\x00" in value
-            or any(
-                not part
-                or part in {".", ".."}
-                for part in value.split("/")
-            )
+            or any(not part or part in {".", ".."} for part in value.split("/"))
         ):
             raise ValueError("model path is unsafe")
         return value
@@ -513,8 +511,7 @@ class CompiledJobInput(_Strict):
         if len(value) != len(set(value)):
             raise ValueError("job input media types must be unique")
         if any(
-            re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", media_type)
-            is None
+            re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", media_type) is None
             for media_type in value
         ):
             raise ValueError("job input media type is invalid")

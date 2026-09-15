@@ -40,7 +40,9 @@ PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
     ROOT / "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
 )
-PUBLIC_CONTRACTS_WHEEL_HASH = hashlib.sha256(PUBLIC_CONTRACTS_WHEEL.read_bytes()).hexdigest()
+PUBLIC_CONTRACTS_WHEEL_HASH = hashlib.sha256(
+    PUBLIC_CONTRACTS_WHEEL.read_bytes()
+).hexdigest()
 
 
 class Clock:
@@ -62,7 +64,14 @@ def service(tmp_path):
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
         for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
-            session.add(AgentNode(node_id=node_id, state="active", capabilities=[], workload_intent_ordinal=1))
+            session.add(
+                AgentNode(
+                    node_id=node_id,
+                    state="active",
+                    capabilities=[],
+                    workload_intent_ordinal=1,
+                )
+            )
             session.add(
                 AgentCertificate(
                     serial=serial,
@@ -258,7 +267,10 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     ]
     revision = packaging_source["revision"]
     assert len(revision) == 40 and set(revision) <= set("0123456789abcdef")
-    assert packaging_source["source"] == "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
+    assert (
+        packaging_source["source"]
+        == "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
+    )
     assert packaging_source["branch"] == "main"
     assert packaging_source["subdirectory"] == "contracts"
     assert contract_package["source"] == {
@@ -269,14 +281,25 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     assert f'sha256 = "{PUBLIC_CONTRACTS_WHEEL_HASH}"' in packaging_lock
     assert "COPY control/pyproject.toml ./" in dockerfile
     assert "COPY control/src ./src" in dockerfile
-    assert "COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/" in dockerfile
+    assert (
+        "COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/"
+        in dockerfile
+    )
     assert "/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" in dockerfile
-    assert "python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels /agent-protocol" not in dockerfile
+    assert (
+        "python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels /agent-protocol"
+        not in dockerfile
+    )
     assert "git clone --filter=blob:none --no-checkout" in dockerfile
     assert "git -C /public-contracts checkout --detach" in dockerfile
-    assert "python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels" in dockerfile
+    assert (
+        "python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels" in dockerfile
+    )
     assert "/public-contracts/contracts" in dockerfile
-    assert "COPY inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl /wheels/" not in dockerfile
+    assert (
+        "COPY inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl /wheels/"
+        not in dockerfile
+    )
     dockerignore = set(dockerignore_path.read_text().splitlines())
     assert "*" in dockerignore
     lines = dockerignore_path.read_text().splitlines()
@@ -404,7 +427,9 @@ def test_control_environment_preserves_the_canonical_zero_byte_model_contract() 
 
 
 @pytest.mark.lane  # Builds the root-context control image.
-def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(control_image_build_args: list[str]) -> None:
+def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
+    control_image_build_args: list[str],
+) -> None:
     image = "vonk-control:test-packaging-contracts"
     build = subprocess.run(
         [

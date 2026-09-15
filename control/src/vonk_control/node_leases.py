@@ -22,9 +22,7 @@ class NodeLeaseConflict(RuntimeError):
 
     def __init__(self, node_ids: Iterable[str]) -> None:
         self.node_ids = tuple(sorted(set(node_ids)))
-        super().__init__(
-            "node mutation lease conflict: " + ", ".join(self.node_ids)
-        )
+        super().__init__("node mutation lease conflict: " + ", ".join(self.node_ids))
 
 
 @dataclass(frozen=True)
@@ -139,8 +137,7 @@ class NodeLeaseService:
             or len(fences) != 1
             or len(states) != 1
             or any(
-                row.owner_kind != owner_kind or row.owner_id != owner_id
-                for row in rows
+                row.owner_kind != owner_kind or row.owner_id != owner_id for row in rows
             )
         ):
             raise NodeLeaseConflict(row.node_id for row in rows)
@@ -190,14 +187,11 @@ class NodeLeaseService:
         nodes = _nodes(grant.node_ids)
         _uuid(grant.fence, "node mutation lease fence")
         rows = self._rows(session, nodes)
-        if (
-            len(rows) != len(nodes)
-            or any(
-                row.owner_kind != grant.owner_kind
-                or row.owner_id != grant.owner_id
-                or row.fence != grant.fence
-                for row in rows
-            )
+        if len(rows) != len(nodes) or any(
+            row.owner_kind != grant.owner_kind
+            or row.owner_id != grant.owner_id
+            or row.fence != grant.fence
+            for row in rows
         ):
             raise NodeLeaseConflict(nodes)
         return rows

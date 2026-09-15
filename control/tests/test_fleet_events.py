@@ -70,7 +70,7 @@ def _job(identifier: str) -> models.Job:
         kind="deploy",
         state="queued",
         actor="operator@example.invalid",
-        authority_revision="a"  * 64,
+        authority_revision="a" * 64,
         targets=["spk_" + "a" * 32],
         payload_digest="b" * 64,
         payload={"credential": "must-never-enter-event-payload"},
@@ -160,7 +160,7 @@ def _operation() -> models.AgentOperation:
         kind="deploy",
         payload_digest="2" * 64,
         payload={"secret": "private operation payload"},
-        authority_revision="a"  * 64,
+        authority_revision="a" * 64,
         state="queued",
         current_attempt=0,
         retry_disposition=None,
@@ -318,9 +318,10 @@ def test_sqlite_concurrent_allocations_are_unique_and_monotonic(tmp_path) -> Non
     def observe_second_update(
         _connection, _cursor, statement, _parameters, _context, _many
     ) -> None:
-        if (
-            getattr(writer_role, "value", None) == "second"
-            and statement.lstrip().upper().startswith("UPDATE FLEET_EVENT_CURSOR")
+        if getattr(
+            writer_role, "value", None
+        ) == "second" and statement.lstrip().upper().startswith(
+            "UPDATE FLEET_EVENT_CURSOR"
         ):
             second_update_started.set()
 
@@ -368,7 +369,10 @@ def test_cursor_allocator_compiles_to_a_postgresql_row_lock() -> None:
 def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
 
-    with pytest.raises(RuntimeError, match="forced rollback"), sessions.begin() as session:
+    with (
+        pytest.raises(RuntimeError, match="forced rollback"),
+        sessions.begin() as session,
+    ):
         session.add(_job("job-rollback"))
         repository.append_in_session(session, _draft(entity_id="job-rollback"))
         raise RuntimeError("forced rollback")
@@ -420,9 +424,10 @@ def test_repository_rejects_unknown_fields_in_a_typed_change_payload(sessions) -
         "unexpected": "must not become wire data",
     }
 
-    with pytest.raises(
-        ValueError, match="extra_forbidden"
-    ), sessions.begin() as session:
+    with (
+        pytest.raises(ValueError, match="extra_forbidden"),
+        sessions.begin() as session,
+    ):
         repository.append_in_session(
             session,
             _draft(entity_id="job-typed", payload=payload),
@@ -599,9 +604,9 @@ def test_recorder_captures_every_authoritative_insert_with_public_payloads(
         assert private_value not in serialized
     assert all(
         len(
-            json.dumps(
-                row.payload, sort_keys=True, separators=(",", ":")
-            ).encode("utf-8")
+            json.dumps(row.payload, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
         )
         <= 8192
         for row in rows
@@ -685,9 +690,9 @@ def test_recorder_uses_attribute_history_for_every_authoritative_transition(
             ]
         )
     with sessions.begin() as session:
-        session.get(models.NodeTelemetryLatest, "spk_" + "a" * 32).sample_id = (
-            "sample-2"
-        )
+        session.get(
+            models.NodeTelemetryLatest, "spk_" + "a" * 32
+        ).sample_id = "sample-2"
         session.get(models.RecipeInstallation, "installation-1").state = "installed"
         installation_node = session.get(models.InstallationNode, "installation-node-1")
         installation_node.state = "installed"
@@ -739,9 +744,9 @@ def test_recorder_emits_nothing_for_irrelevant_writes_or_exact_telemetry_replay(
             ]
         )
     with sessions.begin() as session:
-        session.get(models.NodeTelemetryLatest, "spk_" + "a" * 32).sample_id = (
-            "sample-1"
-        )
+        session.get(
+            models.NodeTelemetryLatest, "spk_" + "a" * 32
+        ).sample_id = "sample-1"
         session.get(models.RecipeInstallation, "installation-1").updated_at = (
             NOW + timedelta(seconds=1)
         )
@@ -753,8 +758,8 @@ def test_recorder_emits_nothing_for_irrelevant_writes_or_exact_telemetry_replay(
             seconds=1
         )
         session.get(models.Job, "job-1").updated_at = NOW + timedelta(seconds=1)
-        session.get(models.AgentOperation, "operation-1").updated_at = (
-            NOW + timedelta(seconds=1)
+        session.get(models.AgentOperation, "operation-1").updated_at = NOW + timedelta(
+            seconds=1
         )
 
     assert len(_event_rows(sessions)) == 7
@@ -810,7 +815,10 @@ def test_recorder_source_flush_and_event_are_rolled_back_together(sessions) -> N
         session.add(_job("job-1"))
     assert len(_event_rows(sessions)) == 1
 
-    with pytest.raises(RuntimeError, match="forced rollback"), sessions.begin() as session:
+    with (
+        pytest.raises(RuntimeError, match="forced rollback"),
+        sessions.begin() as session,
+    ):
         job = session.get(models.Job, "job-1")
         job.state = "running"
         session.flush()
@@ -908,9 +916,7 @@ def test_durable_job_service_resume_records_waiting_then_queued(tmp_path) -> Non
 def test_durable_operation_projection_resume_records_waiting_then_queued(
     tmp_path,
 ) -> None:
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'operation-resume-events.sqlite'}"
-    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'operation-resume-events.sqlite'}")
     models.Base.metadata.create_all(engine)
     production_sessions = session_factory(engine)
     job = _job("operation-projection-resume")

@@ -242,11 +242,19 @@ def test_removed_package_and_deployment_routes_are_not_registered() -> None:
 def test_generic_job_submission_route_is_retired() -> None:
     client, headers, jobs, _audits = _client("administrator")
 
-    assert client.post(
-        "/api/jobs",
-        headers=headers,
-        json={"kind": "probe", "authority_revision": "abc", "targets": [], "payload": {}},
-    ).status_code == 405
+    assert (
+        client.post(
+            "/api/jobs",
+            headers=headers,
+            json={
+                "kind": "probe",
+                "authority_revision": "abc",
+                "targets": [],
+                "payload": {},
+            },
+        ).status_code
+        == 405
+    )
     assert jobs.calls == []
 
 
@@ -300,9 +308,7 @@ def test_signed_bearer_authentication_remains_unchanged_and_takes_precedence() -
     client.cookies.set("vonk_session", "not-an-opaque-session")
     bearer = codec.issue(Actor("operator", "operator"), ttl_seconds=1000, now=0)
 
-    response = client.get(
-        "/api/audit", headers={"authorization": f"Bearer {bearer}"}
-    )
+    response = client.get("/api/audit", headers={"authorization": f"Bearer {bearer}"})
 
     assert response.status_code == 200
     client.cookies.set("vonk_session", issued.token)

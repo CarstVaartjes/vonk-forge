@@ -358,6 +358,7 @@ class AtomicRecipeRoutePublisher:
             current = self._publisher._read_marker(
                 optional=True, verify_files=True, verify_lease=False
             )
+
             def route_bytes(generation: int) -> bytes:
                 document: dict[str, object] = {
                     "generation": generation,
@@ -371,8 +372,7 @@ class AtomicRecipeRoutePublisher:
                 if state == "maintenance":
                     document["reason"] = "recipe routes withdrawn"
                 return (
-                    json.dumps(document, sort_keys=True, separators=(",", ":"))
-                    + "\n"
+                    json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
                 ).encode()
 
             # Activation is durable before the supervisor acknowledgement and
@@ -866,7 +866,8 @@ class RecipeRouteService:
         publisher = self._publisher
         if isinstance(publisher, AtomicRecipeRoutePublisher):
             return publisher.publish_empty(
-                route_digest, expires_at=recipe_route_lease_expiry(_aware(self._clock()))
+                route_digest,
+                expires_at=recipe_route_lease_expiry(_aware(self._clock())),
             )
         if isinstance(publisher, _EmptyPublisher):
             return publisher.publish_empty(route_digest)
@@ -1006,9 +1007,7 @@ class RecipeRouteService:
                         "recipe rank set does not match accepted plan",
                         run_id=run.id,
                     )
-            exact_observations = (
-                stored_run_plan.get("observation_schema_version") == 2
-            )
+            exact_observations = stored_run_plan.get("observation_schema_version") == 2
             if len(nodes) > 1 and not exact_observations:
                 raise RecipeRouteError(
                     "distributed recipe route requires exact rank observations",

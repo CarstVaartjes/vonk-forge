@@ -172,9 +172,7 @@ def test_recovery_stops_failed_endpoint_owner_only_once() -> None:
             "endpoint topology",
         ),
         (
-            lambda authority: authority["interfaces"][0].update(
-                health_path="models"
-            ),
+            lambda authority: authority["interfaces"][0].update(health_path="models"),
             "readiness path",
         ),
     ],

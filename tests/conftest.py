@@ -42,6 +42,7 @@ def hermetic_git_config() -> Iterator[None]:
             else:
                 os.environ[name] = value
 
+
 # A module containing any of these drives something the host must provide.
 _LANE_SIGNALS = (
     "/usr/bin/dpkg",

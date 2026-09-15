@@ -376,7 +376,9 @@ def setup(
                     {
                         "node_id": node,
                         "rank": rank,
-                        "role": "entrypoint" if rank == endpoint_owner_rank else "worker",
+                        "role": "entrypoint"
+                        if rank == endpoint_owner_rank
+                        else "worker",
                         "endpoint_owner": rank == endpoint_owner_rank,
                         "port": 8000,
                         "allowed": True,
@@ -423,8 +425,7 @@ def setup(
                     ),
                     observation_endpoint_ready=(
                         True
-                        if exact_distributed
-                        and rank == endpoint_owner_rank
+                        if exact_distributed and rank == endpoint_owner_rank
                         else None
                     ),
                     updated_at=NOW - (timedelta(seconds=301) if stale else timedelta()),
@@ -1038,11 +1039,14 @@ def test_acknowledgement_failure_after_activation_is_temporary() -> None:
     )
 
     assert routes_module.publication_is_temporary(activated) is True
-    assert routes_module.publication_is_temporary(RecipeRouteNotReady("waiting")) is True
+    assert (
+        routes_module.publication_is_temporary(RecipeRouteNotReady("waiting")) is True
+    )
     assert routes_module.publication_is_temporary(OSError("socket")) is True
     assert routes_module.publication_is_temporary(LiteLlmPolicyError("bad")) is False
     assert (
-        routes_module.publication_is_temporary(RuntimeError("invalid document")) is False
+        routes_module.publication_is_temporary(RuntimeError("invalid document"))
+        is False
     )
 
 
@@ -1479,7 +1483,9 @@ def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
     from .test_route_runtime import _supervisor
 
     clock = MutableClock(NOW)
-    base, _, _, run_id = setup(tmp_path / "database", clock=clock, engine=postgres_engine)
+    base, _, _, run_id = setup(
+        tmp_path / "database", clock=clock, engine=postgres_engine
+    )
     root = tmp_path / "live"
     service = atomic_service(base, root, clock)
     first = service.publish_run(run_id)
@@ -1545,7 +1551,9 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
     """A lost publication response adopts an activated bundle on restart."""
 
     clock = MutableClock(NOW)
-    base, _, _, run_id = setup(tmp_path / "database", clock=clock, engine=postgres_engine)
+    base, _, _, run_id = setup(
+        tmp_path / "database", clock=clock, engine=postgres_engine
+    )
     root = tmp_path / "live"
     acknowledgements: list[int] = []
     fail_ack = [failure_point == "after-activation"]

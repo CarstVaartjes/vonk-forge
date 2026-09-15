@@ -26,7 +26,14 @@ POSTINST = ROOT / "packaging/debian/postinst"
 PRERM = ROOT / "packaging/debian/prerm"
 RECOVERY_LIFECYCLE = ROOT / "tests/nodes/test_agent_upgrade_recovery_systemd.sh"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
-PACKAGE_BINARIES = ("vonk-agent", "vonk-monitor", "vonk-agent-helper", "vonk-build-egress", "vonk-runtime-probe", "oras")
+PACKAGE_BINARIES = (
+    "vonk-agent",
+    "vonk-monitor",
+    "vonk-agent-helper",
+    "vonk-build-egress",
+    "vonk-runtime-probe",
+    "oras",
+)
 BUILD_DIGEST = "sha256:" + "b" * 64
 REPAIR_NODE_ID = "spk_2818d189042b4c77aefa7796f4befd23"
 REPAIR_BINARY_REVISION = "e" * 40
@@ -88,7 +95,10 @@ def test_greenfield_repair_allows_one_exact_binary_and_packaging_revision() -> N
         not in verifier
     )
     assert "binary_revision == packaging_revision" not in verifier
-    assert "not binary_source_revision.startswith(source_revision_match.group(1))" in builder
+    assert (
+        "not binary_source_revision.startswith(source_revision_match.group(1))"
+        in builder
+    )
 
 
 def test_greenfield_repair_evidence_accepts_one_exact_source_revision() -> None:
@@ -839,7 +849,7 @@ def test_recovery_binds_exact_root_custody_dpkg_invocation_and_candidate() -> No
     assert "helper_legacy_incoming" not in preinst
     assert "custody_root=/run/vonk-forge-package-candidates" in preinst
     assert '[ "${#invocation}" -eq 32 ]' in preinst
-    assert '= 0:0:600:1 ]' in preinst
+    assert "= 0:0:600:1 ]" in preinst
     assert 'safe_root_directory "$invocation_dir" 700' in preinst
     assert "candidate_before=" in preinst and "candidate_after=" in preinst
     assert "helper_namespace_has_package_paths" in preinst
@@ -869,7 +879,7 @@ def test_recovery_binds_exact_root_custody_dpkg_invocation_and_candidate() -> No
 
 def test_recovery_does_not_probe_legacy_helper_socket_metadata() -> None:
     preinst = PREINST.read_text()
-    start = preinst.index("    ensure_root_directory \"$socket_dropin_dir\" 755")
+    start = preinst.index('    ensure_root_directory "$socket_dropin_dir" 755')
     end = preinst.index("\n    boot_id=", start)
     handoff = preinst[start:end]
     assert "systemctl --system is-enabled" not in handoff
@@ -1353,9 +1363,7 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         'systemctl --system start "$recovery_unit"',
     ):
         assert durable_proof in post_remove
-    wants_proof = post_remove.index(
-        "systemctl --system show --property=Wants --value"
-    )
+    wants_proof = post_remove.index("systemctl --system show --property=Wants --value")
     simulated_boot_start = post_remove.index(
         'systemctl --system start "$recovery_unit"'
     )
@@ -1460,7 +1468,7 @@ def test_recovery_is_static_offline_named_only_and_compare_deletes() -> None:
     # Packaged executables are deliberately root-owned and non-writable (0555).
     # The bounded ancestry fallback must recognize that deployed mode while
     # retaining compatibility with a locally repaired 0755 helper.
-    assert '0:555|0:755) return 0' in preinst
+    assert "0:555|0:755) return 0" in preinst
     assert "legacy_bridge" not in preinst
     assert "20-package-upgrade-bridge.conf" not in preinst
 

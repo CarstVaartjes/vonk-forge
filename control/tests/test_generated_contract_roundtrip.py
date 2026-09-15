@@ -33,34 +33,36 @@ def test_generated_telemetry_models_consume_current_pydantic_documents() -> None
         TelemetryPoint.from_dict(incomplete_document)
 
     producer = PointProducer.model_validate_json(
-        json.dumps({
-            **incomplete_document,
-            "metrics": {
-                "schema_version": 2,
-                "series": [
-                    {
-                        "aggregation": "instant",
-                        "freshness_threshold_seconds": 30,
-                        "key": "gpu.utilization_percent",
-                        "measurement_kind": "measured",
-                        "observed_at": "2026-09-05T00:00:00Z",
-                        "scope": "accelerator",
-                        "device_id": "0",
-                        "source": "fixture",
-                        "support_status": "available",
-                        "unit": "percent",
-                        "value": 75.0,
-                    }
-                ],
-                "capabilities": [],
-                "runtimes": [],
-                "workloads": [],
-                "provenance": {
-                    "collector": "fixture",
-                    "collector_version": "1",
+        json.dumps(
+            {
+                **incomplete_document,
+                "metrics": {
+                    "schema_version": 2,
+                    "series": [
+                        {
+                            "aggregation": "instant",
+                            "freshness_threshold_seconds": 30,
+                            "key": "gpu.utilization_percent",
+                            "measurement_kind": "measured",
+                            "observed_at": "2026-09-05T00:00:00Z",
+                            "scope": "accelerator",
+                            "device_id": "0",
+                            "source": "fixture",
+                            "support_status": "available",
+                            "unit": "percent",
+                            "value": 75.0,
+                        }
+                    ],
+                    "capabilities": [],
+                    "runtimes": [],
+                    "workloads": [],
+                    "provenance": {
+                        "collector": "fixture",
+                        "collector_version": "1",
+                    },
                 },
-            },
-        })
+            }
+        )
     )
     rich = TelemetryPoint.from_dict(json.loads(producer.model_dump_json()))
     assert rich.metrics is not None
@@ -68,27 +70,29 @@ def test_generated_telemetry_models_consume_current_pydantic_documents() -> None
     assert rich.metrics.series[0].key == "gpu.utilization_percent"
 
     history_producer = HistoryProducer.model_validate_json(
-        json.dumps({
-            "schema_version": 1,
-            "node_id": rich.node_id,
-            "start": "2026-09-05T00:00:00Z",
-            "end": "2026-09-05T00:01:00Z",
-            "resolution": "raw",
-            "maximum_points": 2,
-            "points": [rich.to_dict()],
-            "metadata": {
-                "requested_start": "2026-09-05T00:00:00Z",
-                "requested_end": "2026-09-05T00:01:00Z",
-                "actual_start": "2026-09-05T00:00:00Z",
-                "actual_end": "2026-09-05T00:00:00Z",
-                "requested_resolution": "raw",
-                "actual_resolution": "raw",
-                "point_count": 1,
-                "coverage_seconds": 0.0,
-                "gap_samples": 0,
-                "downsampled": False,
-            },
-        })
+        json.dumps(
+            {
+                "schema_version": 1,
+                "node_id": rich.node_id,
+                "start": "2026-09-05T00:00:00Z",
+                "end": "2026-09-05T00:01:00Z",
+                "resolution": "raw",
+                "maximum_points": 2,
+                "points": [rich.to_dict()],
+                "metadata": {
+                    "requested_start": "2026-09-05T00:00:00Z",
+                    "requested_end": "2026-09-05T00:01:00Z",
+                    "actual_start": "2026-09-05T00:00:00Z",
+                    "actual_end": "2026-09-05T00:00:00Z",
+                    "requested_resolution": "raw",
+                    "actual_resolution": "raw",
+                    "point_count": 1,
+                    "coverage_seconds": 0.0,
+                    "gap_samples": 0,
+                    "downsampled": False,
+                },
+            }
+        )
     )
     history = TelemetryHistoryResponse.from_dict(
         json.loads(history_producer.model_dump_json())
@@ -97,4 +101,7 @@ def test_generated_telemetry_models_consume_current_pydantic_documents() -> None
     assert isinstance(history.points[0], TelemetryPoint)
     assert history.points[0].metrics is not None
     assert history.metadata.point_count == 1
-    assert HistoryProducer.model_validate_json(json.dumps(history.to_dict())) == history_producer
+    assert (
+        HistoryProducer.model_validate_json(json.dumps(history.to_dict()))
+        == history_producer
+    )

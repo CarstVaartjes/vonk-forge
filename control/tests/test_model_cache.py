@@ -300,7 +300,9 @@ def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> Non
     document["identity"]["slug"] = "canonical-model"
     document["identity"]["model"]["publisher"] = "vonk-forge"
     document["identity"]["model"]["slug"] = "canonical-model"
-    document["source"]["repository"] = "https://huggingface.co/vonk-forge/canonical-model"
+    document["source"]["repository"] = (
+        "https://huggingface.co/vonk-forge/canonical-model"
+    )
     document["source"]["revision"] = "0" * 40
     document["files"] = [
         {
@@ -353,9 +355,9 @@ def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> Non
         "slug": "canonical-model",
         "content_sha256": digest,
     }
-    assert [(item.path, item.expected_bytes, item.roles) for item in manifest.artifacts] == [
-        ("weights.bin", 3, ("weights",))
-    ]
+    assert [
+        (item.path, item.expected_bytes, item.roles) for item in manifest.artifacts
+    ] == [("weights.bin", 3, ("weights",))]
 
 
 def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_revision(
@@ -384,77 +386,154 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     new_document["metadata"]["description"] += " newer"
     new_recipe = RecipeDefinition.model_validate(new_document)
     model_root = CatalogDocument(
-        id="00000000-0000-0000-0000-000000000101", kind="model",
-        publisher="vonk-forge", slug="resolver-model", title="Resolver model",
-        created_by="test", created_at=NOW, updated_at=NOW,
+        id="00000000-0000-0000-0000-000000000101",
+        kind="model",
+        publisher="vonk-forge",
+        slug="resolver-model",
+        title="Resolver model",
+        created_by="test",
+        created_at=NOW,
+        updated_at=NOW,
     )
     recipe_root = CatalogDocument(
-        id="00000000-0000-0000-0000-000000000102", kind="recipe",
-        publisher="vonk-forge", slug="resolver-recipe", title="Resolver recipe",
-        created_by="test", created_at=NOW, updated_at=NOW,
+        id="00000000-0000-0000-0000-000000000102",
+        kind="recipe",
+        publisher="vonk-forge",
+        slug="resolver-recipe",
+        title="Resolver recipe",
+        created_by="test",
+        created_at=NOW,
+        updated_at=NOW,
     )
     old_digest = content_sha256(old_recipe)
     new_digest = content_sha256(new_recipe)
     old_revision = CatalogDocumentRevision(
-        id="00000000-0000-0000-0000-000000000103", document_id=recipe_root.id,
-        kind="recipe", publisher=recipe_root.publisher, slug=recipe_root.slug,
-        revision_number=1, schema_version=2, state="active",
-        document=old_recipe.model_dump(mode="json"), content_digest=old_digest,
-        execution_key="a" * 64, projected={}, created_by="test", created_at=NOW,
+        id="00000000-0000-0000-0000-000000000103",
+        document_id=recipe_root.id,
+        kind="recipe",
+        publisher=recipe_root.publisher,
+        slug=recipe_root.slug,
+        revision_number=1,
+        schema_version=2,
+        state="active",
+        document=old_recipe.model_dump(mode="json"),
+        content_digest=old_digest,
+        execution_key="a" * 64,
+        projected={},
+        created_by="test",
+        created_at=NOW,
     )
     new_revision = CatalogDocumentRevision(
-        id="00000000-0000-0000-0000-000000000104", document_id=recipe_root.id,
-        kind="recipe", publisher=recipe_root.publisher, slug=recipe_root.slug,
-        revision_number=2, schema_version=2, state="active",
-        document=new_recipe.model_dump(mode="json"), content_digest=new_digest,
-        execution_key="b" * 64, projected={}, created_by="test", created_at=NOW,
+        id="00000000-0000-0000-0000-000000000104",
+        document_id=recipe_root.id,
+        kind="recipe",
+        publisher=recipe_root.publisher,
+        slug=recipe_root.slug,
+        revision_number=2,
+        schema_version=2,
+        state="active",
+        document=new_recipe.model_dump(mode="json"),
+        content_digest=new_digest,
+        execution_key="b" * 64,
+        projected={},
+        created_by="test",
+        created_at=NOW,
     )
     model_revision = CatalogDocumentRevision(
-        id="00000000-0000-0000-0000-000000000105", document_id=model_root.id,
-        kind="model", publisher=model_root.publisher, slug=model_root.slug,
-        revision_number=1, schema_version=2, state="failed",
-        document=model.model_dump(mode="json"), content_digest=model_digest,
-        projected={}, created_by="test", created_at=NOW,
+        id="00000000-0000-0000-0000-000000000105",
+        document_id=model_root.id,
+        kind="model",
+        publisher=model_root.publisher,
+        slug=model_root.slug,
+        revision_number=1,
+        schema_version=2,
+        state="failed",
+        document=model.model_dump(mode="json"),
+        content_digest=model_digest,
+        projected={},
+        created_by="test",
+        created_at=NOW,
     )
     newer_model_revision = CatalogDocumentRevision(
-        id="00000000-0000-0000-0000-000000000109", document_id=model_root.id,
-        kind="model", publisher=model_root.publisher, slug=model_root.slug,
-        revision_number=2, schema_version=2, state="active",
-        document=newer_model.model_dump(mode="json"), content_digest=newer_model_digest,
-        projected={}, created_by="test", created_at=NOW,
+        id="00000000-0000-0000-0000-000000000109",
+        document_id=model_root.id,
+        kind="model",
+        publisher=model_root.publisher,
+        slug=model_root.slug,
+        revision_number=2,
+        schema_version=2,
+        state="active",
+        document=newer_model.model_dump(mode="json"),
+        content_digest=newer_model_digest,
+        projected={},
+        created_by="test",
+        created_at=NOW,
     )
     build = RecipeBuild(
         id="00000000-0000-0000-0000-000000000106",
-        recipe_revision_id=old_revision.id, builder_node_id="resolver-builder",
-        source_bundle_sha256="2" * 64, build_input_sha256="3" * 64,
-        state="succeeded", policy_report={}, plan={}, image_digest="sha256:" + "4" * 64,
-        oci_layout_sha256="5" * 64, image_bytes=17, error=None,
-        created_at=NOW, updated_at=NOW,
+        recipe_revision_id=old_revision.id,
+        builder_node_id="resolver-builder",
+        source_bundle_sha256="2" * 64,
+        build_input_sha256="3" * 64,
+        state="succeeded",
+        policy_report={},
+        plan={},
+        image_digest="sha256:" + "4" * 64,
+        oci_layout_sha256="5" * 64,
+        image_bytes=17,
+        error=None,
+        created_at=NOW,
+        updated_at=NOW,
     )
     receipt = RuntimeImageReceipt(
-        id="00000000-0000-0000-0000-000000000107", recipe_revision_id=old_revision.id,
-        source="controller-build", original_content_digest=old_digest,
-        effective_execution_key=old_revision.execution_key, registry_manifest_digest=None,
+        id="00000000-0000-0000-0000-000000000107",
+        recipe_revision_id=old_revision.id,
+        source="controller-build",
+        original_content_digest=old_digest,
+        effective_execution_key=old_revision.execution_key,
+        registry_manifest_digest=None,
         platform_manifest_digest="sha256:" + "6" * 64,
-        local_image_config_id="sha256:" + "7" * 64, oci_archive_sha256="8" * 64,
-        image_bytes=17, architecture="linux-arm64", runtime_interface="vonk.runtime.v1",
-        runtime_interface_label="v1", build_id=build.id, verified_at=NOW, state="verified",
+        local_image_config_id="sha256:" + "7" * 64,
+        oci_archive_sha256="8" * 64,
+        image_bytes=17,
+        architecture="linux-arm64",
+        runtime_interface="vonk.runtime.v1",
+        runtime_interface_label="v1",
+        build_id=build.id,
+        verified_at=NOW,
+        state="verified",
     )
     authorization = RuntimeImageAuthorization(
-        id="00000000-0000-0000-0000-000000000108", recipe_revision_id=old_revision.id,
-        receipt_id=receipt.id, source=receipt.source,
+        id="00000000-0000-0000-0000-000000000108",
+        recipe_revision_id=old_revision.id,
+        receipt_id=receipt.id,
+        source=receipt.source,
         original_content_digest=receipt.original_content_digest,
-        effective_execution_key=receipt.effective_execution_key, registry_manifest_digest=None,
+        effective_execution_key=receipt.effective_execution_key,
+        registry_manifest_digest=None,
         platform_manifest_digest=receipt.platform_manifest_digest,
         local_image_config_id=receipt.local_image_config_id,
-        oci_archive_sha256=receipt.oci_archive_sha256, image_bytes=17,
-        build_id=build.id, authorized_at=NOW, state="authorized",
+        oci_archive_sha256=receipt.oci_archive_sha256,
+        image_bytes=17,
+        build_id=build.id,
+        authorized_at=NOW,
+        state="authorized",
     )
     with sessions.begin() as session:
-        session.add_all([model_root, recipe_root, model_revision, newer_model_revision,
-                         old_revision, new_revision,
-                         AgentNode(node_id="resolver-builder", state="active"), build,
-                         receipt, authorization])
+        session.add_all(
+            [
+                model_root,
+                recipe_root,
+                model_revision,
+                newer_model_revision,
+                old_revision,
+                new_revision,
+                AgentNode(node_id="resolver-builder", state="active"),
+                build,
+                receipt,
+                authorization,
+            ]
+        )
 
     manifest = ArtifactSetManifest(
         model_content_sha256=model_digest,
@@ -487,11 +566,21 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     )
     artifact = manifest.artifacts[0]
     model_cache = ModelCacheSet(
-        artifact_set_sha256=manifest.digest, schema_version=2,
-        model_content_sha256=model_digest, recipe_revision_sha256=None,
-        manifest=manifest.document(), expected_bytes=3, verified_bytes=3,
-        state="cached", protected=False, protected_reasons=[], created_at=NOW,
-        updated_at=NOW, verified_at=NOW, last_accessed_at=NOW, last_error=None,
+        artifact_set_sha256=manifest.digest,
+        schema_version=2,
+        model_content_sha256=model_digest,
+        recipe_revision_sha256=None,
+        manifest=manifest.document(),
+        expected_bytes=3,
+        verified_bytes=3,
+        state="cached",
+        protected=False,
+        protected_reasons=[],
+        created_at=NOW,
+        updated_at=NOW,
+        verified_at=NOW,
+        last_accessed_at=NOW,
+        last_error=None,
     )
     model_object = service.root / "objects" / artifact.sha256[:2] / artifact.sha256
     model_object.parent.mkdir(parents=True)
@@ -500,18 +589,20 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     assert receipt.image_bytes is not None
     image_object.write_bytes(b"x" * receipt.image_bytes)
     with sessions.begin() as session:
-        session.add_all([
-            model_cache,
-            ModelCacheArtifact(
-                sha256=artifact.sha256,
-                storage_key=f"objects/{artifact.sha256[:2]}/{artifact.sha256}",
-                expected_bytes=3,
-                actual_bytes=3,
-                state="verified",
-                verified_at=NOW,
-                updated_at=NOW,
-            ),
-        ])
+        session.add_all(
+            [
+                model_cache,
+                ModelCacheArtifact(
+                    sha256=artifact.sha256,
+                    storage_key=f"objects/{artifact.sha256[:2]}/{artifact.sha256}",
+                    expected_bytes=3,
+                    actual_bytes=3,
+                    state="verified",
+                    verified_at=NOW,
+                    updated_at=NOW,
+                ),
+            ]
+        )
 
     resolved = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
@@ -597,7 +688,9 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
 @pytest.mark.parametrize("shared_object", [False, True])
 @pytest.mark.parametrize("partial_checkpoint", [False, True])
 def test_canonical_dependency_closure_reaches_run_switch(
-    cache, shared_object: bool, partial_checkpoint: bool,
+    cache,
+    shared_object: bool,
+    partial_checkpoint: bool,
 ) -> None:
     service, sessions = cache
     companion = _canonical_model(
@@ -607,13 +700,15 @@ def test_canonical_dependency_closure_reaches_run_switch(
         file_digest=("3" if shared_object else "2") * 64,
     )
     companion_document = companion.model_dump(mode="json")
-    companion_document["files"].append({
-        "id": "empty-config",
-        "path": "config/empty.txt",
-        "sha256": hashlib.sha256(b"").hexdigest(),
-        "size_bytes": 0,
-        "roles": ["config"],
-    })
+    companion_document["files"].append(
+        {
+            "id": "empty-config",
+            "path": "config/empty.txt",
+            "sha256": hashlib.sha256(b"").hexdigest(),
+            "size_bytes": 0,
+            "roles": ["config"],
+        }
+    )
     companion = ModelDefinition.model_validate(companion_document)
     companion_digest = content_sha256(companion)
     primary = _canonical_model(
@@ -685,7 +780,9 @@ def test_canonical_dependency_closure_reaches_run_switch(
     manifest = service.resolve_artifact_set(model_content_sha256=primary_digest)
 
     assert manifest.model_content_sha256 == primary_digest
-    assert manifest.model_content_digests == tuple(sorted((primary_digest, companion_digest)))
+    assert manifest.model_content_digests == tuple(
+        sorted((primary_digest, companion_digest))
+    )
     assert {item.model_content_sha256 for item in manifest.artifacts} == {
         primary_digest,
         companion_digest,
@@ -714,7 +811,9 @@ def test_canonical_dependency_closure_reaches_run_switch(
     assert inspection.artifact_set_bytes == (3 if shared_object else 6)
     assert inspection.required_bytes == inspection.artifact_set_bytes
     assert inspection.missing_nas_bytes == inspection.artifact_set_bytes
-    assert set(inspection.artifact_digests) == {item.sha256 for item in manifest.artifacts}
+    assert set(inspection.artifact_digests) == {
+        item.sha256 for item in manifest.artifacts
+    }
     assert hashlib.sha256(b"").hexdigest() in inspection.artifact_digests
 
 
@@ -743,7 +842,9 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     assert first.result.artifact_set_sha256 == first.artifact_set_sha256
     entry = service.get_entry(first.artifact_set_sha256 or "")
     assert entry["coverage"] == "complete"
-    assert entry["expected_bytes"] == len(b"primary model bytestokenizer auxiliary bytes")
+    assert entry["expected_bytes"] == len(
+        b"primary model bytestokenizer auxiliary bytes"
+    )
     assert entry["verified_bytes"] == entry["expected_bytes"]
     assert {item["path"] for item in entry["artifacts"]} == {
         "weights.bin",
@@ -770,9 +871,10 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     composed_source = CompositeVerifiedObjectSource(
         model_source, MemoryVerifiedObjectSource()
     )
-    assert composed_source.verified_model_objects_for_set(
-        first.artifact_set_sha256 or ""
-    ) == receipts
+    assert (
+        composed_source.verified_model_objects_for_set(first.artifact_set_sha256 or "")
+        == receipts
+    )
     assert {
         (
             item["model_content_sha256"],
@@ -791,13 +893,16 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         and _distribution_object(item)["name"] == item["path"]
         for item in receipts
     )
-    assert service.read_verified_artifact(
-        first.artifact_set_sha256 or "",
-        str(primary["sha256"]),
-        "weights.bin",
-        offset=8,
-        maximum_bytes=6,
-    ) == b"model "
+    assert (
+        service.read_verified_artifact(
+            first.artifact_set_sha256 or "",
+            str(primary["sha256"]),
+            "weights.bin",
+            offset=8,
+            maximum_bytes=6,
+        )
+        == b"model "
+    )
 
     model_b = "b" * 64
     primary_b = dict(primary, model_content_sha256=model_b)
@@ -825,7 +930,9 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     ],
 )
 def test_cache_operation_reads_reject_malformed_or_wrong_kind_results(
-    cache, tmp_path: Path, invalid_result: object,
+    cache,
+    tmp_path: Path,
+    invalid_result: object,
 ) -> None:
     service, sessions = cache
     operation = _download(
@@ -952,7 +1059,9 @@ def test_operation_transfer_progress_counts_only_missing_objects(
 ) -> None:
     service, _sessions = cache
     model = "7" * 64
-    cached = _artifact(tmp_path, b"cached", artifact_id="cached", model_content_sha256=model)
+    cached = _artifact(
+        tmp_path, b"cached", artifact_id="cached", model_content_sha256=model
+    )
     first = _download(
         service,
         [cached],
@@ -1021,6 +1130,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     cache, tmp_path: Path
 ) -> None:
     from vonk_control import operation_api, operation_contract
+
     service, _sessions = cache
     cursor_codec = TokenCodec(b"c" * 32).cursor_codec()
     provider = model_cache_operation_provider(service, cursors=cursor_codec)
@@ -1051,7 +1161,9 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         operation_ids.append(operation.id)
 
     query = operation_api.OperationQuery(limit=1, after=None, state=None, node_id=None)
-    with pytest.raises(operation_api.OperationProjectionError, match="cursor projection unavailable"):
+    with pytest.raises(
+        operation_api.OperationProjectionError, match="cursor projection unavailable"
+    ):
         model_cache_operation_provider(service).list_operations(query)
     first_page = provider.list_operations(query)
     assert isinstance(first_page, operation_api.OperationListPage)
@@ -1167,11 +1279,15 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     assert partial.attempt == 1
     assert partial.progress["expected_bytes"] == len(data)
     checkpoint_bytes = (
-        service.root
-        / "partials"
-        / str(partial.artifact_set_sha256)
-        / f"{artifact['sha256']}.part"
-    ).stat().st_size
+        (
+            service.root
+            / "partials"
+            / str(partial.artifact_set_sha256)
+            / f"{artifact['sha256']}.part"
+        )
+        .stat()
+        .st_size
+    )
     assert partial.progress["downloaded_bytes"] == checkpoint_bytes
     # Replay uses the original plan identity even though the current preview
     # now sees a shorter remaining range.
@@ -1201,7 +1317,12 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     assert resumed.progress["downloaded_bytes"] == len(data)
     assert resumed.progress["expected_bytes"] == len(data)
     assert resumed.attempt == 2
-    assert (service.root / "objects" / str(artifact["sha256"])[0:2] / str(artifact["sha256"]).strip()).read_bytes() == data
+    assert (
+        service.root
+        / "objects"
+        / str(artifact["sha256"])[0:2]
+        / str(artifact["sha256"]).strip()
+    ).read_bytes() == data
     assert restarted.get_entry(set_digest)["coverage"] == "complete"
 
 
@@ -1288,21 +1409,29 @@ def test_exhausted_transient_download_allows_bounded_operator_retry_after_restar
     assert retry.plan_digest == exhausted.plan_digest
     assert retry.artifact_set_sha256 == exhausted.artifact_set_sha256
 
-    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
+    restarted = ModelCacheService(
+        sessions, service.root, reserve_bytes=0, fixture_sources=True
+    )
     assert restarted.resume_operations() == 1
     restarted.run_pending()
     assert restarted.get_operation(retry.id).state == "succeeded"
 
 
-def test_model_cache_retry_classification_rejects_terminal_http_and_storage_errors() -> None:
+def test_model_cache_retry_classification_rejects_terminal_http_and_storage_errors() -> (
+    None
+):
     request = httpx.Request("GET", "https://example.invalid/model")
     for status in (401, 403, 404):
         response = httpx.Response(status, request=request)
-        error = httpx.HTTPStatusError("request failed", request=request, response=response)
+        error = httpx.HTTPStatusError(
+            "request failed", request=request, response=response
+        )
         assert _retryable_failure(error) is False
     for status in (429, 500, 503):
         response = httpx.Response(status, request=request)
-        error = httpx.HTTPStatusError("request failed", request=request, response=response)
+        error = httpx.HTTPStatusError(
+            "request failed", request=request, response=response
+        )
         assert _retryable_failure(error) is True
     assert _retryable_failure(OSError(errno.EACCES, "permission denied")) is False
     assert _retryable_failure(OSError(errno.ENOSPC, "no space left")) is False
@@ -1313,21 +1442,29 @@ def test_provider_retry_after_and_rate_limit_reset_are_bounded_hints() -> None:
     now = datetime(2026, 9, 5, 12, tzinfo=UTC)
     assert _retry_after_seconds({"retry-after": "7"}, now=now) == 7
     assert _retry_after_seconds({"ratelimit-reset": "30"}, now=now) == 30
-    assert _retry_after_seconds(
-        {"x-ratelimit-reset": str(int(now.timestamp()) + 11)}, now=now
-    ) == 11
-    assert _retry_after_seconds(
-        {"RateLimit": '"resolvers";r=0;t=123'}, now=now
-    ) == 123
-    assert _retry_after_seconds(
-        {"Retry-After": "7", "RateLimit": '"resolvers";r=0;t=123'}, now=now
-    ) == 123
-    assert _retry_after_seconds(
-        {"RateLimit": '"resolvers";r=0;t=123junk'}, now=now
-    ) is None
-    assert _retry_after_seconds(
-        {"RateLimit": '"resolvers";r=0;t=999999999999999999999'}, now=now
-    ) == 365 * 24 * 60 * 60
+    assert (
+        _retry_after_seconds(
+            {"x-ratelimit-reset": str(int(now.timestamp()) + 11)}, now=now
+        )
+        == 11
+    )
+    assert _retry_after_seconds({"RateLimit": '"resolvers";r=0;t=123'}, now=now) == 123
+    assert (
+        _retry_after_seconds(
+            {"Retry-After": "7", "RateLimit": '"resolvers";r=0;t=123'}, now=now
+        )
+        == 123
+    )
+    assert (
+        _retry_after_seconds({"RateLimit": '"resolvers";r=0;t=123junk'}, now=now)
+        is None
+    )
+    assert (
+        _retry_after_seconds(
+            {"RateLimit": '"resolvers";r=0;t=999999999999999999999'}, now=now
+        )
+        == 365 * 24 * 60 * 60
+    )
 
 
 def test_worker_prefers_nonblocking_cache_tick_when_available() -> None:
@@ -1356,15 +1493,25 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     service, _sessions = cache
     model = "d" * 64
     good = b"good payload"
-    artifact = _artifact(tmp_path, good, artifact_id="weights", model_content_sha256=model)
+    artifact = _artifact(
+        tmp_path, good, artifact_id="weights", model_content_sha256=model
+    )
     source = tmp_path / "weights.source"
-    set_digest = _download(
-        service,
-        [artifact],
-        model_content_sha256=model,
-        request_key="00000000-0000-4000-8000-000000000004",
-    ).artifact_set_sha256 or ""
-    target = service.root / "objects" / str(artifact["sha256"])[0:2] / str(artifact["sha256"])
+    set_digest = (
+        _download(
+            service,
+            [artifact],
+            model_content_sha256=model,
+            request_key="00000000-0000-4000-8000-000000000004",
+        ).artifact_set_sha256
+        or ""
+    )
+    target = (
+        service.root
+        / "objects"
+        / str(artifact["sha256"])[0:2]
+        / str(artifact["sha256"])
+    )
     assert target.read_bytes() == good
 
     source.write_bytes(b"bad! payload")
@@ -1425,9 +1572,13 @@ def test_distribution_manifest_uses_receipts_and_serves_only_the_requested_file(
 
     service, _sessions = cache
     primary = _artifact(tmp_path, b"primary weights")
-    auxiliary = _artifact(tmp_path, b"tokenizer", artifact_id="tokenizer", path="tokenizer.json")
+    auxiliary = _artifact(
+        tmp_path, b"tokenizer", artifact_id="tokenizer", path="tokenizer.json"
+    )
     operation = _download(
-        service, [primary, auxiliary], model_content_sha256="a" * 64,
+        service,
+        [primary, auxiliary],
+        model_content_sha256="a" * 64,
         request_key="ef456dfd-03ba-44a8-9304-219c721dc908",
     )
     assert operation.artifact_set_sha256 is not None
@@ -1458,7 +1609,9 @@ def test_distribution_manifest_uses_receipts_and_serves_only_the_requested_file(
         source.open_verified(digest, len(b"primary weights"))
 
 
-def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(cache, tmp_path: Path) -> None:
+def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(
+    cache, tmp_path: Path
+) -> None:
     service, _sessions = cache
     model = "f" * 64
     data = b"bounded bytes"
@@ -1476,14 +1629,28 @@ def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(cache, tmp_pa
     assert service.resume_operations() == 1
     service.run_pending()
     set_digest = interrupted.artifact_set_sha256 or ""
-    target = service.root / "objects" / str(artifact["sha256"])[0:2] / str(artifact["sha256"])
-    assert service.read_verified_artifact(set_digest, str(artifact["sha256"]), "weights.bin") == data
+    target = (
+        service.root
+        / "objects"
+        / str(artifact["sha256"])[0:2]
+        / str(artifact["sha256"])
+    )
+    assert (
+        service.read_verified_artifact(
+            set_digest, str(artifact["sha256"]), "weights.bin"
+        )
+        == data
+    )
     target.write_bytes(b"tampered!!!")
     with pytest.raises(ModelCacheConflict, match="not completely verified"):
-        service.read_verified_artifact(set_digest, str(artifact["sha256"]), "weights.bin")
+        service.read_verified_artifact(
+            set_digest, str(artifact["sha256"]), "weights.bin"
+        )
 
 
-def test_controller_worker_drains_queued_cache_operations_without_inline_api_transfer() -> None:
+def test_controller_worker_drains_queued_cache_operations_without_inline_api_transfer() -> (
+    None
+):
     calls: list[int] = []
 
     class Jobs(JobService):
@@ -1546,16 +1713,28 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
         assert operation.state == "succeeded"
         assert len(requests) == 1
         assert requests[0].headers.get("range") is None
-        assert service.get_entry(operation.artifact_set_sha256 or "")["coverage"] == "complete"
+        assert (
+            service.get_entry(operation.artifact_set_sha256 or "")["coverage"]
+            == "complete"
+        )
     finally:
         http_client.close()
 
 
 def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:
     from vonk_control.model_cache_progress import cache_progress
-    value = cache_progress({"phase": "downloading", "completed_artifacts": 0,
-        "total_artifacts": 1, "downloaded_bytes": 12, "expected_bytes": None},
-        previous=None, now=NOW)
+
+    value = cache_progress(
+        {
+            "phase": "downloading",
+            "completed_artifacts": 0,
+            "total_artifacts": 1,
+            "downloaded_bytes": 12,
+            "expected_bytes": None,
+        },
+        previous=None,
+        now=NOW,
+    )
     progress = ModelCacheOperationProvider._progress(value)
     assert progress["phase"] == "download"
     assert progress["completed_bytes"] == 12
@@ -1563,7 +1742,9 @@ def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> Non
     assert "eta_seconds" not in progress
     assert "bytes_per_second" not in progress
     with pytest.raises(ValidationError):
-        ModelCacheOperationProvider._progress({"phase": "downloading", "downloaded_bytes": 12})
+        ModelCacheOperationProvider._progress(
+            {"phase": "downloading", "downloaded_bytes": 12}
+        )
 
 
 def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeypatch):
@@ -1571,13 +1752,21 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
     data = b"x" * (2 * 1024 * 1024 + 3)
     artifact = _artifact(tmp_path, data)
     small = _artifact(tmp_path, b"config", artifact_id="tokenizer", path="config.json")
-    downloaded = _download(service, [small, artifact], model_content_sha256="a" * 64,
-                           request_key="00000000-0000-4000-8000-000000001001")
+    downloaded = _download(
+        service,
+        [small, artifact],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001001",
+    )
     digest = downloaded.artifact_set_sha256
     assert digest is not None
     preview = service.repair_preview(digest)
-    repair = service.start_repair(actor="test", request_key="00000000-0000-4000-8000-000000001002",
-                                  artifact_set_sha256=digest, plan_digest=preview["plan_digest"])
+    repair = service.start_repair(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000001002",
+        artifact_set_sha256=digest,
+        plan_digest=preview["plan_digest"],
+    )
     service._run_download(repair.id, force=True, interrupt_after_bytes=1024 * 1024)
     assert service.get_operation(repair.id).state == "partial"
     available = service.download_preview(
@@ -1585,9 +1774,13 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
     )
     assert available["already_cached_bytes"] == len(data) + len(b"config")
     artifact_digest = _required_text(artifact["sha256"], "artifact digest")
-    assert service.read_verified_artifact(digest, artifact_digest, "weights.bin") == data
+    assert (
+        service.read_verified_artifact(digest, artifact_digest, "weights.bin") == data
+    )
     service.close()
-    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
+    restarted = ModelCacheService(
+        sessions, service.root, reserve_bytes=0, fixture_sources=True
+    )
     offsets = []
     original = restarted._open_source
 
@@ -1599,21 +1792,32 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
     restarted.run_pending()
     assert restarted.get_operation(repair.id).state == "succeeded"
     assert offsets == [1024 * 1024]
-    assert restarted.read_verified_artifact(digest, artifact_digest, "weights.bin") == data
+    assert (
+        restarted.read_verified_artifact(digest, artifact_digest, "weights.bin") == data
+    )
     restarted.close()
 
 
-def test_atomic_repair_keeps_path_and_open_reader_available(cache, tmp_path, monkeypatch):
+def test_atomic_repair_keeps_path_and_open_reader_available(
+    cache, tmp_path, monkeypatch
+):
     service, _ = cache
     data = b"immutable model"
     artifact = _artifact(tmp_path, data)
-    downloaded = _download(service, [artifact], model_content_sha256="a" * 64,
-                           request_key="00000000-0000-4000-8000-000000001003")
+    downloaded = _download(
+        service,
+        [artifact],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001003",
+    )
     digest = downloaded.artifact_set_sha256
-    target, _, _ = service.verified_artifact_file(digest, artifact["sha256"], "weights.bin")
+    target, _, _ = service.verified_artifact_file(
+        digest, artifact["sha256"], "weights.bin"
+    )
     original = __import__("os").replace
     replacements = []
     with target.open("rb") as reader:
+
         def replace(source, destination):
             assert target.read_bytes() == data
             assert destination == target
@@ -1621,31 +1825,45 @@ def test_atomic_repair_keeps_path_and_open_reader_available(cache, tmp_path, mon
             assert target.read_bytes() == data
             assert reader.read() == data
             replacements.append(destination)
+
         monkeypatch.setattr("vonk_control.model_cache.os.replace", replace)
-        repair = service.start_repair(actor="test", request_key="00000000-0000-4000-8000-000000001004",
-                                      artifact_set_sha256=digest,
-                                      plan_digest=service.repair_preview(digest)["plan_digest"])
+        repair = service.start_repair(
+            actor="test",
+            request_key="00000000-0000-4000-8000-000000001004",
+            artifact_set_sha256=digest,
+            plan_digest=service.repair_preview(digest)["plan_digest"],
+        )
         service.run_pending()
     assert service.get_operation(repair.id).state == "succeeded"
     assert replacements == [target]
 
 
-def test_reconciliation_reuses_verified_bytes_but_detects_same_size_mutation(cache, tmp_path, monkeypatch):
+def test_reconciliation_reuses_verified_bytes_but_detects_same_size_mutation(
+    cache, tmp_path, monkeypatch
+):
     from types import SimpleNamespace
 
     from vonk_control.cached_file_verification import CachedFileVerifier
 
     service, _ = cache
     artifact = _artifact(tmp_path, b"good")
-    downloaded = _download(service, [artifact], model_content_sha256="a" * 64,
-                           request_key="00000000-0000-4000-8000-000000001005")
+    downloaded = _download(
+        service,
+        [artifact],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001005",
+    )
     monkeypatch.setattr("vonk_control.model_cache.verified_files", CachedFileVerifier())
     calls = []
     original = hashlib.sha256
+
     def sha256():
         calls.append(1)
         return original()
-    monkeypatch.setattr("vonk_control.cached_file_verification.hashlib", SimpleNamespace(sha256=sha256))
+
+    monkeypatch.setattr(
+        "vonk_control.cached_file_verification.hashlib", SimpleNamespace(sha256=sha256)
+    )
     service.reconcile_storage()
     service.reconcile_storage()
     service.get_entry(downloaded.artifact_set_sha256)
@@ -1655,47 +1873,87 @@ def test_reconciliation_reuses_verified_bytes_but_detects_same_size_mutation(cac
     assert service.get_entry(downloaded.artifact_set_sha256)["state"] == "needs-repair"
 
 
-def test_repair_capacity_admission_preserves_verified_object(cache, tmp_path, monkeypatch):
+def test_repair_capacity_admission_preserves_verified_object(
+    cache, tmp_path, monkeypatch
+):
     from collections import namedtuple
+
     service, _ = cache
     artifact = _artifact(tmp_path, b"model")
-    downloaded = _download(service, [artifact], model_content_sha256="a" * 64,
-                           request_key="00000000-0000-4000-8000-000000001006")
+    downloaded = _download(
+        service,
+        [artifact],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001006",
+    )
     digest = downloaded.artifact_set_sha256
     usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr("vonk_control.model_cache.shutil.disk_usage", lambda _: usage(100, 100, 0))
+    monkeypatch.setattr(
+        "vonk_control.model_cache.shutil.disk_usage", lambda _: usage(100, 100, 0)
+    )
     with pytest.raises(ModelCacheConflict, match="insufficient-reserved-storage"):
-        service.start_repair(actor="test", request_key="00000000-0000-4000-8000-000000001007",
-                             artifact_set_sha256=digest,
-                             plan_digest=service.repair_preview(digest)["plan_digest"])
-    assert service.read_verified_artifact(digest, artifact["sha256"], "weights.bin") == b"model"
+        service.start_repair(
+            actor="test",
+            request_key="00000000-0000-4000-8000-000000001007",
+            artifact_set_sha256=digest,
+            plan_digest=service.repair_preview(digest)["plan_digest"],
+        )
+    assert (
+        service.read_verified_artifact(digest, artifact["sha256"], "weights.bin")
+        == b"model"
+    )
 
 
 def test_repair_checkpoint_requires_exact_nested_contract():
     from vonk_control.model_cache_contract import ModelCacheRepairCheckpoint
+
     valid = {"transfer_id": "a" * 32, "completed_objects": ["b" * 64]}
-    assert ModelCacheRepairCheckpoint.model_validate(valid).model_dump(mode="json") == valid
-    for invalid in ({"transfer_id": "a" * 32}, dict(valid, transfer_id="../object"),
-                    dict(valid, completed_objects=[7]), dict(valid, legacy=True)):
+    assert (
+        ModelCacheRepairCheckpoint.model_validate(valid).model_dump(mode="json")
+        == valid
+    )
+    for invalid in (
+        {"transfer_id": "a" * 32},
+        dict(valid, transfer_id="../object"),
+        dict(valid, completed_objects=[7]),
+        dict(valid, legacy=True),
+    ):
         with pytest.raises(ValidationError):
             ModelCacheRepairCheckpoint.model_validate(invalid)
 
 
-def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(cache, tmp_path):
+def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(
+    cache, tmp_path
+):
     from vonk_control.model_cache_progress import project_cache_progress
+
     service, sessions = cache
     clock = [datetime.now(UTC)]
     service._clock = lambda: clock[0]
     raw = _artifact(tmp_path, b"x" * 100)
     preview = service.download_preview(artifacts=[raw])
-    operation = service.start_download(actor="test", request_key="00000000-0000-4000-8000-000000000991",
-        plan_digest=preview["plan_digest"], artifacts=[raw])
+    operation = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000991",
+        plan_digest=preview["plan_digest"],
+        artifacts=[raw],
+    )
     with sessions() as session:
-        manifest = ArtifactSetManifest.from_document(session.get(ModelCacheOperation, operation.id).payload["manifest"])
+        manifest = ArtifactSetManifest.from_document(
+            session.get(ModelCacheOperation, operation.id).payload["manifest"]
+        )
     spec = manifest.artifacts[0]
+
     def checkpoint(owner, count, state="partial", force=False):
-        owner._checkpoint_artifact(spec, operation_id=operation.id, set_digest=manifest.digest,
-            actual_bytes=count, state=state, force_progress=force)
+        owner._checkpoint_artifact(
+            spec,
+            operation_id=operation.id,
+            set_digest=manifest.digest,
+            actual_bytes=count,
+            state=state,
+            force_progress=force,
+        )
+
     checkpoint(service, 10)
     clock[0] += timedelta(seconds=0.1)
     checkpoint(service, 20)
@@ -1705,7 +1963,13 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(cac
     measured = service.get_operation(operation.id).progress["measurement"]
     assert measured["bytes_per_second"] == 20
     assert measured["members"][0]["bytes_per_second"] == 20
-    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True, clock=lambda: clock[0])
+    restarted = ModelCacheService(
+        sessions,
+        service.root,
+        reserve_bytes=0,
+        fixture_sources=True,
+        clock=lambda: clock[0],
+    )
     clock[0] += timedelta(seconds=1)
     checkpoint(restarted, 40)
     current = restarted.get_operation(operation.id).progress
@@ -1715,7 +1979,9 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(cac
     assert isinstance(smoothed, (int, float))
     assert 10 < smoothed < 20
     projected = project_cache_progress(current, clock[0])
-    projected_members = require_sequence(projected["members"], "cache measurement members")
+    projected_members = require_sequence(
+        projected["members"], "cache measurement members"
+    )
     projected_member = require_mapping(projected_members[0], "cache measurement member")
     assert projected_member["observed_at"] == clock[0].isoformat()
     clock[0] += timedelta(seconds=0.1)
@@ -1733,17 +1999,32 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(cac
 
 def test_cache_measurements_handle_unknown_total_and_observation_gap():
     from vonk_control.model_cache_progress import cache_progress, project_cache_progress
+
     def snapshot(count: int, total: int | None = 100) -> dict[str, object]:
-        return {"phase": "downloading", "completed_artifacts": 0, "total_artifacts": 1,
-            "downloaded_bytes": count, "expected_bytes": total}
+        return {
+            "phase": "downloading",
+            "completed_artifacts": 0,
+            "total_artifacts": 1,
+            "downloaded_bytes": count,
+            "expected_bytes": total,
+        }
+
     first = cache_progress(snapshot(0), previous=None, now=NOW)
-    second = cache_progress(snapshot(10), previous=first, now=NOW + timedelta(seconds=1))
+    second = cache_progress(
+        snapshot(10), previous=first, now=NOW + timedelta(seconds=1)
+    )
     second_measurement = require_mapping(second["measurement"], "cache measurement")
     assert second_measurement["eta_seconds"] == 9
-    restarted = cache_progress(snapshot(20), previous=second, now=NOW + timedelta(seconds=60))
-    restarted_measurement = require_mapping(restarted["measurement"], "cache measurement")
+    restarted = cache_progress(
+        snapshot(20), previous=second, now=NOW + timedelta(seconds=60)
+    )
+    restarted_measurement = require_mapping(
+        restarted["measurement"], "cache measurement"
+    )
     assert "bytes_per_second" not in restarted_measurement
-    unknown = cache_progress(snapshot(30, None), previous=restarted, now=NOW + timedelta(seconds=61))
+    unknown = cache_progress(
+        snapshot(30, None), previous=restarted, now=NOW + timedelta(seconds=61)
+    )
     unknown_measurement = require_mapping(unknown["measurement"], "cache measurement")
     assert unknown_measurement["bytes_per_second"] == 10
     assert "eta_seconds" not in unknown_measurement
@@ -1752,14 +2033,24 @@ def test_cache_measurements_handle_unknown_total_and_observation_gap():
     assert "bytes_per_second" not in stale
 
 
-def test_large_model_keeps_exact_aggregate_without_truncated_member_list(cache, tmp_path):
+def test_large_model_keeps_exact_aggregate_without_truncated_member_list(
+    cache, tmp_path
+):
     from dataclasses import replace
+
     service, _ = cache
     raw = _artifact(tmp_path, b"x")
     manifest = service.resolve_artifact_set(artifacts=[raw])
-    specs = tuple(replace(manifest.artifacts[0], key=f"file-{i}", sha256=f"{i:064x}") for i in range(1025))
+    specs = tuple(
+        replace(manifest.artifacts[0], key=f"file-{i}", sha256=f"{i:064x}")
+        for i in range(1025)
+    )
     large = replace(manifest, artifacts=specs)
-    transfer = {"artifacts": {spec.sha256: {"baseline_bytes": 0, "received_bytes": 0} for spec in specs}}
+    transfer = {
+        "artifacts": {
+            spec.sha256: {"baseline_bytes": 0, "received_bytes": 0} for spec in specs
+        }
+    }
     progress = service._progress(large, phase="downloading", transfer=transfer)
     assert progress["measurement"]["total_items"] == 1025
     assert progress["measurement"]["total_bytes"] == 1025
@@ -1844,7 +2135,9 @@ def _track_checkpoint_sessions(service: ModelCacheService):
     return sampled, writes
 
 
-def test_fragmented_http_download_bounds_checkpoints(cache, tmp_path: Path, monkeypatch) -> None:
+def test_fragmented_http_download_bounds_checkpoints(
+    cache, tmp_path: Path, monkeypatch
+) -> None:
     _existing, sessions = cache
     payload = bytes(range(256)) * ((4 * _CHUNK_BYTES) // 256)
     fragment = 16 * 1024
@@ -1991,7 +2284,10 @@ def test_fragmented_http_final_progress_is_durable_and_resumes(
         resumed = service.get_operation(observed.id)
         assert resumed.state == "succeeded"
         assert resumed.progress["downloaded_bytes"] == len(payload)
-        assert any(request.headers.get("range") == f"bytes={durable_after}-" for request in requests)
+        assert any(
+            request.headers.get("range") == f"bytes={durable_after}-"
+            for request in requests
+        )
         assert (
             service.root
             / "objects"
@@ -2003,7 +2299,9 @@ def test_fragmented_http_final_progress_is_durable_and_resumes(
         client.close()
 
 
-def test_fragmented_http_shutdown_preserves_sub_chunk_tail(cache, tmp_path: Path) -> None:
+def test_fragmented_http_shutdown_preserves_sub_chunk_tail(
+    cache, tmp_path: Path
+) -> None:
     _existing, sessions = cache
     payload = b"s" * (2 * _CHUNK_BYTES)
     fragments = []
@@ -2024,9 +2322,12 @@ def test_fragmented_http_shutdown_preserves_sub_chunk_tail(cache, tmp_path: Path
     sampled, _writes = _track_checkpoint_sessions(service)
     artifact = _http_artifact(payload)
     try:
-        preview = service.download_preview(model_content_sha256="b" * 64, artifacts=[artifact])
+        preview = service.download_preview(
+            model_content_sha256="b" * 64, artifacts=[artifact]
+        )
         operation = service.start_download(
-            actor="test", request_key="00000000-0000-4000-8000-000000000995",
+            actor="test",
+            request_key="00000000-0000-4000-8000-000000000995",
             plan_digest=_required_text(preview["plan_digest"], "preview plan digest"),
             model_content_sha256="b" * 64,
             artifacts=[artifact],
@@ -2047,7 +2348,9 @@ def test_fragmented_http_shutdown_preserves_sub_chunk_tail(cache, tmp_path: Path
         client.close()
 
 
-@pytest.mark.parametrize("ending", ["complete", "truncated", "oversized", "fsync_error"])
+@pytest.mark.parametrize(
+    "ending", ["complete", "truncated", "oversized", "fsync_error"]
+)
 def test_fragmented_http_tail_checkpoint_never_exceeds_synced_bytes(
     cache, tmp_path, monkeypatch, ending
 ):
@@ -2078,7 +2381,9 @@ def test_fragmented_http_tail_checkpoint_never_exceeds_synced_bytes(
             200, request=request, stream=_FragmentedByteStream(body, fragment=4096)
         )
 
-    service, client = _http_cache_service(tmp_path, sessions, handler, clock=lambda: NOW)
+    service, client = _http_cache_service(
+        tmp_path, sessions, handler, clock=lambda: NOW
+    )
     real_checkpoint = service._checkpoint_artifact
 
     def checkpoint(spec, **kwargs):
@@ -2091,7 +2396,9 @@ def test_fragmented_http_tail_checkpoint_never_exceeds_synced_bytes(
     monkeypatch.setattr(service, "_checkpoint_artifact", checkpoint)
     try:
         operation = _download(
-            service, [_http_artifact(payload)], model_content_sha256="b" * 64,
+            service,
+            [_http_artifact(payload)],
+            model_content_sha256="b" * 64,
             request_key="00000000-0000-4000-8000-000000000996",
         )
         expected = 0 if ending == "fsync_error" else min(len(body), len(payload))
@@ -2099,7 +2406,9 @@ def test_fragmented_http_tail_checkpoint_never_exceeds_synced_bytes(
         assert operation.progress["downloaded_bytes"] == expected
         assert (operation.state == "succeeded") == (ending == "complete")
         if ending != "complete":
-            assert not service._object_path(hashlib.sha256(payload).hexdigest()).exists()
+            assert not service._object_path(
+                hashlib.sha256(payload).hexdigest()
+            ).exists()
     finally:
         service.close()
         client.close()
@@ -2125,7 +2434,9 @@ def test_progress_is_sampled_while_source_read_is_blocked(cache, tmp_path, monke
     def handler(request):
         return httpx.Response(200, request=request, stream=SlowStream())
 
-    service, client = _http_cache_service(tmp_path, sessions, handler, clock=lambda: NOW)
+    service, client = _http_cache_service(
+        tmp_path, sessions, handler, clock=lambda: NOW
+    )
     real_checkpoint = service._checkpoint_artifact
 
     def checkpoint(spec, **kwargs):
@@ -2138,7 +2449,9 @@ def test_progress_is_sampled_while_source_read_is_blocked(cache, tmp_path, monke
     monkeypatch.setattr(service, "_checkpoint_artifact", checkpoint)
     try:
         operation = _download(
-            service, [_http_artifact(payload)], model_content_sha256="b" * 64,
+            service,
+            [_http_artifact(payload)],
+            model_content_sha256="b" * 64,
             request_key="00000000-0000-4000-8000-000000000997",
         )
         assert operation.state == "succeeded"
@@ -2176,17 +2489,24 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
         if "range" in request.headers:
             start = int(request.headers["range"].removeprefix("bytes=").split("-")[0])
             return httpx.Response(
-                206, request=request, content=payload[start:],
-                headers={"content-range": f"bytes {start}-{len(payload)-1}/{len(payload)}"},
+                206,
+                request=request,
+                content=payload[start:],
+                headers={
+                    "content-range": f"bytes {start}-{len(payload) - 1}/{len(payload)}"
+                },
             )
         return httpx.Response(
-            200, request=request,
+            200,
+            request=request,
             stream=_FragmentedByteStream(
                 payload, fragment=4096, fail_after=None if complete_tail else 4096
             ),
         )
 
-    service, client = _http_cache_service(tmp_path, sessions, handler, clock=lambda: NOW)
+    service, client = _http_cache_service(
+        tmp_path, sessions, handler, clock=lambda: NOW
+    )
     artifact = _http_artifact(payload)
     publish = service._publish_object
 
@@ -2196,9 +2516,12 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
 
     monkeypatch.setattr(service, "_publish_object", checked_publish)
     try:
+
         def download(number):
             return _download(
-                service, [artifact], model_content_sha256="b" * 64,
+                service,
+                [artifact],
+                model_content_sha256="b" * 64,
                 request_key=f"00000000-0000-4000-8000-{number:012d}",
             )
 
@@ -2219,9 +2542,12 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
             assert len(requests) == 1
         else:
             assert requests[-1].headers["range"] == "bytes=4096-"
-        assert service._object_path(
-            _required_text(artifact["sha256"], "artifact digest")
-        ).read_bytes() == payload
+        assert (
+            service._object_path(
+                _required_text(artifact["sha256"], "artifact digest")
+            ).read_bytes()
+            == payload
+        )
     finally:
         service.close()
         client.close()
@@ -2230,14 +2556,20 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
 def test_cancel_queued_download_is_durable_and_idempotent(cache, tmp_path):
     service, sessions = cache
     artifact = _artifact(tmp_path, b"cancel me")
-    preview = service.download_preview(model_content_sha256="a" * 64, artifacts=[artifact])
+    preview = service.download_preview(
+        model_content_sha256="a" * 64, artifacts=[artifact]
+    )
     operation = service.start_download(
-        actor="test", request_key="00000000-0000-4000-8000-000000001010",
-        plan_digest=str(preview["plan_digest"]), model_content_sha256="a" * 64,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000001010",
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256="a" * 64,
         artifacts=[artifact],
     )
     assert service.cancel_operation(operation.id).state == "cancelled"
-    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
+    restarted = ModelCacheService(
+        sessions, service.root, reserve_bytes=0, fixture_sources=True
+    )
     try:
         assert restarted.run_pending() == 0
         assert restarted.cancel_operation(operation.id).state == "cancelled"
@@ -2246,12 +2578,15 @@ def test_cancel_queued_download_is_durable_and_idempotent(cache, tmp_path):
         restarted.close()
 
 
-def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(cache, tmp_path):
+def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
+    cache, tmp_path
+):
     _existing, sessions = cache
     payload = b"c" * 8192
     operation_id = []
-    api = ModelCacheService(sessions, tmp_path / "http-nas-cache", reserve_bytes=0,
-                            fixture_sources=True)
+    api = ModelCacheService(
+        sessions, tmp_path / "http-nas-cache", reserve_bytes=0, fixture_sources=True
+    )
 
     class CancelStream(httpx.SyncByteStream):
         def __iter__(self):
@@ -2267,10 +2602,14 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(cac
 
     service, client = _http_cache_service(tmp_path, sessions, handler)
     artifact = _http_artifact(payload)
-    preview = service.download_preview(model_content_sha256="b" * 64, artifacts=[artifact])
+    preview = service.download_preview(
+        model_content_sha256="b" * 64, artifacts=[artifact]
+    )
     operation = service.start_download(
-        actor="test", request_key="00000000-0000-4000-8000-000000001011",
-        plan_digest=str(preview["plan_digest"]), model_content_sha256="b" * 64,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000001011",
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256="b" * 64,
         artifacts=[artifact],
     )
     operation_id.append(operation.id)
@@ -2291,60 +2630,94 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(cac
         client.close()
 
 
-def test_remove_model_cancels_preparation_preserves_shared_blob_and_running_node(cache, tmp_path: Path):
+def test_remove_model_cancels_preparation_preserves_shared_blob_and_running_node(
+    cache, tmp_path: Path
+):
     service, sessions = cache
     model_a = _canonical_model(
-        publisher="vonk-forge", slug="remove-model-a", file_id="weights",
+        publisher="vonk-forge",
+        slug="remove-model-a",
+        file_id="weights",
         file_digest="a" * 64,
     )
     model_b = _canonical_model(
-        publisher="vonk-forge", slug="remove-model-b", file_id="weights",
+        publisher="vonk-forge",
+        slug="remove-model-b",
+        file_id="weights",
         file_digest="a" * 64,
     )
     digest_a = content_sha256(model_a)
     digest_b = content_sha256(model_b)
     with sessions.begin() as session:
         for index, (slug, model, digest) in enumerate(
-            (("remove-model-a", model_a, digest_a), ("remove-model-b", model_b, digest_b)),
+            (
+                ("remove-model-a", model_a, digest_a),
+                ("remove-model-b", model_b, digest_b),
+            ),
             start=1,
         ):
             document_id = f"00000000-0000-4000-8000-00000000010{index}"
             root = CatalogDocument(
-                id=document_id, kind="model", publisher="vonk-forge", slug=slug,
-                title=slug, created_by="test", created_at=NOW, updated_at=NOW,
+                id=document_id,
+                kind="model",
+                publisher="vonk-forge",
+                slug=slug,
+                title=slug,
+                created_by="test",
+                created_at=NOW,
+                updated_at=NOW,
             )
             session.add(root)
             session.flush()
-            session.add(CatalogDocumentRevision(
-                id=f"00000000-0000-4000-8000-00000000011{index}",
-                document_id=document_id, kind="model", publisher="vonk-forge", slug=slug,
-                revision_number=1, schema_version=2, state="active",
-                document=model.model_dump(mode="json"), content_digest=digest,
-                projected={}, created_by="test", created_at=NOW,
-            ))
+            session.add(
+                CatalogDocumentRevision(
+                    id=f"00000000-0000-4000-8000-00000000011{index}",
+                    document_id=document_id,
+                    kind="model",
+                    publisher="vonk-forge",
+                    slug=slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=model.model_dump(mode="json"),
+                    content_digest=digest,
+                    projected={},
+                    created_by="test",
+                    created_at=NOW,
+                )
+            )
         session.add(AgentNode(node_id="spark-live", state="active"))
 
     payload = b"shared model payload"
     first = _download(
-        service, [_artifact(tmp_path, payload, model_content_sha256=digest_a)],
+        service,
+        [_artifact(tmp_path, payload, model_content_sha256=digest_a)],
         model_content_sha256=digest_a,
         request_key="00000000-0000-4000-8000-000000001030",
     )
     second = _download(
-        service, [_artifact(tmp_path, payload, model_content_sha256=digest_b)],
+        service,
+        [_artifact(tmp_path, payload, model_content_sha256=digest_b)],
         model_content_sha256=digest_b,
         request_key="00000000-0000-4000-8000-000000001031",
     )
     assert first.state == second.state == "succeeded"
     artifact = _artifact(tmp_path, payload, model_content_sha256=digest_a)
-    preview = service.download_preview(model_content_sha256=digest_a, artifacts=[artifact])
+    preview = service.download_preview(
+        model_content_sha256=digest_a, artifacts=[artifact]
+    )
     pending = service.start_download(
-        actor="operator", request_key="00000000-0000-4000-8000-000000001032",
-        plan_digest=str(preview["plan_digest"]), model_content_sha256=digest_a,
-        artifacts=[artifact], force=True, selector="vonk-forge/remove-model-a",
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000001032",
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256=digest_a,
+        artifacts=[artifact],
+        force=True,
+        selector="vonk-forge/remove-model-a",
     )
     removed = service.remove_model_selector(
-        "vonk-forge/remove-model-a", actor="operator",
+        "vonk-forge/remove-model-a",
+        actor="operator",
         request_key="00000000-0000-4000-8000-000000001033",
     )
     assert removed.kind == "remove"
@@ -2354,12 +2727,22 @@ def test_remove_model_cancels_preparation_preserves_shared_blob_and_running_node
     service.run_pending()
 
     with sessions() as session:
-        assert session.scalar(select(ModelCacheSet).where(
-            ModelCacheSet.model_content_sha256 == digest_a,
-        )) is None
-        assert session.scalar(select(ModelCacheSet).where(
-            ModelCacheSet.model_content_sha256 == digest_b,
-        )) is not None
+        assert (
+            session.scalar(
+                select(ModelCacheSet).where(
+                    ModelCacheSet.model_content_sha256 == digest_a,
+                )
+            )
+            is None
+        )
+        assert (
+            session.scalar(
+                select(ModelCacheSet).where(
+                    ModelCacheSet.model_content_sha256 == digest_b,
+                )
+            )
+            is not None
+        )
         assert session.get(AgentNode, "spark-live") is not None
     assert service._object_path(artifact["sha256"]).is_file()
     observed, action, selector = service.get_operator_operation(removed.id)
@@ -2369,8 +2752,9 @@ def test_remove_model_cancels_preparation_preserves_shared_blob_and_running_node
 
 
 @pytest.mark.parametrize("range_supported", [True, False])
-def test_model_cache_parallel_ranges_publish_or_fall_back(cache, tmp_path, monkeypatch,
-                                                        range_supported):
+def test_model_cache_parallel_ranges_publish_or_fall_back(
+    cache, tmp_path, monkeypatch, range_supported
+):
     import threading
 
     import vonk_control.model_cache as module
@@ -2389,7 +2773,9 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(cache, tmp_path, monke
         if requested and range_supported:
             start, end = map(int, requested.removeprefix("bytes=").split("-"))
             return httpx.Response(
-                206, request=request, content=payload[start:end + 1],
+                206,
+                request=request,
+                content=payload[start : end + 1],
                 headers={"content-range": f"bytes {start}-{end}/{len(payload)}"},
             )
         return httpx.Response(200, request=request, content=payload)
@@ -2398,14 +2784,19 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(cache, tmp_path, monke
     artifact = _http_artifact(payload)
     try:
         operation = _download(
-            service, [artifact], model_content_sha256="b" * 64,
+            service,
+            [artifact],
+            model_content_sha256="b" * 64,
             request_key="00000000-0000-4000-8000-000000001020",
         )
         assert operation.state == "succeeded", operation.last_error
         assert operation.progress["downloaded_bytes"] == len(payload)
-        assert service._object_path(
-            _required_text(artifact["sha256"], "artifact digest")
-        ).read_bytes() == payload
+        assert (
+            service._object_path(
+                _required_text(artifact["sha256"], "artifact digest")
+            ).read_bytes()
+            == payload
+        )
         assert len([request for request in requests if request]) == 4
         assert (None in requests) == (not range_supported)
         assert not list((service.root / "partials").rglob("*.range-*"))
@@ -2417,13 +2808,19 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(cache, tmp_path, monke
 def test_cancel_during_verification_does_not_publish(cache, tmp_path, monkeypatch):
     service, sessions = cache
     artifact = _artifact(tmp_path, b"verified but cancelled")
-    preview = service.download_preview(model_content_sha256="a" * 64, artifacts=[artifact])
+    preview = service.download_preview(
+        model_content_sha256="a" * 64, artifacts=[artifact]
+    )
     operation = service.start_download(
-        actor="test", request_key="00000000-0000-4000-8000-000000001021",
-        plan_digest=str(preview["plan_digest"]), model_content_sha256="a" * 64,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000001021",
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256="a" * 64,
         artifacts=[artifact],
     )
-    api = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
+    api = ModelCacheService(
+        sessions, service.root, reserve_bytes=0, fixture_sources=True
+    )
     real_verify = service._verify_file
 
     def verify(path, spec):
@@ -2441,11 +2838,15 @@ def test_cancel_during_verification_does_not_publish(cache, tmp_path, monkeypatc
         api.close()
 
 
-def test_range_disk_reservation_falls_back_without_source_io(cache, tmp_path, monkeypatch):
+def test_range_disk_reservation_falls_back_without_source_io(
+    cache, tmp_path, monkeypatch
+):
     import shutil
 
     service, _sessions = cache
-    spec = ArtifactSpec.from_manifest(_first_manifest_artifact(_manifest_document(tmp_path)))
+    spec = ArtifactSpec.from_manifest(
+        _first_manifest_artifact(_manifest_document(tmp_path))
+    )
     partial = service._partial_path("b" * 64, spec.sha256)
     partial.parent.mkdir(parents=True)
     partial.write_bytes(b"m")

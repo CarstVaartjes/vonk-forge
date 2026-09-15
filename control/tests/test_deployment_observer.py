@@ -12,20 +12,32 @@ from vonk_control.models import Observation
 from .test_deployment_provenance import deployment
 
 
-def test_background_observation_reaches_api_projection_and_retains_age_on_outage(tmp_path):
+def test_background_observation_reaches_api_projection_and_retains_age_on_outage(
+    tmp_path,
+):
     sessions, now, _, _ = deployment(tmp_path)
     generation = "a" * 64
-    release = json.dumps({
-        "schema_version": 2, "channel": "dev", "generation": generation,
-        "source_sha": "b" * 40, "images": {"api": "ghcr.io/example/api@sha256:" + "c" * 64},
-        "artifacts": {},
-    }).encode()
-    manifest = "\n".join([
-        "schema_version=2", "channel=dev", f"generation={generation}",
-        "source_sha=" + "b" * 40, f"expires_at={int(now.timestamp()) + 3600}",
-        f"release_path=artifacts/dev/releases/{generation}/release.json",
-        f"release_sha256={hashlib.sha256(release).hexdigest()}",
-    ])
+    release = json.dumps(
+        {
+            "schema_version": 2,
+            "channel": "dev",
+            "generation": generation,
+            "source_sha": "b" * 40,
+            "images": {"api": "ghcr.io/example/api@sha256:" + "c" * 64},
+            "artifacts": {},
+        }
+    ).encode()
+    manifest = "\n".join(
+        [
+            "schema_version=2",
+            "channel=dev",
+            f"generation={generation}",
+            "source_sha=" + "b" * 40,
+            f"expires_at={int(now.timestamp()) + 3600}",
+            f"release_path=artifacts/dev/releases/{generation}/release.json",
+            f"release_sha256={hashlib.sha256(release).hexdigest()}",
+        ]
+    )
     entered, proceed = threading.Event(), threading.Event()
     unavailable = False
 
@@ -40,7 +52,12 @@ def test_background_observation_reaches_api_projection_and_retains_age_on_outage
             return httpx.Response(200, text=manifest)
         return httpx.Response(200, content=release)
 
-    observer = DeploymentObserver(sessions, channel="dev", transport=httpx.MockTransport(respond), clock=lambda: now)
+    observer = DeploymentObserver(
+        sessions,
+        channel="dev",
+        transport=httpx.MockTransport(respond),
+        clock=lambda: now,
+    )
     try:
         assert observer.tick() is False
         assert entered.wait(5)
@@ -62,7 +79,14 @@ def test_background_observation_reaches_api_projection_and_retains_age_on_outage
         assert projected.platform[1].evidence.age_seconds == 600
         assert projected.platform[1].evidence.freshness == "stale"
         with sessions() as session:
-            assert session.scalar(select(func.count()).select_from(Observation).where(Observation.kind.like("deployment.%"))) == 2
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(Observation)
+                    .where(Observation.kind.like("deployment.%"))
+                )
+                == 2
+            )
     finally:
         proceed.set()
         observer.close()
@@ -70,7 +94,13 @@ def test_background_observation_reaches_api_projection_and_retains_age_on_outage
 
 def test_inconsistent_publication_does_not_become_deployment_evidence(tmp_path):
     sessions, now, _, _ = deployment(tmp_path)
-    observer = DeploymentObserver(sessions, transport=httpx.MockTransport(lambda _: httpx.Response(200, text="schema_version=1")), clock=lambda: now)
+    observer = DeploymentObserver(
+        sessions,
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, text="schema_version=1")
+        ),
+        clock=lambda: now,
+    )
     try:
         observer.refresh()
         projected = DeploymentProvenanceService(sessions, clock=lambda: now).snapshot()

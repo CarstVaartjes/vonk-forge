@@ -138,16 +138,30 @@ def _artifact_job_response() -> dict[str, object]:
 
 
 def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     preview = FleetProfilePreview(
-        allowed=True, assignments=[], generated_at=datetime(2026, 9, 13, tzinfo=UTC),
-        plan_digest="a" * 64, profile_digest="b" * 64,
-        profile_id="12345678-1234-4123-8123-123456789abc", profile_name="Empty profile",
-        reasons=[], scope=FleetProfileScopePreview(node_ids=[]), steps=[],
+        allowed=True,
+        assignments=[],
+        generated_at=datetime(2026, 9, 13, tzinfo=UTC),
+        plan_digest="a" * 64,
+        profile_digest="b" * 64,
+        profile_id="12345678-1234-4123-8123-123456789abc",
+        profile_name="Empty profile",
+        reasons=[],
+        scope=FleetProfileScopePreview(node_ids=[]),
+        steps=[],
         summary=FleetProfilePlanSummary(
-            already_correct=0, blockers=0, builds=0, distributions=0,
-            installs=0, placements=0, starts=0, stops=0, uninstalls=0,
+            already_correct=0,
+            blockers=0,
+            builds=0,
+            distributions=0,
+            installs=0,
+            placements=0,
+            starts=0,
+            stops=0,
+            uninstalls=0,
         ),
     ).to_dict()
     observed: list[urllib.request.Request] = []
@@ -156,7 +170,9 @@ def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
         observed.append(request)
         return _Response(200, preview)
 
-    client = ControlClient("https://forge.example.test", _token(tmp_path), opener=opener)
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
     status = cli.main(
         ("--profile", "7", "profile", "load", "--dry-run", "--json"),
         control_client=client,
@@ -249,19 +265,25 @@ def test_raw_request_rejects_malformed_typed_errors(
         client.request("GET", "/api/jobs")
 
 
-def test_raw_request_rejects_error_fields_outside_openapi_contract(tmp_path: Path) -> None:
+def test_raw_request_rejects_error_fields_outside_openapi_contract(
+    tmp_path: Path,
+) -> None:
     headers = Message()
     headers["Content-Type"] = "application/json"
-    body = io.BytesIO(json.dumps({
-        "code": "model_cache.auth_required",
-        "detail": "Hugging Face access is required",
-        "recovery_actions": ["open_model_access", "check_access_and_resume"],
-        "required_bytes": 200,
-        "free_bytes": 100,
-        "shortfall_bytes": 100,
-        "retry_time": "2026-09-06T13:05:00Z",
-        "preserved": "12 MiB of verified bytes",
-    }).encode())
+    body = io.BytesIO(
+        json.dumps(
+            {
+                "code": "model_cache.auth_required",
+                "detail": "Hugging Face access is required",
+                "recovery_actions": ["open_model_access", "check_access_and_resume"],
+                "required_bytes": 200,
+                "free_bytes": 100,
+                "shortfall_bytes": 100,
+                "retry_time": "2026-09-06T13:05:00Z",
+                "preserved": "12 MiB of verified bytes",
+            }
+        ).encode()
+    )
 
     def opener(*_args, **_kwargs):
         raise urllib.error.HTTPError(
@@ -284,6 +306,7 @@ def test_raw_request_rejects_error_fields_outside_openapi_contract(tmp_path: Pat
                 "request_key": "11111111-1111-4111-8111-111111111111",
             },
         )
+
 
 def test_request_validates_canonical_route_models(
     tmp_path: Path,
@@ -325,6 +348,7 @@ def test_request_validates_canonical_route_models(
         "/api/artifact-jobs/capabilities",
     )
     assert result == capabilities
+
 
 def test_request_rejects_undocumented_no_content_status(tmp_path: Path) -> None:
     client = ControlClient(
@@ -426,26 +450,29 @@ def test_request_rejects_undocumented_success_status(tmp_path: Path) -> None:
     client = ControlClient(
         "https://forge.example.test",
         _token(tmp_path),
-        opener=lambda *_args, **_kwargs: _Response(299, {
-            "schema_version": 1,
-            "storage": {
-                "in_flight_uploads": 0,
-                "max_stored_bytes": 1024,
-                "remaining_bytes": 1024,
-                "reserved_bytes": 0,
-                "used_bytes": 0,
+        opener=lambda *_args, **_kwargs: _Response(
+            299,
+            {
+                "schema_version": 1,
+                "storage": {
+                    "in_flight_uploads": 0,
+                    "max_stored_bytes": 1024,
+                    "remaining_bytes": 1024,
+                    "reserved_bytes": 0,
+                    "used_bytes": 0,
+                },
+                "transport": {
+                    "max_input_file_bytes": 512,
+                    "max_input_files": 32,
+                    "max_input_total_bytes": 1024,
+                    "max_output_file_bytes": 1024,
+                    "max_output_files": 32,
+                    "max_output_total_bytes": 2048,
+                    "max_timeout_seconds": 3600,
+                    "reserved_input_names": ["manifest.json"],
+                },
             },
-            "transport": {
-                "max_input_file_bytes": 512,
-                "max_input_files": 32,
-                "max_input_total_bytes": 1024,
-                "max_output_file_bytes": 1024,
-                "max_output_files": 32,
-                "max_output_total_bytes": 2048,
-                "max_timeout_seconds": 3600,
-                "reserved_input_names": ["manifest.json"],
-            },
-        }),
+        ),
     )
 
     with pytest.raises(ControlMalformedResponse, match="undocumented status"):

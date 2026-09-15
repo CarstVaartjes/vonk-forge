@@ -476,9 +476,12 @@ def test_generated_schema_validates_synthetic_lock() -> None:
         ("_IndexSource", "url"),
         ("_SignedHttpIndexIdentity", "url"),
     ):
-        assert schema["$defs"][source_name]["properties"][field_name].get(
-            "maxLength", 2048
-        ) == 2048
+        assert (
+            schema["$defs"][source_name]["properties"][field_name].get(
+                "maxLength", 2048
+            )
+            == 2048
+        )
     assert schema == workload_release_lock_schema()
     assert PackageReleaseLock.parse(lock_document()).family_id == (
         "future-synthetic-stack"

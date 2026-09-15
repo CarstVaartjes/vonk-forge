@@ -7,7 +7,12 @@ import subprocess
 import sys
 import time
 
-_COMMANDS = (("uv", "sync"), ("skopeo", "inspect"), ("docker", "pull"), ("docker", "buildx", "imagetools", "inspect"))
+_COMMANDS = (
+    ("uv", "sync"),
+    ("skopeo", "inspect"),
+    ("docker", "pull"),
+    ("docker", "buildx", "imagetools", "inspect"),
+)
 _PERMANENT = re.compile(
     r"authentication failed|unauthorized|forbidden|permission denied|access denied|"
     r"repository(?: [^\n]+)? not found|not our ref|couldn't find remote ref|"
@@ -35,8 +40,11 @@ def retryable(output: str) -> bool:
 
 def main(command: list[str] | None = None) -> int:
     command = sys.argv[1:] if command is None else command
-    if not any(tuple(command[:len(prefix)]) == prefix for prefix in _COMMANDS):
-        print("Only uv sync, skopeo inspect, docker pull and docker buildx imagetools inspect may be retried.", file=sys.stderr)
+    if not any(tuple(command[: len(prefix)]) == prefix for prefix in _COMMANDS):
+        print(
+            "Only uv sync, skopeo inspect, docker pull and docker buildx imagetools inspect may be retried.",
+            file=sys.stderr,
+        )
         return 64
     for attempt in range(1, 4):
         result = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -51,8 +59,11 @@ def main(command: list[str] | None = None) -> int:
             print(result.stdout, end="", file=sys.stderr)
         if attempt == 3 or not retryable(result.stdout + result.stderr):
             return result.returncode
-        delay = 2 ** attempt
-        print(f"Transient dependency fetch failure; retry {attempt + 1}/3 in {delay}s.", file=sys.stderr)
+        delay = 2**attempt
+        print(
+            f"Transient dependency fetch failure; retry {attempt + 1}/3 in {delay}s.",
+            file=sys.stderr,
+        )
         time.sleep(delay)
     raise AssertionError("retry loop must return")
 

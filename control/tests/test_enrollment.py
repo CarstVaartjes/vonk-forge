@@ -159,9 +159,7 @@ def csr(node_id: str = NODE_ID) -> bytes:
     key = ed25519.Ed25519PrivateKey.generate()
     return (
         x509.CertificateSigningRequestBuilder()
-        .subject_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)])
-        )
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)]))
         .add_extension(
             x509.SubjectAlternativeName(
                 [
@@ -195,9 +193,7 @@ def rsa_csr() -> bytes:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     return (
         x509.CertificateSigningRequestBuilder()
-        .subject_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, NODE_ID)])
-        )
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, NODE_ID)]))
         .add_extension(
             x509.SubjectAlternativeName(
                 [
@@ -670,7 +666,9 @@ def test_rotation_preserves_only_live_operation_authority(
     _assert_rotation_operation_authority(service, attempt_state)
 
 
-def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(service) -> None:
+def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(
+    service,
+) -> None:
     enrollment, sessions, clock, _authority = service
     issued = enroll(enrollment)
     contacted = threading.Event()
@@ -680,7 +678,9 @@ def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(servic
 
     stop_waiting = threading.Event()
     jobs = AgentJobService(
-        sessions, clock=clock, contact_consumer=observe_contact,
+        sessions,
+        clock=clock,
+        contact_consumer=observe_contact,
         monotonic=lambda: time.monotonic() + (120 if stop_waiting.is_set() else 0),
     )
     source = AgentSource(
@@ -688,9 +688,17 @@ def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(servic
     )
     with ThreadPoolExecutor(max_workers=1) as pool:
         waiting = pool.submit(
-            claim_agent, jobs, NODE_ID, issued.serial, 60, wait_seconds=60,
+            claim_agent,
+            jobs,
+            NODE_ID,
+            issued.serial,
+            60,
+            wait_seconds=60,
             source=source,
-            runtime_identity={**PACKAGED_RUNTIME_IDENTITY, "observation_receipt_public_key": "c" * 64},
+            runtime_identity={
+                **PACKAGED_RUNTIME_IDENTITY,
+                "observation_receipt_public_key": "c" * 64,
+            },
         )
         try:
             assert contacted.wait(timeout=5)
@@ -728,12 +736,11 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
     presence = AgentPresenceService(
         sessions, ManagementAddressPolicy.parse("192.168.1.0/24"), clock=clock
     )
+
     def observe_contact(session, source) -> None:
         presence.observe_in_session(session, source)
 
-    jobs = AgentJobService(
-        sessions, clock=clock, contact_consumer=observe_contact
-    )
+    jobs = AgentJobService(sessions, clock=clock, contact_consumer=observe_contact)
     payload = {"workload_intent_ordinal": 1}
     parent = Job(
         request_id=str(uuid.uuid4()),
@@ -920,9 +927,7 @@ def test_recovery_conflict_revocation_is_durable_across_response_loss(
     pending_csr = csr()
     authority.revoke_failures.add(obsolete.serial)
 
-    with pytest.raises(
-        RenewalConflictRevocationUncertain, match="retry recovery"
-    ):
+    with pytest.raises(RenewalConflictRevocationUncertain, match="retry recovery"):
         enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
     with sessions() as session:
         old_staged = session.get(AgentCertificate, obsolete.serial)

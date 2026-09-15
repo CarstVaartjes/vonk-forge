@@ -44,9 +44,7 @@ _ARGUMENTS = {
     "mamba-radix-cache-strategy": ArgumentSpec(
         "--mamba-radix-cache-strategy", validate=one_of("extra_buffer")
     ),
-    "mamba-ssm-dtype": ArgumentSpec(
-        "--mamba-ssm-dtype", validate=one_of("bfloat16")
-    ),
+    "mamba-ssm-dtype": ArgumentSpec("--mamba-ssm-dtype", validate=one_of("bfloat16")),
     "mamba-track-interval": ArgumentSpec(
         "--mamba-track-interval", validate=integer(1, 1_000_000)
     ),
@@ -88,9 +86,7 @@ _ARGUMENTS = {
         "--enable-linear-replayssm-spec", takes_value=False
     ),
     "allow-auto-truncate": ArgumentSpec("--allow-auto-truncate", takes_value=False),
-    "ple-offload-embedding": ArgumentSpec(
-        "--ple-offload-embedding", takes_value=False
-    ),
+    "ple-offload-embedding": ArgumentSpec("--ple-offload-embedding", takes_value=False),
     "cuda-graph-max-bs": ArgumentSpec(
         "--cuda-graph-max-bs", validate=integer(1, 65_536)
     ),
@@ -98,9 +94,7 @@ _ARGUMENTS = {
         "--disable-cuda-graph-padding", takes_value=False
     ),
     "disable-radix-cache": ArgumentSpec("--disable-radix-cache", takes_value=False),
-    "sampling-backend": ArgumentSpec(
-        "--sampling-backend", validate=one_of("pytorch")
-    ),
+    "sampling-backend": ArgumentSpec("--sampling-backend", validate=one_of("pytorch")),
     "default-chat-template-kwargs": ArgumentSpec(
         "--default-chat-template-kwargs",
         validate=one_of('{"enable_thinking":false}'),

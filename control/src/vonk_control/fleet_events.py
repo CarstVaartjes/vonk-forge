@@ -206,9 +206,7 @@ class FleetEventRepository:
         self._sessions = sessions
         self._clock = clock
 
-    def append_in_session(
-        self, session: Session, draft: FleetEventDraft
-    ) -> FleetEvent:
+    def append_in_session(self, session: Session, draft: FleetEventDraft) -> FleetEvent:
         payload = _validated_payload(draft)
         occurred_at = self._clock()
         if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
@@ -223,9 +221,7 @@ class FleetEventRepository:
             if event_id is None:
                 raise RuntimeError("fleet event cursor singleton is not initialized")
         else:
-            last_id = connection.execute(
-                _cursor_lock_statement()
-            ).scalar_one_or_none()
+            last_id = connection.execute(_cursor_lock_statement()).scalar_one_or_none()
             if last_id is None:
                 raise RuntimeError("fleet event cursor singleton is not initialized")
             event_id = last_id + 1
@@ -266,9 +262,7 @@ class FleetEventRepository:
                     select(func.min(FleetStreamEvent.id))
                     .where(FleetStreamEvent.expires_at > now)
                     .scalar_subquery(),
-                ).where(
-                    FleetEventCursor.singleton_id == 1
-                )
+                ).where(FleetEventCursor.singleton_id == 1)
             ).one_or_none()
         if row is None:
             raise RuntimeError("fleet event cursor singleton is not initialized")
@@ -503,9 +497,7 @@ class FleetEventRecorder:
                 "mapping_generation": value.mapping_generation,
                 "state": value.state,
             }
-            return FleetEventDraft(
-                "recipe-state", None, entity_kind, value.id, payload
-            )
+            return FleetEventDraft("recipe-state", None, entity_kind, value.id, payload)
         if isinstance(value, InstallationNode):
             entity_kind = "installation-node"
             payload = {
@@ -536,9 +528,7 @@ class FleetEventRecorder:
                 "state": value.state,
                 "route_state": value.route_state,
             }
-            return FleetEventDraft(
-                "recipe-state", None, entity_kind, value.id, payload
-            )
+            return FleetEventDraft("recipe-state", None, entity_kind, value.id, payload)
         if isinstance(value, RunNode):
             entity_kind = "run-node"
             payload = {

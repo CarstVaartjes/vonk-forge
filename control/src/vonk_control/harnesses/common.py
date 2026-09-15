@@ -73,7 +73,9 @@ class ArgumentSpec:
     validate: Callable[[str], bool] = lambda _value: True
 
 
-def structured_command(value: object, *, canonical_argv: bool = False) -> tuple[str, ...]:
+def structured_command(
+    value: object, *, canonical_argv: bool = False
+) -> tuple[str, ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise HarnessCompileError("harness command must be a structured argv")
     command = tuple(value)
@@ -90,7 +92,10 @@ def structured_command(value: object, *, canonical_argv: bool = False) -> tuple[
     executable = PurePosixPath(command[0]).name.lower()
     if executable in (_SHELL_EXECUTABLES | _SHELL_LAUNCHERS):
         raise HarnessCompileError("harness command contains unsafe shell syntax")
-    if canonical_argv and sum(len(item.encode("utf-8")) for item in command) > 1_048_576:
+    if (
+        canonical_argv
+        and sum(len(item.encode("utf-8")) for item in command) > 1_048_576
+    ):
         raise HarnessCompileError("harness command exceeds its total argv bound")
     return command
 
@@ -180,8 +185,7 @@ def validate_projection(
         raise HarnessCompileError("harness projection environment is invalid")
     enforce_engine_contract = (
         not canonical_argv
-        and
-        projection.slug in _BUILTIN_HARNESS_SLUGS
+        and projection.slug in _BUILTIN_HARNESS_SLUGS
         and _is_builtin_launch_command(projection.slug, projection.command)
     )
     if enforce_engine_contract:
@@ -329,7 +333,9 @@ def compile_arguments(
         unknown_specification = specification is None
         if specification is None:
             if _SAFE_ENGINE_OPTION_NAME.fullmatch(name) is None:
-                raise HarnessCompileError(f"harness engine option name is invalid: {name}")
+                raise HarnessCompileError(
+                    f"harness engine option name is invalid: {name}"
+                )
             # The recipe is bound to a trusted, digest-pinned runtime. Preserve
             # safe options so a newer runtime can consume them without a
             # platform allowlist silently dropping intent.
@@ -792,7 +798,9 @@ def _validate_engine_launch(slug: str, command: tuple[str, ...]) -> None:
         try:
             output_index = command.index("--output-dir")
         except ValueError as error:
-            raise HarnessCompileError("job harness launch lacks output directory") from error
+            raise HarnessCompileError(
+                "job harness launch lacks output directory"
+            ) from error
         if output_index + 1 >= len(command) or command[output_index + 1] != "/outputs":
             raise HarnessCompileError("job harness output directory is invalid")
 
@@ -997,8 +1005,7 @@ def _validate_parameter_value(
     if kind in {"string", "enum"}:
         allowed_values = sequence(declaration.get("allowed_values"))
         valid = type(value) is str and (
-            kind != "enum"
-            or (allowed_values is not None and value in allowed_values)
+            kind != "enum" or (allowed_values is not None and value in allowed_values)
         )
     if not valid:
         raise HarnessCompileError(f"harness parameter value is invalid: {name}")

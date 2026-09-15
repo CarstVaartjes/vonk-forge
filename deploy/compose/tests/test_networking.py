@@ -126,7 +126,8 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
     assert not services["control-worker"].get("ports")
     assert not rendered["networks"]["artifact-egress"].get("internal", False)
     assert {
-        name for name, service in services.items()
+        name
+        for name, service in services.items()
         if "artifact-egress" in service.get("networks", {})
     } == {"control-worker"}
     assert set(services["control-api"]["networks"]) == {

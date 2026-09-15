@@ -57,7 +57,9 @@ def test_recipe_job_vectors_are_canonical_typed_and_digest_bound() -> None:
         lambda value: value["inputs"][0].update(name="../escape"),
         lambda value: value.update(input_total_bytes=4),
         lambda value: value.update(reserved_memory_bytes=0),
-        lambda value: value["compiled_execution_plan"]["runtime"].update(argv=["bad\x00value"]),
+        lambda value: value["compiled_execution_plan"]["runtime"].update(
+            argv=["bad\x00value"]
+        ),
         lambda value: value["output_limits"].update(
             allowed_media_types=["image/png", "image/png"]
         ),
@@ -153,8 +155,15 @@ def test_recipe_job_result_rejects_manifest_drift() -> None:
 def test_failed_process_result_is_valid_only_for_its_current_operation() -> None:
     _, envelope = documents()
     result = dict(envelope["result"], exit_code=1, reason="runtime failed")
-    assert validate_result_for_operation("recipe.job.run.v1", result, state="failed").exit_code == 1
+    assert (
+        validate_result_for_operation(
+            "recipe.job.run.v1", result, state="failed"
+        ).exit_code
+        == 1
+    )
     with pytest.raises(AgentProtocolError, match="typed model"):
         validate_result_for_operation("recipe.stop", result, state="failed")
     with pytest.raises(AgentProtocolError, match="typed model"):
-        validate_result_for_operation("recipe.job.run.v1", envelope["result"], state="failed")
+        validate_result_for_operation(
+            "recipe.job.run.v1", envelope["result"], state="failed"
+        )

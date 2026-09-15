@@ -61,7 +61,9 @@ def test_redaction_truncates_remote_output() -> None:
         "https://user:secret-password@example.com/model/weights#secret-fragment",
     ],
 )
-def test_download_diagnostics_preserve_source_but_strip_url_credentials(url: str) -> None:
+def test_download_diagnostics_preserve_source_but_strip_url_credentials(
+    url: str,
+) -> None:
     safe = redact_text(f"download failed ({url}); retry is available")
     assert "secret-" not in safe
     assert "user:" not in safe
@@ -78,7 +80,9 @@ def test_persisted_failure_evidence_does_not_retain_signed_download_queries() ->
     from vonk_control.operation_contract import sanitize_failure_evidence
 
     safe = sanitize_failure_evidence(
-        {"detail": "Read failed: https://cdn.example/model?Signature=signed-download-secret"}
+        {
+            "detail": "Read failed: https://cdn.example/model?Signature=signed-download-secret"
+        }
     )
     assert "signed-download-secret" not in str(safe)
     assert "https://cdn.example/model" in str(safe)

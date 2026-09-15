@@ -183,12 +183,19 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
                 child.payload["compiled_execution_plan"], "compiled execution plan"
             )
             placement = require_mapping(
-                require_mapping(plan_document["runtime"], "compiled runtime")["placement"],
+                require_mapping(plan_document["runtime"], "compiled runtime")[
+                    "placement"
+                ],
                 "compiled runtime placement",
             )
-            if nodes > 1 and child.payload["local_address"] != child.payload["master_address"]:
+            if (
+                nodes > 1
+                and child.payload["local_address"] != child.payload["master_address"]
+            ):
                 assert placement["endpoint_address"] is None
-                assert child.payload["endpoint_address"] == child.payload["local_address"]
+                assert (
+                    child.payload["endpoint_address"] == child.payload["local_address"]
+                )
             with sessions() as session:
                 run = session.get(RecipeRun, started.owner_id)
                 assert run is not None
@@ -295,9 +302,7 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
         run_plan_document = require_mapping(run.plan, "run plan")
         plan_nodes = {
             item["node_id"]: item
-            for item in require_sequence(
-                run_plan_document["nodes"], "run plan nodes"
-            )
+            for item in require_sequence(run_plan_document["nodes"], "run plan nodes")
             if isinstance(item, dict)
         }
     assert set(plan_nodes) == set(node_ids)
@@ -356,7 +361,9 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
             require_mapping(job.result["launch_evidence"], "launch evidence")[node_id],
             "node launch evidence",
         )
-        assert launch == require_mapping(produced["evidence"], "start result")["evidence"]
+        assert (
+            launch == require_mapping(produced["evidence"], "start result")["evidence"]
+        )
         run = session.get(RecipeRun, run_id)
         installation = session.get(RecipeInstallation, binding["installation_id"])
         run_node = (
@@ -382,7 +389,9 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         assert binding["master_port"] == launch.get("master_port")
     if same_second:
         with sessions.begin() as session:
-            node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
+            node = (
+                session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
+            )
             node.updated_at = NOW + timedelta(microseconds=500_000)
     operation_id = str(uuid.uuid4())
     fence = str(uuid.uuid4())
@@ -417,7 +426,9 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
             env={
                 **os.environ,
                 "VONK_HOST_HELPER_GRANT_PUBLIC_KEY": grant_public_key.hex(),
-                "VONK_HOST_HELPER_WIRE_NOW": str(int(NOW.timestamp()) - int(same_second)),
+                "VONK_HOST_HELPER_WIRE_NOW": str(
+                    int(NOW.timestamp()) - int(same_second)
+                ),
             },
             check=False,
         )

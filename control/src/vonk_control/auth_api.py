@@ -117,7 +117,7 @@ def install_auth_routes(
             422: {
                 "description": "Invalid login request",
                 "model": LoginRequestInvalid,
-            }
+            },
         },
         operation_id="loginBrowser",
     )
@@ -200,9 +200,7 @@ def install_auth_routes(
             200: {
                 "description": "A short-lived administrator bearer token download",
                 "content": {
-                    "text/plain": {
-                        "schema": {"type": "string", "format": "binary"}
-                    }
+                    "text/plain": {"schema": {"type": "string", "format": "binary"}}
                 },
             },
         },
@@ -228,9 +226,11 @@ def install_auth_routes(
             ttl_seconds=_CLI_TOKEN_TTL_SECONDS,
             now=issued_at,
         )
-        expires_at = datetime.fromtimestamp(
-            issued_at + _CLI_TOKEN_TTL_SECONDS, tz=UTC
-        ).isoformat().replace("+00:00", "Z")
+        expires_at = (
+            datetime.fromtimestamp(issued_at + _CLI_TOKEN_TTL_SECONDS, tz=UTC)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
         audit(request, identity.actor.subject, "auth.cli_token.issued")
         return Response(
             content=f"{token}\n",

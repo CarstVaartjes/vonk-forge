@@ -55,9 +55,7 @@ def _validate_manifest_contract(document: Mapping[str, object]) -> None:
     # was decoded from JSON, so round-trip it rather than asserting a type the
     # validator cannot check.
     errors = sorted(
-        Draft202012Validator(schema).iter_errors(
-            json.loads(json.dumps(document))
-        ),
+        Draft202012Validator(schema).iter_errors(json.loads(json.dumps(document))),
         key=lambda error: tuple(str(part) for part in error.absolute_path),
     )
     if errors:

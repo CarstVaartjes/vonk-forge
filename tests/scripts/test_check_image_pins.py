@@ -24,7 +24,8 @@ SCRIPT = ROOT / "scripts/check-image-pins"
 
 def _module() -> ModuleType:
     specification = importlib.util.spec_from_loader(
-        "check_image_pins", importlib.machinery.SourceFileLoader("check_image_pins", str(SCRIPT))
+        "check_image_pins",
+        importlib.machinery.SourceFileLoader("check_image_pins", str(SCRIPT)),
     )
     assert specification is not None and specification.loader is not None
     module = importlib.util.module_from_spec(specification)
@@ -56,9 +57,7 @@ def test_a_moved_tag_is_reported_without_blocking(monkeypatch, tmp_path) -> None
         module, "resolve", lambda reference, timeout: (elsewhere, None, "")
     )
 
-    payload = module.audit(
-        _root(tmp_path, {"caddy": f"caddy:2.11.4@{recorded}"}), 1.0
-    )
+    payload = module.audit(_root(tmp_path, {"caddy": f"caddy:2.11.4@{recorded}"}), 1.0)
 
     assert [finding["kind"] for finding in payload["findings"]] == ["moved"]
     assert payload["ok"] is True
@@ -73,9 +72,7 @@ def test_a_missing_digest_blocks(monkeypatch, tmp_path) -> None:
         lambda reference, timeout: (None, "manifest unknown", "missing"),
     )
 
-    payload = module.audit(
-        _root(tmp_path, {"caddy": f"caddy:2.11.4@{recorded}"}), 1.0
-    )
+    payload = module.audit(_root(tmp_path, {"caddy": f"caddy:2.11.4@{recorded}"}), 1.0)
 
     assert [finding["kind"] for finding in payload["findings"]] == ["missing"]
     assert payload["ok"] is False
@@ -90,9 +87,7 @@ def test_an_unreadable_registry_warns_without_blocking(monkeypatch, tmp_path) ->
         lambda reference, timeout: (None, "dial tcp: i/o timeout", "unverified"),
     )
 
-    payload = module.audit(
-        _root(tmp_path, {"caddy": f"caddy:2.11.4@{recorded}"}), 1.0
-    )
+    payload = module.audit(_root(tmp_path, {"caddy": f"caddy:2.11.4@{recorded}"}), 1.0)
 
     assert [finding["kind"] for finding in payload["findings"]] == ["unverified"]
     assert payload["ok"] is True
@@ -100,7 +95,9 @@ def test_an_unreadable_registry_warns_without_blocking(monkeypatch, tmp_path) ->
 
 def test_a_pinned_image_absent_from_the_lock_blocks(monkeypatch, tmp_path) -> None:
     module = _module()
-    monkeypatch.setattr(module, "resolve", lambda reference, timeout: ("sha256:" + "a" * 64, None, ""))
+    monkeypatch.setattr(
+        module, "resolve", lambda reference, timeout: ("sha256:" + "a" * 64, None, "")
+    )
     root = _root(tmp_path, {})
     (root / "control/Dockerfile").write_text(
         "FROM postgres:18.6@sha256:" + "c" * 64 + "\n", encoding="utf-8"

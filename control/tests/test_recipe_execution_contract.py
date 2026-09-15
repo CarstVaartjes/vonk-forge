@@ -56,7 +56,9 @@ def _run_plan() -> dict[str, object]:
     return plan.model_dump(mode="json")
 
 
-def test_run_plan_json_roundtrip_retains_required_nulls_and_timestamp_spelling() -> None:
+def test_run_plan_json_roundtrip_retains_required_nulls_and_timestamp_spelling() -> (
+    None
+):
     value = _run_plan()
     document = run_plan_document(value)
     nodes = require_sequence(document["nodes"], "run plan nodes")

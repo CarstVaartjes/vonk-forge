@@ -50,7 +50,9 @@ def _publish(catalog, document):
 
 
 def _library(catalog):
-    return LibraryProjection(catalog._sessions, cursors=catalog._cursors, clock=lambda: NOW)
+    return LibraryProjection(
+        catalog._sessions, cursors=catalog._cursors, clock=lambda: NOW
+    )
 
 
 def _assert_current(catalog, first, expected):
@@ -60,16 +62,24 @@ def _assert_current(catalog, first, expected):
     assert detail.definition == RecipeDefinition.model_validate(expected.document)
     assert catalog.get_recipe(first.document_id).id == expected.id
     current = catalog.recipe_catalog_local_revisions([(first.publisher, first.slug)])
-    assert current[(first.publisher, first.slug)].content_sha256 == expected.content_digest
+    assert (
+        current[(first.publisher, first.slug)].content_sha256 == expected.content_digest
+    )
     library = _library(catalog)
     assert {
         row.identity.recipe_revision_id
         for row in library.recipe_library(all_models=True).recipes
     } == {expected.id}
-    assert library.recipe_detail(f"{first.publisher}/{first.slug}").identity.recipe_revision_id == expected.id
+    assert (
+        library.recipe_detail(
+            f"{first.publisher}/{first.slug}"
+        ).identity.recipe_revision_id
+        == expected.id
+    )
     # A cached historical revision must not reappear as another Library choice.
     assert {
-        row.id for row in library._catalog_documents(
+        row.id
+        for row in library._catalog_documents(
             kind="recipe", local_digests=[first.content_digest]
         )
     } == {expected.id}
@@ -77,7 +87,10 @@ def _assert_current(catalog, first, expected):
         active = CatalogRepository().active_revision(session, first.document_id)
         assert active is not None
         assert active.id == expected.id
-        assert ModelCacheService._latest_recipe_digest(session, first.content_digest) == expected.content_digest
+        assert (
+            ModelCacheService._latest_recipe_digest(session, first.content_digest)
+            == expected.content_digest
+        )
 
 
 def test_stable_recipe_reads_follow_promotion_and_ignore_failed_successor(catalog):
@@ -120,10 +133,15 @@ def test_recipe_detail_keeps_its_exact_model_when_model_head_advances(catalog):
     catalog.entities.resolve(candidate.id, actor="test")
 
     detail = _library(catalog).authoring_recipe_detail(recipe.document_id)
-    assert detail.model_documents[0].model_document == ModelDefinition.model_validate(model)
-    assert catalog.entities.resolve_reference(
-        RecipeDefinition.model_validate(recipe.document).models[0].model
-    ).id == first_model.id
+    assert detail.model_documents[0].model_document == ModelDefinition.model_validate(
+        model
+    )
+    assert (
+        catalog.entities.resolve_reference(
+            RecipeDefinition.model_validate(recipe.document).models[0].model
+        ).id
+        == first_model.id
+    )
 
 
 def test_stable_recipe_reads_do_not_guess_when_active_head_is_missing(catalog):
@@ -131,9 +149,11 @@ def test_stable_recipe_reads_do_not_guess_when_active_head_is_missing(catalog):
     _publish(catalog, model)
     first = _publish(catalog, _recipe(model))
     with catalog._sessions.begin() as session:
-        head = session.scalar(select(CatalogDocumentHead).where(
-            CatalogDocumentHead.active_revision_id == first.id
-        ))
+        head = session.scalar(
+            select(CatalogDocumentHead).where(
+                CatalogDocumentHead.active_revision_id == first.id
+            )
+        )
         head.active_revision_id = None
 
     with pytest.raises(KeyError):
@@ -145,4 +165,7 @@ def test_stable_recipe_reads_do_not_guess_when_active_head_is_missing(catalog):
     assert catalog.get_recipe(first.id).id == first.id
     with catalog._sessions() as session:
         assert CatalogRepository().active_revision(session, first.document_id) is None
-        assert ModelCacheService._latest_recipe_digest(session, first.content_digest) is None
+        assert (
+            ModelCacheService._latest_recipe_digest(session, first.content_digest)
+            is None
+        )

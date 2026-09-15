@@ -256,7 +256,16 @@ def test_plan_accepts_canonical_unicode_space_and_max_length_paths(path: str) ->
 
 @pytest.mark.parametrize(
     "path",
-    ["/absolute", "../escape", "nested//file", "nested/./file", "nested/../file", "bad\\name", "bad\x00name", "x" * 513],
+    [
+        "/absolute",
+        "../escape",
+        "nested//file",
+        "nested/./file",
+        "nested/../file",
+        "bad\\name",
+        "bad\x00name",
+        "x" * 513,
+    ],
 )
 def test_plan_rejects_unsafe_or_oversized_model_paths(path: str) -> None:
     value = copy.deepcopy(PLAN)

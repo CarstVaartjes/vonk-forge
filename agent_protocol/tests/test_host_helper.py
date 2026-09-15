@@ -103,7 +103,9 @@ def test_host_artifact_signing_bytes_keep_the_domain_and_raw_digest_contract() -
     )
 
 
-@pytest.mark.parametrize("model", [HostRuntimeRequest, ExecuteContainerRuntimeRequestOperation])
+@pytest.mark.parametrize(
+    "model", [HostRuntimeRequest, ExecuteContainerRuntimeRequestOperation]
+)
 def test_runtime_cleanup_identity_is_required_only_for_cleanup(model) -> None:
     document = {
         "action": "installation-cleanup",
@@ -115,7 +117,9 @@ def test_runtime_cleanup_identity_is_required_only_for_cleanup(model) -> None:
     if model is HostRuntimeRequest:
         document.update(schema_version=1, arguments=[])
     else:
-        document.update(type="execute-container-runtime-request", request_sha256="a" * 64)
+        document.update(
+            type="execute-container-runtime-request", request_sha256="a" * 64
+        )
     installation_id = "70000000-0000-4000-8000-000000000007"
     valid = model.model_validate(document | {"installation_id": installation_id})
     assert json.loads(canonical_message(valid))["installation_id"] == installation_id
@@ -124,7 +128,9 @@ def test_runtime_cleanup_identity_is_required_only_for_cleanup(model) -> None:
             model.model_validate(document | missing)
     if model is HostRuntimeRequest:
         with pytest.raises(ValidationError, match="runtime arguments"):
-            model.model_validate(document | {"installation_id": installation_id, "arguments": ["rm"]})
+            model.model_validate(
+                document | {"installation_id": installation_id, "arguments": ["rm"]}
+            )
     ordinary = document | {"action": "runtime-preflight"}
     with pytest.raises(ValidationError, match="installation identity"):
         model.model_validate(ordinary | {"installation_id": installation_id})

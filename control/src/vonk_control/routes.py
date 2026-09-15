@@ -62,12 +62,11 @@ class RouteEndpointPolicy:
     allowed_schemes: frozenset[str] = frozenset({"http"})
 
     def __post_init__(self) -> None:
-        if (
-            not self.allowed_ports
-            or any(
-                isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
-                for port in self.allowed_ports
-            )
+        if not self.allowed_ports or any(
+            isinstance(port, bool)
+            or not isinstance(port, int)
+            or not 1 <= port <= 65535
+            for port in self.allowed_ports
         ):
             raise RouteValidationError("route endpoint ports are invalid")
         if self.maximum_age_seconds <= 0:
@@ -76,8 +75,13 @@ class RouteEndpointPolicy:
             raise RouteValidationError("route endpoint schemes are invalid")
 
     def render(self, endpoint: RouteEndpoint, *, node_ids: tuple[str, ...]) -> str:
-        if _NODE.fullmatch(endpoint.node_id) is None or endpoint.node_id not in node_ids:
-            raise RouteValidationError("route endpoint node is not part of the candidate")
+        if (
+            _NODE.fullmatch(endpoint.node_id) is None
+            or endpoint.node_id not in node_ids
+        ):
+            raise RouteValidationError(
+                "route endpoint node is not part of the candidate"
+            )
         if endpoint.scheme not in self.allowed_schemes:
             raise RouteValidationError("route endpoint scheme is not allowed")
         if (
@@ -86,11 +90,18 @@ class RouteEndpointPolicy:
             or endpoint.port not in self.allowed_ports
         ):
             raise RouteValidationError("route endpoint port is not repository-declared")
-        if endpoint.observed_at.tzinfo is None or endpoint.observed_at.utcoffset() is None:
-            raise RouteValidationError("route endpoint observation must be timezone-aware")
+        if (
+            endpoint.observed_at.tzinfo is None
+            or endpoint.observed_at.utcoffset() is None
+        ):
+            raise RouteValidationError(
+                "route endpoint observation must be timezone-aware"
+            )
         now = self.clock()
         if now.tzinfo is None or now.utcoffset() is None:
-            raise RouteValidationError("route endpoint policy clock must be timezone-aware")
+            raise RouteValidationError(
+                "route endpoint policy clock must be timezone-aware"
+            )
         observed_at = endpoint.observed_at.astimezone(UTC)
         current = now.astimezone(UTC)
         if observed_at > current:
@@ -115,7 +126,9 @@ class RouteEndpointPolicy:
             raise RouteValidationError("route health timestamp must be timezone-aware")
         now = self.clock()
         if now.tzinfo is None or now.utcoffset() is None:
-            raise RouteValidationError("route endpoint policy clock must be timezone-aware")
+            raise RouteValidationError(
+                "route endpoint policy clock must be timezone-aware"
+            )
         health = health_timestamp.astimezone(UTC)
         current = now.astimezone(UTC)
         if health > current:
@@ -128,7 +141,9 @@ class RouteEndpointPolicy:
             or health < endpoint.observed_at.astimezone(UTC)
             for endpoint in endpoints
         ):
-            raise RouteValidationError("route health timestamp predates endpoint observation")
+            raise RouteValidationError(
+                "route health timestamp predates endpoint observation"
+            )
         return health
 
 
@@ -182,7 +197,9 @@ class RoutePublisher:
 
     @staticmethod
     def _encoded(payload: Mapping[str, object]) -> bytes:
-        return (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        return (
+            json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
 
     def _load(self) -> None:
         active = self._root / "active.json"
@@ -198,10 +215,15 @@ class RoutePublisher:
                 raise RouteValidationError("active route generation checksum mismatch")
             payload = json.loads(content)
             self._state = RouteState(
-                generation=payload["generation"], state=payload["state"], authority_revision=payload.get("authority_revision"),
-                profile=payload.get("profile"), workload=payload.get("workload"),
-                node_ids=tuple(payload["node_ids"]), aliases=dict(payload["aliases"]),
-                health_timestamp=payload.get("health_timestamp"), reason=payload.get("reason"),
+                generation=payload["generation"],
+                state=payload["state"],
+                authority_revision=payload.get("authority_revision"),
+                profile=payload.get("profile"),
+                workload=payload.get("workload"),
+                node_ids=tuple(payload["node_ids"]),
+                aliases=dict(payload["aliases"]),
+                health_timestamp=payload.get("health_timestamp"),
+                reason=payload.get("reason"),
                 digest=pointer["sha256"],
             )
         except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
@@ -212,59 +234,97 @@ class RoutePublisher:
         payload["generation"] = generation
         content = self._encoded(payload)
         if self._validate(content) is not True:
-            raise RouteValidationError("route candidate failed configuration validation")
+            raise RouteValidationError(
+                "route candidate failed configuration validation"
+            )
         digest = hashlib.sha256(content).hexdigest()
         directory_name = f"{generation:08d}-{digest}"
         directory = self._generations / directory_name
         try:
             directory.mkdir(mode=0o700)
             target = directory / "routes.json"
-            descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+            descriptor = os.open(
+                target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+            )
             with os.fdopen(descriptor, "wb") as output:
-                output.write(content); output.flush(); os.fsync(output.fileno())
+                output.write(content)
+                output.flush()
+                os.fsync(output.fileno())
             self._apply(content)
         except RouteValidationError:
             raise
         except Exception as error:
-            raise RouteValidationError("route candidate apply failed; previous generation retained") from error
+            raise RouteValidationError(
+                "route candidate apply failed; previous generation retained"
+            ) from error
         pointer = self._encoded({"directory": directory_name, "sha256": digest})
         descriptor, temporary_raw = tempfile.mkstemp(prefix=".active-", dir=self._root)
         temporary = Path(temporary_raw)
         try:
             os.fchmod(descriptor, 0o600)
             with os.fdopen(descriptor, "wb") as output:
-                output.write(pointer); output.flush(); os.fsync(output.fileno())
+                output.write(pointer)
+                output.flush()
+                os.fsync(output.fileno())
             os.replace(temporary, self._root / "active.json")
         finally:
             temporary.unlink(missing_ok=True)
         self._state = RouteState(
-            generation=generation, state=payload["state"], authority_revision=payload.get("authority_revision"),
-            profile=payload.get("profile"), workload=payload.get("workload"),
-            node_ids=tuple(payload["node_ids"]), aliases=dict(payload["aliases"]),
-            health_timestamp=payload.get("health_timestamp"), reason=payload.get("reason"), digest=digest,
+            generation=generation,
+            state=payload["state"],
+            authority_revision=payload.get("authority_revision"),
+            profile=payload.get("profile"),
+            workload=payload.get("workload"),
+            node_ids=tuple(payload["node_ids"]),
+            aliases=dict(payload["aliases"]),
+            health_timestamp=payload.get("health_timestamp"),
+            reason=payload.get("reason"),
+            digest=digest,
         )
         return self._state
 
     def maintenance(self, targets: tuple[str, ...], reason: str) -> RouteState:
         if not targets or any(_NODE.fullmatch(target) is None for target in targets):
             raise RouteValidationError("maintenance targets must be stable node IDs")
-        safe_reason = re.sub(r"(?i)(bearer|token|secret|password)\S*", "<redacted>", reason)[:256]
-        return self._publish_payload({
-            "state": "maintenance", "authority_revision": None, "profile": None, "workload": None,
-            "node_ids": sorted(set(targets)), "aliases": {}, "health_timestamp": None,
-            "reason": safe_reason or "maintenance",
-        })
+        safe_reason = re.sub(
+            r"(?i)(bearer|token|secret|password)\S*", "<redacted>", reason
+        )[:256]
+        return self._publish_payload(
+            {
+                "state": "maintenance",
+                "authority_revision": None,
+                "profile": None,
+                "workload": None,
+                "node_ids": sorted(set(targets)),
+                "aliases": {},
+                "health_timestamp": None,
+                "reason": safe_reason or "maintenance",
+            }
+        )
 
     def publish(self, candidate: RouteCandidate) -> RouteState:
-        if _AUTHORITY_REVISION.fullmatch(candidate.authority_revision) is None or _NAME.fullmatch(candidate.profile) is None or _NAME.fullmatch(candidate.workload) is None:
+        if (
+            _AUTHORITY_REVISION.fullmatch(candidate.authority_revision) is None
+            or _NAME.fullmatch(candidate.profile) is None
+            or _NAME.fullmatch(candidate.workload) is None
+        ):
             raise RouteValidationError("route candidate identity is invalid")
-        if not candidate.node_ids or any(_NODE.fullmatch(node) is None for node in candidate.node_ids):
+        if not candidate.node_ids or any(
+            _NODE.fullmatch(node) is None for node in candidate.node_ids
+        ):
             raise RouteValidationError("route candidate nodes are invalid")
         candidate_aliases = dict(candidate.aliases)
-        if not candidate_aliases or any(_NAME.fullmatch(alias) is None for alias in candidate_aliases):
+        if not candidate_aliases or any(
+            _NAME.fullmatch(alias) is None for alias in candidate_aliases
+        ):
             raise RouteValidationError("route aliases are invalid")
-        if not all(isinstance(endpoint, RouteEndpoint) for endpoint in candidate_aliases.values()):
-            raise RouteValidationError("route aliases must use one endpoint representation")
+        if not all(
+            isinstance(endpoint, RouteEndpoint)
+            for endpoint in candidate_aliases.values()
+        ):
+            raise RouteValidationError(
+                "route aliases must use one endpoint representation"
+            )
         endpoints = {
             alias: endpoint
             for alias, endpoint in candidate_aliases.items()
@@ -278,12 +338,18 @@ class RoutePublisher:
             candidate.health_timestamp,
             endpoints=tuple(endpoints.values()),
         )
-        return self._publish_payload({
-            "state": "published", "authority_revision": candidate.authority_revision, "profile": candidate.profile,
-            "workload": candidate.workload, "node_ids": sorted(set(candidate.node_ids)),
-            "aliases": dict(sorted(aliases.items())),
-            "health_timestamp": health_timestamp.isoformat(), "reason": None,
-        })
+        return self._publish_payload(
+            {
+                "state": "published",
+                "authority_revision": candidate.authority_revision,
+                "profile": candidate.profile,
+                "workload": candidate.workload,
+                "node_ids": sorted(set(candidate.node_ids)),
+                "aliases": dict(sorted(aliases.items())),
+                "health_timestamp": health_timestamp.isoformat(),
+                "reason": None,
+            }
+        )
 
     def transition(self, candidate: RouteCandidate) -> RouteState:
         self.maintenance(candidate.node_ids, "route endpoint transition")
@@ -295,4 +361,8 @@ class RoutePublisher:
         return self._state
 
     def visible_aliases(self) -> set[str]:
-        return set(self.snapshot().aliases) if self.snapshot().state == "published" else set()
+        return (
+            set(self.snapshot().aliases)
+            if self.snapshot().state == "published"
+            else set()
+        )

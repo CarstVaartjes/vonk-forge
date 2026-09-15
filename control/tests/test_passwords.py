@@ -25,4 +25,6 @@ def test_password_boundary_rejects_empty_or_oversized_input(password: str) -> No
 
 
 def test_verify_password_returns_one_generic_invalid_result() -> None:
-    assert verify_password("not-a-phc-string", "wrong") == PasswordVerification(False, False)
+    assert verify_password("not-a-phc-string", "wrong") == PasswordVerification(
+        False, False
+    )

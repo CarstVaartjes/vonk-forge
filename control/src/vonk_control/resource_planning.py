@@ -19,7 +19,9 @@ from .run_switch_contract import RunSwitchChangeEffect
 
 EvidenceState = Literal["declared", "measured", "fresh", "stale", "unknown"]
 Effect = Literal["reuse", "restart", "reprepare", "reinstall", "rebuild"]
-_CHANGE_EFFECTS: frozenset[RunSwitchChangeEffect] = frozenset(get_args(RunSwitchChangeEffect))
+_CHANGE_EFFECTS: frozenset[RunSwitchChangeEffect] = frozenset(
+    get_args(RunSwitchChangeEffect)
+)
 
 
 @runtime_checkable
@@ -210,12 +212,22 @@ class PreparationDecision:
     settings_digest: str
 
 
-def resolve_effective_settings(value: Mapping[str, object] | object) -> SettingsResolution:
+def resolve_effective_settings(
+    value: Mapping[str, object] | object,
+) -> SettingsResolution:
     """Resolve one canonical RecipeDefinition or its typed settings projection."""
 
     raw = _as_mapping(value)
     if raw is None:
-        return SettingsResolution(None, (_reason("resource.settings_unknown", "Canonical effective settings are unavailable."),))
+        return SettingsResolution(
+            None,
+            (
+                _reason(
+                    "resource.settings_unknown",
+                    "Canonical effective settings are unavailable.",
+                ),
+            ),
+        )
     source = raw.get("settings", raw)
     settings = dict(source) if isinstance(source, Mapping) else {}
     reasons: list[ResourceReason] = []
@@ -228,7 +240,12 @@ def resolve_effective_settings(value: Mapping[str, object] | object) -> Settings
 
     kind = settings.get("kind")
     if kind not in {"generation", "embedding", "job"}:
-        reasons.append(_reason("resource.settings_kind_unknown", "Canonical settings kind is missing or unsupported."))
+        reasons.append(
+            _reason(
+                "resource.settings_kind_unknown",
+                "Canonical settings kind is missing or unsupported.",
+            )
+        )
         kind = "job"
 
     def positive(name: str, optional: bool = True) -> int | None:
@@ -236,7 +253,12 @@ def resolve_effective_settings(value: Mapping[str, object] | object) -> Settings
         if value is None and optional:
             return None
         if type(value) is not int or value < 1:
-            reasons.append(_reason("resource.settings_type", f"Canonical {name} must be a positive integer."))
+            reasons.append(
+                _reason(
+                    "resource.settings_type",
+                    f"Canonical {name} must be a positive integer.",
+                )
+            )
             return None
         return value
 
@@ -247,7 +269,9 @@ def resolve_effective_settings(value: Mapping[str, object] | object) -> Settings
     effects: dict[str, str] = {}
     raw_knobs = settings.get("knobs", {})
     if not isinstance(raw_knobs, Mapping):
-        reasons.append(_reason("resource.knobs_invalid", "Canonical settings knobs are invalid."))
+        reasons.append(
+            _reason("resource.knobs_invalid", "Canonical settings knobs are invalid.")
+        )
         raw_knobs = {}
     for name, raw_value in raw_knobs.items():
         if isinstance(raw_value, Mapping) and "value" in raw_value:
@@ -273,36 +297,83 @@ def resolve_effective_settings(value: Mapping[str, object] | object) -> Settings
     topology_map = topology if isinstance(topology, Mapping) else None
     parallel = topology_map.get("parallelism") if topology_map else None
     if not isinstance(parallel, Mapping):
-        reasons.append(_reason("resource.parallelism_unknown", "Canonical topology parallelism is unavailable."))
+        reasons.append(
+            _reason(
+                "resource.parallelism_unknown",
+                "Canonical topology parallelism is unavailable.",
+            )
+        )
         parallel = {}
     if "parallelism" in settings:
-        reasons.append(_reason("resource.parallelism_duplicate", "Parallelism is owned by topology and cannot be repeated in settings."))
+        reasons.append(
+            _reason(
+                "resource.parallelism_duplicate",
+                "Parallelism is owned by topology and cannot be repeated in settings.",
+            )
+        )
     dimensions: dict[str, int | None] = {}
     for name in ("tensor", "pipeline", "data"):
         value = parallel.get(name)
         if type(value) is not int or value < 1:
-            reasons.append(_reason("resource.parallelism_type", f"Canonical topology parallelism {name} is invalid."))
+            reasons.append(
+                _reason(
+                    "resource.parallelism_type",
+                    f"Canonical topology parallelism {name} is invalid.",
+                )
+            )
             dimensions[name] = None
         else:
             dimensions[name] = value
     node_count = topology_map.get("node_count") if topology_map else None
     if type(node_count) is not int or node_count < 1:
-        reasons.append(_reason("resource.parallelism_type", "Canonical topology node_count is invalid."))
+        reasons.append(
+            _reason(
+                "resource.parallelism_type", "Canonical topology node_count is invalid."
+            )
+        )
         node_count = None
     world_size = parallel.get("world_size")
     if type(world_size) is not int or world_size < 1:
-        reasons.append(_reason("resource.parallelism_type", "Canonical topology parallelism world_size is invalid."))
+        reasons.append(
+            _reason(
+                "resource.parallelism_type",
+                "Canonical topology parallelism world_size is invalid.",
+            )
+        )
         world_size = None
-    tensor, pipeline, data = dimensions["tensor"], dimensions["pipeline"], dimensions["data"]
+    tensor, pipeline, data = (
+        dimensions["tensor"],
+        dimensions["pipeline"],
+        dimensions["data"],
+    )
     if tensor is not None and pipeline is not None and data is not None:
         product = tensor * pipeline * data
         if world_size is not None and product != world_size:
-            reasons.append(_reason("resource.parallelism_inconsistent", "Topology parallelism product does not equal declared world_size."))
-        if node_count is not None and world_size is not None and world_size != node_count:
-            reasons.append(_reason("resource.parallelism_inconsistent", "Declared parallelism world_size does not equal node_count."))
+            reasons.append(
+                _reason(
+                    "resource.parallelism_inconsistent",
+                    "Topology parallelism product does not equal declared world_size.",
+                )
+            )
+        if (
+            node_count is not None
+            and world_size is not None
+            and world_size != node_count
+        ):
+            reasons.append(
+                _reason(
+                    "resource.parallelism_inconsistent",
+                    "Declared parallelism world_size does not equal node_count.",
+                )
+            )
     backend = parallel.get("backend")
     if not isinstance(backend, str) or not backend:
-        reasons.append(_reason("resource.parallelism_type", "Canonical topology parallelism backend is invalid."))
+        reasons.append(
+            _reason(
+                "resource.parallelism_type",
+                "Canonical topology parallelism backend is invalid.",
+            )
+        )
         backend = "unknown"
     if reasons:
         return SettingsResolution(None, tuple(reasons))
@@ -311,7 +382,13 @@ def resolve_effective_settings(value: Mapping[str, object] | object) -> Settings
         "context_tokens": context,
         "concurrency": concurrency,
         "max_batch_tokens": batch,
-        "parallelism": {"world_size": world_size, "tensor": dimensions["tensor"], "pipeline": dimensions["pipeline"], "data": dimensions["data"], "backend": backend},
+        "parallelism": {
+            "world_size": world_size,
+            "tensor": dimensions["tensor"],
+            "pipeline": dimensions["pipeline"],
+            "data": dimensions["data"],
+            "backend": backend,
+        },
         "knobs": _canonical(knobs),
     }
     canonical_digest = raw.get("identity_sha256")
@@ -322,47 +399,137 @@ def resolve_effective_settings(value: Mapping[str, object] | object) -> Settings
         return SettingsResolution(None, tuple(reasons))
     return SettingsResolution(
         EffectiveResourceSettings(
-            kind, context, concurrency, batch,
+            kind,
+            context,
+            concurrency,
+            batch,
             ParallelismSettings(world_size, tensor, pipeline, data, backend),
-            knobs, effects, digest,
+            knobs,
+            effects,
+            digest,
         ),
         (),
     )
 
 
-def resource_demand(settings: EffectiveResourceSettings | object, evidence: ResourceEvidence, *, node_id: str | None = None) -> ResourceDemand:
-    resolution = SettingsResolution(settings, ()) if isinstance(settings, EffectiveResourceSettings) else resolve_effective_settings(settings)
+def resource_demand(
+    settings: EffectiveResourceSettings | object,
+    evidence: ResourceEvidence,
+    *,
+    node_id: str | None = None,
+) -> ResourceDemand:
+    resolution = (
+        SettingsResolution(settings, ())
+        if isinstance(settings, EffectiveResourceSettings)
+        else resolve_effective_settings(settings)
+    )
     reasons = list(resolution.reasons)
     if resolution.settings is None:
-        return ResourceDemand(None, None, None, None, None, None, "unknown", tuple(reasons))
+        return ResourceDemand(
+            None, None, None, None, None, None, "unknown", tuple(reasons)
+        )
     selected = resolution.settings
     if evidence.evidence_state in {"unknown", "stale"}:
-        reasons.append(_reason("resource.evidence_unknown", "Memory evidence is missing or stale for the selected settings.", node_id=node_id))
-    if evidence.evidence_digest is not None and not _is_digest(evidence.evidence_digest):
-        reasons.append(_reason("resource.evidence_invalid", "Memory evidence digest is invalid.", node_id=node_id))
-    for name, item in (("weights_bytes", evidence.weights_bytes), ("runtime_overhead_bytes", evidence.runtime_overhead_bytes)):
-        if (type(item) is not int or item < 0) and not (type(evidence.declared_total_bytes) is int and evidence.declared_total_bytes >= 0):
-            reasons.append(_reason("resource.evidence_unknown", f"{name} is missing or invalid; capacity cannot be predicted.", node_id=node_id))
-    context = _term("context", selected.context_tokens, evidence.baseline_context_tokens, evidence.context_bytes_per_token, evidence.supported_context_tokens, node_id, required=selected.context_tokens is not None)
-    concurrency = _term("concurrency", selected.concurrency, evidence.baseline_concurrency, evidence.concurrency_bytes_per_request, evidence.supported_concurrency, node_id, required=selected.concurrency is not None)
-    batch = _term("batch", selected.batch_tokens, evidence.baseline_batch_tokens, evidence.batch_bytes_per_token, evidence.supported_batch_tokens, node_id, required=selected.batch_tokens is not None)
+        reasons.append(
+            _reason(
+                "resource.evidence_unknown",
+                "Memory evidence is missing or stale for the selected settings.",
+                node_id=node_id,
+            )
+        )
+    if evidence.evidence_digest is not None and not _is_digest(
+        evidence.evidence_digest
+    ):
+        reasons.append(
+            _reason(
+                "resource.evidence_invalid",
+                "Memory evidence digest is invalid.",
+                node_id=node_id,
+            )
+        )
+    for name, item in (
+        ("weights_bytes", evidence.weights_bytes),
+        ("runtime_overhead_bytes", evidence.runtime_overhead_bytes),
+    ):
+        if (type(item) is not int or item < 0) and not (
+            type(evidence.declared_total_bytes) is int
+            and evidence.declared_total_bytes >= 0
+        ):
+            reasons.append(
+                _reason(
+                    "resource.evidence_unknown",
+                    f"{name} is missing or invalid; capacity cannot be predicted.",
+                    node_id=node_id,
+                )
+            )
+    context = _term(
+        "context",
+        selected.context_tokens,
+        evidence.baseline_context_tokens,
+        evidence.context_bytes_per_token,
+        evidence.supported_context_tokens,
+        node_id,
+        required=selected.context_tokens is not None,
+    )
+    concurrency = _term(
+        "concurrency",
+        selected.concurrency,
+        evidence.baseline_concurrency,
+        evidence.concurrency_bytes_per_request,
+        evidence.supported_concurrency,
+        node_id,
+        required=selected.concurrency is not None,
+    )
+    batch = _term(
+        "batch",
+        selected.batch_tokens,
+        evidence.baseline_batch_tokens,
+        evidence.batch_bytes_per_token,
+        evidence.supported_batch_tokens,
+        node_id,
+        required=selected.batch_tokens is not None,
+    )
     for term in (context, concurrency, batch):
         reasons.extend(term[1])
     total: int | None = None
-    if not reasons and all(isinstance(term[0], int) for term in (context, concurrency, batch)):
+    if not reasons and all(
+        isinstance(term[0], int) for term in (context, concurrency, batch)
+    ):
         base = evidence.declared_total_bytes
-        if base is None and type(evidence.weights_bytes) is int and type(evidence.runtime_overhead_bytes) is int:
+        if (
+            base is None
+            and type(evidence.weights_bytes) is int
+            and type(evidence.runtime_overhead_bytes) is int
+        ):
             base = evidence.weights_bytes + evidence.runtime_overhead_bytes
         if base is not None:
-            total = base + require_integer(context[0], "context") + require_integer(concurrency[0], "concurrency") + require_integer(batch[0], "batch")
+            total = (
+                base
+                + require_integer(context[0], "context")
+                + require_integer(concurrency[0], "concurrency")
+                + require_integer(batch[0], "batch")
+            )
     return ResourceDemand(
         evidence.weights_bytes if type(evidence.weights_bytes) is int else None,
-        evidence.runtime_overhead_bytes if type(evidence.runtime_overhead_bytes) is int else None,
-        context[0], concurrency[0], batch[0], total, evidence.evidence_state, tuple(reasons),
+        evidence.runtime_overhead_bytes
+        if type(evidence.runtime_overhead_bytes) is int
+        else None,
+        context[0],
+        concurrency[0],
+        batch[0],
+        total,
+        evidence.evidence_state,
+        tuple(reasons),
     )
 
 
-def plan_capacity(requirements: Mapping[str, ResourceDemand], capacities: Sequence[CapacitySnapshot], planned_stops: Sequence[PlannedStopRelease] = (), *, memory_floor_bytes: int = 0) -> CapacityPlan:
+def plan_capacity(
+    requirements: Mapping[str, ResourceDemand],
+    capacities: Sequence[CapacitySnapshot],
+    planned_stops: Sequence[PlannedStopRelease] = (),
+    *,
+    memory_floor_bytes: int = 0,
+) -> CapacityPlan:
     reasons: list[ResourceReason] = []
     by_node = {item.node_id: item for item in capacities}
     releases: dict[tuple[str, str], int] = {}
@@ -370,25 +537,66 @@ def plan_capacity(requirements: Mapping[str, ResourceDemand], capacities: Sequen
         if not stop.planned:
             continue
         if type(stop.release_bytes) is not int or stop.release_bytes < 0:
-            reasons.append(_reason("resource.stop_release_unknown", "A planned stop has no valid capacity release evidence.", node_id=stop.node_id))
+            reasons.append(
+                _reason(
+                    "resource.stop_release_unknown",
+                    "A planned stop has no valid capacity release evidence.",
+                    node_id=stop.node_id,
+                )
+            )
             continue
-        releases[(stop.node_id, stop.memory_kind)] = releases.get((stop.node_id, stop.memory_kind), 0) + stop.release_bytes
+        releases[(stop.node_id, stop.memory_kind)] = (
+            releases.get((stop.node_id, stop.memory_kind), 0) + stop.release_bytes
+        )
     nodes: list[NodeCapacityPlan] = []
     for node_id, demand in requirements.items():
         node_reasons = list(demand.reasons)
         capacity = by_node.get(node_id)
         if capacity is None:
-            node_reasons.append(_reason("resource.capacity_unknown", "Capacity evidence is unavailable for the selected rank.", node_id=node_id))
-            nodes.append(NodeCapacityPlan(node_id, demand.total_bytes, None, None, None, False, False, tuple(node_reasons)))
+            node_reasons.append(
+                _reason(
+                    "resource.capacity_unknown",
+                    "Capacity evidence is unavailable for the selected rank.",
+                    node_id=node_id,
+                )
+            )
+            nodes.append(
+                NodeCapacityPlan(
+                    node_id,
+                    demand.total_bytes,
+                    None,
+                    None,
+                    None,
+                    False,
+                    False,
+                    tuple(node_reasons),
+                )
+            )
             continue
         available = capacity.available_bytes
         occupied = capacity.occupied_bytes
         reserved = capacity.reserved_bytes
-        for name, value in (("available", available), ("occupied", occupied), ("reserved", reserved)):
+        for name, value in (
+            ("available", available),
+            ("occupied", occupied),
+            ("reserved", reserved),
+        ):
             if type(value) is not int or value < 0:
-                node_reasons.append(_reason("resource.capacity_unknown", f"Current {name} capacity evidence is missing or invalid.", node_id=node_id))
+                node_reasons.append(
+                    _reason(
+                        "resource.capacity_unknown",
+                        f"Current {name} capacity evidence is missing or invalid.",
+                        node_id=node_id,
+                    )
+                )
         if capacity.evidence_state in {"unknown", "stale"}:
-            node_reasons.append(_reason("resource.capacity_unknown", "Current capacity evidence is missing or stale.", node_id=node_id))
+            node_reasons.append(
+                _reason(
+                    "resource.capacity_unknown",
+                    "Current capacity evidence is missing or stale.",
+                    node_id=node_id,
+                )
+            )
         total_bytes = demand.total_bytes
         if (
             not isinstance(available, int)
@@ -397,41 +605,120 @@ def plan_capacity(requirements: Mapping[str, ResourceDemand], capacities: Sequen
             or total_bytes is None
             or node_reasons
         ):
-            nodes.append(NodeCapacityPlan(node_id, demand.total_bytes, None, None, None, False, False, tuple(node_reasons)))
+            nodes.append(
+                NodeCapacityPlan(
+                    node_id,
+                    demand.total_bytes,
+                    None,
+                    None,
+                    None,
+                    False,
+                    False,
+                    tuple(node_reasons),
+                )
+            )
             continue
         current = available - occupied - reserved - total_bytes
         release = releases.get((node_id, capacity.memory_kind), 0)
         if not release:
-            release = max((value for (candidate, kind), value in releases.items() if candidate == node_id and _same_memory_kind(kind, capacity.memory_kind)), default=0)
+            release = max(
+                (
+                    value
+                    for (candidate, kind), value in releases.items()
+                    if candidate == node_id
+                    and _same_memory_kind(kind, capacity.memory_kind)
+                ),
+                default=0,
+            )
         after_stop = current + release
         current_fit = current >= memory_floor_bytes
         after_fit = after_stop >= memory_floor_bytes
         selected = after_stop if release else current
         allowed = selected >= memory_floor_bytes
         if not allowed:
-            node_reasons.append(_reason("resource.insufficient_capacity_after_stop" if release else "resource.insufficient_capacity", f"Selected settings leave {selected} bytes after planned stops.", node_id=node_id))
-        nodes.append(NodeCapacityPlan(node_id, demand.total_bytes, current, after_stop, selected, not current_fit and after_fit and release > 0, allowed, tuple(node_reasons)))
+            node_reasons.append(
+                _reason(
+                    "resource.insufficient_capacity_after_stop"
+                    if release
+                    else "resource.insufficient_capacity",
+                    f"Selected settings leave {selected} bytes after planned stops.",
+                    node_id=node_id,
+                )
+            )
+        nodes.append(
+            NodeCapacityPlan(
+                node_id,
+                demand.total_bytes,
+                current,
+                after_stop,
+                selected,
+                not current_fit and after_fit and release > 0,
+                allowed,
+                tuple(node_reasons),
+            )
+        )
     reasons.extend(reason for node in nodes for reason in node.reasons)
-    return CapacityPlan(tuple(nodes), bool(nodes) and not reasons and all(node.allowed for node in nodes), any(node.stop_required for node in nodes), tuple(reasons))
+    return CapacityPlan(
+        tuple(nodes),
+        bool(nodes) and not reasons and all(node.allowed for node in nodes),
+        any(node.stop_required for node in nodes),
+        tuple(reasons),
+    )
 
 
-def plan_resource_preflight(effective_context: Mapping[str, object] | object, evidence_by_node: Mapping[str, ResourceEvidence], capacities: Sequence[CapacitySnapshot], planned_stops: Sequence[PlannedStopRelease] = (), *, memory_floor_bytes: int = 0) -> ResourcePreflightPlan:
+def plan_resource_preflight(
+    effective_context: Mapping[str, object] | object,
+    evidence_by_node: Mapping[str, ResourceEvidence],
+    capacities: Sequence[CapacitySnapshot],
+    planned_stops: Sequence[PlannedStopRelease] = (),
+    *,
+    memory_floor_bytes: int = 0,
+) -> ResourcePreflightPlan:
     resolution = resolve_effective_settings(effective_context)
     if resolution.settings is None:
         return ResourcePreflightPlan(None, {}, None, resolution.reasons)
-    demands = {node_id: resource_demand(resolution.settings, evidence, node_id=node_id) for node_id, evidence in evidence_by_node.items()}
-    capacity = plan_capacity(demands, capacities, planned_stops, memory_floor_bytes=memory_floor_bytes)
-    return ResourcePreflightPlan(resolution.settings, demands, capacity, (*resolution.reasons, *capacity.reasons))
+    demands = {
+        node_id: resource_demand(resolution.settings, evidence, node_id=node_id)
+        for node_id, evidence in evidence_by_node.items()
+    }
+    capacity = plan_capacity(
+        demands, capacities, planned_stops, memory_floor_bytes=memory_floor_bytes
+    )
+    return ResourcePreflightPlan(
+        resolution.settings, demands, capacity, (*resolution.reasons, *capacity.reasons)
+    )
 
 
-def classify_preparation_effects(previous: EffectiveResourceSettings | object | None, current: EffectiveResourceSettings | object, *, parameter_effects: Mapping[str, str] | None = None) -> PreparationDecision:
-    current_resolution = current if isinstance(current, EffectiveResourceSettings) else resolve_effective_settings(current).settings
+def classify_preparation_effects(
+    previous: EffectiveResourceSettings | object | None,
+    current: EffectiveResourceSettings | object,
+    *,
+    parameter_effects: Mapping[str, str] | None = None,
+) -> PreparationDecision:
+    current_resolution = (
+        current
+        if isinstance(current, EffectiveResourceSettings)
+        else resolve_effective_settings(current).settings
+    )
     if current_resolution is None:
         raise ValueError("effective settings are invalid")
-    previous_resolution = previous if isinstance(previous, EffectiveResourceSettings) else resolve_effective_settings(previous).settings if previous is not None else None
+    previous_resolution = (
+        previous
+        if isinstance(previous, EffectiveResourceSettings)
+        else resolve_effective_settings(previous).settings
+        if previous is not None
+        else None
+    )
     current_identity = current_resolution.identity()
-    previous_identity = previous_resolution.identity() if previous_resolution is not None else None
-    changed = {key for key in current_identity if previous_identity is None or current_identity[key] != previous_identity.get(key)}
+    previous_identity = (
+        previous_resolution.identity() if previous_resolution is not None else None
+    )
+    changed = {
+        key
+        for key in current_identity
+        if previous_identity is None
+        or current_identity[key] != previous_identity.get(key)
+    }
     effects = dict(current_resolution.change_effects)
     effects.update(parameter_effects or {})
     if any(effect not in _CHANGE_EFFECTS for effect in effects.values()):
@@ -439,23 +726,90 @@ def classify_preparation_effects(previous: EffectiveResourceSettings | object | 
     active = {key: effect for key, effect in effects.items() if effect != "none"}
     rebuild = "rebuild" in active.values()
     reinstall = rebuild or "reinstall" in active.values() or "parallelism" in changed
-    reprepare = reinstall or bool(changed & {"context_tokens", "concurrency", "batch_tokens", "knobs", "kind"}) or "reprepare" in active.values()
+    reprepare = (
+        reinstall
+        or bool(
+            changed & {"context_tokens", "concurrency", "batch_tokens", "knobs", "kind"}
+        )
+        or "reprepare" in active.values()
+    )
     restart = reprepare or bool(changed) or "restart" in active.values()
-    effect: Effect = "rebuild" if rebuild else "reinstall" if reinstall else "reprepare" if reprepare else "restart" if restart else "reuse"
-    return PreparationDecision(effect, tuple(sorted(changed | set(active))), bool(changed or active), restart, reprepare, reinstall, rebuild, current_resolution.identity_digest or _digest(current_identity))
+    effect: Effect = (
+        "rebuild"
+        if rebuild
+        else "reinstall"
+        if reinstall
+        else "reprepare"
+        if reprepare
+        else "restart"
+        if restart
+        else "reuse"
+    )
+    return PreparationDecision(
+        effect,
+        tuple(sorted(changed | set(active))),
+        bool(changed or active),
+        restart,
+        reprepare,
+        reinstall,
+        rebuild,
+        current_resolution.identity_digest or _digest(current_identity),
+    )
 
 
-def _term(name: str, value: int | None, baseline: int | None, coefficient: int | None, supported: tuple[int, int] | None, node_id: str | None, *, required: bool) -> tuple[int | None, tuple[ResourceReason, ...]]:
+def _term(
+    name: str,
+    value: int | None,
+    baseline: int | None,
+    coefficient: int | None,
+    supported: tuple[int, int] | None,
+    node_id: str | None,
+    *,
+    required: bool,
+) -> tuple[int | None, tuple[ResourceReason, ...]]:
     if value is None:
-        return (0, ()) if not required else (None, (_reason(f"resource.{name}_unknown", f"Effective {name} setting is unavailable; capacity cannot be predicted.", node_id=node_id),))
-    if supported is not None and (len(supported) != 2 or value < supported[0] or value > supported[1]):
-        return None, (_reason(f"resource.{name}_unsupported", f"Effective {name} setting is outside the declared supported range.", node_id=node_id),)
+        return (
+            (0, ())
+            if not required
+            else (
+                None,
+                (
+                    _reason(
+                        f"resource.{name}_unknown",
+                        f"Effective {name} setting is unavailable; capacity cannot be predicted.",
+                        node_id=node_id,
+                    ),
+                ),
+            )
+        )
+    if supported is not None and (
+        len(supported) != 2 or value < supported[0] or value > supported[1]
+    ):
+        return None, (
+            _reason(
+                f"resource.{name}_unsupported",
+                f"Effective {name} setting is outside the declared supported range.",
+                node_id=node_id,
+            ),
+        )
     if baseline is None:
-        return None, (_reason(f"resource.{name}_evidence_unknown", f"No baseline evidence is declared for effective {name}.", node_id=node_id),)
+        return None, (
+            _reason(
+                f"resource.{name}_evidence_unknown",
+                f"No baseline evidence is declared for effective {name}.",
+                node_id=node_id,
+            ),
+        )
     if value == baseline:
         return 0, ()
     if type(coefficient) is not int or coefficient < 0:
-        return None, (_reason(f"resource.{name}_evidence_unknown", f"No evidence supports changing effective {name} from its measured baseline.", node_id=node_id),)
+        return None, (
+            _reason(
+                f"resource.{name}_evidence_unknown",
+                f"No evidence supports changing effective {name} from its measured baseline.",
+                node_id=node_id,
+            ),
+        )
     return max(0, value - baseline) * coefficient, ()
 
 
@@ -477,7 +831,16 @@ def _as_mapping(value: object) -> Mapping[str, object] | None:
                 "knobs": dict(value.knobs),
                 "change_effects": dict(value.change_effects),
             },
-            "topology": {"node_count": parallel.world_size, "parallelism": {"world_size": parallel.world_size, "tensor": parallel.tensor, "pipeline": parallel.pipeline, "data": parallel.data, "backend": parallel.backend}},
+            "topology": {
+                "node_count": parallel.world_size,
+                "parallelism": {
+                    "world_size": parallel.world_size,
+                    "tensor": parallel.tensor,
+                    "pipeline": parallel.pipeline,
+                    "data": parallel.data,
+                    "backend": parallel.backend,
+                },
+            },
             "identity_sha256": value.identity_digest,
         }
     return None
@@ -489,7 +852,11 @@ def _effect(value: object) -> RunSwitchChangeEffect | None:
 
 
 def _same_memory_kind(left: str, right: str) -> bool:
-    return {left, right} <= {"unified", "unified-memory"} or {left, right} <= {"host", "host-memory"} or {left, right} <= {"accelerator", "gpu-memory"}
+    return (
+        {left, right} <= {"unified", "unified-memory"}
+        or {left, right} <= {"host", "host-memory"}
+        or {left, right} <= {"accelerator", "gpu-memory"}
+    )
 
 
 def _reason(code: str, detail: str, *, node_id: str | None = None) -> ResourceReason:
@@ -498,15 +865,24 @@ def _reason(code: str, detail: str, *, node_id: str | None = None) -> ResourceRe
 
 def _canonical(value: object) -> object:
     if isinstance(value, Mapping):
-        return {str(key): _canonical(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}
+        return {
+            str(key): _canonical(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return [_canonical(item) for item in value]
     return value
 
 
 def _digest(value: object) -> str:
-    return hashlib.sha256(json.dumps(_canonical(value), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(_canonical(value), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _is_digest(value: object) -> TypeGuard[str]:
-    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )

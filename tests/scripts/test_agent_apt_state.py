@@ -49,8 +49,7 @@ def test_rclone_failure_reports_sanitized_provider_error(
         monkeypatch.setenv(name, value)
     stderr = (
         "request failed for https://url-user:url-password@example.invalid/object"
-        "?signature=query-secret: AccessDenied "
-        + " ".join(secrets.values())
+        "?signature=query-secret: AccessDenied " + " ".join(secrets.values())
     ).encode()
     monkeypatch.setattr(
         state.subprocess,
@@ -61,9 +60,7 @@ def test_rclone_failure_reports_sanitized_provider_error(
     )
 
     with pytest.raises(state.StateError) as raised:
-        state.RcloneStore("valid-bucket")._run(
-            "write", ["copyto", "source", "target"]
-        )
+        state.RcloneStore("valid-bucket")._run("write", ["copyto", "source", "target"])
 
     message = str(raised.value)
     assert "write failed with exit code 3" in message
@@ -226,9 +223,7 @@ def bundles(tmp_path: Path, publication: dict[str, object]) -> tuple[bytes, byte
             f"compressed {architecture} package index".encode()
         )
     (public / f"dists/{distribution}/Release").write_bytes(b"release metadata")
-    (public / f"dists/{distribution}/Release.gpg").write_bytes(
-        b"detached signature"
-    )
+    (public / f"dists/{distribution}/Release.gpg").write_bytes(b"detached signature")
     (public / f"dists/{distribution}/InRelease").write_bytes(b"signed-at-t1")
     (public / keyring).write_bytes(b"public key")
     package_root = public / "pool/main/v/vonk-forge-agent"
@@ -501,7 +496,9 @@ def test_development_compaction_workflow_retry_restores_prior_committed_state(
             tmp_path / "public",
             "prepare",
         )
-    retry = FakeAptly(old_records, {snapshot_name(previous): old_records}, aptly.packages)
+    retry = FakeAptly(
+        old_records, {snapshot_name(previous): old_records}, aptly.packages
+    )
     monkeypatch.setattr(state, "_run_aptly", retry.run)
     state.compact_aptly_state(
         publication,
@@ -572,9 +569,7 @@ def test_stable_compaction_retains_current_and_two_complete_predecessors(
     historical = [stable_receipt(version) for version in ("1.8.0", "1.9.0", "1.10.0")]
     publication = stable_receipt("1.11.0")
     old_records = set().union(*(package_records(item) for item in historical))
-    old_snapshots = {
-        snapshot_name(item): package_records(item) for item in historical
-    }
+    old_snapshots = {snapshot_name(item): package_records(item) for item in historical}
     config, package_dir, aptly = fake_aptly(
         tmp_path,
         publication,
@@ -628,7 +623,9 @@ def test_stable_compaction_rejects_rollback_before_mutation(
             tmp_path / "public",
             "prepare",
         )
-    assert not any(operation[:2] == ("repo", "remove") for operation in aptly.operations)
+    assert not any(
+        operation[:2] == ("repo", "remove") for operation in aptly.operations
+    )
 
 
 def test_repository_version_rejects_an_extra_architecture() -> None:
@@ -703,9 +700,7 @@ def test_partial_immutable_objects_are_completable_and_conflicts_fail(
     state_bundle, public_bundle = bundles(tmp_path, publication)
     operations: list[str] = []
     prefix = f"arm64/versions/{publication['version']}"
-    private = FakeR2(
-        "state", operations, fail_once={f"{prefix}/commit.json"}
-    )
+    private = FakeR2("state", operations, fail_once={f"{prefix}/commit.json"})
 
     with pytest.raises(OSError, match="injected R2 failure"):
         state.commit_candidate(private, publication, state_bundle, public_bundle)
@@ -715,9 +710,7 @@ def test_partial_immutable_objects_are_completable_and_conflicts_fail(
         f"{prefix}/public-tree.tar.gz",
     }
 
-    manifest = state.commit_candidate(
-        private, publication, state_bundle, public_bundle
-    )
+    manifest = state.commit_candidate(private, publication, state_bundle, public_bundle)
 
     assert private.objects[f"{prefix}/commit.json"] == manifest
     commit_failure = operations.index(f"state:write-failed:{prefix}/commit.json")
@@ -928,9 +921,7 @@ def test_concurrent_manifest_scan_rejects_corruption_before_bundle_reads(
         )
 
     assert operations[0] == "state:list:arm64/versions/"
-    assert set(operations[1:]) == {
-        f"state:read:{key}" for key in commit_keys
-    }
+    assert set(operations[1:]) == {f"state:read:{key}" for key in commit_keys}
 
 
 def test_equal_replay_downloads_committed_bundles_concurrently(
@@ -1153,9 +1144,7 @@ def test_public_failure_does_not_advance_latest_and_exact_retry_completes(
     state_bundle, public_bundle = bundles(tmp_path, publication)
     operations: list[str] = []
     private = FakeR2("state", operations)
-    public = FakeR2(
-        "public", operations, fail_once={"dists/dev/InRelease"}
-    )
+    public = FakeR2("public", operations, fail_once={"dists/dev/InRelease"})
     state.commit_candidate(private, publication, state_bundle, public_bundle)
 
     with pytest.raises(OSError, match="injected R2 failure"):
@@ -1363,7 +1352,11 @@ def test_structural_tar_validation_rejects_noncanonical_destinations(
                 member.type = tarfile.DIRTYPE
                 archive.addfile(member)
             else:
-                raw = state.canonical_json(publication) if name == "publication-receipt.json" else b"x"
+                raw = (
+                    state.canonical_json(publication)
+                    if name == "publication-receipt.json"
+                    else b"x"
+                )
                 member.size = len(raw)
                 archive.addfile(member, io.BytesIO(raw))
 

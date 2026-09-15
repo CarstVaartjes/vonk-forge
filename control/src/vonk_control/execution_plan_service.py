@@ -45,9 +45,13 @@ def compile_job_invocation(
 
     plan = CompiledExecutionPlan.model_validate(installed)
     if plan.job is None or not 1 <= timeout_seconds <= plan.job.timeout_seconds:
-        raise ExecutionPlanCompilationError("job timeout exceeds the installed workload")
+        raise ExecutionPlanCompilationError(
+            "job timeout exceeds the installed workload"
+        )
     if content_sha256(recipe) != plan.identity.recipe_revision_sha256:
-        raise ExecutionPlanCompilationError("job recipe differs from the installed workload")
+        raise ExecutionPlanCompilationError(
+            "job recipe differs from the installed workload"
+        )
     resolved = resolve_recipe_entities(session, recipe.model_dump(mode="json"))
     models = _canonical_models(resolved["models"])
     if _is_source_build(recipe) and build is None:
@@ -63,7 +67,9 @@ def compile_job_invocation(
     runtime_spec = _bind_runtime_artifacts(runtime_spec, models)
     job = runtime_spec.get("job")
     if not isinstance(job, dict):
-        raise ExecutionPlanCompilationError("compiled runtime job settings are unavailable")
+        raise ExecutionPlanCompilationError(
+            "compiled runtime job settings are unavailable"
+        )
     job["timeout_seconds"] = timeout_seconds
     identity = runtime_spec.get("identity")
     if not isinstance(identity, dict):
@@ -101,7 +107,8 @@ RuntimeImageResolver = Callable[
     RuntimeImageReceipt,
 ]
 RuntimeImagePreparer = Callable[
-    [Mapping[str, object], Mapping[str, object], RecipeBuild | None], RuntimeImageReceipt
+    [Mapping[str, object], Mapping[str, object], RecipeBuild | None],
+    RuntimeImageReceipt,
 ]
 
 
@@ -230,12 +237,19 @@ class ControllerExecutionPlanService:
                     runtime_spec,
                     placement=placement,
                 )
-            except (CompiledExecutionPlanError, RecipeRuntimeSpecError, TypeError, ValueError) as error:
+            except (
+                CompiledExecutionPlanError,
+                RecipeRuntimeSpecError,
+                TypeError,
+                ValueError,
+            ) as error:
                 raise ExecutionPlanCompilationError(
                     f"compiled execution plan for {node.node_id} is unavailable: {error}"
                 ) from error
         if not result:
-            raise ExecutionPlanCompilationError("compiled execution plan has no mapped targets")
+            raise ExecutionPlanCompilationError(
+                "compiled execution plan has no mapped targets"
+            )
         return result
 
     def _runtime_image(
@@ -260,7 +274,9 @@ class ControllerExecutionPlanService:
         try:
             image = CompiledRuntimeImage.model_validate(value)
         except Exception as error:
-            raise ExecutionPlanCompilationError("verified runtime image receipt is invalid") from error
+            raise ExecutionPlanCompilationError(
+                "verified runtime image receipt is invalid"
+            ) from error
         expected_digest = image.registry_manifest_digest or image.image_digest
         if expected_digest != image_digest:
             raise ExecutionPlanCompilationError(
@@ -308,7 +324,9 @@ def _canonical_recipe(
     """Return the producer-resolved canonical recipe after validating its source."""
 
     parsed = RecipeDefinition.model_validate(document)
-    resolved = resolved_entities.get("recipe") if resolved_entities is not None else None
+    resolved = (
+        resolved_entities.get("recipe") if resolved_entities is not None else None
+    )
     if resolved is None:
         return parsed
     if not isinstance(resolved, RecipeDefinition):
@@ -344,7 +362,9 @@ def _build_package(build: RecipeBuild) -> dict[str, object]:
         or not isinstance(build.image_digest, str)
         or not isinstance(build.build_input_sha256, str)
     ):
-        raise ExecutionPlanCompilationError("successful Controller build receipt is unavailable")
+        raise ExecutionPlanCompilationError(
+            "successful Controller build receipt is unavailable"
+        )
     return {
         "image_digest": build.image_digest,
         "image_reference": f"localhost/vonk/recipe-build@{build.image_digest}",
@@ -355,7 +375,9 @@ def _build_package(build: RecipeBuild) -> dict[str, object]:
 
 def _image_digest(value: object) -> str:
     if not isinstance(value, str) or "@sha256:" not in value:
-        raise ExecutionPlanCompilationError("compiled runtime image digest is unavailable")
+        raise ExecutionPlanCompilationError(
+            "compiled runtime image digest is unavailable"
+        )
     digest = value.rsplit("@", 1)[-1]
     if not digest.startswith("sha256:") or len(digest) != 71:
         raise ExecutionPlanCompilationError("compiled runtime image digest is invalid")
@@ -381,7 +403,9 @@ def _placement(
     world_size: int,
 ) -> dict[str, object]:
     endpoint = runtime_spec.get("endpoint")
-    role = next((item for item in recipe.topology.roles if item.name == node.role), None)
+    role = next(
+        (item for item in recipe.topology.roles if item.name == node.role), None
+    )
     if role is None:
         raise ExecutionPlanCompilationError(
             f"mapped role {node.role!r} is absent from the canonical recipe topology"
@@ -391,13 +415,19 @@ def _placement(
         raise ExecutionPlanCompilationError("canonical recipe role memory is invalid")
     if recipe.interfaces[0].adapter == "openai":
         if not isinstance(endpoint, Mapping):
-            raise ExecutionPlanCompilationError("compiled runtime endpoint is unavailable")
+            raise ExecutionPlanCompilationError(
+                "compiled runtime endpoint is unavailable"
+            )
         port = endpoint.get("port")
         if type(port) is not int or port <= 0 or port > 65535:
-            raise ExecutionPlanCompilationError("compiled runtime endpoint port is invalid")
+            raise ExecutionPlanCompilationError(
+                "compiled runtime endpoint port is invalid"
+            )
     else:
         if endpoint is not None:
-            raise ExecutionPlanCompilationError("job recipe has an unexpected runtime endpoint")
+            raise ExecutionPlanCompilationError(
+                "job recipe has an unexpected runtime endpoint"
+            )
         port = None
     return {
         "endpoint_address": None,
@@ -421,13 +451,19 @@ def _bind_runtime_artifacts(
 
     result = dict(runtime_spec)
     raw_artifacts = runtime_spec.get("artifacts")
-    if not isinstance(raw_artifacts, Sequence) or isinstance(raw_artifacts, (str, bytes)):
-        raise ExecutionPlanCompilationError("canonical runtime model artifacts are unavailable")
+    if not isinstance(raw_artifacts, Sequence) or isinstance(
+        raw_artifacts, (str, bytes)
+    ):
+        raise ExecutionPlanCompilationError(
+            "canonical runtime model artifacts are unavailable"
+        )
     by_identity: dict[tuple[str, str], Mapping[str, object]] = {}
     try:
         canonical_models = _canonical_models(models)
     except (TypeError, ValueError) as error:
-        raise ExecutionPlanCompilationError("canonical model projection is invalid") from error
+        raise ExecutionPlanCompilationError(
+            "canonical model projection is invalid"
+        ) from error
     for model in canonical_models:
         identity = content_sha256(model)
         for file in model.files:
@@ -435,25 +471,40 @@ def _bind_runtime_artifacts(
     bound: list[dict[str, object]] = []
     for raw in raw_artifacts:
         if not isinstance(raw, Mapping):
-            raise ExecutionPlanCompilationError("canonical runtime model artifact is invalid")
+            raise ExecutionPlanCompilationError(
+                "canonical runtime model artifact is invalid"
+            )
         model = raw.get("model")
         file_id = raw.get("file_id")
-        model_digest = model.get("content_sha256") if isinstance(model, Mapping) else None
+        model_digest = (
+            model.get("content_sha256") if isinstance(model, Mapping) else None
+        )
         if not isinstance(model_digest, str) or not isinstance(file_id, str):
             raise ExecutionPlanCompilationError(
                 "selected model file is absent from the canonical model manifest"
             )
         file = by_identity.get((model_digest, file_id))
         if file is None:
-            raise ExecutionPlanCompilationError("selected model file is absent from the canonical model manifest")
+            raise ExecutionPlanCompilationError(
+                "selected model file is absent from the canonical model manifest"
+            )
         digest = file.get("sha256")
         size = file.get("size_bytes")
         path = file.get("path")
-        if not isinstance(digest, str) or type(size) is not int or size < 0 or not isinstance(path, str):
-            raise ExecutionPlanCompilationError("selected model file integrity metadata is invalid")
+        if (
+            not isinstance(digest, str)
+            or type(size) is not int
+            or size < 0
+            or not isinstance(path, str)
+        ):
+            raise ExecutionPlanCompilationError(
+                "selected model file integrity metadata is invalid"
+            )
         item = dict(raw)
         if item.get("path") != path:
-            raise ExecutionPlanCompilationError("selected model file path does not match the canonical manifest")
+            raise ExecutionPlanCompilationError(
+                "selected model file path does not match the canonical manifest"
+            )
         item["sha256"] = digest
         item["bytes"] = size
         mount = item.get("mount")
