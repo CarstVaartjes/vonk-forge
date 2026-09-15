@@ -956,6 +956,7 @@ class ModelCacheService:
         fixture_sources: bool = False,
         trusted_source_hosts: Sequence[str] = ("huggingface.co",),
         huggingface_token_path: Path | None = None,
+        runtime_archive_available: Callable[[str, int], bool] | None = None,
     ) -> None:
         if not isinstance(root, Path):
             root = Path(root)
@@ -997,6 +998,7 @@ class ModelCacheService:
         self._huggingface_token_path = (
             Path(huggingface_token_path) if huggingface_token_path is not None else None
         )
+        self._runtime_archive_available = runtime_archive_available
         self._lock = threading.RLock()
         self._closed = threading.Event()
         self._claim_owner = uuid.uuid4().hex
@@ -1337,17 +1339,31 @@ class ModelCacheService:
                 return "", None
 
             def verified_image(revision_id: str) -> RuntimeImageReceiptRow | None:
-                return session.scalar(select(RuntimeImageReceiptRow).join(
-                    RuntimeImageAuthorization,
-                    RuntimeImageAuthorization.receipt_id == RuntimeImageReceiptRow.id,
-                ).where(
-                    RuntimeImageAuthorization.recipe_revision_id == revision_id,
-                    RuntimeImageAuthorization.state == "authorized",
-                    RuntimeImageReceiptRow.state == "verified",
-                ).order_by(
-                    RuntimeImageReceiptRow.verified_at.desc(),
-                    RuntimeImageReceiptRow.id.desc(),
-                ))
+                receipts = session.scalars(
+                    select(RuntimeImageReceiptRow).join(
+                        RuntimeImageAuthorization,
+                        RuntimeImageAuthorization.receipt_id == RuntimeImageReceiptRow.id,
+                    ).where(
+                        RuntimeImageAuthorization.recipe_revision_id == revision_id,
+                        RuntimeImageAuthorization.state == "authorized",
+                        RuntimeImageReceiptRow.state == "verified",
+                    ).order_by(
+                        RuntimeImageReceiptRow.verified_at.desc(),
+                        RuntimeImageReceiptRow.id.desc(),
+                    )
+                )
+                if self._runtime_archive_available is None:
+                    return None
+                return next(
+                    (
+                        receipt
+                        for receipt in receipts
+                        if self._runtime_archive_available(
+                            receipt.oci_archive_sha256, receipt.image_bytes
+                        )
+                    ),
+                    None,
+                )
 
             selected: tuple[CatalogDocumentRevision, str, str | None, RuntimeImageReceiptRow | None] | None = None
             newest_compatible: CatalogDocumentRevision | None = None
@@ -1376,8 +1392,19 @@ class ModelCacheService:
                 ModelCacheSet.model_content_sha256 == digest,
                 ModelCacheSet.state == "cached",
             )))
+
+            def model_set_available(row: ModelCacheSet) -> bool:
+                manifest = ArtifactSetManifest.from_document(row.manifest)
+                if manifest.digest != row.artifact_set_sha256:
+                    raise ModelCacheStorageError(
+                        "model_cache.manifest_identity_mismatch",
+                        "cached artifact manifest does not match its stored identity",
+                    )
+                required = set(_unique_artifacts(manifest.artifacts))
+                return required <= self._managed_cached_objects(manifest)
+
             model_set = max(
-                model_rows,
+                (row for row in model_rows if model_set_available(row)),
                 key=lambda item: (item.updated_at, item.artifact_set_sha256),
                 default=None,
             )

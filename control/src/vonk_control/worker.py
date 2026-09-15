@@ -523,6 +523,9 @@ if __name__ == "__main__":
             clock=clock,
         ),
     )
+    runtime_image_storage = FilesystemRuntimeImageStorage(
+        settings.agent_artifact_root
+    )
     model_cache = ModelCacheService(
         sessions,
         settings.model_cache_root,
@@ -530,11 +533,9 @@ if __name__ == "__main__":
         max_parallel_downloads=settings.model_cache_parallel_downloads,
         clock=clock,
         huggingface_token_path=settings.huggingface_token_path,
+        runtime_archive_available=runtime_image_storage.build_archive_available,
     )
     model_cache.resume_operations()
-    runtime_image_storage = FilesystemRuntimeImageStorage(
-        settings.agent_artifact_root
-    )
     runtime_image_transport = SkopeoOCIImageTransport()
 
     def prepare_runtime_image_receipt(document, runtime_spec, build):

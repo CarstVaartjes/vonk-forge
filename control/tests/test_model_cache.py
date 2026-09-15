@@ -137,7 +137,24 @@ def cache(tmp_path: Path):
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    service = ModelCacheService(sessions, tmp_path / "nas-cache", reserve_bytes=0, fixture_sources=True)
+    runtime_root = tmp_path / "runtime-images"
+    runtime_root.mkdir()
+
+    def runtime_archive_available(digest: str, expected_bytes: int) -> bool:
+        path = runtime_root / digest
+        return (
+            path.is_file()
+            and not path.is_symlink()
+            and path.stat().st_size == expected_bytes
+        )
+
+    service = ModelCacheService(
+        sessions,
+        tmp_path / "nas-cache",
+        reserve_bytes=0,
+        fixture_sources=True,
+        runtime_archive_available=runtime_archive_available,
+    )
     return service, sessions
 
 
@@ -341,7 +358,9 @@ def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> Non
     ]
 
 
-def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_revision(cache):
+def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_revision(
+    cache, monkeypatch: pytest.MonkeyPatch
+):
     service, sessions = cache
     model = _canonical_model(
         publisher="vonk-forge",
@@ -431,18 +450,67 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         oci_archive_sha256=receipt.oci_archive_sha256, image_bytes=17,
         build_id=build.id, authorized_at=NOW, state="authorized",
     )
-    model_cache = ModelCacheSet(
-        artifact_set_sha256="9" * 64, schema_version=2,
-        model_content_sha256=model_digest, recipe_revision_sha256=None,
-        manifest={"schema_version": 2}, expected_bytes=3, verified_bytes=3,
-        state="cached", protected=False, protected_reasons=[], created_at=NOW,
-        updated_at=NOW, verified_at=NOW, last_accessed_at=NOW, last_error=None,
-    )
     with sessions.begin() as session:
         session.add_all([model_root, recipe_root, model_revision, newer_model_revision,
                          old_revision, new_revision,
                          AgentNode(node_id="resolver-builder", state="active"), build,
-                         receipt, authorization, model_cache])
+                         receipt, authorization])
+
+    manifest = ArtifactSetManifest(
+        model_content_sha256=model_digest,
+        recipe_revision_sha256=None,
+        model_content_digests=(model_digest,),
+        artifacts=(
+            ArtifactSpec(
+                key="artifact-111111111111-weights",
+                artifact_id="weights",
+                path="weights.safetensors",
+                kind="huggingface.file",
+                repository="https://huggingface.co/vonk-forge/resolver-model",
+                source=(
+                    "https://huggingface.co/vonk-forge/resolver-model/resolve/"
+                    + "0" * 40
+                    + "/weights.safetensors"
+                ),
+                revision="0" * 40,
+                sha256="1" * 64,
+                expected_bytes=3,
+                roles=("weights",),
+                model_content_sha256=model_digest,
+            ),
+        ),
+        model_definition_ref=ModelReference(
+            publisher="vonk-forge",
+            slug="resolver-model",
+            content_sha256=model_digest,
+        ),
+    )
+    artifact = manifest.artifacts[0]
+    model_cache = ModelCacheSet(
+        artifact_set_sha256=manifest.digest, schema_version=2,
+        model_content_sha256=model_digest, recipe_revision_sha256=None,
+        manifest=manifest.document(), expected_bytes=3, verified_bytes=3,
+        state="cached", protected=False, protected_reasons=[], created_at=NOW,
+        updated_at=NOW, verified_at=NOW, last_accessed_at=NOW, last_error=None,
+    )
+    model_object = service.root / "objects" / artifact.sha256[:2] / artifact.sha256
+    model_object.parent.mkdir(parents=True)
+    model_object.write_bytes(b"one")
+    image_object = service.root.parent / "runtime-images" / receipt.oci_archive_sha256
+    image_object.write_bytes(b"x" * receipt.image_bytes)
+    with sessions.begin() as session:
+        session.add_all([
+            model_cache,
+            ModelCacheArtifact(
+                sha256=artifact.sha256,
+                storage_key=f"objects/{artifact.sha256[:2]}/{artifact.sha256}",
+                expected_bytes=3,
+                actual_bytes=3,
+                state="verified",
+                verified_at=NOW,
+                updated_at=NOW,
+            ),
+        ])
 
     resolved = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
@@ -457,6 +525,51 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         "model_bytes": 3,
         "image_bytes": 17,
     }
+
+    real_open = os.open
+
+    def deny_model_object(path, *args, **kwargs):
+        if Path(path) == model_object:
+            raise PermissionError("model object is inaccessible")
+        return real_open(path, *args, **kwargs)
+
+    def deny_runtime_archive(_digest: str, _size: int) -> bool:
+        raise PermissionError("runtime archive is inaccessible")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(os, "open", deny_model_object)
+        with pytest.raises(PermissionError, match="model object is inaccessible"):
+            service.resolve_latest_cached(
+                recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+            )
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            service,
+            "_runtime_archive_available",
+            deny_runtime_archive,
+        )
+        with pytest.raises(PermissionError, match="runtime archive is inaccessible"):
+            service.resolve_latest_cached(
+                recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+            )
+
+    model_object.unlink()
+    missing_model_bytes = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+    )
+    assert missing_model_bytes["recipe"]["cached"] is True
+    assert missing_model_bytes["model"]["cached"] is False
+    assert "model-not-cached" in missing_model_bytes["blockers"]
+    model_object.write_bytes(b"one")
+
+    image_object.unlink()
+    missing_image_bytes = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+    )
+    assert missing_image_bytes["recipe"]["recipe_revision_id"] == new_revision.id
+    assert missing_image_bytes["recipe"]["cached"] is False
+    assert "recipe-not-cached" in missing_image_bytes["blockers"]
+    image_object.write_bytes(b"x" * receipt.image_bytes)
 
     with sessions.begin() as session:
         session.delete(model_cache)

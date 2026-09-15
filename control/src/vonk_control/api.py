@@ -1329,6 +1329,7 @@ def production_app() -> FastAPI:
 
     settings = Settings.from_env_and_secrets()
     sessions = session_factory(build_engine(settings.database_url))
+    # Planning, profile choices, and preparation share the same managed OCI root.
     runtime_image_storage = FilesystemRuntimeImageStorage(settings.agent_artifact_root)
 
     def clock() -> datetime:
@@ -1378,6 +1379,7 @@ def production_app() -> FastAPI:
         max_parallel_downloads=settings.model_cache_parallel_downloads,
         clock=clock,
         huggingface_token_path=settings.huggingface_token_path,
+        runtime_archive_available=runtime_image_storage.build_archive_available,
     )
     model_cache.resume_operations()
 
@@ -1393,8 +1395,6 @@ def production_app() -> FastAPI:
         current_revision=current_revision,
         model_cache=model_cache,
     )
-    # RecipeBuildVerifiedObjectSource and direct-image preparation share this
-    # Controller OCI root, including the cheap planning/projection probe above.
     runtime_image_transport = SkopeoOCIImageTransport()
 
     def prepare_runtime_image_receipt(
