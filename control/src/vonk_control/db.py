@@ -12,25 +12,46 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import InterfaceError, OperationalError, TimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .settings import database_wait_budgets
+
 _STARTUP_ADVISORY_LOCK = 8_241_779_103
 _ALEMBIC_CONFIG = Path(__file__).resolve().parent / "alembic.ini"
 _DATABASE_STARTUP_TIMEOUT_SECONDS = 120.0
 _DATABASE_RETRYABLE_ERRORS = (InterfaceError, OperationalError, TimeoutError)
 
 
-# A writer that waits forever on a row lock stops the worker's coordinator loop
-# silently: no error, no progress, and nothing to trip. Bound the wait so
-# contention surfaces as an error the caller can log and retry.
-_ROW_LOCK_TIMEOUT_MILLISECONDS = 30_000
-
-
 def build_engine(database_url: str) -> Engine:
-    connect_args = (
-        {"options": f"-c lock_timeout={_ROW_LOCK_TIMEOUT_MILLISECONDS}"}
-        if "postgres" in database_url
-        else {}
-    )
-    return create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
+    """Build the one engine every component shares.
+
+    Configuration owns every finite wait budget; PostgreSQL receives all four
+    server-side timeouts per connection, and its pool is explicitly bounded so
+    a saturated pool fails within the pool timeout instead of queueing a
+    connection forever. SQLite accepts neither the server options nor an
+    explicit pool size, so it keeps the default pool.
+    """
+
+    budgets = database_wait_budgets()
+    if "postgres" in database_url:
+        connect_args = {
+            "options": " ".join(
+                (
+                    f"-c lock_timeout={budgets.lock_timeout_ms}",
+                    f"-c statement_timeout={budgets.statement_timeout_ms}",
+                    f"-c transaction_timeout={budgets.transaction_timeout_ms}",
+                    "-c idle_in_transaction_session_timeout="
+                    + f"{budgets.idle_in_transaction_timeout_ms}",
+                )
+            )
+        }
+        return create_engine(
+            database_url,
+            pool_pre_ping=True,
+            pool_size=budgets.pool_size,
+            max_overflow=budgets.max_overflow,
+            pool_timeout=budgets.pool_timeout_seconds,
+            connect_args=connect_args,
+        )
+    return create_engine(database_url, pool_pre_ping=True, connect_args={})
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:
