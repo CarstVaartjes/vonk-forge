@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import cast
 
 from sqlalchemy import select
-from vonk_control.bounded_json import require_mapping, sequence
+from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
@@ -110,7 +110,7 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         assert retry.progress["attempt"] == 2
         assert retry.progress["workload_intent_ordinal"] == original_ordinal + 1
         retry_scope = require_mapping(retry.plan["scope"], "retry scope")
-        assert tuple(sequence(retry_scope["node_ids"])) == tuple(nodes)
+        assert tuple(require_sequence(retry_scope["node_ids"], "retry nodes")) == tuple(nodes)
         original_child = session.get(Job, child_id)
         assert original_child is not None
         assert original_child.payload["plan"] == original_plan
@@ -136,7 +136,7 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         retry_plan = require_mapping(retry_child.payload["plan"], "retry plan")
         assert all(
             require_mapping(phase, "retry phase")["subphase"] != "model-download"
-            for phase in sequence(retry_plan["phases"])
+            for phase in require_sequence(retry_plan["phases"], "retry phases")
         )
 
 
@@ -234,7 +234,7 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
     assert storage.build_archive_available(archive_digest, archive_bytes) is False
     run_switch._build_archive_available = storage.build_archive_available
 
-    def replan_build(_revision_id: str, _builder_node_id: str) -> RecipeBuildPlan:
+    def replan_build(recipe_revision_id: str, builder_node_id: str) -> RecipeBuildPlan:
         with sessions.begin() as session:
             build = session.get(RecipeBuild, build_plan.build_id)
             assert build is not None
@@ -263,14 +263,14 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
         assert retry_child is not None
         child_plan = require_mapping(retry_child.payload["plan"], "child plan")
         child_build = require_mapping(child_plan["build"], "child build")
-        child_phases = sequence(child_plan["phases"])
+        child_phases = require_sequence(child_plan["phases"], "child phases")
         first_phase = require_mapping(child_phases[0], "first child phase")
         assert child_build["state"] == "planned"
         assert (
             first_phase["subphase"] == "container-build"
         )
         retry_scope = require_mapping(retry.plan["scope"], "retry scope")
-        assert tuple(sequence(retry_scope["node_ids"])) == tuple(nodes)
+        assert tuple(require_sequence(retry_scope["node_ids"], "retry nodes")) == tuple(nodes)
 
 
 def test_malformed_failed_profile_does_not_block_unrelated_queued_work(
