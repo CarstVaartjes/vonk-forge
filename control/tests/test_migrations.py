@@ -12,6 +12,7 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
+from vonk_control.db import verify_schema_is_current
 from vonk_control.models import Base, Job
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -178,3 +179,69 @@ def test_postgres_fresh_schema_matches_metadata_has_current_kind_and_roundtrips_
     _assert_current_schema(postgres_engine)
     _assert_model_cache_operation_kind_is_current(postgres_engine)
     _assert_json_roundtrip(postgres_engine)
+    # The reviewed tolerance for the constraint-kind artefact above must not make
+    # the startup gate refuse a freshly created schema.
+    with postgres_engine.connect() as connection:
+        verify_schema_is_current(connection)
+
+
+def test_schema_gate_refuses_a_database_that_only_claims_the_current_revision(
+    tmp_path: Path,
+) -> None:
+    """``alembic_version`` is not evidence about the physical schema.
+
+    A database created before a model change keeps the retired column while
+    already reporting the current baseline, so the gate has to compare the live
+    catalog and name the object, not trust the revision row.
+    """
+
+    url = f"sqlite:///{tmp_path / 'retired-column.sqlite'}"
+    _upgrade(url)
+    engine = create_engine(url)
+    try:
+        with engine.connect() as connection:
+            verify_schema_is_current(connection)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE runtime_image_authorizations "
+                    "ADD COLUMN receipt_id VARCHAR(36)"
+                )
+            )
+        with (
+            pytest.raises(RuntimeError) as caught,
+            engine.connect() as connection,
+        ):
+            verify_schema_is_current(connection)
+        message = str(caught.value)
+        assert "startup is refused" in message
+        assert "runtime_image_authorizations.receipt_id" in message
+    finally:
+        engine.dispose()
+
+
+def test_postgres_schema_gate_refuses_the_retired_receipt_column(
+    postgres_engine,
+) -> None:
+    """Reproduce the stale ``receipt_id NOT NULL`` column an upgraded NAS kept.
+
+    The live deployment failed every runtime image authorization insert here,
+    long after startup, and reported only SQLAlchemy's opaque ``gkpj`` code.
+    """
+
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE runtime_image_authorizations "
+                "ADD COLUMN receipt_id VARCHAR(36) NOT NULL"
+            )
+        )
+    with (
+        pytest.raises(RuntimeError) as caught,
+        postgres_engine.connect() as connection,
+    ):
+        verify_schema_is_current(connection)
+    assert "unexpected column runtime_image_authorizations.receipt_id" in str(
+        caught.value
+    )

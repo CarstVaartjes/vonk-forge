@@ -8,7 +8,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import InterfaceError, OperationalError, TimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -130,6 +130,165 @@ def upgrade_schema(
     command.upgrade(config, "head")
 
 
+# ``alembic_version`` cannot prove that a live database is the current schema.
+# The fresh baseline creates its tables from ``Base.metadata``, so a database
+# created before a model change keeps the retired shape while already reporting
+# ``0000_fresh_schema``; a removed column then stays behind ``NOT NULL`` and
+# every insert fails long after startup.  Comparing the live catalog against the
+# current metadata is the only check that can see it, so startup fails closed.
+_SCHEMA_DIFFERENCE_LABELS = {
+    "add_table": "missing table",
+    "remove_table": "unexpected table",
+    "add_column": "missing column",
+    "remove_column": "unexpected column",
+    "add_constraint": "missing constraint",
+    "remove_constraint": "unexpected constraint",
+    "add_index": "missing index",
+    "remove_index": "unexpected index",
+    "modify_nullable": "changed nullability",
+    "modify_type": "changed type",
+    "modify_default": "changed default",
+}
+
+
+# Reviewed spurious reports, keyed by ``(operation, object name)``.  The
+# declared ``UniqueConstraint`` on ``model_cache_set_artifacts`` covers that
+# table's two primary-key columns, so PostgreSQL realises the same uniqueness as
+# the primary key under that name.  Uniqueness is enforced; only the
+# constraint-kind comparison disagrees, and it disagrees on a freshly created
+# schema, so it is not drift.  ``test_migrations`` pins the same report.
+_TOLERATED_SCHEMA_DIFFERENCES = frozenset(
+    {("add_constraint", "uq_model_cache_set_artifact_key")}
+)
+_SCHEMA_DIFFERENCE_LIMIT = 16
+# Differences whose fourth element is a ``Column`` rather than a name.
+_COLUMN_DIFFERENCE_OPERATIONS = frozenset(
+    {
+        "add_column",
+        "remove_column",
+        "modify_nullable",
+        "modify_type",
+        "modify_default",
+    }
+)
+
+
+def _schema_difference_key(difference: tuple[object, ...]) -> tuple[str, str | None]:
+    """Identify one autogenerate difference for the reviewed-tolerance check."""
+
+    name: str | None = None
+    for value in difference[1:]:
+        candidate = getattr(value, "name", None)
+        if isinstance(candidate, str):
+            name = candidate
+        elif isinstance(value, str):
+            name = value
+    return (str(difference[0]), name)
+
+
+def _schema_difference_label(difference: tuple[object, ...]) -> str:
+    """Name one difference so the operator knows exactly what to reconcile."""
+
+    operation = str(difference[0])
+    qualifier = _SCHEMA_DIFFERENCE_LABELS.get(operation, operation.replace("_", " "))
+    if operation in _COLUMN_DIFFERENCE_OPERATIONS:
+        # ``(operation, schema, table name, Column, ...)``: the column renders as
+        # "table.column" by itself, so name the two parts explicitly.
+        table_name = difference[2] if len(difference) > 2 else None
+        column_name = getattr(
+            difference[3] if len(difference) > 3 else None, "name", None
+        )
+        object_name = ".".join(
+            str(part) for part in (table_name, column_name) if part is not None
+        )
+        return f"{qualifier} {object_name}".strip()
+    item = difference[1] if len(difference) > 1 else None
+    table = getattr(getattr(item, "table", None), "name", None)
+    name = getattr(item, "name", None)
+    object_name = ".".join(part for part in (table, name) if isinstance(part, str)) or (
+        str(item) if item is not None else ""
+    )
+    return f"{qualifier} {object_name}".strip()
+
+
+def _missing_check_constraints(connection: Connection) -> list[str]:
+    """Report declared CHECK constraints the live catalog does not enforce.
+
+    Autogenerate does not compare CHECK constraints at all, so this covers the
+    one constraint kind a metadata comparison would otherwise miss.  Only
+    declared names are compared; the expression text is the model's business.
+    """
+
+    from sqlalchemy import inspect
+
+    from .models import Base
+
+    inspector = inspect(connection)
+    live_tables = set(inspector.get_table_names())
+    missing: list[str] = []
+    for table_name, table in sorted(Base.metadata.tables.items()):
+        declared = {
+            constraint.name
+            for constraint in table.constraints
+            if type(constraint).__name__ == "CheckConstraint"
+            and isinstance(constraint.name, str)
+        }
+        if not declared or table_name not in live_tables:
+            continue
+        reflected = {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints(table_name)
+            if isinstance(constraint.get("name"), str)
+        }
+        missing.extend(
+            f"missing check constraint {table_name}.{name}"
+            for name in sorted(declared - reflected)
+        )
+    return missing
+
+
+def verify_schema_is_current(connection: Connection) -> None:
+    """Fail closed unless the live schema is exactly the current model schema.
+
+    ``alembic_version`` reports the revision that was applied, never the shape
+    that exists now.  This comparison is what turns a stale column or constraint
+    left behind by an earlier baseline into an immediate, actionable startup
+    refusal instead of a mysterious failure deep inside an operation.
+
+    CHECK constraint *expressions* are not compared (declared names only),
+    because autogenerate does not diff CHECK constraints.
+    """
+
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    from .models import Base
+
+    differences = list(
+        compare_metadata(MigrationContext.configure(connection), Base.metadata)
+    )
+    unexpected = [
+        difference
+        for difference in differences
+        if _schema_difference_key(difference) not in _TOLERATED_SCHEMA_DIFFERENCES
+    ]
+    labels = sorted(
+        {_schema_difference_label(difference) for difference in unexpected}
+        | set(_missing_check_constraints(connection))
+    )
+    if not labels:
+        return
+    listed = ", ".join(labels[:_SCHEMA_DIFFERENCE_LIMIT])
+    if len(labels) > _SCHEMA_DIFFERENCE_LIMIT:
+        listed += f", and {len(labels) - _SCHEMA_DIFFERENCE_LIMIT} more"
+    raise RuntimeError(
+        "The live Controller database schema does not match the current "
+        "Controller model metadata, so startup is refused rather than serving "
+        "an operation against a stale schema. No automatic repair is performed. "
+        f"Reconcile these objects, then restart the Controller: {listed}."
+    )
+
+
 def initialize_database(
     database_url: str,
     *,
@@ -153,6 +312,8 @@ def initialize_database(
                 lock_connection.commit()
                 try:
                     upgrade_schema(database_url, config_path=config_path)
+                    with engine.connect() as schema_connection:
+                        verify_schema_is_current(schema_connection)
                     authority = DatabaseAuthorityService(session_factory(engine))
                     return authority.ensure_initialized(acquire_advisory_lock=False)
                 finally:
