@@ -22,8 +22,8 @@ def test_synthetic_v2_source_build_compiles_with_a_canonical_receipt() -> None:
     context = ROOT / "control/tests/fixtures/recipes/dev-http-smoke/context"
     base_images = dockerfile_base_images((context / "Dockerfile").read_bytes())
     expected_base_image = (
-        "docker.io/library/python:3.12.11-slim-bookworm@"
-        "sha256:9bb659dc6d5218917236f3711e866a5634bb4c2f208de9d4533aa4863f57c1d3"
+        "docker.io/library/python:3.14.7-slim-bookworm@"
+        "sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f"
     )
     assert tuple(image["reference"] for image in base_images) == (expected_base_image,)
 
