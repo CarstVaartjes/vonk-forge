@@ -128,14 +128,18 @@ The bounded cutover is:
    `_managed_cached_objects`, the artifact resolution path,
    `reconcile_storage`, `storage_summary`, and the two removal paths in
    `_remove_model_content`.
-2. **Image and build checkpoints.** The prepared runtime-image receipt and the
-   build/transfer checkpoint already have storage-side files; the remaining SQL
-   availability columns follow the same rule, leaving SQL with the exact
-   reference a fence conditionally accepts.
+2. **Image and build checkpoints.** Implemented. The prepared runtime-image
+   receipt is now the storage fact and SQL keeps only the authorization that a
+   fence conditionally accepts. `RuntimeImageReceipt` and its table, model,
+   constraints, and foreign key are deleted; `RuntimeImageAuthorization` is
+   keyed by its own `(recipe_revision_id, effective_execution_key,
+   oci_archive_sha256)`. Availability requires both a live matching
+   authorization and the stored receipt, so neither a deleted authorization
+   with bytes on disk nor a live authorization with the receipt removed is
+   admitted.
 
-   This package is scoped and parked, not started, because it is materially
-   larger than the model cutover and because its current code declares the
-   opposite authority:
+   The reconnaissance that preceded it remains useful context for the next
+   cutover, which is the `recipe_builds` build and transfer checkpoint:
 
    * The SQL row model (`models.RuntimeImageReceipt`, imported elsewhere as
      `RuntimeImageReceiptRow`) has 147 references across thirteen modules
@@ -170,28 +174,6 @@ The bounded cutover is:
    `test_recipe_image_availability.py`, `test_direct_run_switch_production_path.py`,
    `test_agent_api.py`, and `test_availability_production.py` consumers updated
    in the same commit.
-
-## Implementation checkpoint: image receipt cutover
-
-A working tree exists on branch `codex/image-receipt-checkpoint` with the whole
-cutover implemented and 333 of 340 relevant tests passing. It is **not verified
-and must not be merged**. The seven remaining failures are all one defect.
-
-`distribution_executor._archive_is_published` decides availability from the
-managed-storage receipt when the distribution source carries a real Controller
-image cache (`ControllerRuntimeImageVerifiedObjectSource._runtime_storage`), and
-from the fixture source's own `register_runtime_image` declaration otherwise.
-The two spell image digests differently, and the fixture declarations in
-`control/tests/test_direct_run_switch_production_path.py` and
-`control/tests/test_direct_runtime_path.py` do not currently name the digest the
-plan resolves, so the check fails closed and six run-switch tests see a 409 or a
-missing rejection. `test_notes_revision_reuses_original_receipt_with_separate_authorization`
-is the seventh and is about the authorization count for an editorial successor.
-
-Finish by giving the fixture sources a declaration that matches what the plan
-resolves, then re-run the eight image suites, add the adversarial cases (no
-receipt, mismatched archive digest, revoked authorization), and run the full
-gate set before opening a PR.
 
 ## Evidence of success
 

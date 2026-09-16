@@ -365,9 +365,7 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                 and session.scalar(
                     select(RuntimeImageAuthorization.id)
                     .where(
-                        RuntimeImageAuthorization.recipe_revision_id.in_(
-                            revision_ids
-                        ),
+                        RuntimeImageAuthorization.recipe_revision_id.in_(revision_ids),
                         RuntimeImageAuthorization.source == "published",
                         RuntimeImageAuthorization.state == "authorized",
                         RuntimeImageAuthorization.registry_manifest_digest.in_(

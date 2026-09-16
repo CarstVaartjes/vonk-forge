@@ -956,8 +956,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
         authorization = session.scalar(select(RuntimeImageAuthorization))
         assert authorization is not None
         assert (
-            completed.result["oci_archive_sha256"]
-            == authorization.oci_archive_sha256
+            completed.result["oci_archive_sha256"] == authorization.oci_archive_sha256
         )
         persisted = session.get(Job, parent.id)
         assert persisted is not None

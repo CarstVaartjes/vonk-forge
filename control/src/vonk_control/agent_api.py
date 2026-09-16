@@ -184,6 +184,12 @@ def _strict_json_datetime(value: object) -> object:
     return parsed
 
 
+def _prefixed_text(value: object) -> str | None:
+    """Normalize a digest-shaped value that arrived as untyped JSON."""
+
+    return prefixed_image_digest(value) if isinstance(value, str) else None
+
+
 def _runtime_image_authorization_matches(
     runtime_image: Mapping[str, object],
     identity: Mapping[str, object],
@@ -210,14 +216,10 @@ def _runtime_image_authorization_matches(
         or runtime_image.get("image_digest") != installation_image_digest
         # The compiled plan and the durable authorization spell image digests
         # differently; compare them in one spelling.
-        or prefixed_image_digest(runtime_image.get("image_digest"))
-        != prefixed_image_digest(
-            getattr(authorization, "platform_manifest_digest", None)
-        )
-        or prefixed_image_digest(runtime_image.get("platform_manifest_digest"))
-        != prefixed_image_digest(
-            getattr(authorization, "platform_manifest_digest", None)
-        )
+        or _prefixed_text(runtime_image.get("image_digest"))
+        != _prefixed_text(getattr(authorization, "platform_manifest_digest", None))
+        or _prefixed_text(runtime_image.get("platform_manifest_digest"))
+        != _prefixed_text(getattr(authorization, "platform_manifest_digest", None))
         or runtime_image.get("registry_manifest_digest")
         != getattr(authorization, "registry_manifest_digest", None)
         or runtime_image.get("local_image_config_id")

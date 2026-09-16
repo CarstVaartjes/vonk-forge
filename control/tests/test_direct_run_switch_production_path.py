@@ -548,7 +548,7 @@ def _make_service(
     # This fixture source owns no Controller image cache, so it declares its
     # published archive exactly as MemoryVerifiedObjectSource intends. The real
     # path reads the receipt in the cache root instead.
-    source.register_runtime_image(REGISTRY_DIGEST, ARCHIVE_DIGEST)
+    source.register_runtime_image(PLATFORM_DIGEST, ARCHIVE_DIGEST)
     executor = _TargetExecutor(
         sessions,
         AgentJobService(sessions, clock=lambda: NOW),

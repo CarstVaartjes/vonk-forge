@@ -25,7 +25,6 @@ from vonk_control.models import (
     Job,
     RecipeBuild,
     RuntimeImageAuthorization,
-    RuntimeImageAuthorization,
 )
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
@@ -322,9 +321,7 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
     else:
         assert result.state == "failed"
         assert result.failure is not None
-        assert result.failure["code"] == (
-            "runtime_image.authorization_revoked"
-        )
+        assert result.failure["code"] == ("runtime_image.authorization_revoked")
 
 
 def test_forced_digest_failure_does_not_replace_valid_archive(tmp_path: Path) -> None:

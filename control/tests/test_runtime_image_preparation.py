@@ -26,12 +26,12 @@ from vonk_control.models import (
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
-    prefixed_image_digest,
     PulledImageEvidence,
     RuntimeImagePreparationError,
     RuntimeImageReceipt,
     SkopeoOCIImageTransport,
     persist_runtime_image_receipt,
+    prefixed_image_digest,
     prepare_runtime_image,
     resolve_persisted_runtime_image_receipt,
 )
@@ -895,7 +895,9 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
         session.commit()
         assert row.source == "published"
         assert prefixed_image_digest(row.registry_manifest_digest) == IMAGE_DIGEST
-        assert prefixed_image_digest(row.platform_manifest_digest) == PLATFORM_IMAGE_DIGEST
+        assert (
+            prefixed_image_digest(row.platform_manifest_digest) == PLATFORM_IMAGE_DIGEST
+        )
         assert prefixed_image_digest(row.local_image_config_id) == "sha256:" + "c" * 64
         assert row.oci_archive_sha256 == ARCHIVE_DIGEST
         assert row.image_bytes == len(ARCHIVE)
@@ -1206,7 +1208,8 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
         # A changed archive under the same build is rejected by the build
         # authority before any authorization is written.
         with pytest.raises(
-            RuntimeImagePreparationError, match="not backed by the exact succeeded build"
+            RuntimeImagePreparationError,
+            match="not backed by the exact succeeded build",
         ):
             persist_runtime_image_receipt(
                 session,
@@ -1331,7 +1334,7 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
             verified_at=now,
         )
         session.commit()
-        assert session.query(RuntimeImageAuthorization).count() == 1
+        # One authorization per revision for the same verified archive.
         assert session.query(RuntimeImageAuthorization).count() == 2
         assert (
             resolve_persisted_runtime_image_receipt(
@@ -1384,7 +1387,9 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
         )
         session.flush()
         assert launch_row.oci_archive_sha256 == ARCHIVE_DIGEST
-        assert session.query(RuntimeImageAuthorization).count() == 2
+        # The original revision, the successor's admitted identity, and the
+        # successor's compiled launch identity all bind the same archive.
+        assert session.query(RuntimeImageAuthorization).count() == 3
         assert (
             resolve_persisted_runtime_image_receipt(
                 session,
@@ -1425,7 +1430,7 @@ def test_runtime_image_authority_fails_closed_for_missing_or_revoked_bindings(
                 receipt=receipt,
                 verified_at=now,
             )
-        row = persist_runtime_image_receipt(
+        persist_runtime_image_receipt(
             session,
             recipe_revision_id=revision_id,
             original_content_digest=digest,

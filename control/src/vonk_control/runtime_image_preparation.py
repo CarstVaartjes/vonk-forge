@@ -654,8 +654,7 @@ def _authorize_current_revision(
             RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
             RuntimeImageAuthorization.effective_execution_key
             == effective_execution_key,
-            RuntimeImageAuthorization.oci_archive_sha256
-            == receipt.oci_archive_sha256,
+            RuntimeImageAuthorization.oci_archive_sha256 == receipt.oci_archive_sha256,
         )
     )
     if authorization is None:

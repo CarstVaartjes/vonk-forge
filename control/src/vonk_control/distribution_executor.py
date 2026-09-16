@@ -24,7 +24,6 @@ from .agent_jobs import AgentJobService
 from .bounded_json import sequence
 from .distribution import DistributionError, DistributionService
 from .model_cache import ModelCacheNotFound
-from .runtime_image_preparation import prefixed_image_digest
 from .model_cache_contract import ModelCacheDownloadResult
 from .models import (
     AgentOperation,
@@ -44,6 +43,11 @@ from .run_switch_contract import (
     RunSwitchPlan,
 )
 from .run_switch_operations import PhaseExecution
+from .runtime_image_preparation import (
+    RuntimeImagePreparationError,
+    RuntimeImageStorage,
+    prefixed_image_digest,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -863,7 +867,7 @@ class DurableDistributionPhaseExecutor:
         return image_digest, layout_digest, image_bytes, build_id
 
     @staticmethod
-    def _source_runtime_storage(source: object) -> object | None:
+    def _source_runtime_storage(source: object) -> RuntimeImageStorage | None:
         """Return the runtime-image storage behind a distribution source."""
 
         for candidate in (source, getattr(source, "oci_source", None)):
@@ -875,42 +879,44 @@ class DurableDistributionPhaseExecutor:
     def _archive_is_published(
         self, image_digest: str, archive_sha256: str, image_bytes: int
     ) -> bool:
-        """Whether a current authorization covers an archive storage holds.
+        """Whether a live authorization covers an archive that is present.
 
         SQL owns the authorization decision and managed storage owns whether
-        the bytes and their receipt are present, so both must agree: a stored
-        archive with no live, matching authorization is not usable. A source
-        with no Controller image cache -- the in-memory fixture source -- cannot
-        answer the storage half, and its assignment was already verified
-        through ``verify_runtime_image`` by the service that registered it.
+        the bytes and their receipt are present, so both must hold: a stored
+        archive with no live, matching authorization is not usable, and an
+        authorization whose bytes are gone is not usable either. A source with
+        no Controller image cache -- the in-memory fixture source -- declares
+        its published archives instead, and that declaration answers the
+        presence half.
         """
 
-        storage = self._source_runtime_storage(self._distribution.source)
-        if storage is None:
-            verifier = getattr(self._distribution.source, "verify_runtime_image", None)
-            if not callable(verifier):
-                return False
-            return bool(verifier(prefixed_image_digest(image_digest), archive_sha256))
-        try:
-            receipt = storage.read_receipt(archive_sha256)
-        except Exception:
-            return False
-        if (
-            receipt.oci_archive_sha256 != archive_sha256
-            or receipt.image_bytes != image_bytes
-        ):
-            return False
+        expected_image_digest = prefixed_image_digest(image_digest)
         with self._sessions() as session:
             authorized = session.scalar(
                 select(RuntimeImageAuthorization.id).where(
                     RuntimeImageAuthorization.state == "authorized",
                     RuntimeImageAuthorization.oci_archive_sha256 == archive_sha256,
                     RuntimeImageAuthorization.platform_manifest_digest
-                    == prefixed_image_digest(image_digest),
+                    == expected_image_digest,
                     RuntimeImageAuthorization.image_bytes == image_bytes,
                 )
             )
-        return authorized is not None
+        if authorized is None:
+            return False
+        storage = self._source_runtime_storage(self._distribution.source)
+        if storage is None:
+            verifier = getattr(self._distribution.source, "verify_runtime_image", None)
+            if not callable(verifier):
+                return False
+            return bool(verifier(expected_image_digest, archive_sha256))
+        try:
+            receipt = storage.read_receipt(archive_sha256)
+        except (RuntimeImagePreparationError, OSError, ValueError):
+            return False
+        return (
+            receipt.oci_archive_sha256 == archive_sha256
+            and receipt.image_bytes == image_bytes
+        )
 
     @staticmethod
     def _runtime_execution_key(progress: Mapping[str, object]) -> str | None:
@@ -997,7 +1003,7 @@ class DurableDistributionPhaseExecutor:
                             RuntimeImageAuthorization.state == "authorized",
                         )
                     )
-                    if authorization is not None and not self._archive_is_published(
+                    if authorization is None or not self._archive_is_published(
                         authorization.platform_manifest_digest,
                         authorization.oci_archive_sha256,
                         authorization.image_bytes,

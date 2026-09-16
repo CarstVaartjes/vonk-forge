@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 contracts = pytest.importorskip("vonk_forge_contracts")
-from vonk_control.agent_api import _runtime_image_receipt_matches
+from vonk_control.agent_api import _runtime_image_authorization_matches
 from vonk_control.artifact_jobs import _active_recipe_revision
 from vonk_control.fleet_projection import _canonical_recipe
 from vonk_control.models import CatalogDocumentRevision
@@ -99,7 +99,7 @@ def _runtime_receipt_fixture(
     revision_digest = "a" * 64
     platform_digest = "sha256:" + "b" * 64
     receipt = SimpleNamespace(
-        state="verified",
+        state="authorized",
         recipe_revision_id=revision_id,
         original_content_digest=revision_digest,
         effective_execution_key="c" * 64,
@@ -139,7 +139,7 @@ def _runtime_receipt_fixture(
 def test_persisted_published_image_binds_without_a_recipe_build() -> None:
     runtime_image, identity, receipt = _runtime_receipt_fixture()
 
-    assert _runtime_image_receipt_matches(
+    assert _runtime_image_authorization_matches(
         runtime_image,
         identity,
         receipt,
@@ -149,7 +149,7 @@ def test_persisted_published_image_binds_without_a_recipe_build() -> None:
         installation_recipe_build_id=None,
     )
 
-    assert not _runtime_image_receipt_matches(
+    assert not _runtime_image_authorization_matches(
         runtime_image,
         identity,
         receipt,
@@ -165,7 +165,7 @@ def test_persisted_controller_build_image_requires_matching_build_receipt() -> N
         source="controller-build", build_id="build"
     )
 
-    assert _runtime_image_receipt_matches(
+    assert _runtime_image_authorization_matches(
         runtime_image,
         identity,
         receipt,
@@ -176,7 +176,7 @@ def test_persisted_controller_build_image_requires_matching_build_receipt() -> N
     )
 
     receipt.local_image_config_id = "sha256:" + "0" * 64
-    assert not _runtime_image_receipt_matches(
+    assert not _runtime_image_authorization_matches(
         runtime_image,
         identity,
         receipt,
@@ -188,7 +188,7 @@ def test_persisted_controller_build_image_requires_matching_build_receipt() -> N
 
     receipt.local_image_config_id = runtime_image["local_image_config_id"]
     identity["recipe_revision_sha256"] = "0" * 64
-    assert not _runtime_image_receipt_matches(
+    assert not _runtime_image_authorization_matches(
         runtime_image,
         identity,
         receipt,

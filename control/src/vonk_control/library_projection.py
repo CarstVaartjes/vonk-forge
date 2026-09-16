@@ -515,9 +515,7 @@ class LibraryProjection:
                         authorization.oci_archive_sha256, authorization.image_bytes
                     )
                 ):
-                    available_recipe_digests.add(
-                        authorization.original_content_digest
-                    )
+                    available_recipe_digests.add(authorization.original_content_digest)
             for revision in revisions:
                 if revision.kind != "recipe":
                     continue
