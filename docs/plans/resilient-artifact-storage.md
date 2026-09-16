@@ -189,11 +189,12 @@ The bounded cutover is:
 
 ## Remaining coordination work: the blocking file locks
 
-Two baseline sites remain after `route_runtime._locked` and
+One baseline site remains after `route_runtime._locked` and
 `runtime_image_preparation.pull_and_export` were converted and the scanner
-learned to tell an in-process guard from an artifact lock (see below), and the
-audit that classified them is worth recording because the first reading --
-"flip them all to `LOCK_NB`" -- is wrong for both.
+learned to tell an in-process guard from an artifact lock and a private
+descriptor from a shared one (see below). The audit is worth recording because
+the first reading -- "flip them all to `LOCK_NB`" -- was wrong for almost
+every one of them.
 
 Each remaining site is a **cross-process serialization lock on one named
 resource**, not an artifact lock waiting on another artifact lock:
@@ -205,10 +206,12 @@ resource**, not an artifact lock waiting on another artifact lock:
   nonblocking would break that fence; the correct nonblocking shape needs the
   caller to abandon and replay the upload, which is a protocol change rather
   than a flag change.
-* `artifact_blob_store._reserve` takes the quota lock and a reservation file
-  lock together. The reservation lock already uses `LOCK_NB` on its inspection
-  path; the acquisition path blocks, and that is what keeps the quota
-  arithmetic exact.
+* `artifact_blob_store._reserve` blocks on a reservation file lock. **Resolved
+  in the scanner**: the descriptor comes from an `O_EXCL` create, so it names a
+  file only this call can hold and the lock can never contend. The scanner now
+  proves that from the syntax tree instead of reporting every blocking `flock`,
+  with tests for the private descriptor, the shared descriptor, and the
+  nonblocking shared descriptor. Quota arithmetic is unchanged.
 * `route_runtime._locked` serialized route publication with an unbounded
   blocking acquisition. **Converted**: it now claims the lock with `LOCK_NB`
   inside a bounded budget and reports contention to its caller, which retries

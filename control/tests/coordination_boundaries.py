@@ -321,6 +321,46 @@ def _is_blocking_flock(call: ast.Call) -> bool:
     return bool(flags & _ACQUIRE_FLAGS) and "LOCK_NB" not in flags
 
 
+def _exclusive_create_descriptors(body: Sequence[ast.stmt]) -> set[str]:
+    """Names bound to a descriptor from an exclusive-create ``os.open``.
+
+    ``os.open(..., os.O_EXCL)`` either creates the file or fails, so the
+    descriptor returned to this call names a file no other process can already
+    hold open. A lock on such a descriptor is private by construction: it can
+    never contend, whatever flags it is taken with.
+    """
+
+    created: set[str] = set()
+    for statement in body:
+        for child in ast.walk(statement):
+            if not isinstance(child, ast.Assign) or len(child.targets) != 1:
+                continue
+            value = child.value
+            if not isinstance(value, ast.Call):
+                continue
+            if _tail(_dotted_name(value.func) or "") != "open":
+                continue
+            # The flag is usually one term of a ``|`` chain, so search the
+            # whole call rather than its direct arguments.
+            if any(
+                isinstance(child, ast.Attribute) and child.attr == "O_EXCL"
+                for child in ast.walk(value)
+            ):
+                target = child.targets[0]
+                if isinstance(target, ast.Name):
+                    created.add(target.id)
+    return created
+
+
+def _flock_descriptor_name(call: ast.Call) -> str | None:
+    """The plain name whose descriptor a ``flock`` call locks, if any."""
+
+    if not call.args:
+        return None
+    first = call.args[0]
+    return first.id if isinstance(first, ast.Name) else None
+
+
 def _receiver_is_path(name: str) -> bool:
     """Whether a dotted call name's receiver names a filesystem location."""
 
@@ -374,13 +414,16 @@ class Site:
 class _FunctionScanner:
     """One pass over a single function body, innermost owner wins."""
 
-    def __init__(self, path: str, function: str) -> None:
+    def __init__(
+        self, path: str, function: str, statements: Sequence[ast.stmt]
+    ) -> None:
         self._path = path
         self._function = function
         self._transaction_depth = 0
         self._held_locks: list[str] = []
         self._sites: list[Site] = []
         self._seen: set[tuple[str, int, str]] = set()
+        self._private_descriptors = _exclusive_create_descriptors(statements)
 
     def _report(self, line: int, kind: str, detail: str) -> None:
         key = (kind, line, detail)
@@ -443,7 +486,7 @@ class _FunctionScanner:
                 locks.append((item.context_expr.lineno, name, False))
             flock = _acquires_flock(item.context_expr)
             if flock is not None:
-                locks.append((flock.lineno, "fcntl.flock", _is_blocking_flock(flock)))
+                locks.append((flock.lineno, "fcntl.flock", self._flock_blocks(flock)))
         for line, name, blocking in locks:
             if self._transaction_depth:
                 self._report(
@@ -472,6 +515,18 @@ class _FunctionScanner:
             self._transaction_depth -= 1
         del self._held_locks[len(self._held_locks) - len(locks) :]
 
+    def _flock_blocks(self, flock: ast.Call) -> bool:
+        """Whether a blocking flock can actually contend.
+
+        A flock on a descriptor from an exclusive create is private by
+        construction, so its flags cannot make it block on another holder.
+        """
+
+        descriptor = _flock_descriptor_name(flock)
+        if descriptor is not None and descriptor in self._private_descriptors:
+            return False
+        return _is_blocking_flock(flock)
+
     def _observe_call(self, call: ast.Call) -> None:
         flock = _acquires_flock(call)
         if flock is not None:
@@ -489,7 +544,7 @@ class _FunctionScanner:
                     "artifact locks held together: "
                     + ", ".join([*self._held_locks, name]),
                 )
-            if _is_blocking_flock(flock):
+            if self._flock_blocks(flock):
                 self._report(
                     call.lineno,
                     BLOCKING_ARTIFACT_LOCK,
@@ -508,7 +563,7 @@ class _FunctionScanner:
 def _function_sites(
     path: str, function: ast.FunctionDef | ast.AsyncFunctionDef
 ) -> list[Site]:
-    return _FunctionScanner(path, function.name).run(function)
+    return _FunctionScanner(path, function.name, function.body).run(function)
 
 
 def scan_source(source: str, *, path: str) -> list[Site]:
