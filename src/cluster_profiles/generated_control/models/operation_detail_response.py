@@ -46,6 +46,7 @@ class OperationDetailResponse:
             provenance (Union['OperationEvidenceProvenance', None, Unset]):
             recovery (Union['OperationRecovery', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
+            status_reason (Union[None, Unset, str]):
             updated_at (Union[None, Unset, str]):
      """
 
@@ -62,6 +63,7 @@ class OperationDetailResponse:
     provenance: Union['OperationEvidenceProvenance', None, Unset] = UNSET
     recovery: Union['OperationRecovery', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
+    status_reason: Union[None, Unset, str] = UNSET
     updated_at: Union[None, Unset, str] = UNSET
 
 
@@ -142,6 +144,12 @@ class OperationDetailResponse:
 
         schema_version = self.schema_version
 
+        status_reason: Union[None, Unset, str]
+        if isinstance(self.status_reason, Unset):
+            status_reason = UNSET
+        else:
+            status_reason = self.status_reason
+
         updated_at: Union[None, Unset, str]
         if isinstance(self.updated_at, Unset):
             updated_at = UNSET
@@ -173,6 +181,8 @@ class OperationDetailResponse:
             field_dict["recovery"] = recovery
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
+        if status_reason is not UNSET:
+            field_dict["status_reason"] = status_reason
         if updated_at is not UNSET:
             field_dict["updated_at"] = updated_at
 
@@ -337,6 +347,16 @@ class OperationDetailResponse:
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
+        def _parse_status_reason(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        status_reason = _parse_status_reason(d.pop("status_reason", UNSET))
+
+
         def _parse_updated_at(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -361,6 +381,7 @@ class OperationDetailResponse:
             provenance=provenance,
             recovery=recovery,
             schema_version=schema_version,
+            status_reason=status_reason,
             updated_at=updated_at,
         )
 
