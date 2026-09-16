@@ -1679,3 +1679,62 @@ def test_artifact_cancel_preserves_declared_engine_evidence_and_meaningful_value
     for key, value in evidence.items():
         assert cancelled.result_evidence[key] == value
     assert service.get(created.id).result_evidence == cancelled.result_evidence
+
+
+def test_reference_fence_claim_is_bounded_when_another_process_holds_it(
+    tmp_path, monkeypatch
+) -> None:
+    """A contended reference fence fails instead of parking the worker.
+
+    The holder is a separate process: ``flock`` is per open file description,
+    so a second descriptor in this process would succeed and never exercise the
+    contended path. It fails on the wrong implementation that calls a blocking
+    ``flock``, because that call never returns while the holder lives.
+    """
+
+    import subprocess
+    import sys
+
+    from vonk_control import artifact_blob_store
+    from vonk_control.artifact_blob_store import (
+        ArtifactBlobStore,
+        ArtifactBlobStoreError,
+    )
+
+    store = ArtifactBlobStore(tmp_path / "blobs")
+    store._prepare_root()
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import fcntl, os, sys, time\n"
+                "fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o600)\n"
+                "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+                "sys.stdout.write('held\\n'); sys.stdout.flush()\n"
+                "time.sleep(60)\n"
+            ),
+            str(store._root / ".references.lock"),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+        monkeypatch.setattr(artifact_blob_store, "_REFERENCE_LOCK_BUDGET_SECONDS", 0.2)
+        monkeypatch.setattr(artifact_blob_store, "_REFERENCE_LOCK_RETRY_SECONDS", 0.01)
+        with (
+            pytest.raises(ArtifactBlobStoreError, match="being reconciled"),
+            store.reference_attachment(),
+        ):
+            pass
+    finally:
+        holder.terminate()
+        holder.wait(timeout=10)
+
+    # With the holder gone a shared claim succeeds again.
+    with store.reference_attachment():
+        pass
+    with store.reference_reconciliation():
+        pass

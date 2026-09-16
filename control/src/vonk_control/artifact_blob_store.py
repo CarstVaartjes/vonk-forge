@@ -13,6 +13,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+# The reference fence is a short critical section around one blob verification
+# and its durable attachment, so a bounded nonblocking claim is enough: the
+# caller retries its own operation rather than parking on another process'
+# reconciliation.
+_REFERENCE_LOCK_BUDGET_SECONDS = 30.0
+_REFERENCE_LOCK_RETRY_SECONDS = 0.05
+
 
 class ArtifactBlobStoreError(ValueError):
     pass
@@ -332,19 +339,42 @@ class ArtifactBlobStore:
 
     @contextmanager
     def _reference_lock(self, *, exclusive: bool) -> Iterator[None]:
+        """Hold the shared reference fence for one bounded claim.
+
+        The fence is a kernel file lock shared with any other Controller
+        process, so it is claimed nonblockingly and retried until a bounded
+        budget expires. A caller that cannot make progress reports the
+        contention and retries its own operation instead of pinning a worker
+        thread on another process' reconciliation.
+        """
+
         self._prepare_root()
         flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(self._root / ".references.lock", flags, 0o600)
         try:
-            fcntl.flock(
-                descriptor,
-                fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH,
-            )
+            self._claim_reference_lock(descriptor, exclusive=exclusive)
             yield
         finally:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
+
+    @staticmethod
+    def _claim_reference_lock(descriptor: int, *, exclusive: bool) -> None:
+        """Acquire the reference fence nonblockingly inside a bounded budget."""
+
+        mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        deadline = time.monotonic() + _REFERENCE_LOCK_BUDGET_SECONDS
+        while True:
+            try:
+                fcntl.flock(descriptor, mode | fcntl.LOCK_NB)
+                return
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ArtifactBlobStoreError(
+                        "artifact storage references are being reconciled"
+                    ) from None
+                time.sleep(_REFERENCE_LOCK_RETRY_SECONDS)
 
     def _commit(
         self, temporary: Path, sha256: str, size_bytes: int
