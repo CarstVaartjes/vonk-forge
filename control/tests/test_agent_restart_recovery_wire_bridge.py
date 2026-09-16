@@ -394,6 +394,7 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
     first_process.stdin.close()
     partial = data_root / "distribution/models" / f"{large_digest}.partial"
     small = data_root / "distribution/models" / small_digest
+    archive = data_root / "oci-archives" / archive_digest
     try:
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
@@ -402,6 +403,7 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
                 and partial.exists()
                 and partial.stat().st_size > 0
                 and small.exists()
+                and archive.exists()
             ):
                 break
             if first_process.poll() is not None:
@@ -413,14 +415,18 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
             time.sleep(0.05)
         else:
             raise AssertionError(
-                "agent did not persist partial bytes and a completed object"
+                "agent did not persist partial bytes and completed objects"
             )
-        saved_bytes = partial.stat().st_size
-        assert 0 < saved_bytes < 6_000_000
     finally:
         first_process.kill()
         first_process.wait(timeout=5)
         server.release_partial.set()
+    # Read the checkpoint only after the writer is gone.  The agent buffers
+    # range bytes, so the partial keeps growing between the readiness check
+    # above and the kill; the resumed process resumes from the durable on-disk
+    # length, which is this post-kill size and never an earlier sample.
+    saved_bytes = partial.stat().st_size
+    assert 0 < saved_bytes < 6_000_000
 
     interrupted = _run_probe(
         restart_probe, _probe_request("recover", first, data_root, server, certs)
