@@ -1539,6 +1539,31 @@ fn validate_pki_material_at(
         .verify_signature(Some(intermediate.public_key()))
         .map_err(|_| invalid_pki("controller certificate is not signed by the intermediate"))?;
 
+    // Strict RFC 5280 verification (OpenSSL's X509_V_FLAG_X509_STRICT, enabled
+    // by default in Python 3.13+) rejects a non-self-signed certificate that
+    // omits the Authority Key Identifier.  The control plane reaches step-ca
+    // with only the root as its trust anchor, so an installed PKI group whose
+    // intermediate predates the AKI cannot complete TLS to step-ca.  Refuse it
+    // during an upgrade instead of silently installing a controller that fails
+    // every enrollment.  The root is self-signed and may legitimately omit its
+    // own AKI.
+    let root_ski = certificate_subject_key_identifier(&root);
+    let intermediate_aki = certificate_authority_key_identifier(&intermediate);
+    if intermediate_aki.is_none() || intermediate_aki != root_ski {
+        return Err(invalid_pki(
+            "intermediate certificate must carry an Authority Key Identifier that matches the \
+             root subject key identifier; regenerate the Step CA/controller PKI group",
+        ));
+    }
+    if let Some(server_aki) = certificate_authority_key_identifier(&server)
+        && Some(server_aki) != certificate_subject_key_identifier(&intermediate)
+    {
+        return Err(invalid_pki(
+            "controller certificate Authority Key Identifier must match the intermediate \
+             subject key identifier; regenerate the Step CA/controller PKI group",
+        ));
+    }
+
     let expected_hostnames = pki_hostnames(request, environment)?;
     let actual_hostnames = server
         .subject_alternative_name()
@@ -1666,6 +1691,36 @@ fn validate_es256_jwks(public: &PublicJwk, private: &PrivateJwk) -> Result<(), S
         ));
     }
     Ok(())
+}
+
+/// Return the Subject Key Identifier bytes carried by one certificate.
+fn certificate_subject_key_identifier(
+    certificate: &x509_parser::certificate::X509Certificate<'_>,
+) -> Option<Vec<u8>> {
+    certificate
+        .extensions()
+        .iter()
+        .find_map(|extension| match extension.parsed_extension() {
+            x509_parser::extensions::ParsedExtension::SubjectKeyIdentifier(value) => {
+                Some(value.0.to_vec())
+            }
+            _ => None,
+        })
+}
+
+/// Return the Authority Key Identifier bytes carried by one certificate.
+fn certificate_authority_key_identifier(
+    certificate: &x509_parser::certificate::X509Certificate<'_>,
+) -> Option<Vec<u8>> {
+    certificate
+        .extensions()
+        .iter()
+        .find_map(|extension| match extension.parsed_extension() {
+            x509_parser::extensions::ParsedExtension::AuthorityKeyIdentifier(value) => {
+                value.key_identifier.as_ref().map(|key| key.0.to_vec())
+            }
+            _ => None,
+        })
 }
 
 fn invalid_pki(message: &str) -> SetupError {
