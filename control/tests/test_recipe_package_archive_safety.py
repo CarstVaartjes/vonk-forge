@@ -1,4 +1,4 @@
-"""Adversarial archive cases for the package consumer.
+"""Adversarial and boundary archive cases for the package consumer.
 
 `RecipePackageClient._decode_package` is the only shipped code that opens a recipe
 archive somebody else produced: the Controller downloads a package published by the
@@ -9,7 +9,8 @@ front of the copy that actually parses untrusted bytes.
 
 Every case serves bytes whose declared `package.sha256` matches what is sent, so the
 transport digest check passes and any rejection has to come from the archive
-validation itself.
+validation itself. The closing group covers the resource limits that stop a published
+archive from exhausting the Controller.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from typing import Any
 
 import httpx
 import pytest
+from vonk_control import recipe_packages
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     RecipePackageClient,
@@ -110,6 +112,13 @@ def _add_member(members: list[Member], name: str, body: bytes) -> list[Member]:
     member.size = len(body)
     member.mode = 0o644
     return [*members, (member, body)]
+
+
+def _member(name: str, body: bytes) -> Member:
+    member = tarfile.TarInfo(name)
+    member.size = len(body)
+    member.mode = 0o644
+    return (member, body)
 
 
 def _reject(
@@ -369,4 +378,81 @@ def test_rejects_an_archive_without_a_recipe_json_entrypoint(
         published_package,
         _repack(_rewrite_manifest(members, mutate)),
         code="recipe_package.package_invalid",
+    )
+
+
+# --- resource limits --------------------------------------------------------------
+
+
+def test_rejects_more_members_than_the_shipped_file_count_limit(
+    tmp_path: Any,
+    published_package: tuple[dict[str, Any], dict[str, Any], bytes],
+) -> None:
+    """The first rejected count is MAX_PACKAGE_FILES + 1.
+
+    Empty members are enough to reach this limit, so it runs against the shipped
+    constant rather than a scaled copy.
+    """
+    members = [
+        _member(f"member-{index:05d}", b"")
+        for index in range(recipe_packages.MAX_PACKAGE_FILES + 1)
+    ]
+    _reject(
+        tmp_path,
+        published_package,
+        _repack(members),
+        code="recipe_package.extract_invalid",
+    )
+
+
+def test_member_size_limit_is_exclusive(
+    tmp_path: Any,
+    published_package: tuple[dict[str, Any], dict[str, Any], bytes],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A member at the limit is read; one byte more is refused.
+
+    The limit is scaled down here. Materialising the shipped 128 MiB, only to
+    prove a `>` comparison, would cost the suite a 128 MiB archive and would
+    still leave the accepted side untestable. Scaling exercises both sides of the
+    shipped comparison; the constant's own value is not asserted.
+    """
+    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_FILE_BYTES", 64)
+    _reject(
+        tmp_path,
+        published_package,
+        _repack([_member("payload.bin", b"x" * 64)]),
+        code="recipe_package.package_invalid",
+    )
+    _reject(
+        tmp_path,
+        published_package,
+        _repack([_member("payload.bin", b"x" * 65)]),
+        code="recipe_package.extract_invalid",
+    )
+
+
+def test_total_size_limit_is_exclusive(
+    tmp_path: Any,
+    published_package: tuple[dict[str, Any], dict[str, Any], bytes],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Members summing to the limit are read; one byte more is refused.
+
+    Scaled for the same reason as the per-member limit: the shipped 256 MiB is
+    not worth materialising in a unit test.
+    """
+    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_FILE_BYTES", 1024)
+    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_TOTAL_BYTES", 20)
+    _reject(
+        tmp_path,
+        published_package,
+        _repack([_member("a.bin", b"x" * 10), _member("b.bin", b"x" * 10)]),
+        code="recipe_package.package_invalid",
+    )
+    _reject(
+        tmp_path,
+        published_package,
+        _repack([_member("a.bin", b"x" * 11), _member("b.bin", b"x" * 11)]),
+        code="recipe_package.extract_invalid",
     )
