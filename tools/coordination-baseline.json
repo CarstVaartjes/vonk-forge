@@ -2,14 +2,6 @@
   "schema": 1,
   "sites": [
     {
-      "detail": "artifact locks held together: self._quota_lock, fcntl.flock",
-      "function": "reconcile",
-      "kind": "nested_artifact_lock",
-      "line": 266,
-      "path": "control/src/vonk_control/artifact_blob_store.py",
-      "reason": "Reviewed deferral: two locks are held at once, an in-process guard plus a kernel file lock. Removing the outer guard changes which writer wins a concurrent reservation, so the lock set is being reduced in its own package with its contention tests."
-    },
-    {
       "detail": "blocking artifact lock fcntl.flock",
       "function": "_reference_lock",
       "kind": "blocking_artifact_lock",
@@ -24,22 +16,6 @@
       "line": 429,
       "path": "control/src/vonk_control/artifact_blob_store.py",
       "reason": "Reviewed deferral: this file lock is a kernel-level mutual exclusion held across a potentially slow operation. Replacing it with a nonblocking claim changes the caller into a reschedule loop, so it lands with the reservation and bounded-retry protocol in its own package rather than as a flag change here."
-    },
-    {
-      "detail": "artifact locks held together: self._quota_lock, fcntl.flock",
-      "function": "_reserve",
-      "kind": "nested_artifact_lock",
-      "line": 429,
-      "path": "control/src/vonk_control/artifact_blob_store.py",
-      "reason": "Reviewed deferral: two locks are held at once, an in-process guard plus a kernel file lock. Removing the outer guard changes which writer wins a concurrent reservation, so the lock set is being reduced in its own package with its contention tests."
-    },
-    {
-      "detail": "artifact locks held together: self._identity_lock, self._removal_lock",
-      "function": "_run",
-      "kind": "nested_artifact_lock",
-      "line": 1803,
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "reason": "Reviewed deferral: two locks are held at once, an in-process guard plus a kernel file lock. Removing the outer guard changes which writer wins a concurrent reservation, so the lock set is being reduced in its own package with its contention tests."
     }
   ]
 }

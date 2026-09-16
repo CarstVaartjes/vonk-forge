@@ -186,6 +186,23 @@ _PATH_RECEIVER_SEGMENTS = frozenset(
 
 _NON_LOCK_TAILS = frozenset({"unlock", "locked", "blocking", "block"})
 
+# The architecture's artifact-lock rules are about the locks that guard
+# managed-storage bytes: at most one held at a time, acquired outside SQL, and
+# never blocking. An in-process concurrency guard is a different resource
+# class -- it serialises this process's own work (one identity's preparation,
+# the reservation quota) and is *expected* to be held while a narrower artifact
+# lock is taken, because the artifact lock is what keeps the guarded work
+# exclusive. Every name here is reviewed and must stay justified in the plan:
+# a guard that is not listed is still scanned as an artifact lock, so a new
+# lock cannot silently opt out.
+GUARD_LOCK_NAMES = frozenset(
+    {
+        "_identity_lock",
+        "_identity_locks_guard",
+        "_quota_lock",
+    }
+)
+
 # The reviewed reason recorded for each site kind still in the baseline. A new
 # site of an existing kind inherits the reason for that kind; a site that no
 # longer occurs must be deleted from the baseline, so these reasons can only
@@ -199,10 +216,9 @@ DEFAULT_REASONS = {
         "package rather than as a flag change here."
     ),
     NESTED_ARTIFACT_LOCK: (
-        "Reviewed deferral: two locks are held at once, an in-process guard "
-        "plus a kernel file lock. Removing the outer guard changes which "
-        "writer wins a concurrent reservation, so the lock set is being "
-        "reduced in its own package with its contention tests."
+        "Reviewed deferral: two artifact locks are held at once. Removing the "
+        "outer one changes which writer wins the contested resource, so the "
+        "lock set is reduced in its own package with its contention tests."
     ),
 }
 
@@ -249,8 +265,8 @@ def _transaction_context(expr: ast.expr) -> str | None:
     return None
 
 
-def _artifact_lock(expr: ast.expr) -> str | None:
-    """Return the artifact-lock context manager name, or ``None``."""
+def _lock_name(expr: ast.expr) -> str | None:
+    """Return the local lock context manager name, or ``None``."""
 
     if isinstance(expr, ast.Call):
         name = _dotted_name(expr.func)
@@ -266,6 +282,19 @@ def _artifact_lock(expr: ast.expr) -> str | None:
     if tail == "flock" or "lock" in tail:
         return name
     return None
+
+
+def _is_guard_lock(name: str) -> bool:
+    return _tail(name) in GUARD_LOCK_NAMES
+
+
+def _artifact_lock(expr: ast.expr) -> str | None:
+    """Return the artifact-lock name only when ``expr`` is not a guard."""
+
+    name = _lock_name(expr)
+    if name is None or _is_guard_lock(name):
+        return None
+    return name
 
 
 def _flock_flags(call: ast.Call) -> frozenset[str]:
