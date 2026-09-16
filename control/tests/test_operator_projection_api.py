@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import cast
+
 import pytest
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from vonk_control.agent_api import EnrollmentGrantResponse
+from vonk_control.agent_api import AgentApiServices, EnrollmentGrantResponse
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.deployment_provenance_contract import (
     DeploymentProvenance,
@@ -14,6 +18,7 @@ from vonk_control.library_api import _error as library_error
 from vonk_control.operator_projection_api import (
     FleetNodeDetailResponse,
     FleetOperatorServices,
+    _AgentEnrollmentAdapter,
     _deployment_provenance,
     _operator_error,
     build_fleet_operator_services,
@@ -232,3 +237,116 @@ def test_only_an_explicit_request_fault_is_reported_as_the_callers_error() -> No
         assert str(server.detail).startswith("stored document is invalid at ")
         # So is an unexpected failure with no client-correctable cause.
         assert mapper(RuntimeError("projection unavailable")).status_code == 503
+
+
+def test_agent_enrollment_adapter_binds_the_reviewed_display_name() -> None:
+    """The adapter must not discard the name it was asked to enroll.
+
+    ``_AgentEnrollmentAdapter.create_named`` used to call
+    ``EnrollmentService.create(None, ...)``, so the operator-supplied name was
+    never persisted as the grant's ``requested_display_name`` and the enrolling
+    node fell back to its generated node id.
+    """
+
+    class _Grant:
+        id = "grant-1"
+        expires_at = datetime(2026, 9, 10, 12, 0, tzinfo=UTC)
+        purpose = "new-node"
+        token = "t" * 43
+
+    class _EnrollmentService:
+        def __init__(self) -> None:
+            self.created: tuple[str, str, int] | None = None
+
+        def create_named(self, name: str, actor: str, ttl_seconds: int) -> _Grant:
+            self.created = (name, actor, ttl_seconds)
+            return _Grant()
+
+        def create(self, *_args: object) -> _Grant:
+            raise AssertionError("the reviewed display name must not be dropped")
+
+    enrollment = _EnrollmentService()
+    services = SimpleNamespace(
+        enrollment=enrollment,
+        bootstrap=SimpleNamespace(
+            controller_endpoint="https://controller.example.test",
+            enrollment_endpoint="https://controller.example.test/agent/enroll",
+            ca_fingerprint="a" * 64,
+            controller_address="controller.example.test",
+            service_hostnames=["controller.example.test"],
+            installer_url="https://install.vonkforge.ai/dev/spark",
+        ),
+    )
+
+    adapter = _AgentEnrollmentAdapter(cast(AgentApiServices, services))
+    result = adapter.create_named(
+        name="Living Spark", ttl_seconds=600, actor="admin", request_id="request-1"
+    )
+
+    assert enrollment.created == ("Living Spark", "admin", 600)
+    assert result["display_name"] == "Living Spark"
+
+
+def test_metrics_capabilities_forwards_the_telemetry_selectors() -> None:
+    """The capabilities route must expose the selectors its siblings accept.
+
+    ``telemetry_capabilities`` already accepted key, device_id, interface_name
+    and run_id, and ``/metrics/current`` and ``/metrics/history`` declared them,
+    but ``/metrics/capabilities`` declared only ``selector``, so the caller's
+    scope was silently ignored.
+    """
+
+    from vonk_control.fleet_projection import (
+        FleetSnapshot,
+        TelemetryCapabilitiesResponse,
+    )
+
+    from .test_metrics import NODE, _fleet_snapshot
+
+    class _Projection:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def read(self) -> FleetSnapshot:
+            return _fleet_snapshot()
+
+        def telemetry_capabilities(
+            self, node_id: str, **selectors: object
+        ) -> TelemetryCapabilitiesResponse:
+            self.calls.append({"node_id": node_id, **selectors})
+            return TelemetryCapabilitiesResponse(
+                node_id=NODE,
+                observed_at=datetime(2026, 8, 5, 12, tzinfo=UTC),
+                received_at=datetime(2026, 8, 5, 12, tzinfo=UTC),
+                freshness="live",
+                capabilities=[],
+            )
+
+    projection = _Projection()
+    app = FastAPI()
+    install_operator_projection_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("operator", "operator")),
+        fleet_projection=projection,
+        library_projection=None,
+    )
+    response = TestClient(app).get(
+        f"/api/fleet/{NODE}/metrics/capabilities",
+        params={
+            "key": "gpu.utilization",
+            "device_id": "gpu0",
+            "interface_name": "eth0",
+            "run_id": "run-1",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert projection.calls == [
+        {
+            "node_id": NODE,
+            "key": "gpu.utilization",
+            "device_id": "gpu0",
+            "interface_name": "eth0",
+            "run_id": "run-1",
+        }
+    ]
