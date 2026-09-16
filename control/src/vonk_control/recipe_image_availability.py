@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import OperationMemberProgress, OperationProgress
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -336,6 +337,48 @@ def _retryable(error: BaseException) -> bool:
     )
 
 
+def _failure_code(error: BaseException) -> str:
+    """Return the stable operation failure code for an exception.
+
+    Only the repository's own operation failures may contribute ``code``.
+    A library exception can carry an unrelated attribute of the same name --
+    ``sqlalchemy.exc.IntegrityError.code`` is the ``gkpj`` documentation slug --
+    and copying it hides the failure class behind an opaque token that matches
+    no recovery action and no operator instruction. Anything the database
+    layer raises is therefore reported by its exception class name.
+    """
+
+    code = getattr(error, "code", None)
+    if isinstance(error, SQLAlchemyError) or not isinstance(code, str) or not code:
+        return type(error).__name__.lower()
+    return code
+
+
+def _failure_detail(error: BaseException) -> str:
+    """Return operator-facing failure text, never a non-string attribute.
+
+    ``sqlalchemy.exc.StatementError`` initialises ``detail`` to an empty list,
+    so trusting the attribute records ``[]`` and discards the message, the
+    statement and the violated constraint. A driver error is reported from its
+    ``orig`` message, which names the constraint without the statement and
+    bound parameters that ``str(error)`` would bury it under.
+    """
+
+    detail = getattr(error, "detail", None)
+    if isinstance(detail, str) and detail.strip():
+        return detail
+    message: str | None = None
+    if isinstance(error, DBAPIError):
+        origin = getattr(error, "orig", None)
+        if origin is not None:
+            message = str(origin).strip() or None
+    if message is None:
+        message = str(error)
+    # Keep the class name: an opaque library message must never hide which
+    # failure was raised.
+    return f"{type(error).__name__}: {message}"
+
+
 def _retry_after(error: BaseException) -> int | None:
     value = getattr(error, "retry_after_seconds", None)
     if type(value) is int and 0 <= value <= 86_400:
@@ -345,8 +388,10 @@ def _retry_after(error: BaseException) -> int | None:
 
 def _log_excerpt(error: BaseException) -> str | None:
     value = getattr(error, "log_excerpt", None)
-    if value is None:
+    if not isinstance(value, str) or not value.strip():
         value = getattr(error, "detail", None)
+    if not isinstance(value, str) or not value.strip():
+        value = _failure_detail(error)
     if not isinstance(value, str) or not value.strip():
         return None
     return value[:1024]
@@ -2295,8 +2340,8 @@ class RecipeImageAvailabilityService:
 
     def _fail(self, operation_id: str, error: BaseException) -> None:
         retryable = _retryable(error)
-        code = getattr(error, "code", type(error).__name__.lower())
-        detail = getattr(error, "detail", str(error))
+        code = _failure_code(error)
+        detail = _failure_detail(error)
         step = getattr(error, "step", None)
         retry_after = _retry_after(error)
         preserved_retry_time = getattr(error, "retry_time", None)

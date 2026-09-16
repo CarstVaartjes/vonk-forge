@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import _build_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
+from vonk_control.failure_evidence import failure_receipt
+from vonk_control.model_cache import ModelCacheError
 from vonk_control.model_cache_progress import cache_progress
 from vonk_control.models import (
     AgentNode,
@@ -423,6 +428,154 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(
     )
     with pytest.raises(ValueError, match="requires failure evidence"):
         restarted.get(queued.id)
+
+
+def test_database_integrity_failure_names_the_violated_constraint(
+    tmp_path: Path,
+) -> None:
+    """A database failure must not be reported as SQLAlchemy's own slug.
+
+    The availability worker records the verified archive through
+    ``persist_runtime_image_receipt``, which inserts into
+    ``runtime_image_authorizations`` and flushes. When the database refuses
+    that write the raw ``sqlalchemy.exc.IntegrityError`` reaches ``_fail``.
+    That exception carries ``code = "gkpj"`` -- SQLAlchemy's documentation slug
+    -- and ``detail = []``, the empty ``StatementError.detail`` list, so a
+    reporter that trusts those attributes stores ``{"code": "gkpj",
+    "detail": "[]"}`` and the operator loses the constraint entirely.
+    """
+
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    build_id = "00000000-0000-4000-8000-000000000903"
+    with sessions.begin() as session:
+        _add_revision(session, "revision-integrity-failure", recipe)
+        session.add(AgentNode(node_id="spark-builder", state="active"))
+        session.add(
+            RecipeBuild(
+                id=build_id,
+                recipe_revision_id="revision-integrity-failure",
+                builder_node_id="spark-builder",
+                source_bundle_sha256="b" * 64,
+                build_input_sha256="f" * 64,
+                state="succeeded",
+                policy_report={},
+                plan={},
+                image_digest=IMAGE_DIGEST,
+                oci_layout_sha256=ARCHIVE_SHA,
+                image_bytes=len(ARCHIVE),
+                error=None,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+
+    def builder(*_: object, **__: object) -> dict[str, object]:
+        (storage.root / ARCHIVE_SHA).write_bytes(ARCHIVE)
+        return {
+            "state": "succeeded",
+            "build_id": build_id,
+            "build_input_sha256": "f" * 64,
+            "image_digest": IMAGE_DIGEST,
+            "oci_layout_sha256": ARCHIVE_SHA,
+            "image_bytes": len(ARCHIVE),
+        }
+
+    class BuildTransport(Transport):
+        def inspect_archive(
+            self,
+            archive: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
+        ) -> PulledImageEvidence:
+            return PulledImageEvidence(
+                manifest_digest=IMAGE_DIGEST,
+                requested_manifest_digest=None,
+                config_id=CONFIG_DIGEST,
+                local_reference="docker-archive:" + str(archive),
+                architecture=expected_architecture,
+                runtime_interface=expected_runtime_interface,
+                archive_sha256=expected_archive_sha256,
+                archive_bytes=expected_archive_bytes,
+            )
+
+    # Built exactly as the DBAPI layer builds it (``statement``, ``params``,
+    # ``orig``): the driver error is the ``orig`` the failure reporter must
+    # surface, while the SQLAlchemy wrapper contributes the empty ``detail``
+    # list and the ``gkpj`` slug that used to win.
+    def receipt_writer(*_args: object) -> None:
+        refusal = sqlite3.IntegrityError(
+            "UNIQUE constraint failed: runtime_image_authorizations."
+            "recipe_revision_id, runtime_image_authorizations."
+            "effective_execution_key, runtime_image_authorizations."
+            "oci_archive_sha256"
+        )
+        error = IntegrityError(None, None, refusal)
+        assert error.code == "gkpj"
+        assert error.detail == []
+        raise error
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe,
+            _build_runtime(),
+        ),
+        transport=BuildTransport(),
+        builder=builder,
+        receipt_writer=receipt_writer,
+        clock=lambda: datetime.now(UTC),
+        automatic_attempt_limit=1,
+    )
+    queued = service.start(
+        "revision-integrity-failure",
+        actor="operator",
+        request_id="i" * 36,
+    )
+    assert service.run_pending() == 1
+    failed = service.get(queued.id)
+    assert failed.state == "failed"
+    failure = require_mapping(failed.failure, "failure")
+    assert failure["code"] != "gkpj"
+    assert failure["code"] == "integrityerror"
+    detail = failure["detail"]
+    assert isinstance(detail, str)
+    assert detail != "[]"
+    assert "UNIQUE constraint failed" in detail
+    assert "runtime_image_authorizations" in detail
+    excerpt = failure["log_excerpt"]
+    assert isinstance(excerpt, str) and "UNIQUE constraint failed" in excerpt
+    view = _view_document(failed)
+    assert view.failure is not None
+    assert view.failure.code == "integrityerror"
+    # The operator-facing evidence bundle reuses this contract, so it must
+    # carry the failure instead of a summary of "[]". Its own line sanitizer
+    # still redacts this particular line -- ``_SECRET_LINE`` matches the bare
+    # substring ``authorization`` inside the ``runtime_image_authorizations``
+    # table name -- which is a separate sanitizer decision, so only the
+    # persisted failure detail above is asserted to name the constraint.
+    receipt = failure_receipt(failure)
+    assert receipt.error_code == "integrityerror"
+    assert receipt.summary != "[]"
+    assert receipt.summary
+
+
+def test_model_cache_error_coerces_a_non_string_detail() -> None:
+    """``str(error)`` must never become ``[]`` for a model cache failure."""
+
+    # A caller can reach this with a sequence at runtime even though the
+    # parameter is declared as text; the constructor must not store it as is.
+    error = ModelCacheError("model_cache.rate_limited", cast("str", []))
+    assert isinstance(error.detail, str)
+    assert error.detail == "[]"
+    assert str(error) == "[]"
 
 
 def test_build_mode_dispatches_when_no_verified_build_receipt_exists(

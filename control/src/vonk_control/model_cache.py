@@ -113,7 +113,10 @@ class ModelCacheError(RuntimeError):
         recovery: str | None = None,
     ) -> None:
         self.code = code
-        self.detail = detail[:512]
+        # Coerce before bounding: a caller that passes a sequence would
+        # otherwise leave a non-string in place, and the ``str(error)``
+        # fallback every failure path uses would then read ``[]``.
+        self.detail = str(detail)[:512]
         self.retry_after_seconds = retry_after_seconds
         self.recovery = recovery
         super().__init__(self.detail)
