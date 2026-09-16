@@ -236,6 +236,20 @@ both. Converting them to bounded nonblocking claims needs a caller-side
 reschedule loop per site plus its contention test, so it belongs in its own
 package taken one site at a time rather than as a flag sweep.
 
+## Where the lock guarantees are proven
+
+The three nonblocking claims are proven in the **lane tier**, in
+`control/tests/test_os_lock_contention.py`, because `flock` semantics are the
+guarantee: the holder runs as a **separate process** (a second descriptor in the
+same process would succeed, since `flock` is per open file description), the
+claim must return inside its budget, and the release must restore availability.
+A mocked acquisition would establish nothing. Run them with `-m lane` in
+OrbStack or the designated Linux lane; they pass there in about a second.
+
+The static rules stay in the fast tier, in
+`control/tests/test_coordination_boundaries.py`, because they are pure syntax
+tree analysis.
+
 ## Evidence of success
 
 Validate complete interactions under contention, process death, lost responses,
