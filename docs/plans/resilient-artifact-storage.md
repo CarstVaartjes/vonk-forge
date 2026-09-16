@@ -1,11 +1,17 @@
 # Approach to resilient Controller integrations
 
-Status: approved direction. Phase 1 is implemented: the coordination
+Status: approved direction. Both phases are implemented. The coordination
 boundaries are machine-checked by
 `control/tests/coordination_boundaries.py` and its shrink-only baseline
-`tools/coordination-baseline.json`, and the four audited SQL-over-storage
-edges are closed. Phase 2 (artifact availability and local checkpoints moving
-from SQL to managed storage) remains pending.
+`tools/coordination-baseline.json`, which is now empty: the four audited
+SQL-over-storage edges are closed, and every audited artifact lock is either a
+bounded nonblocking claim with a contention test or a descriptor the scanner
+proves no other caller can contend for. Phase 2 (artifact availability and local
+checkpoints moving from SQL to managed storage) moved model object availability
+and the runtime-image receipt to managed storage and verified that the
+`recipe_builds` half needs no cutover. This is repository and CI evidence;
+deployed Controller recovery and physical Spark acceptance remain separate,
+unexercised boundaries.
 
 This is a high-level approach, not a task breakdown. The
 [architecture overview](../architecture-overview.md) owns the strict state,
@@ -69,11 +75,11 @@ cannot replace a design that prevents cycles.
 `control/tests/coordination_boundaries.py` now enforces the two provable rules:
 a SQL transaction never spans external work, and an artifact lock is acquired
 outside a transaction, nonblockingly, and one at a time. CI runs it, and
-`tools/coordination-baseline.json` records the remaining sites with a written
+`tools/coordination-baseline.json` records accepted exceptions with a written
 reason under a gate that fails on both a new site and a stale entry. The
-blocking `fcntl.flock` acquisitions and the nested lock pairs still listed
-there are the next coordination package: a nonblocking claim needs a
-reschedule protocol, not a flag change.
+baseline is now empty: every audited site is either converted to a bounded
+nonblocking claim with a contention test, or proven in the syntax tree to hold
+a descriptor no other caller can contend for.
 
 Keep failures local to the affected request, object, source, or target.
 Independent eligible work continues. Recovery uses bounded concurrency and
@@ -115,8 +121,8 @@ replay merely because artifact preparation supports recovery.
 
 The bounded cutover is:
 
-1. **Model object availability.** An object's verification receipt moves to
-   managed storage beside the bytes it describes. SQL keeps the logical
+1. **Model object availability.** Implemented. An object's verification receipt
+   moved to managed storage beside the bytes it describes. SQL keeps the logical
    `model_cache_sets` membership that binds a profile to an exact artifact-set
    digest, and the `model_cache_artifacts` table is deleted with its model,
    schema entry, and test fixtures. An object whose receipt is absent is
@@ -187,54 +193,54 @@ The bounded cutover is:
    `test_agent_api.py`, and `test_availability_production.py` consumers updated
    in the same commit.
 
-## Remaining coordination work: the blocking file locks
+## Disposition of the audited lock sites
 
-One baseline site remains after `route_runtime._locked` and
-`runtime_image_preparation.pull_and_export` were converted and the scanner
-learned to tell an in-process guard from an artifact lock and a private
-descriptor from a shared one (see below). The audit is worth recording because
-the first reading -- "flip them all to `LOCK_NB`" -- was wrong for almost
-every one of them.
+The baseline holds no sites. The audit is worth recording because the first
+reading -- "flip them all to `LOCK_NB`" -- was wrong for almost every one of
+them. Each site is a **cross-process serialization lock on one named resource**,
+not an artifact lock waiting on another artifact lock, and each ended in one of
+two states.
 
-Each remaining site is a **cross-process serialization lock on one named
-resource**, not an artifact lock waiting on another artifact lock:
+Converted to a bounded nonblocking claim, each with a contention test that holds
+the lock from a separate process:
 
+* `route_runtime._locked` serialized route publication with an unbounded
+  blocking acquisition. It now claims the lock with `LOCK_NB` inside a bounded
+  budget and reports contention to its caller, which retries the whole
+  publication through normal reconciliation.
+* `runtime_image_preparation.pull_and_export` serializes writers of one OCI
+  index across worker processes. The claim is now `LOCK_NB` inside a bounded
+  budget, and contention raises a retryable
+  `runtime_image.transfer_contended` failure so the operation is rescheduled
+  instead of parking a preparation slot across a network transfer. This is the
+  one site where removing the wait does not weaken a fence, because the caller
+  already replays the whole preparation.
 * `artifact_blob_store._reference_lock` is taken by `reference_attachment()`
   (shared) and `reference_reconciliation()` (exclusive), and the attachment form
   is deliberately held across a blob verification *and* its durable database
-  attachment so a reconciler cannot reclaim a blob between the two. Making it
-  nonblocking would break that fence; the correct nonblocking shape needs the
-  caller to abandon and replay the upload, which is a protocol change rather
-  than a flag change.
-* `artifact_blob_store._reserve` blocks on a reservation file lock. **Resolved
-  in the scanner**: the descriptor comes from an `O_EXCL` create, so it names a
-  file only this call can hold and the lock can never contend. The scanner now
-  proves that from the syntax tree instead of reporting every blocking `flock`,
-  with tests for the private descriptor, the shared descriptor, and the
-  nonblocking shared descriptor. Quota arithmetic is unchanged.
-* `route_runtime._locked` serialized route publication with an unbounded
-  blocking acquisition. **Converted**: it now claims the lock with `LOCK_NB`
-  inside a bounded budget and reports contention to its caller, which retries
-  the whole publication through normal reconciliation. A contention test holds
-  the lock from a separate process and proves the claim returns instead of
-  parking a worker thread.
-* `runtime_image_preparation.pull_and_export` serializes writers of one OCI
-  index across worker processes. **Converted**: the claim is now `LOCK_NB`
-  inside a bounded budget, and contention raises a retryable
-  `runtime_image.transfer_contended` failure so the operation is rescheduled
-  instead of parking a preparation slot across a network transfer. A second
-  mutation test confirms the removal of the blocking acquisition: this is the
-  one site where removing the wait does not weaken a fence, because the caller
-  already replays the whole preparation.
-* `recipe_image_availability._run` holds an in-process identity guard while
-  taking the removal lock; the two are related guards rather than two artifact
-  locks.
+  attachment so a reconciler cannot reclaim a blob between the two. The fence
+  still spans both steps; only the acquisition changed. It now claims inside a
+  bounded budget and reports contention as an `ArtifactBlobStoreError`, which
+  the upload route returns as a 409 conflict so the caller abandons and replays
+  the upload, and which a scheduled reconciliation pass surfaces to its caller
+  rather than parking a worker on another process' reconciliation. That
+  caller-side replay is what makes the nonblocking shape safe here, which is why
+  this site needed a protocol answer rather than a flag change.
 
-What the coordination rules actually require of these is that no such wait sits
-inside a SQL transaction or waits on a child, and the scanner already enforces
-both. Converting them to bounded nonblocking claims needs a caller-side
-reschedule loop per site plus its contention test, so it belongs in its own
-package taken one site at a time rather than as a flag sweep.
+Proven in the syntax tree to be uncontended, so the scanner accepts them:
+
+* `artifact_blob_store._reserve` blocks on a reservation file lock. The
+  descriptor comes from an `O_EXCL` create, so it names a file only this call
+  can hold and the lock can never contend. The scanner proves that from the
+  syntax tree instead of reporting every blocking `flock`, with tests for the
+  private descriptor, the shared descriptor, and the nonblocking shared
+  descriptor. Quota arithmetic is unchanged.
+* `recipe_image_availability._run` holds an in-process identity guard while
+  taking the removal lock; the scanner tells such a guard from an artifact lock,
+  because the two are related guards rather than two artifact locks.
+
+What the coordination rules require of these is that no such wait sits inside a
+SQL transaction or waits on a child, and the scanner enforces both.
 
 ## Where the lock guarantees are proven
 
@@ -244,7 +250,10 @@ guarantee: the holder runs as a **separate process** (a second descriptor in the
 same process would succeed, since `flock` is per open file description), the
 claim must return inside its budget, and the release must restore availability.
 A mocked acquisition would establish nothing. Run them with `-m lane` in
-OrbStack or the designated Linux lane; they pass there in about a second.
+OrbStack or the designated Linux lane; they pass there in about a second. The
+complete control suite in CI does not filter the marker, so the `control-suite`
+shards also run them on `ubuntu-24.04`; `-m "not lane"` describes the local fast
+tier, not a CI omission.
 
 The static rules stay in the fast tier, in
 `control/tests/test_coordination_boundaries.py`, because they are pure syntax
