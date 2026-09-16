@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None:
+def test_control_wheel_packages_current_runtime_assets(tmp_path: Path) -> None:
     subprocess.run(
         [
             "uv",
@@ -31,7 +31,10 @@ def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None
     with zipfile.ZipFile(wheel) as archive:
         members = set(archive.namelist())
 
-    assert "vonk_control/schemas/test-report-v1.schema.json" in members
+    # The test report is a canonical Pydantic contract now, so the retired
+    # hand-written runtime schema is no longer packaged.
+    assert "vonk_control/schemas/test-report-v1.schema.json" not in members
+    assert "vonk_control/schema_resources.py" not in members
     assert (
         not {
             "vonk_control/schemas/catalog-entity-v1.schema.json",
@@ -43,6 +46,7 @@ def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None
         & members
     )
     assert "vonk_control/schemas/recipe-v1.schema.json" not in members
+    assert "vonk_control/alembic.ini" in members
 
     fixture = tmp_path / "synthetic-canonical-recipe.json"
     fixture.write_bytes(
@@ -55,13 +59,14 @@ def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None
             sys.executable,
             "-c",
             (
-                "import json,sys;"
-                "sys.path.insert(0,sys.argv[1]);"
-                "from jsonschema import Draft202012Validator;"
-                "from vonk_forge_contracts import RecipeDefinition;"
-                "from vonk_control.schema_resources import read_runtime_schema;"
-                "RecipeDefinition.model_validate(json.load(open(sys.argv[2], encoding='utf-8')));"
-                "Draft202012Validator.check_schema(json.loads(read_runtime_schema('test-report-v1.schema.json')))"
+                "import json, sys\n"
+                "sys.path.insert(0, sys.argv[1])\n"
+                "from vonk_forge_contracts import RecipeDefinition, TestReport\n"
+                "from vonk_control import catalog_revision_contract, catalog_service\n"
+                "RecipeDefinition.model_validate("
+                "json.load(open(sys.argv[2], encoding='utf-8')))\n"
+                "assert catalog_revision_contract.TestReport is TestReport\n"
+                "assert catalog_service.TestReport is TestReport\n"
             ),
             str(wheel),
             str(fixture),

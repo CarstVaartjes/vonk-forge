@@ -81,7 +81,6 @@ COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
 COPY control/src ./src
 COPY control/alembic.ini ./alembic.ini
 COPY control/migrations ./migrations
-COPY schemas/global/test-report-v1.schema.json /schemas/global/test-report-v1.schema.json
 COPY --from=web /web/dist ./src/vonk_control/web
 COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/
 RUN apt-get update \

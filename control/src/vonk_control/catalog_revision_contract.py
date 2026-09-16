@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
-from functools import lru_cache
 from typing import TYPE_CHECKING, Literal
 
-from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import ConfigDict, Field, ValidationError
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.build_import import RecipeBuildOptions
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    TestReport,
+    content_sha256,
+)
 from vonk_forge_contracts.model import ModelIdentity
 from vonk_forge_contracts.recipe import RecipeTopology
 
 from .bounded_json import require_mapping
-from .schema_resources import read_runtime_schema
 from .strict_json import StrictJSONModel, serialize_json_value
 
 if TYPE_CHECKING:
@@ -57,7 +58,7 @@ class _CatalogRevisionProjection(StrictJSONModel):
     package_handle: RecipePackageHandleProjection | None = None
     release_version: str | None = None
     release_released_at: str | None = None
-    test_report: dict[str, object] | None = None
+    test_report: TestReport | None = None
 
 
 class BuildResourcesProjection(StrictJSONModel):
@@ -130,13 +131,6 @@ def _json(value: object) -> bytes:
         ) from error
 
 
-@lru_cache(maxsize=1)
-def _test_report_validator() -> Draft202012Validator:
-    schema = json.loads(read_runtime_schema("test-report-v1.schema.json"))
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
-
-
 def read_catalog_projection(
     revision: CatalogDocumentRevision,
 ) -> ModelRevisionProjection | RecipeRevisionProjection:
@@ -164,10 +158,6 @@ def read_catalog_projection(
                 )
             ):
                 raise ValueError("source-build projection is incomplete")
-            if parsed.test_report is not None and not _test_report_validator().is_valid(
-                json.loads(_json(parsed.test_report))
-            ):
-                raise ValueError("catalog test report projection is invalid")
         return parsed
     except (TypeError, ValueError, ValidationError) as error:
         raise CatalogRevisionContractError(
@@ -193,10 +183,6 @@ def write_catalog_projection(
             raise ValueError("catalog projection kind is required")
     except (TypeError, ValueError, ValidationError) as error:
         raise CatalogRevisionContractError("catalog projection is invalid") from error
-    if parsed.test_report is not None and not _test_report_validator().is_valid(
-        json.loads(_json(parsed.test_report))
-    ):
-        raise CatalogRevisionContractError("catalog test report projection is invalid")
     return dict(
         require_mapping(
             serialize_json_value(parsed), "catalog projection is not a JSON object"
