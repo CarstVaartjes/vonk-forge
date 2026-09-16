@@ -103,12 +103,24 @@ struct DeadlineRunner {
 
 impl DeadlineRunner {
     fn record(&self, arguments: &[String], timeout: Duration) {
-        for phase in ["load", "build", "push"] {
-            if arguments.iter().any(|value| value == phase) {
-                self.timeouts.borrow_mut().push((phase.to_owned(), timeout));
-                break;
-            }
-        }
+        // The adaptation is a second, ordered build stage. Name it separately
+        // so the deadline test proves the adapter stage shares the one recipe
+        // deadline instead of recording two indistinguishable builds.
+        let phase = if arguments.iter().any(|value| value == "load") {
+            "load"
+        } else if arguments
+            .iter()
+            .any(|value| value.starts_with("--unit=vonk-runtime-adapter-"))
+        {
+            "adapt"
+        } else if arguments.iter().any(|value| value == "build") {
+            "build"
+        } else if arguments.iter().any(|value| value == "push") {
+            "push"
+        } else {
+            return;
+        };
+        self.timeouts.borrow_mut().push((phase.to_owned(), timeout));
     }
 }
 
@@ -340,7 +352,7 @@ impl ProcessRunner for Runner {
         {
             b"10.89.0.2\n".to_vec()
         } else if arguments.iter().any(|value| value == "inspect") {
-            b"linux\tarm64\tv1\t10001:10001\n".to_vec()
+            inspect_fixture(arguments.last().map(String::as_str).unwrap_or_default())
         } else {
             Vec::new()
         };
@@ -435,6 +447,39 @@ fn adapter_fixture() -> RecipeBuildAdapter {
     RecipeBuildAdapter {
         adapter_sha256,
         definition,
+    }
+}
+
+/// The two references one build produces: the recipe image is the adaptation
+/// stage's input, and the adapted image is the exported artifact.
+const RECIPE_BUILD_TAG_PREFIX: &str = "localhost/vonk/recipe-build-";
+const ADAPTED_BUILD_TAG_PREFIX: &str = "localhost/vonk/runtime-adapter-";
+
+fn recipe_build_tag(operation: Uuid) -> String {
+    format!("{RECIPE_BUILD_TAG_PREFIX}{operation}")
+}
+
+fn adapted_build_tag(operation: Uuid) -> String {
+    format!("{ADAPTED_BUILD_TAG_PREFIX}{operation}")
+}
+
+/// Scripted `podman image inspect` output for one build reference.
+///
+/// The recipe image legitimately lacks the adapter labels, so its template
+/// fields render as Go's `<no value>`. The adapted image is the one that must
+/// carry the interface label, the resolved adapter identity and the adapter's
+/// runtime user; returning those only for the adapted reference is what lets
+/// the tests distinguish an applied adaptation from a skipped one.
+fn inspect_fixture(reference: &str) -> Vec<u8> {
+    if reference.starts_with(ADAPTED_BUILD_TAG_PREFIX) {
+        let adapter = adapter_fixture();
+        format!(
+            "linux\tarm64\tv1\t{}\t{}\t{}\n",
+            adapter.definition.adapter_id, adapter.adapter_sha256, adapter.definition.image_user
+        )
+        .into_bytes()
+    } else {
+        b"linux\tarm64\t<no value>\t<no value>\t<no value>\t10001:10001\n".to_vec()
     }
 }
 
@@ -1231,13 +1276,108 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
             }
         }
     }
+    // The recipe image is only the adaptation stage's input.  The exported
+    // artifact must be the adapted image, and the adaptation must be the one
+    // reviewed stage that installs the interface label, the adapter identity
+    // and the runtime user.
+    let adapter = adapter_fixture();
+    // Image references are keyed by the request's build id; the transient unit
+    // names and the private build root are keyed by the operation id.
+    let build_id = build_request.build_id;
+    let adapter_unit = format!("--unit=vonk-runtime-adapter-{operation}");
+    let adapter_build_index = calls
+        .iter()
+        .position(|call| call.1.iter().any(|value| value == &adapter_unit))
+        .expect("the resolved adapter must run as its own ordered build stage");
+    let adapter_build = &calls[adapter_build_index];
+    assert_eq!(adapter_build.0, Program::SystemdRun);
+    assert!(
+        calls
+            .iter()
+            .position(|call| call.1.iter().any(|value| value == "build"))
+            .unwrap()
+            < adapter_build_index,
+        "the recipe image must be built before the adapter is applied"
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.1.iter().any(|value| value == "build"))
+            .count(),
+        2,
+        "exactly one recipe build stage plus one ordered adapter stage"
+    );
+    assert!(
+        adapter_build.1.iter().any(|value| value == "--build-arg")
+            && adapter_build
+                .1
+                .iter()
+                .any(|value| value == &format!("VONK_RECIPE_IMAGE={}", recipe_build_tag(build_id))),
+        "the adaptation stage must build from the verified recipe image"
+    );
+    for label in [
+        "--label=ai.vonkforge.runtime-interface=v1".to_owned(),
+        format!(
+            "--label=ai.vonkforge.runtime-adapter={}",
+            adapter.definition.adapter_id
+        ),
+        format!(
+            "--label=ai.vonkforge.runtime-adapter-sha256={}",
+            adapter.adapter_sha256
+        ),
+    ] {
+        assert!(
+            adapter_build.1.iter().any(|value| value == &label),
+            "the adapted image must carry {label}"
+        );
+    }
+    assert!(
+        adapter_build
+            .1
+            .iter()
+            .any(|value| value == "--cap-drop=all")
+            && adapter_build
+                .1
+                .iter()
+                .any(|value| value == "--security-opt=no-new-privileges"),
+        "the adapter stage keeps the fail-closed build envelope"
+    );
+    for reference in [recipe_build_tag(build_id), adapted_build_tag(build_id)] {
+        assert!(
+            calls.iter().any(|call| {
+                call.1.iter().any(|value| value == "inspect")
+                    && call.1.iter().any(|value| value == &reference)
+            }),
+            "each build stage image must be inspected before it is trusted"
+        );
+        assert!(
+            calls.iter().any(|call| {
+                call.1.windows(2).any(|pair| pair == ["image", "rm"])
+                    && call.1.iter().any(|value| value == &reference)
+            }),
+            "{reference} must not survive the build"
+        );
+    }
+    let push = calls
+        .iter()
+        .find(|call| call.1.iter().any(|value| value == "push"))
+        .unwrap();
+    assert!(
+        push.1
+            .iter()
+            .any(|value| value == &adapted_build_tag(build_id)),
+        "only the adapted image may be exported"
+    );
+    assert!(
+        !push
+            .1
+            .iter()
+            .any(|value| value == &recipe_build_tag(build_id)),
+        "the un-adapted recipe image must never leave the builder"
+    );
     assert!(
         Path::new(
-            calls
-                .iter()
-                .find(|call| call.1.iter().any(|value| value == "push"))
-                .unwrap()
-                .1
+            push.1
                 .last()
                 .unwrap()
                 .strip_prefix("docker-archive:")
@@ -1293,7 +1433,7 @@ fn import_build_and_export_share_the_recipe_deadline() {
             .iter()
             .map(|(phase, _)| phase.as_str())
             .collect::<Vec<_>>(),
-        ["load", "build", "push"]
+        ["load", "build", "adapt", "push"]
     );
     assert!(timeouts.iter().all(|(_, timeout)| {
         *timeout > Duration::ZERO
@@ -1397,6 +1537,36 @@ fn fresh_node_produces_verified_exact_digest_oci_archive_before_offline_build() 
         .position(|(_, arguments)| arguments.iter().any(|value| value == "build"))
         .unwrap();
     assert!(load < build);
+    // The offline build still ends in the reviewed adaptation stage, and the
+    // verified artifact is the adapted image.
+    let operation = Uuid::parse_str("00000000-0000-4000-8000-00000000000a").unwrap();
+    let adapter_build = calls
+        .iter()
+        .position(|(_, arguments)| {
+            arguments
+                .iter()
+                .any(|value| value == &format!("--unit=vonk-runtime-adapter-{operation}"))
+        })
+        .unwrap();
+    assert!(build < adapter_build);
+    assert!(
+        calls[adapter_build]
+            .1
+            .iter()
+            .any(|value| value == "--build-arg")
+            && calls[adapter_build].1.iter().any(|value| value
+                == &format!(
+                    "VONK_RECIPE_IMAGE={}",
+                    recipe_build_tag(build_request.build_id)
+                )),
+        "the adaptation stage must build from the recipe image"
+    );
+    assert!(
+        calls.iter().any(|(_, arguments)| arguments
+            .iter()
+            .any(|value| value == &adapted_build_tag(build_request.build_id))),
+        "the exported image must be the adapted one"
+    );
     assert!(calls.iter().all(|(_, arguments)| {
         !arguments.iter().any(|value| value == "pull")
             && !arguments.iter().any(|value| value == "--pull")
@@ -2111,6 +2281,28 @@ fn build_routes_declared_public_hosts_through_an_ephemeral_internal_proxy() {
             .iter()
             .any(|value| value == "HTTP_PROXY=http://10.89.0.2:18080")
     );
+    let adapter_build = calls
+        .iter()
+        .find(|(_, arguments)| {
+            arguments
+                .iter()
+                .any(|value| value == &format!("--unit=vonk-runtime-adapter-{operation}"))
+        })
+        .expect("the adapter is applied as its own ordered stage");
+    assert!(
+        adapter_build
+            .1
+            .iter()
+            .any(|value| value == "--network=none"),
+        "the adapter stage installs from the local recipe image and needs no egress"
+    );
+    assert!(
+        adapter_build
+            .1
+            .iter()
+            .all(|value| !value.contains("HTTP_PROXY") && !value.contains("HTTPS_PROXY")),
+        "the declared public hosts must not leak into the adapter stage"
+    );
     assert!(
         calls
             .iter()
@@ -2240,6 +2432,23 @@ fn build_rejects_a_docker_archive_larger_than_declared_output_limit() {
     .unwrap_err();
 
     assert!(matches!(error, RecipeBuildError::OutputLimit));
+    let calls = runner.calls.borrow();
+    assert!(
+        calls.iter().any(|(_, arguments)| arguments
+            .iter()
+            .any(|value| value == &format!("--unit=vonk-runtime-adapter-{operation}"))),
+        "the limit is checked on the exported adapted image, so the adaptation must have run"
+    );
+    let push = calls
+        .iter()
+        .find(|(_, arguments)| arguments.iter().any(|value| value == "push"))
+        .unwrap();
+    assert!(
+        push.1
+            .iter()
+            .any(|value| value == &adapted_build_tag(build_request.build_id)),
+        "the oversize export must be the adapted image, not its recipe input"
+    );
 }
 
 #[test]
