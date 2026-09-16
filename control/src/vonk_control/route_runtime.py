@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -24,6 +25,12 @@ from vonk_agent_protocol.route_activation import (
     ActivationMarker,
     SupervisorAcknowledgement,
 )
+
+# A publication claim is a short critical section, so a bounded nonblocking
+# claim is enough: the reconciler retries the whole publication, which is safer
+# than parking a worker thread on a contended file lock.
+_PUBLICATION_LOCK_BUDGET_SECONDS = 30.0
+_PUBLICATION_LOCK_RETRY_SECONDS = 0.05
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 RECIPE_ROUTE_AUTHORITY_ID = str(
@@ -417,27 +424,54 @@ class AtomicRouteBundlePublisher:
 
     @contextmanager
     def _locked(self):
-        try:
-            import fcntl
+        """Hold the publication lock for one bounded claim.
 
-            path = self._root / ".publication.lock"
+        The lock is a kernel file lock shared with any other publication
+        process, so it is claimed nonblockingly and retried with a short sleep
+        until the bounded budget expires. A publication that cannot make
+        progress returns to its caller instead of pinning a worker thread
+        indefinitely, and the caller's normal reconciliation retries the whole
+        publication.
+        """
+
+        try:
             descriptor = os.open(
-                path,
+                self._root / ".publication.lock",
                 os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
                 0o600,
             )
+        except OSError as error:
+            raise RouteRuntimeError("route publication lock is unavailable") from error
+        try:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 raise RouteRuntimeError("route publication lock is unsafe")
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            self._claim_publication_lock(descriptor)
         except RouteRuntimeError:
+            os.close(descriptor)
             raise
         except Exception as error:
+            os.close(descriptor)
             raise RouteRuntimeError("route publication lock is unavailable") from error
         try:
             yield
         finally:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
+
+    def _claim_publication_lock(self, descriptor: int) -> None:
+        """Acquire the publication lock nonblockingly inside a bounded budget."""
+
+        deadline = time.monotonic() + _PUBLICATION_LOCK_BUDGET_SECONDS
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise RouteRuntimeError(
+                        "route publication lock is held by another publisher"
+                    ) from None
+                time.sleep(_PUBLICATION_LOCK_RETRY_SECONDS)
 
     def _activate(
         self,

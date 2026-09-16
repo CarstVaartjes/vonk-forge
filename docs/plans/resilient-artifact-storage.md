@@ -189,9 +189,9 @@ The bounded cutover is:
 
 ## Remaining coordination work: the blocking file locks
 
-Seven baseline sites remain, and the audit that classified them is worth
-recording because the first reading -- "flip them to `LOCK_NB`" -- is wrong for
-every one of them.
+Six baseline sites remain after `route_runtime._locked` was converted (see
+below), and the audit that classified them is worth recording because the first
+reading -- "flip them all to `LOCK_NB`" -- is wrong for most of them.
 
 Each remaining site is a **cross-process serialization lock on one named
 resource**, not an artifact lock waiting on another artifact lock:
@@ -207,7 +207,12 @@ resource**, not an artifact lock waiting on another artifact lock:
   lock together. The reservation lock already uses `LOCK_NB` on its inspection
   path; the acquisition path blocks, and that is what keeps the quota
   arithmetic exact.
-* `route_runtime._locked` serializes route publication.
+* `route_runtime._locked` serialized route publication with an unbounded
+  blocking acquisition. **Converted**: it now claims the lock with `LOCK_NB`
+  inside a bounded budget and reports contention to its caller, which retries
+  the whole publication through normal reconciliation. A contention test holds
+  the lock from a separate process and proves the claim returns instead of
+  parking a worker thread.
 * `runtime_image_preparation.pull_and_export` serializes writers of one OCI
   index, which is why it must hold across worker processes.
 * `recipe_image_availability._run` holds an in-process identity guard while

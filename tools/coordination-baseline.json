@@ -43,14 +43,6 @@
     },
     {
       "detail": "blocking artifact lock fcntl.flock",
-      "function": "_locked",
-      "kind": "blocking_artifact_lock",
-      "line": 431,
-      "path": "control/src/vonk_control/route_runtime.py",
-      "reason": "Reviewed deferral: this file lock is a kernel-level mutual exclusion held across a potentially slow operation. Replacing it with a nonblocking claim changes the caller into a reschedule loop, so it lands with the reservation and bounded-retry protocol in its own package rather than as a flag change here."
-    },
-    {
-      "detail": "blocking artifact lock fcntl.flock",
       "function": "pull_and_export",
       "kind": "blocking_artifact_lock",
       "line": 191,
