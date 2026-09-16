@@ -484,3 +484,56 @@ def test_the_guard_list_does_not_hide_an_unlisted_lock_under_an_artifact_lock() 
             "artifact locks held together: self.artifact_lock, self.unlisted_lock",
         )
     ]
+
+
+def test_a_blocking_flock_on_an_exclusive_create_file_is_allowed() -> None:
+    """``O_EXCL`` makes the lock private, so its flags cannot contend.
+
+    ``os.open(..., os.O_EXCL)`` either creates the file or fails, so the
+    descriptor belongs to this call alone and no other process can already hold
+    it. It fails on the wrong implementation that reports every blocking
+    ``flock`` without proving the descriptor can contend.
+    """
+
+    assert (
+        _scanned(
+            _wrap(
+                """\
+                    descriptor = os.open(
+                        'reserve', os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600
+                    )
+                    fcntl.flock(descriptor, fcntl.LOCK_EX)
+                """
+            )
+        )
+        == []
+    )
+
+
+def test_a_blocking_flock_on_a_shared_file_is_still_a_site() -> None:
+    """Without ``O_EXCL`` the file may be shared, so the lock can contend."""
+
+    assert _scanned(
+        _wrap(
+            """\
+                descriptor = os.open('shared', os.O_RDWR | os.O_CREAT, 0o600)
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            """
+        )
+    ) == [(BLOCKING_ARTIFACT_LOCK, 21, "blocking artifact lock fcntl.flock")]
+
+
+def test_a_nonblocking_flock_on_a_shared_file_is_allowed() -> None:
+    """The escape is only for provably private descriptors, not for LOCK_NB."""
+
+    assert (
+        _scanned(
+            _wrap(
+                """\
+                    descriptor = os.open('shared', os.O_RDWR | os.O_CREAT, 0o600)
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                """
+            )
+        )
+        == []
+    )
