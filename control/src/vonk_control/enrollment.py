@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import logging
 import re
 import secrets
 import threading
@@ -45,6 +46,8 @@ from .recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from .route_runtime import RECIPE_ROUTE_AUTHORITY_ID
+
+_LOGGER = logging.getLogger(__name__)
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -359,6 +362,16 @@ class EnrollmentService:
             try:
                 issued = self._authority.issue_node(claim.node_id, claim.csr_pem, now)
             except Exception as error:
+                # The client only learns that issuance is uncertain.  Operators
+                # still need the provider cause and traceback to reconcile a
+                # stuck node, keyed by the node identity that owns the claim.
+                # The grant token and CSR never appear in the message or the
+                # provider error, and the client-facing detail is unchanged.
+                _LOGGER.exception(
+                    "agent certificate issuance failed for node %s",
+                    claim.node_id,
+                    extra={"failure_type": type(error).__name__},
+                )
                 raise EnrollmentIssuanceUncertain(
                     "certificate issuance is uncertain; manual recovery required"
                 ) from error
