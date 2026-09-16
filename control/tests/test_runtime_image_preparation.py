@@ -1615,3 +1615,68 @@ def test_runtime_image_storage_types_only_clean_absence_as_cache_missing(
     with pytest.raises(RuntimeImagePreparationError) as unsafe:
         storage.verify_existing(digest, 4)
     assert unsafe.value.code == "runtime_image.archive_mismatch"
+
+
+def test_registry_layer_lock_claim_is_bounded_when_another_writer_holds_it(
+    tmp_path, monkeypatch
+) -> None:
+    """A contended OCI layer lock fails retryably instead of parking the worker.
+
+    The holder is a separate process: ``flock`` is per open file description,
+    so a second descriptor in this process would succeed and never exercise the
+    contended path. It fails on the wrong implementation that calls a blocking
+    ``flock``, because that call never returns while the holder lives.
+    """
+
+    import subprocess
+    import sys
+
+    from vonk_control import runtime_image_preparation
+
+    lock_path = tmp_path / "layer.lock"
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import fcntl, os, sys, time\n"
+                "fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o600)\n"
+                "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+                "sys.stdout.write('held\\n'); sys.stdout.flush()\n"
+                "time.sleep(60)\n"
+            ),
+            str(lock_path),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+        monkeypatch.setattr(
+            runtime_image_preparation, "_REGISTRY_LAYER_LOCK_BUDGET_SECONDS", 0.2
+        )
+        monkeypatch.setattr(
+            runtime_image_preparation, "_REGISTRY_LAYER_LOCK_RETRY_SECONDS", 0.01
+        )
+        with (
+            lock_path.open("a+b") as lock,
+            pytest.raises(
+                RuntimeImagePreparationError, match="same OCI index"
+            ) as failure,
+        ):
+            runtime_image_preparation._claim_registry_layer_lock(
+                lock, reference="registry.example/vonk/tiny"
+            )
+        # The failure is retryable, so the preparation operation reschedules.
+        assert failure.value.retryable is True
+        assert failure.value.recovery_actions == ("retry",)
+    finally:
+        holder.terminate()
+        holder.wait(timeout=10)
+
+    # With the holder gone the same claim succeeds.
+    with lock_path.open("a+b") as lock:
+        runtime_image_preparation._claim_registry_layer_lock(
+            lock, reference="registry.example/vonk/tiny"
+        )
