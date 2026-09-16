@@ -189,10 +189,11 @@ The bounded cutover is:
 
 ## Remaining coordination work: the blocking file locks
 
-Five baseline sites remain after `route_runtime._locked` and
-`runtime_image_preparation.pull_and_export` were converted (see below), and the
+Two baseline sites remain after `route_runtime._locked` and
+`runtime_image_preparation.pull_and_export` were converted and the scanner
+learned to tell an in-process guard from an artifact lock (see below), and the
 audit that classified them is worth recording because the first reading --
-"flip them all to `LOCK_NB`" -- is wrong for most of them.
+"flip them all to `LOCK_NB`" -- is wrong for both.
 
 Each remaining site is a **cross-process serialization lock on one named
 resource**, not an artifact lock waiting on another artifact lock:

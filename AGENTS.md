@@ -259,6 +259,11 @@ the pyright baseline: an unreviewed site fails, a baseline site that no longer
 occurs fails as stale, and every entry carries a written reason. A stale entry
 means the boundary now holds, so the entry is deleted rather than explained.
 Run `--write-baseline` after a fix to see exactly which entries disappeared.
+The scanner's one-lock and nesting rules apply to locks that guard managed
+storage. An in-process concurrency guard -- one that serialises this process's
+own work -- is a different resource class and is listed by name in
+`GUARD_LOCK_NAMES` with its justification in the plan; a lock that is not listed
+is still scanned as an artifact lock, so a new lock cannot silently opt out.
 
 There is no separate ESLint or Prettier configuration. TypeScript formatting
 follows the surrounding files, and `npm run build` is the type gate.

@@ -18,6 +18,7 @@ import pytest
 from .coordination_boundaries import (
     BASELINE_PATH,
     BLOCKING_ARTIFACT_LOCK,
+    GUARD_LOCK_NAMES,
     NESTED_ARTIFACT_LOCK,
     SQL_TRANSACTION_SPANS_ARTIFACT_LOCK,
     SQL_TRANSACTION_SPANS_EXTERNAL_WORK,
@@ -380,3 +381,106 @@ def test_rendered_baseline_round_trips() -> None:
     )
     assert document["schema"] == 1
     assert document["sites"] == [site.identity | {"reason": "reviewed"}]
+
+
+def test_an_in_process_guard_plus_an_artifact_lock_is_allowed() -> None:
+    """A concurrency guard is a different resource class from an artifact lock.
+
+    It fails on the wrong implementation that treats every ``*lock*`` name as
+    an artifact lock, which flags the reviewed service guards and forces the
+    working locking code to be restructured to satisfy a heuristic.
+    """
+
+    assert (
+        _scanned(
+            _wrap(
+                """\
+                    with self._identity_lock(identity):
+                        with self.removal_lock:
+                            persist()
+                """
+            )
+        )
+        == []
+    )
+    assert (
+        _scanned(
+            _wrap(
+                """\
+                    with self._quota_lock():
+                        with self.reservation_lock:
+                            reserve()
+                """
+            )
+        )
+        == []
+    )
+
+
+def test_an_unlisted_lock_is_still_scanned_as_an_artifact_lock() -> None:
+    """A new lock name cannot silently opt out of the artifact-lock rules."""
+
+    assert _scanned(
+        _wrap(
+            """\
+                with self.artifact_lock:
+                    with self.unreviewed_guard_lock:
+                        pass
+            """
+        )
+    ) == [
+        (
+            NESTED_ARTIFACT_LOCK,
+            21,
+            "artifact locks held together: self.artifact_lock, self.unreviewed_guard_lock",
+        )
+    ]
+
+
+def test_the_guard_names_stay_documented() -> None:
+    """Every guard name must be one the plan justifies, not a stray entry."""
+
+    assert GUARD_LOCK_NAMES == {
+        "_identity_lock",
+        "_identity_locks_guard",
+        "_quota_lock",
+    }
+
+
+def test_the_guard_list_does_not_hide_an_unlisted_lock_under_an_artifact_lock() -> None:
+    """A guard name exempts only that name, and the exemption is documented.
+
+    The deliberate limit is that an unlisted lock nested inside a *listed*
+    guard is not reported as nesting, because the guard is not tracked as a
+    held artifact lock. This test pins that limit so widening the list is a
+    visible decision rather than a silent one.
+    """
+
+    assert (
+        _scanned(
+            _wrap(
+                """\
+                    with self._identity_lock(identity):
+                        with self.unlisted_lock:
+                            pass
+                """
+            )
+        )
+        == []
+    )
+    # The same unlisted lock under an artifact lock is still a violation.
+    assert _scanned(
+        _wrap(
+            """\
+                with self.artifact_lock:
+                    with self.unlisted_lock:
+                        pass
+                """
+        )
+    ) == [
+        (
+            NESTED_ARTIFACT_LOCK,
+            21,
+            "artifact locks held together: self.artifact_lock, self.unlisted_lock",
+        )
+    ]
