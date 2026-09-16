@@ -295,11 +295,21 @@ class OperationDetailResponse(StrictModel):
     provenance: OperationEvidenceProvenance | None = None
     evidence_download: OperationEvidenceDownload | None = None
     recovery: OperationRecovery | None = None
+    #: Why this operation is not currently progressing.  A refused claim
+    #: records the refusing check here so an operator can tell "no work" apart
+    #: from "work this node may not execute, and why".
+    status_reason: str | None = Field(default=None, max_length=1024)
 
     @model_serializer(mode="wrap")
     def _serialize_without_unset_evidence(self, handler):
         document = handler(self)
-        for key in ("failure", "provenance", "evidence_download", "recovery"):
+        for key in (
+            "failure",
+            "provenance",
+            "evidence_download",
+            "recovery",
+            "status_reason",
+        ):
             if document.get(key) is None:
                 document.pop(key, None)
         return document
@@ -920,6 +930,7 @@ def _operation_item(
             else None
         ),
         "state": operation.state,
+        "status_reason": operation.status_reason,
         "updated_at": _aware(operation.updated_at).isoformat(),
     }
 
@@ -952,6 +963,9 @@ def operation_detail_response(
         failure=failure,
         provenance=_provenance_projection(result, operation_id),
         evidence_download=_evidence_download_projection(result, operation_id),
+        status_reason=_optional_text(
+            item.get("status_reason"), "operation status reason is invalid"
+        ),
         recovery=recovery_for_operation(
             state,
             supported_actions=item.get("supported_actions"),

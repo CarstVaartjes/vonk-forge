@@ -3932,6 +3932,8 @@ export interface components {
             schema_version: 2;
             /** State */
             state: string;
+            /** Status Reason */
+            status_reason?: string | null;
             /** Updated At */
             updated_at?: string | null;
         };

@@ -2511,6 +2511,7 @@ class RecipeOperationService:
                                 )
                             ),
                             "cancel_actor": job.actor,
+                            "cancel_requested_at": _aware(now).isoformat(),
                             "reason": "recipe Controller cache removal cancelled the build",
                         },
                     )
@@ -3209,6 +3210,7 @@ class RecipeOperationService:
                         "cancel_requested": True,
                         "cancel_request_id": request_id,
                         "cancel_actor": actor,
+                        "cancel_requested_at": _aware(now).isoformat(),
                         "reason": reason,
                     },
                 )

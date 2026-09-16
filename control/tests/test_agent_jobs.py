@@ -2187,3 +2187,269 @@ def test_lease_only_wire_heartbeat_retains_measured_progress(
         assert attempt.progress["members"] == []
         assert attempt.progress["total_bytes_known"] is False
         assert "total_bytes" not in attempt.progress
+
+
+def _supersede_waiting_mutation(
+    sessions, clock, parent_job, operation, *, cancel_requested_at: str | None
+) -> None:
+    """Leave one issued order waiting for a cancellation it can never receive.
+
+    A ``waiting-for-operator`` operation has no live attempt, so the agent can
+    never deliver the cancellation receipt the mutating gate otherwise waits
+    for.  The parent has already recorded ``cancel_requested``; the timestamp is
+    what authorises its bounded cleanup window and is exactly what the buggy
+    writers omitted.
+    """
+
+    with sessions.begin() as session:
+        stored = session.get(AgentOperation, operation.id)
+        old_parent = session.get(Job, parent_job.id)
+        assert stored is not None and old_parent is not None
+        stored.state = "waiting-for-operator"
+        stored.current_attempt = 1
+        stored.status_reason = "operation outcome uncertain"
+        session.add(
+            AgentOperationAttempt(
+                operation_id=stored.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=clock.now + timedelta(minutes=1),
+                agent_certificate_serial="serial-a",
+                state="waiting-for-operator",
+            )
+        )
+        old_parent.state = "running"
+        old_parent.result = {
+            "cancel_requested": True,
+            "cancel_request_id": str(uuid.uuid4()),
+            "cancel_actor": "controller",
+            "reason": "superseded by newer workload intent",
+            **(
+                {}
+                if cancel_requested_at is None
+                else {"cancel_requested_at": cancel_requested_at}
+            ),
+        }
+
+
+def _enqueue_successor_mutation(jobs, sessions, clock):
+    with sessions.begin() as session:
+        session.get(AgentNode, NODE_A).workload_intent_ordinal = 2
+    successor_parent = parent(sessions, clock)
+    with sessions.begin() as session:
+        session.get(Job, successor_parent.id).payload = {"workload_intent_ordinal": 2}
+    return jobs.enqueue(
+        successor_parent.id,
+        NODE_A,
+        ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
+        COMMIT,
+        {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+    )
+
+
+@pytest.mark.parametrize(
+    "cancel_requested_at",
+    [None, "expired"],
+    ids=["disarmed", "expired"],
+)
+def test_superseded_waiting_mutation_is_reconciled_and_stops_blocking(
+    service, cancel_requested_at
+) -> None:
+    """A cancelled order that can never report back must not wedge the node.
+
+    The old order is waiting for a cancellation receipt, but a
+    ``waiting-for-operator`` operation has no live attempt to fence.  When its
+    cancellation is disarmed (no parseable ``cancel_requested_at``) or past its
+    authorised cleanup window, the wait has no bound, so the claim path drives
+    it to its known terminal state instead of blocking later mutations forever.
+    """
+
+    jobs, sessions, clock = service
+    old_parent = parent(sessions, clock)
+    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    requested_at = (
+        None
+        if cancel_requested_at is None
+        else (clock.now - timedelta(seconds=700)).isoformat()
+    )
+    _supersede_waiting_mutation(
+        sessions, clock, old_parent, old, cancel_requested_at=requested_at
+    )
+    new = _enqueue_successor_mutation(jobs, sessions, clock)
+
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+
+    assert claim is not None
+    assert claim.operation_id == new.id
+    with sessions() as session:
+        reconciled = session.get(AgentOperation, old.id)
+        assert reconciled is not None
+        assert reconciled.state == "cancelled"
+        assert reconciled.status_reason is not None
+        assert "superseded by workload intent 2" in reconciled.status_reason
+        assert "intent 1 cancelled" in reconciled.status_reason
+        assert (
+            "cancel_requested_at missing or unparseable"
+            if cancel_requested_at is None
+            else "cancellation cleanup deadline elapsed"
+        ) in reconciled.status_reason
+    assert job_state(sessions, old_parent.id).state == "cancelled"
+
+
+def test_disarmed_cancellation_records_the_defect(service) -> None:
+    """A flag without a usable timestamp disarms cleanup; say so loudly."""
+
+    jobs, sessions, clock = service
+    old_parent = parent(sessions, clock)
+    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    _supersede_waiting_mutation(
+        sessions, clock, old_parent, old, cancel_requested_at=None
+    )
+    _enqueue_successor_mutation(jobs, sessions, clock)
+
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is not None
+
+    assert (
+        job_state(sessions, old_parent.id).status_reason
+        == "cancel_requested carried no cancel_requested_at; the superseded "
+        "order was reconciled to cancelled"
+    )
+
+
+def test_live_cancellation_still_blocks_later_work(service) -> None:
+    """A cancellation inside its cleanup window still fences later mutations."""
+
+    jobs, sessions, clock = service
+    old_parent = parent(sessions, clock)
+    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    _supersede_waiting_mutation(
+        sessions,
+        clock,
+        old_parent,
+        old,
+        cancel_requested_at=clock.now.isoformat(),
+    )
+    new = _enqueue_successor_mutation(jobs, sessions, clock)
+
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        blocked = session.get(AgentOperation, new.id)
+        waiting = session.get(AgentOperation, old.id)
+        assert blocked is not None and blocked.state == "queued"
+        assert waiting is not None and waiting.state == "waiting-for-operator"
+
+
+
+def test_live_prior_mutation_still_blocks_later_work(service) -> None:
+    jobs, sessions, clock = service
+    old_parent = parent(sessions, clock)
+    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert first is not None and first.operation_id == old.id
+    clock.advance(seconds=1)
+    new_parent = parent(sessions, clock)
+    new = jobs.enqueue(new_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        blocked = session.get(AgentOperation, new.id)
+        running = session.get(AgentOperation, old.id)
+        assert blocked is not None and blocked.state == "queued"
+        assert running is not None and running.state == "running"
+
+
+def test_claim_refusal_records_capability_reason(service) -> None:
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+
+    assert (
+        claim_agent(
+            jobs, NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1"]
+        )
+        is None
+    )
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        job = session.get(Job, parent_job.id)
+        assert stored is not None and stored.status_reason is not None
+        assert "capability-unadvertised" in stored.status_reason
+        assert "recipe.stop" in stored.status_reason
+        assert job is not None and job.status_reason == stored.status_reason
+
+    # Recording the refusal must not wedge the operation: a capable claim wins.
+    recovered = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert recovered is not None and recovered.operation_id == operation.id
+    with sessions() as session:
+        assert session.get(AgentOperation, operation.id).status_reason is None
+
+
+def test_claim_refusal_records_parent_state_reason(service) -> None:
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    with sessions.begin() as session:
+        session.get(Job, parent_job.id).state = "succeeded"
+
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.status_reason is not None
+        assert "parent-not-claimable" in stored.status_reason
+        assert "succeeded" in stored.status_reason
+
+
+def test_excluded_work_refusal_names_both_ordinals(service) -> None:
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    with sessions.begin() as session:
+        session.get(AgentNode, NODE_A).workload_intent_ordinal = 2
+
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.status_reason is not None
+        assert "workload-intent-superseded" in stored.status_reason
+        assert "operation_intent=1" in stored.status_reason
+        assert "node_intent=2" in stored.status_reason
+
+
+def test_excluded_work_refusal_records_a_cancelled_parent(service) -> None:
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    with sessions.begin() as session:
+        session.get(Job, parent_job.id).result = {"cancel_requested": True}
+
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.status_reason is not None
+        assert "parent-cancel-requested" in stored.status_reason
+
+
+def test_no_work_claim_records_no_refusal(service) -> None:
+    jobs, sessions, clock = service
+
+    # An empty node has nothing to explain, and a completed operation is not
+    # "work this node may not execute", so neither case writes a reason.
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+    jobs.succeed(claim, STOP_RESULT)
+
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        assert session.scalars(select(AgentOperation)).all() != []
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.status_reason is None
