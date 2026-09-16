@@ -5430,6 +5430,61 @@
       "title": "PythonRuntimeMetadata",
       "type": "object"
     },
+    "RecipeBuildAdapter": {
+      "additionalProperties": false,
+      "description": "The adaptation stage applied after the recipe image is built.\n\n``adapter_sha256`` is the canonical digest of ``definition``.  The agent\nre-derives it from the received definition and refuses to adapt when they\ndisagree, so a Controller/agent drift cannot silently install a different\nadaptation than the one the prepared-image identity recorded.",
+      "properties": {
+        "adapter_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Sha256",
+          "type": "string"
+        },
+        "definition": {
+          "$ref": "#/$defs/RecipeBuildAdapterDefinition"
+        }
+      },
+      "required": [
+        "adapter_sha256",
+        "definition"
+      ],
+      "title": "RecipeBuildAdapter",
+      "type": "object"
+    },
+    "RecipeBuildAdapterDefinition": {
+      "additionalProperties": false,
+      "description": "One reviewed, digest-identified platform adaptation of a built image.\n\nThe recipe Dockerfile owns the pinned upstream runtime, compilation, model\npatches and engine arguments.  The platform owns the final Vonk contract\nlayered on top of that built image: the ``ai.vonkforge.runtime-interface``\nlabel, the canonical ``/opt/vonk/bin/<engine>`` launcher and the runtime\nuser/ownership.  Hosting that in one reviewed adapter instead of recipe\nboilerplate requires an identity that changes when the adaptation changes,\nso this definition -- not the compatible ``v1`` label -- is what the digest\ncovers.  ``containerfile`` is the rendered, ordered adaptation stage and is\nthe only content the builder executes.",
+      "properties": {
+        "adapter_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+          "title": "Adapter Id",
+          "type": "string"
+        },
+        "containerfile": {
+          "maxLength": 65536,
+          "minLength": 1,
+          "title": "Containerfile",
+          "type": "string"
+        },
+        "engine": {
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Engine",
+          "type": "string"
+        },
+        "image_user": {
+          "pattern": "^[1-9][0-9]*(:[1-9][0-9]*)?$",
+          "title": "Image User",
+          "type": "string"
+        }
+      },
+      "required": [
+        "adapter_id",
+        "containerfile",
+        "engine",
+        "image_user"
+      ],
+      "title": "RecipeBuildAdapterDefinition",
+      "type": "object"
+    },
     "RecipeBuildAdditionalContext": {
       "additionalProperties": false,
       "properties": {
@@ -6049,6 +6104,9 @@
     "RecipeBuildRequest": {
       "additionalProperties": false,
       "properties": {
+        "adapter": {
+          "$ref": "#/$defs/RecipeBuildAdapter"
+        },
         "arguments": {
           "items": {
             "$ref": "#/$defs/RecipeBuildArgument"
@@ -6157,6 +6215,7 @@
         }
       },
       "required": [
+        "adapter",
         "arguments",
         "base_image_storage_bytes",
         "base_images",
@@ -11103,6 +11162,8 @@
     "PackageRollbackAuthority": "vonk_agent_protocol.package_upgrade.PackageRollbackAuthority",
     "PackageRollbackSource": "vonk_agent_protocol.package_upgrade.PackageRollbackSource",
     "PythonRuntimeMetadata": "vonk_agent_protocol.workload_packages.PythonRuntimeMetadata",
+    "RecipeBuildAdapter": "vonk_agent_protocol.build_import.RecipeBuildAdapter",
+    "RecipeBuildAdapterDefinition": "vonk_agent_protocol.build_import.RecipeBuildAdapterDefinition",
     "RecipeBuildAdditionalContext": "vonk_agent_protocol.build_import.RecipeBuildAdditionalContext",
     "RecipeBuildArgument": "vonk_agent_protocol.build_import.RecipeBuildArgument",
     "RecipeBuildBaseImage": "vonk_agent_protocol.build_import.RecipeBuildBaseImage",
@@ -11267,6 +11328,8 @@
     "PackageRollbackAuthority": "#/$defs/PackageRollbackAuthority",
     "PackageRollbackSource": "#/$defs/PackageRollbackSource",
     "PythonRuntimeMetadata": "#/$defs/PythonRuntimeMetadata",
+    "RecipeBuildAdapter": "#/$defs/RecipeBuildAdapter",
+    "RecipeBuildAdapterDefinition": "#/$defs/RecipeBuildAdapterDefinition",
     "RecipeBuildAdditionalContext": "#/$defs/RecipeBuildAdditionalContext",
     "RecipeBuildArgument": "#/$defs/RecipeBuildArgument",
     "RecipeBuildBaseImage": "#/$defs/RecipeBuildBaseImage",

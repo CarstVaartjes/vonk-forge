@@ -43,10 +43,17 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runtime_adapters import resolve_runtime_adapter
 
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
+)
+
+_BUILD_ADAPTER = (
+    resolve_runtime_adapter("vllm", {"mode": "single"})
+    .to_wire()
+    .model_dump(mode="json")
 )
 
 NODE_A = "spk_" + "a" * 32
@@ -879,6 +886,7 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
     payload = {
         "schema_version": 1,
         "kind": "recipe.build.v1",
+        "adapter": _BUILD_ADAPTER,
         "build_id": build_id,
         "recipe_revision_id": revision_id,
         "recipe_content_sha256": "a" * 64,
@@ -1027,6 +1035,7 @@ def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) ->
     payload = {
         "schema_version": 1,
         "kind": "recipe.build.v1",
+        "adapter": _BUILD_ADAPTER,
         "build_id": build_id,
         "recipe_revision_id": revision_id,
         "recipe_content_sha256": "a" * 64,

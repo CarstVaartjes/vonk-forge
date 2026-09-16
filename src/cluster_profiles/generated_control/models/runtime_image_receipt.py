@@ -52,6 +52,8 @@ class RuntimeImageReceipt:
             schema_version (Literal[2]):
             source (RuntimeImageReceiptSource):
             build_input_sha256 (Union[None, Unset, str]):
+            runtime_adapter (Union[None, Unset, str]):
+            runtime_adapter_sha256 (Union[None, Unset, str]):
      """
 
     architecture: Literal['linux-arm64']
@@ -73,6 +75,8 @@ class RuntimeImageReceipt:
     schema_version: Literal[2]
     source: RuntimeImageReceiptSource
     build_input_sha256: Union[None, Unset, str] = UNSET
+    runtime_adapter: Union[None, Unset, str] = UNSET
+    runtime_adapter_sha256: Union[None, Unset, str] = UNSET
 
 
 
@@ -125,6 +129,18 @@ class RuntimeImageReceipt:
         else:
             build_input_sha256 = self.build_input_sha256
 
+        runtime_adapter: Union[None, Unset, str]
+        if isinstance(self.runtime_adapter, Unset):
+            runtime_adapter = UNSET
+        else:
+            runtime_adapter = self.runtime_adapter
+
+        runtime_adapter_sha256: Union[None, Unset, str]
+        if isinstance(self.runtime_adapter_sha256, Unset):
+            runtime_adapter_sha256 = UNSET
+        else:
+            runtime_adapter_sha256 = self.runtime_adapter_sha256
+
 
         field_dict: dict[str, Any] = {}
 
@@ -150,6 +166,10 @@ class RuntimeImageReceipt:
         })
         if build_input_sha256 is not UNSET:
             field_dict["build_input_sha256"] = build_input_sha256
+        if runtime_adapter is not UNSET:
+            field_dict["runtime_adapter"] = runtime_adapter
+        if runtime_adapter_sha256 is not UNSET:
+            field_dict["runtime_adapter_sha256"] = runtime_adapter_sha256
 
         return field_dict
 
@@ -239,6 +259,26 @@ class RuntimeImageReceipt:
         build_input_sha256 = _parse_build_input_sha256(d.pop("build_input_sha256", UNSET))
 
 
+        def _parse_runtime_adapter(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        runtime_adapter = _parse_runtime_adapter(d.pop("runtime_adapter", UNSET))
+
+
+        def _parse_runtime_adapter_sha256(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        runtime_adapter_sha256 = _parse_runtime_adapter_sha256(d.pop("runtime_adapter_sha256", UNSET))
+
+
         runtime_image_receipt = cls(
             architecture=architecture,
             archive_path=archive_path,
@@ -259,6 +299,8 @@ class RuntimeImageReceipt:
             schema_version=schema_version,
             source=source,
             build_input_sha256=build_input_sha256,
+            runtime_adapter=runtime_adapter,
+            runtime_adapter_sha256=runtime_adapter_sha256,
         )
 
         return runtime_image_receipt

@@ -207,7 +207,9 @@ def compile_runtime_spec(
         # contract; a projection without one is an internal contract failure,
         # not a runtime default.
         raise RecipeRuntimeSpecError("canonical harness telemetry is missing")
-    environment = writable_path_document(parsed.runtime.engine, projection.environment)
+    environment = writable_path_document(
+        parsed.runtime.engine, projection.environment, projection.writable_paths
+    )
     compiled_arguments = _compiled_arguments(parsed, parameters)
     runtime: dict[str, object] = {
         "interface": "vonk.runtime.v1",

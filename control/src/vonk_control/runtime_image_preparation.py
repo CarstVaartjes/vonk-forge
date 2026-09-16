@@ -36,8 +36,17 @@ from vonk_agent_protocol.wire_model import Digest, WireModel
 from vonk_forge_contracts import RecipeDefinition
 
 from .cached_file_verification import verified_files
-from .catalog_revision_contract import read_catalog_document, read_catalog_projection
+from .catalog_revision_contract import (
+    RecipeRevisionProjection,
+    read_catalog_document,
+    read_catalog_projection,
+)
 from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
+from .runtime_adapters import (
+    RuntimeAdapter,
+    RuntimeAdapterError,
+    resolve_runtime_adapter,
+)
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -436,6 +445,12 @@ class RuntimeImageReceipt(WireModel):
     # build index. It is meaningful only for a Controller build.
     build_input_sha256: Digest | None = None
     runtime_interface_label: RuntimeInterfaceLabel
+    # The resolved platform adaptation identity, keyed to the final image
+    # digest beside it. ``runtime-interface="v1"`` only marks compatibility;
+    # these two fields identify which adapter implementation produced the
+    # bytes, so an adapter change cannot read as the same prepared image.
+    runtime_adapter: str | None = Field(default=None, min_length=1, max_length=128)
+    runtime_adapter_sha256: Digest | None = None
 
     @model_validator(mode="after")
     def receipt_identity_is_consistent(self) -> RuntimeImageReceipt:
@@ -453,6 +468,12 @@ class RuntimeImageReceipt(WireModel):
             raise ValueError(
                 "Controller-build runtime image receipt provenance is invalid"
             )
+        if (self.runtime_adapter is None) != (self.runtime_adapter_sha256 is None):
+            raise ValueError("runtime image receipt adapter identity is incomplete")
+        if self.source == "published" and self.runtime_adapter is not None:
+            raise ValueError("published runtime image receipt carries an adapter")
+        if self.source == "controller-build" and self.runtime_adapter is None:
+            raise ValueError("Controller-build runtime image receipt lacks its adapter")
         return self
 
     def to_mapping(self) -> dict[str, object]:
@@ -673,14 +694,36 @@ def _authorize_current_revision(
                 "runtime_image.authorization_invalid",
                 "source-build receipt is not backed by the exact succeeded build",
             )
-        source_bundle_sha256 = read_catalog_projection(revision).source_bundle_sha256
+        projected = read_catalog_projection(revision)
+        if not isinstance(projected, RecipeRevisionProjection):
+            raise RuntimeImagePreparationError(
+                "runtime_image.authorization_invalid",
+                "current source-build recipe projection is unavailable",
+            )
         if (
-            source_bundle_sha256 is None
-            or build.source_bundle_sha256 != source_bundle_sha256
+            projected.source_bundle_sha256 is None
+            or build.source_bundle_sha256 != projected.source_bundle_sha256
         ):
             raise RuntimeImagePreparationError(
                 "runtime_image.authorization_invalid",
                 "source-build receipt does not match the current build input",
+            )
+        try:
+            current_adapter = resolve_runtime_adapter(
+                projected.runtime_engine, projected.topology
+            )
+        except RuntimeAdapterError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.authorization_invalid",
+                "current recipe has no supported runtime adapter",
+            ) from error
+        if (
+            receipt.runtime_adapter != current_adapter.adapter_id
+            or receipt.runtime_adapter_sha256 != current_adapter.digest
+        ):
+            raise RuntimeImagePreparationError(
+                "runtime_image.authorization_invalid",
+                "source-build receipt was produced by a different runtime adapter",
             )
     else:
         raise RuntimeImagePreparationError(
@@ -889,6 +932,8 @@ class FilesystemRuntimeImageStorage:
                     "runtime_interface",
                     "runtime_interface_label",
                     "build_id",
+                    "runtime_adapter",
+                    "runtime_adapter_sha256",
                 )
             ):
                 raise RuntimeImagePreparationError(
@@ -1217,6 +1262,9 @@ def prepare_runtime_image(
         )
     effective_transport = transport or SkopeoOCIImageTransport()
     if source_build:
+        resolved_adapter = resolve_runtime_adapter(
+            parsed.runtime.engine, parsed.topology
+        )
         receipt = _prepare_from_build(
             build_receipt,
             storage=storage,
@@ -1226,6 +1274,7 @@ def prepare_runtime_image(
             content_sha256=_recipe_digest(parsed),
             expected_architecture=projection["architecture"],
             expected_interface=projection["interface"],
+            adapter=resolved_adapter,
             now=now,
         )
     else:
@@ -1349,6 +1398,7 @@ def _prepare_from_build(
     content_sha256: str,
     expected_architecture: str,
     expected_interface: str,
+    adapter: RuntimeAdapter,
     now: datetime | None,
 ) -> RuntimeImageReceipt:
     value = _object_mapping(raw)
@@ -1399,6 +1449,8 @@ def _prepare_from_build(
         and cached.runtime_interface_label == expected_interface_label
         and cached.image_bytes == image_bytes
         and cached.build_id == build_id
+        and cached.runtime_adapter == adapter.adapter_id
+        and cached.runtime_adapter_sha256 == adapter.digest
         and (raw_build_input is None or cached.build_input_sha256 == raw_build_input)
     ):
         return cached
@@ -1455,6 +1507,8 @@ def _prepare_from_build(
         recorded_at=_timestamp(now),
         build_id=build_id,
         build_input_sha256=recorded_build_input,
+        runtime_adapter=adapter.adapter_id,
+        runtime_adapter_sha256=adapter.digest,
     )
     # A build receipt already points at an immutable stored archive, but still
     # update the receipt atomically so direct and source-build paths converge.

@@ -22,8 +22,12 @@ from vonk_forge_contracts.resolver import (
 )
 
 from ..runtime_writable_paths import (
+    RUNTIME_REQUIREMENT_DECLARATION,
+    RuntimeWritablePath,
     effective_environment,
     reject_recipe_environment,
+    resolve_requirements,
+    split_requirements,
     telemetry_contract,
     validate_paths,
     writable_paths,
@@ -275,13 +279,27 @@ def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str
     return tuple(result)
 
 
-def _environment(recipe: RecipeDefinition) -> tuple[tuple[str, str], ...]:
+def _environment(
+    recipe: RecipeDefinition,
+) -> tuple[tuple[tuple[str, str], ...], tuple[RuntimeWritablePath, ...]]:
+    """Compile the recipe environment plus its declared runtime requirements.
+
+    A recipe may request a platform capability by name; it never authors the
+    resolved path or its ownership.  The declaration is consumed here and the
+    resolved paths become part of the same central contract the runtime is
+    validated against.
+    """
     supplied: list[tuple[str, str]] = []
     for item in recipe.runtime.environment:
         if item.secret is not None:
             raise HarnessCompileError(
                 "runtime secret requires the platform secret projection"
             )
+        if item.name == RUNTIME_REQUIREMENT_DECLARATION:
+            supplied.append(
+                (item.name, _scalar(item.value, "runtime requirement declaration"))
+            )
+            continue
         if (
             _SAFE_ENV_NAME.fullmatch(item.name) is None
             or item.name in _PLATFORM_ENV_NAMES
@@ -293,10 +311,34 @@ def _environment(recipe: RecipeDefinition) -> tuple[tuple[str, str], ...]:
             (item.name, _scalar(item.value, f"recipe environment {item.name}"))
         )
     try:
-        reject_recipe_environment(recipe.runtime.engine, supplied)
-        return effective_environment(recipe.runtime.engine, supplied)
+        declared, remaining = split_requirements(supplied)
+        requirement_paths, requirement_environment = resolve_requirements(
+            recipe.runtime.engine, declared
+        )
+        reject_recipe_environment(recipe.runtime.engine, remaining)
+        environment = effective_environment(recipe.runtime.engine, remaining)
     except (TypeError, ValueError) as error:
         raise HarnessCompileError(str(error)) from error
+    return (
+        _merge_environment(environment, requirement_environment),
+        (
+            *writable_paths(recipe.runtime.engine),
+            *requirement_paths,
+        ),
+    )
+
+
+def _merge_environment(
+    environment: tuple[tuple[str, str], ...],
+    requirement_environment: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, str], ...]:
+    names = {name for name, _value in environment}
+    for name, _value in requirement_environment:
+        if name in names:
+            raise HarnessCompileError(
+                f"runtime requirement environment collides with the recipe: {name}"
+            )
+    return (*environment, *requirement_environment)
 
 
 def _model_mounts(
@@ -448,7 +490,7 @@ def compile_canonical_harness(
     if rank >= offset + role_decl.count or rank < offset:
         raise HarnessCompileError("mapped topology role and rank are inconsistent")
     image, image_digest = _image(recipe, package)
-    environment = _environment(recipe)
+    environment, runtime_paths = _environment(recipe)
     mounts = _model_mounts(recipe, models, role)
     command = list(_argv(recipe, _settings(recipe, settings)))
     entry = tuple(recipe.runtime.entrypoint)
@@ -478,7 +520,7 @@ def compile_canonical_harness(
     for _artifact, mount in mounts:
         if mount not in model_mounts:
             model_mounts.append(mount)
-    validate_paths(slug, writable_paths(slug), dict(environment))
+    validate_paths(slug, runtime_paths, dict(environment))
     projection = HarnessProjection(
         slug=slug,
         contract_version=1,
@@ -500,7 +542,7 @@ def compile_canonical_harness(
             else None
         ),
         environment=environment,
-        writable_paths=writable_paths(slug),
+        writable_paths=runtime_paths,
         telemetry=telemetry_contract(slug),
         read_only_root=True,
         binding=HarnessBinding(

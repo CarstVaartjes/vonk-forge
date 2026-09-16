@@ -269,6 +269,88 @@ def test_unknown_engine_values_preserve_order_and_reserved_paths_fail(
         compile_runtime_spec(reserved, models=[model], role="entrypoint", rank=0)
 
 
+def test_declared_runtime_requirement_resolves_to_platform_owned_paths(
+    model: contracts.ModelDefinition,
+) -> None:
+    raw = _example("recipe-image.json")
+    runtime = _raw_runtime(raw)
+    runtime["engine"] = "vllm"
+    runtime["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
+    runtime["environment"] = [
+        {"name": "VONK_RUNTIME_REQUIREMENTS", "value": "tilelang-cache"}
+    ]
+    recipe = contracts.RecipeDefinition.model_validate(raw)
+
+    spec = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+
+    projection = _runtime(spec)
+    paths = {
+        (item["name"], item["path"], item["persistent"])
+        for item in _mappings(projection["writable_paths"], "writable paths")
+    }
+    assert ("tilelang", "/outputs/cache/tilelang", True) in paths
+    assert ("tilelang-tmp", "/outputs/tmp/tilelang", False) in paths
+    environment = {
+        item["name"]: item["value"]
+        for item in _mappings(projection["environment"], "runtime environment")
+    }
+    assert environment["TILELANG_CACHE_DIR"] == "/outputs/cache/tilelang"
+    assert environment["TILELANG_TMP_DIR"] == "/outputs/tmp/tilelang"
+    # The platform consumes the declaration; it never reaches the engine.
+    assert "VONK_RUNTIME_REQUIREMENTS" not in environment
+
+
+def test_recipe_cannot_restate_or_move_a_platform_owned_path(
+    model: contracts.ModelDefinition,
+) -> None:
+    raw = _example("recipe-image.json")
+    runtime = _raw_runtime(raw)
+    runtime["engine"] = "vllm"
+    runtime["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
+    runtime["environment"] = [{"name": "TILELANG_CACHE_DIR", "value": "/tmp/moved"}]
+    recipe = contracts.RecipeDefinition.model_validate(raw)
+
+    with pytest.raises(RecipeRuntimeSpecError, match="platform-owned"):
+        compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+
+
+@pytest.mark.parametrize(
+    ("engine", "entrypoint", "requirement", "detail"),
+    [
+        (
+            "vllm",
+            ["/opt/vonk/bin/vllm", "serve", "/models"],
+            "not-a-requirement",
+            "unavailable",
+        ),
+        (
+            "llama-cpp",
+            ["/opt/vonk/bin/llama-server"],
+            "tilelang-cache",
+            "not supported",
+        ),
+    ],
+)
+def test_unknown_or_unsupported_runtime_requirement_is_rejected(
+    model: contracts.ModelDefinition,
+    engine: str,
+    entrypoint: list[str],
+    requirement: str,
+    detail: str,
+) -> None:
+    raw = _example("recipe-image.json")
+    runtime = _raw_runtime(raw)
+    runtime["engine"] = engine
+    runtime["entrypoint"] = entrypoint
+    runtime["environment"] = [
+        {"name": "VONK_RUNTIME_REQUIREMENTS", "value": requirement}
+    ]
+    recipe = contracts.RecipeDefinition.model_validate(raw)
+
+    with pytest.raises(RecipeRuntimeSpecError, match=detail):
+        compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+
+
 def test_canonical_argv_preserves_empty_and_repeated_options(
     model: contracts.ModelDefinition,
 ) -> None:

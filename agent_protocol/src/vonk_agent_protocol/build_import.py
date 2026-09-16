@@ -213,6 +213,47 @@ class RecipeBuildOptions(WireModel):
     unset_labels: list[MetadataName] = Field(max_length=64)
 
 
+class RecipeBuildAdapterDefinition(WireModel):
+    """One reviewed, digest-identified platform adaptation of a built image.
+
+    The recipe Dockerfile owns the pinned upstream runtime, compilation, model
+    patches and engine arguments.  The platform owns the final Vonk contract
+    layered on top of that built image: the ``ai.vonkforge.runtime-interface``
+    label, the canonical ``/opt/vonk/bin/<engine>`` launcher and the runtime
+    user/ownership.  Hosting that in one reviewed adapter instead of recipe
+    boilerplate requires an identity that changes when the adaptation changes,
+    so this definition -- not the compatible ``v1`` label -- is what the digest
+    covers.  ``containerfile`` is the rendered, ordered adaptation stage and is
+    the only content the builder executes.
+    """
+
+    adapter_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,127}$")
+    containerfile: str = Field(min_length=1, max_length=65_536)
+    engine: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,62}$")
+    image_user: str = Field(pattern=r"^[1-9][0-9]*(:[1-9][0-9]*)?$")
+
+    @model_validator(mode="after")
+    def containerfile_is_bounded_text(self) -> RecipeBuildAdapterDefinition:
+        if "\x00" in self.containerfile:
+            raise ValueError("adapter content must not contain NUL")
+        if "VONK_RECIPE_IMAGE" not in self.containerfile:
+            raise ValueError("adapter must build from the recipe image argument")
+        return self
+
+
+class RecipeBuildAdapter(WireModel):
+    """The adaptation stage applied after the recipe image is built.
+
+    ``adapter_sha256`` is the canonical digest of ``definition``.  The agent
+    re-derives it from the received definition and refuses to adapt when they
+    disagree, so a Controller/agent drift cannot silently install a different
+    adaptation than the one the prepared-image identity recorded.
+    """
+
+    adapter_sha256: Digest
+    definition: RecipeBuildAdapterDefinition
+
+
 class RecipeBuildLimits(WireModel):
     container_socket: bool
     cpu_cores: int = Field(ge=1, le=256)
@@ -227,6 +268,7 @@ class RecipeBuildLimits(WireModel):
 
 
 class RecipeBuildRequest(WireModel):
+    adapter: RecipeBuildAdapter
     arguments: list[RecipeBuildArgument] = Field(max_length=64)
     base_image_storage_bytes: int = Field(ge=0, le=16 * 1024**4)
     base_images: list[RecipeBuildBaseImage] = Field(max_length=8)

@@ -3,7 +3,7 @@
 use std::{
     fmt,
     fs::{self, File},
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom, Write},
     os::unix::{
         ffi::OsStrExt,
         fs::{MetadataExt, PermissionsExt},
@@ -17,8 +17,8 @@ use tempfile::{Builder, TempDir};
 use thiserror::Error;
 use uuid::Uuid;
 use vonk_agent_protocol::{
-    RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence, RecipeBuildPolicy,
-    RecipeBuildPolicyFinding, RecipeBuildRequest,
+    RecipeBuildAdapter, RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence,
+    RecipeBuildPolicy, RecipeBuildPolicyFinding, RecipeBuildRequest, canonical_json, hex_sha256,
 };
 
 use crate::{
@@ -32,6 +32,19 @@ use crate::{
 const MAX_EGRESS_BINARY_BYTES: u64 = 16 * 1024 * 1024;
 const MINIMUM_BUILD_DISK_RESERVE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAXIMUM_BUILD_DISK_RESERVE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+const MAXIMUM_ADAPTER_CONTAINERFILE_BYTES: usize = 65_536;
+
+/// The platform contract the adaptation stage installs.  These names are the
+/// agent's policy boundary: the OCI admission policy at run time requires the
+/// interface label, and the two adapter labels are how a prepared image proves
+/// which reviewed adaptation produced it.
+const RUNTIME_INTERFACE_LABEL: &str = "ai.vonkforge.runtime-interface";
+const RUNTIME_INTERFACE_LABEL_VALUE: &str = "v1";
+const RUNTIME_ADAPTER_LABEL: &str = "ai.vonkforge.runtime-adapter";
+const RUNTIME_ADAPTER_DIGEST_LABEL: &str = "ai.vonkforge.runtime-adapter-sha256";
+/// The adaptation stage names the recipe image through an argument so the
+/// adapter bytes -- and therefore their digest -- do not change per build.
+const ADAPTER_RECIPE_IMAGE_ARGUMENT: &str = "VONK_RECIPE_IMAGE";
 
 /// A Controller-authorized cleanup names an operation, never a host path or
 /// arbitrary service. Systemd stops the entire build cgroup before capacity is
@@ -143,6 +156,15 @@ pub enum RecipeBuildError {
     },
     #[error("built recipe image evidence is invalid")]
     ImageInspect,
+    #[error("platform runtime adapter is invalid")]
+    AdapterInvalid,
+    #[error("platform runtime adapter build failed ({diagnostic})")]
+    AdapterBuild {
+        diagnostic: PodmanBuildDiagnostic,
+        logs: Option<Box<crate::failure_evidence::FailureProcessLogs>>,
+    },
+    #[error("adapted runtime image evidence is invalid")]
+    AdapterInspect,
     #[error("Podman could not export the built recipe image")]
     ImageExport,
     #[error("build output exceeded its declared limit")]
@@ -242,6 +264,12 @@ impl RecipeBuildError {
                 "diagnostic": diagnostic.to_string(),
                 "reason": self.to_string(),
                 "stage": "image-build",
+                "diagnostic_logs": logs,
+            }),
+            Self::AdapterBuild { diagnostic, logs } => serde_json::json!({
+                "diagnostic": diagnostic.to_string(),
+                "reason": self.to_string(),
+                "stage": "runtime-adapter",
                 "diagnostic_logs": logs,
             }),
             Self::NetworkBoundary {
@@ -582,21 +610,36 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 logs: Some(Box::new(sanitized_process_logs(&output))),
             });
         }
-        let mut inspect_arguments = podman_storage_arguments(&storage, runroot.path());
-        inspect_arguments.extend([
-            "image".to_owned(),
-            "inspect".to_owned(),
-            "--format".to_owned(),
-            "{{.Os}}\t{{.Architecture}}\t{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t{{.Config.User}}".to_owned(),
-            tag.clone(),
-        ]);
-        let inspected = self.runner.run_cancellable(
-            Program::Podman,
-            &inspect_arguments,
-            Duration::from_secs(60),
+        // The recipe image is the adaptation stage's input, not the final
+        // artifact.  Verify the platform it produced, then apply the resolved
+        // platform adapter as the one reviewed, ordered step that owns the
+        // interface label, the canonical launcher and the runtime user.
+        let recipe_inspection = self.inspect_image(&storage, runroot.path(), &tag, cancelled)?;
+        inspect_recipe_image(&recipe_inspection.stdout)
+            .map_err(|_| RecipeBuildError::ImageInspect)?;
+        let adapter_context = staging.path().join("adapter-context");
+        fs::create_dir(&adapter_context)?;
+        let adapter_containerfile = adapter_context.join("Containerfile");
+        write_adapter_containerfile(&adapter_containerfile, &request.adapter)?;
+        let final_tag = format!("localhost/vonk/runtime-adapter-{}", request.build_id);
+        self.build_adaptation(
+            request,
+            &storage,
+            runroot.path(),
+            staging.path(),
+            &tag,
+            &final_tag,
+            &adapter_containerfile,
+            &adapter_context,
+            operation_id,
+            deadline,
+            minimum_free_disk_bytes,
             cancelled,
         )?;
-        inspect_image(&inspected.stdout).map_err(|_| RecipeBuildError::ImageInspect)?;
+        let adapted_inspection =
+            self.inspect_image(&storage, runroot.path(), &final_tag, cancelled)?;
+        inspect_adapted_image(&adapted_inspection.stdout, &request.adapter)
+            .map_err(|_| RecipeBuildError::AdapterInspect)?;
         let build_root = self.data_root.join("builds");
         fs::create_dir_all(&build_root)?;
         let operation_root = build_root.join(operation_id.to_string());
@@ -608,7 +651,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             "push".to_owned(),
             "--digestfile".to_owned(),
             digest_file.display().to_string(),
-            tag.clone(),
+            final_tag.clone(),
             // Spark's supported runtime is Docker. Export a docker-save
             // archive so the privileged helper can use Docker's native
             // load path without exposing the daemon to the rootless builder.
@@ -645,11 +688,13 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             return Err(RecipeBuildError::OutputLimit);
         }
         let oci_layout_sha256 = sha256_file(&layout)?;
-        let mut remove_arguments = podman_storage_arguments(&storage, runroot.path());
-        remove_arguments.extend(["image".to_owned(), "rm".to_owned(), tag]);
-        let _ = self
-            .runner
-            .run(Program::Podman, &remove_arguments, Duration::from_secs(60));
+        for reference in [final_tag, tag] {
+            let mut remove_arguments = podman_storage_arguments(&storage, runroot.path());
+            remove_arguments.extend(["image".to_owned(), "rm".to_owned(), reference]);
+            let _ = self
+                .runner
+                .run(Program::Podman, &remove_arguments, Duration::from_secs(60));
+        }
         Ok(RecipeBuildEvidence {
             build_input_sha256: request.build_input_sha256.clone(),
             image_bytes,
@@ -657,6 +702,118 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             oci_layout_sha256,
             policy: policy.into(),
         })
+    }
+
+    /// Inspect one image in this build's private storage.
+    fn inspect_image(
+        &self,
+        storage: &Path,
+        runroot: &Path,
+        reference: &str,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::process::ProcessOutput, RecipeBuildError> {
+        let mut arguments = podman_storage_arguments(storage, runroot);
+        arguments.extend([
+            "image".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            IMAGE_INSPECT_FORMAT.to_owned(),
+            reference.to_owned(),
+        ]);
+        Ok(self.runner.run_cancellable(
+            Program::Podman,
+            &arguments,
+            Duration::from_secs(60),
+            cancelled,
+        )?)
+    }
+
+    /// Apply the resolved platform adapter to the built recipe image.
+    ///
+    /// The adaptation is a real ordered build stage, not a recipe shell hook:
+    /// it builds from the recipe image through an argument, installs the
+    /// platform contract, and carries the adapter identity as labels so the
+    /// exported image can be checked against the plan.
+    #[allow(clippy::too_many_arguments)]
+    fn build_adaptation(
+        &self,
+        request: &RecipeBuildRequest,
+        storage: &Path,
+        runroot: &Path,
+        staging: &Path,
+        recipe_reference: &str,
+        final_reference: &str,
+        containerfile: &Path,
+        context: &Path,
+        operation_id: Uuid,
+        deadline: Instant,
+        minimum_free_disk_bytes: u64,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), RecipeBuildError> {
+        let mut adapter_arguments = podman_build_arguments(storage, runroot, None);
+        adapter_arguments.extend([
+            "--no-cache".to_owned(),
+            "--pull=never".to_owned(),
+            "--platform".to_owned(),
+            request.platform.clone(),
+            "--file".to_owned(),
+            containerfile.display().to_string(),
+            "--tag".to_owned(),
+            final_reference.to_owned(),
+            "--build-arg".to_owned(),
+            format!("{ADAPTER_RECIPE_IMAGE_ARGUMENT}={recipe_reference}"),
+            "--cap-drop=all".to_owned(),
+            "--security-opt=no-new-privileges".to_owned(),
+            format!("--format={}", request.options.format),
+            format!("--label={RUNTIME_INTERFACE_LABEL}={RUNTIME_INTERFACE_LABEL_VALUE}"),
+            format!(
+                "--label={RUNTIME_ADAPTER_LABEL}={}",
+                request.adapter.definition.adapter_id
+            ),
+            format!(
+                "--label={RUNTIME_ADAPTER_DIGEST_LABEL}={}",
+                request.adapter.adapter_sha256
+            ),
+        ]);
+        // The adaptation stage chowns the platform directories, so it needs the
+        // same Controller-declared build capabilities as the recipe build.  It
+        // never gains a capability the recipe build envelope did not admit.
+        for capability in &request.capabilities {
+            adapter_arguments.push(format!("--cap-add={capability}"));
+        }
+        adapter_arguments.push(context.display().to_string());
+        let timeout = remaining_build_time(deadline)?;
+        let mut arguments = podman_user_service_arguments(
+            &format!("vonk-runtime-adapter-{operation_id}"),
+            runroot,
+            staging,
+            timeout,
+            true,
+        );
+        arguments.extend([
+            format!("--property=MemoryMax={}", request.limits.memory_bytes),
+            format!(
+                "--property=CPUQuota={}%",
+                u64::from(request.limits.cpu_cores) * 100
+            ),
+            format!("--property=TasksMax={}", request.limits.processes),
+            "/usr/bin/podman".to_owned(),
+        ]);
+        arguments.extend(adapter_arguments);
+        let output = self.runner.run_with_disk_reserve_cancellable(
+            Program::SystemdRun,
+            &arguments,
+            timeout,
+            ProcessDiskReserve::new(staging, minimum_free_disk_bytes),
+            cancelled,
+        )?;
+        if !output.success {
+            return Err(RecipeBuildError::AdapterBuild {
+                diagnostic: podman_build_diagnostic(&output),
+                logs: Some(Box::new(sanitized_process_logs(&output))),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -1440,18 +1597,107 @@ fn scalar(value: &serde_json::Value) -> Result<String, RecipeBuildError> {
     }
 }
 
-fn inspect_image(payload: &[u8]) -> Result<(), RecipeBuildError> {
-    let text = std::str::from_utf8(payload).map_err(|_| RecipeBuildError::Evidence)?;
-    let fields = text.trim().split('\t').collect::<Vec<_>>();
-    if fields.len() != 4
-        || fields[0] != "linux"
-        || fields[1] != "arm64"
-        || fields[2] != "v1"
-        || !non_root_user(fields[3])
+/// One inspect template carries the platform fields the agent must verify.
+/// A recipe image legitimately lacks the adapter labels; the recipe-stage
+/// check ignores them and the adapted-stage check requires them.
+const IMAGE_INSPECT_FORMAT: &str = "{{.Os}}\t{{.Architecture}}\t\
+{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t\
+{{index .Config.Labels \"ai.vonkforge.runtime-adapter\"}}\t\
+{{index .Config.Labels \"ai.vonkforge.runtime-adapter-sha256\"}}\t{{.Config.User}}";
+
+/// Write the reviewed adaptation stage after verifying it against its plan.
+///
+/// The Controller derives ``adapter_sha256`` from the canonical definition and
+/// this re-derives it from the received bytes, so a plan cannot install a
+/// different adaptation than the one the prepared-image identity recorded.
+fn write_adapter_containerfile(
+    path: &Path,
+    adapter: &RecipeBuildAdapter,
+) -> Result<(), RecipeBuildError> {
+    let definition = &adapter.definition;
+    let canonical = canonical_json(definition).map_err(|_| RecipeBuildError::AdapterInvalid)?;
+    if hex_sha256(&canonical) != adapter.adapter_sha256 {
+        return Err(RecipeBuildError::AdapterInvalid);
+    }
+    validate_adapter_containerfile(&definition.containerfile)?;
+    let mut file = File::create(path)?;
+    file.write_all(definition.containerfile.as_bytes())?;
+    file.sync_all()?;
+    Ok(())
+}
+
+/// Refuse an adaptation stage that could escape the recipe image boundary.
+///
+/// The content is platform-authored and digest-verified, but the builder still
+/// holds the fail-closed structural line: it must build from the recipe image
+/// argument and cannot fetch remote content, add remote artifacts or mount the
+/// host.
+fn validate_adapter_containerfile(value: &str) -> Result<(), RecipeBuildError> {
+    if value.is_empty() || value.len() > MAXIMUM_ADAPTER_CONTAINERFILE_BYTES || value.contains('\0')
     {
-        return Err(RecipeBuildError::Evidence);
+        return Err(RecipeBuildError::AdapterInvalid);
+    }
+    let mut builds_from_recipe = false;
+    for line in value.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let instruction = line.to_ascii_uppercase();
+        if instruction == "ADD" || instruction.starts_with("ADD ") {
+            return Err(RecipeBuildError::AdapterInvalid);
+        }
+        if instruction.contains("--MOUNT=") || instruction.contains("--NETWORK=") {
+            return Err(RecipeBuildError::AdapterInvalid);
+        }
+        if line.contains("http://") || line.contains("https://") {
+            return Err(RecipeBuildError::AdapterInvalid);
+        }
+        if instruction.starts_with("FROM ") {
+            if builds_from_recipe
+                || line[5..].trim() != format!("${{{ADAPTER_RECIPE_IMAGE_ARGUMENT}}}")
+            {
+                return Err(RecipeBuildError::AdapterInvalid);
+            }
+            builds_from_recipe = true;
+        }
+    }
+    if !builds_from_recipe {
+        return Err(RecipeBuildError::AdapterInvalid);
     }
     Ok(())
+}
+
+fn inspect_recipe_image(payload: &[u8]) -> Result<(), RecipeBuildError> {
+    let fields = inspect_fields(payload)?;
+    if fields.len() != 6 || fields[0] != "linux" || fields[1] != "arm64" {
+        return Err(RecipeBuildError::ImageInspect);
+    }
+    Ok(())
+}
+
+fn inspect_adapted_image(
+    payload: &[u8],
+    adapter: &RecipeBuildAdapter,
+) -> Result<(), RecipeBuildError> {
+    let fields = inspect_fields(payload)?;
+    if fields.len() != 6
+        || fields[0] != "linux"
+        || fields[1] != "arm64"
+        || fields[2] != RUNTIME_INTERFACE_LABEL_VALUE
+        || fields[3] != adapter.definition.adapter_id
+        || fields[4] != adapter.adapter_sha256
+        || fields[5] != adapter.definition.image_user
+        || !non_root_user(fields[5])
+    {
+        return Err(RecipeBuildError::AdapterInspect);
+    }
+    Ok(())
+}
+
+fn inspect_fields(payload: &[u8]) -> Result<Vec<&str>, RecipeBuildError> {
+    let text = std::str::from_utf8(payload).map_err(|_| RecipeBuildError::Evidence)?;
+    Ok(text.trim().split('\t').collect())
 }
 
 fn inspect_base_image(
@@ -1493,8 +1739,12 @@ fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RecipeBuildError, podman_build_diagnostic, podman_import_process_error};
+    use super::{
+        RecipeBuildAdapter, RecipeBuildError, canonical_json, hex_sha256, podman_build_diagnostic,
+        podman_import_process_error,
+    };
     use crate::process::{ProcessError, ProcessOutput};
+    use vonk_agent_protocol::RecipeBuildAdapterDefinition;
 
     #[test]
     fn podman_failure_retains_sanitized_final_ring_output() {
@@ -1798,6 +2048,90 @@ mod tests {
             assert_eq!(evidence["diagnostic"], diagnostic);
             assert!(!evidence.to_string().contains("private"));
             assert!(!evidence.to_string().contains("secret"));
+        }
+    }
+
+    const ADAPTER_STAGE: &str = "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\nUSER 0\n\
+RUN set -eu \\\n && install --directory --owner=10001 --group=10001 /outputs \\\n \
+&& test -x /opt/vonk/bin/vllm\nUSER 10001:10001\nWORKDIR /tmp\n";
+
+    fn adapter(containerfile: &str) -> RecipeBuildAdapter {
+        let definition = RecipeBuildAdapterDefinition {
+            adapter_id: "vonk.runtime-contract.vllm.v1".to_owned(),
+            containerfile: containerfile.to_owned(),
+            engine: "vllm".to_owned(),
+            image_user: "10001:10001".to_owned(),
+        };
+        let digest = hex_sha256(&canonical_json(&definition).expect("canonical adapter"));
+        RecipeBuildAdapter {
+            adapter_sha256: digest,
+            definition,
+        }
+    }
+
+    fn inspect_payload(adapter: &RecipeBuildAdapter, user: &str, interface: &str) -> Vec<u8> {
+        format!(
+            "linux\tarm64\t{interface}\t{}\t{}\t{user}",
+            adapter.definition.adapter_id, adapter.adapter_sha256
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn adapter_stage_is_written_only_for_its_own_digest() {
+        let directory = tempfile::tempdir().expect("temporary adapter context");
+        let path = directory.path().join("Containerfile");
+        let accepted = adapter(ADAPTER_STAGE);
+        super::write_adapter_containerfile(&path, &accepted).expect("matching digest");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("written adapter"),
+            ADAPTER_STAGE
+        );
+        // The wrong implementation trusts the declared fields without
+        // re-deriving the canonical digest, so it installs a tampered stage.
+        let tampered = RecipeBuildAdapter {
+            adapter_sha256: "0".repeat(64),
+            definition: accepted.definition.clone(),
+        };
+        assert!(matches!(
+            super::write_adapter_containerfile(&path, &tampered),
+            Err(RecipeBuildError::AdapterInvalid)
+        ));
+    }
+
+    #[test]
+    fn adapter_stage_cannot_escape_the_recipe_image_boundary() {
+        for containerfile in [
+            "FROM scratch\nCOPY . /\n",
+            "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\nADD https://example.invalid/x /x\n",
+            "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\n\
+RUN --mount=type=bind,source=/,target=/host true\n",
+            "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\nRUN curl http://example.invalid/x\n",
+        ] {
+            assert!(matches!(
+                super::validate_adapter_containerfile(containerfile),
+                Err(RecipeBuildError::AdapterInvalid)
+            ));
+        }
+        super::validate_adapter_containerfile(ADAPTER_STAGE).expect("platform stage");
+    }
+
+    #[test]
+    fn adapted_image_evidence_binds_interface_adapter_and_user() {
+        let request = adapter(ADAPTER_STAGE);
+        super::inspect_adapted_image(&inspect_payload(&request, "10001:10001", "v1"), &request)
+            .expect("matching adapted evidence");
+        // The wrong implementation checks only that some label and some user
+        // exist, so a different adapter or user would be accepted.
+        for payload in [
+            inspect_payload(&request, "0:0", "v1"),
+            inspect_payload(&request, "10001:10001", "v2"),
+            b"linux\tarm64\tv1\tvonk.runtime-contract.vllm.v1\t".to_vec(),
+        ] {
+            assert!(matches!(
+                super::inspect_adapted_image(&payload, &request),
+                Err(RecipeBuildError::AdapterInspect)
+            ));
         }
     }
 }

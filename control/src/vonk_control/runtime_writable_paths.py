@@ -8,6 +8,7 @@ a recipe-local override cannot silently move writes into the image root.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -30,6 +31,46 @@ class EngineTelemetryContract:
     adapter: str
     path: str | None
     environment: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeRequirement:
+    """A named runtime capability a recipe may request by name.
+
+    A recipe that needs engine scratch space requests the requirement; it never
+    authors the host path, the environment value, or the ownership.  The
+    platform resolves the name to concrete writable paths below the output
+    mount plus the environment names that point at them, so a recipe cannot
+    move a cache root and a new engine's scratch space is one reviewed entry
+    here rather than another per-recipe list.
+    """
+
+    name: str
+    paths: tuple[RuntimeWritablePath, ...]
+    environment: tuple[tuple[str, str], ...]
+    engines: frozenset[str]
+
+
+# The one environment name a recipe may use to declare runtime requirements.
+# The platform consumes and removes it before the runtime environment is
+# serialized; it is never forwarded to the engine.
+RUNTIME_REQUIREMENT_DECLARATION = "VONK_RUNTIME_REQUIREMENTS"
+
+_RUNTIME_REQUIREMENTS: dict[str, RuntimeRequirement] = {
+    "tilelang-cache": RuntimeRequirement(
+        name="tilelang-cache",
+        paths=(
+            RuntimeWritablePath("tilelang", "/outputs/cache/tilelang", True),
+            RuntimeWritablePath("tilelang-tmp", "/outputs/tmp/tilelang", False),
+        ),
+        environment=(
+            ("TILELANG_CACHE_DIR", "/outputs/cache/tilelang"),
+            ("TILELANG_TMP_DIR", "/outputs/tmp/tilelang"),
+        ),
+        engines=frozenset({"vllm", "sglang", "tensorrt-llm"}),
+    ),
+}
+_REQUIREMENT_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 
 
 _COMMON_PATHS = (
@@ -166,14 +207,80 @@ _TELEMETRY_ENV_NAMES = frozenset(
 )
 
 
-def writable_paths(slug: str) -> tuple[RuntimeWritablePath, ...]:
-    """Return the writable directories owned by the platform harness."""
-    try:
-        return _ENGINE_PATHS[slug]
-    except KeyError as exc:
-        raise _compile_error(
-            f"runtime writable-path contract is unavailable: {slug}"
-        ) from exc
+def writable_paths(
+    slug: str, requirements: Iterable[str] = ()
+) -> tuple[RuntimeWritablePath, ...]:
+    """Return the writable directories owned by the platform harness.
+
+    The engine contract comes first and is never optional.  Declared
+    requirements append their resolved paths, so every consumer sees the exact
+    same ordered set the compiler validated.
+    """
+    base = _ENGINE_PATHS.get(slug)
+    if base is None:
+        raise _compile_error(f"runtime writable-path contract is unavailable: {slug}")
+    resolved, _environment = _requirement_resolution(slug, tuple(requirements))
+    return (*base, *resolved)
+
+
+def resolve_requirements(
+    slug: str, declared: Iterable[str]
+) -> tuple[tuple[RuntimeWritablePath, ...], tuple[tuple[str, str], ...]]:
+    """Resolve declared requirement names to platform paths and environment."""
+    return _requirement_resolution(slug, tuple(declared))
+
+
+def split_requirements(
+    supplied: Iterable[tuple[str, str]],
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    """Separate a recipe's requirement declaration from its environment.
+
+    The declaration is returned in authored order and removed from the
+    environment the runtime receives.  A repeated or malformed declaration is
+    rejected rather than merged.
+    """
+    declared: list[str] = []
+    remaining: list[tuple[str, str]] = []
+    seen = False
+    for name, value in supplied:
+        if name != RUNTIME_REQUIREMENT_DECLARATION:
+            remaining.append((name, value))
+            continue
+        if seen:
+            raise _compile_error("runtime requirement declaration is repeated")
+        seen = True
+        for item in value.split(","):
+            requirement = item.strip()
+            if _REQUIREMENT_NAME.fullmatch(requirement) is None:
+                raise _compile_error(
+                    f"runtime requirement name is invalid: {requirement}"
+                )
+            declared.append(requirement)
+    if len(set(declared)) != len(declared):
+        raise _compile_error("runtime requirement declaration is repeated")
+    return tuple(declared), tuple(remaining)
+
+
+def _requirement_resolution(
+    slug: str, declared: tuple[str, ...]
+) -> tuple[tuple[RuntimeWritablePath, ...], tuple[tuple[str, str], ...]]:
+    if not declared:
+        return (), ()
+    if slug not in _ENGINE_PATHS:
+        raise _compile_error(f"runtime writable-path contract is unavailable: {slug}")
+    paths: list[RuntimeWritablePath] = []
+    environment: list[tuple[str, str]] = []
+    for name in declared:
+        requirement = _RUNTIME_REQUIREMENTS.get(name)
+        if requirement is None:
+            raise _compile_error(f"runtime requirement is unavailable: {name}")
+        if slug not in requirement.engines:
+            raise _compile_error(
+                f"runtime requirement is not supported by this engine: {name}"
+            )
+        paths.extend(requirement.paths)
+        environment.extend(requirement.environment)
+    return tuple(paths), tuple(environment)
 
 
 def telemetry_contract(slug: str) -> EngineTelemetryContract:
@@ -284,10 +391,13 @@ def validate_paths(
 ) -> None:
     expected = writable_paths(slug)
     actual = tuple(paths)
-    if actual != expected:
+    # The engine contract is mandatory and ordered; only reviewed requirement
+    # paths may follow it.  A recipe cannot reorder, drop, or add to the base.
+    if actual[: len(expected)] != expected:
         raise _compile_error(
             "runtime writable paths are not the central engine contract"
         )
+    _validate_requirement_paths(actual[len(expected) :], env)
     if len({item.name for item in actual}) != len(actual) or len(
         {item.path for item in actual}
     ) != len(actual):
@@ -316,6 +426,29 @@ def validate_paths(
             )
 
 
+def _validate_requirement_paths(
+    extras: tuple[RuntimeWritablePath, ...], env: Mapping[str, str]
+) -> None:
+    """Accept only the exact resolved paths of declared requirements."""
+    remaining = set(extras)
+    for requirement in _RUNTIME_REQUIREMENTS.values():
+        present = [path for path in requirement.paths if path in remaining]
+        if not present:
+            continue
+        if len(present) != len(requirement.paths):
+            raise _compile_error("runtime requirement paths are incomplete")
+        for name, value in requirement.environment:
+            if env.get(name) != value:
+                raise _compile_error(
+                    f"runtime requirement environment is incomplete: {name}"
+                )
+        remaining.difference_update(requirement.paths)
+    if remaining:
+        raise _compile_error(
+            "runtime writable paths are not the central engine contract"
+        )
+
+
 def validate_telemetry(
     slug: str, telemetry: EngineTelemetryContract, env: Mapping[str, str]
 ) -> None:
@@ -330,13 +463,14 @@ def validate_telemetry(
 def document(
     slug: str,
     env: Iterable[tuple[str, str]],
+    paths: Iterable[RuntimeWritablePath] | None = None,
 ) -> list[dict[str, object]]:
     values = dict(env)
-    paths = writable_paths(slug)
-    validate_paths(slug, paths, values)
+    resolved = writable_paths(slug) if paths is None else tuple(paths)
+    validate_paths(slug, resolved, values)
     return [
         {"name": item.name, "path": item.path, "persistent": item.persistent}
-        for item in paths
+        for item in resolved
     ]
 
 

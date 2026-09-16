@@ -6014,6 +6014,10 @@ export interface components {
             recorded_at: string;
             /** Registry Manifest Digest */
             registry_manifest_digest: string | null;
+            /** Runtime Adapter */
+            runtime_adapter?: string | null;
+            /** Runtime Adapter Sha256 */
+            runtime_adapter_sha256?: string | null;
             /**
              * Runtime Interface
              * @constant

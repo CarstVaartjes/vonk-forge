@@ -45,6 +45,11 @@ from .recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
+from .runtime_adapters import (
+    RuntimeAdapter,
+    RuntimeAdapterError,
+    resolve_runtime_adapter,
+)
 from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
 from .source_policy import (
     SourcePolicyError,
@@ -77,6 +82,7 @@ def derive_build_input_identity(
     effective_settings: object | None = None,
     topology_inputs: Mapping[str, object] | None = None,
     model_artifacts: Sequence[object] | None = None,
+    runtime_adapter: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Project the exact executable inputs used to build a recipe image.
 
@@ -86,6 +92,10 @@ def derive_build_input_identity(
     selectors likewise contribute their canonical file content only when the
     caller says the build consumes those files; roles and mounts belong to the
     runtime execution identity.
+
+    The resolved runtime adapter is executable input, not provenance: the
+    platform adaptation stage runs as part of producing the final image, so an
+    adapter change must invalidate a prepared image that embeds it.
     """
     executable_fields = {
         field: copy.deepcopy(build[field])
@@ -121,7 +131,19 @@ def derive_build_input_identity(
         identity["topology_inputs"] = copy.deepcopy(dict(topology_inputs))
     if model_artifacts is not None:
         identity["model_artifacts"] = _canonical_model_build_inputs(model_artifacts)
+    if runtime_adapter is not None:
+        identity["runtime_adapter"] = copy.deepcopy(dict(runtime_adapter))
     return identity
+
+
+def _resolved_adapter(projected: RecipeRevisionProjection) -> RuntimeAdapter:
+    """Resolve the platform adaptation for a recipe or fail closed."""
+    try:
+        return resolve_runtime_adapter(
+            projected.runtime_engine, projected.topology.model_dump(mode="json")
+        )
+    except RuntimeAdapterError as error:
+        raise RecipeBuildError("build.adapter_unavailable", str(error)) from error
 
 
 def _build_effective_settings(value: object | None) -> dict[str, object] | None:
@@ -540,6 +562,7 @@ class RecipeBuildService:
             projected = _read_recipe_projection(revision)
             document = _canonical_recipe_document(revision.document)
             build = _canonical_build(document, projected)
+            adapter = _resolved_adapter(projected)
             source_sha256 = _source_bundle_handle(projected)
             if session.get(RecipeSourceBundle, source_sha256) is None:
                 raise RecipeBuildError(
@@ -589,6 +612,7 @@ class RecipeBuildService:
             effective_settings=document["settings"],
             topology_inputs=topology,
             model_artifacts=model_artifacts,
+            runtime_adapter=adapter.document(),
         )
         intent_sha256 = _digest(intent)
 
@@ -629,6 +653,7 @@ class RecipeBuildService:
                     effective_settings=document["settings"],
                     topology_inputs=topology,
                     model_artifacts=model_artifacts,
+                    runtime_adapter=adapter.document(),
                 )
                 if candidate.build_input_sha256 != _digest(exact):
                     continue
@@ -748,6 +773,7 @@ class RecipeBuildService:
             _validate_builder(node)
             document = _canonical_recipe_document(revision.document)
             build = _canonical_build(document, projected)
+            adapter = _resolved_adapter(projected)
             source_sha256 = _source_bundle_handle(projected)
             public_network = _public_build_network(build)
             # Claim capabilities describe operations; the probed egress boundary
@@ -855,6 +881,7 @@ class RecipeBuildService:
                 and not isinstance(model_inputs, (str, bytes))
                 else None
             ),
+            runtime_adapter=adapter.document(),
         )
         build_input_sha256 = _digest(build_identity)
         if resolution is not None:
@@ -886,6 +913,7 @@ class RecipeBuildService:
         payload: dict[str, object] = {
             "schema_version": 1,
             "kind": "recipe.build.v1",
+            "adapter": adapter.to_wire().model_dump(mode="json"),
             "build_id": proposed_build_id,
             "recipe_revision_id": revision.id,
             "recipe_content_sha256": revision.content_digest,

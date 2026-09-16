@@ -66,6 +66,7 @@ from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
     _bind_compiled_execution_plan,
 )
+from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptWire,
 )
@@ -1097,6 +1098,7 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         image_digest: str,
         _runtime_spec: Mapping[str, object],
     ) -> RuntimeImageReceiptWire:
+        adapter = resolve_runtime_adapter(recipe.runtime.engine, recipe.topology)
         return RuntimeImageReceiptWire(
             schema_version=2,
             source="controller-build",
@@ -1116,6 +1118,8 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
             recorded_at="2026-01-01T00:00:00+00:00",
             build_id=build.id,
             runtime_interface_label="v1",
+            runtime_adapter=adapter.adapter_id,
+            runtime_adapter_sha256=adapter.digest,
         )
 
     service = ControllerExecutionPlanService(

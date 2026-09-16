@@ -30,6 +30,7 @@ fn build_payload() -> serde_json::Value {
     json!({
         "schema_version": 1,
         "kind": "recipe.build.v1",
+        "adapter": {"adapter_sha256": "4444444444444444444444444444444444444444444444444444444444444444", "definition": {"adapter_id": "vonk.runtime-contract.vllm.v1", "containerfile": "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\n", "engine": "vllm", "image_user": "10001:10001"}},
         "build_id": "00000000-0000-4000-8000-000000000009",
         "recipe_revision_id": "00000000-0000-4000-8000-000000000001",
         "recipe_content_sha256": "a".repeat(64),
@@ -152,6 +153,23 @@ fn build_claim_matches_shared_python_rust_vectors() {
             case.name
         );
     }
+}
+
+#[test]
+fn shared_recipe_build_vector_binds_the_adapter_identity() {
+    let vectors: SharedVectors = serde_json::from_str(include_str!(
+        "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-build-claim-v1.json"
+    ))
+    .unwrap();
+    let adapter: vonk_agent_protocol::RecipeBuildAdapter =
+        serde_json::from_value(vectors.base_payload["adapter"].clone()).unwrap();
+    // The Python producer derived this digest from its canonical definition;
+    // re-deriving it here keeps the agent's independent check byte-identical
+    // with the identity the prepared-image cache was keyed by.
+    assert_eq!(
+        hex_sha256(&canonical_json(&adapter.definition).unwrap()),
+        adapter.adapter_sha256
+    );
 }
 
 #[test]
