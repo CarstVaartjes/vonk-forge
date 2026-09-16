@@ -231,6 +231,31 @@ def _lease_expiry_reason(
     return ("; ".join(parts) + "; the effect is unobserved")[:512]
 
 
+#: Every recorded claim refusal starts with this prefix.  It keeps the
+#: structured reason recognisable, and it lets the recorder replace an earlier
+#: refusal on the parent job without overwriting an unrelated domain reason.
+_CLAIM_REFUSAL_PREFIX = "claim refused: "
+_MAX_CLAIM_REFUSAL_REASON = 512
+
+
+def _claim_refusal_reason(check: str, **facts: object) -> str:
+    """Render one bounded, redacted record of why a claim was refused.
+
+    Only bounded control-plane facts belong here: the name of the refusing
+    check, the operation kind and state, attempt and ordinal integers, and
+    small state labels.  Payloads, digests, certificate material and
+    agent-supplied strings must never be passed.  The result is redacted and
+    truncated to the persisted ``status_reason`` width so a refusal cannot
+    smuggle unbounded or sensitive data onto the operator surface.
+    """
+
+    rendered = "; ".join(
+        f"{key}={value}" for key, value in facts.items() if value is not None
+    )
+    reason = _CLAIM_REFUSAL_PREFIX + check + (f" ({rendered})" if rendered else "")
+    return redact_text(reason)[:_MAX_CLAIM_REFUSAL_REASON]
+
+
 def _document(value: Mapping[str, object]) -> dict[str, object]:
     """Return the protocol's validated, deterministic JSON representation."""
     return json.loads(canonical_message(value))
@@ -478,7 +503,12 @@ class AgentJobService:
                         "cancel_requested_at": _aware(now).isoformat(),
                         "reason": "superseded by newer workload intent",
                     }
-                elif "cancel_requested_at" not in previous:
+                elif superseded_cancellation_deadline(previous) is None:
+                    # A repeated cancellation path must repair a result that
+                    # carries the flag but no usable timestamp, not merely one
+                    # with the key missing.  Without a parseable instant the
+                    # cleanup STOP can never be authorised and the operation
+                    # would wait forever.
                     parent.result = {
                         **previous,
                         "cancel_requested_at": _aware(now).isoformat(),
@@ -675,6 +705,204 @@ class AgentJobService:
                     return None
                 self._available.wait(min(remaining, _DATABASE_REPOLL_SECONDS))
 
+    def _record_claim_refusal(
+        self,
+        session: Session,
+        *,
+        operation: StoredOperation | None,
+        job_id: str | None,
+        check: str,
+        **facts: object,
+    ) -> None:
+        """Persist a bounded reason for a refused claim without changing it.
+
+        A refusal must never be silent: an operator has to be able to tell
+        "there is no work" apart from "work exists and this check refused it".
+        The reason is written to the operation, the durable per-operation
+        surface already documented as "why this operation is not currently
+        progressing", and to its parent job, the operator-facing surface the
+        jobs API returns.  Writing only on change keeps a long-polling agent
+        from turning one stuck operation into a write per poll.  The parent
+        reason is only replaced when it is absent or was itself a claim
+        refusal, so a domain reason such as "superseded by newer workload
+        intent" is never overwritten.
+        """
+
+        reason = _claim_refusal_reason(check, **facts)
+        if (
+            operation is not None
+            and operation.status_reason != reason
+            and (
+                operation.status_reason is None
+                or operation.status_reason.startswith(_CLAIM_REFUSAL_PREFIX)
+            )
+        ):
+            # A domain reason such as "retry budget exhausted" already explains
+            # why the operation is not progressing; a refusal must add evidence,
+            # never erase it.
+            operation.status_reason = reason
+        if job_id is not None:
+            job = session.get(Job, job_id)
+            if (
+                job is not None
+                and job.status_reason != reason
+                and (
+                    job.status_reason is None
+                    or job.status_reason.startswith(_CLAIM_REFUSAL_PREFIX)
+                )
+            ):
+                job.status_reason = reason
+
+    def _excluded_work_refusal(
+        self,
+        session: Session,
+        node: AgentNode,
+        now: datetime,
+    ) -> tuple[StoredOperation, str, dict[str, object]] | None:
+        """Explain why a non-terminal operation on this node was not offered.
+
+        ``_claimable_operations`` is a closed predicate.  When it matches
+        nothing, the claim path cannot tell "no work exists" from "work exists
+        and this node may not execute it now", which is exactly the silent
+        wedge an operator cannot diagnose.  This read-only probe re-evaluates
+        the same conditions for the oldest non-terminal operation so the
+        refusal can be recorded.  It never grants or retries a claim.
+        """
+
+        operation = session.scalar(
+            select(StoredOperation)
+            .where(
+                StoredOperation.node_id == node.node_id,
+                StoredOperation.state.in_(
+                    {"queued", "running", "waiting-for-operator"}
+                ),
+            )
+            .order_by(StoredOperation.created_at, StoredOperation.id)
+            .limit(1)
+        )
+        if operation is None:
+            return None
+        facts: dict[str, object] = {"kind": operation.kind, "state": operation.state}
+        parent = session.get(Job, operation.parent_job_id)
+        if parent is None:
+            return operation, "parent-job-missing", facts
+        if parent.state in _TERMINAL_PARENT_STATES:
+            return operation, "parent-not-claimable", {
+                **facts,
+                "parent_state": parent.state,
+            }
+        if (
+            operation.workload_intent_ordinal is not None
+            and operation.workload_intent_ordinal != node.workload_intent_ordinal
+        ):
+            return operation, "workload-intent-superseded", {
+                **facts,
+                "operation_intent": operation.workload_intent_ordinal,
+                "node_intent": node.workload_intent_ordinal,
+            }
+        if (
+            isinstance(parent.result, Mapping)
+            and parent.result.get("cancel_requested") is True
+        ):
+            return operation, "parent-cancel-requested", facts
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == operation.current_attempt,
+            )
+        )
+        if operation.state == "queued" and operation.current_attempt != 0:
+            return operation, "queued-attempt-not-zero", {
+                **facts,
+                "attempt": operation.current_attempt,
+            }
+        if operation.state == "running":
+            if attempt is None:
+                return operation, "running-attempt-missing", {
+                    **facts,
+                    "attempt": operation.current_attempt,
+                }
+            if attempt.state != "running":
+                return operation, "running-attempt-not-running", {
+                    **facts,
+                    "attempt": operation.current_attempt,
+                    "attempt_state": attempt.state,
+                }
+            return operation, "running-lease-not-expired", {
+                **facts,
+                "attempt": operation.current_attempt,
+                "lease_deadline": _aware(attempt.lease_deadline).isoformat(),
+            }
+        if operation.state == "waiting-for-operator" and (
+            operation.retry_disposition != _RETRY_DISPOSITION
+            or operation.retry_disposition_attempt != operation.current_attempt
+        ):
+            return operation, "operator-retry-not-authorized", {
+                **facts,
+                "attempt": operation.current_attempt,
+            }
+        if operation.state == "waiting-for-operator" and (
+            operation.retry_due_at is not None
+            and _aware(operation.retry_due_at) > _aware(now)
+        ):
+            return operation, "operator-retry-not-due", {
+                **facts,
+                "attempt": operation.current_attempt,
+                "retry_due_at": _aware(operation.retry_due_at).isoformat(),
+            }
+        return operation, "unclassified-unclaimable", {
+            **facts,
+            "attempt": operation.current_attempt,
+        }
+
+    def _cancel_superseded_operation(
+        self,
+        session: Session,
+        operation: StoredOperation,
+        parent: Job,
+        now: datetime,
+        *,
+        superseded_by: int | None,
+        disarmed: bool,
+    ) -> None:
+        """Drive a superseded, non-terminal order to its known terminal state.
+
+        A ``waiting-for-operator`` operation has no live attempt, so it can
+        never deliver the cancellation receipt that a pending supersession
+        waits for.  The *order* outcome is already known - cancelled - even if
+        the effect is unobserved, so the operation becomes terminal instead of
+        blocking later work forever.  The effect is never re-issued.  A
+        cancellation recorded without a parseable ``cancel_requested_at`` is a
+        defect that disarmed cleanup entirely, so the reason names it instead
+        of silently disabling recovery.
+        """
+
+        detail = (
+            "cancel_requested_at missing or unparseable"
+            if disarmed
+            else "cancellation cleanup deadline elapsed"
+        )
+        operation.state = "cancelled"
+        operation.status_reason = (
+            f"superseded by workload intent {superseded_by}; intent "
+            f"{operation.workload_intent_ordinal} cancelled ({detail})"
+        )[:512]
+        operation.retry_disposition = None
+        operation.retry_disposition_attempt = None
+        operation.retry_due_at = None
+        operation.updated_at = now
+        # Aggregate first: it recomputes the parent's operator reason from its
+        # children, so the defect note has to be written afterwards to survive.
+        self._aggregate_parent(session, operation.parent_job_id)
+        if disarmed and (
+            parent.status_reason is None
+            or parent.status_reason.startswith(_CLAIM_REFUSAL_PREFIX)
+        ):
+            parent.status_reason = (
+                "cancel_requested carried no cancel_requested_at; the superseded "
+                "order was reconciled to cancelled"
+            )[:1024]
+
     @staticmethod
     def _claimable_operations(
         node_id: str, now: datetime, capabilities: tuple[str, ...] | None
@@ -834,10 +1062,25 @@ class AgentJobService:
                 node_id,
             )
             if scopes is None:
+                refused_id = candidate_id if candidate_id is not None else upgrade_id
+                if refused_id is not None:
+                    self._record_claim_refusal(
+                        session,
+                        operation=session.get(StoredOperation, refused_id),
+                        job_id=None,
+                        check="operation-scope-lock",
+                    )
                 return None
             identity = self._lock_identity(session, node_id, certificate_serial)
             now = self._clock()
             if identity is None or not self._identity_is_active(*identity, now):
+                if candidate_id is not None:
+                    self._record_claim_refusal(
+                        session,
+                        operation=session.get(StoredOperation, candidate_id),
+                        job_id=None,
+                        check="node-identity-inactive",
+                    )
                 return None
             node, certificate = identity
             self._validate_agent_contract(
@@ -865,6 +1108,16 @@ class AgentJobService:
                 parent_job_id=None if upgrade_id is None else scopes[upgrade_id][0],
             )
             if candidate_id is None:
+                excluded = self._excluded_work_refusal(session, node, now)
+                if excluded is not None:
+                    excluded_operation, refusal_check, refusal_facts = excluded
+                    self._record_claim_refusal(
+                        session,
+                        operation=excluded_operation,
+                        job_id=excluded_operation.parent_job_id,
+                        check=refusal_check,
+                        **refusal_facts,
+                    )
                 return None
             statement = (
                 self._claimable_operations(node_id, now, capabilities)
@@ -874,6 +1127,14 @@ class AgentJobService:
             )
             operation = session.scalar(statement)
             if operation is None or operation.parent_job_id != scopes[candidate_id][0]:
+                if operation is not None:
+                    self._record_claim_refusal(
+                        session,
+                        operation=operation,
+                        job_id=operation.parent_job_id,
+                        check="parent-scope-changed",
+                        kind=operation.kind,
+                    )
                 return None
             if not self._claim_has_authority(
                 session,
@@ -886,10 +1147,25 @@ class AgentJobService:
             ):
                 return None
             if capabilities is not None and operation.kind not in capabilities:
+                self._record_claim_refusal(
+                    session,
+                    operation=operation,
+                    job_id=operation.parent_job_id,
+                    check="capability-unadvertised",
+                    kind=operation.kind,
+                )
                 return None
             if operation.kind in _RECIPE_CAPABILITIES and (
                 protocol_version != 3 or capabilities is None
             ):
+                self._record_claim_refusal(
+                    session,
+                    operation=operation,
+                    job_id=operation.parent_job_id,
+                    check="recipe-protocol-unsupported",
+                    kind=operation.kind,
+                    protocol_version=protocol_version,
+                )
                 return None
             if (
                 operation.kind == AgentOperation.RECIPE_BUILD.value
@@ -899,6 +1175,13 @@ class AgentJobService:
             ):
                 self._reject_recipe_build_claim(
                     session, operation, certificate_serial, now
+                )
+                self._record_claim_refusal(
+                    session,
+                    operation=operation,
+                    job_id=operation.parent_job_id,
+                    check="builder-runtime-changed",
+                    kind=operation.kind,
                 )
                 return None
             if operation.kind in _MUTATING_OPERATIONS:
@@ -914,6 +1197,7 @@ class AgentJobService:
                             ),
                         )
                         .order_by(StoredOperation.id)
+                        .with_for_update(of=StoredOperation)
                     )
                 )
                 active_mutations_list = []
@@ -935,7 +1219,36 @@ class AgentJobService:
                             and isinstance(old_parent.result, Mapping)
                             and old_parent.result.get("cancel_requested") is True
                         ):
-                            active_mutations_list.append(old)
+                            cancellation_deadline = superseded_cancellation_deadline(
+                                old_parent.result
+                            )
+                            if (
+                                cancellation_deadline is not None
+                                and _aware(now) < cancellation_deadline
+                            ):
+                                # The cancellation is live: its cleanup STOP is
+                                # still authorised, so the prior effect must
+                                # cease before any later mutation runs.
+                                active_mutations_list.append(old)
+                            else:
+                                # The order is cancelled but its cleanup is
+                                # either disarmed (no parseable
+                                # cancel_requested_at, a defect) or past its
+                                # authorised window.  A waiting-for-operator
+                                # operation has no live attempt and can never
+                                # deliver the receipt this wait needs, so the
+                                # wait has no bound.  The terminal state is
+                                # known, not uncertain: cancel it instead of
+                                # wedging every later mutation on this node
+                                # forever.  The effect is never re-issued.
+                                self._cancel_superseded_operation(
+                                    session,
+                                    old,
+                                    old_parent,
+                                    now,
+                                    superseded_by=operation.workload_intent_ordinal,
+                                    disarmed=cancellation_deadline is None,
+                                )
                 active_mutations = tuple(active_mutations_list)
                 # A current exact STOP is the cleanup action for an older
                 # cancelled workload. Do not let the old order's bookkeeping
@@ -969,6 +1282,19 @@ class AgentJobService:
                             stop_cleans_superseded = False
                             break
                 if active_mutations and not stop_cleans_superseded:
+                    blocking = active_mutations[0]
+                    self._record_claim_refusal(
+                        session,
+                        operation=operation,
+                        job_id=operation.parent_job_id,
+                        check="live-mutation-in-progress",
+                        kind=operation.kind,
+                        operation_intent=operation.workload_intent_ordinal,
+                        blocking_kind=blocking.kind,
+                        blocking_state=blocking.state,
+                        blocking_operation=blocking.id,
+                        blocking_intent=blocking.workload_intent_ordinal,
+                    )
                     return None
             resumable_progress = None
             if operation.current_attempt:
@@ -1330,7 +1656,17 @@ class AgentJobService:
             current_operation.node_id != node.node_id
             or current_operation.node_id not in job.targets
             or current_operation.authority_revision != job.authority_revision
-            or (
+        ):
+            self._record_claim_refusal(
+                session,
+                operation=current_operation,
+                job_id=job.id,
+                check="operation-authority-stale",
+                kind=current_operation.kind,
+            )
+            return False
+        if (
+            (
                 current_operation.kind in _WORKLOAD_INTENT_OPERATIONS
                 and current_operation.workload_intent_ordinal is None
             )
@@ -1341,19 +1677,60 @@ class AgentJobService:
                 and current_operation.workload_intent_ordinal
                 != node.workload_intent_ordinal
             )
-            or node.state != "active"
+        ):
+            self._record_claim_refusal(
+                session,
+                operation=current_operation,
+                job_id=job.id,
+                check="workload-intent-mismatch",
+                kind=current_operation.kind,
+                operation_intent=current_operation.workload_intent_ordinal,
+                parent_intent=job.payload.get("workload_intent_ordinal"),
+                node_intent=node.workload_intent_ordinal,
+            )
+            return False
+        if (
+            isinstance(job.result, Mapping)
+            and job.result.get("cancel_requested") is True
+        ):
+            self._record_claim_refusal(
+                session,
+                operation=current_operation,
+                job_id=job.id,
+                check="parent-cancel-requested",
+                kind=current_operation.kind,
+            )
+            return False
+        if (
+            node.state != "active"
             or node.revoked_at is not None
             or protocol_version is None
             or node.protocol_version != protocol_version
-            or capabilities is None
+        ):
+            self._record_claim_refusal(
+                session,
+                operation=current_operation,
+                job_id=job.id,
+                check="node-not-eligible",
+                kind=current_operation.kind,
+                node_state=node.state,
+                protocol_version=protocol_version,
+                node_protocol_version=node.protocol_version,
+            )
+            return False
+        if (
+            capabilities is None
             or current_operation.kind not in capabilities
             or not isinstance(node.capabilities, list)
             or current_operation.kind not in node.capabilities
-            or (
-                isinstance(job.result, Mapping)
-                and job.result.get("cancel_requested") is True
-            )
         ):
+            self._record_claim_refusal(
+                session,
+                operation=current_operation,
+                job_id=job.id,
+                check="capability-unadvertised",
+                kind=current_operation.kind,
+            )
             return False
         if (
             job.state == "waiting-for-operator"
@@ -1366,7 +1743,17 @@ class AgentJobService:
             job.status_reason = None
             job.updated_at = now
             return True
-        return job.state not in _TERMINAL_PARENT_STATES
+        if job.state in _TERMINAL_PARENT_STATES:
+            self._record_claim_refusal(
+                session,
+                operation=current_operation,
+                job_id=job.id,
+                check="parent-not-claimable",
+                kind=current_operation.kind,
+                parent_state=job.state,
+            )
+            return False
+        return True
 
     @staticmethod
     def _target_scope(targets: object) -> tuple[str, ...] | None:

@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn
+from typing import NoReturn, cast
 
 import pytest
 from fastapi import FastAPI
@@ -268,6 +268,53 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     assert listed.json()["operations"][0]["progress"]["total_bytes_known"] is False
     assert detail.status_code == 200
     assert detail.json() == listed.json()["operations"][0]
+
+
+def test_operation_read_surfaces_a_recorded_claim_refusal_reason() -> None:
+    from types import SimpleNamespace
+
+    reason = (
+        "claim refused: live-mutation-in-progress "
+        "(operation_intent=4; blocking_kind=recipe.start; blocking_intent=2)"
+    )
+    item = {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "parent_id": None,
+        "node_ids": [NODE_ID],
+        "kind": "artifact.distribution.v1",
+        "state": "queued",
+        "attempt": 0,
+        "progress": None,
+        "result": None,
+        "created_at": "2026-08-15T11:59:00Z",
+        "updated_at": "2026-08-15T12:00:00Z",
+        "status_reason": reason,
+    }
+
+    response = operation_api.operation_detail_response(item)
+
+    assert response.status_reason == reason
+    assert response.model_dump()["status_reason"] == reason
+    # A claim that was never refused keeps the response shape it always had.
+    assert "status_reason" not in operation_api.operation_detail_response(
+        {**item, "status_reason": None}
+    ).model_dump()
+
+    operation = SimpleNamespace(
+        current_attempt=0,
+        id=item["id"],
+        kind=item["kind"],
+        node_id=NODE_ID,
+        parent_job_id=None,
+        payload={},
+        state="queued",
+        status_reason=reason,
+        updated_at=datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
+    )
+    assert operation_api._operation_item(
+        cast(AgentOperation, operation), None
+    )["status_reason"] == reason
+
 
 
 def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> None:

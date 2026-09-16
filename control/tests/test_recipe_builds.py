@@ -25,7 +25,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs import AgentJobService, superseded_cancellation_deadline
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_integer
 from vonk_control.catalog_entities import CatalogEntityService
@@ -1194,6 +1194,9 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
         assert original_job is not None and original_job.state == source_state
         assert original_job.result is not None
         assert original_job.result["cancel_requested"] is True
+        # A cancellation without a parseable instant can never authorise the
+        # bounded cleanup STOP and would wedge the node forever.
+        assert superseded_cancellation_deadline(original_job.result) is not None
         assert (
             session.scalar(
                 select(ResourceReservation).where(
@@ -1270,6 +1273,7 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
         )
         original_job = session.get(Job, original.id)
         assert original_job is not None
+        assert superseded_cancellation_deadline(original_job.result) is not None
         if outcome == "success":
             assert original_job.state == "cancelled"
             assert remaining is None
