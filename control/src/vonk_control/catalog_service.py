@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -10,12 +9,17 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import IO
 
-from jsonschema import Draft202012Validator, FormatChecker
+from pydantic import ValidationError
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    TestReport,
+    content_sha256,
+)
 
 from .auth import CursorCodec
 from .catalog_entities import (
@@ -36,7 +40,6 @@ from .models import (
     CatalogDocumentHead,
     RecipeSourceBundle,
 )
-from .schema_resources import read_runtime_schema
 from .source_bundles import (
     SourceBundleError,
     SourceBundleStoreProtocol,
@@ -496,20 +499,18 @@ class CatalogService:
         self, recipe_id: str, report: Mapping[str, object], actor: str
     ) -> dict[str, object]:
         del actor
-        clean = copy.deepcopy(dict(report))
-        errors = sorted(
-            _test_report_validator().iter_errors(clean),
-            key=lambda error: tuple(str(part) for part in error.absolute_path),
-        )
-        if errors:
+        try:
+            validated = TestReport.model_validate(report)
+        except ValidationError as error:
             raise CatalogValidationError(
                 "catalog.test_report_invalid", "test report is invalid"
-            )
+            ) from error
+        clean = validated.model_dump(mode="json", exclude_none=False)
         with self._sessions.begin() as session:
             revision = _get_active_recipe(session, recipe_id)
             if revision is None:
                 raise KeyError(recipe_id)
-            if clean.get("recipe_sha256") != revision.content_digest:
+            if clean["recipe_sha256"] != revision.content_digest:
                 raise CatalogValidationError(
                     "catalog.test_report_recipe_mismatch",
                     "test report does not match this recipe revision",
@@ -518,8 +519,17 @@ class CatalogService:
                 mode="json", exclude_none=False
             )
             projected["test_report"] = clean
-            revision.projected = write_catalog_projection(projected, kind=revision.kind)
-            session.flush()
+            # An active revision is immutable through the ORM; only the derived
+            # ``projected`` column may move, and it moves through the same
+            # Core UPDATE the import path uses.
+            session.execute(
+                update(CatalogDocumentRevision)
+                .where(CatalogDocumentRevision.id == revision.id)
+                .values(
+                    projected=write_catalog_projection(projected, kind=revision.kind)
+                )
+            )
+            session.expire(revision, ["projected"])
         return clean
 
     def publication_export(
@@ -539,6 +549,7 @@ class CatalogService:
                     "catalog.test_report_required",
                     "attach a passing local test report before publication export",
                 )
+            test_report = report.model_dump(mode="json", exclude_none=False)
             recipe_document = read_catalog_document(revision)
             if not isinstance(recipe_document, RecipeDefinition):
                 raise CatalogValidationError(
@@ -550,7 +561,7 @@ class CatalogService:
         identity = recipe["identity"]
         if isinstance(identity, dict):
             identity["publisher"] = target_publisher
-        return {"recipe": recipe, "test_report": report}
+        return {"recipe": recipe, "test_report": test_report}
 
 
 def _get_active_recipe(
@@ -674,13 +685,6 @@ def _package_handle_metadata(
             "recipe package handle closure is invalid",
         )
     return values
-
-
-@__import__("functools").lru_cache(maxsize=1)
-def _test_report_validator() -> Draft202012Validator:
-    schema = json.loads(read_runtime_schema("test-report-v1.schema.json"))
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
 
 
 def _actor(value: str) -> str:

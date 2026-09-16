@@ -1,8 +1,8 @@
 source = "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
 # Resolved from current recipes main during the launch contract update.
 branch = "main"
-revision = "6001adcb12443701c8d695271deedbab6810217e"
+revision = "71d83d36adb2d16fea59efdd9e092648b05fab66"
 subdirectory = "contracts"
 package = "vonk-forge-public-contracts==0.1.0"
 wheel = "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
-sha256 = "dab7b701d9df26a4e61663a6f32a79e381d0f9a82a45a92c4f88efc48b8fe0ea"
+sha256 = "df51d23b1eadc8e40778395b74c9025adfb192a3e38d90e0c82ac307deab277c"
