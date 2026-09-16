@@ -10,23 +10,64 @@ from ... import errors
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.request_validation_problem import RequestValidationProblem
 from ...models.telemetry_capabilities_response import TelemetryCapabilitiesResponse
+from ...types import UNSET, Unset
 from typing import cast
+from typing import cast, Union
+from typing import Union
 
 
 
 def _get_kwargs(
     selector: str,
+    *,
+    key: Union[None, Unset, str] = UNSET,
+    device_id: Union[None, Unset, str] = UNSET,
+    interface_name: Union[None, Unset, str] = UNSET,
+    run_id: Union[None, Unset, str] = UNSET,
 
 ) -> dict[str, Any]:
 
 
 
 
+    params: dict[str, Any] = {}
+
+    json_key: Union[None, Unset, str]
+    if isinstance(key, Unset):
+        json_key = UNSET
+    else:
+        json_key = key
+    params["key"] = json_key
+
+    json_device_id: Union[None, Unset, str]
+    if isinstance(device_id, Unset):
+        json_device_id = UNSET
+    else:
+        json_device_id = device_id
+    params["device_id"] = json_device_id
+
+    json_interface_name: Union[None, Unset, str]
+    if isinstance(interface_name, Unset):
+        json_interface_name = UNSET
+    else:
+        json_interface_name = interface_name
+    params["interface_name"] = json_interface_name
+
+    json_run_id: Union[None, Unset, str]
+    if isinstance(run_id, Unset):
+        json_run_id = UNSET
+    else:
+        json_run_id = run_id
+    params["run_id"] = json_run_id
+
+
+    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
 
     _kwargs: dict[str, Any] = {
         "method": "get",
         "url": "/api/fleet/{selector}/metrics/capabilities".format(selector=selector,),
+        "params": params,
     }
 
 
@@ -89,12 +130,20 @@ def sync_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
+    key: Union[None, Unset, str] = UNSET,
+    device_id: Union[None, Unset, str] = UNSET,
+    interface_name: Union[None, Unset, str] = UNSET,
+    run_id: Union[None, Unset, str] = UNSET,
 
 ) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCapabilitiesResponse]]:
     """ Fleet Metrics Capabilities
 
     Args:
         selector (str):
+        key (Union[None, Unset, str]):
+        device_id (Union[None, Unset, str]):
+        interface_name (Union[None, Unset, str]):
+        run_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -107,6 +156,10 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         selector=selector,
+key=key,
+device_id=device_id,
+interface_name=interface_name,
+run_id=run_id,
 
     )
 
@@ -120,12 +173,20 @@ def sync(
     selector: str,
     *,
     client: AuthenticatedClient,
+    key: Union[None, Unset, str] = UNSET,
+    device_id: Union[None, Unset, str] = UNSET,
+    interface_name: Union[None, Unset, str] = UNSET,
+    run_id: Union[None, Unset, str] = UNSET,
 
 ) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCapabilitiesResponse]]:
     """ Fleet Metrics Capabilities
 
     Args:
         selector (str):
+        key (Union[None, Unset, str]):
+        device_id (Union[None, Unset, str]):
+        interface_name (Union[None, Unset, str]):
+        run_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -139,6 +200,10 @@ def sync(
     return sync_detailed(
         selector=selector,
 client=client,
+key=key,
+device_id=device_id,
+interface_name=interface_name,
+run_id=run_id,
 
     ).parsed
 
@@ -146,12 +211,20 @@ async def asyncio_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
+    key: Union[None, Unset, str] = UNSET,
+    device_id: Union[None, Unset, str] = UNSET,
+    interface_name: Union[None, Unset, str] = UNSET,
+    run_id: Union[None, Unset, str] = UNSET,
 
 ) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCapabilitiesResponse]]:
     """ Fleet Metrics Capabilities
 
     Args:
         selector (str):
+        key (Union[None, Unset, str]):
+        device_id (Union[None, Unset, str]):
+        interface_name (Union[None, Unset, str]):
+        run_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -164,6 +237,10 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         selector=selector,
+key=key,
+device_id=device_id,
+interface_name=interface_name,
+run_id=run_id,
 
     )
 
@@ -177,12 +254,20 @@ async def asyncio(
     selector: str,
     *,
     client: AuthenticatedClient,
+    key: Union[None, Unset, str] = UNSET,
+    device_id: Union[None, Unset, str] = UNSET,
+    interface_name: Union[None, Unset, str] = UNSET,
+    run_id: Union[None, Unset, str] = UNSET,
 
 ) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCapabilitiesResponse]]:
     """ Fleet Metrics Capabilities
 
     Args:
         selector (str):
+        key (Union[None, Unset, str]):
+        device_id (Union[None, Unset, str]):
+        interface_name (Union[None, Unset, str]):
+        run_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -196,5 +281,9 @@ async def asyncio(
     return (await asyncio_detailed(
         selector=selector,
 client=client,
+key=key,
+device_id=device_id,
+interface_name=interface_name,
+run_id=run_id,
 
     )).parsed
