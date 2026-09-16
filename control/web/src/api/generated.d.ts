@@ -7852,7 +7852,12 @@ export interface operations {
     };
     getFleetMetricsCapabilities: {
         parameters: {
-            query?: never;
+            query?: {
+                key?: string | null;
+                device_id?: string | null;
+                interface_name?: string | null;
+                run_id?: string | null;
+            };
             header?: never;
             path: {
                 selector: string;

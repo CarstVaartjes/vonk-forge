@@ -224,7 +224,7 @@ class _AgentEnrollmentAdapter:
         del request_id
         services = self._required()
         assert services.enrollment is not None
-        grant = services.enrollment.create(None, actor, ttl_seconds)
+        grant = services.enrollment.create_named(name, actor, ttl_seconds)
         return {
             "display_name": name,
             "state": "pending",
@@ -567,11 +567,23 @@ def install_operator_projection_routes(
     )
     def fleet_metrics_capabilities(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
+        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
+        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        interface_name: Annotated[
+            str | None, Query(min_length=1, max_length=64)
+        ] = None,
+        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated,
     ) -> TelemetryCapabilitiesResponse:
         node = _node(snapshot(), selector)
         try:
-            return fleet().telemetry_capabilities(node.id)
+            return fleet().telemetry_capabilities(
+                node.id,
+                key=key,
+                device_id=device_id,
+                interface_name=interface_name,
+                run_id=run_id,
+            )
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
 
