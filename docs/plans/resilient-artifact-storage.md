@@ -133,6 +133,44 @@ The bounded cutover is:
    availability columns follow the same rule, leaving SQL with the exact
    reference a fence conditionally accepts.
 
+   This package is scoped and parked, not started, because it is materially
+   larger than the model cutover and because its current code declares the
+   opposite authority:
+
+   * The SQL row model (`models.RuntimeImageReceipt`, imported elsewhere as
+     `RuntimeImageReceiptRow`) has 147 references across thirteen modules
+     (`runtime_image_preparation` 56, `distribution_executor` 32,
+     `distribution` 19, `run_switch_operations` 13, `recipe_image_availability`
+     9, `model_cache` 8, `execution_plan_service` 5, `api` 4, `agent_api` 4,
+     `run_switch_contract` 2, `library_projection` 2,
+     `availability_production` 2, `models` 1) plus 35 in `control/tests`.
+     The storage contract `RuntimeImageReceipt` is a different type with the
+     same name, so a naive rename is not the change.
+   * `persist_runtime_image_receipt` states that "filesystem receipts are an
+     object cache" and "the SQL row is the authority consumed by install
+     admission and agent specification reads". Phase 2 reverses that sentence,
+     so the cutover has to move admission authority deliberately rather than
+     delete an unused copy.
+   * The row supplies a join key (`RuntimeImageAuthorization.receipt_id`), a
+     duplicated availability flag (`state == "verified"`), and the
+     `verified`→`evicted` transition used by `remove_selector`. The
+     authorization table already carries every identity field it compares, so
+     the natural key is its existing `oci_archive_sha256`; the receipt row is
+     what makes the mapping indirect.
+   * Revocation must not be dropped. The authorization `state` already has
+     `authorized`/`revoked`; the receipt `state` is the local-availability flag
+     that becomes storage-owned.
+
+   The bounded cutover is: delete the receipt table and row model; re-key
+   `RuntimeImageAuthorization` by its own `oci_archive_sha256`; read
+   availability and the archive from the storage receipt; keep SQL for the
+   authorization decision, the revocation, and the exact reference a fence
+   accepts. It lands as its own package off the current main, with the
+   `control/tests/test_runtime_image_preparation.py`,
+   `test_recipe_image_availability.py`, `test_direct_run_switch_production_path.py`,
+   `test_agent_api.py`, and `test_availability_production.py` consumers updated
+   in the same commit.
+
 ## Evidence of success
 
 Validate complete interactions under contention, process death, lost responses,
