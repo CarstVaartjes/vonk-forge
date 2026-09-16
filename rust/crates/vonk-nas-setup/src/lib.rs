@@ -2258,10 +2258,20 @@ fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
         }
         if name != ".env" && name != "docker-compose.yaml" && name != "secrets" && name != "backups"
         {
-            return Err(SetupError::UnsafeDestination(format!(
-                "{} is an unexpected top-level entry",
-                entry.path().display()
-            )));
+            // A synced/NAS-hosted bundle keeps its rclone bisync database in a
+            // real `.sync` directory at the bundle root.  Tolerate exactly that
+            // directory and never read, write, delete, or recurse into it.  A
+            // regular file or symlink of the same name still fails closed,
+            // because a symlink could redirect a later release-controlled
+            // write.  `DirEntry::file_type` reports the entry itself, not the
+            // symlink target, so the check does not follow links.
+            let file_type = entry.file_type()?;
+            if name != ".sync" || !file_type.is_dir() {
+                return Err(SetupError::UnsafeDestination(format!(
+                    "{} is an unexpected top-level entry",
+                    entry.path().display()
+                )));
+            }
         }
     }
     require_regular_file(&bundle.join("docker-compose.yaml"))?;
