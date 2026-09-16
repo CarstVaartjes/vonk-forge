@@ -75,6 +75,29 @@ class CacheManifest(StrictModel):
     artifacts: list[CacheManifestArtifact]
 
 
+class ModelCacheObjectReceipt(StrictModel):
+    """Managed-storage ownership record for one verified cache object.
+
+    The bytes and this receipt live together under the trusted cache root, and
+    together they are the whole of an object's availability. SQL owns set
+    membership and the exact artifact-set identity that admission binds; it
+    holds no per-object availability flag.
+    """
+
+    schema_version: Literal[2]
+    sha256: Digest
+    storage_key: str = Field(min_length=1, max_length=255)
+    expected_bytes: int = Field(ge=0)
+    actual_bytes: int = Field(ge=0)
+    verified_at: str = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _sizes_agree(self) -> ModelCacheObjectReceipt:
+        if self.actual_bytes != self.expected_bytes:
+            raise ValueError("a verified object receipt has no partial length")
+        return self
+
+
 class ModelCacheRepairCheckpoint(StrictModel):
     transfer_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     completed_objects: list[Digest]
@@ -513,6 +536,7 @@ __all__ = [
     "ModelCacheDownloadResult",
     "ModelCacheEntryState",
     "ModelCacheInventoryResponse",
+    "ModelCacheObjectReceipt",
     "ModelCacheOperationKind",
     "ModelCacheOperationPayload",
     "ModelCacheOperationPhase",

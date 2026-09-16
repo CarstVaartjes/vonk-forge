@@ -118,12 +118,15 @@ SQL. Replacing PostgreSQL or LiteLLM's database is outside this direction.
 
 ### Current implementation and remaining cutover
 
-Today, `ModelCacheSet`, `ModelCacheArtifact`, and `ModelCacheOperation` retain
-artifact state and checkpoints in SQL. Image preparation writes filesystem
-receipts and `RuntimeImageReceipt` rows; SQL receipt state still participates in
-admission. `RecipeBuild`, `Job`, and agent-operation rows retain build and
-preparation results. These are existing paths to refactor, not justification
-for adding another independently writable copy.
+Today, `ModelCacheSet` and `ModelCacheSetArtifact` retain the logical
+artifact-set identity and membership in SQL, while every model object's bytes,
+size, and verification receipt are owned by managed storage under the cache
+root. `ModelCacheOperation` retains the operation record and its checkpoints.
+Image preparation writes filesystem receipts and `RuntimeImageReceipt` rows;
+SQL receipt state still participates in admission. `RecipeBuild`, `Job`, and
+agent-operation rows retain build and preparation results. These are existing
+paths to refactor, not justification for adding another independently writable
+copy.
 
 Recent cache-recovery work already reconciles absent bytes after a NAS restore,
 reuses completed transfers, and rebuilds missing source images. Preserve that

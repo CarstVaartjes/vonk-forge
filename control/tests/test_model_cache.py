@@ -47,9 +47,9 @@ from vonk_control.models import (
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
-    ModelCacheArtifact,
     ModelCacheOperation,
     ModelCacheSet,
+    ModelCacheSetArtifact,
     RecipeBuild,
     RuntimeImageAuthorization,
     RuntimeImageReceipt,
@@ -156,6 +156,30 @@ def cache(tmp_path: Path):
         runtime_archive_available=runtime_archive_available,
     )
     return service, sessions
+
+
+def _write_object_receipt(
+    service: ModelCacheService, digest: str, expected_bytes: int
+) -> None:
+    """Publish the managed-storage receipt that makes a stored object available."""
+
+    path = service.root / "objects" / digest[:2] / f"{digest}.receipt.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "sha256": digest,
+                "storage_key": f"objects/{digest[:2]}/{digest}",
+                "expected_bytes": expected_bytes,
+                "actual_bytes": expected_bytes,
+                "verified_at": NOW.isoformat(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
 
 
 def _artifact(
@@ -589,20 +613,8 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     assert receipt.image_bytes is not None
     image_object.write_bytes(b"x" * receipt.image_bytes)
     with sessions.begin() as session:
-        session.add_all(
-            [
-                model_cache,
-                ModelCacheArtifact(
-                    sha256=artifact.sha256,
-                    storage_key=f"objects/{artifact.sha256[:2]}/{artifact.sha256}",
-                    expected_bytes=3,
-                    actual_bytes=3,
-                    state="verified",
-                    verified_at=NOW,
-                    updated_at=NOW,
-                ),
-            ]
-        )
+        session.add(model_cache)
+    _write_object_receipt(service, artifact.sha256, 3)
 
     resolved = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
@@ -915,7 +927,12 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     )
     assert second.state == "succeeded"
     with sessions() as session:
-        assert session.scalar(select(func.count()).select_from(ModelCacheArtifact)) == 2
+        # SQL owns membership: two objects, one membership row per set.
+        assert (
+            session.scalar(select(func.count()).select_from(ModelCacheSetArtifact)) == 4
+        )
+    # Managed storage owns availability: one receipt per stored object.
+    assert len(list((service.root / "objects").glob("*/*.receipt.json"))) == 2
     assert service.storage_summary().unique_used_bytes == len(
         b"primary model bytes"
     ) + len(b"tokenizer auxiliary bytes")
@@ -995,7 +1012,7 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
     monkeypatch: pytest.MonkeyPatch,
     stored_state: str,
 ) -> None:
-    service, sessions = cache
+    service, _sessions = cache
     model = "7" * 64
     data = b"verified cache model bytes"
     artifact = _artifact(tmp_path, data, model_content_sha256=model)
@@ -1014,16 +1031,15 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         .identity()
     )
     path = service._object_path(spec.sha256)
-    if stored_state in {"partial", "receipt_missing"}:
-        with sessions.begin() as session:
-            row = session.get(ModelCacheArtifact, spec.sha256)
-            assert row is not None
-            if stored_state == "partial":
-                row.state = "partial"
-            else:
-                row.verified_at = None
+    if stored_state == "receipt_missing":
+        # Bytes are present but the managed-storage receipt is gone: this is
+        # the wrong implementation's masked case, so admission must not use it.
+        service._receipt_path(spec.sha256).unlink()
+    elif stored_state == "partial":
+        service._receipt_path(spec.sha256).unlink()
     elif stored_state == "missing":
         path.unlink()
+        service._receipt_path(spec.sha256).unlink()
     elif stored_state == "truncated":
         path.write_bytes(data[:-1])
     elif stored_state == "symlink":
@@ -1052,6 +1068,91 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
     expected = len(data) if stored_state == "verified" else 0
     assert preview["already_cached_bytes"] == expected
     assert preview["new_bytes"] == len(data) - expected
+
+
+def test_stored_bytes_without_a_receipt_are_not_admitted(cache, tmp_path: Path) -> None:
+    """Managed storage owns availability; SQL and bare bytes may not infer it.
+
+    It fails on the wrong implementation that treats an object as available
+    because its bytes are present and the size matches, which is exactly how a
+    lost receipt or a restored-but-unadopted cache would be silently admitted.
+    """
+
+    service, _sessions = cache
+    model = "8" * 64
+    data = b"bytes present, receipt absent"
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
+    digest = _required_text(artifact["sha256"], "artifact digest")
+    object_path = service.root / "objects" / digest[:2] / digest
+    object_path.parent.mkdir(parents=True)
+    object_path.write_bytes(data)
+    assert not service._receipt_path(digest).exists()
+
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
+    assert preview["already_cached_bytes"] == 0
+    assert preview["new_bytes"] == len(data)
+
+
+def test_a_receipt_for_a_different_size_does_not_admit_the_object(
+    cache, tmp_path: Path
+) -> None:
+    """The receipt records the exact verified size, not merely its presence."""
+
+    service, _sessions = cache
+    model = "9" * 64
+    data = b"receipt size disagrees with the manifest"
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
+    digest = _required_text(artifact["sha256"], "artifact digest")
+    object_path = service.root / "objects" / digest[:2] / digest
+    object_path.parent.mkdir(parents=True)
+    object_path.write_bytes(data)
+    _write_object_receipt(service, digest, len(data) - 1)
+
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
+    assert preview["already_cached_bytes"] == 0
+    assert preview["new_bytes"] == len(data)
+
+
+def test_a_malformed_receipt_is_not_trusted(cache, tmp_path: Path) -> None:
+    """A damaged receipt is repaired through prepare/verify, never trusted."""
+
+    service, _sessions = cache
+    model = "b" * 64
+    data = b"malformed receipt"
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
+    digest = _required_text(artifact["sha256"], "artifact digest")
+    object_path = service.root / "objects" / digest[:2] / digest
+    object_path.parent.mkdir(parents=True)
+    object_path.write_bytes(data)
+    receipt_path = service._receipt_path(digest)
+    receipt_path.write_text("{not json", encoding="utf-8")
+
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
+    assert preview["already_cached_bytes"] == 0
+
+
+def test_verification_publishes_the_object_receipt(cache, tmp_path: Path) -> None:
+    """A verified object is published with the receipt that owns its availability."""
+
+    service, _sessions = cache
+    model = "c" * 64
+    data = b"receipt publication"
+    artifact = _artifact(tmp_path, data, model_content_sha256=model)
+    downloaded = _download(
+        service,
+        [artifact],
+        model_content_sha256=model,
+        request_key="00000000-0000-4000-8000-000000000019",
+    )
+    digest = _required_text(artifact["sha256"], "artifact digest")
+    receipt_path = service._receipt_path(digest)
+    assert receipt_path.is_file()
+    document = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert document["schema_version"] == 2
+    assert document["sha256"] == digest
+    assert document["expected_bytes"] == len(data)
+    assert document["actual_bytes"] == len(data)
+    assert downloaded.artifact_set_sha256
 
 
 def test_admission_checks_storage_size_after_the_read_transaction_closes(
@@ -1867,6 +1968,11 @@ def test_atomic_repair_keeps_path_and_open_reader_available(
     with target.open("rb") as reader:
 
         def replace(source, destination):
+            # The managed-storage receipt uses the same atomic rename. This test
+            # is about the object's pathname and its already-open reader.
+            if destination != target:
+                original(source, destination)
+                return
             assert target.read_bytes() == data
             assert destination == target
             original(source, destination)

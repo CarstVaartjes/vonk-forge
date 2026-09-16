@@ -23,7 +23,6 @@ from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    ModelCacheArtifact,
 )
 from vonk_forge_contracts import ModelDefinition, content_sha256
 
@@ -155,39 +154,24 @@ def test_catalog_identity_is_unique_in_postgres(catalog) -> None:
         catalog.create_draft(document, actor="operator")
 
 
-def test_postgres_persists_verified_zero_byte_model_artifact(postgres_engine) -> None:
-    artifact_table = ModelCacheArtifact.__table__
-    assert isinstance(artifact_table, Table)
-    Base.metadata.create_all(postgres_engine, tables=[artifact_table])
-    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    empty_digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    try:
-        with sessions.begin() as session:
-            session.add(
-                ModelCacheArtifact(
-                    sha256=empty_digest,
-                    storage_key="objects/empty-support-file",
-                    expected_bytes=0,
-                    actual_bytes=0,
-                    state="verified",
-                    updated_at=NOW,
-                )
-            )
-        with sessions.begin() as session:
-            session.add(
-                ModelCacheArtifact(
-                    sha256="f" * 64,
-                    storage_key="objects/invalid-empty-support-file",
-                    expected_bytes=0,
-                    actual_bytes=0,
-                    state="verified",
-                    updated_at=NOW,
-                )
-            )
-            with pytest.raises(IntegrityError):
-                session.flush()
-    finally:
-        Base.metadata.drop_all(postgres_engine, tables=[artifact_table])
+def test_postgres_schema_has_no_per_object_availability_table(
+    postgres_engine,
+) -> None:
+    """SQL owns set membership, not artifact availability.
+
+    Managed storage owns an object's bytes, size, and verification receipt.
+    The obsolete ``model_cache_artifacts`` table must not come back, because a
+    second availability fact in SQL is exactly what the cutover removed.
+    """
+
+    Base.metadata.create_all(postgres_engine)
+    tables = set(inspect(postgres_engine).get_table_names())
+    assert "model_cache_artifacts" not in tables
+    assert {
+        "model_cache_sets",
+        "model_cache_set_artifacts",
+        "model_cache_operations",
+    } <= tables
 
 
 def test_active_canonical_json_cannot_be_mutated(catalog) -> None:

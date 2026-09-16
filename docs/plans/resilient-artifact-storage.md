@@ -122,7 +122,12 @@ The bounded cutover is:
    schema entry, and test fixtures. An object whose receipt is absent is
    unavailable for admission even when bytes are present, and an object whose
    receipt is present but whose bytes are gone is reported as a repair
-   blocker rather than admitted.
+   blocker rather than admitted. The audit found twelve `ModelCacheArtifact`
+   consumers that move together: `_ensure_set` row creation, the download and
+   verify progress checkpoint, `_mark_artifact_verified`, `_verified_bytes`,
+   `_managed_cached_objects`, the artifact resolution path,
+   `reconcile_storage`, `storage_summary`, and the two removal paths in
+   `_remove_model_content`.
 2. **Image and build checkpoints.** The prepared runtime-image receipt and the
    build/transfer checkpoint already have storage-side files; the remaining SQL
    availability columns follow the same rule, leaving SQL with the exact
