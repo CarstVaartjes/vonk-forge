@@ -30,6 +30,11 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
+          # Pin the interpreter explicitly. Without it the job resolves the
+          # runner's system Python instead of the version this repository
+          # declares, so the recipe check would validate on a different
+          # interpreter than every other lane.
+          python-version: "3.14"
           enable-cache: true
 
       - name: Require candidate contract source

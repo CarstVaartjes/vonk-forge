@@ -114,7 +114,7 @@ def test_pinned_client_generator_round_trips_arbitrary_json_values(
             "uv",
             "run",
             "--python",
-            "3.12",
+            "3.14",
             "--project",
             "control",
             "--frozen",

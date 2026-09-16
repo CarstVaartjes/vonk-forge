@@ -166,7 +166,7 @@ The public website and catalog implementation live in
 
 ## Develop
 
-Required tools are Python 3.12+, [`uv`](https://docs.astral.sh/uv/), Rust,
+Required tools are Python 3.14+, [`uv`](https://docs.astral.sh/uv/), Rust,
 Node.js, and Docker for integration tests.
 
 Catalog tests consume the real recipe repository. Set

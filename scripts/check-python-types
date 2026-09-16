@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --python 3.12 --frozen --with pyright==1.1.408 python
+#!/usr/bin/env -S uv run --python 3.14 --frozen --with pyright==1.1.408 python
 """Fail when a Python type error appears outside the reviewed exception list.
 
 The repository does not type-check cleanly yet, but every surviving error is a

@@ -61,7 +61,7 @@ contract suite covers structural projection and distribution-independent
 engine defaults; the
 recipe-library validator passed the 84-recipe catalog at recipe commit
 `8da79f23` against this platform worktree. A disposable OrbStack container
-(`orbstack` Docker 29.4.0, `python:3.12-bookworm`) started with `--read-only`,
+(`orbstack` Docker 29.4.0, `python:3.14-bookworm`) started with `--read-only`,
 `--cap-drop=ALL`, `no-new-privileges`, nonroot UID 10001, `--network none`, and
 only the declared `/outputs` bind; it wrote the cache and temp probes
 successfully. This is container evidence only. GPU execution, NCCL fabric,
