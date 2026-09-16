@@ -12,10 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "deploy/compose/postgres/init-databases.sh"
 ENTRYPOINT = ROOT / "deploy/compose/postgres/entrypoint.sh"
-POSTGRES_IMAGE = (
-    "postgres:18.6@sha256:"
-    "4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280"
-)
+POSTGRES_IMAGE = "postgres:18.6"
 
 
 def _docker_unavailable(message: str) -> None:

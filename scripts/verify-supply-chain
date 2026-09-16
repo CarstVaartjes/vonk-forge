@@ -13,7 +13,17 @@ import sys
 import tomllib
 from pathlib import Path
 
-IMAGE = re.compile(r"^[^\s@]+(?::[^\s@]+)?@sha256:[0-9a-f]{64}$")
+# Images are pinned by explicit version tag, not by digest. A tag with a
+# version is reviewable and a patch release arrives through a dependency bump;
+# a digest is more precise but requires hand-editing a value the tooling owns
+# and, against a republished tag, stops resolving. Recipe base images are the
+# exception: they stay digest-pinned in vonk-forge-recipes, where the digest
+# enters the compiled runtime plan.
+# An image reference: a registry path with an optional :tag. The tag must be
+# present and must not be a floating channel name. The path excludes `@`, so a
+# digest reference fails this check.
+VERSIONED_IMAGE = re.compile(r"^[^\s@]+:[^\s@]+$")
+FLOATING_TAGS = frozenset({"latest", "main", "edge", "stable", "master", "dev"})
 PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
 PUBLIC_CONTRACT_LOCK = "control/packaging/public-contracts.lock"
 PUBLIC_CONTRACT_WHEEL = (
@@ -531,14 +541,17 @@ def image_errors(root: Path) -> list[str]:
         build_bases = {}
     for name, reference in {**images, **build_bases}.items():
         if not isinstance(reference, str):
-            errors.append(f"{name} image is not pinned by digest")
+            errors.append(f"{name} image is not pinned by version")
             continue
-        if IMAGE.fullmatch(reference) is None:
-            errors.append(f"{name} image is not pinned by digest")
+        # A digest or a version tag both pin an explicit version; a bare or
+        # floating reference pins nothing.
+        bare = reference.split("@", 1)[0]
+        if "@sha256:" not in reference and VERSIONED_IMAGE.fullmatch(reference) is None:
+            errors.append(f"{name} image is not pinned by an explicit version")
+        elif bare.rsplit(":", 1)[-1].lower() in FLOATING_TAGS:
+            errors.append(f"{name} image uses a floating tag: {reference}")
         if name in images and reference not in compose:
-            errors.append(
-                f"{name} Compose default is not the locked digest-pinned image"
-            )
+            errors.append(f"{name} Compose default is not the locked versioned image")
     if re.search(r"(?m)^\s*image:\s*[^$\n]*(?::latest|:main|:edge)(?:\s|$)", compose):
         errors.append("Compose contains a floating image tag without digest")
     releases = lock.get("release_images", [])
@@ -598,7 +611,7 @@ def image_errors(root: Path) -> list[str]:
     ):
         errors.append(
             "API, worker, and LiteLLM release images must be explicitly "
-            "digest-pinned; Hermes must be either digest-pinned or explicitly opt-in"
+            "version-pinned; Hermes must be either version-pinned or explicitly opt-in"
         )
     for release in expected_releases:
         context = root / release["context"]
@@ -612,17 +625,15 @@ def image_errors(root: Path) -> list[str]:
     for name in ("node", "python"):
         reference = build_bases.get(name)
         if not isinstance(reference, str):
-            errors.append(f"{name} digest-pinned build base is missing or invalid")
+            errors.append(f"{name} build base is missing or invalid")
         elif reference not in dockerfile:
-            errors.append(
-                f"{name} digest-pinned build base is absent from control Dockerfile"
-            )
+            errors.append(f"{name} build base is absent from control Dockerfile")
     hermes_reference = build_bases.get("hermes")
     if not isinstance(hermes_reference, str):
-        errors.append("hermes digest-pinned build base is missing or invalid")
+        errors.append("hermes build base is missing or invalid")
     elif hermes_reference not in hermes_dockerfile:
         errors.append(
-            "hermes digest-pinned build base is absent from Hermes Dockerfile"
+            "hermes build base is absent from Hermes Dockerfile"
         )
     if "ARG NODE_IMAGE" not in dockerfile or "ARG PYTHON_IMAGE" not in dockerfile:
         errors.append("control build bases are not explicit locked arguments")
@@ -644,10 +655,10 @@ def image_errors(root: Path) -> list[str]:
     if (
         hermes_base is None
         or hermes_base.group(1) != locked_hermes
-        or IMAGE.fullmatch(hermes_base.group(1)) is None
+        or VERSIONED_IMAGE.fullmatch(hermes_base.group(1)) is None
         or "FROM ${HERMES_IMAGE} AS managed" not in hermes_dockerfile
     ):
-        errors.append("Hermes build base is not the exact digest-pinned locked image")
+        errors.append("Hermes build base is not the exact versioned locked image")
     return errors
 
 

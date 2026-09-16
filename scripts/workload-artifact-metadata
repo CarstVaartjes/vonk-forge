@@ -51,11 +51,14 @@ OUTPUT_REPOSITORY = re.compile(
     r"^ghcr\.io/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
     r"(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*){1,7}$"
 )
-PINNED_IMAGE = re.compile(
-    r"^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[1-9][0-9]{0,4})?/"
-    r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
-    r"(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*"
-    r"@sha256:[0-9a-f]{64}$"
+# A base image is identified by repository and version tag; a digest is not
+# part of the identity. The tag must be present and must not be a floating
+# channel name.
+# A base image is pinned either by digest or by an explicit version tag.
+# A bare or floating reference is refused.
+VERSIONED_IMAGE = re.compile(
+    r"^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[1-9][0-9]{0,4})?/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*"
+    r"(?:@sha256:[0-9a-f]{64}|:(?!(?:latest|main|edge|stable|master|dev)$)[a-z0-9][a-z0-9._-]*)$"
 )
 MAX_DOCUMENT_BYTES = 64 * 1024
 
@@ -156,9 +159,9 @@ class WorkloadArtifactBuild:
             if (
                 not isinstance(value, str)
                 or len(value) > 512
-                or PINNED_IMAGE.fullmatch(value) is None
+                or VERSIONED_IMAGE.fullmatch(value) is None
             ):
-                raise ValueError("base image must be a canonical digest-pinned reference")
+                raise ValueError("base image must be a canonical versioned reference")
             base_images.append(value)
         if len(set(base_images)) != len(base_images):
             raise ValueError("base images must be unique")

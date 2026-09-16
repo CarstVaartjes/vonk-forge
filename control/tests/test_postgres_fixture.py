@@ -13,11 +13,8 @@ from .conftest import (
 )
 
 
-def test_postgres_runtime_is_immutable_18_3() -> None:
-    assert POSTGRES_IMAGE == (
-        "postgres:18.3@sha256:"
-        "7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db"
-    )
+def test_postgres_runtime_is_version_pinned_18_3() -> None:
+    assert POSTGRES_IMAGE == "postgres:18.3"
 
 
 def test_postgres_database_names_are_unique_safe_identifiers() -> None:

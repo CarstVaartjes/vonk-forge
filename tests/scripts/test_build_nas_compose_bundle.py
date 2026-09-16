@@ -18,10 +18,10 @@ RENDERER = ROOT / "scripts/render-production-compose"
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 DIGEST = "a" * 64
 IMAGES = {
-    "api_image": f"ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:{DIGEST}",
-    "worker_image": f"ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3@sha256:{DIGEST}",
-    "hermes_image": f"ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3@sha256:{DIGEST}",
-    "litellm_image": f"ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3@sha256:{DIGEST}",
+    "api_image": "ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3",
+    "worker_image": "ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3",
+    "hermes_image": "ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3",
+    "litellm_image": "ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3",
 }
 SERVICES = {
     "tailscale-gateway",

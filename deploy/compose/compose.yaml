@@ -59,7 +59,7 @@ x-worker-environment: &worker-environment
 
 services:
   postgres:
-    image: ${POSTGRES_IMAGE:-postgres:18.6@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280}
+    image: ${POSTGRES_IMAGE:-postgres:18.6}
     entrypoint: [/usr/local/bin/vonk-postgres-entrypoint]
     command: [postgres]
     restart: unless-stopped
@@ -88,7 +88,7 @@ services:
       retries: 10
 
   control-api:
-    image: ${CONTROL_API_IMAGE:?set a digest-pinned control-api image}
+    image: ${CONTROL_API_IMAGE:?set a version-pinned control-api image}
     restart: unless-stopped
     logging: *bounded-logging
     command: [python, -m, vonk_control.api]
@@ -142,7 +142,7 @@ services:
       retries: 10
 
   control-worker:
-    image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
+    image: ${CONTROL_WORKER_IMAGE:?set a version-pinned control-worker image}
     restart: unless-stopped
     logging: *bounded-logging
     command: [python, -m, vonk_control.worker]
@@ -174,7 +174,7 @@ services:
       retries: 12
 
   step-ca:
-    image: ${STEP_CA_IMAGE:-smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270}
+    image: ${STEP_CA_IMAGE:-smallstep/step-ca:0.30.2}
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
@@ -196,7 +196,7 @@ services:
       retries: 10
 
   litellm:
-    image: ${LITELLM_IMAGE:?set a digest-pinned Vonk LiteLLM image}
+    image: ${LITELLM_IMAGE:?set a version-pinned Vonk LiteLLM image}
     restart: unless-stopped
     logging: *bounded-logging
     entrypoint: [/bin/sh, /run/vonk-normalized-secrets/runtime-assets/litellm/entrypoint.sh]
@@ -234,7 +234,7 @@ services:
       retries: 10
 
   prometheus:
-    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0}
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.14.0}
     restart: unless-stopped
     logging: *bounded-logging
     command:
@@ -259,7 +259,7 @@ services:
       retries: 12
 
   grafana:
-    image: ${GRAFANA_IMAGE:-grafana/grafana:13.2.0@sha256:3fd54ae1214669f8355f065ec9f6445d5279a3d77095ab048ca045685272429b}
+    image: ${GRAFANA_IMAGE:-grafana/grafana:13.2.0}
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
@@ -287,7 +287,7 @@ services:
       retries: 12
 
   caddy:
-    image: ${CADDY_IMAGE:-caddy:2.11.4@sha256:13ba145cba2f3e28fa801994876e4c086d1b95d5aa2a520a734765ffb6b12017}
+    image: ${CADDY_IMAGE:-caddy:2.11.4}
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
@@ -321,7 +321,7 @@ services:
       retries: 12
 
   registry:
-    image: ${REGISTRY_IMAGE:-registry:3.1.1@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33}
+    image: ${REGISTRY_IMAGE:-registry:3.1.1}
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
@@ -405,7 +405,7 @@ networks:
   litellm-edge: {internal: true}
   registry-edge: {internal: true}
   # No standing service joins this network. A Docker-daemon administrator may
-  # attach a digest-pinned one-shot ORAS publisher as documented in registry/README.md.
+  # attach a version-pinned one-shot ORAS publisher as documented in registry/README.md.
   registry-publisher: {internal: true}
   ca: {internal: true}
 

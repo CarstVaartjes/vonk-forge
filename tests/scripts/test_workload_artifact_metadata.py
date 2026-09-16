@@ -35,7 +35,7 @@ def _request_document() -> dict[str, object]:
     return {
         "architecture": "linux/arm64",
         "attestations": {"provenance": True, "sbom": True},
-        "base_images": [f"nvcr.io/nvidia/cuda@{SHA_A}"],
+        "base_images": ["nvcr.io/nvidia/cuda:13.0.0-runtime-ubuntu24.04"],
         "context": "adapters/deepseek/ds4",
         "context_digest": SHA_B,
         "dockerfile": "adapters/deepseek/ds4/Dockerfile",
@@ -139,7 +139,7 @@ def test_request_rejects_unreviewed_or_secret_bearing_inputs(field: str) -> None
         ("output_repository", "ghcr.io/" + "a" * 240 + "/workload"),
         ("architecture", []),
         ("base_images", []),
-        ("base_images", [f"example.invalid/base@{SHA_A}"] * 17),
+        ("base_images", ["example.invalid/base:1.0.0"] * 17),
     ],
 )
 def test_request_rejects_missing_exact_or_unbounded_values(
@@ -183,10 +183,10 @@ def test_request_rejects_path_escape_or_unreviewed_source_roots(
 @pytest.mark.parametrize(
     "reference",
     [
-        "nvcr.io/nvidia/cuda:13.0.0-runtime-ubuntu24.04",
         "nvcr.io/nvidia/cuda:latest",
         f"nvcr.io/nvidia/cuda:13.0@{SHA_A}",
-        f"NVCR.IO/nvidia/cuda@{SHA_A}",
+        "nvcr.io/nvidia/cuda",
+        f"NVCR.IO/nvidia/cuda:13.0.0-runtime@sha256:{'a' * 64}",
     ],
 )
 def test_request_rejects_mutable_or_noncanonical_base_images(reference: str) -> None:

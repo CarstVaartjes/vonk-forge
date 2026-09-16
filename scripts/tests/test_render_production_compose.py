@@ -195,7 +195,7 @@ def test_render_rejects_template_token_drift(tmp_path: Path) -> None:
     template = tmp_path / "compose.yaml"
     template.write_text(
         TEMPLATE.read_text(encoding="utf-8").replace(
-            "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}",
+            "${CONTROL_API_IMAGE:?set a version-pinned control-api image}",
             "unexpected",
             1,
         ),

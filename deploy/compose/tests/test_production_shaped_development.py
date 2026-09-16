@@ -42,7 +42,7 @@ def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
         "hermes"
     ]
     assert document["x-hermes-service"]["image"] == (
-        "${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}"
+        "${HERMES_AGENT_IMAGE:?set a version-pinned Hermes image}"
     )
     tailscale = yaml.safe_load(
         (ROOT / "deploy/compose/tailscale/compose.yaml").read_text(encoding="utf-8")

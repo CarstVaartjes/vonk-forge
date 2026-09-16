@@ -1,7 +1,7 @@
 x-hermes-service: &hermes-service
   # Compose interpolates profiles during validation, so every release manifest
   # supplies the accepted immutable image even when Hermes remains disabled.
-  image: ${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}
+  image: ${HERMES_AGENT_IMAGE:?set a version-pinned Hermes image}
   logging:
     driver: local
     options:
@@ -42,7 +42,7 @@ x-hermes-service: &hermes-service
 
 services:
   hermes-litellm-key-provisioner:
-    image: ${LITELLM_IMAGE:?set a digest-pinned Vonk LiteLLM image}
+    image: ${LITELLM_IMAGE:?set a version-pinned Vonk LiteLLM image}
     profiles: [hermes]
     restart: unless-stopped
     logging:

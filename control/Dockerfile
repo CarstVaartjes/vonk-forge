@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1.7
-ARG NODE_IMAGE=node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553
-ARG PYTHON_IMAGE=python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
+# First-party language bases track their rolling tag so a rebuild picks up
+# upstream patch releases. They hold no operator data, run only our own code,
+# and are rebuilt through CI on every change; see docs/image-pin-refresh.md.
+# Third-party bases below stay digest-pinned.
+ARG NODE_IMAGE=node:24-bookworm-slim
+ARG PYTHON_IMAGE=python:3.14-slim-bookworm
 ARG SKOPEO_IMAGE=quay.io/skopeo/stable:v1.22.2-immutable@sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810
 ARG SKOPEO_INDEX_DIGEST=sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810
 ARG SKOPEO_AMD64_DIGEST=sha256:0e392474a4383b733038b85eff26ade929d2ff10e8deead25a6add3ed79fb362
