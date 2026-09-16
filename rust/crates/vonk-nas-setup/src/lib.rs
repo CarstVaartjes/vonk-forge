@@ -1316,6 +1316,13 @@ fn ca_certificate_params(
         KeyUsagePurpose::KeyCertSign,
         KeyUsagePurpose::CrlSign,
     ];
+    // Strict RFC 5280 verification (OpenSSL's X509_V_FLAG_X509_STRICT, enabled
+    // by default in Python 3.13+) rejects any non-self-signed certificate that
+    // omits the Authority Key Identifier.  The controller reaches step-ca over
+    // TLS with that verifier and only the root as its trust anchor, so a
+    // generated intermediate without the extension makes every enrollment
+    // fail closed.  The controller leaf already sets this flag.
+    params.use_authority_key_identifier_extension = true;
     Ok(params)
 }
 
