@@ -22,10 +22,7 @@ from .api_response_witness import (  # noqa: F401 - pytest discovers imported ho
     pytest_terminal_summary,
 )
 
-POSTGRES_IMAGE = (
-    "postgres:18.3@sha256:"
-    "7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db"
-)
+POSTGRES_IMAGE = "postgres:18.3"
 _POSTGRES_PASSWORD = "postgres"
 _POSTGRES_PORT_TEMPLATE = (
     '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}'

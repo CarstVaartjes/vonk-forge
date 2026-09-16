@@ -1,16 +1,17 @@
 # Refresh the pinned container images
 
-Every upstream image this platform builds or runs is fixed by an immutable tag
-**and** an OCI index digest. This runbook is the manual procedure for a human
-refreshing those pins deliberately. It is not a CI job and there is no
-scheduled refresh: a moving upstream tag must never change what runs without a
-reviewed edit.
+Every upstream image this platform builds or runs is fixed by an explicit
+version tag. A digest is optional: an entry may be `NAME:TAG` or
+`NAME:TAG@sha256:<64 hex>`, and either form is accepted, because a recipe that
+declares a digest is implemented exactly as it was defined. What is refused is a
+bare or floating reference — one that pins no version at all. This runbook is
+the manual procedure for a human refreshing a pin deliberately.
 
 `deploy/compose/images.lock.json` is the single inventory. Its `images` mapping
 holds the Compose runtime images and its `build_bases` mapping holds the images
-the release Dockerfiles build `FROM`. `scripts/verify-supply-chain` rejects any
-entry that is not of the form `NAME[:TAG]@sha256:<64 hex>` and binds the lock
-into `inventory/sbom/manifest.json`.
+the release Dockerfiles build `FROM`. `scripts/verify-supply-chain` binds the
+lock into `inventory/sbom/manifest.json` and rejects any entry that pins no
+explicit version.
 
 ## The pins and where they live
 
@@ -73,19 +74,19 @@ them, but a refresh that touches their upstream must update them too:
   are obvious fakes (`@sha256:aaaa…`); only its `TAILSCALE_IMAGE` mirrors the
   real pin, and no test compares it to the lock.
 
-## The rule: tag plus digest, never a moving tag
+## The rule: an explicit version, digest optional
 
-A tag is a mutable pointer owned by the publisher; a digest is a
-content-addressed identity owned by the content. Pin `NAME:TAG@sha256:<index>`
-for both properties:
+A version tag and a digest both pin an explicit version; they differ only in how
+precisely. This repository pins the tag and leaves the digest optional:
 
-- **Keep the tag** so the reference is human-readable and the provenance is
-  obvious in diffs and SBOMs.
-- **Keep the digest** so the build is exact and reproducible even if the tag
-  moves.
-- **Never pin a floating tag alone** (`stable`, `latest`, `main`, `edge`).
-  Compose defaults must carry a digest; `scripts/verify-supply-chain` rejects
-  Compose `:latest`, `:main`, and `:edge` defaults without one.
+- **Require an explicit version.** `NAME:TAG`, `NAME:TAG@sha256:<index>` and
+  `NAME@sha256:<index>` are all accepted.
+- **A recipe keeps whatever it declares.** A recipe that pins a digest is
+  implemented exactly as it was defined, so a digest is never stripped and never
+  required. Recipes whose build instructions name a specific downloaded image
+  keep that image as written.
+- **Refuse a bare or floating reference.** `stable`, `latest`, `main`, and
+  `edge` pin nothing; `scripts/verify-supply-chain` rejects them.
 
 Digest pinning is not enough on its own if the tag is floating and later
 advances: registries garbage-collect superseded indexes, and the recorded digest

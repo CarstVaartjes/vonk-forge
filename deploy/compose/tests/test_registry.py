@@ -35,7 +35,7 @@ def _rendered() -> dict:
 def test_distribution_is_pinned_private_persistent_and_credential_free() -> None:
     rendered = _rendered()
     registry = rendered["services"]["registry"]
-    assert registry["image"] == "registry:3@sha256:" + "9" * 64
+    assert registry["image"] == "registry:3"
     assert not registry.get("ports")
     assert set(registry["networks"]) == {"registry-edge", "registry-publisher"}
     assert rendered["networks"]["registry-edge"]["internal"] is True

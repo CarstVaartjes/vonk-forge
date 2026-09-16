@@ -38,7 +38,7 @@ from vonk_control.step_ca import (
 NODE_ID = "spk_0123456789abcdef0123456789abcdef"
 NOW = datetime(2026, 8, 4, 12, tzinfo=UTC)
 CA_URL = "https://step-ca:9000"
-STEP_CA_IMAGE = "smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270"
+STEP_CA_IMAGE = "smallstep/step-ca:0.30.2"
 
 
 def _der(tag: int, payload: bytes) -> bytes:
