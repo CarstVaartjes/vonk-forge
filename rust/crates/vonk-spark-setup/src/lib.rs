@@ -863,6 +863,12 @@ pub enum SetupError {
     #[error("controller CA is invalid or does not match its supplied SHA-256")]
     ControllerCa,
     #[error(
+        "controller CA changed (this Spark trusts {stored}, the controller advertises \
+         {advertised}); refresh /etc/vonk-forge-agent/controller-ca.pem and ca_sha256 before \
+         re-enrolling"
+    )]
+    ControllerCaChanged { stored: String, advertised: String },
+    #[error(
         "enrollment bootstrap is invalid or does not match the supplied endpoint and CA SHA-256"
     )]
     EnrollmentBootstrap,
@@ -1040,6 +1046,9 @@ pub fn prepare_setup_with_authority(
             let config = paired_configuration(&paths.config, paths)?;
             let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
             verify_ca(&ca, &config.ca_sha256)?;
+            // Fail closed before prompting for a grant when the controller no
+            // longer advertises the CA this Spark pinned.
+            verify_reenroll_controller_ca(&config, request.controller_address, runner)?;
             let pairing_token = prompt
                 .secret("Pairing token")
                 .map_err(|_| SetupError::Prompt)?;
@@ -2551,6 +2560,37 @@ pub fn parse_enrollment_bootstrap(bytes: &[u8]) -> Result<EnrollmentBootstrapRes
         return Err(SetupError::EnrollmentBootstrap);
     }
     serde_json::from_slice(bytes).map_err(|_| SetupError::EnrollmentBootstrap)
+}
+
+/// Refuse a re-enrollment whose stored controller CA no longer matches the CA
+/// the controller advertises.
+///
+/// A rotated controller CA otherwise reaches the enroll POST as an opaque
+/// rustls `InvalidCertificate(BadSignature)`, because the old and new roots can
+/// share a common name, and the operator has to hand-refresh the pinned CA on
+/// every Spark.  The insecure bootstrap read supplies only the advertised
+/// fingerprint: nothing else from it is trusted and the discovered CA is never
+/// adopted here.
+fn verify_reenroll_controller_ca(
+    config: &WrittenConfig,
+    controller_address: Option<Ipv4Addr>,
+    runner: &mut dyn CommandRunner,
+) -> Result<(), SetupError> {
+    let mut bootstrap_url = config.enrollment_url.clone();
+    bootstrap_url.set_path("/agent/bootstrap");
+    let output = run_checked(
+        runner,
+        bootstrap_curl(&bootstrap_url, controller_address, None),
+    )?
+    .stdout;
+    let bootstrap = parse_enrollment_bootstrap(&output)?;
+    if bootstrap.ca_fingerprint != config.ca_sha256 {
+        return Err(SetupError::ControllerCaChanged {
+            stored: config.ca_sha256.clone(),
+            advertised: bootstrap.ca_fingerprint,
+        });
+    }
+    Ok(())
 }
 
 fn discover_enrollment(

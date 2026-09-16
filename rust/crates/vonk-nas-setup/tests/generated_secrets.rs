@@ -8,8 +8,8 @@ use base64ct::{Base64UrlUnpadded, Encoding};
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use rcgen::{
-    CertificateParams, DnType, ExtendedKeyUsagePurpose, Issuer, KeyPair, KeyUsagePurpose,
-    PKCS_ED25519,
+    BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -343,6 +343,81 @@ fn replace_controller_leaf(
         controller_key.serialize_pem(),
     )
     .expect("replace controller key");
+}
+
+/// Rebuild the CA group with the pre-fix legacy intermediate that omitted the
+/// Authority Key Identifier.  The existing intermediate key is reused so the
+/// controller leaf and every other pinned member stay valid, and only the
+/// certificate extensions differ from a compliant group.
+fn replace_intermediate_with_legacy_aki_omission(secrets: &Path) {
+    let password =
+        std::fs::read_to_string(secrets.join("step-ca-password")).expect("Step CA password");
+    let encrypted_intermediate = std::fs::read_to_string(secrets.join("step-ca/intermediate-key"))
+        .expect("encrypted intermediate key");
+    let intermediate_signing_key = ed25519_dalek::SigningKey::from_pkcs8_encrypted_pem(
+        &encrypted_intermediate,
+        password.trim().as_bytes(),
+    )
+    .expect("decrypted intermediate key");
+    let intermediate_der = intermediate_signing_key
+        .to_pkcs8_der()
+        .expect("intermediate PKCS#8 DER");
+    let intermediate_key =
+        KeyPair::try_from(intermediate_der.as_bytes()).expect("rcgen intermediate key");
+
+    let now = time::OffsetDateTime::now_utc();
+    let root_key = KeyPair::generate_for(&PKCS_ED25519).expect("root key");
+    let mut root_params = CertificateParams::new(Vec::<String>::new()).expect("root parameters");
+    root_params.not_before = now - time::Duration::hours(1);
+    root_params.not_after = now + time::Duration::days(3650);
+    root_params
+        .distinguished_name
+        .push(DnType::CommonName, "Vonk Forge Root CA");
+    root_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(1));
+    root_params.key_usages = vec![
+        KeyUsagePurpose::DigitalSignature,
+        KeyUsagePurpose::KeyCertSign,
+        KeyUsagePurpose::CrlSign,
+    ];
+    root_params.use_authority_key_identifier_extension = true;
+    let root = CertifiedIssuer::self_signed(root_params, root_key).expect("self-signed root");
+
+    let mut intermediate_params =
+        CertificateParams::new(Vec::<String>::new()).expect("intermediate parameters");
+    intermediate_params.not_before = now - time::Duration::hours(1);
+    intermediate_params.not_after = now + time::Duration::days(1825);
+    intermediate_params
+        .distinguished_name
+        .push(DnType::CommonName, "Vonk Forge Agent Intermediate CA");
+    intermediate_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+    intermediate_params.key_usages = vec![
+        KeyUsagePurpose::DigitalSignature,
+        KeyUsagePurpose::KeyCertSign,
+        KeyUsagePurpose::CrlSign,
+    ];
+    // The legacy generator left this disabled, so the intermediate carried no
+    // Authority Key Identifier and strict verification rejected the chain.
+    intermediate_params.use_authority_key_identifier_extension = false;
+    let intermediate = CertifiedIssuer::signed_by(intermediate_params, intermediate_key, &root)
+        .expect("legacy intermediate");
+
+    let chain = std::fs::read_to_string(secrets.join("controller-server-certificate"))
+        .expect("controller chain");
+    let marker = "-----END CERTIFICATE-----";
+    let leaf_end = chain.find(marker).expect("controller leaf end") + marker.len();
+    let leaf_pem = &chain[..leaf_end];
+    std::fs::write(secrets.join("step-ca/root-certificate"), root.pem())
+        .expect("write legacy root");
+    std::fs::write(
+        secrets.join("step-ca/intermediate-certificate"),
+        intermediate.pem(),
+    )
+    .expect("write legacy intermediate");
+    std::fs::write(
+        secrets.join("controller-server-certificate"),
+        format!("{leaf_pem}\n{}", intermediate.pem()),
+    )
+    .expect("write controller chain");
 }
 
 fn upgrade_pki_bundle(output_root: &Path) -> Result<(), vonk_nas_setup::SetupError> {
@@ -706,6 +781,24 @@ fn upgrade_rejects_corrupt_expired_controller_key_before_renewal() {
     assert_eq!(
         std::fs::read(secrets.join("controller-server-key")).expect("key after"),
         key_before
+    );
+}
+
+#[test]
+fn upgrade_rejects_an_intermediate_without_authority_key_identifier() {
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = clone_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    replace_intermediate_with_legacy_aki_omission(&secrets);
+
+    let error = upgrade_pki_bundle(temporary.path())
+        .expect_err("legacy intermediate without an Authority Key Identifier rejected");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("Authority Key Identifier")
+            && message.contains("regenerate the Step CA/controller PKI group"),
+        "{message}"
     );
 }
 

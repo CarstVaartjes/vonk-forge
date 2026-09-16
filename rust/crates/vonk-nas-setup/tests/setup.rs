@@ -816,6 +816,93 @@ fn upgrade_rejects_unmanaged_top_level_entries_before_writing() {
 }
 
 #[test]
+fn upgrade_accepts_a_sync_directory_beside_the_bundle() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    let sync = bundle.join(".sync");
+    let job = sync.join("sync-job");
+    std::fs::create_dir(&sync).expect("sync directory");
+    std::fs::create_dir(&job).expect("sync job directory");
+    std::fs::write(job.join("bisync.db"), "sync database\n").expect("sync database");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let result = prepare(
+        &payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("a real .sync directory is tolerated");
+
+    assert_eq!(
+        std::fs::read_to_string(job.join("bisync.db")).expect("preserved sync database"),
+        "sync database\n",
+        "the installer must not touch the sync tool metadata"
+    );
+    assert_ne!(
+        std::fs::read_to_string(result.root.join("docker-compose.yaml")).expect("compose"),
+        "old compose\n"
+    );
+}
+
+#[test]
+fn upgrade_rejects_a_sync_regular_file() {
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    std::fs::write(bundle.join(".sync"), "not a directory\n").expect("sync file");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let error = prepare(
+        &payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect_err("a regular file named .sync is rejected");
+
+    assert!(error.to_string().contains("unexpected top-level entry"));
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("docker-compose.yaml")).expect("compose"),
+        "old compose\n",
+        "validation must happen before release-controlled state changes"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn upgrade_rejects_a_sync_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let temporary = tempdir().expect("temporary directory");
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    let outside = temporary.path().join("outside");
+    std::fs::create_dir(&outside).expect("outside directory");
+    symlink(&outside, bundle.join(".sync")).expect("sync symlink");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let error = prepare(
+        &payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect_err("a symlink named .sync is rejected");
+
+    assert!(error.to_string().contains("unexpected top-level entry"));
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("docker-compose.yaml")).expect("compose"),
+        "old compose\n",
+        "validation must happen before release-controlled state changes"
+    );
+}
+
+#[test]
 fn upgrade_removes_an_empty_interrupted_installer_staging_directory() {
     let temporary = tempdir().expect("temporary directory");
     write_existing_bundle(temporary.path());

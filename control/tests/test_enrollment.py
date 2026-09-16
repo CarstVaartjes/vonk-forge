@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import logging
 import threading
 import time
 import uuid
@@ -22,6 +23,7 @@ from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.enrollment import (
     EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
     EnrollmentService,
     RenewalConflictRevocationUncertain,
     RenewalInProgress,
@@ -1593,3 +1595,44 @@ def test_provider_failure_is_durable_uncertain_and_exact_replay_never_reissues(
     with sessions() as session:
         stored = session.scalar(select(AgentEnrollment))
         assert stored is not None and stored.state == "issuing"
+
+
+def test_provider_failure_logs_the_cause_with_the_node_identity(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'logged-uncertain.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    authority = FailingIssuanceAuthority()
+    enrollment = EnrollmentService(
+        sessions,
+        authority,
+        clock=Clock(),
+        issuance_replay_wait_seconds=0.01,
+    )
+    request = csr()
+    grant = enrollment.create(NODE_ID, "admin", 600)
+
+    with (
+        caplog.at_level(logging.ERROR, logger="vonk_control.enrollment"),
+        pytest.raises(EnrollmentIssuanceUncertain, match="manual recovery"),
+    ):
+        enrollment.submit(grant.token, request, evidence(request))
+
+    records = [
+        record
+        for record in caplog.records
+        if record.name == "vonk_control.enrollment" and record.levelno == logging.ERROR
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert NODE_ID in record.getMessage()
+    assert getattr(record, "failure_type", None) == "RuntimeError"
+    # The provider cause and traceback are retained for reconciliation.
+    assert record.exc_info is not None
+    cause = record.exc_info[1]
+    assert isinstance(cause, RuntimeError)
+    assert str(cause) == "provider response deliberately lost"
+    # Neither the grant token nor the CSR may reach the log.
+    assert grant.token not in caplog.text
+    assert request.decode() not in caplog.text
