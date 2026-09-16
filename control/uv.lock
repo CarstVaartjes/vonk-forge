@@ -1090,7 +1090,7 @@ dev = [
 [[package]]
 name = "vonk-forge-public-contracts"
 version = "0.1.0"
-source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main#6001adcb12443701c8d695271deedbab6810217e" }
+source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main#71d83d36adb2d16fea59efdd9e092648b05fab66" }
 dependencies = [
     { name = "pydantic" },
 ]
