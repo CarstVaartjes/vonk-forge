@@ -37,7 +37,6 @@ from vonk_forge_contracts import RecipeDefinition
 from .cached_file_verification import verified_files
 from .catalog_revision_contract import read_catalog_document, read_catalog_projection
 from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
-from .models import RuntimeImageReceipt as RuntimeImageReceiptRow
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -429,6 +428,38 @@ def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
         ) from error
 
 
+def prefixed_image_digest(value: str | None) -> str | None:
+    """Return a ``sha256:``-prefixed image digest.
+
+    The managed-storage receipt stores image digests without the algorithm
+    prefix, while Controller SQL stores them with it. One normalization keeps a
+    storage observation comparable to a durable authorization without
+    duplicating either spelling at every call site.
+    """
+
+    if value is None:
+        return None
+    return value if value.startswith("sha256:") else f"sha256:{value}"
+
+
+def _receipt_identity(receipt: RuntimeImageReceipt) -> dict[str, object]:
+    """The immutable identity a re-preparation of the same archive must repeat."""
+
+    return {
+        "source": receipt.source,
+        "registry_manifest_digest": prefixed_image_digest(
+            receipt.registry_manifest_digest
+        ),
+        "platform_manifest_digest": prefixed_image_digest(
+            receipt.platform_manifest_digest
+        ),
+        "local_image_config_id": prefixed_image_digest(receipt.local_image_config_id),
+        "oci_archive_sha256": receipt.oci_archive_sha256,
+        "image_bytes": receipt.image_bytes,
+        "build_id": receipt.build_id,
+    }
+
+
 def persist_runtime_image_receipt(
     session: Session,
     *,
@@ -437,14 +468,13 @@ def persist_runtime_image_receipt(
     effective_execution_key: str,
     receipt: RuntimeImageReceipt,
     verified_at: datetime,
-) -> RuntimeImageReceiptRow:
-    """Atomically upsert the verified runtime identity in Controller SQL.
+) -> RuntimeImageReceipt:
+    """Authorize an exact verified runtime identity for the current revision.
 
-    Filesystem receipts are an object cache.  The SQL row is the authority
-    consumed by install admission and agent specification reads, so a
-    successful filesystem preparation is not complete until this function
-    flushes the exact recipe/effective execution binding in the caller's
-    transaction.
+    Managed storage already owns the verified bytes and the immutable receipt
+    written beside them by ``FilesystemRuntimeImageStorage.commit``. SQL owns
+    only the decision that this current revision may consume that exact
+    archive, recorded in :class:`RuntimeImageAuthorization`.
     """
 
     if (
@@ -468,139 +498,33 @@ def persist_runtime_image_receipt(
             "runtime_image.receipt_identity_invalid",
             "runtime image receipt source is invalid",
         )
-    current_revision = session.get(CatalogDocumentRevision, recipe_revision_id)
-    if (
-        current_revision is None
-        or current_revision.kind != "recipe"
-        or current_revision.state != "active"
-    ):
-        raise RuntimeImagePreparationError(
-            "runtime_image.authorization_invalid",
-            "current recipe revision authority is unavailable or inactive",
-        )
-    if receipt.distribution_content_sha256 != original_content_digest:
-        # Production callers provide the currently requested revision digest.
-        # Permit that value to differ only when the current SQL revision is a
-        # real notes-only successor; the receipt's own digest remains the
-        # immutable original provenance used below.
-        if current_revision.content_digest != original_content_digest:
-            raise RuntimeImagePreparationError(
-                "runtime_image.receipt_identity_invalid",
-                "runtime image receipt recipe digest does not match the catalog revision",
-            )
-        original_content_digest = receipt.distribution_content_sha256
-    if receipt.source == "published":
-        if receipt.registry_manifest_digest is None or receipt.build_id is not None:
-            raise RuntimeImagePreparationError(
-                "runtime_image.receipt_identity_invalid",
-                "published runtime image receipt provenance is invalid",
-            )
-    elif receipt.registry_manifest_digest is not None or receipt.build_id is None:
+    revision = session.get(CatalogDocumentRevision, recipe_revision_id)
+    if revision is None or revision.kind != "recipe" or revision.state != "active":
         raise RuntimeImagePreparationError(
             "runtime_image.receipt_identity_invalid",
-            "Controller-build runtime image receipt provenance is invalid",
+            "current recipe revision authority is unavailable",
         )
-    if (
-        receipt.architecture != "linux-arm64"
-        or receipt.runtime_interface != "vonk.runtime.v1"
-        or receipt.runtime_interface_label != "v1"
-    ):
-        raise RuntimeImagePreparationError(
-            "runtime_image.receipt_identity_invalid",
-            "runtime image platform or interface identity is invalid",
-        )
-    # The receipt's own content digest selects its original canonical
-    # provenance.  ``recipe_revision_id`` is the currently requested revision
-    # and may be a notes-only descendant of that original revision.
-    original_revision = session.scalar(
-        select(CatalogDocumentRevision)
-        .where(
-            CatalogDocumentRevision.kind == "recipe",
-            CatalogDocumentRevision.content_digest
-            == receipt.distribution_content_sha256,
-        )
-        .order_by(CatalogDocumentRevision.revision_number, CatalogDocumentRevision.id)
-        .limit(1)
-    )
-    if original_revision is None:
-        raise RuntimeImagePreparationError(
-            "runtime_image.receipt_identity_invalid",
-            "original recipe revision authority is unavailable",
-        )
-    original_revision_id = original_revision.id
-    _validate_revision_reuse_identity(current_revision, original_revision)
-    # A source recipe can be rebuilt under the same execution identity.  The
-    # rebuild is a new immutable observation when its verified platform/config
-    # identity changes; retaining both rows lets a frozen plan continue to
-    # resolve only its original receipt while a fresh plan authorizes the new
-    # one.  Published pins cannot legitimately change beneath the same recipe
-    # execution, so their narrower lookup deliberately retains conflict
-    # detection.  For either source, the database uniqueness fields identify
-    # the row and the full comparison below prevents changed archive/build
-    # provenance from being folded into an existing observation.
-    lookup = select(RuntimeImageReceiptRow).where(
-        RuntimeImageReceiptRow.recipe_revision_id == original_revision_id,
-        RuntimeImageReceiptRow.source == receipt.source,
-        RuntimeImageReceiptRow.original_content_digest == original_content_digest,
-        RuntimeImageReceiptRow.effective_execution_key == effective_execution_key,
-    )
-    if receipt.source == "controller-build":
-        lookup = lookup.where(
-            RuntimeImageReceiptRow.platform_manifest_digest
-            == receipt.platform_manifest_digest,
-            RuntimeImageReceiptRow.local_image_config_id
-            == receipt.local_image_config_id,
-        )
-    row = session.scalar(lookup)
-    identity = {
-        "registry_manifest_digest": receipt.registry_manifest_digest,
-        "platform_manifest_digest": receipt.platform_manifest_digest,
-        "local_image_config_id": receipt.local_image_config_id,
-        "oci_archive_sha256": receipt.oci_archive_sha256,
-        "image_bytes": receipt.image_bytes,
-        "architecture": receipt.architecture,
-        "runtime_interface": receipt.runtime_interface,
-        "runtime_interface_label": receipt.runtime_interface_label,
-        "build_id": receipt.build_id,
-    }
-    if row is None:
-        row = RuntimeImageReceiptRow(
-            recipe_revision_id=original_revision_id,
-            source=receipt.source,
-            original_content_digest=original_content_digest,
-            effective_execution_key=effective_execution_key,
-            **identity,
-            verified_at=verified_at,
-            state="verified",
-        )
-        session.add(row)
-    else:
-        if row.state not in {"verified", "evicted"}:
-            raise RuntimeImagePreparationError(
-                "runtime_image.receipt_authority_revoked",
-                "immutable runtime image receipt is not verified",
+    # An editorial successor shares the original revision digest and may reuse
+    # its verified bytes only when its execution and artifact identities are
+    # unchanged. Two independent revisions that happen to pin the same image are
+    # not successors, so they authorize the same archive on their own terms.
+    if revision.content_digest != original_content_digest:
+        original = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.content_digest == original_content_digest,
             )
-        existing = {key: getattr(row, key) for key in identity}
-        if existing != identity:
-            raise RuntimeImagePreparationError(
-                "runtime_image.receipt_identity_conflict",
-                "durable runtime image receipt identity changed for the same execution",
-            )
-        # Re-preparation restores an evicted cache entry only after verifying
-        # the identical bytes and original provenance. Security revocation of
-        # either the receipt or its authorization remains terminal.
-        row.verified_at = verified_at
-        row.state = "verified"
-    session.flush()
-
+        )
+        if original is not None and original.id != revision.id:
+            _validate_revision_reuse_identity(revision, original)
     _authorize_current_revision(
         session,
         recipe_revision_id=recipe_revision_id,
-        receipt=row,
+        receipt=receipt,
         effective_execution_key=effective_execution_key,
         authorized_at=verified_at,
     )
-    return row
+    return receipt
 
 
 def resolve_persisted_runtime_image_receipt(
@@ -610,14 +534,8 @@ def resolve_persisted_runtime_image_receipt(
     current_content_digest: str,
     effective_execution_key: str,
     receipt: RuntimeImageReceipt,
-) -> RuntimeImageReceiptRow:
-    """Require current-revision authorization for an immutable receipt.
-
-    The filesystem receipt carries the original verified recipe digest.  The
-    caller supplies the currently requested revision digest separately so a
-    notes-only successor can authorize those same bytes without rewriting the
-    original receipt provenance.
-    """
+) -> RuntimeImageReceipt:
+    """Require current-revision authorization for an immutable storage receipt."""
 
     revision = session.get(CatalogDocumentRevision, recipe_revision_id)
     if (
@@ -627,51 +545,24 @@ def resolve_persisted_runtime_image_receipt(
         or revision.content_digest != current_content_digest
     ):
         raise ValueError("current recipe revision digest is not authorized")
-    original_content_digest = receipt.distribution_content_sha256
-
-    row = session.scalar(
-        select(RuntimeImageReceiptRow).where(
-            RuntimeImageReceiptRow.source == receipt.source,
-            RuntimeImageReceiptRow.original_content_digest == original_content_digest,
-            RuntimeImageReceiptRow.effective_execution_key == effective_execution_key,
-            RuntimeImageReceiptRow.state == "verified",
-            RuntimeImageReceiptRow.registry_manifest_digest
-            == receipt.registry_manifest_digest,
-            RuntimeImageReceiptRow.platform_manifest_digest
-            == receipt.platform_manifest_digest,
-            RuntimeImageReceiptRow.local_image_config_id
-            == receipt.local_image_config_id,
-            RuntimeImageReceiptRow.oci_archive_sha256 == receipt.oci_archive_sha256,
-            RuntimeImageReceiptRow.image_bytes == receipt.image_bytes,
-            RuntimeImageReceiptRow.architecture == receipt.architecture,
-            RuntimeImageReceiptRow.runtime_interface == receipt.runtime_interface,
-            RuntimeImageReceiptRow.runtime_interface_label
-            == receipt.runtime_interface_label,
-            RuntimeImageReceiptRow.build_id == receipt.build_id,
-        )
-    )
-    if row is None:
-        raise ValueError(
-            "durable runtime image receipt identity does not match filesystem receipt"
-        )
+    identity = _receipt_identity(receipt)
     authorization = session.scalar(
         select(RuntimeImageAuthorization).where(
             RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
-            RuntimeImageAuthorization.receipt_id == row.id,
-            RuntimeImageAuthorization.source == receipt.source,
             RuntimeImageAuthorization.original_content_digest
-            == row.original_content_digest,
+            == receipt.distribution_content_sha256,
             RuntimeImageAuthorization.effective_execution_key
             == effective_execution_key,
             RuntimeImageAuthorization.registry_manifest_digest
-            == receipt.registry_manifest_digest,
+            == identity["registry_manifest_digest"],
             RuntimeImageAuthorization.platform_manifest_digest
-            == receipt.platform_manifest_digest,
+            == identity["platform_manifest_digest"],
             RuntimeImageAuthorization.local_image_config_id
-            == receipt.local_image_config_id,
-            RuntimeImageAuthorization.oci_archive_sha256 == receipt.oci_archive_sha256,
-            RuntimeImageAuthorization.image_bytes == receipt.image_bytes,
-            RuntimeImageAuthorization.build_id == receipt.build_id,
+            == identity["local_image_config_id"],
+            RuntimeImageAuthorization.oci_archive_sha256
+            == identity["oci_archive_sha256"],
+            RuntimeImageAuthorization.image_bytes == identity["image_bytes"],
+            RuntimeImageAuthorization.build_id == identity["build_id"],
             RuntimeImageAuthorization.state == "authorized",
         )
     )
@@ -679,24 +570,18 @@ def resolve_persisted_runtime_image_receipt(
         raise ValueError(
             "current recipe revision is not authorized for runtime image receipt"
         )
-    return row
+    return receipt
 
 
 def _authorize_current_revision(
     session: Session,
     *,
     recipe_revision_id: str,
-    receipt: RuntimeImageReceiptRow,
+    receipt: RuntimeImageReceipt,
     effective_execution_key: str,
     authorized_at: datetime,
 ) -> RuntimeImageAuthorization:
-    """Create or verify the separate current-recipe receipt binding."""
-
-    if receipt.effective_execution_key != effective_execution_key:
-        raise RuntimeImagePreparationError(
-            "runtime_image.authorization_invalid",
-            "current recipe execution identity does not match the immutable receipt",
-        )
+    """Create or verify the separate current-recipe archive binding."""
 
     revision = session.get(CatalogDocumentRevision, recipe_revision_id)
     if revision is None or revision.kind != "recipe" or revision.state != "active":
@@ -758,26 +643,23 @@ def _authorize_current_revision(
         )
 
     values = {
-        "source": receipt.source,
-        "original_content_digest": receipt.original_content_digest,
+        **_receipt_identity(receipt),
+        "original_content_digest": receipt.distribution_content_sha256,
         "effective_execution_key": effective_execution_key,
-        "registry_manifest_digest": receipt.registry_manifest_digest,
-        "platform_manifest_digest": receipt.platform_manifest_digest,
-        "local_image_config_id": receipt.local_image_config_id,
-        "oci_archive_sha256": receipt.oci_archive_sha256,
-        "image_bytes": receipt.image_bytes,
-        "build_id": receipt.build_id,
     }
+    # SQL keys the authorized archive by its own digest and its binding, now
+    # that no receipt row mediates the join.
     authorization = session.scalar(
         select(RuntimeImageAuthorization).where(
             RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
-            RuntimeImageAuthorization.receipt_id == receipt.id,
+            RuntimeImageAuthorization.effective_execution_key
+            == effective_execution_key,
+            RuntimeImageAuthorization.oci_archive_sha256 == receipt.oci_archive_sha256,
         )
     )
     if authorization is None:
         authorization = RuntimeImageAuthorization(
             recipe_revision_id=recipe_revision_id,
-            receipt_id=receipt.id,
             **values,
             authorized_at=authorized_at,
             state="authorized",
@@ -792,8 +674,8 @@ def _authorize_current_revision(
         existing = {key: getattr(authorization, key) for key in values}
         if existing != values:
             raise RuntimeImagePreparationError(
-                "runtime_image.authorization_conflict",
-                "current recipe authorization identity changed",
+                "runtime_image.receipt_identity_conflict",
+                "durable runtime image receipt identity changed for the same bytes",
             )
         authorization.authorized_at = authorized_at
         authorization.state = "authorized"

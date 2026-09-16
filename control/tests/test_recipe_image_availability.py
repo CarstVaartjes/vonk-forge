@@ -25,7 +25,6 @@ from vonk_control.models import (
     Job,
     RecipeBuild,
     RuntimeImageAuthorization,
-    RuntimeImageReceipt,
 )
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
@@ -277,25 +276,20 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
     assert service.get(first.id).state == "succeeded"
     cached = storage.read_receipt(ARCHIVE_SHA)
     with sessions.begin() as session:
-        receipt = session.scalar(select(RuntimeImageReceipt))
+        # One verified archive has one authorization here; the storage receipt
+        # beside the bytes is the immutable observation and has no state.
         authorization = session.scalar(select(RuntimeImageAuthorization))
-        assert receipt is not None and authorization is not None
-        receipt_id, authorization_id = receipt.id, authorization.id
-        execution_key = receipt.effective_execution_key
-        if revoked == "receipt":
-            receipt.state = "revoked"
-        elif revoked == "authorization":
+        assert authorization is not None
+        archive_sha256 = authorization.oci_archive_sha256
+        authorization_id = authorization.id
+        execution_key = authorization.effective_execution_key
+        if revoked is not None:
             authorization.state = "revoked"
     service.remove_selector(recipe.identity.slug, actor="operator", request_id="2" * 36)
+    # Removal takes the bytes and the managed-storage receipt with them; SQL
+    # keeps the authorization decision, which a restore re-checks.
     assert not (storage.root / ARCHIVE_SHA).exists()
-    with sessions() as session, pytest.raises(ValueError):
-        resolve_persisted_runtime_image_receipt(
-            session,
-            recipe_revision_id="revision-restore",
-            current_content_digest=content_sha256(recipe),
-            effective_execution_key=execution_key,
-            receipt=cached,
-        )
+    assert not (storage.root / f"{ARCHIVE_SHA}.receipt.json").exists()
     # Restart and use the real download path, including SQL receipt persistence.
     restarted = RecipeImageAvailabilityService(
         sessions,
@@ -321,17 +315,13 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
                 effective_execution_key=execution_key,
                 receipt=cached,
             )
-            assert restored.id == receipt_id
+            assert restored.oci_archive_sha256 == archive_sha256
             authorization = session.get(RuntimeImageAuthorization, authorization_id)
             assert authorization is not None and authorization.state == "authorized"
     else:
         assert result.state == "failed"
         assert result.failure is not None
-        assert result.failure["code"] == (
-            "runtime_image.receipt_authority_revoked"
-            if revoked == "receipt"
-            else "runtime_image.authorization_revoked"
-        )
+        assert result.failure["code"] == ("runtime_image.authorization_revoked")
 
 
 def test_forced_digest_failure_does_not_replace_valid_archive(tmp_path: Path) -> None:
@@ -594,7 +584,7 @@ def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(
     with sessions() as session:
         build = session.get(RecipeBuild, "00000000-0000-4000-8000-000000000901")
         assert build is not None and build.state == "failed"
-        assert session.scalars(select(RuntimeImageReceipt)).all() == []
+        assert session.scalars(select(RuntimeImageAuthorization)).all() == []
 
 
 def test_builder_capacity_wait_remains_durable_queue_after_automatic_limit(

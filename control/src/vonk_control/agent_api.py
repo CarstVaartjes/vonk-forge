@@ -111,7 +111,6 @@ from .models import (
     RecipeSourceBundle,
     RunNode,
     RuntimeImageAuthorization,
-    RuntimeImageReceipt,
 )
 from .operation_api import bounded_error_responses
 from .pki import IssuedCertificate
@@ -123,7 +122,10 @@ from .recipe_execution_contract import (
 from .recipe_operations import (
     prepare_exact_recipe_run_observation_nodes,
 )
-from .runtime_image_preparation import IMAGE_CACHE_DIRECTORY
+from .runtime_image_preparation import (
+    IMAGE_CACHE_DIRECTORY,
+    prefixed_image_digest,
+)
 from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
 from .strict_json import ControllerAPIRoute, StrictJSONModel
 from .telemetry import (
@@ -182,85 +184,70 @@ def _strict_json_datetime(value: object) -> object:
     return parsed
 
 
-def _runtime_image_receipt_matches(
+def _prefixed_text(value: object) -> str | None:
+    """Normalize a digest-shaped value that arrived as untyped JSON."""
+
+    return prefixed_image_digest(value) if isinstance(value, str) else None
+
+
+def _runtime_image_authorization_matches(
     runtime_image: Mapping[str, object],
     identity: Mapping[str, object],
-    receipt: object,
+    authorization: object,
     *,
     revision_id: str,
     revision_digest: str,
     installation_image_digest: str,
     installation_recipe_build_id: str | None,
-    authorization: object | None = None,
 ) -> bool:
-    """Bind one persisted launch image to its verified Controller receipt."""
+    """Bind one persisted launch image to its authorized Controller archive.
+
+    SQL owns the authorization decision; managed storage owns the verified
+    archive and its receipt. The authorization carries the archive identity, so
+    comparing it to the compiled launch image is the whole check.
+    """
 
     if (
-        getattr(receipt, "state", None) != "verified"
+        getattr(authorization, "state", None) != "authorized"
         or identity.get("recipe_revision_sha256") != revision_digest
-        or getattr(receipt, "effective_execution_key", None)
+        or getattr(authorization, "recipe_revision_id", None) != revision_id
+        or getattr(authorization, "effective_execution_key", None)
         != identity.get("execution_sha256")
         or runtime_image.get("image_digest") != installation_image_digest
-        or runtime_image.get("image_digest")
-        != getattr(receipt, "platform_manifest_digest", None)
-        or runtime_image.get("platform_manifest_digest")
-        != getattr(receipt, "platform_manifest_digest", None)
+        # The compiled plan and the durable authorization spell image digests
+        # differently; compare them in one spelling.
+        or _prefixed_text(runtime_image.get("image_digest"))
+        != _prefixed_text(getattr(authorization, "platform_manifest_digest", None))
+        or _prefixed_text(runtime_image.get("platform_manifest_digest"))
+        != _prefixed_text(getattr(authorization, "platform_manifest_digest", None))
         or runtime_image.get("registry_manifest_digest")
-        != getattr(receipt, "registry_manifest_digest", None)
+        != getattr(authorization, "registry_manifest_digest", None)
         or runtime_image.get("local_image_config_id")
-        != getattr(receipt, "local_image_config_id", None)
+        != getattr(authorization, "local_image_config_id", None)
         or runtime_image.get("oci_layout_sha256")
-        != getattr(receipt, "oci_archive_sha256", None)
-        or runtime_image.get("image_bytes") != getattr(receipt, "image_bytes", None)
-        or runtime_image.get("architecture") != getattr(receipt, "architecture", None)
-        or runtime_image.get("runtime_interface")
-        != getattr(receipt, "runtime_interface", None)
-        or runtime_image.get("runtime_interface_label")
-        != getattr(receipt, "runtime_interface_label", None)
-        or runtime_image.get("source") != getattr(receipt, "source", None)
-        or runtime_image.get("build_id") != getattr(receipt, "build_id", None)
-    ):
-        return False
-    if authorization is None:
-        if (
-            getattr(receipt, "recipe_revision_id", None) != revision_id
-            or getattr(receipt, "original_content_digest", None) != revision_digest
-        ):
-            return False
-    elif (
-        getattr(authorization, "recipe_revision_id", None) != revision_id
-        or getattr(authorization, "receipt_id", None) != getattr(receipt, "id", None)
-        or getattr(authorization, "original_content_digest", None)
-        != getattr(receipt, "original_content_digest", None)
-        or getattr(authorization, "effective_execution_key", None)
-        != getattr(receipt, "effective_execution_key", None)
-        or getattr(authorization, "source", None) != getattr(receipt, "source", None)
-        or getattr(authorization, "platform_manifest_digest", None)
-        != getattr(receipt, "platform_manifest_digest", None)
-        or getattr(authorization, "local_image_config_id", None)
-        != getattr(receipt, "local_image_config_id", None)
-        or getattr(authorization, "oci_archive_sha256", None)
-        != getattr(receipt, "oci_archive_sha256", None)
-        or getattr(authorization, "image_bytes", None)
-        != getattr(receipt, "image_bytes", None)
-        or getattr(authorization, "build_id", None)
-        != getattr(receipt, "build_id", None)
+        != getattr(authorization, "oci_archive_sha256", None)
+        or runtime_image.get("image_bytes")
+        != getattr(authorization, "image_bytes", None)
+        # Architecture and runtime-interface labels are compiled launch facts,
+        # not authorization columns; the plan's own validation owns them.
+        or runtime_image.get("source") != getattr(authorization, "source", None)
+        or runtime_image.get("build_id") != getattr(authorization, "build_id", None)
     ):
         return False
     source = runtime_image.get("source")
     if source == "published":
         return (
             runtime_image.get("registry_manifest_digest") is not None
-            and getattr(receipt, "registry_manifest_digest", None) is not None
+            and getattr(authorization, "registry_manifest_digest", None) is not None
             and runtime_image.get("build_id") is None
-            and getattr(receipt, "build_id", None) is None
+            and getattr(authorization, "build_id", None) is None
             and installation_recipe_build_id is None
         )
     if source == "controller-build":
         return (
             runtime_image.get("build_id") is not None
-            and getattr(receipt, "build_id", None) is not None
-            and getattr(receipt, "registry_manifest_digest", None) is None
+            and getattr(authorization, "build_id", None) is not None
+            and getattr(authorization, "registry_manifest_digest", None) is None
         )
     return False
 
@@ -1712,20 +1699,7 @@ def install_agent_routes(
                 if isinstance(effective_execution_key, str)
                 else []
             )
-            authorization_by_receipt = {
-                authorization.receipt_id: authorization
-                for authorization in authorizations
-            }
-            receipts = (
-                session.scalars(
-                    select(RuntimeImageReceipt).where(
-                        RuntimeImageReceipt.id.in_(authorization_by_receipt),
-                        RuntimeImageReceipt.state == "verified",
-                    )
-                ).all()
-                if authorization_by_receipt
-                else []
-            )
+            candidate_authorizations = list(authorizations)
             candidate_source = (
                 candidate_runtime_image.get("source")
                 if isinstance(candidate_runtime_image, Mapping)
@@ -1791,26 +1765,25 @@ def install_agent_routes(
                 status_code=409,
                 detail="recipe specification execution receipts are stale",
             )
-        matching_receipts = [
-            receipt
-            for receipt in receipts
-            if _runtime_image_receipt_matches(
+        matching_authorizations = [
+            authorization
+            for authorization in candidate_authorizations
+            if _runtime_image_authorization_matches(
                 runtime_image,
                 identity_document,
-                receipt,
+                authorization,
                 revision_id=revision_id,
                 revision_digest=revision_content_digest,
                 installation_image_digest=installation_image_digest,
                 installation_recipe_build_id=installation_recipe_build_id,
-                authorization=authorization_by_receipt.get(receipt.id),
             )
         ]
-        if len(matching_receipts) != 1:
+        if len(matching_authorizations) != 1:
             raise HTTPException(
                 status_code=409,
                 detail="recipe specification execution receipts are stale",
             )
-        receipt = matching_receipts[0]
+        receipt = matching_authorizations[0]
         if runtime_image.get("source") == "controller-build":
             if (
                 build_id != getattr(receipt, "build_id", None)

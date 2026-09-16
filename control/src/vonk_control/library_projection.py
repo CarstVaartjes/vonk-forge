@@ -47,8 +47,8 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
     RunNode,
+    RuntimeImageAuthorization,
 )
-from .models import RuntimeImageReceipt as RuntimeImageReceiptRow
 from .request_fault import RequestFault
 
 
@@ -332,7 +332,13 @@ class LibraryProjection:
             installation_nodes = list(session.scalars(select(InstallationNode)))
             runs = list(session.scalars(select(RecipeRun)))
             run_nodes = list(session.scalars(select(RunNode)))
-            runtime_receipts = list(session.scalars(select(RuntimeImageReceiptRow)))
+            runtime_authorizations = list(
+                session.scalars(
+                    select(RuntimeImageAuthorization).where(
+                        RuntimeImageAuthorization.state == "authorized"
+                    )
+                )
+            )
 
         revision_digests = {
             revision.id: revision.content_digest for revision in revisions
@@ -501,16 +507,15 @@ class LibraryProjection:
                     and digest is not None
                 ):
                     available_recipe_digests.add(digest)
-            for receipt in runtime_receipts:
+            for authorization in runtime_authorizations:
                 if (
-                    receipt.state == "verified"
-                    and isinstance(receipt.oci_archive_sha256, str)
-                    and type(receipt.image_bytes) is int
+                    isinstance(authorization.oci_archive_sha256, str)
+                    and type(authorization.image_bytes) is int
                     and self._runtime_archive_available(
-                        receipt.oci_archive_sha256, receipt.image_bytes
+                        authorization.oci_archive_sha256, authorization.image_bytes
                     )
                 ):
-                    available_recipe_digests.add(receipt.original_content_digest)
+                    available_recipe_digests.add(authorization.original_content_digest)
             for revision in revisions:
                 if revision.kind != "recipe":
                     continue

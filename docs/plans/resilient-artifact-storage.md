@@ -128,14 +128,18 @@ The bounded cutover is:
    `_managed_cached_objects`, the artifact resolution path,
    `reconcile_storage`, `storage_summary`, and the two removal paths in
    `_remove_model_content`.
-2. **Image and build checkpoints.** The prepared runtime-image receipt and the
-   build/transfer checkpoint already have storage-side files; the remaining SQL
-   availability columns follow the same rule, leaving SQL with the exact
-   reference a fence conditionally accepts.
+2. **Image and build checkpoints.** Implemented. The prepared runtime-image
+   receipt is now the storage fact and SQL keeps only the authorization that a
+   fence conditionally accepts. `RuntimeImageReceipt` and its table, model,
+   constraints, and foreign key are deleted; `RuntimeImageAuthorization` is
+   keyed by its own `(recipe_revision_id, effective_execution_key,
+   oci_archive_sha256)`. Availability requires both a live matching
+   authorization and the stored receipt, so neither a deleted authorization
+   with bytes on disk nor a live authorization with the receipt removed is
+   admitted.
 
-   This package is scoped and parked, not started, because it is materially
-   larger than the model cutover and because its current code declares the
-   opposite authority:
+   The reconnaissance that preceded it remains useful context for the next
+   cutover, which is the `recipe_builds` build and transfer checkpoint:
 
    * The SQL row model (`models.RuntimeImageReceipt`, imported elsewhere as
      `RuntimeImageReceiptRow`) has 147 references across thirteen modules

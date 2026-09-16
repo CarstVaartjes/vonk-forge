@@ -32,8 +32,12 @@ from .bounded_json import mapping, require_mapping, require_sequence
 from .catalog_queries import active_head_revision
 from .model_cache import ModelCacheNotFound
 from .model_cache_progress import project_cache_progress
-from .models import CatalogDocumentRevision, Job, RecipeBuild
-from .models import RuntimeImageReceipt as RuntimeImageReceiptRow
+from .models import (
+    CatalogDocumentRevision,
+    Job,
+    RecipeBuild,
+    RuntimeImageAuthorization,
+)
 from .operation_contract import normalize_operation_progress, sanitize_failure_evidence
 from .operation_progress import aggregate_progress
 from .runtime_image_preparation import (
@@ -618,11 +622,13 @@ class RecipeImageAvailabilityService:
             cancelled_build_ids = [build.id for build in builds]
             revision = session.get(CatalogDocumentRevision, revision_id)
             content_digest = revision.content_digest if revision is not None else None
+            # SQL owns which revisions are authorized; the archive identity is
+            # the authorization's own digest now that no receipt row exists.
             receipts = (
                 list(
                     session.scalars(
-                        select(RuntimeImageReceiptRow).where(
-                            RuntimeImageReceiptRow.original_content_digest
+                        select(RuntimeImageAuthorization).where(
+                            RuntimeImageAuthorization.original_content_digest
                             == content_digest,
                         )
                     )
@@ -630,9 +636,12 @@ class RecipeImageAvailabilityService:
                 if content_digest is not None
                 else []
             )
-            all_receipts = list(session.scalars(select(RuntimeImageReceiptRow)))
+            all_receipts = list(session.scalars(select(RuntimeImageAuthorization)))
+            removed_archives = {item.oci_archive_sha256 for item in receipts}
             other_archives = {
-                item.oci_archive_sha256 for item in all_receipts if item not in receipts
+                item.oci_archive_sha256
+                for item in all_receipts
+                if item.oci_archive_sha256 not in removed_archives
             }
             # Cache removal invalidates availability, not recipe authority.
             # Exact re-preparation may restore evicted bytes; an explicit

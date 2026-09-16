@@ -16,7 +16,7 @@ from vonk_control.distribution import (
     MemoryVerifiedObjectSource,
 )
 from vonk_control.distribution_executor import DurableDistributionPhaseExecutor
-from vonk_control.models import Base, RecipeBuild, RuntimeImageReceipt
+from vonk_control.models import Base, RecipeBuild, RuntimeImageAuthorization
 from vonk_control.run_switch_contract import RunSwitchPhase, RunSwitchPlan
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
@@ -64,6 +64,10 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(
     )
     source = _ModelObjectSource()
     source.register_artifact_set(model_set_digest, (model,))
+    # This fixture source owns no Controller image cache, so it declares the
+    # prepared archive exactly as MemoryVerifiedObjectSource intends. The real
+    # path reads the receipt in the cache root instead.
+    source.register_runtime_image(PLATFORM_IMAGE_DIGEST, ARCHIVE_DIGEST)
     executor = DurableDistributionPhaseExecutor(
         sessions,
         AgentJobService(sessions, clock=lambda: datetime.now(UTC)),
@@ -172,7 +176,7 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(
     assert verify.result["verified"] is True
     assert plan.recipe_build_id is None
     with Session(engine) as session:
-        session.query(RuntimeImageReceipt).delete(synchronize_session=False)
+        session.query(RuntimeImageAuthorization).delete(synchronize_session=False)
         session.commit()
     with pytest.raises(RuntimeError, match="receipt authority"):
         executor._archive(
@@ -182,3 +186,109 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(
             layout_digest=ARCHIVE_DIGEST,
             image_bytes=receipt.image_bytes,
         )
+
+
+def _archive_gate_service(tmp_path: Path):
+    """A distribution service whose source carries a real image cache."""
+
+    from vonk_control.distribution import (
+        ControllerRuntimeImageVerifiedObjectSource,
+        DistributionService,
+    )
+    from vonk_control.runtime_image_preparation import (
+        FilesystemRuntimeImageStorage,
+        prepare_runtime_image,
+    )
+
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    receipt = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with Session(engine) as session:
+        _add_revision(session, "gate-revision", _recipe("recipe-image.json"))
+        persist_runtime_image_receipt(
+            session,
+            recipe_revision_id="gate-revision",
+            original_content_digest=receipt.distribution_content_sha256,
+            effective_execution_key="f" * 64,
+            receipt=receipt,
+            verified_at=datetime.now(UTC),
+        )
+        session.commit()
+    source = ControllerRuntimeImageVerifiedObjectSource(sessions, tmp_path)
+    service = DistributionService(source, sessions=sessions)
+    plan = RunSwitchPlan.model_construct(
+        preparation=None,
+        storage=SimpleNamespace(artifact_digests=["b" * 64]),
+        image_digest=PLATFORM_IMAGE_DIGEST,
+        build=SimpleNamespace(oci_layout_sha256=None, image_bytes=None),
+        recipe_build_id=None,
+        recipe_revision_id="gate-revision",
+        recipe_content_sha256=receipt.distribution_content_sha256,
+        generated_at=datetime.now(UTC),
+        plan_digest="c" * 64,
+        mapping=None,
+    )
+    executor = DurableDistributionPhaseExecutor(
+        sessions,
+        AgentJobService(sessions, clock=lambda: datetime.now(UTC)),
+        service,
+        clock=lambda: datetime.now(UTC),
+    )
+    return executor, plan, receipt, sessions
+
+
+def test_archive_gate_requires_the_authorization_even_when_bytes_are_stored(
+    tmp_path: Path,
+) -> None:
+    """A stored archive with no live authorization is not usable.
+
+    It fails on the wrong implementation that treats managed-storage presence
+    as sufficient, which would serve bytes whose authorization was deleted.
+    """
+
+    executor, plan, receipt, sessions = _archive_gate_service(tmp_path)
+    call = {
+        "build_id": None,
+        "image_digest": PLATFORM_IMAGE_DIGEST,
+        "layout_digest": ARCHIVE_DIGEST,
+        "image_bytes": receipt.image_bytes,
+        "effective_execution_key": "f" * 64,
+    }
+    assert executor._archive(plan, **call).sha256 == ARCHIVE_DIGEST
+    with Session(sessions.kw["bind"]) as session:
+        session.query(RuntimeImageAuthorization).delete(synchronize_session=False)
+        session.commit()
+    # The bytes and their receipt are still in managed storage.
+    assert (tmp_path / "image-cache" / ARCHIVE_DIGEST).is_file()
+    with pytest.raises(RuntimeError, match="receipt authority"):
+        executor._archive(plan, **call)
+
+
+def test_archive_gate_requires_the_stored_receipt_even_when_authorized(
+    tmp_path: Path,
+) -> None:
+    """A live authorization with no stored receipt is not usable either.
+
+    It fails on the wrong implementation that trusts the SQL authorization
+    alone, which would admit an archive removed from managed storage.
+    """
+
+    executor, plan, receipt, _sessions = _archive_gate_service(tmp_path)
+    call = {
+        "build_id": None,
+        "image_digest": PLATFORM_IMAGE_DIGEST,
+        "layout_digest": ARCHIVE_DIGEST,
+        "image_bytes": receipt.image_bytes,
+        "effective_execution_key": "f" * 64,
+    }
+    assert executor._archive(plan, **call).sha256 == ARCHIVE_DIGEST
+    (tmp_path / "image-cache" / f"{ARCHIVE_DIGEST}.receipt.json").unlink()
+    with pytest.raises(RuntimeError, match="receipt authority"):
+        executor._archive(plan, **call)

@@ -32,7 +32,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
-    RuntimeImageReceipt,
+    RuntimeImageAuthorization,
 )
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityClaim,
@@ -193,10 +193,17 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
     production.service.run_claim(claim)
     assert production.service.get(queued.id).state == "succeeded"
     with sessions() as session:
-        receipt = session.scalar(select(RuntimeImageReceipt))
-        assert receipt is not None
-        assert receipt.recipe_revision_id == recipe_revision_id
-        assert receipt.state == "verified"
+        authorization = session.scalar(
+            select(RuntimeImageAuthorization).where(
+                RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id
+            )
+        )
+        assert authorization is not None
+        assert authorization.state == "authorized"
+        receipt = production.service._storage.read_receipt(
+            authorization.oci_archive_sha256
+        )
+        assert receipt.image_bytes == authorization.image_bytes
     production.close()
 
 
@@ -946,9 +953,11 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     model_child = require_mapping(completed.result["model_child"], "model child")
     assert model_child["state"] == "succeeded"
     with sessions() as session:
-        receipt = session.scalar(select(RuntimeImageReceipt))
-        assert receipt is not None
-        assert completed.result["oci_archive_sha256"] == receipt.oci_archive_sha256
+        authorization = session.scalar(select(RuntimeImageAuthorization))
+        assert authorization is not None
+        assert (
+            completed.result["oci_archive_sha256"] == authorization.oci_archive_sha256
+        )
         persisted = session.get(Job, parent.id)
         assert persisted is not None
         assert "failure" not in persisted.payload
