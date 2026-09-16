@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
@@ -18,6 +19,7 @@ from vonk_control.recipe_builds import (
     _canonical_build,
     derive_build_input_identity,
 )
+from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -329,6 +331,36 @@ def test_canonical_build_identity_excludes_editorial_runtime_selectors_and_notes
         )
         != first
     )
+
+
+def test_build_identity_binds_the_resolved_runtime_adapter() -> None:
+    build = {
+        "base_image": {
+            "repository": "runtime/base",
+            "digest": "b" * 64,
+            "platform": "linux/arm64",
+        },
+        "context": {"path": "source"},
+        "dockerfile": "Dockerfile",
+        "target": "runtime",
+        "arguments": [{"name": "flavor", "value": "release"}],
+        "network": {"mode": "none", "hosts": []},
+    }
+    adapter = resolve_runtime_adapter("vllm", {"mode": "single"})
+    changed = replace(adapter, adapter_id=f"{adapter.adapter_id}-next")
+
+    def identity(value) -> dict[str, object]:
+        return derive_build_input_identity(
+            build,
+            source_bundle_sha256="d" * 64,
+            builder_binary_digest="e" * 64,
+            runtime_adapter=value.document(),
+        )
+
+    # The wrong implementation omits the adapter, so an adapter change leaves
+    # the prepared-image cache key identical and reuses an unadapted image.
+    assert identity(adapter) == identity(adapter)
+    assert identity(adapter) != identity(changed)
 
 
 def test_prebuilt_recipe_does_not_enter_source_build_path() -> None:

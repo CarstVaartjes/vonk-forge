@@ -3515,6 +3515,22 @@ pub struct PythonRuntimeMetadata {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct RecipeBuildAdapter {
+    pub adapter_sha256: ::std::string::String,
+    pub definition: RecipeBuildAdapterDefinition,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RecipeBuildAdapterDefinition {
+    pub adapter_id: ::std::string::String,
+    pub containerfile: ::std::string::String,
+    pub engine: ::std::string::String,
+    pub image_user: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct RecipeBuildAdditionalContext {
     pub name: ::std::string::String,
     pub path: ::std::string::String,
@@ -3884,6 +3900,7 @@ pub struct RecipeBuildPolicyFinding {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RecipeBuildRequest {
+    pub adapter: RecipeBuildAdapter,
     pub arguments: ::std::vec::Vec<RecipeBuildArgument>,
     pub base_image_storage_bytes: u64,
     pub base_images: ::std::vec::Vec<RecipeBuildBaseImage>,
@@ -9913,6 +9930,48 @@ impl<'de> ::serde::Deserialize<'de> for PythonRuntimeMetadata {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdapter {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeBuildAdapter", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub adapter_sha256: ::std::string::String,
+            pub definition: RecipeBuildAdapterDefinition,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            adapter_sha256: raw.adapter_sha256,
+            definition: raw.definition,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdapterDefinition {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeBuildAdapterDefinition", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub adapter_id: ::std::string::String,
+            pub containerfile: ::std::string::String,
+            pub engine: ::std::string::String,
+            pub image_user: ::std::string::String,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            adapter_id: raw.adapter_id,
+            containerfile: raw.containerfile,
+            engine: raw.engine,
+            image_user: raw.image_user,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdditionalContext {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -10344,6 +10403,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildRequest {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
+            pub adapter: RecipeBuildAdapter,
             pub arguments: ::std::vec::Vec<RecipeBuildArgument>,
             pub base_image_storage_bytes: u64,
             pub base_images: ::std::vec::Vec<RecipeBuildBaseImage>,
@@ -10366,6 +10426,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildRequest {
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
+            adapter: raw.adapter,
             arguments: raw.arguments,
             base_image_storage_bytes: raw.base_image_storage_bytes,
             base_images: raw.base_images,

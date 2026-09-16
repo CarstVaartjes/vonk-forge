@@ -10,8 +10,11 @@ from pathlib import PurePosixPath
 
 from ..bounded_json import sequence
 from ..runtime_writable_paths import (
+    RUNTIME_REQUIREMENT_DECLARATION,
     effective_environment,
     reject_recipe_environment,
+    resolve_requirements,
+    split_requirements,
     telemetry_contract,
     validate_telemetry,
 )
@@ -422,14 +425,19 @@ def compile_environment(
             type(name) is not str
             or _SAFE_ENGINE_ENVIRONMENT_NAME.fullmatch(name) is None
             or name in _FORBIDDEN_ENGINE_ENVIRONMENT_NAMES
-            or name.startswith(_FORBIDDEN_ENGINE_ENVIRONMENT_PREFIXES)
+            or (
+                name != RUNTIME_REQUIREMENT_DECLARATION
+                and name.startswith(_FORBIDDEN_ENGINE_ENVIRONMENT_PREFIXES)
+            )
             or name in names
         ):
             raise HarnessCompileError("harness environment name is invalid")
         result.append((name, _safe_scalar(item.get("value"), "harness environment")))
         names.add(name)
     if engine_slug is not None:
-        reject_recipe_environment(engine_slug, result)
+        declared, remaining = split_requirements(result)
+        resolve_requirements(engine_slug, declared)
+        reject_recipe_environment(engine_slug, remaining)
     return tuple(result)
 
 
@@ -739,12 +747,16 @@ def projection(
         if job_input_contract(recipe) is not None or allow_local_media_input
         else None
     )
-    runtime_paths = engine_writable_paths(slug)
-    validate_runtime_paths(slug, runtime_paths, dict(environment))
     try:
-        effective = effective_environment(slug, environment)
+        declared, remaining = split_requirements(environment)
+        requirement_paths, requirement_environment = resolve_requirements(
+            slug, declared
+        )
+        effective = effective_environment(slug, remaining)
     except (TypeError, ValueError) as error:
         raise HarnessCompileError(str(error)) from error
+    effective = _merge_requirement_environment(effective, requirement_environment)
+    runtime_paths = (*engine_writable_paths(slug), *requirement_paths)
     validate_runtime_paths(slug, runtime_paths, dict(effective))
     value = HarnessProjection(
         slug=slug,
@@ -767,6 +779,19 @@ def projection(
         read_only_root=True,
     )
     return value
+
+
+def _merge_requirement_environment(
+    environment: tuple[tuple[str, str], ...],
+    requirement_environment: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, str], ...]:
+    names = {name for name, _value in environment}
+    for name, _value in requirement_environment:
+        if name in names:
+            raise HarnessCompileError(
+                f"runtime requirement environment collides with the recipe: {name}"
+            )
+    return (*environment, *requirement_environment)
 
 
 _ENGINE_LAUNCH_PREFIXES: dict[str, tuple[str, ...]] = {

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import vonk_control.availability_production as availability_production_module
 import vonk_control.recipe_builds as recipe_builds_module
+import vonk_control.runtime_adapters as runtime_adapters_module
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -54,6 +55,7 @@ from vonk_control.recipe_operations import (
     _record_build_evidence,
 )
 from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -61,6 +63,8 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, content_sha256
+
+_CACHED_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
 
 
 class RecordingQueue:
@@ -352,6 +356,44 @@ def test_build_resolution_reuses_exact_receipt_without_builder_admission(
     assert resolution.image_digest == "sha256:" + "b" * 64
 
 
+def test_an_adapter_change_invalidates_the_prepared_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    cached = service.resolve(revision.id)
+    assert cached.cached
+    assert cached.build_input_sha256 == plan.build_input_sha256
+
+    # A reviewed adapter change is a different executable input.  Omitting the
+    # adapter from the identity would reuse the image the previous adaptation
+    # produced and leave the built recipe unadapted.
+    adapter = cached.input_intent["runtime_adapter"]
+    assert isinstance(adapter, dict)
+    current = runtime_adapters_module._ENGINE_ADAPTERS[adapter["adapter_id"].split(".")[-2]]
+    monkeypatch.setitem(
+        runtime_adapters_module._ENGINE_ADAPTERS,
+        current.adapter_id.split(".")[-2],
+        runtime_adapters_module._AdapterSpec(
+            f"{current.adapter_id}.next", current.launcher
+        ),
+    )
+    changed = service.resolve(revision.id)
+    assert not changed.cached
+    assert changed.build_id is None
+    assert changed.input_intent_sha256 != cached.input_intent_sha256
+
+
 def _write_controller_build_receipt(
     storage: FilesystemRuntimeImageStorage,
     *,
@@ -387,6 +429,8 @@ def _write_controller_build_receipt(
             build_id=build_id,
             build_input_sha256=build_input_sha256,
             runtime_interface_label="v1",
+            runtime_adapter=_CACHED_ADAPTER.adapter_id,
+            runtime_adapter_sha256=_CACHED_ADAPTER.digest,
         ),
     )
 

@@ -13,6 +13,9 @@ from vonk_control.recipe_execution_contract import (
     parse_stored_run_plan,
     run_plan_document,
 )
+from vonk_control.runtime_adapters import resolve_runtime_adapter
+
+_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
 
 
 def _run_plan() -> dict[str, object]:
@@ -106,6 +109,7 @@ def test_build_plan_optional_target_is_omitted_in_canonical_document() -> None:
     value = {
         "schema_version": 1,
         "kind": "recipe.build.v1",
+        "adapter": _ADAPTER.to_wire().model_dump(mode="json"),
         "build_id": "00000000-0000-4000-8000-000000000001",
         "recipe_revision_id": "00000000-0000-4000-8000-000000000002",
         "recipe_content_sha256": "a" * 64,

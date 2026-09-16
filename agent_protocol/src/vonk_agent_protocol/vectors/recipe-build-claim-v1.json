@@ -3,6 +3,15 @@
   "base_payload": {
     "schema_version": 1,
     "kind": "recipe.build.v1",
+    "adapter": {
+      "adapter_sha256": "4538e83a53e5098102dffd407584c81eb17c7b2b24179b1e186e469eb1d6c1be",
+      "definition": {
+        "adapter_id": "vonk.runtime-contract.vllm.v1",
+        "containerfile": "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\nUSER 0\nRUN set -eu \\\n && install --directory --mode=0755 /opt/vonk/bin \\\n && install --directory --owner=10001 --group=10001 /outputs /outputs/cache/home /outputs/cache /outputs/cache/config /outputs/tmp /outputs/cache/huggingface /outputs/cache/huggingface/transformers /outputs/cache/torch /outputs/cache/torch_extensions /outputs/cache/torchinductor /outputs/cache/triton /outputs/cache/cuda /outputs/cache/uv /outputs/cache/vllm \\\n && test -x /opt/vonk/bin/vllm\nUSER 10001:10001\nWORKDIR /tmp\n",
+        "engine": "vllm",
+        "image_user": "10001:10001"
+      }
+    },
     "build_id": "00000000-0000-4000-8000-000000000009",
     "recipe_revision_id": "00000000-0000-4000-8000-000000000001",
     "recipe_content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -73,103 +82,255 @@
       "name": "valid exact no-base claim",
       "valid": true,
       "changes": [
-        {"op": "set", "path": ["base_images"], "value": []},
-        {"op": "set", "path": ["base_image_storage_bytes"], "value": 0}
+        {
+          "op": "set",
+          "path": [
+            "base_images"
+          ],
+          "value": []
+        },
+        {
+          "op": "set",
+          "path": [
+            "base_image_storage_bytes"
+          ],
+          "value": 0
+        }
       ]
     },
     {
       "name": "valid public network claim",
       "valid": true,
       "changes": [
-        {"op": "set", "path": ["network", "mode"], "value": "public"},
-        {"op": "set", "path": ["network", "hosts"], "value": ["pypi.org"]}
+        {
+          "op": "set",
+          "path": [
+            "network",
+            "mode"
+          ],
+          "value": "public"
+        },
+        {
+          "op": "set",
+          "path": [
+            "network",
+            "hosts"
+          ],
+          "value": [
+            "pypi.org"
+          ]
+        }
       ]
     },
     {
       "name": "valid target stage",
       "valid": true,
       "changes": [
-        {"op": "set", "path": ["target"], "value": "runtime-final"}
+        {
+          "op": "set",
+          "path": [
+            "target"
+          ],
+          "value": "runtime-final"
+        }
       ]
     },
     {
       "name": "valid bounded capabilities",
       "valid": true,
       "changes": [
-        {"op": "set", "path": ["capabilities"], "value": ["CHOWN", "DAC_OVERRIDE"]}
+        {
+          "op": "set",
+          "path": [
+            "capabilities"
+          ],
+          "value": [
+            "CHOWN",
+            "DAC_OVERRIDE"
+          ]
+        }
       ]
     },
     {
       "name": "valid closed Podman options",
       "valid": true,
       "changes": [
-        {"op": "set", "path": ["options", "additional_contexts"], "value": [{"name": "assets", "path": "assets/model"}]},
-        {"op": "set", "path": ["options", "annotations"], "value": [{"name": "org.example/source", "value": "https://example.com/value"}]},
-        {"op": "set", "path": ["options", "environment"], "value": [{"name": "MODEL_PATH", "value": "/opt/model"}]},
-        {"op": "set", "path": ["options", "unset_labels"], "value": ["org.example/old"]}
+        {
+          "op": "set",
+          "path": [
+            "options",
+            "additional_contexts"
+          ],
+          "value": [
+            {
+              "name": "assets",
+              "path": "assets/model"
+            }
+          ]
+        },
+        {
+          "op": "set",
+          "path": [
+            "options",
+            "annotations"
+          ],
+          "value": [
+            {
+              "name": "org.example/source",
+              "value": "https://example.com/value"
+            }
+          ]
+        },
+        {
+          "op": "set",
+          "path": [
+            "options",
+            "environment"
+          ],
+          "value": [
+            {
+              "name": "MODEL_PATH",
+              "value": "/opt/model"
+            }
+          ]
+        },
+        {
+          "op": "set",
+          "path": [
+            "options",
+            "unset_labels"
+          ],
+          "value": [
+            "org.example/old"
+          ]
+        }
       ]
     },
     {
       "name": "unknown capability",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["capabilities"], "value": ["SYS_ADMIN"]}
+        {
+          "op": "set",
+          "path": [
+            "capabilities"
+          ],
+          "value": [
+            "SYS_ADMIN"
+          ]
+        }
       ]
     },
     {
       "name": "unknown Podman option",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["options", "device"], "value": "/dev/nvidia0"}
+        {
+          "op": "set",
+          "path": [
+            "options",
+            "device"
+          ],
+          "value": "/dev/nvidia0"
+        }
       ]
     },
     {
       "name": "duplicate capability",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["capabilities"], "value": ["CHOWN", "CHOWN"]}
+        {
+          "op": "set",
+          "path": [
+            "capabilities"
+          ],
+          "value": [
+            "CHOWN",
+            "CHOWN"
+          ]
+        }
       ]
     },
     {
       "name": "unknown top-level field",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["ambient_store"], "value": true}
+        {
+          "op": "set",
+          "path": [
+            "ambient_store"
+          ],
+          "value": true
+        }
       ]
     },
     {
       "name": "invalid target stage",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["target"], "value": "runtime/final"}
+        {
+          "op": "set",
+          "path": [
+            "target"
+          ],
+          "value": "runtime/final"
+        }
       ]
     },
     {
       "name": "missing top-level field",
       "valid": false,
       "changes": [
-        {"op": "remove", "path": ["source_bundle_bytes"]}
+        {
+          "op": "remove",
+          "path": [
+            "source_bundle_bytes"
+          ]
+        }
       ]
     },
     {
       "name": "unknown base-image field",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["base_images", 0, "ambient_store"], "value": true}
+        {
+          "op": "set",
+          "path": [
+            "base_images",
+            0,
+            "ambient_store"
+          ],
+          "value": true
+        }
       ]
     },
     {
       "name": "unknown limits field",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["limits", "swap_bytes"], "value": 1}
+        {
+          "op": "set",
+          "path": [
+            "limits",
+            "swap_bytes"
+          ],
+          "value": 1
+        }
       ]
     },
     {
       "name": "manifest digest differs from reference",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["base_images", 0, "manifest_digest"], "value": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}
+        {
+          "op": "set",
+          "path": [
+            "base_images",
+            0,
+            "manifest_digest"
+          ],
+          "value": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
       ]
     },
     {
@@ -178,7 +339,9 @@
       "changes": [
         {
           "op": "set",
-          "path": ["base_images"],
+          "path": [
+            "base_images"
+          ],
           "value": [
             {
               "reference": "ghcr.io/vonkforge/runtime@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
@@ -196,141 +359,289 @@
       "name": "noncanonical base reference",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["base_images", 0, "reference"], "value": "-ghcr.io/vonkforge/runtime@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}
+        {
+          "op": "set",
+          "path": [
+            "base_images",
+            0,
+            "reference"
+          ],
+          "value": "-ghcr.io/vonkforge/runtime@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
       ]
     },
     {
       "name": "mutable base reference",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["base_images", 0, "reference"], "value": "ghcr.io/vonkforge/runtime:latest"}
+        {
+          "op": "set",
+          "path": [
+            "base_images",
+            0,
+            "reference"
+          ],
+          "value": "ghcr.io/vonkforge/runtime:latest"
+        }
       ]
     },
     {
       "name": "noncanonical build UUID",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["build_id"], "value": "00000000-0000-4000-8000-00000000000A"}
+        {
+          "op": "set",
+          "path": [
+            "build_id"
+          ],
+          "value": "00000000-0000-4000-8000-00000000000A"
+        }
       ]
     },
     {
       "name": "unsupported platform",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["platform"], "value": "linux/amd64"}
+        {
+          "op": "set",
+          "path": [
+            "platform"
+          ],
+          "value": "linux/amd64"
+        }
       ]
     },
     {
       "name": "dockerfile above 512 UTF-8 bytes",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["dockerfile"], "value": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界/Dockerfile"}
+        {
+          "op": "set",
+          "path": [
+            "dockerfile"
+          ],
+          "value": "\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c/Dockerfile"
+        }
       ]
     },
     {
       "name": "zero source bundle bytes",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["source_bundle_bytes"], "value": 0}
+        {
+          "op": "set",
+          "path": [
+            "source_bundle_bytes"
+          ],
+          "value": 0
+        }
       ]
     },
     {
       "name": "source bundle above maximum",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["source_bundle_bytes"], "value": 67108865}
+        {
+          "op": "set",
+          "path": [
+            "source_bundle_bytes"
+          ],
+          "value": 67108865
+        }
       ]
     },
     {
       "name": "boolean source bundle bytes",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["source_bundle_bytes"], "value": true}
+        {
+          "op": "set",
+          "path": [
+            "source_bundle_bytes"
+          ],
+          "value": true
+        }
       ]
     },
     {
       "name": "zero base storage with declared base",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["base_image_storage_bytes"], "value": 0}
+        {
+          "op": "set",
+          "path": [
+            "base_image_storage_bytes"
+          ],
+          "value": 0
+        }
       ]
     },
     {
       "name": "base storage above maximum",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["base_image_storage_bytes"], "value": 17592186044417}
+        {
+          "op": "set",
+          "path": [
+            "base_image_storage_bytes"
+          ],
+          "value": 17592186044417
+        }
       ]
     },
     {
       "name": "nonzero base storage without bases",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["base_images"], "value": []}
+        {
+          "op": "set",
+          "path": [
+            "base_images"
+          ],
+          "value": []
+        }
       ]
     },
     {
       "name": "zero memory bound",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["limits", "memory_bytes"], "value": 0}
+        {
+          "op": "set",
+          "path": [
+            "limits",
+            "memory_bytes"
+          ],
+          "value": 0
+        }
       ]
     },
     {
       "name": "temporary storage above maximum",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["limits", "temporary_bytes"], "value": 17592186044417}
+        {
+          "op": "set",
+          "path": [
+            "limits",
+            "temporary_bytes"
+          ],
+          "value": 17592186044417
+        }
       ]
     },
     {
       "name": "zero output bound",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["limits", "output_bytes"], "value": 0}
+        {
+          "op": "set",
+          "path": [
+            "limits",
+            "output_bytes"
+          ],
+          "value": 0
+        }
       ]
     },
     {
       "name": "output bound above maximum",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["limits", "output_bytes"], "value": 17592186044417}
+        {
+          "op": "set",
+          "path": [
+            "limits",
+            "output_bytes"
+          ],
+          "value": 17592186044417
+        }
       ]
     },
     {
       "name": "unsafe build privilege",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["limits", "privileged"], "value": true}
+        {
+          "op": "set",
+          "path": [
+            "limits",
+            "privileged"
+          ],
+          "value": true
+        }
       ]
     },
     {
       "name": "inconsistent none network",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["network", "hosts"], "value": ["pypi.org"]}
+        {
+          "op": "set",
+          "path": [
+            "network",
+            "hosts"
+          ],
+          "value": [
+            "pypi.org"
+          ]
+        }
       ]
     },
     {
       "name": "private public-network host",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["network", "mode"], "value": "public"},
-        {"op": "set", "path": ["network", "hosts"], "value": ["169.254.169.254"]}
+        {
+          "op": "set",
+          "path": [
+            "network",
+            "mode"
+          ],
+          "value": "public"
+        },
+        {
+          "op": "set",
+          "path": [
+            "network",
+            "hosts"
+          ],
+          "value": [
+            "169.254.169.254"
+          ]
+        }
       ]
     },
     {
       "name": "non-scalar argument",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["arguments", 0, "value"], "value": ["1"]}
+        {
+          "op": "set",
+          "path": [
+            "arguments",
+            0,
+            "value"
+          ],
+          "value": [
+            "1"
+          ]
+        }
       ]
     },
     {
       "name": "argument integer outside signed range",
       "valid": false,
       "changes": [
-        {"op": "set", "path": ["arguments", 0, "value"], "value": 9223372036854775808}
+        {
+          "op": "set",
+          "path": [
+            "arguments",
+            0,
+            "value"
+          ],
+          "value": 9223372036854775808
+        }
       ]
     }
   ]

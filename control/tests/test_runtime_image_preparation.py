@@ -24,6 +24,7 @@ from vonk_control.models import (
     RuntimeImageAuthorization,
 )
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
+from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -1076,6 +1077,7 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
     recipe_digest = content_sha256(recipe)
+    adapter = resolve_runtime_adapter(recipe.runtime.engine, recipe.topology)
     revision_id = "revision-rebuilt-source"
     execution_key = "a" * 64
     old_build_id = "a0a6e2d9-7771-45eb-bacb-c56142a240cf"
@@ -1105,6 +1107,8 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
         archive_path="/state/agent-artifacts/image-cache/old",
         recorded_at="2026-09-15T17:00:00+00:00",
         build_id=old_build_id,
+        runtime_adapter=adapter.adapter_id,
+        runtime_adapter_sha256=adapter.digest,
     )
     new_receipt = old_receipt.model_copy(
         update={
@@ -1615,3 +1619,56 @@ def test_runtime_image_storage_types_only_clean_absence_as_cache_missing(
     with pytest.raises(RuntimeImagePreparationError) as unsafe:
         storage.verify_existing(digest, 4)
     assert unsafe.value.code == "runtime_image.archive_mismatch"
+
+
+def test_controller_build_receipt_requires_its_adapter_identity() -> None:
+    adapter = resolve_runtime_adapter("vllm", {"mode": "single"})
+    shared = {
+        "schema_version": 2,
+        "distribution_publisher": "vonk",
+        "distribution_slug": "cached",
+        "distribution_content_sha256": "a" * 64,
+        "registry_manifest_digest": None,
+        "platform_manifest_digest": PLATFORM_IMAGE_DIGEST,
+        "image_digest": PLATFORM_IMAGE_DIGEST,
+        "oci_archive_sha256": "b" * 64,
+        "image_bytes": 1,
+        "local_image_config_id": "sha256:" + "c" * 64,
+        "local_image_reference": None,
+        "architecture": "linux-arm64",
+        "runtime_interface": "vonk.runtime.v1",
+        "runtime_interface_label": "v1",
+        "archive_path": "/state/runtime-images/" + "b" * 64,
+        "recorded_at": "2026-09-15T00:00:00Z",
+    }
+    # A receipt that records no adapter cannot prove which reviewed adaptation
+    # produced the bytes, so the identity binding is unverifiable.
+    with pytest.raises(ValueError, match="lacks its adapter"):
+        RuntimeImageReceipt(**shared, source="controller-build", build_id="build")
+    with pytest.raises(ValueError, match="incomplete"):
+        RuntimeImageReceipt(
+            **shared,
+            source="controller-build",
+            build_id="build",
+            runtime_adapter=adapter.adapter_id,
+        )
+    accepted = RuntimeImageReceipt(
+        **shared,
+        source="controller-build",
+        build_id="build",
+        runtime_adapter=adapter.adapter_id,
+        runtime_adapter_sha256=adapter.digest,
+    )
+    assert accepted.runtime_adapter_sha256 == adapter.digest
+
+    with pytest.raises(ValueError, match="carries an adapter"):
+        RuntimeImageReceipt(
+            **{
+                **shared,
+                "registry_manifest_digest": "sha256:" + "d" * 64,
+                "build_id": None,
+            },
+            source="published",
+            runtime_adapter=adapter.adapter_id,
+            runtime_adapter_sha256=adapter.digest,
+        )

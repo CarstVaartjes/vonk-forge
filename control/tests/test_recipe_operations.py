@@ -104,6 +104,7 @@ from vonk_control.route_runtime import (
 )
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -113,6 +114,8 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 
 from .canonical_recipe_fixtures import canonical_example
 from .preflight_fixtures import record_passing_preflight
+
+_FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
 
 
 class RecordingQueue:
@@ -700,6 +703,7 @@ def setup_services(
             plan={
                 "schema_version": 1,
                 "kind": "recipe.build.v1",
+                "adapter": _FIXTURE_ADAPTER.to_wire().model_dump(mode="json"),
                 "build_id": "00000000-0000-4000-8000-000000000000",
                 "recipe_revision_id": revision.id,
                 "recipe_content_sha256": recipe_digest,

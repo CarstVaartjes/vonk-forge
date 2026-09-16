@@ -82,6 +82,7 @@ from vonk_control.run_switch_operations import (
     _transient_distribution_exception,
     effective_build_receipt,
 )
+from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -90,6 +91,8 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.runtime_preflight import latest_result
 
 from .preflight_fixtures import record_passing_preflight
+
+_FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
 from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import (
     NOW,
@@ -259,6 +262,8 @@ def _runtime_receipt(
         "recorded_at": NOW.isoformat(),
         "build_id": build_id,
         "runtime_interface_label": "v1",
+        "runtime_adapter": _FIXTURE_ADAPTER.adapter_id,
+        "runtime_adapter_sha256": _FIXTURE_ADAPTER.digest,
     }
 
 

@@ -559,6 +559,11 @@ def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
 
     if path == ("platform",):
         return value == "linux/arm64"
+    if path == ("adapter", "definition", "containerfile"):
+        # The platform-owned adaptation stage is the one declared build leaf
+        # that legitimately carries absolute paths and shell text.  It travels
+        # with its canonical digest, which the agent re-derives before use.
+        return 0 < len(value.encode("utf-8")) <= 65_536 and "\x00" not in value
     if path == ("dockerfile",):
         return bundle_path()
     if path == ("options", "ignorefile"):

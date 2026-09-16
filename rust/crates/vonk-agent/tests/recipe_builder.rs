@@ -19,9 +19,9 @@ use vonk_agent::{
     recipe_builder::{RecipeBuildError, RecipeBuilder},
 };
 use vonk_agent_protocol::{
-    RecipeBuildAdditionalContext, RecipeBuildArgument, RecipeBuildBaseImage, RecipeBuildLimits,
-    RecipeBuildMetadata, RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildRequest,
-    canonical_json, hex_sha256,
+    RecipeBuildAdapter, RecipeBuildAdapterDefinition, RecipeBuildAdditionalContext,
+    RecipeBuildArgument, RecipeBuildBaseImage, RecipeBuildLimits, RecipeBuildMetadata,
+    RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildRequest, canonical_json, hex_sha256,
 };
 
 struct Runner {
@@ -424,9 +424,24 @@ fn bundle_for(reference: &str) -> (Vec<u8>, String) {
     (payload, digest)
 }
 
+fn adapter_fixture() -> RecipeBuildAdapter {
+    let definition = RecipeBuildAdapterDefinition {
+        adapter_id: "vonk.runtime-contract.vllm.v1".to_owned(),
+        containerfile: "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\n".to_owned(),
+        engine: "vllm".to_owned(),
+        image_user: "10001:10001".to_owned(),
+    };
+    let adapter_sha256 = hex_sha256(&canonical_json(&definition).unwrap());
+    RecipeBuildAdapter {
+        adapter_sha256,
+        definition,
+    }
+}
+
 fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
     let base = registry_fixture();
     RecipeBuildRequest {
+        adapter: adapter_fixture(),
         arguments: vec![RecipeBuildArgument {
             name: "runtime-version".to_owned(),
             value: serde_json::json!("1"),
