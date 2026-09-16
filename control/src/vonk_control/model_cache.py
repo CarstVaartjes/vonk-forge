@@ -47,6 +47,7 @@ from .model_cache_contract import (
     CacheManifest,
     CacheManifestArtifact,
     ModelCacheDownloadPayload,
+    ModelCacheObjectReceipt,
     ModelCacheOperationPhase,
     ModelCacheOperationProgress,
     ModelCacheOperationResponse,
@@ -63,7 +64,6 @@ from .model_cache_ranges import cleanup_ranges, download_ranges, range_partial_b
 from .models import (
     CatalogDocumentRevision,
     FleetProfile,
-    ModelCacheArtifact,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
@@ -1716,35 +1716,28 @@ class ModelCacheService:
         # stop a late producer; the unlinks themselves are not SQL work.
         for set_digest in selected:
             shutil.rmtree(self._root / "partials" / set_digest, ignore_errors=True)
-        with self._lock, self._session(write=True) as session:
+        with self._lock, self._session() as session:
             referenced = {
                 membership.artifact_sha256
                 for membership in session.scalars(select(ModelCacheSetArtifact))
             }
-            unreferenced = [
-                artifact
-                for artifact in session.scalars(select(ModelCacheArtifact))
-                if artifact.sha256 in object_digests
-                and artifact.sha256 not in referenced
-            ]
-            removals = [
-                (artifact, self._object_path(artifact.sha256))
-                for artifact in unreferenced
-            ]
+        removals = [
+            member for member in sorted(object_digests) if member not in referenced
+        ]
         reclaimed = 0
-        for _artifact, path in removals:
+        for member in removals:
+            path = self._object_path(member)
             try:
                 metadata = path.lstat()
             except FileNotFoundError:
-                continue
-            if stat.S_ISREG(metadata.st_mode):
+                metadata = None
+            if metadata is not None and stat.S_ISREG(metadata.st_mode):
                 reclaimed += metadata.st_size
                 path.unlink(missing_ok=True)
+            # The receipt is the availability fact, so it is removed with the
+            # bytes; a caller that still wants them prepares them again.
+            self._receipt_path(member).unlink(missing_ok=True)
         with self._lock, self._session(write=True) as session:
-            for artifact, _path in removals:
-                stored = session.get(ModelCacheArtifact, artifact.sha256)
-                if stored is not None:
-                    session.delete(stored)
             for set_digest in selected:
                 session.query(ModelCacheSetArtifact).filter(
                     ModelCacheSetArtifact.artifact_set_sha256 == set_digest
@@ -2239,50 +2232,27 @@ class ModelCacheService:
         Transfers and explicit verification retain their content checks.
         """
         specs = _unique_artifacts(manifest.artifacts)
-        # The SQL read yields only the receipt metadata it owns. Presence and
-        # size are storage facts, so they are checked after the read transaction
-        # has closed and never inside it: no SQL lock is held across a
-        # filesystem check, and no filesystem lock is taken while SQL is open.
-        receipts: list[tuple[str, int]] = []
-        with self._session() as session:
-            rows = session.scalars(
-                select(ModelCacheArtifact).where(
-                    ModelCacheArtifact.sha256.in_(specs),
-                    ModelCacheArtifact.state == "verified",
-                    ModelCacheArtifact.verified_at.is_not(None),
-                )
-            )
-            for row in rows:
-                spec = specs[row.sha256]
-                if (
-                    row.expected_bytes != spec.expected_bytes
-                    or row.actual_bytes != spec.expected_bytes
-                ):
-                    continue
-                receipts.append((row.sha256, spec.expected_bytes))
-        cached: set[str] = set()
-        for sha256, expected_bytes in receipts:
-            try:
-                fd = os.open(
-                    self._object_path(sha256),
-                    os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
-                )
-            except (FileNotFoundError, NotADirectoryError):
-                continue
-            except OSError as exc:
-                if exc.errno == errno.ELOOP:
-                    continue
-                raise
-            try:
-                metadata = os.fstat(fd)
-                if (
-                    stat.S_ISREG(metadata.st_mode)
-                    and metadata.st_size == expected_bytes
-                ):
-                    cached.add(sha256)
-            finally:
-                os.close(fd)
-        return frozenset(cached)
+        # Managed storage owns per-object availability: a verified object is
+        # available exactly when its receipt is beside its bytes. SQL is not
+        # consulted and holds no availability flag, so a damage or restore that
+        # loses the receipt cannot be masked by a stale database row.
+        return frozenset(
+            sha256
+            for sha256, spec in specs.items()
+            if self._object_is_available(sha256, spec.expected_bytes)
+        )
+
+    def _stored_object_bytes(self, digest: str) -> int:
+        """Return a stored object's byte length, or zero when storage lacks it."""
+
+        path = self._object_path(digest)
+        try:
+            metadata = path.lstat()
+        except (FileNotFoundError, NotADirectoryError):
+            return 0
+        except OSError:
+            return 0
+        return metadata.st_size if stat.S_ISREG(metadata.st_mode) else 0
 
     def _partial_bytes(self, set_digest: str, spec: ArtifactSpec) -> int:
         """Return only a bounded, reusable partial checkpoint length."""
@@ -2427,24 +2397,8 @@ class ModelCacheService:
                     "artifact-set digest resolves to different immutable content",
                 )
         for spec in manifest.artifacts:
-            artifact = session.get(ModelCacheArtifact, spec.sha256)
-            if artifact is None:
-                artifact = ModelCacheArtifact(
-                    sha256=spec.sha256,
-                    storage_key=self._object_key(spec.sha256),
-                    expected_bytes=spec.expected_bytes,
-                    actual_bytes=0,
-                    state="missing",
-                    verified_at=None,
-                    updated_at=now,
-                )
-                session.add(artifact)
-                session.flush()
-            elif artifact.expected_bytes != spec.expected_bytes:
-                raise ModelCacheConflict(
-                    "model_cache.digest_size_conflict",
-                    "artifact digest is already bound to a different size",
-                )
+            # SQL owns membership only. The object's identity, size, and
+            # availability are the manifest and the managed-storage receipt.
             membership = session.get(
                 ModelCacheSetArtifact,
                 {"artifact_set_sha256": set_digest, "artifact_key": spec.key},
@@ -3427,22 +3381,9 @@ class ModelCacheService:
                     ):
                         self._progress_checkpoint_at[operation_id] = now
                         return
-                artifact = session.get(ModelCacheArtifact, spec.sha256)
-                if artifact is not None:
-                    published = (
-                        artifact.state == "verified"
-                        and artifact.verified_at is not None
-                        and artifact.actual_bytes
-                        == artifact.expected_bytes
-                        == spec.expected_bytes
-                    )
-                    # Refresh bytes belong to the operation's transfer ledger.
-                    # The last verified object remains published until its
-                    # replacement has been verified and atomically committed.
-                    if not published:
-                        artifact.actual_bytes = actual_bytes
-                        artifact.state = "partial" if state == "verifying" else state
-                        artifact.updated_at = now
+                # Refresh bytes belong to the operation's transfer ledger. The
+                # last verified receipt and its object remain published until
+                # the replacement has been verified and atomically committed.
                 if operation is not None:
                     payload = _validated_operation_payload(operation)
                     manifest = ArtifactSetManifest.from_document(payload["manifest"])
@@ -3525,33 +3466,60 @@ class ModelCacheService:
 
     def _mark_artifact_verified(self, spec: ArtifactSpec, set_digest: str) -> None:
         now = self._clock()
-        with self._lock, self._session(write=True) as session:
-            artifact = session.get(ModelCacheArtifact, spec.sha256)
-            if artifact is not None:
-                artifact.actual_bytes = spec.expected_bytes
-                artifact.state = "verified"
-                artifact.verified_at = now
-                artifact.updated_at = now
+        # Availability is a managed-storage fact: the receipt beside the bytes
+        # owns it. This runs once per object inside the publication lock, so it
+        # stays bounded -- the set-level projection is recomputed once when the
+        # operation finalizes or the entry is read, never per object, which
+        # would make one set quadratic in its own membership.
+        self._write_object_receipt(spec, now)
+        with self._session(write=True) as session:
             row = session.get(ModelCacheSet, set_digest)
             if row is not None:
-                row.verified_bytes = self._verified_bytes(session, set_digest)
                 row.updated_at = now
 
-    def _verified_bytes(self, session: Session, set_digest: str) -> int:
-        rows = session.scalars(
-            select(ModelCacheSetArtifact).where(
-                ModelCacheSetArtifact.artifact_set_sha256 == set_digest
+    def _stored_object(self, digest: str, expected_bytes: int) -> int | None:
+        """Return the stored bytes when storage holds this exact object.
+
+        One receipt read and one descriptor check answer both "is it
+        available" and "how many bytes are there", so a whole-set read costs
+        one pass over the objects instead of several.
+        """
+
+        if self._read_object_receipt(digest, expected_bytes) is None:
+            return None
+        try:
+            fd = os.open(
+                self._object_path(digest),
+                os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
             )
-        )
+        except (FileNotFoundError, NotADirectoryError):
+            return None
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                return None
+            raise
+        try:
+            metadata = os.fstat(fd)
+        finally:
+            os.close(fd)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != expected_bytes:
+            return None
+        return expected_bytes
+
+    def _verified_bytes(self, session: Session, set_digest: str) -> int:
+        row = session.get(ModelCacheSet, set_digest)
+        if row is None:
+            return 0
+        manifest = ArtifactSetManifest.from_document(row.manifest)
         total = 0
         seen: set[str] = set()
-        for membership in rows:
-            if membership.artifact_sha256 in seen:
+        for spec in manifest.artifacts:
+            if spec.sha256 in seen:
                 continue
-            seen.add(membership.artifact_sha256)
-            artifact = session.get(ModelCacheArtifact, membership.artifact_sha256)
-            if artifact is not None and artifact.state == "verified":
-                total += artifact.expected_bytes
+            seen.add(spec.sha256)
+            stored = self._stored_object(spec.sha256, spec.expected_bytes)
+            if stored is not None:
+                total += stored
         return total
 
     def _finish_partial(
@@ -5324,20 +5292,25 @@ class ModelCacheService:
                     "model_cache.entry_missing", "cache entry was not found"
                 )
             self._refresh_protection(session, row)
+            # The set projection is recomputed when an entry is read rather
+            # than after every object, so a partially completed operation
+            # still reports exact stored bytes without making publication
+            # quadratic in the set's own membership.
+            row.verified_bytes = self._verified_bytes(session, row.artifact_set_sha256)
             manifest = ArtifactSetManifest.from_document(row.manifest)
             artifacts = []
             unique_bytes = 0
             seen: set[str] = set()
             for spec in manifest.artifacts:
-                cache_artifact = session.get(ModelCacheArtifact, spec.sha256)
-                state = "missing"
-                actual = 0
-                if cache_artifact is not None:
-                    state = cache_artifact.state
-                    actual = cache_artifact.actual_bytes
-                    if spec.sha256 not in seen and state == "verified":
-                        unique_bytes += spec.expected_bytes
-                        seen.add(spec.sha256)
+                # One owner per fact: managed storage decides availability, and
+                # the same descriptor check reports the stored length, so a
+                # receipt alone cannot invent bytes.
+                stored = self._stored_object(spec.sha256, spec.expected_bytes)
+                actual = stored or 0
+                state = "verified" if stored is not None else "missing"
+                if stored is not None and spec.sha256 not in seen:
+                    unique_bytes += spec.expected_bytes
+                    seen.add(spec.sha256)
                 artifacts.append(
                     {
                         "schema_version": SCHEMA_VERSION,
@@ -5425,45 +5398,38 @@ class ModelCacheService:
 
     def reconcile_storage(self) -> dict[str, object]:
         with self._lock:
+            # Object availability lives in managed storage. Reconciliation
+            # repairs a receipt from verified bytes, and removes the receipt of
+            # an object whose bytes are gone so admission cannot admit it.
             with self._session() as session:
-                known = [
-                    (artifact.sha256, artifact.expected_bytes)
-                    for artifact in session.scalars(select(ModelCacheArtifact))
-                ]
-            # Reading and hashing stored objects is storage work, not SQL work.
-            # Each object is inspected and, when its size matches, content
-            # verified with the read transaction already closed.
-            observed: dict[str, int] = {}
-            for sha256, expected_bytes in known:
+                sets = list(session.scalars(select(ModelCacheSet)))
+                expected = {
+                    spec.sha256: spec
+                    for row in sets
+                    for spec in ArtifactSetManifest.from_document(
+                        row.manifest
+                    ).artifacts
+                }
+            for sha256, spec in expected.items():
                 path = self._object_path(sha256)
                 try:
                     metadata = path.lstat()
                 except FileNotFoundError:
-                    observed[sha256] = 0
+                    self._receipt_path(sha256).unlink(missing_ok=True)
                     continue
                 if not stat.S_ISREG(metadata.st_mode):
-                    observed[sha256] = 0
+                    self._receipt_path(sha256).unlink(missing_ok=True)
                     continue
-                actual = metadata.st_size
-                if actual == expected_bytes and verified_files.verify_path(
-                    path, sha256, expected_bytes
+                available = self._object_is_available(sha256, spec.expected_bytes)
+                if not available:
+                    self._receipt_path(sha256).unlink(missing_ok=True)
+                if (
+                    not available
+                    and metadata.st_size == spec.expected_bytes
+                    and verified_files.verify_path(path, sha256, spec.expected_bytes)
                 ):
-                    observed[sha256] = actual
-                else:
-                    observed[sha256] = min(actual, expected_bytes)
+                    self._write_object_receipt(spec, self._clock())
             with self._session(write=True) as session:
-                rows = list(session.scalars(select(ModelCacheArtifact)))
-                for artifact in rows:
-                    previous = (artifact.state, artifact.actual_bytes)
-                    actual = observed.get(artifact.sha256, 0)
-                    if actual == artifact.expected_bytes:
-                        artifact.state = "verified"
-                        artifact.actual_bytes = actual
-                    else:
-                        artifact.state = "missing" if actual == 0 else "corrupt"
-                        artifact.actual_bytes = min(actual, artifact.expected_bytes)
-                    if previous != (artifact.state, artifact.actual_bytes):
-                        artifact.updated_at = self._clock()
                 sets = list(session.scalars(select(ModelCacheSet)))
                 for row in sets:
                     previous = (
@@ -6015,16 +5981,14 @@ class ModelCacheService:
                 for item in memberships
                 if item.artifact_set_sha256 in protected_sets
             }
-            in_flight_artifacts: set[str] = set()
+            in_flight_artifacts: dict[str, int] = {}
             for operation in operations:
                 if operation.kind not in {"download", "repair"}:
                     continue
                 payload = _validated_operation_payload(operation)
                 manifest = ArtifactSetManifest.from_document(payload["manifest"])
-                in_flight_artifacts.update(item.sha256 for item in manifest.artifacts)
-            artifact_rows = {
-                row.sha256: row for row in session.scalars(select(ModelCacheArtifact))
-            }
+                for item in manifest.artifacts:
+                    in_flight_artifacts.setdefault(item.sha256, item.expected_bytes)
             protected_bytes = sum(
                 object_bytes.get(digest, 0) for digest in protected_artifacts
             )
@@ -6039,15 +6003,14 @@ class ModelCacheService:
             in_flight_bytes = sum(
                 max(
                     0,
-                    artifact_rows[digest].expected_bytes
+                    expected
                     - max(
                         object_bytes.get(digest, 0),
                         partial_bytes.get(digest, 0),
-                        int(artifact_rows[digest].actual_bytes),
+                        self._stored_object_bytes(digest),
                     ),
                 )
-                for digest in in_flight_artifacts
-                if digest in artifact_rows
+                for digest, expected in in_flight_artifacts.items()
             )
         available = max(0, usage.free - self._reserve_bytes)
         return StorageSummary(
@@ -6079,6 +6042,74 @@ class ModelCacheService:
 
     def _object_path(self, digest: str) -> Path:
         return self._root / "objects" / digest[:2] / digest
+
+    def _receipt_path(self, digest: str) -> Path:
+        return self._root / "objects" / digest[:2] / f"{digest}.receipt.json"
+
+    def _write_object_receipt(self, spec: ArtifactSpec, verified_at: datetime) -> None:
+        """Publish the managed-storage receipt that owns an object's availability.
+
+        The receipt is written after the verified bytes are in place, and it is
+        replaced atomically so a reader never sees a partial document.
+        """
+
+        receipt = ModelCacheObjectReceipt(
+            schema_version=SCHEMA_VERSION,
+            sha256=spec.sha256,
+            storage_key=self._object_key(spec.sha256),
+            expected_bytes=spec.expected_bytes,
+            actual_bytes=spec.expected_bytes,
+            verified_at=verified_at.isoformat(),
+        )
+        path = self._receipt_path(spec.sha256)
+        path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with open(temporary, "w", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        receipt.model_dump(mode="json"),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        _fsync_directory(path.parent)
+
+    def _read_object_receipt(
+        self, digest: str, expected_bytes: int
+    ) -> ModelCacheObjectReceipt | None:
+        """Read a receipt and confirm it still describes the object on disk.
+
+        Missing, malformed, or mismatched receipts all mean "not available":
+        admission must never infer availability from bytes alone, and a
+        damaged receipt is repaired through the normal prepare/verify path
+        rather than trusted.
+        """
+
+        path = self._receipt_path(digest)
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+            return None
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        try:
+            receipt = ModelCacheObjectReceipt.model_validate(document)
+        except ValidationError:
+            return None
+        if receipt.sha256 != digest or receipt.expected_bytes != expected_bytes:
+            return None
+        return receipt
+
+    def _object_is_available(self, digest: str, expected_bytes: int) -> bool:
+        """Whether managed storage holds a verified object with its receipt."""
+
+        return self._stored_object(digest, expected_bytes) is not None
 
     def _partial_path(self, set_digest: str, digest: str) -> Path:
         return self._root / "partials" / set_digest / f"{digest}.part"

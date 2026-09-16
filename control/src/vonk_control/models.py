@@ -1231,34 +1231,6 @@ class ModelCacheSet(Base):
     last_error: Mapped[str | None] = mapped_column(String(512))
 
 
-class ModelCacheArtifact(Base):
-    """One deduplicated immutable artifact object tracked by its content digest."""
-
-    __tablename__ = "model_cache_artifacts"
-    __table_args__ = (
-        CheckConstraint(
-            _lower_hex("sha256", 64), name="ck_model_cache_artifacts_digest"
-        ),
-        CheckConstraint(
-            "expected_bytes >= 0 AND actual_bytes >= 0 AND actual_bytes <= expected_bytes AND (expected_bytes > 0 OR (sha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' AND actual_bytes = 0))",
-            name="ck_model_cache_artifacts_sizes",
-        ),
-        CheckConstraint(
-            "state IN ('partial','verified','missing','corrupt')",
-            name="ck_model_cache_artifacts_state",
-        ),
-    )
-    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
-    storage_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    expected_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    actual_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
-    state: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-
-
 class ModelCacheSetArtifact(Base):
     """Stable membership projection; one artifact object may serve many sets."""
 
@@ -1283,11 +1255,9 @@ class ModelCacheSetArtifact(Base):
         primary_key=True,
     )
     artifact_key: Mapped[str] = mapped_column(String(256), primary_key=True)
-    artifact_sha256: Mapped[str] = mapped_column(
-        ForeignKey("model_cache_artifacts.sha256", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
+    # The object's bytes and verification receipt are a managed-storage fact,
+    # so membership records the exact digest without a SQL availability row.
+    artifact_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     path: Mapped[str] = mapped_column(String(512), nullable=False)
 
 
