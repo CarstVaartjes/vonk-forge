@@ -20,13 +20,14 @@ import os
 import re
 import stat
 import subprocess
+import time
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Literal, Protocol
+from typing import IO, Annotated, Literal, Protocol
 
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
@@ -44,10 +45,25 @@ IMAGE_CACHE_DIRECTORY = "image-cache"
 
 
 class RuntimeImagePreparationError(ValueError):
-    """A canonical identity, image archive, or receipt is invalid."""
+    """A canonical identity, image archive, or receipt is invalid.
 
-    def __init__(self, code: str, detail: str) -> None:
+    ``retryable`` and ``recovery_actions`` mirror the operator-facing failure
+    contract the availability service consumes, so a transient preparation
+    failure is rescheduled instead of reported as terminal.
+    """
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        retryable: bool = False,
+        recovery_actions: Sequence[str] = (),
+    ) -> None:
         self.code = code
+        self.detail = detail
+        self.retryable = retryable
+        self.recovery_actions = tuple(recovery_actions)
         super().__init__(detail)
 
 
@@ -63,6 +79,32 @@ class PulledImageEvidence:
     runtime_interface: str
     archive_sha256: str
     archive_bytes: int
+
+
+# The layer lock covers a network transfer and an export, so its claim is
+# bounded: a preparation worker that cannot take it returns a retryable failure
+# and is rescheduled rather than parked with no deadline.
+_REGISTRY_LAYER_LOCK_BUDGET_SECONDS = 30.0
+_REGISTRY_LAYER_LOCK_RETRY_SECONDS = 0.05
+
+
+def _claim_registry_layer_lock(lock: IO[bytes], *, reference: str) -> None:
+    """Acquire one OCI layer lock nonblockingly inside a bounded budget."""
+
+    deadline = time.monotonic() + _REGISTRY_LAYER_LOCK_BUDGET_SECONDS
+    while True:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise RuntimeImagePreparationError(
+                    "runtime_image.transfer_contended",
+                    "another preparation is exporting the same OCI index",
+                    retryable=True,
+                    recovery_actions=("retry",),
+                ) from None
+            time.sleep(_REGISTRY_LAYER_LOCK_RETRY_SECONDS)
 
 
 class OCIImageTransport(Protocol):
@@ -186,9 +228,13 @@ class SkopeoOCIImageTransport:
         blobs.mkdir(exist_ok=True)
         staged_source = f"oci:{layout}:image"
         # Different images can transfer concurrently. Only writers of the
-        # same OCI index are serialized, including across worker processes.
+        # same OCI index are serialized, including across worker processes. The
+        # claim is nonblocking inside a bounded budget: this critical section
+        # covers a network transfer plus an export, so parking a preparation
+        # worker on it would hold a scarce slot with no deadline. Contention
+        # returns a retryable failure and the operation is rescheduled.
         with (cache / f"{key}.lock").open("a+b") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            _claim_registry_layer_lock(lock, reference=reference)
             # Skopeo cleans failed writes itself. Remove leftovers after a
             # killed worker once this image's exclusive lock proves no writer
             # can still be using them; completed shared blobs remain reusable.
