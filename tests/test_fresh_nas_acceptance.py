@@ -123,15 +123,14 @@ def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> 
     renderer = _script_module(PRODUCTION_RENDERER, "acceptance_prompt_renderer")
     builder = _script_module(PAYLOAD_BUILDER, "acceptance_prompt_payload_builder")
     rendered = tmp_path / "docker-compose.yaml"
-    digest = "a" * 64
     renderer.render(
         COMPOSE_TEMPLATE,
         rendered,
         channel="pinned",
-        api_image=f"ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:{digest}",
-        worker_image=f"ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3@sha256:{digest}",
-        hermes_image=f"ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3@sha256:{digest}",
-        litellm_image=f"ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3@sha256:{digest}",
+        api_image="ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3",
+        worker_image="ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3",
+        hermes_image="ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3",
+        litellm_image="ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3",
     )
     payload = builder._payload(builder._read_compose(rendered), "stable")
     required = payload["required_values"]
@@ -525,8 +524,11 @@ def test_immutable_image_check_distinguishes_versioned_dev_tags(
     image = f"ghcr.io/carstvaartjes/vonk-forge-api:{tag}@sha256:{'a' * 64}"
 
     assert acceptance.is_immutable_image(image) is expected
+    # A release tag without a digest pins an explicit version, so it is
+    # immutable; a floating channel tag is not.
+    assert acceptance.is_immutable_image("ghcr.io/carstvaartjes/vonk-forge-api:0.1.0")
     assert not acceptance.is_immutable_image(
-        "ghcr.io/carstvaartjes/vonk-forge-api:0.1.0"
+        "ghcr.io/carstvaartjes/vonk-forge-api:latest"
     )
 
 

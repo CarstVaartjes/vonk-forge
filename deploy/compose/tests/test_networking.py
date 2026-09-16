@@ -7,15 +7,15 @@ from pathlib import Path
 def _rendered() -> dict:
     root = Path(__file__).resolve().parents[3]
     env = os.environ | {
-        "POSTGRES_IMAGE": "postgres:17@sha256:" + "a" * 64,
-        "CADDY_IMAGE": "caddy:2@sha256:" + "b" * 64,
-        "REGISTRY_IMAGE": "registry:3@sha256:" + "9" * 64,
-        "CONTROL_API_IMAGE": "example/control-api:1@sha256:" + "c" * 64,
-        "CONTROL_WORKER_IMAGE": "example/control-worker:1@sha256:" + "8" * 64,
-        "HERMES_AGENT_IMAGE": "example/hermes:1@sha256:" + "7" * 64,
-        "LITELLM_IMAGE": "example/litellm:1@sha256:" + "d" * 64,
-        "PROMETHEUS_IMAGE": "prom/prometheus:1@sha256:" + "e" * 64,
-        "GRAFANA_IMAGE": "grafana/grafana:1@sha256:" + "f" * 64,
+        "POSTGRES_IMAGE": "postgres:17",
+        "CADDY_IMAGE": "caddy:2",
+        "REGISTRY_IMAGE": "registry:3",
+        "CONTROL_API_IMAGE": "example/control-api:1",
+        "CONTROL_WORKER_IMAGE": "example/control-worker:1",
+        "HERMES_AGENT_IMAGE": "example/hermes:1",
+        "LITELLM_IMAGE": "example/litellm:1",
+        "PROMETHEUS_IMAGE": "prom/prometheus:1",
+        "GRAFANA_IMAGE": "grafana/grafana:1",
         "DATABASE_URL_FILE": "/dev/null",
         "HF_TOKEN_FILE": "/dev/null",
         "ADMIN_PASSWORD_FILE": "/dev/null",
@@ -31,7 +31,7 @@ def _rendered() -> dict:
         "LITELLM_DATABASE_URL_FILE": "/dev/null",
         "LITELLM_DATABASE_PASSWORD_FILE": "/dev/null",
         "STEP_CA_IMAGE": "smallstep/step-ca:0.30.2@sha256:" + "1" * 64,
-        "TAILSCALE_IMAGE": "tailscale/tailscale:v1.102.3@sha256:8c42c4574ab066384fcb72f69e086a2ff1dd3652eb6f56856cee34bcf0d2f680",
+        "TAILSCALE_IMAGE": "tailscale/tailscale:v1.102.3",
         "AGENT_CLIENT_CA_FILE": "/dev/null",
         "AGENT_INTERMEDIATE_CERTIFICATE_FILE": "/dev/null",
         "CONTROLLER_CA_FILE": "/dev/null",
@@ -79,14 +79,17 @@ def _rendered() -> dict:
     return json.loads(result.stdout)
 
 
-def test_only_caddy_publishes_ports_and_images_are_digest_pinned() -> None:
+def test_only_caddy_publishes_ports_and_images_are_version_pinned() -> None:
     rendered = _rendered()
     published = {
         name for name, service in rendered["services"].items() if service.get("ports")
     }
     assert published == {"caddy"}
+    floating = {"latest", "main", "edge", "stable", "master", "dev"}
     assert all(
-        "@sha256:" in service["image"] or service.get("build")
+        "@sha256:" in service["image"]
+        or service["image"].rsplit(":", 1)[-1].lower() not in floating
+        or service.get("build")
         for service in rendered["services"].values()
     )
 

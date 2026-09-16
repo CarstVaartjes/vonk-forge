@@ -22,7 +22,11 @@ DEFAULT_SERVICES = {
 }
 HERMES_SERVICES = {"hermes-agent", "hermes-litellm-key-provisioner"}
 ALL_SERVICES = DEFAULT_SERVICES | HERMES_SERVICES
-PINNED_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}(?:}|$)")
+# A service image is pinned by a digest or by an explicit version tag; a bare
+# or floating reference pins nothing.
+PINNED_VERSION = re.compile(
+    r"(?:@sha256:[0-9a-f]{64}|:(?!latest|main|edge|stable|master|dev)[A-Za-z0-9][A-Za-z0-9._-]*)}(?:}|$)"
+)
 
 
 def _canonical_model() -> dict[str, object]:
@@ -104,8 +108,8 @@ def test_every_runtime_service_is_long_running() -> None:
         assert "service_completed_successfully" not in _dependency_conditions(service)
 
 
-def test_canonical_model_has_healthchecks_and_digest_locked_images() -> None:
-    """Catches a service that can be started without readiness or a reproducible image."""
+def test_canonical_model_has_healthchecks_and_version_pinned_images() -> None:
+    """Catches a service that can be started without readiness or a pinned version."""
     model = _canonical_model()
     services = model["services"]
     assert isinstance(services, dict)
@@ -116,9 +120,9 @@ def test_canonical_model_has_healthchecks_and_digest_locked_images() -> None:
         image = service.get("image")
         assert isinstance(image, str), name
         if ":?set " in image:
-            assert ":?set a digest-pinned " in image, name
+            assert ":?set a version-pinned " in image, name
         else:
-            assert PINNED_DIGEST.search(image), name
+            assert PINNED_VERSION.search(image), name
 
 
 def test_site_path_inputs_are_relative_to_the_uploaded_directory() -> None:

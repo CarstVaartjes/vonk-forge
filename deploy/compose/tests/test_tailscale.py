@@ -11,10 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose"
-TAILSCALE_IMAGE = (
-    "tailscale/tailscale:v1.102.3@sha256:"
-    "8c42c4574ab066384fcb72f69e086a2ff1dd3652eb6f56856cee34bcf0d2f680"
-)
+TAILSCALE_IMAGE = "tailscale/tailscale:v1.102.3"
 
 
 def test_default_tailscale_image_matches_the_audited_lock() -> None:

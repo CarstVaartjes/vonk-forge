@@ -553,15 +553,16 @@ def test_verifier_does_not_require_cluster_profiles_to_be_installed(
 
 def test_verifier_rejects_floating_image(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
-    compose = repository / "deploy/compose/compose.yaml"
-    text = compose.read_text()
-    locked = "caddy:2.11.4@sha256:13ba145cba2f3e28fa801994876e4c086d1b95d5aa2a520a734765ffb6b12017"
-    compose.write_text(text.replace(locked, "caddy:latest"))
+    # Move the lock and the Compose default together so this exercises the
+    # floating-tag rule itself rather than the lock/Compose agreement check.
+    for name in ("deploy/compose/images.lock.json", "deploy/compose/compose.yaml"):
+        path = repository / name
+        path.write_text(path.read_text().replace("caddy:2.11.4", "caddy:latest"))
     result = subprocess.run(
         [SCRIPT, "--root", repository], capture_output=True, text=True, check=False
     )
     assert result.returncode != 0
-    assert "digest" in result.stderr or "floating" in result.stderr
+    assert "floating" in result.stderr
 
 
 def test_verifier_rejects_floating_hermes_agent_base(tmp_path: Path) -> None:
@@ -569,8 +570,8 @@ def test_verifier_rejects_floating_hermes_agent_base(tmp_path: Path) -> None:
     dockerfile = repository / "deploy/compose/hermes-agent/Dockerfile"
     dockerfile.write_text(
         dockerfile.read_text().replace(
-            "nousresearch/hermes-agent:v2026.7.20@sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a",
             "nousresearch/hermes-agent:v2026.7.20",
+            "nousresearch/hermes-agent:latest",
         )
     )
 
@@ -582,7 +583,7 @@ def test_verifier_rejects_floating_hermes_agent_base(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "Hermes" in result.stderr and "digest" in result.stderr
+    assert "Hermes" in result.stderr and "versioned" in result.stderr
 
 
 @pytest.mark.parametrize("name", ("node", "python", "hermes"))
@@ -609,7 +610,64 @@ def test_verifier_reports_missing_or_malformed_build_bases_as_json(
     assert result.returncode != 0
     payload = json.loads(result.stdout)
     assert payload["ok"] is False
-    assert f"{name} digest-pinned build base is missing or invalid" in payload["errors"]
+    expected = (
+        "hermes build base is missing or invalid"
+        if name == "hermes"
+        else f"{name} build base is missing or invalid"
+    )
+    assert expected in payload["errors"]
+
+
+@pytest.mark.parametrize("name", ("node", "python"))
+def test_verifier_accepts_tag_tracked_first_party_build_bases(
+    tmp_path: Path, name: str
+) -> None:
+    """A first-party language base may follow its rolling tag."""
+
+    repository = _copy(tmp_path)
+    lock_path = repository / "deploy/compose/images.lock.json"
+    lock = json.loads(lock_path.read_text())
+    reference = lock["build_bases"][name]
+    assert "@" not in reference, "the first-party build base should not be digested"
+    dockerfile = repository / "control/Dockerfile"
+    assert reference in dockerfile.read_text()
+
+    result = subprocess.run(
+        [SCRIPT, "--root", repository, "--json"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert not [error for error in payload["errors"] if error.startswith(f"{name} ")], (
+        payload["errors"]
+    )
+
+
+@pytest.mark.parametrize("name", ("hermes", "litellm", "node", "python"))
+def test_verifier_rejects_a_floating_build_base(tmp_path: Path, name: str) -> None:
+    """Dropping the digest is allowed; dropping the version pin is not."""
+
+    repository = _copy(tmp_path)
+    lock_path = repository / "deploy/compose/images.lock.json"
+    lock = json.loads(lock_path.read_text())
+    lock["build_bases"][name] = lock["build_bases"][name].split(":", 1)[0] + ":latest"
+    lock_path.write_text(json.dumps(lock))
+
+    result = subprocess.run(
+        [SCRIPT, "--root", repository, "--json"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    payload = json.loads(result.stdout)
+    assert any(
+        error.startswith(f"{name} image uses a floating tag")
+        for error in payload["errors"]
+    ), payload["errors"]
 
 
 @pytest.mark.parametrize("value", (None, [], {}))
@@ -632,20 +690,16 @@ def test_verifier_reports_non_string_runtime_images_as_json(
     assert result.returncode != 0
     payload = json.loads(result.stdout)
     assert payload["ok"] is False
-    assert "caddy image is not pinned by digest" in payload["errors"]
+    assert "caddy image is not pinned by version" in payload["errors"]
 
 
 def test_image_lock_contains_the_pinned_hermes_build_base() -> None:
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
 
-    assert lock["build_bases"]["hermes"] == (
-        "nousresearch/hermes-agent:v2026.7.20@sha256:"
-        "f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a"
-    )
+    assert lock["build_bases"]["hermes"] == "nousresearch/hermes-agent:v2026.7.20"
     assert "hermes-agent" not in lock["images"]
     assert lock["build_bases"]["litellm"] == (
-        "ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:"
-        "f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2"
+        "ghcr.io/berriai/litellm:v1.83.14-stable.patch.3"
     )
     assert "litellm" not in lock["images"]
     assert not any("ai-devbox" in name for name in lock["build_bases"])

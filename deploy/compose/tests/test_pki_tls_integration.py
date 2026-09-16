@@ -17,10 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 ROOT = Path(__file__).resolve().parents[3]
-CADDY_IMAGE = (
-    "caddy:2.11.4@sha256:"
-    "13ba145cba2f3e28fa801994876e4c086d1b95d5aa2a520a734765ffb6b12017"
-)
+CADDY_IMAGE = "caddy:2.11.4"
 HOSTNAMES = (
     "enroll.test.example",
     "agents.test.example",

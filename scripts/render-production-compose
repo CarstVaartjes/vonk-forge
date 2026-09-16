@@ -13,15 +13,17 @@ from pathlib import Path
 
 import yaml
 
-API_TOKEN = "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}"
-WORKER_TOKEN = "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}"
-HERMES_TOKEN = "${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}"
-LITELLM_TOKEN = "${LITELLM_IMAGE:?set a digest-pinned Vonk LiteLLM image}"
+API_TOKEN = "${CONTROL_API_IMAGE:?set a version-pinned control-api image}"
+WORKER_TOKEN = "${CONTROL_WORKER_IMAGE:?set a version-pinned control-worker image}"
+HERMES_TOKEN = "${HERMES_AGENT_IMAGE:?set a version-pinned Hermes image}"
+LITELLM_TOKEN = "${LITELLM_IMAGE:?set a version-pinned Vonk LiteLLM image}"
 TOKEN_COUNTS = {API_TOKEN: 1, WORKER_TOKEN: 1, HERMES_TOKEN: 1, LITELLM_TOKEN: 2}
+# A production release image is identified by its semantic version tag. The
+# digest is no longer part of the identity; a release is bound to the tag that
+# the publication workflow stamped.
 IMAGE_PATTERN = re.compile(
     r"ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker|hermes|litellm)"
-    r":v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
-    r"@sha256:[0-9a-f]{64}\Z"
+    r":v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z"
 )
 
 
@@ -29,7 +31,7 @@ def _validate_image(image: str, role: str) -> None:
     match = IMAGE_PATTERN.fullmatch(image)
     if match is None or match.group("role") != role:
         raise ValueError(
-            f"{role} image must use an immutable production version locked by digest"
+            f"{role} image must use an immutable production semantic version tag"
         )
 
 

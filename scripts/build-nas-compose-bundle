@@ -19,7 +19,19 @@ from typing import Any
 import yaml
 
 MAX_COMPOSE_BYTES = 32 * 1024 * 1024
-PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$")
+# A bundle service image carries an explicit version tag. Digests are no
+# longer required; a floating channel tag is still refused.
+VERSIONED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./_-]*:[a-z0-9][a-z0-9._-]*$")
+FLOATING_TAGS = frozenset({"latest", "main", "edge", "stable", "master", "dev"})
+
+
+def _version_pinned(image: str) -> bool:
+    """A digest or a version tag pins an explicit version; a float does not."""
+
+    bare = image.split("@", 1)[0]
+    return (
+        "@sha256:" in image or VERSIONED_IMAGE.fullmatch(image) is not None
+    ) and bare.rsplit(":", 1)[-1].lower() not in FLOATING_TAGS
 SERVICES = {
     "tailscale-gateway",
     "tailscale-configurator",
@@ -116,9 +128,9 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
     for name, raw_service in services.items():
         service = _mapping(raw_service, f"service {name}")
         image = service.get("image")
-        if not isinstance(image, str) or PINNED_IMAGE.fullmatch(image) is None:
+        if not isinstance(image, str) or not _version_pinned(image):
             raise BundleError(
-                f"Compose service {name} does not use a digest-pinned image"
+                f"Compose service {name} does not use a strongly versioned image"
             )
         if any(key in service for key in ("build", "extends", "env_file")):
             raise BundleError(

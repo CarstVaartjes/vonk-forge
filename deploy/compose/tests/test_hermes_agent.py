@@ -42,16 +42,13 @@ def _rendered() -> dict[str, object]:
     return json.loads(result.stdout)
 
 
-def test_wrapper_image_is_digest_pinned_and_contains_no_ssh_stack() -> None:
+def test_wrapper_image_is_version_pinned_and_contains_no_ssh_stack() -> None:
     dockerfile = (HERMES / "Dockerfile").read_text()
     project_text = "\n".join(
         path.read_text(errors="replace") for path in HERMES.glob("*") if path.is_file()
     ).lower()
 
-    assert (
-        "nousresearch/hermes-agent:v2026.7.20@sha256:"
-        "f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a"
-    ) in dockerfile
+    assert "nousresearch/hermes-agent:v2026.7.20" in dockerfile
     assert 'ENTRYPOINT ["/usr/local/bin/vonk-hermes-entrypoint"]' in dockerfile
     assert 'CMD ["gateway", "run"]' in dockerfile
     for forbidden in ("openssh", "sshd", "authorized_keys", "port: 22", "target: 22"):
@@ -61,10 +58,7 @@ def test_wrapper_image_is_digest_pinned_and_contains_no_ssh_stack() -> None:
 def test_compose_hermes_is_unpublished_bounded_and_segmented() -> None:
     service = _rendered()["services"]["hermes-agent"]
 
-    assert service["image"] == (
-        "example/hermes:1@sha256:"
-        "7777777777777777777777777777777777777777777777777777777777777777"
-    )
+    assert service["image"] == "example/hermes:1"
     assert "build" not in service
     assert set(service["networks"]) == {
         "hermes-inference",

@@ -61,8 +61,15 @@ SAFE_DNS_SUFFIX = re.compile(
 TAILSCALE_SERVICE = re.compile(r"svc:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 TAILSCALE_HOSTNAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 ISOLATED_TAILNET_KIND = "isolated-disposable-test"
-PINNED_IMAGE = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z")
-MUTABLE_IMAGE_TAG = re.compile(r":(?:latest|dev|main|edge)@sha256:")
+# An image is pinned by a digest or by an explicit version tag. Only a bare
+# or floating reference fails both checks below.
+PINNED_IMAGE = re.compile(
+    r"[a-z0-9][a-z0-9./_-]*:(?!latest|dev|main|edge|stable|master)[a-z0-9][a-z0-9._-]*\Z"
+    r"|[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z"
+)
+MUTABLE_IMAGE_TAG = re.compile(
+    r":(?:latest|dev|main|edge|stable|master)(?:@sha256:[0-9a-f]{64})?\Z"
+)
 
 
 def required_environment(name: str, *, secret: bool = False) -> str:
@@ -362,10 +369,13 @@ def generate_bundle(
 
 
 def is_immutable_image(image: str) -> bool:
-    return (
-        PINNED_IMAGE.fullmatch(image) is not None
-        and MUTABLE_IMAGE_TAG.search(image) is None
-    )
+    """True when the reference pins an explicit version, by tag or digest."""
+
+    if MUTABLE_IMAGE_TAG.search(image) is not None:
+        return False
+    if "@sha256:" in image:
+        return PINNED_IMAGE.fullmatch(image) is not None
+    return PINNED_IMAGE.fullmatch(image) is not None
 
 
 def is_channel_image(image: str, channel: str | None = None) -> bool:

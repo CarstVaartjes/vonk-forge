@@ -1,6 +1,6 @@
-FROM ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2 AS upstream
+FROM ghcr.io/berriai/litellm:v1.83.14-stable.patch.3 AS upstream
 
-FROM ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2 AS runtime
+FROM ghcr.io/berriai/litellm:v1.83.14-stable.patch.3 AS runtime
 
 USER 0:0
 

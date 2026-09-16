@@ -9,10 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 DEV_CADDYFILE = ROOT / "deploy/compose/Caddyfile"
-DEV_CADDY_IMAGE = (
-    "caddy:2.11.4@sha256:"
-    "13ba145cba2f3e28fa801994876e4c086d1b95d5aa2a520a734765ffb6b12017"
-)
+DEV_CADDY_IMAGE = "caddy:2.11.4"
 
 
 def _environment() -> dict[str, str]:
@@ -27,7 +24,7 @@ def _environment() -> dict[str, str]:
         "PROMETHEUS_IMAGE": "prom/prometheus:1@sha256:" + "e" * 64,
         "GRAFANA_IMAGE": "grafana/grafana:1@sha256:" + "f" * 64,
         "STEP_CA_IMAGE": "smallstep/step-ca:0.30.2@sha256:" + "1" * 64,
-        "TAILSCALE_IMAGE": "tailscale/tailscale:v1.102.3@sha256:8c42c4574ab066384fcb72f69e086a2ff1dd3652eb6f56856cee34bcf0d2f680",
+        "TAILSCALE_IMAGE": "tailscale/tailscale:v1.102.3",
         "DATABASE_URL_FILE": "/dev/null",
         "ADMIN_PASSWORD_FILE": "/dev/null",
         "POSTGRES_PASSWORD_FILE": "/dev/null",
@@ -118,7 +115,7 @@ def _adapted_caddy(environment: dict[str, str], caddyfile: str | None = None) ->
             f"VONK_BACKEND_PORT={environment.get('VONK_BACKEND_PORT', '8443')}",
             "-e",
             "VONK_AGENT_PROXY_AUTH=test-proxy-secret",
-            "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
+            "caddy:2.10.2",
             "caddy",
             "adapt",
             "--config",
@@ -308,7 +305,7 @@ def _entrypoint_result(
         command.extend(("-v", f"{secret_source}:/run/secrets/agent-proxy-auth:ro"))
     command.extend(
         (
-            "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
+            "caddy:2.10.2",
             "/bin/sh",
             "/usr/local/bin/vonk-caddy-entrypoint",
         )
