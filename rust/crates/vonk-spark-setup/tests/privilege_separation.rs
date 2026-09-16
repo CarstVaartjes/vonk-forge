@@ -1147,7 +1147,7 @@ fn explicit_reenrollment_replaces_paired_and_recovering_identities() {
         let ca = controller_ca();
         configured_install(&install_paths, &ca, state);
         let mut prompt = TokenOnlyPrompt { secrets: 0 };
-        let mut prepare_runner = RecordingRunner::default();
+        let mut prepare_runner = runner_with_bootstrap(&ca);
         let prepared = prepare_setup(
             &request(temporary.path()).with_enroll(true),
             &install_paths,
@@ -1158,7 +1158,15 @@ fn explicit_reenrollment_replaces_paired_and_recovering_identities() {
         .unwrap();
 
         assert_eq!(prompt.secrets, 1);
-        assert!(prepare_runner.commands.is_empty());
+        // Planning reads the advertised controller CA once, over the TOFU
+        // bootstrap, and records no other command.
+        assert_eq!(prepare_runner.commands.len(), 1);
+        assert!(
+            prepare_runner.commands[0]
+                .args
+                .iter()
+                .any(|argument| argument == "--insecure")
+        );
         let mut handoff_runner = RecordingRunner::default();
         handoff_to_root_with_authority(
             &prepared,
@@ -1242,13 +1250,95 @@ fn explicit_reenrollment_replaces_paired_and_recovering_identities() {
 }
 
 #[test]
+fn reenrollment_refuses_a_rotated_controller_ca_before_any_write() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let stored_ca = controller_ca();
+    let rotated_ca = controller_ca();
+    assert_ne!(stored_ca, rotated_ca);
+    configured_install(&install_paths, &stored_ca, "paired-v1\n");
+    let config_before = fs::read(&install_paths.config).unwrap();
+    let ca_before = fs::read(&install_paths.ca).unwrap();
+    let mut prompt = TokenOnlyPrompt { secrets: 0 };
+    let mut prepare_runner = runner_with_bootstrap(&rotated_ca);
+
+    let result = prepare_setup(
+        &request(temporary.path()).with_enroll(true),
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    );
+
+    match result {
+        Err(SetupError::ControllerCaChanged { stored, advertised }) => {
+            assert_eq!(stored, ca_fingerprint(&stored_ca));
+            assert_eq!(advertised, ca_fingerprint(&rotated_ca));
+        }
+        Err(other) => panic!("unexpected error: {other}"),
+        Ok(_) => panic!("a rotated controller CA must be refused"),
+    }
+    assert_eq!(
+        prompt.secrets, 0,
+        "the CA change must fail closed before a grant is requested"
+    );
+    assert_eq!(
+        fs::read(&install_paths.config).unwrap(),
+        config_before,
+        "validation must happen before release-controlled state changes"
+    );
+    assert_eq!(
+        fs::read(&install_paths.ca).unwrap(),
+        ca_before,
+        "planning must not rewrite the stored CA"
+    );
+}
+
+#[test]
+fn reenrollment_proceeds_when_the_advertised_ca_matches() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(&install_paths, &ca, "paired-v1\n");
+    let config_before = fs::read(&install_paths.config).unwrap();
+    let mut prompt = TokenOnlyPrompt { secrets: 0 };
+    let mut prepare_runner = runner_with_bootstrap(&ca);
+
+    prepare_setup(
+        &request(temporary.path()).with_enroll(true),
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+    )
+    .expect("a matching advertised CA re-enrolls as before");
+
+    assert_eq!(prompt.secrets, 1, "a matching CA still asks for one grant");
+    assert_eq!(prepare_runner.commands.len(), 1);
+    let bootstrap = &prepare_runner.commands[0];
+    assert_eq!(bootstrap.program, std::path::Path::new("/usr/bin/curl"));
+    assert!(
+        bootstrap
+            .args
+            .iter()
+            .any(|argument| argument == "https://enroll.example.test/agent/bootstrap"),
+        "the comparison reads the controller bootstrap endpoint"
+    );
+    assert_eq!(
+        fs::read(&install_paths.config).unwrap(),
+        config_before,
+        "planning must not rewrite the stored configuration"
+    );
+}
+
+#[test]
 fn failed_post_pair_readiness_is_resumed_without_another_token() {
     let temporary = tempdir().unwrap();
     let install_paths = paths(temporary.path());
     let ca = controller_ca();
     configured_install(&install_paths, &ca, "paired-v1\n");
     let mut prompt = TokenOnlyPrompt { secrets: 0 };
-    let mut prepare_runner = RecordingRunner::default();
+    let mut prepare_runner = runner_with_bootstrap(&ca);
     let prepared = prepare_setup(
         &request(temporary.path()).with_enroll(true),
         &install_paths,
