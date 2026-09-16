@@ -71,9 +71,6 @@ from .models import (
     RecipeRun,
     RuntimeImageAuthorization,
 )
-from .models import (
-    RuntimeImageReceipt as RuntimeImageReceiptRow,
-)
 from .operation_contract import AvailabilityOperationFailure
 from .runtime_init import RuntimeSecretError, read_runtime_secret
 from .strict_json import serialize_json_value
@@ -1442,36 +1439,40 @@ class ModelCacheService:
                         return digest, variant
                 return "", None
 
-            def verified_image(revision_id: str) -> RuntimeImageReceiptRow | None:
-                receipts = session.scalars(
-                    select(RuntimeImageReceiptRow)
-                    .join(
-                        RuntimeImageAuthorization,
-                        RuntimeImageAuthorization.receipt_id
-                        == RuntimeImageReceiptRow.id,
-                    )
+            def verified_image(revision_id: str) -> Mapping[str, object] | None:
+                # SQL owns the authorization decision; managed storage owns
+                # whether the authorized archive is present. The authorization
+                # carries the archive identity, so no receipt row joins them.
+                authorizations = session.scalars(
+                    select(RuntimeImageAuthorization)
                     .where(
                         RuntimeImageAuthorization.recipe_revision_id == revision_id,
                         RuntimeImageAuthorization.state == "authorized",
-                        RuntimeImageReceiptRow.state == "verified",
                     )
                     .order_by(
-                        RuntimeImageReceiptRow.verified_at.desc(),
-                        RuntimeImageReceiptRow.id.desc(),
+                        RuntimeImageAuthorization.authorized_at.desc(),
+                        RuntimeImageAuthorization.id.desc(),
                     )
                 )
                 if self._runtime_archive_available is None:
                     return None
-                for receipt in receipts:
-                    archive = receipt.oci_archive_sha256
-                    size = receipt.image_bytes
+                for authorization in authorizations:
+                    archive = authorization.oci_archive_sha256
+                    size = authorization.image_bytes
                     if not isinstance(archive, str) or type(size) is not int:
                         raise ModelCacheStorageError(
                             "model_cache.runtime_receipt_invalid",
-                            "verified runtime image receipt lacks its archive identity",
+                            "verified runtime image authorization lacks its archive identity",
                         )
                     if self._runtime_archive_available(archive, size):
-                        return receipt
+                        return {
+                            "archive_sha256": archive,
+                            "image_bytes": size,
+                            "platform_manifest_digest": (
+                                authorization.platform_manifest_digest
+                            ),
+                            "source": authorization.source,
+                        }
                 return None
 
             selected: (
@@ -1479,7 +1480,7 @@ class ModelCacheService:
                     CatalogDocumentRevision,
                     str,
                     str | None,
-                    RuntimeImageReceiptRow | None,
+                    Mapping[str, object] | None,
                 ]
                 | None
             ) = None
@@ -1534,9 +1535,9 @@ class ModelCacheService:
             model_verified = model_set.verified_bytes if model_set is not None else None
 
             recipe_cached = receipt is not None
-            image_bytes = receipt.image_bytes if receipt is not None else None
+            image_bytes = receipt["image_bytes"] if receipt is not None else None
             image_digest = (
-                receipt.platform_manifest_digest if receipt is not None else None
+                receipt["platform_manifest_digest"] if receipt is not None else None
             )
             latest = next(
                 (
@@ -1567,12 +1568,12 @@ class ModelCacheService:
                     "content_sha256": revision.content_digest,
                     "cached": recipe_cached,
                     "cache_state": "cached" if recipe_cached else "missing",
-                    "artifact_set_sha256": receipt.oci_archive_sha256
+                    "artifact_set_sha256": receipt["archive_sha256"]
                     if receipt
                     else None,
                     "expected_bytes": image_bytes,
                     "verified_bytes": image_bytes,
-                    "source": receipt.source if receipt else None,
+                    "source": receipt["source"] if receipt else None,
                     "image_digest": image_digest,
                     "update_available": latest is not None,
                 },

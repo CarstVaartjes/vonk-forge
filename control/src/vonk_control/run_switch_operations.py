@@ -57,7 +57,6 @@ from .models import (
     ResourceReservation,
     RunNode,
     RuntimeImageAuthorization,
-    RuntimeImageReceipt,
 )
 from .operation_api import OperationListPage, OperationQuery
 from .operation_progress import observe_progress, project_progress
@@ -3519,28 +3518,29 @@ class RunSwitchOperationService:
             # effective execution key. Reuse the same immutable published
             # image identity across parameter-only keys; compile/install
             # resolves and persists the exact effective key before planning.
-            direct_receipt = session.scalar(
-                select(RuntimeImageReceipt)
-                .join(
-                    RuntimeImageAuthorization,
-                    RuntimeImageAuthorization.receipt_id == RuntimeImageReceipt.id,
-                )
+            authorization = session.scalar(
+                select(RuntimeImageAuthorization)
                 .where(
                     RuntimeImageAuthorization.recipe_revision_id == revision.id,
                     RuntimeImageAuthorization.source == "published",
                     RuntimeImageAuthorization.state == "authorized",
-                    RuntimeImageReceipt.source == "published",
-                    RuntimeImageReceipt.registry_manifest_digest == published_digest,
-                    RuntimeImageReceipt.architecture == "linux-arm64",
-                    RuntimeImageReceipt.runtime_interface == "vonk.runtime.v1",
-                    RuntimeImageReceipt.state == "verified",
+                    RuntimeImageAuthorization.registry_manifest_digest
+                    == published_digest,
                 )
                 .order_by(
-                    RuntimeImageReceipt.verified_at.desc(),
-                    RuntimeImageReceipt.id.desc(),
+                    RuntimeImageAuthorization.authorized_at.desc(),
+                    RuntimeImageAuthorization.id.desc(),
                 )
                 .limit(1)
             )
+            if authorization is not None:
+                direct_receipt = {
+                    "platform_manifest_digest": (
+                        authorization.platform_manifest_digest
+                    ),
+                    "image_bytes": authorization.image_bytes,
+                    "oci_archive_sha256": authorization.oci_archive_sha256,
+                }
         raw_build = execution.get("build") if isinstance(execution, Mapping) else None
         raw_platform = None
         if isinstance(raw_build, Mapping):
@@ -3608,7 +3608,11 @@ class RunSwitchOperationService:
                         builder.architecture
                     )
         elif direct_receipt is not None:
-            observed_architecture = _normalise_architecture(direct_receipt.architecture)
+            # A runtime-image authorization is a verified platform image; the
+            # runtime-image contract fixes its architecture to linux-arm64, so
+            # the observation is that constant rather than a column the
+            # authorization does not carry.
+            observed_architecture = RUNTIME_IMAGE_ARCHITECTURE
         node_architectures = tuple(
             _normalise_architecture(node.architecture)
             for node in session.scalars(
@@ -3657,21 +3661,21 @@ class RunSwitchOperationService:
         image_digest = (
             build.image_digest
             if build is not None
-            else direct_receipt.platform_manifest_digest
+            else direct_receipt["platform_manifest_digest"]
             if direct_receipt is not None
             else published_digest
         )
         image_bytes = (
             build.image_bytes
             if build is not None
-            else direct_receipt.image_bytes
+            else direct_receipt["image_bytes"]
             if direct_receipt is not None
             else None
         )
         oci_layout = (
             build.oci_layout_sha256
             if build is not None
-            else direct_receipt.oci_archive_sha256
+            else direct_receipt["oci_archive_sha256"]
             if direct_receipt is not None
             else None
         )
@@ -7264,6 +7268,9 @@ def _primary_model_digest(document: object) -> str | None:
     model = selection.get("model") if isinstance(selection, Mapping) else None
     value = model.get("content_sha256") if isinstance(model, Mapping) else None
     return value if _is_hex_digest(value) else None
+
+
+RUNTIME_IMAGE_ARCHITECTURE = "linux/arm64"
 
 
 def _normalise_architecture(value: str) -> str:

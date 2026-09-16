@@ -24,6 +24,7 @@ from .agent_jobs import AgentJobService
 from .bounded_json import sequence
 from .distribution import DistributionError, DistributionService
 from .model_cache import ModelCacheNotFound
+from .runtime_image_preparation import prefixed_image_digest
 from .model_cache_contract import ModelCacheDownloadResult
 from .models import (
     AgentOperation,
@@ -32,7 +33,6 @@ from .models import (
     Job,
     RecipeBuild,
     RuntimeImageAuthorization,
-    RuntimeImageReceipt,
 )
 from .operation_progress import aggregate_progress, project_progress
 from .run_switch_contract import (
@@ -863,6 +863,56 @@ class DurableDistributionPhaseExecutor:
         return image_digest, layout_digest, image_bytes, build_id
 
     @staticmethod
+    def _source_runtime_storage(source: object) -> object | None:
+        """Return the runtime-image storage behind a distribution source."""
+
+        for candidate in (source, getattr(source, "oci_source", None)):
+            storage = getattr(candidate, "_runtime_storage", None)
+            if storage is not None:
+                return storage
+        return None
+
+    def _archive_is_published(
+        self, image_digest: str, archive_sha256: str, image_bytes: int
+    ) -> bool:
+        """Whether a current authorization covers an archive storage holds.
+
+        SQL owns the authorization decision and managed storage owns whether
+        the bytes and their receipt are present, so both must agree: a stored
+        archive with no live, matching authorization is not usable. A source
+        with no Controller image cache -- the in-memory fixture source -- cannot
+        answer the storage half, and its assignment was already verified
+        through ``verify_runtime_image`` by the service that registered it.
+        """
+
+        storage = self._source_runtime_storage(self._distribution.source)
+        if storage is None:
+            verifier = getattr(self._distribution.source, "verify_runtime_image", None)
+            if not callable(verifier):
+                return False
+            return bool(verifier(prefixed_image_digest(image_digest), archive_sha256))
+        try:
+            receipt = storage.read_receipt(archive_sha256)
+        except Exception:
+            return False
+        if (
+            receipt.oci_archive_sha256 != archive_sha256
+            or receipt.image_bytes != image_bytes
+        ):
+            return False
+        with self._sessions() as session:
+            authorized = session.scalar(
+                select(RuntimeImageAuthorization.id).where(
+                    RuntimeImageAuthorization.state == "authorized",
+                    RuntimeImageAuthorization.oci_archive_sha256 == archive_sha256,
+                    RuntimeImageAuthorization.platform_manifest_digest
+                    == prefixed_image_digest(image_digest),
+                    RuntimeImageAuthorization.image_bytes == image_bytes,
+                )
+            )
+        return authorized is not None
+
+    @staticmethod
     def _runtime_execution_key(progress: Mapping[str, object]) -> str | None:
         phase_results = progress.get("phase_results")
         if not isinstance(phase_results, list):
@@ -924,30 +974,13 @@ class DurableDistributionPhaseExecutor:
                         raise RuntimeError(
                             "current recipe is not authorized for OCI build receipt"
                         )
-                    receipt = session.scalar(
-                        select(RuntimeImageReceipt).where(
-                            RuntimeImageReceipt.id == authorization.receipt_id,
-                            RuntimeImageReceipt.state == "verified",
-                            RuntimeImageReceipt.source == authorization.source,
-                            RuntimeImageReceipt.build_id == authorization.build_id,
-                            RuntimeImageReceipt.original_content_digest
-                            == authorization.original_content_digest,
-                            RuntimeImageReceipt.effective_execution_key
-                            == authorization.effective_execution_key,
-                            RuntimeImageReceipt.platform_manifest_digest
-                            == authorization.platform_manifest_digest,
-                            RuntimeImageReceipt.local_image_config_id
-                            == authorization.local_image_config_id,
-                            RuntimeImageReceipt.oci_archive_sha256
-                            == authorization.oci_archive_sha256,
-                            RuntimeImageReceipt.image_bytes
-                            == authorization.image_bytes,
-                        )
-                    )
-                    if receipt is None:
+                    if not self._archive_is_published(
+                        authorization.platform_manifest_digest,
+                        authorization.oci_archive_sha256,
+                        authorization.image_bytes,
+                    ):
                         raise RuntimeError("OCI build receipt authority changed")
             else:
-                receipt = None
                 if plan.recipe_revision_id is not None:
                     authorization = session.scalar(
                         select(RuntimeImageAuthorization).where(
@@ -964,45 +997,17 @@ class DurableDistributionPhaseExecutor:
                             RuntimeImageAuthorization.state == "authorized",
                         )
                     )
-                    if authorization is not None:
-                        receipt = session.scalar(
-                            select(RuntimeImageReceipt).where(
-                                RuntimeImageReceipt.id == authorization.receipt_id,
-                                RuntimeImageReceipt.state == "verified",
-                                RuntimeImageReceipt.source == authorization.source,
-                                RuntimeImageReceipt.build_id.is_(None),
-                                RuntimeImageReceipt.original_content_digest
-                                == authorization.original_content_digest,
-                                RuntimeImageReceipt.effective_execution_key
-                                == authorization.effective_execution_key,
-                                RuntimeImageReceipt.registry_manifest_digest
-                                == authorization.registry_manifest_digest,
-                                RuntimeImageReceipt.platform_manifest_digest
-                                == authorization.platform_manifest_digest,
-                                RuntimeImageReceipt.local_image_config_id
-                                == authorization.local_image_config_id,
-                                RuntimeImageReceipt.oci_archive_sha256
-                                == authorization.oci_archive_sha256,
-                                RuntimeImageReceipt.image_bytes
-                                == authorization.image_bytes,
-                            )
+                    if authorization is not None and not self._archive_is_published(
+                        authorization.platform_manifest_digest,
+                        authorization.oci_archive_sha256,
+                        authorization.image_bytes,
+                    ):
+                        raise RuntimeError(
+                            "published runtime image receipt authority changed"
                         )
-                else:
-                    receipt = session.scalar(
-                        select(RuntimeImageReceipt).where(
-                            RuntimeImageReceipt.source == "published",
-                            RuntimeImageReceipt.original_content_digest
-                            == plan.recipe_content_sha256,
-                            RuntimeImageReceipt.effective_execution_key
-                            == effective_execution_key,
-                            RuntimeImageReceipt.state == "verified",
-                            RuntimeImageReceipt.platform_manifest_digest
-                            == image_digest,
-                            RuntimeImageReceipt.oci_archive_sha256 == layout_digest,
-                            RuntimeImageReceipt.image_bytes == image_bytes,
-                        )
-                    )
-                if receipt is None:
+                elif not self._archive_is_published(
+                    image_digest, layout_digest, image_bytes
+                ):
                     raise RuntimeError(
                         "published runtime image receipt authority changed"
                     )

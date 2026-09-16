@@ -1458,130 +1458,6 @@ class RecipeBuild(Base):
     )
 
 
-class RuntimeImageReceipt(Base):
-    """Controller verified image identity used by install and run admission.
-
-    This row is the immutable artifact receipt.  Its recipe revision is the
-    revision whose executable image/build was actually verified.  A current
-    recipe revision that reuses these bytes is represented by
-    :class:`RuntimeImageAuthorization`, never by rewriting this row.
-    """
-
-    __tablename__ = "runtime_image_receipts"
-    __table_args__ = (
-        UniqueConstraint(
-            "recipe_revision_id",
-            "source",
-            "original_content_digest",
-            "effective_execution_key",
-            "platform_manifest_digest",
-            "local_image_config_id",
-            name="uq_runtime_image_receipt_identity",
-        ),
-        Index(
-            "ix_runtime_image_receipt_effective_identity",
-            "effective_execution_key",
-            "platform_manifest_digest",
-            "local_image_config_id",
-            "oci_archive_sha256",
-        ),
-        CheckConstraint(
-            "source IN ('published','controller-build')",
-            name="ck_runtime_image_receipts_source",
-        ),
-        CheckConstraint(
-            _lower_hex("original_content_digest", 64),
-            name="ck_runtime_image_receipts_original_digest",
-        ),
-        CheckConstraint(
-            _lower_hex("effective_execution_key", 64),
-            name="ck_runtime_image_receipts_execution_key",
-        ),
-        CheckConstraint(
-            _prefixed_digest("platform_manifest_digest"),
-            name="ck_runtime_image_receipts_platform_digest",
-        ),
-        CheckConstraint(
-            "registry_manifest_digest IS NULL OR "
-            f"({_prefixed_digest('registry_manifest_digest')})",
-            name="ck_runtime_image_receipts_registry_digest",
-        ),
-        CheckConstraint(
-            _prefixed_digest("local_image_config_id"),
-            name="ck_runtime_image_receipts_config_digest",
-        ),
-        CheckConstraint(
-            _nullable_lower_hex("oci_archive_sha256", 64),
-            name="ck_runtime_image_receipts_archive_digest",
-        ),
-        CheckConstraint(
-            "image_bytes IS NULL OR image_bytes > 0",
-            name="ck_runtime_image_receipts_image_bytes",
-        ),
-        CheckConstraint(
-            "oci_archive_sha256 IS NOT NULL AND image_bytes IS NOT NULL",
-            name="ck_runtime_image_receipts_archive_pair",
-        ),
-        CheckConstraint(
-            "(source = 'published' AND registry_manifest_digest IS NOT NULL AND build_id IS NULL) OR "
-            "(source = 'controller-build' AND registry_manifest_digest IS NULL AND build_id IS NOT NULL)",
-            name="ck_runtime_image_receipts_source_build",
-        ),
-        CheckConstraint(
-            "architecture = 'linux-arm64' AND runtime_interface = 'vonk.runtime.v1' AND runtime_interface_label = 'v1'",
-            name="ck_runtime_image_receipts_runtime_identity",
-        ),
-        CheckConstraint(
-            "state IN ('verified','evicted','revoked')",
-            name="ck_runtime_image_receipts_state",
-        ),
-        ForeignKeyConstraint(
-            ["recipe_revision_id"],
-            ["catalog_document_revisions.id"],
-            name="fk_runtime_image_receipts_recipe_revision",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["build_id"],
-            ["recipe_builds.id"],
-            name="fk_runtime_image_receipts_build",
-            ondelete="RESTRICT",
-        ),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    recipe_revision_id: Mapped[str] = mapped_column(
-        String(36), nullable=False, index=True
-    )
-    source: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    original_content_digest: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True
-    )
-    effective_execution_key: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True
-    )
-    registry_manifest_digest: Mapped[str | None] = mapped_column(String(71), index=True)
-    platform_manifest_digest: Mapped[str] = mapped_column(
-        String(71), nullable=False, index=True
-    )
-    local_image_config_id: Mapped[str] = mapped_column(
-        String(71), nullable=False, index=True
-    )
-    oci_archive_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
-    image_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    architecture: Mapped[str] = mapped_column(String(32), nullable=False)
-    runtime_interface: Mapped[str] = mapped_column(String(64), nullable=False)
-    runtime_interface_label: Mapped[str] = mapped_column(String(128), nullable=False)
-    build_id: Mapped[str | None] = mapped_column(String(36), index=True)
-    verified_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    state: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="verified", index=True
-    )
-
-
 class RuntimeImageAuthorization(Base):
     """Authorize one current recipe revision to consume one verified receipt.
 
@@ -1595,8 +1471,9 @@ class RuntimeImageAuthorization(Base):
     __table_args__ = (
         UniqueConstraint(
             "recipe_revision_id",
-            "receipt_id",
-            name="uq_runtime_image_authorization_revision_receipt",
+            "effective_execution_key",
+            "oci_archive_sha256",
+            name="uq_runtime_image_authorization_revision_execution_archive",
         ),
         CheckConstraint(
             _lower_hex("original_content_digest", 64),
@@ -1637,12 +1514,6 @@ class RuntimeImageAuthorization(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["receipt_id"],
-            ["runtime_image_receipts.id"],
-            name="fk_runtime_image_authorizations_receipt",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
             ["build_id"],
             ["recipe_builds.id"],
             name="fk_runtime_image_authorizations_build",
@@ -1662,7 +1533,6 @@ class RuntimeImageAuthorization(Base):
     recipe_revision_id: Mapped[str] = mapped_column(
         String(36), nullable=False, index=True
     )
-    receipt_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     original_content_digest: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True

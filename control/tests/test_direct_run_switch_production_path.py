@@ -40,7 +40,7 @@ from vonk_control.models import (
     Job,
     RecipeBuild,
     RecipeInstallation,
-    RuntimeImageReceipt,
+    RuntimeImageAuthorization,
 )
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_operations import RecipeOperationService
@@ -278,7 +278,7 @@ class _TargetExecutor(CompositeDistributionPhaseExecutor):
             )
         if phase.subphase == "target-copy" and self._tamper_db and not self._did_tamper:
             with self._sessions.begin() as session:
-                row = session.scalar(select(RuntimeImageReceipt))
+                row = session.scalar(select(RuntimeImageAuthorization))
                 assert row is not None
                 if self._tamper_db == "platform":
                     row.platform_manifest_digest = "sha256:" + "a" * 64
@@ -511,11 +511,11 @@ def _make_service(
         key = runtime_spec["identity"]["execution_sha256"]
         with sessions() as session:
             row = session.scalar(
-                select(RuntimeImageReceipt).where(
-                    RuntimeImageReceipt.recipe_revision_id == revision_id,
-                    RuntimeImageReceipt.effective_execution_key == key,
-                    RuntimeImageReceipt.source == "published",
-                    RuntimeImageReceipt.state == "verified",
+                select(RuntimeImageAuthorization).where(
+                    RuntimeImageAuthorization.recipe_revision_id == revision_id,
+                    RuntimeImageAuthorization.effective_execution_key == key,
+                    RuntimeImageAuthorization.source == "published",
+                    RuntimeImageAuthorization.state == "authorized",
                 )
             )
             if row is None:
@@ -545,6 +545,10 @@ def _make_service(
         mappings=ClusterMappingService(sessions),
     )
     source = _ModelSource()
+    # This fixture source owns no Controller image cache, so it declares its
+    # published archive exactly as MemoryVerifiedObjectSource intends. The real
+    # path reads the receipt in the cache root instead.
+    source.register_runtime_image(REGISTRY_DIGEST, ARCHIVE_DIGEST)
     executor = _TargetExecutor(
         sessions,
         AgentJobService(sessions, clock=lambda: NOW),
@@ -618,7 +622,7 @@ def test_dual_spark_preparation_authorizes_both_execution_roles_for_one_image(
         assert set(plans) == set(node_ids)
         for plan in plans.values():
             validate_compiled_launch_payload(plan)
-        receipts = list(session.scalars(select(RuntimeImageReceipt)))
+        receipts = list(session.scalars(select(RuntimeImageAuthorization)))
         assert len({receipt.effective_execution_key for receipt in receipts}) == 2
         assert {receipt.oci_archive_sha256 for receipt in receipts} == {ARCHIVE_DIGEST}
     assert events.count("runtime-image-pulled") == 1
@@ -710,8 +714,8 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
         )
         assert distribution_object["sha256"] == ARCHIVE_DIGEST
         assert session.query(RecipeBuild).count() == 0
-        assert session.query(RuntimeImageReceipt).count() == 1
-        persisted = session.scalar(select(RuntimeImageReceipt))
+        assert session.query(RuntimeImageAuthorization).count() == 1
+        persisted = session.scalar(select(RuntimeImageAuthorization))
         assert persisted is not None
         assert persisted.original_content_digest == recipe_digest
         assert persisted.registry_manifest_digest == REGISTRY_DIGEST
@@ -888,7 +892,7 @@ def test_direct_run_switch_accepts_the_receipt_recorded_by_availability(
         compiled = require_mapping(compiled_plans[NODE_ID], "compiled plan")
         compiled_identity = require_mapping(compiled["identity"], "compiled identity")
         launch_identity = compiled_identity["execution_sha256"]
-        receipts = list(session.scalars(select(RuntimeImageReceipt)))
+        receipts = list(session.scalars(select(RuntimeImageAuthorization)))
         assert {item.effective_execution_key for item in receipts} == {
             availability_key,
             launch_identity,
@@ -930,7 +934,7 @@ def test_direct_run_switch_rejects_filesystem_only_receipt_before_compile(
         row = session.get(Job, operation.operation_id)
         assert row is not None and row.state == "failed"
         assert "install-preparation-failed" in (row.status_reason or "")
-        assert session.query(RuntimeImageReceipt).count() == 0
+        assert session.query(RuntimeImageAuthorization).count() == 0
         assert session.query(RecipeInstallation).count() == 0
         assert session.query(RecipeBuild).count() == 0
 

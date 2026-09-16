@@ -16,7 +16,7 @@ from vonk_control.distribution import (
     MemoryVerifiedObjectSource,
 )
 from vonk_control.distribution_executor import DurableDistributionPhaseExecutor
-from vonk_control.models import Base, RecipeBuild, RuntimeImageReceipt
+from vonk_control.models import Base, RecipeBuild, RuntimeImageAuthorization
 from vonk_control.run_switch_contract import RunSwitchPhase, RunSwitchPlan
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
@@ -64,6 +64,10 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(
     )
     source = _ModelObjectSource()
     source.register_artifact_set(model_set_digest, (model,))
+    # This fixture source owns no Controller image cache, so it declares the
+    # prepared archive exactly as MemoryVerifiedObjectSource intends. The real
+    # path reads the receipt in the cache root instead.
+    source.register_runtime_image(PLATFORM_IMAGE_DIGEST, ARCHIVE_DIGEST)
     executor = DurableDistributionPhaseExecutor(
         sessions,
         AgentJobService(sessions, clock=lambda: datetime.now(UTC)),
@@ -172,7 +176,7 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(
     assert verify.result["verified"] is True
     assert plan.recipe_build_id is None
     with Session(engine) as session:
-        session.query(RuntimeImageReceipt).delete(synchronize_session=False)
+        session.query(RuntimeImageAuthorization).delete(synchronize_session=False)
         session.commit()
     with pytest.raises(RuntimeError, match="receipt authority"):
         executor._archive(

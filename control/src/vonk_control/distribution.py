@@ -35,7 +35,6 @@ from .models import (
     Job,
     RecipeBuild,
     RuntimeImageAuthorization,
-    RuntimeImageReceipt,
 )
 from .runtime_image_preparation import (
     IMAGE_CACHE_DIRECTORY,
@@ -304,30 +303,12 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                 )
                 if expected_registry != receipt.registry_manifest_digest:
                     return False
-                durable = session.scalar(
-                    select(RuntimeImageReceipt).where(
-                        RuntimeImageReceipt.source == "published",
-                        RuntimeImageReceipt.original_content_digest
-                        == receipt.distribution_content_sha256,
-                        RuntimeImageReceipt.state == "verified",
-                        RuntimeImageReceipt.registry_manifest_digest
-                        == receipt.registry_manifest_digest,
-                        RuntimeImageReceipt.platform_manifest_digest == image_digest,
-                        RuntimeImageReceipt.local_image_config_id
-                        == receipt.local_image_config_id,
-                        RuntimeImageReceipt.oci_archive_sha256 == archive_sha256,
-                        RuntimeImageReceipt.image_bytes == receipt.image_bytes,
-                        RuntimeImageReceipt.architecture == receipt.architecture,
-                        RuntimeImageReceipt.runtime_interface
-                        == receipt.runtime_interface,
-                        RuntimeImageReceipt.runtime_interface_label
-                        == receipt.runtime_interface_label,
-                    )
-                )
-                if durable is None:
-                    return False
+                # The storage receipt above already proves the bytes and their
+                # immutable identity. SQL decides only whether a current
+                # revision may consume that exact archive, keyed by the archive
+                # digest itself now that no receipt row mediates the join.
                 authorization_query = select(RuntimeImageAuthorization).where(
-                    RuntimeImageAuthorization.receipt_id == durable.id,
+                    RuntimeImageAuthorization.oci_archive_sha256 == archive_sha256,
                     RuntimeImageAuthorization.source == "published",
                     RuntimeImageAuthorization.state == "authorized",
                 )
@@ -382,15 +363,18 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
             if (
                 revision_ids
                 and session.scalar(
-                    select(RuntimeImageReceipt.id)
+                    select(RuntimeImageAuthorization.id)
                     .where(
-                        RuntimeImageReceipt.recipe_revision_id.in_(revision_ids),
-                        RuntimeImageReceipt.source == "published",
-                        RuntimeImageReceipt.state == "verified",
-                        RuntimeImageReceipt.registry_manifest_digest.in_(
+                        RuntimeImageAuthorization.recipe_revision_id.in_(
+                            revision_ids
+                        ),
+                        RuntimeImageAuthorization.source == "published",
+                        RuntimeImageAuthorization.state == "authorized",
+                        RuntimeImageAuthorization.registry_manifest_digest.in_(
                             registry_digests
                         ),
-                        RuntimeImageReceipt.platform_manifest_digest == image_digest,
+                        RuntimeImageAuthorization.platform_manifest_digest
+                        == image_digest,
                     )
                     .limit(1)
                 )
@@ -398,9 +382,9 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
             ):
                 return True
 
-        # The filesystem receipt preserves the parent/platform relationship
-        # even when its SQL row has been deleted or tampered with.  Use it only
-        # to suppress an unsafe build fallback; SQL remains required for use.
+        # The storage receipt preserves the parent/platform relationship even
+        # when no current revision authorizes it. Use it only to suppress an
+        # unsafe build fallback; SQL authorization remains required for use.
         for receipt_path in sorted(self._runtime_storage.root.glob("*.receipt.json")):
             try:
                 receipt = self._runtime_storage.read_receipt(

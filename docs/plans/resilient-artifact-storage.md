@@ -171,6 +171,28 @@ The bounded cutover is:
    `test_agent_api.py`, and `test_availability_production.py` consumers updated
    in the same commit.
 
+## Implementation checkpoint: image receipt cutover
+
+A working tree exists on branch `codex/image-receipt-checkpoint` with the whole
+cutover implemented and 333 of 340 relevant tests passing. It is **not verified
+and must not be merged**. The seven remaining failures are all one defect.
+
+`distribution_executor._archive_is_published` decides availability from the
+managed-storage receipt when the distribution source carries a real Controller
+image cache (`ControllerRuntimeImageVerifiedObjectSource._runtime_storage`), and
+from the fixture source's own `register_runtime_image` declaration otherwise.
+The two spell image digests differently, and the fixture declarations in
+`control/tests/test_direct_run_switch_production_path.py` and
+`control/tests/test_direct_runtime_path.py` do not currently name the digest the
+plan resolves, so the check fails closed and six run-switch tests see a 409 or a
+missing rejection. `test_notes_revision_reuses_original_receipt_with_separate_authorization`
+is the seventh and is about the authorization count for an editorial successor.
+
+Finish by giving the fixture sources a declaration that matches what the plan
+resolves, then re-run the eight image suites, add the adversarial cases (no
+receipt, mismatched archive digest, revoked authorization), and run the full
+gate set before opening a PR.
+
 ## Evidence of success
 
 Validate complete interactions under contention, process death, lost responses,

@@ -58,7 +58,6 @@ from vonk_control.models import (
     RecipeBuild,
     RecipeInstallation,
     RuntimeImageAuthorization,
-    RuntimeImageReceipt,
 )
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_execution_contract import installation_plan_document
@@ -788,7 +787,6 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
     original_revision_id = str(uuid4())
     document_id = str(uuid4())
     mapping_id = str(uuid4())
-    receipt_id = str(uuid4())
     payload_wire = WireCompiledExecutionPlan.parse(payload)
     effective_execution_key = payload_wire.identity.execution_sha256
     runtime_image = payload_wire.runtime_image
@@ -882,29 +880,8 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
             )
         )
         session.add(
-            RuntimeImageReceipt(
-                id=receipt_id,
-                recipe_revision_id=original_revision_id,
-                source="published",
-                original_content_digest=original_digest,
-                effective_execution_key=effective_execution_key,
-                registry_manifest_digest=runtime_image.registry_manifest_digest,
-                platform_manifest_digest=runtime_image.platform_manifest_digest,
-                local_image_config_id=runtime_image.local_image_config_id,
-                oci_archive_sha256=runtime_image.oci_layout_sha256,
-                image_bytes=runtime_image.image_bytes,
-                architecture=runtime_image.architecture,
-                runtime_interface=runtime_image.runtime_interface,
-                runtime_interface_label=runtime_image.runtime_interface_label,
-                build_id=None,
-                verified_at=now,
-                state="verified",
-            )
-        )
-        session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision_id,
-                receipt_id=receipt_id,
                 source="published",
                 original_content_digest=original_digest,
                 effective_execution_key=effective_execution_key,

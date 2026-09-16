@@ -23,10 +23,10 @@ from vonk_control.models import (
     RecipeBuild,
     RuntimeImageAuthorization,
 )
-from vonk_control.models import RuntimeImageReceipt as RuntimeImageReceiptRow
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
+    prefixed_image_digest,
     PulledImageEvidence,
     RuntimeImagePreparationError,
     RuntimeImageReceipt,
@@ -894,9 +894,9 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
         )
         session.commit()
         assert row.source == "published"
-        assert row.registry_manifest_digest == IMAGE_DIGEST
-        assert row.platform_manifest_digest == PLATFORM_IMAGE_DIGEST
-        assert row.local_image_config_id == "sha256:" + "c" * 64
+        assert prefixed_image_digest(row.registry_manifest_digest) == IMAGE_DIGEST
+        assert prefixed_image_digest(row.platform_manifest_digest) == PLATFORM_IMAGE_DIGEST
+        assert prefixed_image_digest(row.local_image_config_id) == "sha256:" + "c" * 64
         assert row.oci_archive_sha256 == ARCHIVE_DIGEST
         assert row.image_bytes == len(ARCHIVE)
     second_at = first_at + timedelta(seconds=1)
@@ -910,8 +910,10 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
             verified_at=second_at,
         )
         session.commit()
-        assert same.id == row.id
-        assert same.verified_at.replace(tzinfo=UTC) == second_at
+        assert same.archive_path == row.archive_path
+        # Managed storage owns the immutable receipt published when the bytes
+        # were verified, so a second authorization does not rewrite it.
+        assert same.recorded_at == receipt.recorded_at
     conflicting = receipt.model_copy(
         update={
             "platform_manifest_digest": BUILT_IMAGE_DIGEST,
@@ -959,7 +961,7 @@ def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
     session = Session(engine)
     _add_revision(session, "revision-direct", _recipe("recipe-image.json"))
     session.flush()
-    with pytest.raises(ValueError, match="does not match"):
+    with pytest.raises(ValueError, match="not authorized"):
         resolve_persisted_runtime_image_receipt(session, **resolve_kwargs)
     persist_runtime_image_receipt(
         session,
@@ -973,12 +975,12 @@ def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
             resolve_persisted_runtime_image_receipt(session, **resolve_kwargs).source
             == "published"
         )
-        session.query(RuntimeImageReceiptRow).update(
-            {"local_image_config_id": "sha256:" + "d" * 64}
+        session.query(RuntimeImageAuthorization).update(
+            {"oci_archive_sha256": "e" * 64}
         )
         session.commit()
     session = Session(engine)
-    with pytest.raises(ValueError, match="does not match"):
+    with pytest.raises(ValueError, match="not authorized"):
         resolve_persisted_runtime_image_receipt(session, **resolve_kwargs)
     session.close()
 
@@ -1028,12 +1030,13 @@ def test_one_verified_archive_serves_availability_and_launch_identities(
             verified_at=now,
         )
         session.flush()
-        availability_row_id = availability_row.id
-        launch_row_id = launch_row.id
-        assert launch_row.effective_execution_key == launch_key
+        availability_archive = availability_row.oci_archive_sha256
+        launch_archive = launch_row.oci_archive_sha256
+        assert launch_row.oci_archive_sha256 == ARCHIVE_DIGEST
         session.commit()
 
-    assert availability_row_id != launch_row_id
+    assert availability_archive == launch_archive == ARCHIVE_DIGEST
+    assert session.query(RuntimeImageAuthorization).count() == 2
     with Session(engine) as session:
         assert (
             resolve_persisted_runtime_image_receipt(
@@ -1042,8 +1045,8 @@ def test_one_verified_archive_serves_availability_and_launch_identities(
                 current_content_digest=receipt.distribution_content_sha256,
                 effective_execution_key=launch_key,
                 receipt=receipt,
-            ).id
-            == launch_row_id
+            ).oci_archive_sha256
+            == launch_archive
         )
         assert (
             resolve_persisted_runtime_image_receipt(
@@ -1052,13 +1055,13 @@ def test_one_verified_archive_serves_availability_and_launch_identities(
                 current_content_digest=receipt.distribution_content_sha256,
                 effective_execution_key=availability_key,
                 receipt=receipt,
-            ).id
-            == availability_row_id
+            ).oci_archive_sha256
+            == availability_archive
         )
         assert (
-            session.query(RuntimeImageReceiptRow)
+            session.query(RuntimeImageAuthorization)
             .filter(
-                RuntimeImageReceiptRow.original_content_digest
+                RuntimeImageAuthorization.original_content_digest
                 == receipt.distribution_content_sha256
             )
             .count()
@@ -1200,7 +1203,11 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
                 "build_id": "11111111-1111-4111-8111-111111111111",
             }
         )
-        with pytest.raises(RuntimeImagePreparationError, match="identity changed"):
+        # A changed archive under the same build is rejected by the build
+        # authority before any authorization is written.
+        with pytest.raises(
+            RuntimeImagePreparationError, match="not backed by the exact succeeded build"
+        ):
             persist_runtime_image_receipt(
                 session,
                 recipe_revision_id=revision_id,
@@ -1211,8 +1218,8 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
             )
         session.commit()
 
-        assert new_row.id != old_row.id
-        assert session.query(RuntimeImageReceiptRow).count() == 2
+        assert new_row.oci_archive_sha256 != old_row.oci_archive_sha256
+        assert session.query(RuntimeImageAuthorization).count() == 2
         assert session.query(RuntimeImageAuthorization).count() == 2
         assert (
             resolve_persisted_runtime_image_receipt(
@@ -1221,8 +1228,8 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
                 current_content_digest=recipe_digest,
                 effective_execution_key=execution_key,
                 receipt=new_receipt,
-            ).id
-            == new_row.id
+            ).oci_archive_sha256
+            == new_row.oci_archive_sha256
         )
         assert (
             resolve_persisted_runtime_image_receipt(
@@ -1231,8 +1238,8 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
                 current_content_digest=recipe_digest,
                 effective_execution_key=execution_key,
                 receipt=old_receipt,
-            ).id
-            == old_row.id
+            ).oci_archive_sha256
+            == old_row.oci_archive_sha256
         )
 
 
@@ -1324,7 +1331,7 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
             verified_at=now,
         )
         session.commit()
-        assert session.query(RuntimeImageReceiptRow).count() == 1
+        assert session.query(RuntimeImageAuthorization).count() == 1
         assert session.query(RuntimeImageAuthorization).count() == 2
         assert (
             resolve_persisted_runtime_image_receipt(
@@ -1333,7 +1340,7 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
                 current_content_digest=new_digest,
                 effective_execution_key="a" * 64,
                 receipt=receipt,
-            ).original_content_digest
+            ).distribution_content_sha256
             == old_digest
         )
         with pytest.raises(ValueError, match="current recipe revision digest"):
@@ -1376,8 +1383,8 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
             verified_at=now,
         )
         session.flush()
-        assert launch_row.effective_execution_key == launch_key
-        assert session.query(RuntimeImageReceiptRow).count() == 2
+        assert launch_row.oci_archive_sha256 == ARCHIVE_DIGEST
+        assert session.query(RuntimeImageAuthorization).count() == 2
         assert (
             resolve_persisted_runtime_image_receipt(
                 session,
@@ -1385,8 +1392,8 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
                 current_content_digest=new_digest,
                 effective_execution_key=launch_key,
                 receipt=receipt,
-            ).id
-            == launch_row.id
+            ).oci_archive_sha256
+            == launch_row.oci_archive_sha256
         )
 
 
@@ -1408,7 +1415,7 @@ def test_runtime_image_authority_fails_closed_for_missing_or_revoked_bindings(
     with Session(engine) as session:
         _add_revision(session, revision_id, recipe)
         with pytest.raises(
-            RuntimeImagePreparationError, match="unavailable or inactive"
+            RuntimeImagePreparationError, match="authority is unavailable"
         ):
             persist_runtime_image_receipt(
                 session,
@@ -1442,9 +1449,10 @@ def test_runtime_image_authority_fails_closed_for_missing_or_revoked_bindings(
                 receipt=receipt,
                 verified_at=now,
             )
-        authorization.state = "authorized"
-        row.state = "revoked"
-        with pytest.raises(RuntimeImagePreparationError, match="not verified"):
+        # The storage receipt has no mutable state: revocation is the SQL
+        # authorization's decision, and it stays terminal.
+        authorization.state = "revoked"
+        with pytest.raises(RuntimeImagePreparationError, match="not active"):
             persist_runtime_image_receipt(
                 session,
                 recipe_revision_id=revision_id,
