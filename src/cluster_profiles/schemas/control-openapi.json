@@ -15845,6 +15845,31 @@
             ],
             "title": "Registry Manifest Digest"
           },
+          "runtime_adapter": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Adapter"
+          },
+          "runtime_adapter_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Adapter Sha256"
+          },
           "runtime_interface": {
             "const": "vonk.runtime.v1",
             "title": "Runtime Interface",
