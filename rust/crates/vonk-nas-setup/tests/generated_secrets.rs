@@ -730,6 +730,32 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     server
         .verify_signature(Some(intermediate.public_key()))
         .expect("server signed by intermediate");
+    // Strict RFC 5280 verification rejects a non-self-signed certificate that
+    // omits the Authority Key Identifier.  The controller reaches step-ca with
+    // that verifier enabled and only the root as its trust anchor, so the
+    // generated intermediate must bind the issuer key identifier.
+    let root_ski = root
+        .extensions()
+        .iter()
+        .find_map(|extension| match extension.parsed_extension() {
+            x509_parser::extensions::ParsedExtension::SubjectKeyIdentifier(value) => Some(value.0),
+            _ => None,
+        })
+        .expect("root subject key identifier");
+    let intermediate_aki = intermediate
+        .extensions()
+        .iter()
+        .find_map(|extension| match extension.parsed_extension() {
+            x509_parser::extensions::ParsedExtension::AuthorityKeyIdentifier(value) => {
+                value.key_identifier.as_ref().map(|identifier| identifier.0)
+            }
+            _ => None,
+        })
+        .expect("intermediate authority key identifier");
+    assert_eq!(
+        intermediate_aki, root_ski,
+        "intermediate authority key identifier must match the root subject key identifier"
+    );
 
     let sans = server
         .subject_alternative_name()
