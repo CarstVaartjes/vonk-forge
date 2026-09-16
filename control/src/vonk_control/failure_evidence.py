@@ -44,8 +44,13 @@ _SENSITIVE = re.compile(
     r"password|secret|token|authorization|cookie|credential|private.?key|api.?key|environment",
     re.IGNORECASE,
 )
+# A line-level filter, so each alternative must name a credential *value*, not
+# merely a topic.  A bare ``authorization`` alternative redacted any line that
+# mentioned a table such as ``runtime_image_authorizations`` -- exactly the
+# constraint violation an operator needs to read.  Header and assignment shapes
+# still match, and ``redact_text`` removes the credential inside them.
 _SECRET_LINE = re.compile(
-    r"password|secret|token|authorization|cookie|credential|private[ _-]?key|api[ _-]?key|-----BEGIN|-----END",
+    r"password|secret|token|authorization\s*[:=]|cookie|credential|private[ _-]?key|api[ _-]?key|-----BEGIN|-----END",
     re.IGNORECASE,
 )
 _OPAQUE_SECRET = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9+/=_-]{40,}(?![A-Za-z0-9])")

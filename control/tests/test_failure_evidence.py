@@ -17,6 +17,7 @@ from vonk_control.failure_evidence import (
     FailureEvidenceService,
     collect_failure,
     log_tail,
+    safe_text,
 )
 from vonk_control.failure_evidence_api import install_failure_evidence_routes
 from vonk_control.failure_evidence_models import (
@@ -232,6 +233,26 @@ def test_redaction_handles_adversarial_values_before_persistence(service):
     assert "permission denied" in content
     with service.sessions() as session:
         assert session.scalar(select(FailureEvidenceRecord)).content.decode() == content
+
+
+def test_redaction_keeps_a_constraint_violation_that_names_an_authorization_table() -> (
+    None
+):
+    """The line filter redacts credential values, not the topic.
+
+    A bare ``authorization`` alternative replaced any diagnostic line that
+    mentioned ``runtime_image_authorizations``, which is exactly the constraint
+    violation an operator has to read to repair the database.
+    """
+
+    violation = (
+        'IntegrityError: null value in column "receipt_id" of relation '
+        '"runtime_image_authorizations" violates not-null constraint'
+    )
+    assert safe_text(violation) == violation
+    header = safe_text("Authorization: Bearer super-sensitive")
+    assert "[redacted diagnostic line]" == header
+    assert "super-sensitive" not in header
 
 
 def test_ring_buffer_preserves_last_lines_and_reports_loss():
