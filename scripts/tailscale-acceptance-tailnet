@@ -71,6 +71,25 @@ def _required_environment(name: str) -> str:
     return value
 
 
+def _transport_cause(error: BaseException) -> str:
+    """Name the underlying transport failure for a "was unavailable" line.
+
+    `urllib` wraps most failures in `URLError` and keeps the reason; a bare
+    `TimeoutError` from a read has none. Without this the message cannot tell a
+    DNS failure from a refused connection from the 30-second read timeout, which
+    is exactly the distinction the disposable-tailnet flake needs.
+
+    Only the reason's type and text are reported. The request URL, headers and
+    body can carry the OAuth client secret, and `ApiRequestError` stays
+    sanitized, so the reason is flattened to one bounded line.
+    """
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    detail = " ".join(str(reason).split())
+    if len(detail) > 120:
+        detail = f"{detail[:117]}..."
+    return f"{type(reason).__name__}: {detail}" if detail else type(reason).__name__
+
+
 def _request(
     method: str,
     path: str,
@@ -110,7 +129,8 @@ def _request(
         ) from error
     except (TimeoutError, urllib.error.URLError) as error:
         raise ApiRequestError(
-            f"Tailscale API {method} {path} was unavailable",
+            f"Tailscale API {method} {path} was unavailable "
+            f"({_transport_cause(error)})",
             method=method,
             path=path,
             status_code=None,

@@ -4,6 +4,7 @@ import email.message
 import importlib.machinery
 import importlib.util
 import json
+import socket
 import stat
 import sys
 import urllib.error
@@ -937,3 +938,49 @@ def test_missing_factory_secrets_fail_before_any_api_request(
         )
 
     assert urlopen.requests == []
+
+
+@pytest.mark.parametrize(
+    ("failure", "cause"),
+    (
+        (
+            urllib.error.URLError(ConnectionRefusedError(61, "Connection refused")),
+            "ConnectionRefusedError",
+        ),
+        (
+            urllib.error.URLError(socket.gaierror(-2, "Name or service not known")),
+            "gaierror",
+        ),
+        (urllib.error.URLError(TimeoutError("timed out")), "TimeoutError"),
+        (TimeoutError("timed out"), "TimeoutError"),
+    ),
+)
+def test_transport_failure_names_the_underlying_cause(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure: BaseException,
+    cause: str,
+) -> None:
+    """A "was unavailable" line has to say which transport failure it was.
+
+    The disposable-tailnet flake reported only "was unavailable", which cannot
+    distinguish a DNS failure from a refused connection from the 30-second read
+    timeout that the step's ~31s duration implies. Retrying was deliberately not
+    added, so the message is the only thing that makes the next occurrence
+    diagnosable.
+    """
+    _factory_environment(monkeypatch)
+    _install_urlopen(lifecycle, monkeypatch, [failure])
+
+    with pytest.raises(lifecycle.ApiRequestError) as caught:
+        lifecycle.create(
+            display_name="Vonk Forge CI 123 attempt 1",
+            github_env=tmp_path / "github.env",
+            state=tmp_path / "state.json",
+        )
+
+    message = str(caught.value)
+    assert "POST /oauth/token was unavailable" in message
+    assert cause in message
+    assert "\n" not in message
