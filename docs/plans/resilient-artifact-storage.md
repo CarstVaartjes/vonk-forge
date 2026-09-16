@@ -138,8 +138,20 @@ The bounded cutover is:
    with bytes on disk nor a live authorization with the receipt removed is
    admitted.
 
-   The reconnaissance that preceded it remains useful context for the next
-   cutover, which is the `recipe_builds` build and transfer checkpoint:
+   **The `recipe_builds` half needs no cutover, and this was verified rather
+   than assumed.** `RecipeBuild` carries the build request identity (recipe
+   revision, builder node, source bundle, build input, state, plan, policy
+   report) and the builder's reported output identity (`image_digest`,
+   `oci_layout_sha256`, `image_bytes`). It stores no transfer or build
+   checkpoint: there is no byte counter, no partial offset, and no upload
+   progress in the row. The archive, its partial staging, and the immutable
+   receipt already live in managed storage, and `_authorize_current_revision`
+   checks the row's output identity against that stored receipt before any
+   authorization is written. The row is therefore SQL's record of which builder
+   produced which exact archive, not a second availability copy, which is the
+   ownership split the architecture asks for.
+
+   The reconnaissance that preceded the image work remains as context:
 
    * The SQL row model (`models.RuntimeImageReceipt`, imported elsewhere as
      `RuntimeImageReceiptRow`) has 147 references across thirteen modules
@@ -174,6 +186,39 @@ The bounded cutover is:
    `test_recipe_image_availability.py`, `test_direct_run_switch_production_path.py`,
    `test_agent_api.py`, and `test_availability_production.py` consumers updated
    in the same commit.
+
+## Remaining coordination work: the blocking file locks
+
+Seven baseline sites remain, and the audit that classified them is worth
+recording because the first reading -- "flip them to `LOCK_NB`" -- is wrong for
+every one of them.
+
+Each remaining site is a **cross-process serialization lock on one named
+resource**, not an artifact lock waiting on another artifact lock:
+
+* `artifact_blob_store._reference_lock` is taken by `reference_attachment()`
+  (shared) and `reference_reconciliation()` (exclusive), and the attachment form
+  is deliberately held across a blob verification *and* its durable database
+  attachment so a reconciler cannot reclaim a blob between the two. Making it
+  nonblocking would break that fence; the correct nonblocking shape needs the
+  caller to abandon and replay the upload, which is a protocol change rather
+  than a flag change.
+* `artifact_blob_store._reserve` takes the quota lock and a reservation file
+  lock together. The reservation lock already uses `LOCK_NB` on its inspection
+  path; the acquisition path blocks, and that is what keeps the quota
+  arithmetic exact.
+* `route_runtime._locked` serializes route publication.
+* `runtime_image_preparation.pull_and_export` serializes writers of one OCI
+  index, which is why it must hold across worker processes.
+* `recipe_image_availability._run` holds an in-process identity guard while
+  taking the removal lock; the two are related guards rather than two artifact
+  locks.
+
+What the coordination rules actually require of these is that no such wait sits
+inside a SQL transaction or waits on a child, and the scanner already enforces
+both. Converting them to bounded nonblocking claims needs a caller-side
+reschedule loop per site plus its contention test, so it belongs in its own
+package taken one site at a time rather than as a flag sweep.
 
 ## Evidence of success
 
