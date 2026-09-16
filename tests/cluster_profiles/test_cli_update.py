@@ -332,7 +332,7 @@ def test_signed_update_installs_real_wheel_into_uv_venv(
     accepted_wheel = build(tmp_path / "accepted", "b" * 40, "1.2.3")
     environment = tmp_path / "cli-env"
     subprocess.run(
-        [uv, "venv", "--python", "3.12", str(environment)],
+        [uv, "venv", "--python", "3.14", str(environment)],
         check=True,
         capture_output=True,
         text=True,
