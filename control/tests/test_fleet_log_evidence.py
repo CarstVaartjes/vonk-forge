@@ -9,7 +9,7 @@ path an operator uses.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 from uuid import uuid4
@@ -33,6 +33,16 @@ _NOW = datetime(2026, 9, 17, 12, 56, tzinfo=UTC)
 _STABLE_CODE = "helper_request_argument_empty"
 _REASON = f"container runtime could not start the workload: {_STABLE_CODE}"
 _HELPER_DETAIL = "helper rejected: argv item is empty"
+# The live shape of a lease lapse: the attempt stopped renewing 109 s into a
+# start whose own deadline was still half an hour away.
+_LEASE_DEADLINE = datetime(2026, 9, 17, 12, 55, 57, tzinfo=UTC)
+_START_DEADLINE = "2026-09-17T13:25:00+00:00"
+_LEASE_REASON = (
+    "attempt 1 lease expired; "
+    f"lease deadline {_LEASE_DEADLINE.isoformat()}; "
+    "last accepted contact 2026-09-17T12:55:53+00:00; "
+    f"expired at {_NOW.isoformat()}; the effect is unobserved"
+)
 
 
 def _tail(text: str) -> dict[str, object]:
@@ -106,6 +116,54 @@ def _failed_start(sessions, *, node_id: str = _NODE, preflight=None) -> str:
                     "error_code": "recipe_start_failed",
                     "diagnostics": diagnostics,
                 },
+            )
+        )
+    return operation_id
+
+
+def _parked_start(
+    sessions,
+    *,
+    attempt_number: int = 1,
+    current_attempt: int = 1,
+    operation_state: str = "waiting-for-operator",
+    updated_at: datetime = _NOW,
+) -> str:
+    """One ``recipe.start`` whose attempt stopped renewing and parked the order.
+
+    The park path leaves the attempt ``expired`` and records no attempt result
+    at all, so the operation's own status reason is the only durable narrative.
+    """
+
+    operation_id = str(uuid4())
+    with sessions.begin() as session:
+        session.add(
+            AgentOperation(
+                id=operation_id,
+                parent_job_id=str(uuid4()),
+                node_id=_NODE,
+                kind="recipe.start",
+                payload_digest="c" * 64,
+                payload={"start_deadline": _START_DEADLINE},
+                authority_revision="b" * 64,
+                state=operation_state,
+                status_reason=_LEASE_REASON,
+                current_attempt=current_attempt,
+                created_at=_NOW - timedelta(seconds=109),
+                updated_at=updated_at,
+            )
+        )
+        session.add(
+            AgentOperationAttempt(
+                id=str(uuid4()),
+                operation_id=operation_id,
+                attempt=attempt_number,
+                fence=str(uuid4()),
+                lease_deadline=_LEASE_DEADLINE,
+                agent_certificate_serial="test-serial",
+                state="expired",
+                progress={"phase": "rank-launch"},
+                result=None,
             )
         )
     return operation_id
@@ -216,3 +274,58 @@ def test_refused_request_bound_is_retrievable_through_the_operator_log(tmp_path)
     assert any(
         "limit=4096" in message and "observed=518" in message for message in messages
     ), messages
+
+
+def test_lease_expiry_is_retrievable_through_the_operator_log_path(tmp_path):
+    # Wrong implementation: the projection selected attempt states
+    # ("failed", "waiting-for-operator"), but a lease lapse parks the operation
+    # while leaving the attempt "expired" -- so the exact live blocker, a start
+    # that was still running when its lease stopped being renewed, produced no
+    # operator-visible log entry at all.
+    sessions = _sessions(tmp_path)
+    operation_id = _parked_start(sessions)
+    payload = _client(sessions).get(f"/api/fleet/{_NODE}/loginfo").json()
+    messages = [entry["message"] for entry in payload["entries"]]
+    assert payload["retained"] is True
+    assert {entry["evidence_id"] for entry in payload["entries"]} == {operation_id}
+    # The attempt never delivered a result, so the Controller's own account of
+    # the lapse is the only durable narrative there is.
+    assert any(_LEASE_REASON in message for message in messages), messages
+    # It is a wait, not a failure.  Rendering it as "failed" is what let an
+    # operator read a healthy slow start as a dead one.
+    assert not any("failed:" in message for message in messages), messages
+    # The attempt delivered no receipt, so there is no agent error code to name;
+    # the receipt default would claim a refusal that never happened.
+    assert not any("error_code=" in message for message in messages), messages
+    # Every clock the lapse involves is reported with its numbers.
+    clocks = [message for message in messages if "clock=operation-lease" in message]
+    assert len(clocks) == 1, messages
+    clock = clocks[0]
+    assert f"lease_deadline={_LEASE_DEADLINE.isoformat()}" in clock, clock
+    assert f"expired_at={_NOW.isoformat()}" in clock, clock
+    assert "elapsed_seconds=109" in clock, clock
+    assert f"start_deadline={_START_DEADLINE}" in clock, clock
+    # A lapse that parks the operation is a warning an operator must act on,
+    # never an error that claims the start died.
+    assert {
+        entry["level"] for entry in payload["entries"] if "clock=" in entry["message"]
+    } == {"warning"}
+
+
+def test_a_resumed_operation_does_not_report_a_stale_expiry_instant(tmp_path):
+    # Wrong implementation: the projection read the operation's current
+    # updated_at and status_reason as the lapse facts, so an operation that had
+    # already been retried advertised the retry's timestamp as the instant its
+    # earlier attempt's lease expired.  The attempt row carries no timestamp of
+    # its own, so a lapse that is no longer the reason the order is parked is
+    # deliberately not projected rather than projected with invented numbers.
+    sessions = _sessions(tmp_path)
+    _parked_start(
+        sessions,
+        attempt_number=1,
+        current_attempt=2,
+        operation_state="running",
+        updated_at=_NOW + timedelta(minutes=5),
+    )
+    payload = _client(sessions).get(f"/api/fleet/{_NODE}/loginfo").json()
+    assert payload["entries"] == []
