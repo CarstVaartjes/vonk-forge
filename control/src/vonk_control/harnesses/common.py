@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from math import isfinite
 from pathlib import PurePosixPath
 
+from vonk_agent_protocol.host_helper import MAX_ARGV_BYTES
+
 from ..bounded_json import sequence
 from ..runtime_writable_paths import (
     RUNTIME_REQUIREMENT_DECLARATION,
@@ -97,7 +99,7 @@ def structured_command(
         raise HarnessCompileError("harness command contains unsafe shell syntax")
     if (
         canonical_argv
-        and sum(len(item.encode("utf-8")) for item in command) > 1_048_576
+        and sum(len(item.encode("utf-8")) for item in command) > MAX_ARGV_BYTES
     ):
         raise HarnessCompileError("harness command exceeds its total argv bound")
     return command

@@ -17,6 +17,7 @@ from vonk_control.bounded_json import (
     text,
 )
 from vonk_control.harnesses.canonical import (
+    _MAX_ARGV_BYTES,
     _scalar,
     _validate_argv_size,
 )
@@ -432,9 +433,17 @@ def test_canonical_argv_json_and_utf8_bounds() -> None:
     with pytest.raises(ValueError, match="bounded"):
         _scalar(exact + "Ω", "too-large")
 
-    _validate_argv_size(["x" * 65536] * 16)
+    # The total bound is derived from the canonical host-runtime request
+    # ceiling, so build the exact boundary from the constant rather than
+    # restating its old round value.
+    items, remainder = divmod(_MAX_ARGV_BYTES, 65_536)
+    exact_command = ["x" * 65_536] * items
+    if remainder:
+        exact_command.append("x" * remainder)
+    assert sum(len(item.encode()) for item in exact_command) == _MAX_ARGV_BYTES
+    _validate_argv_size(exact_command)
     with pytest.raises(ValueError, match="total"):
-        _validate_argv_size(["x" * 65536] * 16 + ["x"])
+        _validate_argv_size([*exact_command, "x"])
 
 
 def test_current_recipe_corpus_compiles_every_role() -> None:

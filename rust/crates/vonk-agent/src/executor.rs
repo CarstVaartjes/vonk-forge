@@ -3311,7 +3311,7 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "runtime_helper_request_attempt_invalid"
             | "runtime_helper_request_arguments_presence_invalid"
             | "runtime_helper_request_installation_identity_invalid"
-            | "runtime_helper_request_argument_count_invalid"
+            | "runtime_helper_request_bytes_invalid"
             | "runtime_helper_request_argument_nul_byte"
             | "runtime_helper_request_storage_invalid"
             | "runtime_helper_system_clock_invalid"
@@ -4770,10 +4770,11 @@ mod tests {
         // of 4096.
         let mut start_claim = claim();
         start_claim.operation = "recipe.start".parse().unwrap();
+        let limit = vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES as u64;
         let error = crate::host_runtime::HostRuntimeError::HelperProtocolBound {
-            cause: crate::host_runtime::HelperProtocolCause::RequestArgumentCount,
-            limit: Some(4096),
-            observed: 518,
+            cause: crate::host_runtime::HelperProtocolCause::RequestBytes,
+            limit: Some(limit),
+            observed: limit + 1,
         };
         let failed =
             super::runtime_failure("container runtime could not start the workload", &error);
@@ -4786,14 +4787,14 @@ mod tests {
             .iter()
             .find(|property| property.name == "request_refusal")
             .expect("the refusal bound must be reported");
-        assert!(refusal.value.contains("request_argument_count_invalid"));
-        assert!(refusal.value.contains("limit=4096"));
-        assert!(refusal.value.contains("observed=518"));
+        assert!(refusal.value.contains("request_bytes_invalid"));
+        assert!(refusal.value.contains(&format!("limit={limit}")));
+        assert!(refusal.value.contains(&format!("observed={}", limit + 1)));
         assert!(
             body.reason
                 .as_deref()
                 .unwrap()
-                .contains("helper_request_argument_count_invalid")
+                .contains("helper_request_bytes_invalid")
         );
     }
 
@@ -4816,7 +4817,7 @@ mod tests {
             crate::host_runtime::HelperProtocolCause::RequestAttempt,
             crate::host_runtime::HelperProtocolCause::RequestArgumentsPresence,
             crate::host_runtime::HelperProtocolCause::RequestInstallationIdentity,
-            crate::host_runtime::HelperProtocolCause::RequestArgumentCount,
+            crate::host_runtime::HelperProtocolCause::RequestBytes,
             crate::host_runtime::HelperProtocolCause::RequestArgumentNulByte,
             crate::host_runtime::HelperProtocolCause::RequestStorage,
             crate::host_runtime::HelperProtocolCause::SystemClock,

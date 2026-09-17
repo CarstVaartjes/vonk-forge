@@ -103,6 +103,46 @@ def test_host_artifact_signing_bytes_keep_the_domain_and_raw_digest_contract() -
     )
 
 
+def test_runtime_request_arguments_are_bounded_by_bytes_not_a_count() -> None:
+    """A many-mount command line the plan admits must survive the request model.
+
+    Wrong implementations this catches: a 4096-element ``maxItems`` ceiling
+    refused a legitimate many-mount command line the byte budget had room for,
+    and the item pattern refused the empty element the plan's opaque-argv
+    contract permits.
+    """
+    from vonk_agent_protocol.host_helper import (
+        HOST_RUNTIME_REQUEST_ENVELOPE_BYTES,
+        MAX_ARGV_BYTES,
+        MAX_HELPER_FRAME_BYTES,
+        MAX_HOST_RUNTIME_REQUEST_BYTES,
+    )
+
+    # The request ceiling, not the frame ceiling, is the request's budget; the
+    # plan's argv budget derives strictly below it.
+    assert MAX_HOST_RUNTIME_REQUEST_BYTES == MAX_HELPER_FRAME_BYTES
+    assert (
+        MAX_ARGV_BYTES
+        == MAX_HOST_RUNTIME_REQUEST_BYTES - HOST_RUNTIME_REQUEST_ENVELOPE_BYTES
+    )
+    document = {
+        "schema_version": 1,
+        "action": "start",
+        "job_id": "20000000-0000-4000-8000-000000000002",
+        "operation_id": "30000000-0000-4000-8000-000000000003",
+        "attempt": 1,
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [
+            *(f"--mount=type=bind,src={index:05}" for index in range(6000)),
+            "",
+            "line one\nline two\r\n",
+        ],
+    }
+    request = HostRuntimeRequest.model_validate(document)
+    assert len(request.arguments) == 6002
+    assert len(canonical_message(request)) < MAX_HOST_RUNTIME_REQUEST_BYTES
+
+
 @pytest.mark.parametrize(
     "model", [HostRuntimeRequest, ExecuteContainerRuntimeRequestOperation]
 )

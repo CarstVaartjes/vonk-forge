@@ -3466,10 +3466,9 @@
         },
         "arguments": {
           "items": {
-            "pattern": "^[^\\x00]+$",
+            "pattern": "^[^\\x00]*$",
             "type": "string"
           },
-          "maxItems": 4096,
           "title": "Arguments",
           "type": "array"
         },

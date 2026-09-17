@@ -36,7 +36,7 @@ from .canonical_metadata import (
     CANONICAL_HARNESSES,
     canonical_harness,
 )
-from .common import HarnessCompileError, validate_projection
+from .common import MAX_ARGV_BYTES, HarnessCompileError, validate_projection
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _BUILTINS = frozenset(metadata.slug for metadata in CANONICAL_HARNESSES)
@@ -45,7 +45,9 @@ _JOB_INTERFACES = frozenset(
 )
 _MAX_RUNTIME_ARGUMENTS = 128
 _MAX_ARGV_TOKEN_BYTES = 65_536
-_MAX_ARGV_BYTES = 1_048_576
+# The compiled argv total budget, derived from the canonical host-runtime
+# request ceiling rather than restated as 1 MiB.
+_MAX_ARGV_BYTES = MAX_ARGV_BYTES
 _SAFE_ARG_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _SAFE_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
