@@ -62,6 +62,7 @@ from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentNode,
+    AgentOperation,
     AgentOperationAttempt,
     AgentPresence,
     Base,
@@ -3369,6 +3370,68 @@ def test_failed_result_rejection_names_the_failing_field_and_rule(
     assert any(
         "stable error_code" in issue["msg"] for issue in unnamed.json()["issues"]
     )
+
+
+def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> None:
+    """A refused result or heartbeat must leave a bounded, correlated reason.
+
+    The claim path already explained its refusals, but a refused heartbeat or
+    result persisted nothing, so an operator saw an operation that stopped
+    progressing with no cause at all.
+    """
+
+    client, services, _, clock = agent_system
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
+    )
+    claim = client.post(
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
+    ).json()
+    envelope = {
+        key: claim[key]
+        for key in (
+            "schema_version",
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "node_id",
+            "deadline",
+        )
+    }
+
+    rejected = client.post(
+        "/agent/result",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=envelope | {"state": "succeeded", "result": {"installed_bytes": 0}},
+    )
+
+    assert rejected.status_code == 422
+    with services.sessions() as session:
+        operation = session.get(AgentOperation, claim["operation_id"])
+        job = session.get(Job, claim["job_id"])
+        assert operation is not None and operation.status_reason is not None
+        assert operation.status_reason.startswith("result refused: invalid-result")
+        assert "attempt=1" in operation.status_reason
+        assert job is not None and job.status_reason == operation.status_reason
+
+    clock.now += timedelta(seconds=61)
+    heartbeat = client.post(
+        "/agent/heartbeat",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=envelope | {"progress": {"phase": "stopping"}},
+    )
+
+    assert heartbeat.status_code == 409
+    with services.sessions() as session:
+        operation = session.get(AgentOperation, claim["operation_id"])
+        assert operation is not None and operation.status_reason is not None
+        assert operation.status_reason.startswith("heartbeat refused: stale-attempt")
+        assert "attempt=1" in operation.status_reason
 
 
 def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(

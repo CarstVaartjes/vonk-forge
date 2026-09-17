@@ -277,15 +277,23 @@ def _reconciled_dead_attempt_reason(
     )[:512]
 
 
-#: Every recorded claim refusal starts with this prefix.  It keeps the
-#: structured reason recognisable, and it lets the recorder replace an earlier
+#: Every recorded boundary refusal starts with one of these prefixes.  They keep
+#: the structured reason recognisable, and they let a recorder replace an earlier
 #: refusal on the parent job without overwriting an unrelated domain reason.
 _CLAIM_REFUSAL_PREFIX = "claim refused: "
+#: The heartbeat and result boundaries persist their own refusal notes so a
+#: stalled operation is not left with no reason at all.
+_BOUNDARY_REFUSAL_PREFIXES = ("heartbeat refused: ", "result refused: ")
+_REFUSAL_PREFIXES = (_CLAIM_REFUSAL_PREFIX, *_BOUNDARY_REFUSAL_PREFIXES)
 _MAX_CLAIM_REFUSAL_REASON = 512
 
 
-def _claim_refusal_reason(check: str, **facts: object) -> str:
-    """Render one bounded, redacted record of why a claim was refused.
+def _is_refusal_reason(reason: str | None) -> bool:
+    return reason is None or reason.startswith(_REFUSAL_PREFIXES)
+
+
+def _refusal_reason(prefix: str, check: str, **facts: object) -> str:
+    """Render one bounded, redacted control-plane refusal note.
 
     Only bounded control-plane facts belong here: the name of the refusing
     check, the operation kind and state, attempt and ordinal integers, and
@@ -298,8 +306,12 @@ def _claim_refusal_reason(check: str, **facts: object) -> str:
     rendered = "; ".join(
         f"{key}={value}" for key, value in facts.items() if value is not None
     )
-    reason = _CLAIM_REFUSAL_PREFIX + check + (f" ({rendered})" if rendered else "")
+    reason = prefix + check + (f" ({rendered})" if rendered else "")
     return redact_text(reason)[:_MAX_CLAIM_REFUSAL_REASON]
+
+
+def _claim_refusal_reason(check: str, **facts: object) -> str:
+    return _refusal_reason(_CLAIM_REFUSAL_PREFIX, check, **facts)
 
 
 def _document(value: Mapping[str, object]) -> dict[str, object]:
@@ -769,19 +781,32 @@ class AgentJobService:
         progressing", and to its parent job, the operator-facing surface the
         jobs API returns.  Writing only on change keeps a long-polling agent
         from turning one stuck operation into a write per poll.  The parent
-        reason is only replaced when it is absent or was itself a claim
-        refusal, so a domain reason such as "superseded by newer workload
-        intent" is never overwritten.
+        reason is only replaced when it is absent or was itself a refusal, so a
+        domain reason such as "superseded by newer workload intent" is never
+        overwritten.
         """
 
-        reason = _claim_refusal_reason(check, **facts)
+        self._write_refusal_note(
+            session,
+            operation=operation,
+            job_id=job_id,
+            reason=_claim_refusal_reason(check, **facts),
+        )
+
+    def _write_refusal_note(
+        self,
+        session: Session,
+        *,
+        operation: StoredOperation | None,
+        job_id: str | None,
+        reason: str,
+    ) -> None:
+        """Write one bounded refusal note without erasing a domain reason."""
+
         if (
             operation is not None
             and operation.status_reason != reason
-            and (
-                operation.status_reason is None
-                or operation.status_reason.startswith(_CLAIM_REFUSAL_PREFIX)
-            )
+            and _is_refusal_reason(operation.status_reason)
         ):
             # A domain reason such as "retry budget exhausted" already explains
             # why the operation is not progressing; a refusal must add evidence,
@@ -792,12 +817,61 @@ class AgentJobService:
             if (
                 job is not None
                 and job.status_reason != reason
-                and (
-                    job.status_reason is None
-                    or job.status_reason.startswith(_CLAIM_REFUSAL_PREFIX)
-                )
+                and _is_refusal_reason(job.status_reason)
             ):
                 job.status_reason = reason
+
+    def record_boundary_refusal(
+        self,
+        operation_id: str,
+        attempt: int,
+        fence: str,
+        *,
+        boundary: str,
+        check: str,
+        **facts: object,
+    ) -> bool:
+        """Persist why a heartbeat or result failed at the Controller boundary.
+
+        The claim path already explains its refusals, but a refused heartbeat or
+        result persisted nothing, so an operator could see an operation that
+        stopped progressing with no reason at all.  The note is written only
+        when the submission names the operation's current attempt and fence, so
+        a replayed old boundary cannot annotate newer work.  The parent job
+        receives the same note on the same surface the jobs API returns.
+        """
+
+        prefixes = {
+            "heartbeat": "heartbeat refused: ",
+            "result": "result refused: ",
+        }
+        prefix = prefixes.get(boundary)
+        if prefix is None:
+            raise ValueError("agent boundary is invalid")
+        reason = _refusal_reason(prefix, check, attempt=attempt, **facts)
+        with self._sessions.begin() as session:
+            operation = session.scalar(
+                select(StoredOperation)
+                .where(StoredOperation.id == operation_id)
+                .with_for_update(of=StoredOperation)
+            )
+            if operation is None or operation.current_attempt != attempt:
+                return False
+            current = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation_id,
+                    AgentOperationAttempt.attempt == attempt,
+                )
+            )
+            if current is None or current.fence != fence:
+                return False
+            self._write_refusal_note(
+                session,
+                operation=operation,
+                job_id=operation.parent_job_id,
+                reason=reason,
+            )
+            return True
 
     def _excluded_work_refusal(
         self,
@@ -946,10 +1020,7 @@ class AgentJobService:
         # Aggregate first: it recomputes the parent's operator reason from its
         # children, so the defect note has to be written afterwards to survive.
         self._aggregate_parent(session, operation.parent_job_id)
-        if disarmed and (
-            parent.status_reason is None
-            or parent.status_reason.startswith(_CLAIM_REFUSAL_PREFIX)
-        ):
+        if disarmed and _is_refusal_reason(parent.status_reason):
             parent.status_reason = (
                 "cancel_requested carried no cancel_requested_at; the superseded "
                 "order was reconciled to cancelled"

@@ -1985,8 +1985,22 @@ def install_agent_routes(
                     detail="superseded operation was cancelled",
                     headers={"x-vonk-error-code": "superseded_operation_cancelled"},
                 ) from None
+            required.operations.record_boundary_refusal(
+                str(message.operation_id),
+                message.attempt,
+                str(message.fence),
+                boundary="heartbeat",
+                check="stale-attempt",
+            )
             raise HTTPException(status_code=409, detail=str(error)) from None
         except ValueError as error:
+            required.operations.record_boundary_refusal(
+                str(message.operation_id),
+                message.attempt,
+                str(message.fence),
+                boundary="heartbeat",
+                check="invalid-progress",
+            )
             raise HTTPException(status_code=409, detail=str(error)) from None
         return _json_response(AgentDirective.model_validate(response))
 
@@ -2009,11 +2023,32 @@ def install_agent_routes(
             try:
                 required.operations.record_late_result(message, source=source)
             except StaleAgentAttempt:
+                required.operations.record_boundary_refusal(
+                    str(message.operation_id),
+                    message.attempt,
+                    str(message.fence),
+                    boundary="result",
+                    check="stale-attempt",
+                )
                 raise HTTPException(status_code=409, detail=str(error)) from None
             except ValueError as invalid:
+                required.operations.record_boundary_refusal(
+                    str(message.operation_id),
+                    message.attempt,
+                    str(message.fence),
+                    boundary="result",
+                    check="late-result-invalid",
+                )
                 raise HTTPException(status_code=422, detail=str(invalid)) from None
             return Response(status_code=status.HTTP_202_ACCEPTED)
         except ValueError as error:
+            required.operations.record_boundary_refusal(
+                str(message.operation_id),
+                message.attempt,
+                str(message.fence),
+                boundary="result",
+                check="invalid-result",
+            )
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
