@@ -108,9 +108,13 @@ class HostRuntimeRequest(WireModel):
     operation_id: Uuid4Text
     attempt: int = Field(ge=1, le=2**31 - 1)
     fence: Uuid4Text
-    arguments: list[
-        Annotated[str, Field(min_length=1, max_length=4096, pattern=r"^[^\x00\r\n]+$")]
-    ] = Field(max_length=4096)
+    # One request frames the whole container command line. The item count is a
+    # sanity bound; the authoritative size limit is the helper frame ceiling
+    # (`MAX_MESSAGE_BYTES`, 256 KiB), so a single item has no separate ceiling.
+    # NUL is the one byte an exec argv cannot carry; CR and LF are legal bytes.
+    arguments: list[Annotated[str, Field(min_length=1, pattern=r"^[^\x00]+$")]] = Field(
+        max_length=4096
+    )
     observation: RecipeRunInspectionBinding | None = None
     installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None

@@ -357,7 +357,36 @@ pub fn from_failure(operation: &str, body: &Value) -> FailureDiagnostics {
                 .push("process-log-evidence-invalid".into());
         }
     }
+    if let Some(property) = refusal_property(body) {
+        value.preflight.push(property);
+    }
     value
+}
+
+/// The refusing rule and the measured bound of a refused request, when the
+/// failure carries them. Only the stable rule code and two bounded integers
+/// cross; the offending argument itself is never read from the body.
+fn refusal_property(body: &Value) -> Option<FailureProperty> {
+    let bound = body.get("refusal_bound")?.as_object()?;
+    let rule = bound.get("rule")?.as_str()?;
+    let observed = bound.get("observed")?.as_u64()?;
+    let limit = bound.get("limit").and_then(Value::as_u64);
+    let rule: String = rule
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == '_')
+        .take(64)
+        .collect();
+    if rule.is_empty() {
+        return None;
+    }
+    let value = match limit {
+        Some(limit) => format!("rule={rule} limit={limit} observed={observed}"),
+        None => format!("rule={rule} observed={observed}"),
+    };
+    Some(FailureProperty {
+        name: "request_refusal".into(),
+        value: value.chars().take(256).collect(),
+    })
 }
 
 #[cfg(test)]

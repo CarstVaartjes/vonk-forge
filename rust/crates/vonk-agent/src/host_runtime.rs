@@ -30,6 +30,15 @@ pub enum HostRuntimeError {
     Controller(#[from] ClientError),
     #[error("host runtime helper protocol contract is invalid")]
     HelperProtocol(HelperProtocolCause),
+    /// A request contract was refused for exceeding a measured bound. The limit
+    /// and the observed value travel with the error so the failure evidence can
+    /// name them without carrying engine-owned content.
+    #[error("host runtime helper protocol bound was exceeded")]
+    HelperProtocolBound {
+        cause: HelperProtocolCause,
+        limit: Option<u64>,
+        observed: u64,
+    },
     /// The helper answered, but did not confirm whether the workload started or
     /// stopped. That is an ambiguous effect that needs reconciliation, not a
     /// malformed reply, so it keeps a state of its own.
@@ -81,10 +90,9 @@ pub enum HelperProtocolCause {
     RequestArgumentCount,
     /// An agent-built request argument is empty.
     RequestArgumentEmpty,
-    /// An agent-built request argument exceeds the per-value transport ceiling.
-    RequestArgumentTooLong,
-    /// An agent-built request argument carries a refused control byte.
-    RequestArgumentControlByte,
+    /// An agent-built request argument carries a NUL byte an exec argv cannot
+    /// frame.
+    RequestArgumentNulByte,
     /// The owner-only signed request file could not be established.
     RequestStorage,
     /// The host clock is before the Unix epoch.
@@ -116,8 +124,7 @@ impl HelperProtocolCause {
             Self::RequestInstallationIdentity => "request_installation_identity_invalid",
             Self::RequestArgumentCount => "request_argument_count_invalid",
             Self::RequestArgumentEmpty => "request_argument_empty",
-            Self::RequestArgumentTooLong => "request_argument_too_long",
-            Self::RequestArgumentControlByte => "request_argument_control_byte",
+            Self::RequestArgumentNulByte => "request_argument_nul_byte",
             Self::RequestStorage => "request_storage_invalid",
             Self::SystemClock => "system_clock_invalid",
             Self::InspectionReceipt => "inspection_receipt_invalid",
@@ -135,10 +142,9 @@ impl HelperProtocolCause {
             HostRuntimeRequestRule::Attempt => Self::RequestAttempt,
             HostRuntimeRequestRule::ArgumentsPresence => Self::RequestArgumentsPresence,
             HostRuntimeRequestRule::InstallationIdentity => Self::RequestInstallationIdentity,
-            HostRuntimeRequestRule::ArgumentCount => Self::RequestArgumentCount,
-            HostRuntimeRequestRule::ArgumentEmpty => Self::RequestArgumentEmpty,
-            HostRuntimeRequestRule::ArgumentTooLong => Self::RequestArgumentTooLong,
-            HostRuntimeRequestRule::ArgumentControlByte => Self::RequestArgumentControlByte,
+            HostRuntimeRequestRule::ArgumentCount { .. } => Self::RequestArgumentCount,
+            HostRuntimeRequestRule::ArgumentEmpty { .. } => Self::RequestArgumentEmpty,
+            HostRuntimeRequestRule::ArgumentNulByte { .. } => Self::RequestArgumentNulByte,
             // The observation binding is an inspection contract rather than one
             // of the argument-envelope rules, and it is unreachable from a
             // Start, which always carries `observation: None`.
@@ -164,9 +170,14 @@ impl HostRuntimeError {
             Self::HelperProtocol(cause) if stable_runtime_error_code(cause.code()) => {
                 format!("helper_{}", cause.code())
             }
+            Self::HelperProtocolBound { cause, .. } if stable_runtime_error_code(cause.code()) => {
+                format!("helper_{}", cause.code())
+            }
             // A cause that is not on the namespace allowlist keeps the previous
             // opaque label, exactly as an unlisted helper rejection code does.
-            Self::HelperProtocol(_) => "helper_protocol_invalid".to_owned(),
+            Self::HelperProtocol(_) | Self::HelperProtocolBound { .. } => {
+                "helper_protocol_invalid".to_owned()
+            }
             // An ambiguous stop is named for what it is, so it can never be
             // read as a malformed helper reply.
             Self::StopUncertain => "helper_stop_uncertain".to_owned(),
@@ -174,6 +185,32 @@ impl HostRuntimeError {
                 format!("helper_{code}")
             }
             Self::HelperRejected { .. } => "helper_protocol_invalid".to_owned(),
+        }
+    }
+
+    /// Build the refusal for one canonical request rule, carrying the measured
+    /// bound when the rule has one.
+    fn request_refusal(rule: HostRuntimeRequestRule) -> Self {
+        let cause = HelperProtocolCause::from_request_rule(rule);
+        match rule.bound() {
+            Some((limit, observed)) => Self::HelperProtocolBound {
+                cause,
+                limit,
+                observed,
+            },
+            None => Self::HelperProtocol(cause),
+        }
+    }
+
+    /// The measured limit and observed value behind a refusal, when the rule
+    /// measured one. Only these bounded integers ever cross; the offending
+    /// argument itself never does.
+    pub fn refusal_bound(&self) -> Option<(Option<u64>, u64)> {
+        match self {
+            Self::HelperProtocolBound {
+                limit, observed, ..
+            } => Some((*limit, *observed)),
+            _ => None,
         }
     }
 
@@ -233,9 +270,9 @@ impl HostRuntimeBoundary<'_> {
             observation: Some(binding.clone()),
             installation_id: None,
         };
-        request.validate().map_err(|rule| {
-            HostRuntimeError::HelperProtocol(HelperProtocolCause::from_request_rule(rule))
-        })?;
+        request
+            .validate()
+            .map_err(HostRuntimeError::request_refusal)?;
         let body = canonical_json(&request)
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let digest = hex_sha256(&body);
@@ -346,9 +383,9 @@ impl HostRuntimeBoundary<'_> {
             observation: None,
             installation_id,
         };
-        request.validate().map_err(|rule| {
-            HostRuntimeError::HelperProtocol(HelperProtocolCause::from_request_rule(rule))
-        })?;
+        request
+            .validate()
+            .map_err(HostRuntimeError::request_refusal)?;
         let body = canonical_json(&request)
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let digest = hex_sha256(&body);
@@ -543,8 +580,7 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "request_installation_identity_invalid"
             | "request_argument_count_invalid"
             | "request_argument_empty"
-            | "request_argument_too_long"
-            | "request_argument_control_byte"
+            | "request_argument_nul_byte"
             | "request_storage_invalid"
             | "system_clock_invalid"
             | "inspection_receipt_invalid"
@@ -1305,7 +1341,7 @@ mod tests {
         let rule = request
             .validate()
             .expect_err("this request must violate the rule under test");
-        let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::from_request_rule(rule));
+        let error = HostRuntimeError::request_refusal(rule);
         assert!(error.diagnostic().is_none());
         error.preflight_code()
     }
@@ -1383,30 +1419,90 @@ mod tests {
 
     #[test]
     fn request_argument_refusals_name_the_argument_kind() {
-        // Wrong implementation: an empty, oversized or control-byte argument
-        // collapsed into `helper_request_document_invalid`. The compiled plan
-        // deliberately carries opaque argv items the request transport refuses
-        // (see `opaque_argv_stays_byte_for_byte_after_image_boundary`), so the
-        // code has to name the kind of violation rather than an index.
+        // Wrong implementation: an empty argument, or one carrying a byte an
+        // exec argv cannot frame, collapsed into
+        // `helper_request_document_invalid`, so the code could not name the
+        // kind of violation rather than an index.
         let mut empty = start_request();
         empty.arguments = vec!["sha256:image".to_owned(), String::new()];
         assert_eq!(request_rule_code(&empty), "helper_request_argument_empty");
 
-        let mut too_long = start_request();
-        too_long.arguments = vec![
+        let mut nul = start_request();
+        nul.arguments = vec!["sha256:image".to_owned(), "run\0--flag".to_owned()];
+        assert_eq!(request_rule_code(&nul), "helper_request_argument_nul_byte");
+    }
+
+    #[test]
+    fn a_large_or_multiline_argument_is_admitted() {
+        // The authoritative size limit is the helper frame ceiling, not a
+        // per-argument round number: an inline engine configuration can exceed
+        // 4096 bytes, and CR/LF are legal bytes in an exec argv element.
+        let mut long = start_request();
+        long.arguments = vec![
             "sha256:image".to_owned(),
-            "a".repeat(vonk_agent_protocol::MAX_HOST_RUNTIME_ARGUMENT_BYTES + 1),
+            format!(
+                "--speculative-config={{\"capture\":\"{}\"}}",
+                "x".repeat(8_192)
+            ),
         ];
-        assert_eq!(
-            request_rule_code(&too_long),
-            "helper_request_argument_too_long"
+        assert!(
+            long.validate().is_ok(),
+            "a legitimate large inline configuration must be framed"
         );
 
-        let mut control = start_request();
-        control.arguments = vec!["sha256:image".to_owned(), "run\n--flag".to_owned()];
+        let mut multiline = start_request();
+        multiline.arguments = vec![
+            "sha256:image".to_owned(),
+            "line one\nline two\r\n".to_owned(),
+        ];
+        assert!(
+            multiline.validate().is_ok(),
+            "CR/LF are legal argv bytes and must not be refused"
+        );
+    }
+
+    #[test]
+    fn a_count_refusal_carries_the_limit_and_the_observed_count() {
+        // Wrong implementation: the refusal named the rule but not the bound, so
+        // an operator could not tell one element over from a thousand without
+        // reading the constants.
+        let mut request = start_request();
+        request.arguments =
+            vec!["x".to_owned(); vonk_agent_protocol::MAX_HOST_RUNTIME_ARGUMENTS + 1];
+        let rule = request.validate().expect_err("the count must be refused");
+        let error = HostRuntimeError::request_refusal(rule);
         assert_eq!(
-            request_rule_code(&control),
-            "helper_request_argument_control_byte"
+            error.preflight_code(),
+            "helper_request_argument_count_invalid"
+        );
+        assert_eq!(
+            error.refusal_bound(),
+            Some((
+                Some(vonk_agent_protocol::MAX_HOST_RUNTIME_ARGUMENTS as u64),
+                vonk_agent_protocol::MAX_HOST_RUNTIME_ARGUMENTS as u64 + 1,
+            ))
+        );
+    }
+
+    #[test]
+    fn a_per_argument_refusal_carries_the_element_length() {
+        // Only the offending element's length crosses, never the element.
+        let mut empty = start_request();
+        empty.arguments = vec!["sha256:image".to_owned(), String::new()];
+        let rule = empty
+            .validate()
+            .expect_err("an empty argument must be refused");
+        assert_eq!(
+            HostRuntimeError::request_refusal(rule).refusal_bound(),
+            Some((Some(1), 0))
+        );
+
+        let mut nul = start_request();
+        nul.arguments = vec!["sha256:image".to_owned(), "run\0--flag".to_owned()];
+        let rule = nul.validate().expect_err("a NUL argument must be refused");
+        assert_eq!(
+            HostRuntimeError::request_refusal(rule).refusal_bound(),
+            Some((None, 10))
         );
     }
 
@@ -1569,8 +1665,7 @@ mod tests {
             HelperProtocolCause::RequestInstallationIdentity,
             HelperProtocolCause::RequestArgumentCount,
             HelperProtocolCause::RequestArgumentEmpty,
-            HelperProtocolCause::RequestArgumentTooLong,
-            HelperProtocolCause::RequestArgumentControlByte,
+            HelperProtocolCause::RequestArgumentNulByte,
             HelperProtocolCause::RequestStorage,
             HelperProtocolCause::SystemClock,
             HelperProtocolCause::InspectionReceipt,

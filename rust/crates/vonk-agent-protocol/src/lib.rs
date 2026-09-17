@@ -72,9 +72,11 @@ use uuid::Uuid;
 /// alone project to 152 mount pairs. 4096 leaves that shape room while still
 /// refusing an absurd count, and for realistic argument lengths the frame
 /// ceiling binds first.
+///
+/// There is deliberately no per-argument byte ceiling: an inline engine
+/// configuration is a legal, possibly large, single element, and the frame
+/// ceiling already bounds the whole payload.
 pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 4096;
-/// The per-value ceiling an argument may occupy in one bounded helper request.
-pub const MAX_HOST_RUNTIME_ARGUMENT_BYTES: usize = 4096;
 pub const MAX_DOCUMENT_BYTES: usize = 64 * 1024;
 pub const MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES: usize =
@@ -165,6 +167,9 @@ pub fn host_helper_grant_signing_bytes(
 /// which rule refused. A live blocked Start could not say whether the request
 /// version, the attempt, the argument envelope, the argument count or one
 /// argument's value was wrong.
+///
+/// A rule that measures a bound carries it, so a refusal can report the limit
+/// and the observed value without ever carrying the argument itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum HostRuntimeRequestRule {
     /// `schema_version` is not the current schema.
@@ -181,16 +186,13 @@ pub enum HostRuntimeRequestRule {
     InstallationIdentity,
     /// There are more arguments than the bounded transport accepts.
     #[error("host runtime request argument count is invalid")]
-    ArgumentCount,
+    ArgumentCount { limit: u64, observed: u64 },
     /// An argument is empty.
     #[error("host runtime request argument is empty")]
-    ArgumentEmpty,
-    /// An argument exceeds the per-value transport ceiling.
-    #[error("host runtime request argument is too long")]
-    ArgumentTooLong,
-    /// An argument carries a control byte the transport refuses.
-    #[error("host runtime request argument carries a control byte")]
-    ArgumentControlByte,
+    ArgumentEmpty { observed: u64 },
+    /// An argument carries a NUL byte, which an exec argv cannot frame.
+    #[error("host runtime request argument carries a NUL byte")]
+    ArgumentNulByte { observed: u64 },
     /// The inspection observation binding does not match the request.
     #[error("host runtime request observation binding is invalid")]
     ObservationBinding,
@@ -200,6 +202,22 @@ pub enum HostRuntimeRequestRule {
     /// The arguments could not be canonicalized.
     #[error("host runtime request arguments could not be encoded")]
     Encoding,
+}
+
+impl HostRuntimeRequestRule {
+    /// The limit and the observed value of a rule that measured one.
+    ///
+    /// `None` means the rule is not a measured bound. A `None` limit is a rule
+    /// with no numeric ceiling (a refused byte, not a refused length).
+    pub fn bound(self) -> Option<(Option<u64>, u64)> {
+        match self {
+            Self::ArgumentCount { limit, observed } => Some((Some(limit), observed)),
+            // The empty rule's ceiling is the canonical model's `min_length`.
+            Self::ArgumentEmpty { observed } => Some((Some(1), observed)),
+            Self::ArgumentNulByte { observed } => Some((None, observed)),
+            _ => None,
+        }
+    }
 }
 
 impl HostRuntimeRequest {
@@ -223,17 +241,19 @@ impl HostRuntimeRequest {
             return Err(HostRuntimeRequestRule::InstallationIdentity);
         }
         if self.arguments.len() > MAX_HOST_RUNTIME_ARGUMENTS {
-            return Err(HostRuntimeRequestRule::ArgumentCount);
+            return Err(HostRuntimeRequestRule::ArgumentCount {
+                limit: MAX_HOST_RUNTIME_ARGUMENTS as u64,
+                observed: self.arguments.len() as u64,
+            });
         }
         for value in &self.arguments {
             if value.is_empty() {
-                return Err(HostRuntimeRequestRule::ArgumentEmpty);
+                return Err(HostRuntimeRequestRule::ArgumentEmpty { observed: 0 });
             }
-            if value.len() > MAX_HOST_RUNTIME_ARGUMENT_BYTES {
-                return Err(HostRuntimeRequestRule::ArgumentTooLong);
-            }
-            if value.contains(['\0', '\r', '\n']) {
-                return Err(HostRuntimeRequestRule::ArgumentControlByte);
+            if value.contains('\0') {
+                return Err(HostRuntimeRequestRule::ArgumentNulByte {
+                    observed: value.len() as u64,
+                });
             }
         }
         match (&self.action, &self.observation) {

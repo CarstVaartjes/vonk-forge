@@ -2482,6 +2482,7 @@ fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) ->
         HostRuntimeError::Controller(_) => true,
         HostRuntimeError::HelperRejected { code, .. } => code == "operation_io",
         HostRuntimeError::HelperProtocol(_) => false,
+        HostRuntimeError::HelperProtocolBound { .. } => false,
         HostRuntimeError::StopUncertain => false,
     }
 }
@@ -3131,12 +3132,24 @@ fn image_import_helper_code(error: &crate::host_runtime::HostRuntimeError) -> St
         HostRuntimeError::HelperProtocol(cause) => {
             format!("runtime_helper_{}", cause.code())
         }
+        HostRuntimeError::HelperProtocolBound { cause, .. } => {
+            format!("runtime_helper_{}", cause.code())
+        }
         HostRuntimeError::StopUncertain => "runtime_helper_stop_uncertain".to_owned(),
     }
 }
 
 fn runtime_failure(reason: &str, error: &crate::host_runtime::HostRuntimeError) -> ExecutionResult {
     let mut result = failed_owned(format!("{reason}: {}", error.preflight_code()));
+    if let Some((limit, observed)) = error.refusal_bound() {
+        // Bounded integers only: the refusing rule and the measured bound. The
+        // offending argument itself never crosses this boundary.
+        result.body["refusal_bound"] = json!({
+            "rule": error.preflight_code(),
+            "limit": limit,
+            "observed": observed,
+        });
+    }
     if let Some(detail) = error.diagnostic() {
         result.body["diagnostic_logs"] = json!({
             "stdout": crate::failure_evidence::log_tail(&[]),
@@ -3298,8 +3311,7 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "runtime_helper_request_installation_identity_invalid"
             | "runtime_helper_request_argument_count_invalid"
             | "runtime_helper_request_argument_empty"
-            | "runtime_helper_request_argument_too_long"
-            | "runtime_helper_request_argument_control_byte"
+            | "runtime_helper_request_argument_nul_byte"
             | "runtime_helper_request_storage_invalid"
             | "runtime_helper_system_clock_invalid"
             | "runtime_helper_inspection_receipt_invalid"
@@ -4578,6 +4590,40 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_request_bound_reaches_the_failure_evidence() {
+        // Wrong implementation: the refusal named its rule but not the bound, so
+        // an operator had to read the constants to tell 518 of 4096 from 5000
+        // of 4096.
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let error = crate::host_runtime::HostRuntimeError::HelperProtocolBound {
+            cause: crate::host_runtime::HelperProtocolCause::RequestArgumentCount,
+            limit: Some(4096),
+            observed: 518,
+        };
+        let failed =
+            super::runtime_failure("container runtime could not start the workload", &error);
+        let result = super::normalize_execution_result(&start_claim, failed);
+        let body: vonk_agent_protocol::generated::AgentFailureResult =
+            serde_json::from_value(result.body).unwrap();
+        let diagnostics = body.diagnostics.as_ref().unwrap();
+        let refusal = diagnostics
+            .preflight
+            .iter()
+            .find(|property| property.name == "request_refusal")
+            .expect("the refusal bound must be reported");
+        assert!(refusal.value.contains("request_argument_count_invalid"));
+        assert!(refusal.value.contains("limit=4096"));
+        assert!(refusal.value.contains("observed=518"));
+        assert!(
+            body.reason
+                .as_deref()
+                .unwrap()
+                .contains("helper_request_argument_count_invalid")
+        );
+    }
+
+    #[test]
     fn image_import_helper_protocol_cause_survives_normalization() {
         // Wrong implementation: a new cause's code was absent from
         // `stable_runtime_helper_error_code`, so normalization silently dropped
@@ -4598,8 +4644,7 @@ mod tests {
             crate::host_runtime::HelperProtocolCause::RequestInstallationIdentity,
             crate::host_runtime::HelperProtocolCause::RequestArgumentCount,
             crate::host_runtime::HelperProtocolCause::RequestArgumentEmpty,
-            crate::host_runtime::HelperProtocolCause::RequestArgumentTooLong,
-            crate::host_runtime::HelperProtocolCause::RequestArgumentControlByte,
+            crate::host_runtime::HelperProtocolCause::RequestArgumentNulByte,
             crate::host_runtime::HelperProtocolCause::RequestStorage,
             crate::host_runtime::HelperProtocolCause::SystemClock,
             crate::host_runtime::HelperProtocolCause::InspectionReceipt,
