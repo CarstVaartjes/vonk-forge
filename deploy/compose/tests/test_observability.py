@@ -76,6 +76,20 @@ def test_fleet_dashboard_uses_only_produced_metrics() -> None:
     )
 
 
+def test_starvation_alert_uses_runnable_age_per_kind() -> None:
+    # A running job of another kind used to mask a starved queued one, and an
+    # intentional retry backoff could look like starvation.  The alert now keys
+    # on the oldest runnable queued age per kind, which distinguishes both.
+    document = json.loads((ROOT / "deploy/compose/prometheus/alerts.yaml").read_text())
+    alerts = {
+        rule["alert"]: rule for group in document["groups"] for rule in group["rules"]
+    }
+    assert "WorkerLeaseStarvation" not in alerts
+    rule = alerts["RunnableControlJobStarved"]
+    assert rule["expr"] == "max by (kind) (vonk_runnable_job_age_seconds) > 300"
+    assert "running" not in rule["expr"]
+
+
 def test_every_service_has_bounded_logging() -> None:
     for service in _rendered()["services"].values():
         assert service["logging"]["driver"] == "local"

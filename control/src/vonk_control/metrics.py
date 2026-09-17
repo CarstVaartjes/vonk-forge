@@ -6,7 +6,7 @@ import math
 import re
 import threading
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -90,6 +90,39 @@ def protocol_version_bucket(
     return "supported"
 
 
+def runnable_job_ages(
+    rows: Iterable[tuple[str, datetime, object]],
+    now: datetime,
+) -> dict[str, float]:
+    """Return the oldest queued-but-runnable age per job kind.
+
+    A queued job whose ``result.observation_due_at`` is still in the future is
+    an intentional wait, so it is excluded: only work the durable queue could
+    actually issue now may age into the starvation signal.  This is what keeps
+    the alert honest while another job of a different kind is running.
+    """
+
+    ages: dict[str, float] = {}
+    for kind, created_at, result in rows:
+        if isinstance(result, Mapping):
+            due = result.get("observation_due_at")
+            if isinstance(due, str):
+                try:
+                    due_at = datetime.fromisoformat(due)
+                except ValueError:
+                    due_at = None
+                if due_at is not None:
+                    if due_at.tzinfo is None:
+                        due_at = due_at.replace(tzinfo=UTC)
+                    if due_at > now:
+                        continue
+        created = created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        ages[kind] = max(ages.get(kind, 0.0), max(0.0, (now - created).total_seconds()))
+    return ages
+
+
 class MetricsRegistry:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -107,6 +140,7 @@ class MetricsRegistry:
             ],
         ] = {}
         self._jobs: dict[tuple[str, str], int] = {}
+        self._runnable_job_ages: dict[str, float] = {}
         self._route_state = "unavailable"
         self._backup_age: float | None = None
         self._api_counts: dict[tuple[str, str], int] = defaultdict(int)
@@ -180,6 +214,25 @@ class MetricsRegistry:
             jobs[(safe_kind, safe_state)] += int(self._number(count, "job count"))
         with self._lock:
             self._jobs = dict(jobs)
+
+    def replace_runnable_job_ages(self, rows: Iterable[tuple[str, float]]) -> None:
+        """Atomically replace the oldest runnable queued age per bounded kind.
+
+        A queued job that is deliberately deferred (for example an observation
+        retry due in the future) is not runnable and must not appear here, so a
+        starvation alert can distinguish real eligible work from an intentional
+        wait even while another job of a different kind is running.
+        """
+
+        ages: dict[str, float] = {}
+        for kind, age in rows:
+            safe_kind = kind if kind in _JOB_KINDS else "other"
+            ages[safe_kind] = max(
+                ages.get(safe_kind, 0.0),
+                self._number(age, "runnable job age"),
+            )
+        with self._lock:
+            self._runnable_job_ages = ages
 
     def set_route_state(self, state: str) -> None:
         if state not in _ROUTE_STATES:
@@ -261,6 +314,7 @@ class MetricsRegistry:
     def render(self) -> str:
         with self._lock:
             nodes, jobs = dict(self._nodes), dict(self._jobs)
+            runnable_job_ages = dict(self._runnable_job_ages)
             route_state = self._route_state
             backup_age = self._backup_age
             api_counts = dict(self._api_counts)
@@ -354,6 +408,14 @@ class MetricsRegistry:
         )
         for (kind, state), count in sorted(jobs.items()):
             lines.append(f'vonk_jobs{{kind="{kind}",state="{state}"}} {count}')
+        lines.extend(
+            (
+                "# HELP vonk_runnable_job_age_seconds Age of the oldest runnable queued control job by kind.",
+                "# TYPE vonk_runnable_job_age_seconds gauge",
+            )
+        )
+        for kind, age in sorted(runnable_job_ages.items()):
+            lines.append(f'vonk_runnable_job_age_seconds{{kind="{kind}"}} {age:g}')
         lines.extend(
             (
                 "# HELP vonk_agent_state Current durable outbound-agent lifecycle state.",

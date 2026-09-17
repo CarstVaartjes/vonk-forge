@@ -51,6 +51,12 @@ control plane mounts no Git repository.
 
 ## Worker lease starvation
 
+`RunnableControlJobStarved` fires when the oldest queued control job that could
+run now has waited more than five minutes. It is grouped by job kind, so a
+running job of another kind no longer hides the starved one. A job deferred by a
+future `observation_due_at` is an intentional wait and deliberately does not age
+into the alert; if the alert fires, the wait is not the explanation.
+
 Confirm the worker container is healthy and holds the online shared lock. Check
 expired attempts and database connectivity. Stale fences must never be reused;
 allow the durable queue to issue a new attempt.
