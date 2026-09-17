@@ -48,20 +48,65 @@ def _wrap_numeric_literals(schema: CoreSchema) -> CoreSchema:
     return schema
 
 
+def _bind_string_enum_values(schema: CoreSchema) -> CoreSchema:
+    """Complete a string enum from its own member value in either mode.
+
+    Pydantic's strict mode resolves a string enum field only from an enum
+    *instance*; it rejects the member's own string, which its JSON mode and the
+    published JSON Schema both accept.  A JSON consumer that decodes a body to
+    Python objects before validating -- FastAPI does exactly that for
+    ``body: Model`` parameters -- therefore refused a value the wire contract
+    declares valid.  A truthful ``failure_kind`` in an agent result hit that
+    edge, so the Controller answered HTTP 422 to every replay and the reporting
+    agent lost its lease.
+
+    Only an exact, already-declared member string is bound; every other value
+    reaches Pydantic's own enum error unchanged, so this narrows the mode
+    difference without weakening the contract.
+    """
+
+    if not isinstance(schema, dict):
+        return schema
+    if schema.get("type") == "enum" and schema.get("sub_type") == "str":
+        enum_type = schema["cls"]
+        members = frozenset(schema.get("members", ()))
+
+        def bind_member(value: object) -> object:
+            if type(value) is str and value in members:
+                return enum_type(value)
+            return value
+
+        return core_schema.no_info_before_validator_function(bind_member, schema)
+    for key, nested in tuple(schema.items()):
+        if isinstance(nested, dict):
+            schema[key] = _bind_string_enum_values(nested)
+        elif isinstance(nested, list):
+            schema[key] = [
+                _bind_string_enum_values(item) if isinstance(item, dict) else item
+                for item in nested
+            ]
+    return schema
+
+
 class StrictJSONModel(BaseModel):
-    """Reject Python equality based coercion for numeric and boolean Literals.
+    """Hold the JSON scalar rules that Pydantic's modes disagree about.
 
     Pydantic's strict mode still accepts ``True`` and ``1.0`` for
-    ``Literal[1]`` because they compare equal to ``1`` in Python.  JSON has
-    distinct scalar types, so wire models must require an exact type/value
-    match.  String enum and literal handling remains Pydantic's responsibility.
+    ``Literal[1]`` because they compare equal to ``1`` in Python, so wire
+    models require an exact type/value match.  In the other direction strict
+    mode rejects a string enum's own member string when the input was decoded
+    to Python objects, so a declared member string is bound here once for every
+    mode.  Numeric/enum coercion beyond those two rules remains Pydantic's
+    responsibility.
     """
 
     @classmethod
     def __get_pydantic_core_schema__(
         cls, source_type: Any, handler: GetCoreSchemaHandler
     ) -> CoreSchema:
-        return _wrap_numeric_literals(deepcopy(handler(source_type)))
+        return _bind_string_enum_values(
+            _wrap_numeric_literals(deepcopy(handler(source_type)))
+        )
 
 
 class WireModel(StrictJSONModel, Mapping[str, Any]):

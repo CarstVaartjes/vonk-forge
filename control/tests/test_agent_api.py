@@ -3372,6 +3372,117 @@ def test_failed_result_rejection_names_the_failing_field_and_rule(
     )
 
 
+# The failure envelope spark-3542's agent retained for the artifact
+# distribution whose report the Controller refused.  ``failure_kind`` is a
+# declared string enum and the diagnostics list sits on its declared bound.
+INCIDENT_DISTRIBUTION_FAILURE = {
+    "status": "failed",
+    "error_code": "artifact_distribution_failed",
+    "failure_kind": "temporary-dependency",
+    "reason": "Controller distribution could not be verified and retained",
+    "diagnostics": {
+        "schema_version": 1,
+        "category": "runtime",
+        "collected_at": "2026-09-16T23:29:02.483132899+00:00",
+        "phase": "artifact.distribution.v1",
+        "stdout": {"text": "", "truncated": False, "dropped_bytes": 0, "dropped_lines": 0},
+        "stderr": {"text": "", "truncated": False, "dropped_bytes": 0, "dropped_lines": 0},
+        "collector_errors": [],
+        "preflight": [],
+        "versions": [
+            {"name": "agent", "value": "0.1.1"},
+            {"name": "kernel", "value": "6.17.0-1031-nvidia"},
+            {"name": "podman", "value": "podman version 4.9.3"},
+        ],
+        "storage": [
+            {"name": "data-root", "value": "/var/lib/vonk-forge-agent"},
+            {"name": "free-bytes", "value": "2483534802944"},
+        ],
+        "sandbox": [
+            {"name": "Uid", "value": "128\t128\t128\t128"},
+            {"name": "Gid", "value": "127\t127\t127\t127"},
+            {"name": "CapEff", "value": "0000000000000000"},
+            {"name": "NoNewPrivs", "value": "0"},
+            {"name": "Seccomp", "value": "2"},
+            {"name": "User", "value": "vonk-agent"},
+            {
+                "name": "ReadWritePaths",
+                "value": "/var/lib/vonk-forge-agent /var/lib/vonk-forge/incoming"
+                " /run/vonk-forge-agent",
+            },
+            {
+                "name": "ReadOnlyPaths",
+                "value": "/etc/vonk-forge-agent /usr/lib/vonk-forge",
+            },
+            {"name": "PrivateTmp", "value": "yes"},
+            {"name": "ProtectSystem", "value": "strict"},
+            {"name": "NoNewPrivileges", "value": "no"},
+            {"name": "RestrictNamespaces", "value": "no"},
+        ],
+    },
+}
+
+
+def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> None:
+    """A truthful ``failure_kind`` must not be refused as an invalid request.
+
+    ``failure_kind`` is a string enum in the published wire schema, and the
+    agent sends the member value.  A body model that resolves an enum only from
+    an enum instance rejects that value, so every replay of a genuine failure
+    was answered 422 -- which is what left spark-3542's agent looping until
+    systemd exhausted its restart limit -- and the retained evidence was never
+    consumed.  Replay the retained envelope through the real ingress and require
+    both acceptance and the preserved receipt.
+    """
+
+    client, services, _, clock = agent_system
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "artifact.distribution.v1",
+        "a" * 64,
+        {
+            "schema_version": 1,
+            "authority_revision": "a" * 64,
+            "plan_digest": "a" * 64,
+        },
+    )
+    claim = client.post(
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
+    ).json()
+    envelope = {
+        key: claim[key]
+        for key in (
+            "schema_version",
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "node_id",
+            "deadline",
+        )
+    } | {"state": "failed", "result": INCIDENT_DISTRIBUTION_FAILURE}
+
+    response = client.post(
+        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=envelope
+    )
+
+    assert response.status_code == 204, response.text
+    with services.sessions() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == claim["operation_id"]
+            )
+        )
+        assert attempt is not None
+        assert attempt.state == "failed"
+        assert attempt.result["failure_kind"] == "temporary-dependency"
+        assert attempt.result["error_code"] == "artifact_distribution_failed"
+        # The bound diagnostics survive sanitization rather than being dropped.
+        assert attempt.result["diagnostics"]["phase"] == "artifact.distribution.v1"
+        assert len(attempt.result["diagnostics"]["sandbox"]) == 12
+
+
 def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> None:
     """A refused result or heartbeat must leave a bounded, correlated reason.
 
