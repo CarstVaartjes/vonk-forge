@@ -5722,6 +5722,7 @@ def _blocked_install_plan(
                 reused_bytes=0,
                 required_download_bytes=0,
                 required_bytes=0,
+                required_payload_bytes=0,
                 disk_floor_bytes=0,
                 free_after_bytes=None,
                 blockers=tuple(

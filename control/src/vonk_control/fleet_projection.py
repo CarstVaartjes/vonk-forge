@@ -42,6 +42,10 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+)
 from .strict_json import StrictJSONModel
 from .telemetry import (
     TelemetryDetailsInput,
@@ -89,6 +93,29 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
     except (TypeError, ValueError):
         return None
     return recipe if content_sha256(recipe) == revision.content_digest else None
+
+
+def _installation_payload_expectations(plan: object) -> dict[str, int]:
+    """Per-node materialized payload expectation from the persisted plan.
+
+    ``RecipeInstallation.plan`` is the durable admission record and already
+    carries each node's admitted payload, so the presence byte check reads the
+    expectation from there instead of duplicating it into a column.  A plan
+    admitted before the expectation existed, or one that no longer reads as
+    the current contract, yields no expectation: an absent expectation is not
+    evidence that an installation is short, and this projection must not turn
+    a display annotation into a fleet-wide read failure.
+    """
+
+    try:
+        stored = parse_stored_installation_plan(plan)
+    except RecipeExecutionContractError:
+        return {}
+    return {
+        node.node_id: node.required_payload_bytes
+        for node in stored.nodes
+        if node.required_payload_bytes is not None
+    }
 
 
 _RUNTIME_CAPABILITY_LEDGER: tuple[tuple[str, str, TelemetryMeasurementKind], ...] = (
@@ -1521,10 +1548,14 @@ class FleetProjection:
                 reason = "installation-not-installed"
             if reason is None and any(node.state != "installed" for node in nodes):
                 reason = "rank-not-installed"
-            if reason is None and any(
-                node.installed_bytes < node.required_bytes for node in nodes
-            ):
-                reason = "rank-incomplete-bytes"
+            if reason is None:
+                expectations = _installation_payload_expectations(installation.plan)
+                if any(
+                    node.installed_bytes < expectations[node.node_id]
+                    for node in nodes
+                    if node.node_id in expectations
+                ):
+                    reason = "rank-incomplete-bytes"
             present_ranks = [node.rank for node in visible_nodes]
             member_node_ids = sorted(node.node_id for node in visible_nodes)
             for node in visible_nodes:

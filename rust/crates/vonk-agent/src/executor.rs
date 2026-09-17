@@ -1622,10 +1622,23 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         ));
                     }
                 }
-                let installed_bytes = self
+                // A failed measurement is not evidence that the admitted
+                // payload is present.  Substituting ``expected_bytes`` (the
+                // Controller's disk reservation) would report the reservation
+                // as a measured tree and make an unmeasured install look
+                // complete, so the operation fails instead.
+                let installed_bytes = match self
                     .runtime
                     .installed_bytes(&request.installation_id.to_string())
-                    .unwrap_or(request.expected_bytes);
+                {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        let (stage, category) = error.safe_install_context();
+                        return failed_owned(format!(
+                            "installed payload could not be measured after installation (stage={stage}; category={category})"
+                        ));
+                    }
+                };
                 if *cancellation.borrow() {
                     return cancelled(
                         "controller cancellation observed after installation settled",

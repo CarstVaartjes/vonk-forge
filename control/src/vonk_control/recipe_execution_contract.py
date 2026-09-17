@@ -56,6 +56,12 @@ class StoredInstallNodePlan(_PersistedModel):
     reused_bytes: int = Field(ge=0)
     required_download_bytes: int = Field(ge=0)
     required_bytes: int = Field(ge=0)
+    # Optional with a declared ``None`` default: plans admitted before the
+    # payload expectation existed omit the field, and omission, explicit
+    # ``null`` and an absent expectation are the same observation.  It is
+    # omitted again on serialization, so re-reading and re-writing a stored
+    # document leaves its canonical bytes (and recorded plan digest) unchanged.
+    required_payload_bytes: int | None = Field(default=None, ge=0)
     disk_floor_bytes: int = Field(ge=0)
     free_after_bytes: int | None
     blockers: list[StoredAdmissionReason]

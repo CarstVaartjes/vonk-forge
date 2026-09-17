@@ -928,6 +928,7 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
                                 "reused_bytes": 0,
                                 "required_download_bytes": 0,
                                 "required_bytes": 1,
+                                "required_payload_bytes": 1,
                                 "disk_floor_bytes": 0,
                                 "free_after_bytes": 0,
                                 "blockers": [],
