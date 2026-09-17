@@ -163,7 +163,12 @@ impl ControllerError {
         context.chars().take(MAX_REJECTION_CONTEXT_CHARS).collect()
     }
 
-    fn retryable(&self) -> bool {
+    /// Whether this refusal is the Controller asking for the same request again.
+    ///
+    /// One owner: the renewal loop classifies a failed heartbeat against this
+    /// exact set rather than restating the statuses, so a change here cannot
+    /// leave the two disagreeing.
+    pub(crate) fn retryable(&self) -> bool {
         matches!(self.status, 408 | 429 | 500..=599)
     }
 }
@@ -657,18 +662,17 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let body = canonical_json(&progress).map_err(|_| ClientError::Protocol)?;
-        // A renewal must not outlive the lease it renews: bounding the call by
-        // the remaining accepted lease lets the renewal loop retry promptly
-        // instead of discovering the expiry only after a fixed timeout.
-        let remaining = (progress.deadline.with_timezone(&chrono::Utc) - chrono::Utc::now())
-            .to_std()
-            .unwrap_or(Duration::ZERO);
+        // A renewal that arrives after the accepted lease deadline is still
+        // accepted inside the Controller's renewal allowance, so the attempt
+        // must not be truncated to the lease that is being recovered: bounding
+        // it that way turned "the lease is nearly spent" into "no round trip can
+        // complete", which is what made one late renewal the last one.
         let response = self
             .current_client()
             .await
             .post(self.endpoint("/agent/heartbeat")?)
             .header("content-type", "application/json")
-            .timeout(HEARTBEAT_REQUEST_TIMEOUT.min(remaining))
+            .timeout(HEARTBEAT_REQUEST_TIMEOUT)
             .body(body)
             .send()
             .await?;

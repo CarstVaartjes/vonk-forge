@@ -234,13 +234,51 @@ def _lease_expiry_reason(
     return ("; ".join(parts) + "; the effect is unobserved")[:512]
 
 
-def _attempt_is_live(attempt: AgentOperationAttempt | None, now: datetime) -> bool:
-    """Return whether an attempt can still renew its lease and report.
+def _operation_start_deadline(operation: StoredOperation) -> datetime | None:
+    """Return the immutable start deadline a two-phase start bound, if any.
 
-    This is the same liveness boundary ``_active`` and the expired-attempt
-    candidate predicate use: a missing attempt, an attempt that already
-    stopped, or a lease deadline at or before ``now`` can never renew or
-    deliver a receipt.
+    Only a distributed start persists one, and it is the budget the start may not
+    outlive.  It is the one clock that can bound a lapsed renewal: the lease is
+    the thing being recovered, so it cannot also be the recovery budget.  An
+    operation that binds none gets no allowance, because inventing a second clock
+    would widen the fence without a fact to bound it.
+    """
+
+    payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+    value = payload.get("start_deadline")
+    if not isinstance(value, str):
+        return None
+    try:
+        deadline = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if deadline.tzinfo is None or deadline.utcoffset() is None:
+        return None
+    return deadline
+
+
+def _lapsed_renewal_allowed(operation: StoredOperation, now: datetime) -> bool:
+    """Return whether a lapsed lease may still be re-acquired by its own fence.
+
+    A lease lapse parks a healthy start when the Controller was briefly
+    unreachable, and the operation's own start budget is the clock that says how
+    long that start is still legitimate.  Until it is spent, the executor that
+    holds the fence may prove it is alive again; after it, nothing may.
+    """
+
+    deadline = _operation_start_deadline(operation)
+    return deadline is not None and _aware(now) < _aware(deadline)
+
+
+def _attempt_is_live(attempt: AgentOperationAttempt | None, now: datetime) -> bool:
+    """Return whether an attempt still holds an unexpired lease.
+
+    This is the boundary that decides whether another owner may take the
+    operation over, and which attempts count as expired, so a missing attempt, an
+    attempt that already stopped, or a lease deadline at or before ``now`` is not
+    live.  It is deliberately not the renewal boundary: ``_active`` additionally
+    lets this exact fence renew inside the operation's own start allowance, which
+    restores a healthy attempt without ever letting a second owner in.
     """
 
     return (
@@ -2384,7 +2422,14 @@ class AgentJobService:
             raise ValueError("lease must be positive")
         with self._sessions.begin() as session:
             operation, attempt = self._active(
-                session, fence, source=source, allow_superseded_cancellation=True
+                session,
+                fence,
+                source=source,
+                allow_superseded_cancellation=True,
+                # Only a renewal may re-acquire a lapsed lease.  A late *result*
+                # is a different decision with its own fencing, so it keeps the
+                # unrelaxed boundary.
+                allow_lapsed_renewal=True,
             )
             now = self._clock()
             parent = session.get(Job, operation.parent_job_id)
@@ -3017,6 +3062,7 @@ class AgentJobService:
         *,
         source: AgentSource | None = None,
         allow_superseded_cancellation: bool = False,
+        allow_lapsed_renewal: bool = False,
     ) -> tuple[StoredOperation, AgentOperationAttempt]:
         token = self._fence_token(fence)
         identity_hint = session.execute(
@@ -3123,7 +3169,18 @@ class AgentJobService:
             or attempt.operation_id != operation.id
             or operation.current_attempt != attempt.attempt
             or attempt.state != "running"
-            or _aware(attempt.lease_deadline) <= _aware(now)
+            or (
+                _aware(attempt.lease_deadline) <= _aware(now)
+                and not (
+                    allow_lapsed_renewal
+                    # The exact fence that holds the attempt may re-acquire it
+                    # while the operation's own immutable start budget is still
+                    # open.  The lease still decides when another owner may take
+                    # over, so this restores a healthy executor without opening
+                    # the fence to anyone else.
+                    and _lapsed_renewal_allowed(operation, now)
+                )
+            )
         ):
             raise StaleAgentAttempt(
                 "agent operation lease, certificate, or fence is stale"
