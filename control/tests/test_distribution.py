@@ -136,25 +136,24 @@ def test_distribution_rejects_unassigned_wrong_node_and_corrupt_object(
     service.register(assignment)
     object.__setattr__(services, "distribution", service)
     path = "/agent/distribution/objects/" + model_digest
-    assert (
-        client.get(
-            path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_B, "serial-b")
-        ).status_code
-        == 403
+    wrong_node = client.get(
+        path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_B, "serial-b")
     )
-    assert (
-        client.get(
-            path + "?plan_digest=" + "e" * 64, headers=agent_headers(NODE_A, "serial-a")
-        ).status_code
-        == 403
+    assert wrong_node.status_code == 403
+    # The denial names the refusing check so the agent can report which
+    # authorization boundary rejected it, not just the generic 403 category.
+    assert wrong_node.headers["x-vonk-error-code"] == "distribution.wrong_node"
+    unassigned = client.get(
+        path + "?plan_digest=" + "e" * 64, headers=agent_headers(NODE_A, "serial-a")
     )
+    assert unassigned.status_code == 403
+    assert unassigned.headers["x-vonk-error-code"] == "distribution.unassigned"
     source.objects[model_digest] = b"tampered payload"
-    assert (
-        client.get(
-            path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_A, "serial-a")
-        ).status_code
-        == 503
+    unavailable = client.get(
+        path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_A, "serial-a")
     )
+    assert unavailable.status_code == 503
+    assert unavailable.headers["x-vonk-error-code"] == "distribution.object_unavailable"
 
 
 def test_distribution_assignment_survives_controller_service_restart(

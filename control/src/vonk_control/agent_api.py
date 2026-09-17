@@ -156,6 +156,10 @@ _WORKLOAD_TUF_METADATA_NAME = re.compile(
     r"[1-9][0-9]*\.(?:targets|families|releases))\.json\Z"
 )
 _WORKLOAD_TUF_TARGET_NAME = re.compile(r"releases/[0-9a-f]{64}\.json\Z")
+# A distribution refusal is returned as the agent's ``x-vonk-error-code`` so the
+# denying check is attributable.  The vocabulary is internal, but the header is
+# a wire surface, so it is validated before being reflected.
+_DISTRIBUTION_ERROR_CODE = re.compile(r"[a-z][a-z0-9_.:-]{0,127}\Z")
 
 
 def _strict_json_datetime(value: object) -> object:
@@ -2372,15 +2376,23 @@ def install_agent_routes(
         )
 
     def _distribution_error(error: DistributionError) -> HTTPException:
+        # Name the refusing check on the wire.  Without it the generic 403
+        # boundary code is all the agent can report, so an authority denial
+        # cannot be attributed to an assignment, node or expiry.
+        headers = (
+            {"x-vonk-error-code": error.code}
+            if _DISTRIBUTION_ERROR_CODE.fullmatch(error.code)
+            else {}
+        )
         if error.code in {
             "distribution.unassigned",
             "distribution.wrong_node",
             "distribution.expired",
         }:
-            return HTTPException(status_code=403, detail=error.detail)
+            return HTTPException(status_code=403, detail=error.detail, headers=headers)
         if error.code == "distribution.object_invalid":
-            return HTTPException(status_code=404, detail=error.detail)
-        return HTTPException(status_code=503, detail=error.detail)
+            return HTTPException(status_code=404, detail=error.detail, headers=headers)
+        return HTTPException(status_code=503, detail=error.detail, headers=headers)
 
     @agent.get(
         "/distribution/manifests/{plan_digest}",

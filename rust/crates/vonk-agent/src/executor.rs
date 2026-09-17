@@ -894,25 +894,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         body: distribution_success_evidence(evidence),
                     }
                 }
-                Err(error) => {
-                    let mut body = json!({
-                        "reason": "Controller distribution could not be verified and retained",
-                        "failure_kind": if error.retryable() {
-                            "temporary-dependency"
-                        } else if matches!(error.status(), Some(401 | 403)) {
-                            "invalid-authority"
-                        } else {
-                            "integrity-failure"
-                        },
-                    });
-                    if let Some(seconds) = error.retry_after_seconds() {
-                        body["retry_after_seconds"] = json!(seconds);
-                    }
-                    ExecutionResult {
-                        state: "failed",
-                        body,
-                    }
-                }
+                Err(error) => distribution_failure_result(&error),
             };
         }
         let request = match RecipeOperationRequest::parse(claim) {
@@ -2543,6 +2525,66 @@ fn failed_stage_owned(
     }
 }
 
+/// Bound the safe control-plane facts of a refused Controller request.
+///
+/// An authority denial used to report only that the request failed, so the
+/// denied path, status and request id were unrecoverable.  Only the URL path,
+/// HTTP status, validated error code, request id and transport category are
+/// captured; queries, credentials, headers and response bodies stay unread.
+fn controller_denial_diagnostic(error: &ClientError) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(status) = error.status() {
+        parts.push(format!("http_status={status}"));
+    }
+    if let Some(code) = error.code() {
+        parts.push(format!("error_code={code}"));
+    }
+    if let Some(endpoint) = error
+        .endpoint()
+        .map(str::to_owned)
+        .or_else(|| error.transport_endpoint())
+    {
+        parts.push(format!("endpoint={endpoint}"));
+    }
+    if let Some(request_id) = error.request_id() {
+        parts.push(format!("request_id={request_id}"));
+    }
+    if let Some(kind) = error.transport_kind() {
+        parts.push(format!("transport={kind}"));
+    }
+    // Leave headroom below the 512-character wire field for redaction.
+    parts.join(" ").chars().take(400).collect()
+}
+
+/// Classify a refused distribution and keep the bounded denial facts.
+///
+/// The incident's `invalid-authority` outcome reported only that the
+/// distribution failed, so the denied request and status were unrecoverable.
+fn distribution_failure_result(error: &ClientError) -> ExecutionResult {
+    let mut body = json!({
+        "reason": "Controller distribution could not be verified and retained",
+        "failure_kind": if error.retryable() {
+            "temporary-dependency"
+        } else if matches!(error.status(), Some(401 | 403)) {
+            "invalid-authority"
+        } else {
+            "integrity-failure"
+        },
+        "stage": "artifact-distribution",
+    });
+    if let Some(seconds) = error.retry_after_seconds() {
+        body["retry_after_seconds"] = json!(seconds);
+    }
+    let diagnostic = controller_denial_diagnostic(error);
+    if !diagnostic.is_empty() {
+        body["diagnostic"] = json!(diagnostic);
+    }
+    ExecutionResult {
+        state: "failed",
+        body,
+    }
+}
+
 enum InterruptibleJob<T> {
     Completed(T),
     Cancelled { stopped: bool },
@@ -3317,11 +3359,12 @@ mod tests {
     use super::{
         ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, InterruptibleJob, LoopClient,
         RecipeExecutor, RecipeObservationError, RejectingExecutor, RunOncePolicy,
-        distribution_success_evidence, normalize_execution_result, output_media_type,
-        parse_compiled_execution_plan, readiness_identity, recipe_install_success_body,
-        report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
-        run_once_with_heartbeat_interval, temporary_runtime_observation_failure,
-        wait_for_launch_stability, wait_ready_with_runtime_guard_and_cancellation,
+        controller_denial_diagnostic, distribution_failure_result, distribution_success_evidence,
+        normalize_execution_result, output_media_type, parse_compiled_execution_plan,
+        readiness_identity, recipe_install_success_body, report_complete_recipe_run_observations,
+        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
+        temporary_runtime_observation_failure, wait_for_launch_stability,
+        wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
         client::{AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence},
@@ -3806,6 +3849,59 @@ mod tests {
         );
         assert_eq!(result.body["error_code"], "artifact_distribution_failed");
         assert_eq!(result.body["status"], "failed");
+    }
+
+    #[test]
+    fn a_denied_controller_request_keeps_bounded_denial_facts() {
+        // The incident's invalid-authority failure named neither the denied
+        // request nor the status, so its cause could not be recovered from the
+        // retained evidence.
+        let error = ClientError::Controller(Box::new(ControllerError {
+            operation: "controller.request /agent/distribution/assignment".to_owned(),
+            endpoint: "/agent/distribution/assignment".to_owned(),
+            status: 403,
+            code: "controller.request_rejected".to_owned(),
+            request_id: Some("req-403".to_owned()),
+            decision: "exit",
+            retry_after_seconds: None,
+        }));
+
+        let diagnostic = controller_denial_diagnostic(&error);
+
+        assert!(diagnostic.contains("http_status=403"));
+        assert!(diagnostic.contains("error_code=controller.request_rejected"));
+        assert!(diagnostic.contains("endpoint=/agent/distribution/assignment"));
+        assert!(diagnostic.contains("request_id=req-403"));
+        assert!(diagnostic.len() <= 512);
+    }
+
+    #[test]
+    fn an_invalid_authority_distribution_failure_preserves_denial_context() {
+        let mut distribution_claim = claim();
+        distribution_claim.operation = "artifact.distribution.v1".parse().unwrap();
+        let error = ClientError::Controller(Box::new(ControllerError {
+            operation: "controller.request /agent/distribution/assignment".to_owned(),
+            endpoint: "/agent/distribution/assignment".to_owned(),
+            status: 401,
+            code: "controller.authentication_required".to_owned(),
+            request_id: Some("req-401".to_owned()),
+            decision: "exit",
+            retry_after_seconds: None,
+        }));
+
+        let raw = distribution_failure_result(&error);
+        assert_eq!(raw.state, "failed");
+        assert_eq!(raw.body["failure_kind"], "invalid-authority");
+        assert_eq!(raw.body["stage"], "artifact-distribution");
+
+        let result = normalize_execution_result(&distribution_claim, raw);
+
+        assert_eq!(result.body["error_code"], "artifact_distribution_failed");
+        assert_eq!(result.body["failure_kind"], "invalid-authority");
+        assert_eq!(result.body["stage"], "artifact-distribution");
+        let diagnostic = result.body["diagnostic"].as_str().unwrap();
+        assert!(diagnostic.contains("http_status=401"));
+        assert!(diagnostic.contains("request_id=req-401"));
     }
 
     #[tokio::test]
