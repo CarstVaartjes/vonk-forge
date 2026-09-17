@@ -4,6 +4,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::json;
 use tempfile::tempdir;
 use uuid::Uuid;
+use vonk_agent::client::ControllerError;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
 use vonk_agent_protocol::generated::{
     AgentClaimPayload, AgentFailureKind, AgentOperation, AgentResultResult, RecipeStopPayload,
@@ -58,6 +59,99 @@ fn completed_result_is_redelivered_until_acknowledged() {
     );
     restarted.acknowledge(&result).unwrap();
     assert!(restarted.pending_results().unwrap().is_empty());
+}
+
+#[test]
+fn acknowledged_result_is_not_replayed_after_restart() {
+    // The original retention remedy was to delete reconciliation markers,
+    // which would let an acknowledged outcome replay on the next start.  An
+    // acknowledgement and its marker must survive a restart together, and only
+    // the diagnostic-only reconciliation path may see the receipt once.
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("state.sqlite");
+    let result = {
+        let mut state = StateStore::open(&path, NODE_ID).unwrap();
+        let claim = claim();
+        assert_eq!(
+            state.begin(&claim, Utc::now()).unwrap(),
+            BeginDecision::Execute
+        );
+        let result = state
+            .finish(&claim, "succeeded", json!({"stopped": true}))
+            .unwrap();
+        state.acknowledge(&result).unwrap();
+        result
+    };
+
+    let mut restarted = StateStore::open(&path, NODE_ID).unwrap();
+    assert!(restarted.pending_results().unwrap().is_empty());
+    assert_eq!(
+        restarted.unreconciled_results().unwrap(),
+        vec![(AgentOperation::RecipeStop, result.clone())]
+    );
+    restarted.mark_reconciled(&result).unwrap();
+    drop(restarted);
+
+    let again = StateStore::open(&path, NODE_ID).unwrap();
+    assert!(again.pending_results().unwrap().is_empty());
+    assert!(again.unreconciled_results().unwrap().is_empty());
+}
+
+#[test]
+fn rejected_result_and_its_refusal_survive_restart() {
+    // A refused result is evidence the Controller never accepted, so a restart
+    // must keep both the receipt and the bounded refusal: the receipt so a
+    // corrected Controller rule can reconcile it, the refusal so the loop does
+    // not hot-loop the same bytes in the meantime.
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("state.sqlite");
+    let result = {
+        let mut state = StateStore::open(&path, NODE_ID).unwrap();
+        let claim = claim();
+        assert_eq!(
+            state.begin(&claim, Utc::now()).unwrap(),
+            BeginDecision::Execute
+        );
+        let result = state
+            .finish(&claim, "succeeded", json!({"stopped": true}))
+            .unwrap();
+        state
+            .reject_result(&result, &ingress_refusal(), Utc::now())
+            .unwrap();
+        result
+    };
+
+    let restarted = StateStore::open(&path, NODE_ID).unwrap();
+    assert_eq!(restarted.pending_results().unwrap().len(), 1);
+    let rejection = restarted
+        .result_rejection(&result, Utc::now())
+        .unwrap()
+        .expect("the refusal survives the restart");
+    assert_eq!(rejection.http_status, 422);
+    assert_eq!(rejection.code, "controller.invalid_request");
+    assert_eq!(rejection.request_id.as_deref(), Some("req-422"));
+    // Past the cool-down the same retained receipt is offered again.
+    assert!(
+        restarted
+            .result_rejection(
+                &result,
+                rejection.retry_due_at + chrono::Duration::seconds(1)
+            )
+            .unwrap()
+            .is_none()
+    );
+}
+
+fn ingress_refusal() -> ControllerError {
+    ControllerError {
+        operation: "controller.request /agent/result".to_owned(),
+        endpoint: "/agent/result".to_owned(),
+        status: 422,
+        code: "controller.invalid_request".to_owned(),
+        request_id: Some("req-422".to_owned()),
+        decision: "exit",
+        retry_after_seconds: None,
+    }
 }
 
 #[test]
