@@ -451,13 +451,27 @@ are done.
 
 Staggering merges is a deployment requirement, not tidiness.
 
-Every merge to `main` triggers image builds and an installer generation, and the
-publisher **refuses to promote a superseded build**. Merging several pull
-requests in a burst therefore leaves the later images built, published and
-addressable but referenced by no accepted generation — they cannot be deployed,
-and redeploying silently pulls the older Controller. That is not hypothetical:
-`dev-sha-17c4276a…` was published and referenced by nothing, so a redeploy
-appeared to do nothing.
+A merge to `main` that touches a build input triggers an image build and an
+installer generation, and the publisher **refuses to promote a superseded
+build**. Merging several such pull requests in a burst therefore leaves the later
+images built, published and addressable but referenced by no accepted generation
+— they cannot be deployed, and redeploying silently pulls the older Controller.
+That is not hypothetical: `dev-sha-17c4276a…` was published and referenced by
+nothing, so a redeploy appeared to do nothing.
+
+**Not every merge produces a build, and you must check before reasoning from
+one.** `dev-images.yml` is path-filtered (`on.push.paths`): a merge that changes
+only documentation, tests, a script, or a workflow builds nothing and produces no
+`dev-sha-<commit>` tag. Two consequences, both of which have already caused a
+confidently wrong answer:
+
+- A merge with no build is **not** a promotion candidate and supersedes nothing.
+  Do not claim it displaced an earlier build — verify with
+  `git ls-remote`/the registry that `dev-sha-<full-commit-sha>` exists before
+  treating a commit as deployable.
+- When you need to promote, re-run the publication for the newest commit that
+  **did** build (`dev-sha-…` exists). Publishing a tip that never built promotes
+  a generation with nothing behind it, and the alias will not move.
 
 Arm auto-merge on **one** pull request at a time, and arm the next only once the
 accepted generation has been built from a commit that **contains** the previous
