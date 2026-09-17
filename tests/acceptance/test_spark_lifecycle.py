@@ -71,10 +71,10 @@ PLATFORMS = ("linux-arm64",)
 
 # How long a synthetic-canary operation may take before the lane calls it
 # stuck. The product bounds a single distributed step at
-# VONK_DISTRIBUTED_START_TIMEOUT_SECONDS (60s by default), and the canary moves
-# a tiny synthetic asset set, so a well-behaved operation converges in seconds
-# and a stuck one is distinguishable well inside this budget. Keep these
-# proportional to that guarantee: waiting tens of minutes only delays the
+# VONK_DISTRIBUTED_START_TIMEOUT_SECONDS, so a canary that never converges could
+# otherwise sit inside that budget; the canary moves a tiny synthetic asset set,
+# so a well-behaved operation converges in seconds and these diagnostic bounds
+# stay far below the product's. Waiting out the product budget only delays the
 # diagnosis and hides the cause behind a timeout.
 _CANARY_CONVERGENCE_SECONDS = 120
 _CANARY_ROUTE_SECONDS = 60

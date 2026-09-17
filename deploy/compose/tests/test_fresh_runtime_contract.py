@@ -149,3 +149,27 @@ def test_canonical_model_has_no_bootstrap_runtime_dependency() -> None:
         for service in services.values()
         if isinstance(service, dict)
     )
+
+
+def test_the_shipped_start_budget_default_is_the_controller_default(monkeypatch) -> None:
+    """The deployment default and the Controller's own default must be one number.
+
+    Wrong implementation: Compose shipped ``:-60`` -- the *minimum* the validator
+    accepts -- while the settings default, the operator documentation and the Mia
+    cold-start qualification budget all said 1800.  A default deployment therefore
+    refused a distributed cold start after one minute, and nothing failed, because
+    the two defaults had no relationship in code.  Asserting that they agree,
+    rather than restating either number, is what keeps them from drifting again.
+    """
+    from vonk_control.settings import _distributed_start_timeout
+
+    text = (COMPOSE_ROOT / "compose.yaml").read_text(encoding="utf-8")
+    shipped = re.findall(
+        r"VONK_DISTRIBUTED_START_TIMEOUT_SECONDS: "
+        r"\$\{VONK_DISTRIBUTED_START_TIMEOUT_SECONDS:-(\d+)\}",
+        text,
+    )
+    # The API and the worker must agree: one admitted deadline covers both.
+    assert len(shipped) == 2, shipped
+    monkeypatch.delenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", raising=False)
+    assert set(shipped) == {str(_distributed_start_timeout())}
