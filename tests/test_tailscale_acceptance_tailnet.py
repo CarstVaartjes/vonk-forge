@@ -1469,3 +1469,54 @@ def test_transport_failure_names_the_underlying_cause(
     assert "POST /oauth/token was unavailable" in message
     assert cause in message
     assert "\n" not in message
+
+
+def test_cleanup_403_refusal_names_the_documented_scope_requirement(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 403 on the cleanup token exchange has to explain itself.
+
+    `ApiRequestError` deliberately sanitizes a remote rejection to method, path
+    and status because the body can carry credential material, and the API's
+    403 body is the generic `{message}` document with no scope code. So the
+    rendered line for the live promotion-blocking failure was only "HTTP 403":
+    the operator could see that cleanup was refused but not which request failed
+    or what the documented requirement is. Assert the five facts the refusal
+    must carry: the failing request, the required `all` scope and its owner
+    variable, the narrower scope listing uses, the admin-console check the
+    operator has to make, and why this API path cannot be replaced by a console
+    action.
+    """
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    child = _organization_child(
+        child_id="tailnet_stale_999",
+        display_name="Vonk Forge CI 35232305043 attempt 1",
+        created_at=_created_at(minutes_old=90, now=now),
+    )
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(child),
+            _http_error(403),
+        ],
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle.cleanup()
+
+    message = str(caught.value)
+    assert "POST /oauth/token?tailnet=tailnet_stale_999" in message
+    assert "HTTP 403" in message
+    assert "`all` scope" in message
+    assert "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID" in message
+    assert "`tailnets`" in message
+    assert "Trust credentials" in message
+    assert "admin console" in message
+    # The refusal is a refusal: no second credential, endpoint or retry is
+    # attempted, and the child is left for the operator rather than half-deleted.
+    assert [request.method for request in urlopen.requests] == ["POST", "GET", "POST"]
+    assert _cleanup_requests(urlopen) == []
