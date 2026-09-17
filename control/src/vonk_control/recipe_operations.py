@@ -7,7 +7,7 @@ import ipaddress
 import json
 import logging
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -125,7 +125,7 @@ def _bounded_blocker_reason(code: str, detail: str) -> str:
         return rendered
     keep = _BLOCKER_REASON_CHARS - 3
     head = keep // 2
-    return f"{rendered[:head]}...{rendered[-(keep - head):]}"
+    return f"{rendered[:head]}...{rendered[-(keep - head) :]}"
 
 
 def _active_recipe_revision(
@@ -998,8 +998,19 @@ class RecipeOperationService:
             workload_intent_ordinal=workload_intent_ordinal,
         )
 
-    def preview_run(self, installation_id: str, alias: str) -> RunPlan:
-        return self._run_admission.plan_run(installation_id, alias, now=self._clock())
+    def preview_run(
+        self,
+        installation_id: str,
+        alias: str,
+        *,
+        released_run_ids: Collection[str] = (),
+    ) -> RunPlan:
+        return self._run_admission.plan_run(
+            installation_id,
+            alias,
+            now=self._clock(),
+            released_run_ids=released_run_ids,
+        )
 
     def _adopt_start_in_session(
         self,

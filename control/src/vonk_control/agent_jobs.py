@@ -1383,20 +1383,28 @@ class AgentJobService:
         for condition, condition_held in zip(conditions, held, strict=True):
             if condition_held:
                 continue
-            return operation, condition.check, {
-                **facts,
-                **_claim_condition_facts(
-                    condition.check, operation, attempt, node, now
-                ),
-            }
+            return (
+                operation,
+                condition.check,
+                {
+                    **facts,
+                    **_claim_condition_facts(
+                        condition.check, operation, attempt, node, now
+                    ),
+                },
+            )
         # Every modelled condition held, yet the claim query matched nothing.
         # No unmodelled condition can exist - the predicate is built from the
         # conditions just evaluated - so this is a defensive last resort, not a
         # path any real operation takes.
-        return operation, "unclassified-unclaimable", {
-            **facts,
-            "attempt": operation.current_attempt,
-        }
+        return (
+            operation,
+            "unclassified-unclaimable",
+            {
+                **facts,
+                "attempt": operation.current_attempt,
+            },
+        )
 
     def _cancel_superseded_operation(
         self,

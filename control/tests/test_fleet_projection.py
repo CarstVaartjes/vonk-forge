@@ -2345,7 +2345,13 @@ def _installed_presence(sessions, installation_id: str) -> RecipePresence:
 
 
 @pytest.mark.parametrize(
-    ("reservation_bytes", "payload_expectation_bytes", "installed_bytes", "complete", "reason"),
+    (
+        "reservation_bytes",
+        "payload_expectation_bytes",
+        "installed_bytes",
+        "complete",
+        "reason",
+    ),
     [
         # Admission reserves the materialized payload plus staging, cache and
         # rollback headroom, so the reservation exceeds the tree the agent

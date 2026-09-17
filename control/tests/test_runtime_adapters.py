@@ -67,7 +67,7 @@ def test_adapter_digest_covers_the_adaptation_implementation() -> None:
     installed = replace(
         adapter,
         containerfile=render_adaptation_stage(
-            "vllm", launcher="#!/bin/sh\nexec vllm \"$@\"\n"
+            "vllm", launcher='#!/bin/sh\nexec vllm "$@"\n'
         ),
     )
     assert installed.adapter_id == adapter.adapter_id
