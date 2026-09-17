@@ -3254,6 +3254,16 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "runtime_helper_unavailable"
             | "runtime_authority_unavailable"
             | "runtime_helper_protocol_invalid"
+            // Any host runtime call can be refused before the helper trusts the
+            // grant, the image import included. Dropping those codes here left
+            // the normalized failure with no cause at all.
+            | "grant_invalid"
+            | "grant_node_mismatch"
+            | "grant_unauthorized"
+            | "peer_identity_invalid"
+            | "request_invalid"
+            | "request_replayed"
+            | "request_ledger_failed"
     )
 }
 
@@ -5295,6 +5305,8 @@ mod tests {
             "runtime_helper_unavailable",
             "runtime_authority_unavailable",
             "runtime_helper_protocol_invalid",
+            "grant_unauthorized",
+            "request_replayed",
         ] {
             let result = normalize_execution_result(
                 &import_claim,
