@@ -858,7 +858,19 @@ def test_retained_attempt_evidence_is_bounded_by_the_byte_budget(tmp_path):
         clock=_StepClock(NOW),
         retention=EvidenceRetention(max_bytes=32 * 1024),
     )
-    assert evidence.tick()
+    # ``tick`` stops at a wall-clock collection budget, so a loaded machine may
+    # need more than one pass.  Each pass must still make progress; an unfixed
+    # collector that never selects an expired attempt fails to reach the newest
+    # one here at all.
+    for _ in range(32):
+        evidence.tick()
+        try:
+            evidence.read(operation_id, 32)
+        except KeyError:
+            continue
+        break
+    else:
+        pytest.fail("the newest attempt was never collected")
     with sessions() as session:
         total = session.scalar(
             select(func.sum(func.length(FailureEvidenceRecord.content)))
