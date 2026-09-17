@@ -328,8 +328,7 @@
         "error_code": {
           "anyOf": [
             {
-              "maxLength": 128,
-              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
               "type": "string"
             },
             {

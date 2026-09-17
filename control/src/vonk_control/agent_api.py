@@ -60,7 +60,6 @@ from vonk_agent_protocol.enrollment import (
     RenewRequest,
 )
 from vonk_agent_protocol.host_helper import ContainerRuntimeActionName
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
@@ -157,6 +156,10 @@ _WORKLOAD_TUF_METADATA_NAME = re.compile(
     r"[1-9][0-9]*\.(?:targets|families|releases))\.json\Z"
 )
 _WORKLOAD_TUF_TARGET_NAME = re.compile(r"releases/[0-9a-f]{64}\.json\Z")
+# A distribution refusal is returned as the agent's ``x-vonk-error-code`` so the
+# denying check is attributable.  The vocabulary is internal, but the header is
+# a wire surface, so it is validated before being reflected.
+_DISTRIBUTION_ERROR_CODE = re.compile(r"[a-z][a-z0-9_.:-]{0,127}\Z")
 
 
 def _strict_json_datetime(value: object) -> object:
@@ -1986,8 +1989,22 @@ def install_agent_routes(
                     detail="superseded operation was cancelled",
                     headers={"x-vonk-error-code": "superseded_operation_cancelled"},
                 ) from None
+            required.operations.record_boundary_refusal(
+                str(message.operation_id),
+                message.attempt,
+                str(message.fence),
+                boundary="heartbeat",
+                check="stale-attempt",
+            )
             raise HTTPException(status_code=409, detail=str(error)) from None
         except ValueError as error:
+            required.operations.record_boundary_refusal(
+                str(message.operation_id),
+                message.attempt,
+                str(message.fence),
+                boundary="heartbeat",
+                check="invalid-progress",
+            )
             raise HTTPException(status_code=409, detail=str(error)) from None
         return _json_response(AgentDirective.model_validate(response))
 
@@ -2000,26 +2017,42 @@ def install_agent_routes(
         _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
-            if message.state == "failed" and not isinstance(
-                message.result, RecipeJobRunResult
-            ):
-                error_code = message.result.get("error_code")
-                if (
-                    message.result.get("status") != "failed"
-                    or not isinstance(error_code, str)
-                    or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", error_code) is None
-                ):
-                    raise ValueError("stable failure error code is required")
+            # The failed-result identity rule (a failed status plus a stable
+            # error code) is part of the operation result contract and is
+            # applied by ``validate_result_for_operation`` inside
+            # ``record_result``.  Keeping no second copy here is what makes the
+            # producer and the ingress enforce exactly one rule.
             required.operations.record_result(message, source=source)
         except StaleAgentAttempt as error:
             try:
                 required.operations.record_late_result(message, source=source)
             except StaleAgentAttempt:
+                required.operations.record_boundary_refusal(
+                    str(message.operation_id),
+                    message.attempt,
+                    str(message.fence),
+                    boundary="result",
+                    check="stale-attempt",
+                )
                 raise HTTPException(status_code=409, detail=str(error)) from None
             except ValueError as invalid:
+                required.operations.record_boundary_refusal(
+                    str(message.operation_id),
+                    message.attempt,
+                    str(message.fence),
+                    boundary="result",
+                    check="late-result-invalid",
+                )
                 raise HTTPException(status_code=422, detail=str(invalid)) from None
             return Response(status_code=status.HTTP_202_ACCEPTED)
         except ValueError as error:
+            required.operations.record_boundary_refusal(
+                str(message.operation_id),
+                message.attempt,
+                str(message.fence),
+                boundary="result",
+                check="invalid-result",
+            )
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -2343,15 +2376,23 @@ def install_agent_routes(
         )
 
     def _distribution_error(error: DistributionError) -> HTTPException:
+        # Name the refusing check on the wire.  Without it the generic 403
+        # boundary code is all the agent can report, so an authority denial
+        # cannot be attributed to an assignment, node or expiry.
+        headers = (
+            {"x-vonk-error-code": error.code}
+            if _DISTRIBUTION_ERROR_CODE.fullmatch(error.code)
+            else {}
+        )
         if error.code in {
             "distribution.unassigned",
             "distribution.wrong_node",
             "distribution.expired",
         }:
-            return HTTPException(status_code=403, detail=error.detail)
+            return HTTPException(status_code=403, detail=error.detail, headers=headers)
         if error.code == "distribution.object_invalid":
-            return HTTPException(status_code=404, detail=error.detail)
-        return HTTPException(status_code=503, detail=error.detail)
+            return HTTPException(status_code=404, detail=error.detail, headers=headers)
+        return HTTPException(status_code=503, detail=error.detail, headers=headers)
 
     @agent.get(
         "/distribution/manifests/{plan_digest}",

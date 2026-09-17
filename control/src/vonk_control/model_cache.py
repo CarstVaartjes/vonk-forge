@@ -1314,6 +1314,7 @@ class ModelCacheService:
         recipe_identity: str,
         model_content_sha256: str | None = None,
         model_variant: str | None = None,
+        exact_revision_id: str | None = None,
     ) -> Mapping[str, object]:
         """Resolve one logical Recipe to its newest usable cached revision.
 
@@ -1324,6 +1325,13 @@ class ModelCacheService:
         update is available.  If no revision is cached, the newest active
         revision is returned with unknown (``None``) resource estimates so a
         load operation can prepare it explicitly.
+
+        An explicitly selected exact revision is never replaced by an older
+        cached one: either the caller names it in ``exact_revision_id``, or
+        ``recipe_identity`` is itself a revision id or content digest.  The
+        exact revision is returned with ``cached=False`` and a
+        ``recipe-not-cached`` blocker when its authorized archive is absent, so
+        the operator sees the missing asset instead of a silent substitution.
         """
 
         if (
@@ -1388,6 +1396,35 @@ class ModelCacheService:
                     "recipe identity was not found",
                 )
 
+            # An explicitly selected exact revision must never be silently
+            # replaced by a newer one and must never fall back to an older
+            # cached one.
+            exact: CatalogDocumentRevision | None = None
+            if exact_revision_id is not None:
+                if (
+                    not isinstance(exact_revision_id, str)
+                    or not 1 <= len(exact_revision_id.strip()) <= 256
+                ):
+                    raise ModelCacheResolutionError(
+                        "model_cache.recipe_revision_invalid",
+                        "exact recipe revision is invalid",
+                    )
+                exact = session.scalar(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.id == exact_revision_id.strip(),
+                    )
+                )
+                if exact is None or exact.document_id != seed.document_id:
+                    raise ModelCacheResolutionError(
+                        "model_cache.recipe_revision_missing",
+                        "selected recipe revision was not found",
+                    )
+            elif re.fullmatch(_DIGEST_PATTERN, identity) or (
+                re.fullmatch(UUID_PATTERN, identity) and seed.id == identity
+            ):
+                exact = seed
+
             revisions = list(
                 session.scalars(
                     select(CatalogDocumentRevision)
@@ -1407,6 +1444,15 @@ class ModelCacheService:
                     "model_cache.recipe_revision_missing",
                     "recipe has no active revision",
                 )
+            if exact is not None:
+                if exact.state != "active":
+                    raise ModelCacheResolutionError(
+                        "model_cache.recipe_revision_missing",
+                        "selected recipe revision is not active",
+                    )
+                selection_pool = [exact]
+            else:
+                selection_pool = revisions
 
             def compatible_model(
                 revision: CatalogDocumentRevision,
@@ -1488,7 +1534,7 @@ class ModelCacheService:
                 | None
             ) = None
             newest_compatible: CatalogDocumentRevision | None = None
-            for revision in revisions:
+            for revision in selection_pool:
                 digest, variant = compatible_model(revision)
                 if not digest:
                     continue

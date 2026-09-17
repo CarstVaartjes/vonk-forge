@@ -133,6 +133,25 @@ jobs:
         shell: bash
         run: python3 control/tests/coordination_boundaries.py
 
+  supply-chain:
+    name: Supply-chain evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # The offline half of release-image validation: it binds the SBOM, the
+      # protocol wheel, the image lock and the Compose pins to the exact inputs
+      # without needing a registry, attestations or Docker.  Running it on every
+      # pull request means an invalidated manifest fails here instead of first
+      # on the release tag, where publication is already underway.
+      - name: Verify public image inputs
+        run: scripts/verify-public-image-inputs
+      - name: Verify supply-chain evidence
+        run: scripts/verify-supply-chain --json
+
   rust-quality:
     name: Rust workspace lint
     needs: changes

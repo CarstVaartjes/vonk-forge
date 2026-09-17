@@ -124,6 +124,8 @@ from .package_upgrade import (
     PackageRollbackSource,
 )
 from .wire_model import (
+    ERROR_CODE_PATTERN,
+    ErrorCode,
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
@@ -158,6 +160,7 @@ from .workload_packages import (
 )
 
 __all__ = [
+    "ERROR_CODE_PATTERN",
     "MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES",
     "MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES",
     "MAX_DOCUMENT_BYTES",
@@ -191,6 +194,7 @@ __all__ = [
     "ContainerRuntimeAction",
     "DistributionAssignment",
     "DistributionObject",
+    "ErrorCode",
     "ExecuteContainerRuntimeRequestOperation",
     "FailureDiagnostics",
     "HostHelperGrantClaims",

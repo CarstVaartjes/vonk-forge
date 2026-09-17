@@ -62,6 +62,23 @@ struct StoredOperation {
     result: Option<Vec<u8>>,
 }
 
+/// Bounded, durable record of one Controller refusal of an agent result.
+///
+/// The receipt itself stays in `operations`; this row only explains why the
+/// same bytes must not be re-sent immediately, and when they may be offered
+/// again after the cause is corrected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultRejection {
+    pub http_status: u16,
+    pub code: String,
+    pub decision: String,
+    pub request_id: Option<String>,
+    pub reason: String,
+    pub observed_at: DateTime<Utc>,
+    pub retry_due_at: DateTime<Utc>,
+    pub rejections: u32,
+}
+
 impl StateStore {
     pub fn open(path: &Path, node_id: &str) -> Result<Self, StateError> {
         if let Some(parent) = path.parent() {
@@ -106,6 +123,19 @@ impl StateStore {
                operation_id TEXT PRIMARY KEY NOT NULL,
                attempt INTEGER NOT NULL,
                fence TEXT NOT NULL
+             ) STRICT;
+             CREATE TABLE IF NOT EXISTS result_rejections (
+               operation_id TEXT PRIMARY KEY NOT NULL,
+               attempt INTEGER NOT NULL CHECK (attempt > 0),
+               fence TEXT NOT NULL,
+               http_status INTEGER NOT NULL,
+               code TEXT NOT NULL,
+               decision TEXT NOT NULL,
+               request_id TEXT,
+               reason TEXT NOT NULL,
+               observed_at TEXT NOT NULL,
+               retry_due_at TEXT NOT NULL,
+               rejections INTEGER NOT NULL DEFAULT 1 CHECK (rejections > 0)
              ) STRICT;",
         )?;
         let operation_column = {
@@ -241,6 +271,12 @@ impl StateStore {
                         claim.deadline.to_rfc3339(),
                     ],
                 )?;
+                // A newer authorised attempt replaces the old evidence, so the
+                // old attempt's refusal no longer suppresses anything.
+                transaction.execute(
+                    "DELETE FROM result_rejections WHERE operation_id=?1",
+                    [claim.operation_id.to_string()],
+                )?;
                 BeginDecision::Execute
             }
         };
@@ -372,6 +408,151 @@ impl StateStore {
         Ok(())
     }
 
+    /// Return the recorded refusal of this exact result while its bounded
+    /// cool-down is still open.
+    pub fn result_rejection(
+        &self,
+        result: &AgentResult,
+        now: DateTime<Utc>,
+    ) -> Result<Option<ResultRejection>, StateError> {
+        let row = self
+            .connection
+            .query_row(
+                "SELECT http_status,code,decision,request_id,reason,observed_at,retry_due_at,rejections
+                 FROM result_rejections
+                 WHERE operation_id=?1 AND attempt=?2 AND fence=?3 AND retry_due_at > ?4",
+                params![
+                    result.operation_id.to_string(),
+                    result.attempt,
+                    result.fence.to_string(),
+                    now.to_rfc3339(),
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, u16>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, u32>(7)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((
+            http_status,
+            code,
+            decision,
+            request_id,
+            reason,
+            observed_at,
+            retry_due_at,
+            rejections,
+        )) = row
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ResultRejection {
+            http_status,
+            code,
+            decision,
+            request_id,
+            reason,
+            observed_at: DateTime::parse_from_rfc3339(&observed_at)
+                .map_err(|_| StateError::ResultState)?
+                .with_timezone(&Utc),
+            retry_due_at: DateTime::parse_from_rfc3339(&retry_due_at)
+                .map_err(|_| StateError::ResultState)?
+                .with_timezone(&Utc),
+            rejections,
+        }))
+    }
+
+    /// Record one Controller ingress refusal of this exact result.
+    ///
+    /// Only bounded control-plane facts are persisted: the HTTP status, the
+    /// validated error code, the decision, the request id and the Controller's
+    /// bounded Display line.  The result itself is untouched, so the receipt
+    /// and the refusal both survive a restart and can be reconciled after the
+    /// cause is corrected.
+    pub fn reject_result(
+        &mut self,
+        result: &AgentResult,
+        error: &crate::client::ControllerError,
+        now: DateTime<Utc>,
+    ) -> Result<ResultRejection, StateError> {
+        result.validate()?;
+        let previous: u32 = self
+            .connection
+            .query_row(
+                "SELECT rejections FROM result_rejections WHERE operation_id=?1",
+                [result.operation_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+        let rejections = previous.saturating_add(1);
+        // Bounded exponential cool-down: long enough that the loop never
+        // hot-loops the same rejected bytes, short enough that a corrected
+        // Controller rule reconciles the retained evidence promptly.
+        let delay = backoff_delay(rejections, u64::from(now.timestamp_subsec_nanos()), 15, 900);
+        let retry_due_at =
+            now + chrono::Duration::from_std(delay).map_err(|_| StateError::ResultState)?;
+        let reason: String = error.to_string().chars().take(256).collect();
+        self.connection.execute(
+            "INSERT INTO result_rejections(
+               operation_id,attempt,fence,http_status,code,decision,request_id,reason,
+               observed_at,retry_due_at,rejections)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+             ON CONFLICT(operation_id) DO UPDATE SET
+               attempt=excluded.attempt,
+               fence=excluded.fence,
+               http_status=excluded.http_status,
+               code=excluded.code,
+               decision=excluded.decision,
+               request_id=excluded.request_id,
+               reason=excluded.reason,
+               observed_at=excluded.observed_at,
+               retry_due_at=excluded.retry_due_at,
+               rejections=excluded.rejections",
+            params![
+                result.operation_id.to_string(),
+                result.attempt,
+                result.fence.to_string(),
+                error.status,
+                error.code,
+                error.decision,
+                error.request_id,
+                reason,
+                now.to_rfc3339(),
+                retry_due_at.to_rfc3339(),
+                rejections,
+            ],
+        )?;
+        Ok(ResultRejection {
+            http_status: error.status,
+            code: error.code.clone(),
+            decision: error.decision.to_owned(),
+            request_id: error.request_id.clone(),
+            reason,
+            observed_at: now,
+            retry_due_at,
+            rejections,
+        })
+    }
+
+    /// Drop a refusal once the Controller has accepted or superseded the
+    /// result, or once a newer attempt replaces this one.
+    fn clear_result_rejection(&mut self, result: &AgentResult) -> Result<(), StateError> {
+        self.connection.execute(
+            "DELETE FROM result_rejections WHERE operation_id=?1",
+            [result.operation_id.to_string()],
+        )?;
+        Ok(())
+    }
+
     pub fn pending_results(&self) -> Result<Vec<(AgentOperation, AgentResult)>, StateError> {
         let mut statement = self.connection.prepare(
             "SELECT operation,result_json FROM operations
@@ -450,6 +631,7 @@ impl StateStore {
         if changed != 1 {
             return Err(StateError::Stale);
         }
+        self.clear_result_rejection(result)?;
         Ok(())
     }
 
@@ -473,6 +655,7 @@ impl StateStore {
         if changed != 1 {
             return Err(StateError::Stale);
         }
+        self.clear_result_rejection(result)?;
         Ok(())
     }
 

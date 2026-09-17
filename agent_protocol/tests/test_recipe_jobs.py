@@ -163,7 +163,20 @@ def test_failed_process_result_is_valid_only_for_its_current_operation() -> None
     )
     with pytest.raises(AgentProtocolError, match="typed model"):
         validate_result_for_operation("recipe.stop", result, state="failed")
-    with pytest.raises(AgentProtocolError, match="typed model"):
+    with pytest.raises(AgentProtocolError, match="nonzero process exit code"):
         validate_result_for_operation(
             "recipe.job.run.v1", envelope["result"], state="failed"
         )
+
+
+def test_result_validation_names_the_failing_field_without_echoing_values() -> None:
+    _, envelope = documents()
+    result = json.loads(json.dumps(envelope["result"]))
+    result["output_manifest"]["files"][0]["size_bytes"] = "not-an-integer"
+
+    with pytest.raises(AgentProtocolError) as raised:
+        validate_result_for_operation("recipe.job.run.v1", result, state="succeeded")
+
+    message = str(raised.value)
+    assert "output_manifest.files.0.size_bytes" in message
+    assert "not-an-integer" not in message

@@ -96,6 +96,15 @@ class WireModel(StrictJSONModel, Mapping[str, Any]):
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
+# One stable failure-code rule is shared by the agent result contract, the
+# privileged host-helper response and the Controller's operator failure
+# evidence.  A producer and every consumer must accept and refuse exactly the
+# same spellings, so the rule lives here as one exported pattern instead of a
+# literal repeated at each boundary.
+ERROR_CODE_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
+
+ErrorCode = Annotated[str, Field(pattern=ERROR_CODE_PATTERN)]
+
 
 class OperationCheckpoint(WireModel):
     """Restart-safe cursor identifying a durable operation unit."""
@@ -207,6 +216,8 @@ def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, objec
 
 
 __all__ = [
+    "ERROR_CODE_PATTERN",
+    "ErrorCode",
     "OperationCheckpoint",
     "OperationMemberProgress",
     "OperationProgress",

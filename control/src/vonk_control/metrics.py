@@ -6,12 +6,13 @@ import math
 import re
 import threading
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import OperationProgress
 
 from .models import (
     AgentCertificate,
@@ -19,6 +20,7 @@ from .models import (
     AgentOperation,
     AgentOperationAttempt,
 )
+from .operation_progress import project_progress
 
 if TYPE_CHECKING:
     from .fleet_projection import FleetSnapshot
@@ -90,6 +92,39 @@ def protocol_version_bucket(
     return "supported"
 
 
+def runnable_job_ages(
+    rows: Iterable[tuple[str, datetime, object]],
+    now: datetime,
+) -> dict[str, float]:
+    """Return the oldest queued-but-runnable age per job kind.
+
+    A queued job whose ``result.observation_due_at`` is still in the future is
+    an intentional wait, so it is excluded: only work the durable queue could
+    actually issue now may age into the starvation signal.  This is what keeps
+    the alert honest while another job of a different kind is running.
+    """
+
+    ages: dict[str, float] = {}
+    for kind, created_at, result in rows:
+        if isinstance(result, Mapping):
+            due = result.get("observation_due_at")
+            if isinstance(due, str):
+                try:
+                    due_at = datetime.fromisoformat(due)
+                except ValueError:
+                    due_at = None
+                if due_at is not None:
+                    if due_at.tzinfo is None:
+                        due_at = due_at.replace(tzinfo=UTC)
+                    if due_at > now:
+                        continue
+        created = created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        ages[kind] = max(ages.get(kind, 0.0), max(0.0, (now - created).total_seconds()))
+    return ages
+
+
 class MetricsRegistry:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -107,12 +142,14 @@ class MetricsRegistry:
             ],
         ] = {}
         self._jobs: dict[tuple[str, str], int] = {}
+        self._runnable_job_ages: dict[str, float] = {}
         self._route_state = "unavailable"
         self._backup_age: float | None = None
         self._api_counts: dict[tuple[str, str], int] = defaultdict(int)
         self._api_durations: dict[tuple[str, str], list[float]] = defaultdict(list)
         self._agent_nodes: dict[str, tuple[str, str, float | None, float | None]] = {}
         self._agent_operations: dict[tuple[str, str], int] = {}
+        self._stalled_operations: dict[str, int] = {}
         self._agent_leases: dict[tuple[str, str], float] = {}
 
     @staticmethod
@@ -181,6 +218,25 @@ class MetricsRegistry:
         with self._lock:
             self._jobs = dict(jobs)
 
+    def replace_runnable_job_ages(self, rows: Iterable[tuple[str, float]]) -> None:
+        """Atomically replace the oldest runnable queued age per bounded kind.
+
+        A queued job that is deliberately deferred (for example an observation
+        retry due in the future) is not runnable and must not appear here, so a
+        starvation alert can distinguish real eligible work from an intentional
+        wait even while another job of a different kind is running.
+        """
+
+        ages: dict[str, float] = {}
+        for kind, age in rows:
+            safe_kind = kind if kind in _JOB_KINDS else "other"
+            ages[safe_kind] = max(
+                ages.get(safe_kind, 0.0),
+                self._number(age, "runnable job age"),
+            )
+        with self._lock:
+            self._runnable_job_ages = ages
+
     def set_route_state(self, state: str) -> None:
         if state not in _ROUTE_STATES:
             raise ValueError("route metric state is invalid")
@@ -210,6 +266,7 @@ class MetricsRegistry:
         *,
         nodes: dict[str, tuple[str, str, float | None, float | None]],
         operations: dict[tuple[str, str], int],
+        stalled: dict[str, int],
         leases: dict[tuple[str, str], float],
     ) -> None:
         safe_nodes = {}
@@ -253,14 +310,21 @@ class MetricsRegistry:
             )
             safe_age = self._number(age, "operation lease age")
             safe_leases[safe_key] = max(safe_leases.get(safe_key, 0.0), safe_age)
+        safe_stalled: dict[str, int] = defaultdict(int)
+        for operation, count in stalled.items():
+            safe_stalled[
+                operation if operation in _AGENT_OPERATIONS else "other"
+            ] += int(self._number(count, "stalled operation count"))
         with self._lock:
             self._agent_nodes = safe_nodes
             self._agent_operations = dict(safe_operations)
+            self._stalled_operations = dict(safe_stalled)
             self._agent_leases = safe_leases
 
     def render(self) -> str:
         with self._lock:
             nodes, jobs = dict(self._nodes), dict(self._jobs)
+            runnable_job_ages = dict(self._runnable_job_ages)
             route_state = self._route_state
             backup_age = self._backup_age
             api_counts = dict(self._api_counts)
@@ -269,6 +333,7 @@ class MetricsRegistry:
             }
             agent_nodes = dict(self._agent_nodes)
             agent_operations = dict(self._agent_operations)
+            stalled_operations = dict(self._stalled_operations)
             agent_leases = dict(self._agent_leases)
         lines = [
             "# HELP vonk_route_state Current inference route state.",
@@ -356,6 +421,14 @@ class MetricsRegistry:
             lines.append(f'vonk_jobs{{kind="{kind}",state="{state}"}} {count}')
         lines.extend(
             (
+                "# HELP vonk_runnable_job_age_seconds Age of the oldest runnable queued control job by kind.",
+                "# TYPE vonk_runnable_job_age_seconds gauge",
+            )
+        )
+        for kind, age in sorted(runnable_job_ages.items()):
+            lines.append(f'vonk_runnable_job_age_seconds{{kind="{kind}"}} {age:g}')
+        lines.extend(
+            (
                 "# HELP vonk_agent_state Current durable outbound-agent lifecycle state.",
                 "# TYPE vonk_agent_state gauge",
                 "# HELP vonk_agent_version_compatibility Agent protocol compatibility bucket.",
@@ -395,6 +468,14 @@ class MetricsRegistry:
             lines.append(
                 f'vonk_agent_operations{{operation="{operation}",state="{state}"}} {count}'
             )
+        lines.extend(
+            (
+                "# HELP vonk_stalled_operations Running agent operations whose declared progress has stopped.",
+                "# TYPE vonk_stalled_operations gauge",
+            )
+        )
+        for operation, count in sorted(stalled_operations.items()):
+            lines.append(f'vonk_stalled_operations{{operation="{operation}"}} {count}')
         lines.extend(
             (
                 "# HELP vonk_agent_operation_lease_age_seconds Age since the active operation lease was last updated.",
@@ -505,6 +586,25 @@ class OperationalMetricsCollector:
                     )
                 )
             )
+            progress_rows = list(
+                session.execute(
+                    select(AgentOperation.kind, AgentOperationAttempt.progress)
+                    .join(
+                        AgentOperationAttempt,
+                        (AgentOperationAttempt.operation_id == AgentOperation.id)
+                        & (
+                            AgentOperationAttempt.attempt
+                            == AgentOperation.current_attempt
+                        ),
+                    )
+                    .where(
+                        AgentOperation.state == "running",
+                        AgentOperationAttempt.state == "running",
+                        AgentOperationAttempt.progress.is_not(None),
+                    )
+                    .order_by(AgentOperation.kind, AgentOperation.id)
+                )
+            )
         active_certificates: dict[str, AgentCertificate] = {}
         for certificate in certificates:
             active_certificates.setdefault(certificate.node_id, certificate)
@@ -533,8 +633,23 @@ class OperationalMetricsCollector:
             key = (node_id, operation)
             age = max(0.0, (now - _aware(updated_at)).total_seconds())
             leases[key] = max(leases.get(key, 0.0), age)
+        # Stalled work is derived from the same advisory projection the operator
+        # API already exposes: a running operation that declared measurable
+        # progress and has stopped advancing.  A malformed stored snapshot is
+        # skipped rather than failing the whole scrape.
+        stalled: dict[str, int] = defaultdict(int)
+        for kind, progress in progress_rows:
+            try:
+                projected = project_progress(
+                    OperationProgress.model_validate(progress), now
+                )
+            except (TypeError, ValueError):
+                continue
+            if projected.activity == "possibly_stalled":
+                stalled[kind] += 1
         self._registry._replace_agent_snapshot(
             nodes=nodes,
             operations=operations,
+            stalled=dict(stalled),
             leases=leases,
         )

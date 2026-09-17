@@ -89,6 +89,13 @@ pub enum ClientError {
     // treat the refusal as an acknowledgement.
     #[error("controller did not accept the result for this attempt")]
     ResultSuperseded,
+    // The Controller refused this exact result at its ingress validation
+    // boundary (HTTP 422).  Re-sending the same bytes cannot succeed, but the
+    // refusal is about this operation's evidence, not about the agent's
+    // identity or transport, so the caller records the bounded refusal durably
+    // and keeps the rest of the loop alive instead of exiting.
+    #[error("controller refused the result as invalid")]
+    ResultRejected(Box<ControllerError>),
     #[error("exact recipe run observation is not ready for authorization")]
     ObservationNotReady,
     #[error("controller CA pin is invalid")]
@@ -148,21 +155,21 @@ impl ClientError {
 
     pub fn status(&self) -> Option<u16> {
         match self {
-            Self::Controller(error) => Some(error.status),
+            Self::Controller(error) | Self::ResultRejected(error) => Some(error.status),
             _ => None,
         }
     }
 
     pub fn code(&self) -> Option<&str> {
         match self {
-            Self::Controller(error) => Some(&error.code),
+            Self::Controller(error) | Self::ResultRejected(error) => Some(&error.code),
             _ => None,
         }
     }
 
     pub fn request_id(&self) -> Option<&str> {
         match self {
-            Self::Controller(error) => error.request_id.as_deref(),
+            Self::Controller(error) | Self::ResultRejected(error) => error.request_id.as_deref(),
             _ => None,
         }
     }
@@ -184,7 +191,7 @@ impl ClientError {
     /// are intentionally unavailable to callers of the diagnostic surface.
     pub fn endpoint(&self) -> Option<&str> {
         match self {
-            Self::Controller(error) => Some(&error.endpoint),
+            Self::Controller(error) | Self::ResultRejected(error) => Some(&error.endpoint),
             _ => None,
         }
     }
@@ -197,7 +204,13 @@ impl ClientError {
     }
 
     pub fn decision(&self) -> &'static str {
-        if self.retryable() { "retry" } else { "exit" }
+        if self.retryable() {
+            "retry"
+        } else if matches!(self, Self::ResultRejected(_)) {
+            "record"
+        } else {
+            "exit"
+        }
     }
 }
 
@@ -541,6 +554,12 @@ impl AgentHttpClient {
             // not acknowledge this submission, so the caller keeps the evidence
             // instead of deleting it on the strength of a refusal.
             StatusCode::CONFLICT => Err(ClientError::ResultSuperseded),
+            // A 422 refuses these exact bytes at the Controller's ingress
+            // validation boundary.  The caller records the bounded refusal and
+            // keeps the loop alive; it never treats the refusal as acceptance.
+            StatusCode::UNPROCESSABLE_ENTITY => Err(ClientError::ResultRejected(Box::new(
+                response_controller_error(&response),
+            ))),
             _ => {
                 classify_response(&response)?;
                 Err(ClientError::Protocol)
@@ -1933,6 +1952,16 @@ fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
     if response.status().is_success() {
         return Ok(());
     }
+    Err(ClientError::Controller(Box::new(
+        response_controller_error(response),
+    )))
+}
+
+/// Build the bounded Controller error for one non-success response.
+///
+/// Only the URL path, the validated error token/code headers and the retry
+/// hint are captured; bodies, queries and credentials stay unread.
+fn response_controller_error(response: &reqwest::Response) -> ControllerError {
     let endpoint = response.url().path();
     let operation = format!("controller.request {endpoint}");
     let request_id = response
@@ -1960,7 +1989,7 @@ fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
                 u32::try_from(delay.max(0)).ok()
             })
         });
-    Err(ClientError::Controller(Box::new(error)))
+    error
 }
 
 fn controller_error(

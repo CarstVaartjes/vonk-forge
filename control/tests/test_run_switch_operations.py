@@ -2182,6 +2182,132 @@ def test_first_profile_preparation_preview_replans_a_missing_build_archive(
     ]
 
 
+def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) -> None:
+    """A notes-only successor reuses the identical prepared build.
+
+    ``persist_plan_in_session`` deliberately reuses a succeeded receipt across a
+    revision boundary when the executable input identity matches, keeping the
+    older row and its revision id.  The build selection used to reject that row
+    because its recorded revision id no longer matched the head, so an editorial
+    rename planned a full rebuild of identical bytes.
+    """
+
+    import copy
+
+    from vonk_forge_contracts import RecipeDefinition, content_sha256
+
+    sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
+        assert revision is not None
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None
+        node.binary_digest = "a" * 64
+        node.capabilities = [*node.capabilities, "recipe.build.v1"]
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
+        if session.get(RecipeSourceBundle, build.source_bundle_sha256) is None:
+            session.add(
+                RecipeSourceBundle(
+                    sha256=build.source_bundle_sha256,
+                    media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
+                    archive_bytes=1,
+                    total_bytes=1,
+                    file_count=1,
+                    storage_key="editorial-source-bundle",
+                    manifest={"schema_version": 1},
+                    verified_at=NOW,
+                )
+            )
+        document = copy.deepcopy(revision.document)
+        metadata = document["metadata"]
+        assert isinstance(metadata, dict)
+        metadata["title"] = "Editorially renamed recipe"
+        canonical = RecipeDefinition.model_validate(document)
+        successor = CatalogDocumentRevision(
+            id=str(uuid.uuid4()),
+            document_id=revision.document_id,
+            kind=revision.kind,
+            publisher=revision.publisher,
+            slug=revision.slug,
+            revision_number=revision.revision_number + 1,
+            schema_version=2,
+            state="active",
+            document=canonical.model_dump(mode="json"),
+            content_digest=content_sha256(canonical),
+            artifact_key="b" * 64,
+            execution_key="c" * 64,
+            projected=copy.deepcopy(revision.projected),
+            created_by="test",
+            created_at=NOW,
+        )
+        session.add(successor)
+        session.flush()
+        successor_id = successor.id
+        model_digest = canonical.models[0].model.content_sha256
+        reused_plan = RecipeBuildPlan(
+            build_id=build.id,
+            recipe_revision_id=successor_id,
+            recipe_content_sha256=content_sha256(canonical),
+            builder_node_id=build.builder_node_id,
+            source_bundle_sha256=build.source_bundle_sha256,
+            build_input_sha256=build.build_input_sha256,
+            agent_payload=dict(build.plan),
+            policy_report=dict(build.policy_report),
+        )
+
+    def preview_build(recipe_revision_id: str, builder_node_id: str) -> RecipeBuildPlan:
+        del builder_node_id
+        assert recipe_revision_id == successor_id
+        return reused_plan
+
+    lifecycle.preview_build = preview_build
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    plan = service.preview(
+        RunSwitchPreviewRequest(
+            model_content_sha256=model_digest,
+            recipe_revision_id=successor_id,
+            spark_group=SparkGroup(
+                nodes=[
+                    SparkGroupNode(
+                        node_id=nodes[0],
+                        rank=0,
+                        role="entrypoint",
+                        endpoint_owner=True,
+                    )
+                ]
+            ),
+            alias="qwen",
+            action="run",
+            retention="retain-cached",
+        ),
+        actor="admin",
+    )
+
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    assert plan.build is not None
+    assert plan.build.build_id == build_id
+    assert plan.build.state == "available"
+    assert not any(
+        phase.kind == "prepare" and phase.subphase == "container-build"
+        for phase in plan.phases
+    )
+
+
 def test_present_rebuilt_image_replaces_installation_bound_to_missing_build(
     tmp_path: Path,
 ) -> None:

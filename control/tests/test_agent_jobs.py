@@ -2360,6 +2360,96 @@ def test_live_prior_mutation_still_blocks_later_work(service) -> None:
         assert running is not None and running.state == "running"
 
 
+@pytest.mark.parametrize("dead_attempt", ("missing", "stopped"))
+def test_dead_running_mutation_is_reconciled_and_stops_blocking(
+    service, dead_attempt
+) -> None:
+    """A running order with no executor must not wedge later work (#811).
+
+    #810 reconciled a superseded waiting order, but the claim gate still treated
+    every ``running`` predecessor as live without reading its attempt.  When an
+    agent restarts and its attempt row is gone or already stopped, that order
+    can never deliver the receipt a wait needs, yet it blocked every later
+    mutation on the node forever.  The wrong implementation appends the
+    predecessor to ``active_mutations`` unconditionally; this one parks it as
+    an unobserved operator wait and admits the successor on the next claim.
+    """
+
+    jobs, sessions, clock = service
+    old_parent = parent(sessions, clock)
+    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert first is not None and first.operation_id == old.id
+
+    with sessions.begin() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == old.id
+            )
+        )
+        assert attempt is not None
+        if dead_attempt == "missing":
+            session.delete(attempt)
+        else:
+            attempt.state = "expired"
+    clock.advance(seconds=1)
+    new_parent = parent(sessions, clock)
+    new = jobs.enqueue(new_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+
+    # The first claim reconciles the dead order and refuses itself so the park
+    # commits; the next claim must then admit the successor.
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    claimed = claim_agent(jobs, NODE_A, "serial-a", 30)
+
+    assert claimed is not None and claimed.operation_id == new.id
+    with sessions() as session:
+        parked = session.get(AgentOperation, old.id)
+        successor = session.get(AgentOperation, new.id)
+        assert parked is not None and parked.state == "waiting-for-operator"
+        assert parked.status_reason is not None
+        assert "the effect is unobserved" in parked.status_reason
+        assert (
+            "no recorded attempt" in parked.status_reason
+            if dead_attempt == "missing"
+            else "stopped in state expired" in parked.status_reason
+        )
+        assert successor is not None and successor.state == "running"
+
+
+def test_reconciled_dead_running_mutation_retains_its_pending_result(service) -> None:
+    """Reconciliation must never discard evidence the Controller has not applied."""
+
+    jobs, sessions, clock = service
+    old_parent = parent(sessions, clock)
+    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert first is not None
+    with sessions.begin() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == old.id
+            )
+        )
+        assert attempt is not None
+        attempt.result = {"reason": "unacknowledged stop receipt"}
+        attempt.state = "expired"
+    clock.advance(seconds=1)
+    new_parent = parent(sessions, clock)
+    jobs.enqueue(new_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is not None
+
+    with sessions() as session:
+        retained = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == old.id
+            )
+        )
+        assert retained is not None
+        assert retained.result == {"reason": "unacknowledged stop receipt"}
+
+
 def test_claim_refusal_records_capability_reason(service) -> None:
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)

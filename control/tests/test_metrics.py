@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import pytest
@@ -19,7 +19,7 @@ from vonk_control.fleet_projection import (
     TelemetryPoint,
     TelemetryState,
 )
-from vonk_control.metrics import MetricsRegistry
+from vonk_control.metrics import MetricsRegistry, runnable_job_ages
 
 from .telemetry_fixtures import telemetry_metrics
 
@@ -238,6 +238,40 @@ def test_job_count_snapshot_aggregates_unknown_kinds() -> None:
         ]
     )
     assert 'vonk_jobs{kind="other",state="queued"} 5' in metrics.render()
+
+
+def test_runnable_job_age_excludes_intentional_deferrals() -> None:
+    # The reported starvation blind spot: a running job of another kind masked a
+    # starved queued one, and an intentional retry backoff could look like
+    # starvation.  The age signal is per kind and only counts work the queue
+    # could issue now.
+    now = datetime(2026, 9, 17, 12, tzinfo=UTC)
+    rows = [
+        ("recipe.run-switch.v2", now - timedelta(minutes=20), {}),
+        ("recipe.run-switch.v2", now - timedelta(minutes=30), {}),
+        # A deferred observation retry is an intentional wait.
+        (
+            "recipe.build.v1",
+            now - timedelta(minutes=40),
+            {"observation_due_at": (now + timedelta(minutes=10)).isoformat()},
+        ),
+        ("recipe.build.v1", now - timedelta(minutes=2), {}),
+    ]
+
+    ages = runnable_job_ages(rows, now)
+
+    assert ages == {
+        "recipe.run-switch.v2": 30 * 60,
+        "recipe.build.v1": 2 * 60,
+    }
+    metrics = MetricsRegistry()
+    metrics.replace_runnable_job_ages(ages.items())
+    assert (
+        'vonk_runnable_job_age_seconds{kind="recipe.run-switch.v2"} 1800'
+        in metrics.render()
+    )
+    metrics.replace_runnable_job_ages([])
+    assert "vonk_runnable_job_age_seconds{" not in metrics.render()
 
 
 def test_metrics_endpoint_is_separately_authenticated() -> None:

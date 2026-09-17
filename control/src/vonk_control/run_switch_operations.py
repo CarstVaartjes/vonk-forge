@@ -3245,26 +3245,30 @@ class RunSwitchOperationService:
                 return installation
         return None
 
+    def _build_is_available(self, candidate: RecipeBuild) -> bool:
+        """Whether the recorded receipt still proves a present prepared image."""
+
+        if (
+            candidate.state != "succeeded"
+            or candidate.image_digest is None
+            or candidate.oci_layout_sha256 is None
+            or type(candidate.image_bytes) is not int
+        ):
+            return False
+        return (
+            self._build_archive_available is None
+            or self._build_archive_available(
+                candidate.oci_layout_sha256, candidate.image_bytes
+            )
+        )
+
     def _matching_build(
         self,
         session: Session,
         revision_id: str,
         installation: RecipeInstallation | None,
     ) -> RecipeBuild | None:
-        def available(candidate: RecipeBuild) -> bool:
-            if (
-                candidate.state != "succeeded"
-                or candidate.image_digest is None
-                or candidate.oci_layout_sha256 is None
-                or type(candidate.image_bytes) is not int
-            ):
-                return False
-            return (
-                self._build_archive_available is None
-                or self._build_archive_available(
-                    candidate.oci_layout_sha256, candidate.image_bytes
-                )
-            )
+        available = self._build_is_available
 
         revision = session.get(CatalogDocumentRevision, revision_id)
         if revision is not None and not _is_source_build(revision.document):
@@ -3427,14 +3431,29 @@ class RunSwitchOperationService:
                 # succeeded row that was reset after its archive disappeared;
                 # refresh it so the first preview sees the durable planned row.
                 session.refresh(selected)
-            if selected is None or selected.recipe_revision_id != revision.id:
+            if selected is None:
                 errors.append(f"{node.node_id}: build preview receipt is unavailable")
                 continue
-            return _BuildSelection(
-                build=None,
-                candidate=selected,
-                builder_freshness=freshness,
-            )
+            if selected.recipe_revision_id == revision.id:
+                return _BuildSelection(
+                    build=None,
+                    candidate=selected,
+                    builder_freshness=freshness,
+                )
+            # A succeeded receipt may be recorded under an earlier editorial
+            # revision of the same recipe while its executable input identity
+            # is identical (including the resolved runtime adapter).  That is
+            # the exact prepared image; require the recorded input identity and
+            # present bytes rather than the revision id, and never accept a
+            # mismatched identity.
+            if (
+                getattr(proposed, "build_input_sha256", None)
+                != selected.build_input_sha256
+                or not self._build_is_available(selected)
+            ):
+                errors.append(f"{node.node_id}: build preview receipt is unavailable")
+                continue
+            return _BuildSelection(build=selected, candidate=selected)
 
         if saw_builder:
             detail = "No compatible Controller builder could prepare the exact recipe source and runtime image."

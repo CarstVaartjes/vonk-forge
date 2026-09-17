@@ -1390,6 +1390,7 @@ class FleetProfileService:
                 candidate = self._cache_resolver(
                     recipe_identity=document.id,
                     model_variant=choice.model_variant,
+                    exact_revision_id=revision.id,
                 )
             except (OSError, RuntimeError, TypeError, ValueError) as error:
                 raise FleetProfileConflict(
@@ -1406,6 +1407,10 @@ class FleetProfileService:
                 if isinstance(recipe_part, Mapping)
                 else None
             )
+            # The resolver is asked for the current head revision, so a
+            # different revision back is a resolution defect, not an older
+            # cached substitute.  Keep that fail-closed rather than silently
+            # binding the profile to bytes the operator did not select.
             if isinstance(chosen_id, str) and chosen_id != revision.id:
                 chosen = session.get(CatalogDocumentRevision, chosen_id)
                 if (
@@ -1417,7 +1422,9 @@ class FleetProfileService:
                     raise FleetProfileConflict(
                         "cache resolver returned an incompatible recipe revision"
                     )
-                revision = chosen
+                raise FleetProfileConflict(
+                    "cache resolver replaced the selected recipe revision"
+                )
         return document, revision, cache
 
     @staticmethod
@@ -3204,6 +3211,18 @@ class FleetProfileService:
                 if recipe_part and bool(recipe_part.get("cached"))
                 else "Recipe not cached"
             )
+            cache_blockers = cache.get("blockers") if cache is not None else None
+            if isinstance(cache_blockers, Sequence) and any(
+                blocker == "recipe-not-cached" for blocker in cache_blockers
+            ):
+                # The selected exact revision is bound into the profile, so the
+                # operator has to prepare this cache entry rather than accept a
+                # silently different older revision.
+                warnings.append(
+                    f"Recipe {recipe.publisher}/{recipe.slug} revision "
+                    f"{revision.revision_number} is not in the local cache; "
+                    "prepare the exact cache entry before applying"
+                )
             model_state = (
                 "Cached"
                 if model_part and bool(model_part.get("cached"))

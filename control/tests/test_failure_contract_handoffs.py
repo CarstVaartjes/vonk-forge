@@ -55,9 +55,14 @@ def client_for(sessions, tmp_path):
 @pytest.mark.parametrize(
     "failure",
     [
-        {"reason": "The image could not be acquired"},
         {
-            "error_code": "failure." + "x" * 120,
+            "status": "failed",
+            "error_code": "image_acquire_failed",
+            "reason": "The image could not be acquired",
+        },
+        {
+            "status": "failed",
+            "error_code": "failure_receipt_unreadable",
             "summary": "s" * 1024,
             "uncertain": True,
         },

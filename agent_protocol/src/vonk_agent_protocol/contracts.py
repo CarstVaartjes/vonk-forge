@@ -25,7 +25,7 @@ from pydantic import (
 )
 
 from .failure_evidence import FailureDiagnostics
-from .wire_model import OperationProgress, WireModel
+from .wire_model import ErrorCode, OperationProgress, WireModel
 
 MAX_DOCUMENT_BYTES = 64 * 1024
 MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES = 16 * 1024 * 1024
@@ -295,7 +295,7 @@ class AgentFailureResult(WireModel):
     diagnostics: FailureDiagnostics | None = None
     package_activation: PackageActivationReceipt | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=1024)
-    error_code: str | None = Field(default=None, min_length=1, max_length=128)
+    error_code: ErrorCode | None = None
     summary: str | None = Field(default=None, min_length=1, max_length=1024)
     uncertain: bool | None = None
     recovery: str | None = Field(default=None, min_length=1, max_length=128)
@@ -969,6 +969,12 @@ def validate_result_for_operation(
     Success and failure both use the current typed graph. A one-shot recipe
     job reports its process result on failure; infrastructure failures use the
     shared failure model. Neither permits another operation's success receipt.
+
+    The generic failure model must identify itself: a ``failed`` envelope that
+    is not a recipe-process receipt has to carry ``status="failed"`` and a
+    stable ``error_code`` matching the shared ``ERROR_CODE_PATTERN``.  That
+    rule is enforced by ``AgentResult`` itself, so the agent producer and the
+    Controller ingress cannot disagree about a usable failure.
     """
 
     try:
@@ -998,10 +1004,28 @@ def validate_result_for_operation(
         ):
             raise ValueError("failed recipe job requires a nonzero process exit code")
         return parsed
-    except (TypeError, ValueError, ValidationError) as error:
+    except ValidationError as error:
         raise AgentProtocolError(
-            f"{operation_kind.value} result does not match its typed model"
+            f"{operation_kind.value} result does not match its typed model: "
+            f"{_validation_locations(error)}"
         ) from error
+    except (TypeError, ValueError) as error:
+        raise AgentProtocolError(
+            f"{operation_kind.value} result is invalid: {error}"
+        ) from error
+
+
+def _validation_locations(error: ValidationError, *, limit: int = 8) -> str:
+    """Render bounded field paths and rule types, never rejected values."""
+
+    entries: list[str] = []
+    for item in error.errors()[:limit]:
+        location = ".".join(str(part) for part in item.get("loc", ())) or "<root>"
+        kind = str(item.get("type", "value_error"))
+        entries.append(f"{location}:{kind}"[:80])
+    if not entries:
+        return "<unknown>"
+    return ", ".join(entries)[:256]
 
 
 class _ProtocolEnvelopeModel(WireModel):
@@ -1240,6 +1264,19 @@ class AgentResult(_ProtocolEnvelopeModel):
         _uuid(self.fence, name="fence")
         _node_id(self.node_id)
         _deadline(self.deadline)
+        if (
+            self.state == "failed"
+            and isinstance(self.result, AgentFailureResult)
+            and (self.result.status != "failed" or self.result.error_code is None)
+        ):
+            # A job receipt reports its own process outcome on failure; any
+            # other failed operation uses the shared failure model, which must
+            # identify itself with a failed status and a stable error code.
+            # The envelope is the one place both the agent producer and the
+            # Controller ingress validate, so the rule cannot drift.
+            raise ValueError(
+                "failed result requires status='failed' and a stable error_code"
+            )
         result_document = json.loads(canonical_message(self.result))
         object.__setattr__(
             self,

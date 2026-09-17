@@ -72,6 +72,30 @@ def test_stalled_is_advisory_phase_aware_and_stale_rate_is_hidden():
     assert progress.activity == "active"  # read projection does not mutate stored work
 
 
+def test_declared_progress_makes_a_non_transfer_phase_stall_able() -> None:
+    # A non-transfer phase used to be unconditionally "waiting", so a stuck
+    # verifying/starting step with a declared total was invisible.  A phase that
+    # declared measurable work and stopped advancing is now advisory-stalled,
+    # while an unbounded phase stays waiting rather than guessing a threshold.
+    bounded = OperationProgress.model_validate(
+        sample(completed_bytes=10, total_bytes=100, total_bytes_known=True)
+    )
+    stalled = project_progress(
+        bounded.model_copy(update={"phase": "verifying"}),
+        NOW + timedelta(seconds=121),
+    )
+    assert stalled.activity == "possibly_stalled"
+
+    unbounded = OperationProgress.model_validate(sample(completed_bytes=10))
+    assert (
+        project_progress(
+            unbounded.model_copy(update={"phase": "building"}),
+            NOW + timedelta(seconds=3600),
+        ).activity
+        == "waiting"
+    )
+
+
 def test_write_frequency_coalesces_and_retains_one_snapshot():
     progress = sample(completed_bytes=0)
     for tick in range(1, 1001):

@@ -10,6 +10,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from vonk_agent_protocol import (
+    ERROR_CODE_PATTERN,
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
@@ -53,7 +54,7 @@ class OperationFailureEvidence(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    error_code: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    error_code: str = Field(pattern=ERROR_CODE_PATTERN)
     summary: str = Field(min_length=1, max_length=256)
     detail: str | None = Field(default=None, max_length=1024)
     retryable: bool = False
@@ -302,6 +303,7 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
                 "error_code",
                 "failure_kind",
                 "retry_after_seconds",
+                "status",
                 "summary",
                 "reason",
                 "uncertain",

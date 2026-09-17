@@ -1179,6 +1179,22 @@ def test_public_input_scanner_runs_before_every_image_build() -> None:
     assert "Build and push Hermes image" in publisher
 
 
+def test_supply_chain_evidence_gate_runs_on_every_pull_request() -> None:
+    """A stale manifest must fail a pull request, not only a release tag.
+
+    ``validate-release-images`` needs release metadata and image attestations,
+    so it only runs once a tag is already being published.  The offline
+    supply-chain verifier also runs in the always-on ``supply-chain`` job, which
+    is what makes an invalidated SBOM, protocol wheel or image pin fail before
+    publication; that job must stay independent of the release metadata chain.
+    """
+
+    gate = job("supply-chain")
+    assert "needs:" not in gate
+    assert "scripts/verify-public-image-inputs" in gate
+    assert "scripts/verify-supply-chain --json" in gate
+
+
 def test_api_worker_and_litellm_are_promoted_from_accepted_dev_manifests() -> None:
     publisher = job("publish-images")
     assert "Build and push API image" not in publisher

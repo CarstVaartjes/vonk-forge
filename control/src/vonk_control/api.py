@@ -80,7 +80,7 @@ from .fleet_projection import (
 from .fleet_stream import parse_last_event_id
 from .fleet_stream_contract import FleetStreamEvent
 from .logging import JobLogCorruptError
-from .metrics import MetricsRegistry
+from .metrics import MetricsRegistry, runnable_job_ages
 from .model_cache_api import (
     install_model_operator_routes,
     register_model_cache_operation_provider,
@@ -1629,6 +1629,7 @@ def production_app() -> FastAPI:
     def refresh_metrics() -> None:
         operational_metrics.refresh()
         refresh_fleet_metrics(metrics, visual_fleet.read())
+        now = datetime.now(UTC)
         with sessions() as session:
             job_counts = [
                 (kind, state, count)
@@ -1639,6 +1640,22 @@ def production_app() -> FastAPI:
                 )
             ]
             metrics.replace_job_counts(job_counts)
+            # Oldest queued work an operator could actually run now.  A job
+            # deferred by a future ``observation_due_at`` is an intentional wait,
+            # not starvation, and must not age into the alert.
+            metrics.replace_runnable_job_ages(
+                runnable_job_ages(
+                    (
+                        (row.kind, row.created_at, row.result)
+                        for row in session.execute(
+                            select(Job.kind, Job.created_at, Job.result).where(
+                                Job.state == "queued"
+                            )
+                        )
+                    ),
+                    now,
+                ).items()
+            )
         backup_marker = settings.state_path / "last-successful-backup.epoch"
         if backup_marker.is_file() and not backup_marker.is_symlink():
             try:
