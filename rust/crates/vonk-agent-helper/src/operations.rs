@@ -30,7 +30,14 @@ use crate::protocol::{ContainerRuntimeAction, HostOperation, RestartUnit, artifa
 const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
-const MAX_RUNTIME_REQUEST_BYTES: u64 = 64 * 1024;
+/// The byte ceiling on one canonical runtime-request document. Owned by the
+/// wire contract, not by this helper: the agent enforces the same ceiling
+/// before it writes the request file, so the helper's read cannot be stricter
+/// than the request the agent was willing to send. A private `64 * 1024`
+/// round number here once refused a legitimate many-mount command line with
+/// the opaque `helper.unsafe_path`, after a successful install and after the
+/// agent had admitted the same bytes.
+const MAX_RUNTIME_REQUEST_BYTES: u64 = vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES as u64;
 const MAX_RUNTIME_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 const MAX_COMPILED_MODEL_FILES: usize = 4096;
 const MAX_COMPILED_MODEL_PATH_CHARS: usize = 512;
@@ -3598,10 +3605,11 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        CommandOutput, CommandRunner, JobCancellationFence, MAX_COMPILED_MODEL_PATH_CHARS,
-        ManagedRoots, OperationError, OperationExecutor, RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
-        RuntimeImageReceipt, bounded_container_exit_code, finish_timed_out_job, hex_sha256,
-        loaded_image_source, parse_publication, parse_runtime_stop, validate_docker_run,
+        CommandOutput, CommandRunner, HostRuntimeAction, HostRuntimeRequest, JobCancellationFence,
+        MAX_COMPILED_MODEL_PATH_CHARS, ManagedRoots, OperationError, OperationExecutor,
+        RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION, RuntimeImageReceipt, bounded_container_exit_code,
+        finish_timed_out_job, hex_sha256, loaded_image_source, parse_publication,
+        parse_runtime_stop, validate_docker_run,
     };
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
@@ -5580,6 +5588,55 @@ mod tests {
             Err(OperationError::Io(_))
         ));
         assert_eq!(fs::read(cache.join("sentinel")).unwrap(), b"outside");
+    }
+
+    #[test]
+    fn a_request_document_between_the_retired_private_cap_and_the_exchange_ceiling_is_read() {
+        // Wrong implementation: the helper read the request file under a
+        // private `MAX_RUNTIME_REQUEST_BYTES = 64 * 1024` round number, so a
+        // legitimate many-mount command line the plan admits -- and the agent
+        // admitted under the same byte budget -- was refused as
+        // `helper.unsafe_path` after a successful install, blaming the path
+        // rather than the bound.
+        let temp = tempfile::tempdir().unwrap();
+        let requests = temp.path().join("runtime-requests");
+        fs::create_dir_all(&requests).unwrap();
+        let request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::Start,
+            job_id: uuid::Uuid::new_v4(),
+            operation_id: uuid::Uuid::new_v4(),
+            attempt: 1,
+            fence: uuid::Uuid::new_v4(),
+            arguments: (0..3000)
+                .map(|index| format!("--mount=type=bind,src=/run/vonk/models/{index:05}"))
+                .collect(),
+            observation: None,
+            installation_id: None,
+        };
+        let body = vonk_agent_protocol::canonical_json(&request).unwrap();
+        assert!(
+            body.len() > 64 * 1024,
+            "this document must exceed the retired private cap, got {} bytes",
+            body.len()
+        );
+        assert!(body.len() <= vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES);
+        let digest = hex_sha256(&body);
+        let path = requests.join(format!("{digest}.json"));
+        fs::write(&path, &body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()).with_runtime_requests(&requests),
+            &[0; 32],
+            MissingContainerRunner,
+            None,
+        )
+        .unwrap();
+        let read = executor
+            .read_runtime_request(&digest)
+            .expect("a request inside the exchange ceiling must be read");
+        assert_eq!(read.arguments.len(), 3000);
     }
 
     #[test]

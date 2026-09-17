@@ -25,6 +25,29 @@ HOST_ARTIFACT_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00"
 RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY = "vonk.recipe-run-observation-helper"
 RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\x00"
 MAX_HOST_HELPER_GRANT_SECONDS = 300
+# The authoritative ceiling on one privileged-helper frame, in bytes. A frame is
+# one signed helper message; it carries the grant and the request digest, never
+# the request document itself. Mirrored by Rust `MAX_HELPER_FRAME_BYTES`.
+MAX_HELPER_FRAME_BYTES = 1024 * 1024
+# The authoritative ceiling on one canonical ``HostRuntimeRequest`` document, in
+# bytes. This, not the frame ceiling, is the budget that bounds a runtime
+# request: the agent writes the document to an owner-only request file and the
+# helper reads and parses that file. The ceiling shares the frame basis so one
+# host-runtime exchange's largest allocation stays at two frames. Mirrored by
+# Rust ``MAX_HOST_RUNTIME_REQUEST_BYTES``.
+MAX_HOST_RUNTIME_REQUEST_BYTES = MAX_HELPER_FRAME_BYTES
+# The bytes a canonical request spends on everything but its argument payload.
+# `MAX_ARGV_BYTES` derives below it, so the plan's argv budget sits strictly
+# below the request ceiling. A measured maximum, not merely an equal one; the
+# Rust test `the_declared_envelope_covers_the_largest_contract_permitted_request`
+# re-measures it and fails when a schema growth outgrows this constant.
+HOST_RUNTIME_REQUEST_ENVELOPE_BYTES = 16 * 1024
+# The byte ceiling on one compiled argv vector, derived from the request
+# ceiling. The request the agent sends is this argv plus the image identities,
+# the container-engine options, one mount pair per selected model file and the
+# recipe environment, so an argv budget equal to the request ceiling would claim
+# headroom the request does not have.
+MAX_ARGV_BYTES = MAX_HOST_RUNTIME_REQUEST_BYTES - HOST_RUNTIME_REQUEST_ENVELOPE_BYTES
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Signature = Annotated[str, Field(pattern=r"^[0-9a-f]{128}$")]
@@ -108,15 +131,16 @@ class HostRuntimeRequest(WireModel):
     operation_id: Uuid4Text
     attempt: int = Field(ge=1, le=2**31 - 1)
     fence: Uuid4Text
-    # One request frames the whole container command line. The item count is a
-    # sanity bound; the authoritative size limit is the helper frame ceiling
-    # (`MAX_MESSAGE_BYTES`, 256 KiB), so a single item has no separate ceiling.
-    # NUL is the one byte an exec argv cannot carry; CR and LF are legal bytes,
-    # and an empty element is legal too (the plan's opaque-argv contract admits
-    # it), so only the payload ceiling bounds a single item.
-    arguments: list[Annotated[str, Field(pattern=r"^[^\x00]+$")]] = Field(
-        max_length=4096
-    )
+    # One request carries the whole container command line. The authoritative
+    # size limit is the canonical request byte ceiling
+    # (`MAX_HOST_RUNTIME_REQUEST_BYTES`), so there is deliberately no item count
+    # here: every element costs at least three canonical bytes, so a count
+    # ceiling cannot fire before the byte ceiling and can only refuse a
+    # legitimate many-mount command line that fits. NUL is the one byte an exec
+    # argv cannot carry; CR and LF are legal bytes, and an empty element is
+    # legal too (the plan's opaque-argv contract admits it), so only the payload
+    # ceiling bounds an item.
+    arguments: list[Annotated[str, Field(pattern=r"^[^\x00]*$")]]
     observation: RecipeRunInspectionBinding | None = None
     installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None
