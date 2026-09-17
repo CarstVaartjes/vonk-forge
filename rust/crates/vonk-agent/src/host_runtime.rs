@@ -12,9 +12,10 @@ use ring::signature;
 use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
 use vonk_agent_protocol::{
-    AgentClaim, HostRuntimeAction, HostRuntimeRequest, RecipeRunInspectionBinding,
-    RecipeRunObservationOutcome, RecipeRunObservationReceipt, SignedHostHelperGrant,
-    canonical_json, hex_sha256, parse_strict, recipe_run_observation_receipt_signing_bytes,
+    AgentClaim, HostRuntimeAction, HostRuntimeRequest, HostRuntimeRequestRule,
+    RecipeRunInspectionBinding, RecipeRunObservationOutcome, RecipeRunObservationReceipt,
+    SignedHostHelperGrant, canonical_json, hex_sha256, parse_strict,
+    recipe_run_observation_receipt_signing_bytes,
 };
 
 use crate::client::{AgentHttpClient, ClientError};
@@ -66,6 +67,24 @@ pub enum HelperProtocolCause {
     /// The agent-built runtime request or inspection binding failed canonical
     /// validation before any helper was called.
     RequestDocument,
+    /// The agent-built request targets another schema version.
+    RequestSchemaVersion,
+    /// The agent-built request carries a zero attempt.
+    RequestAttempt,
+    /// The agent-built request carries arguments for the wrong action.
+    RequestArgumentsPresence,
+    /// The agent-built request carries an installation identity for the wrong
+    /// action.
+    RequestInstallationIdentity,
+    /// The agent-built request carries more arguments than the transport
+    /// accepts.
+    RequestArgumentCount,
+    /// An agent-built request argument is empty.
+    RequestArgumentEmpty,
+    /// An agent-built request argument exceeds the per-value transport ceiling.
+    RequestArgumentTooLong,
+    /// An agent-built request argument carries a refused control byte.
+    RequestArgumentControlByte,
     /// The owner-only signed request file could not be established.
     RequestStorage,
     /// The host clock is before the Unix epoch.
@@ -91,11 +110,41 @@ impl HelperProtocolCause {
             Self::RejectionMalformed => "rejection_malformed",
             Self::OutcomeMalformed => "outcome_malformed",
             Self::RequestDocument => "request_document_invalid",
+            Self::RequestSchemaVersion => "request_schema_version_invalid",
+            Self::RequestAttempt => "request_attempt_invalid",
+            Self::RequestArgumentsPresence => "request_arguments_presence_invalid",
+            Self::RequestInstallationIdentity => "request_installation_identity_invalid",
+            Self::RequestArgumentCount => "request_argument_count_invalid",
+            Self::RequestArgumentEmpty => "request_argument_empty",
+            Self::RequestArgumentTooLong => "request_argument_too_long",
+            Self::RequestArgumentControlByte => "request_argument_control_byte",
             Self::RequestStorage => "request_storage_invalid",
             Self::SystemClock => "system_clock_invalid",
             Self::InspectionReceipt => "inspection_receipt_invalid",
             Self::ObservationReceipt => "observation_receipt_invalid",
             Self::ObservationTimestamp => "observation_timestamp_invalid",
+        }
+    }
+
+    /// Map one canonical request rule to the cause this agent reports. Every
+    /// argument-envelope rule keeps its own code so a refused Start names the
+    /// rule and, for a value, the kind of violation rather than one label.
+    pub fn from_request_rule(rule: HostRuntimeRequestRule) -> Self {
+        match rule {
+            HostRuntimeRequestRule::SchemaVersion => Self::RequestSchemaVersion,
+            HostRuntimeRequestRule::Attempt => Self::RequestAttempt,
+            HostRuntimeRequestRule::ArgumentsPresence => Self::RequestArgumentsPresence,
+            HostRuntimeRequestRule::InstallationIdentity => Self::RequestInstallationIdentity,
+            HostRuntimeRequestRule::ArgumentCount => Self::RequestArgumentCount,
+            HostRuntimeRequestRule::ArgumentEmpty => Self::RequestArgumentEmpty,
+            HostRuntimeRequestRule::ArgumentTooLong => Self::RequestArgumentTooLong,
+            HostRuntimeRequestRule::ArgumentControlByte => Self::RequestArgumentControlByte,
+            // The observation binding is an inspection contract rather than one
+            // of the argument-envelope rules, and it is unreachable from a
+            // Start, which always carries `observation: None`.
+            HostRuntimeRequestRule::ObservationBinding
+            | HostRuntimeRequestRule::ObservationAction
+            | HostRuntimeRequestRule::Encoding => Self::RequestDocument,
         }
     }
 }
@@ -184,9 +233,9 @@ impl HostRuntimeBoundary<'_> {
             observation: Some(binding.clone()),
             installation_id: None,
         };
-        request
-            .validate()
-            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestDocument))?;
+        request.validate().map_err(|rule| {
+            HostRuntimeError::HelperProtocol(HelperProtocolCause::from_request_rule(rule))
+        })?;
         let body = canonical_json(&request)
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let digest = hex_sha256(&body);
@@ -297,9 +346,9 @@ impl HostRuntimeBoundary<'_> {
             observation: None,
             installation_id,
         };
-        request
-            .validate()
-            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestDocument))?;
+        request.validate().map_err(|rule| {
+            HostRuntimeError::HelperProtocol(HelperProtocolCause::from_request_rule(rule))
+        })?;
         let body = canonical_json(&request)
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let digest = hex_sha256(&body);
@@ -488,6 +537,14 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "outcome_malformed"
             // The rest of the agent-side contracts share the same namespace.
             | "request_document_invalid"
+            | "request_schema_version_invalid"
+            | "request_attempt_invalid"
+            | "request_arguments_presence_invalid"
+            | "request_installation_identity_invalid"
+            | "request_argument_count_invalid"
+            | "request_argument_empty"
+            | "request_argument_too_long"
+            | "request_argument_control_byte"
             | "request_storage_invalid"
             | "system_clock_invalid"
             | "inspection_receipt_invalid"
@@ -1228,36 +1285,147 @@ mod tests {
         assert!(error.diagnostic().is_none());
     }
 
-    #[test]
-    fn request_document_refusal_names_the_agent_built_request() {
-        // Wrong implementation: a HostRuntimeRequest (or inspection binding)
-        // that failed canonical validation collapsed into
-        // `helper_protocol_invalid`. This is the live Start signature -- the
-        // helper is never called, so there is no helper diagnostic, and an
-        // install that succeeded cannot start.
-        //
-        // The canonical validator is what refuses. A `Start` argument that
-        // carries a newline is rejected before the helper call, which is exactly
-        // the shape the single label could not name.
-        let request = super::HostRuntimeRequest {
+    /// The exact Start request shape `execute_bound` sends, so each rule test
+    /// drives the canonical validator instead of asserting a bare constant.
+    fn start_request() -> super::HostRuntimeRequest {
+        super::HostRuntimeRequest {
             schema_version: 1,
             action: HostRuntimeAction::Start,
             job_id: Uuid::new_v4(),
             operation_id: Uuid::new_v4(),
             attempt: 1,
             fence: Uuid::new_v4(),
-            arguments: vec!["sha256:image".to_owned(), "run\n--flag".to_owned()],
+            arguments: vec!["sha256:image".to_owned(), "run".to_owned()],
             observation: None,
             installation_id: None,
-        };
-        assert!(
-            request.validate().is_err(),
-            "a Start argument containing a newline is refused by the canonical validator"
+        }
+    }
+
+    fn request_rule_code(request: &super::HostRuntimeRequest) -> String {
+        let rule = request
+            .validate()
+            .expect_err("this request must violate the rule under test");
+        let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::from_request_rule(rule));
+        assert!(error.diagnostic().is_none());
+        error.preflight_code()
+    }
+
+    #[test]
+    fn request_schema_version_refusal_names_the_schema_rule() {
+        // Wrong implementation: a request whose schema version was not current
+        // collapsed into `helper_request_document_invalid`, so a live Start
+        // could not say which envelope rule refused it.
+        let mut request = start_request();
+        request.schema_version = 2;
+        assert_eq!(
+            request_rule_code(&request),
+            "helper_request_schema_version_invalid"
+        );
+    }
+
+    #[test]
+    fn request_attempt_refusal_names_the_attempt_rule() {
+        // Wrong implementation: a zero attempt collapsed into
+        // `helper_request_document_invalid`.
+        let mut request = start_request();
+        request.attempt = 0;
+        assert_eq!(
+            request_rule_code(&request),
+            "helper_request_attempt_invalid"
+        );
+    }
+
+    #[test]
+    fn request_arguments_presence_refusal_names_the_presence_rule() {
+        // Wrong implementation: a Start with no arguments, or a preflight that
+        // carried them, collapsed into `helper_request_document_invalid`.
+        let mut absent = start_request();
+        absent.arguments.clear();
+        assert_eq!(
+            request_rule_code(&absent),
+            "helper_request_arguments_presence_invalid"
         );
 
-        let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestDocument);
-        assert_eq!(error.preflight_code(), "helper_request_document_invalid");
-        assert!(error.diagnostic().is_none());
+        let mut present = start_request();
+        present.action = HostRuntimeAction::RuntimePreflight;
+        assert_eq!(
+            request_rule_code(&present),
+            "helper_request_arguments_presence_invalid"
+        );
+    }
+
+    #[test]
+    fn request_installation_identity_refusal_names_the_identity_rule() {
+        // Wrong implementation: an installation identity on an action that is
+        // not cleanup collapsed into `helper_request_document_invalid`.
+        let mut request = start_request();
+        request.installation_id = Some(Uuid::new_v4());
+        assert_eq!(
+            request_rule_code(&request),
+            "helper_request_installation_identity_invalid"
+        );
+    }
+
+    #[test]
+    fn request_argument_count_refusal_names_the_count_rule() {
+        // Wrong implementation: one argument too many for the bounded transport
+        // collapsed into `helper_request_document_invalid`. The compiled plan
+        // bounds its own argv at 512 items before the four identity arguments
+        // and the podman envelope are added, so this rule is reachable on Start.
+        let mut request = start_request();
+        request.arguments =
+            vec!["x".to_owned(); vonk_agent_protocol::MAX_HOST_RUNTIME_ARGUMENTS + 1];
+        assert_eq!(
+            request_rule_code(&request),
+            "helper_request_argument_count_invalid"
+        );
+    }
+
+    #[test]
+    fn request_argument_refusals_name_the_argument_kind() {
+        // Wrong implementation: an empty, oversized or control-byte argument
+        // collapsed into `helper_request_document_invalid`. The compiled plan
+        // deliberately carries opaque argv items the request transport refuses
+        // (see `opaque_argv_stays_byte_for_byte_after_image_boundary`), so the
+        // code has to name the kind of violation rather than an index.
+        let mut empty = start_request();
+        empty.arguments = vec!["sha256:image".to_owned(), String::new()];
+        assert_eq!(request_rule_code(&empty), "helper_request_argument_empty");
+
+        let mut too_long = start_request();
+        too_long.arguments = vec![
+            "sha256:image".to_owned(),
+            "a".repeat(vonk_agent_protocol::MAX_HOST_RUNTIME_ARGUMENT_BYTES + 1),
+        ];
+        assert_eq!(
+            request_rule_code(&too_long),
+            "helper_request_argument_too_long"
+        );
+
+        let mut control = start_request();
+        control.arguments = vec!["sha256:image".to_owned(), "run\n--flag".to_owned()];
+        assert_eq!(
+            request_rule_code(&control),
+            "helper_request_argument_control_byte"
+        );
+    }
+
+    #[test]
+    fn inspection_observation_rules_keep_the_document_cause() {
+        // The observation binding is an inspection contract, not one of the
+        // argument-envelope rules, and a Start always carries
+        // `observation: None`, so a Start can never reach these rules.
+        for rule in [
+            vonk_agent_protocol::HostRuntimeRequestRule::ObservationBinding,
+            vonk_agent_protocol::HostRuntimeRequestRule::ObservationAction,
+            vonk_agent_protocol::HostRuntimeRequestRule::Encoding,
+        ] {
+            assert_eq!(
+                HostRuntimeError::HelperProtocol(HelperProtocolCause::from_request_rule(rule))
+                    .preflight_code(),
+                "helper_request_document_invalid"
+            );
+        }
     }
 
     #[test]
@@ -1395,6 +1563,14 @@ mod tests {
             HelperProtocolCause::RejectionMalformed,
             HelperProtocolCause::OutcomeMalformed,
             HelperProtocolCause::RequestDocument,
+            HelperProtocolCause::RequestSchemaVersion,
+            HelperProtocolCause::RequestAttempt,
+            HelperProtocolCause::RequestArgumentsPresence,
+            HelperProtocolCause::RequestInstallationIdentity,
+            HelperProtocolCause::RequestArgumentCount,
+            HelperProtocolCause::RequestArgumentEmpty,
+            HelperProtocolCause::RequestArgumentTooLong,
+            HelperProtocolCause::RequestArgumentControlByte,
             HelperProtocolCause::RequestStorage,
             HelperProtocolCause::SystemClock,
             HelperProtocolCause::InspectionReceipt,

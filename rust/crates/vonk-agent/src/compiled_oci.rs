@@ -637,6 +637,23 @@ mod tests {
     }
 
     #[test]
+    fn local_image_reference_is_derived_not_the_transported_copy() {
+        // Wrong implementation: the accessor cloned the transported field, so a
+        // plan read before validation could hand the container engine a
+        // Controller transport path -- or an empty reference -- instead of the
+        // immutable derivation the struct's own `validate()` requires.
+        let mut value = fixture();
+        let reference: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+        let expected = reference.runtime_image.local_image_reference();
+        assert!(expected.starts_with("localhost/vonk/compiled-runtime-"));
+
+        value["runtime_image"]["local_image_reference"] = json!("");
+        let broken: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        assert_eq!(broken.runtime_image.local_image_reference(), expected);
+        assert!(broken.validate().is_err());
+    }
+
+    #[test]
     fn conflicting_platform_environment_is_rejected() {
         let mut value = fixture();
         value["runtime"]["env"] = json!([{"name":"VONK_RUNTIME_SPEC","value":"/tmp/override"}]);
