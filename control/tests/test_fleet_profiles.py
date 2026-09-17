@@ -7,7 +7,8 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
-from typing import TypedDict
+from types import SimpleNamespace
+from typing import TypedDict, cast
 from uuid import uuid4
 
 import pytest
@@ -2972,3 +2973,37 @@ rejected(unverified)
         text=True,
         check=True,
     )
+
+
+def test_persisted_child_progress_is_read_with_json_semantics() -> None:
+    """Persisted JSON must be validated as JSON, not as Python objects.
+
+    The database driver hands back decoded JSON, and the profile's own progress
+    document stores ``start_deadline`` as the ISO string it serialized.  Reading
+    that document in Python mode rejected it, and on the live fleet that failed
+    a whole profile application after the distribution and install had already
+    succeeded: "FleetProfileChildProgress -> start_deadline -> Input should be a
+    valid datetime".
+    """
+
+    state = {
+        "state": "running",
+        "child_progress": {
+            "phase": "start",
+            "node_ids": [_node_id(1)],
+            "startup_budget_seconds": 1800,
+            "start_deadline": "2026-09-17T08:48:21.262460Z",
+        },
+    }
+
+    view = RunSwitchFleetProfileAdapter._view_from_state(
+        cast("FleetProfileApplication", SimpleNamespace(id=_uuid(900))), state
+    )
+
+    progress = view.progress
+    assert progress is not None
+    assert progress.phase == "start"
+    start_deadline = progress.start_deadline
+    assert start_deadline is not None
+    assert start_deadline.year == 2026
+    assert start_deadline.microsecond == 262460
