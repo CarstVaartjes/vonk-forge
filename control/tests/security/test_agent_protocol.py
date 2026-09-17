@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
+    MAX_DOCUMENT_BYTES,
     AgentClaim,
     AgentOperation,
     AgentProtocolError,
@@ -198,13 +199,15 @@ def test_payload_and_result_documents_are_size_limited(service) -> None:
         session.add(parent)
 
     with pytest.raises(AgentProtocolError, match="large"):
-        AgentClaim.parse(raw_stop_claim(STOP_PAYLOAD | {"value": "x" * 65_536}))
+        AgentClaim.parse(
+            raw_stop_claim(STOP_PAYLOAD | {"value": "x" * (MAX_DOCUMENT_BYTES + 1)})
+        )
 
     jobs.enqueue(parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     claim = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert claim is not None
     with pytest.raises(AgentProtocolError, match="large"):
-        AgentResult.parse(raw_result({"value": "x" * 65_536}))
+        AgentResult.parse(raw_result({"value": "x" * (MAX_DOCUMENT_BYTES + 1)}))
 
 
 def test_stale_fence_cannot_publish_success(service) -> None:

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from math import isfinite
 from pathlib import PurePosixPath
 
+from vonk_agent_protocol.host_helper import MAX_ARGV_BYTES
+
 from ..bounded_json import sequence
 from ..runtime_writable_paths import (
     RUNTIME_REQUIREMENT_DECLARATION,
@@ -26,14 +28,6 @@ from ..runtime_writable_paths import (
 )
 from .canonical_metadata import CANONICAL_HARNESSES
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
-
-# The compiled argv total budget, in bytes. The protocol package owns the
-# derivation from the canonical host-runtime request ceiling; this module
-# mirrors the arithmetic because the Controller installs the published protocol
-# wheel, not the source tree. Keep the operands identical to
-# `vonk_agent_protocol.host_helper.MAX_ARGV_BYTES` (request ceiling minus the
-# measured request envelope) and let that package's own test pin its side.
-MAX_ARGV_BYTES = 1024 * 1024 - 16 * 1024
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
 _SAFE_ENGINE_OPTION_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")

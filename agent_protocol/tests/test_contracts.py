@@ -606,7 +606,11 @@ def test_cancelled_result_is_a_typed_terminal_agent_state() -> None:
 def test_results_are_bounded_and_reject_secret_bearing_keys() -> None:
     with pytest.raises(AgentProtocolError, match="large"):
         AgentResult.parse(
-            valid_attempt() | {"state": "succeeded", "result": {"x": "x" * 65536}}
+            valid_attempt()
+            | {
+                "state": "succeeded",
+                "result": {"x": "x" * (MAX_DOCUMENT_BYTES + 1)},
+            }
         )
     with pytest.raises(AgentProtocolError):
         AgentResult.parse(
@@ -739,7 +743,7 @@ def test_parse_and_shared_schema_validator_reject_bogus_utc_dates(
 def test_shared_schema_validator_and_parser_reject_oversized_canonical_documents(
     name: str,
 ) -> None:
-    document = {"x": "x" * 65536}
+    document = {"x": "x" * (MAX_DOCUMENT_BYTES + 1)}
     if name == "agent-job.schema.json":
         raw = valid_claim() | {
             "payload": document,
