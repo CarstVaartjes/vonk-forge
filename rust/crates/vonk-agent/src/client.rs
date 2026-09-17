@@ -31,6 +31,7 @@ use vonk_agent_protocol::{
 
 use crate::{
     config::AgentConfig,
+    failure_evidence::sanitize_text,
     identity::{IdentityPaths, active_identity_paths},
     inventory::Inventory,
     oci::MAX_MANAGED_RECIPE_RUNS,
@@ -44,6 +45,18 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_CLAIM_BODY_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES;
+/// Longest Controller validation digest retained in one refusal record.
+const MAX_REJECTION_CONTEXT_CHARS: usize = 256;
+/// Validation issues kept from one refusal.  A union payload fails every
+/// branch, so the Controller can report a hundred issues for one bad field;
+/// the record keeps a bounded, ranked selection instead of all of them.
+const MAX_REJECTION_ISSUES: usize = 4;
+/// Longest single location segment kept from a reported issue.
+const MAX_REJECTION_LOCATION_CHARS: usize = 48;
+/// Pydantic reports these for every union branch that did not match.  They
+/// describe the payload's shape rather than the constraint its producer
+/// broke, so they rank behind a real constraint failure.
+const STRUCTURAL_ERROR_TYPES: [&str; 2] = ["missing", "extra_forbidden"];
 const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 // Renewal has to finish before the active certificate expires. Keep each
 // controller call bounded so a stalled endpoint cannot consume the entire
@@ -111,6 +124,9 @@ pub struct ControllerError {
     pub request_id: Option<String>,
     pub decision: &'static str,
     pub retry_after_seconds: Option<u32>,
+    /// Bounded, sanitized Controller validation context, when the endpoint
+    /// published one.  Never raw request bytes and never the rejected values.
+    pub summary: Option<String>,
 }
 
 impl fmt::Display for ControllerError {
@@ -133,6 +149,18 @@ impl ControllerError {
     pub fn from_status(status: u16) -> Self {
         let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         controller_error(status, "/", "controller.request", None, None)
+    }
+
+    /// Return the bounded context to persist for a refused submission.
+    ///
+    /// The Controller's own validation digest names the boundary and the
+    /// failing field and rule, which is what an operator needs; the status,
+    /// code and request id already have their own columns and log fields, so
+    /// they are only the fallback when no digest was published.  Either way the
+    /// result stays bounded and free of credentials and rejected values.
+    pub fn rejection_context(&self) -> String {
+        let context = self.summary.clone().unwrap_or_else(|| self.to_string());
+        context.chars().take(MAX_REJECTION_CONTEXT_CHARS).collect()
     }
 
     fn retryable(&self) -> bool {
@@ -557,9 +585,20 @@ impl AgentHttpClient {
             // A 422 refuses these exact bytes at the Controller's ingress
             // validation boundary.  The caller records the bounded refusal and
             // keeps the loop alive; it never treats the refusal as acceptance.
-            StatusCode::UNPROCESSABLE_ENTITY => Err(ClientError::ResultRejected(Box::new(
-                response_controller_error(&response),
-            ))),
+            // This is the one boundary that reads the error body: the
+            // Controller publishes a bounded, redacted validation problem
+            // there, and a refusal recorded without it cannot say which field
+            // or rule rejected the result.  Anything absent, oversized or not
+            // of the declared shape leaves the digest unset rather than
+            // guessing at it.
+            StatusCode::UNPROCESSABLE_ENTITY => {
+                let mut error = response_controller_error(&response);
+                error.summary = bounded_body(response)
+                    .await
+                    .ok()
+                    .and_then(|body| controller_rejection_digest(&body));
+                Err(ClientError::ResultRejected(Box::new(error)))
+            }
             _ => {
                 classify_response(&response)?;
                 Err(ClientError::Protocol)
@@ -1992,6 +2031,106 @@ fn response_controller_error(response: &reqwest::Response) -> ControllerError {
     error
 }
 
+/// Digest one Controller validation problem into a bounded refusal reason.
+///
+/// The published shape is `{"detail": str, "issues": [{"type", "loc", "msg"}]}`
+/// with an optional `context`.  Only structural facts are kept: the detail
+/// line, and each retained issue's location and error type.  Messages are
+/// dropped because the location and type already name the field and the rule,
+/// and dropping them keeps submitted content and validator input out of the
+/// durable record.
+///
+/// A union payload fails every branch, so the Controller can report a hundred
+/// issues for one bad field.  A constraint failure is therefore reported in
+/// preference to the shape mismatches of branches that never applied, only a
+/// bounded number of issues is kept, and the rest are counted.  Anything that
+/// does not match the declared shape yields `None` rather than a guess.
+fn controller_rejection_digest(body: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let object = value.as_object()?;
+    let detail = object
+        .get("detail")
+        .and_then(serde_json::Value::as_str)
+        .filter(|detail| !detail.is_empty() && detail.len() <= MAX_REJECTION_CONTEXT_CHARS)
+        .map(sanitize_text);
+    let mut specific = Vec::new();
+    let mut structural = Vec::new();
+    let mut reported = 0_usize;
+    if let Some(issues) = object.get("issues").and_then(serde_json::Value::as_array) {
+        reported = issues.len();
+        for issue in issues {
+            let Some(issue) = issue.as_object() else {
+                continue;
+            };
+            let Some(location) = issue
+                .get("loc")
+                .and_then(serde_json::Value::as_array)
+                .map(|segments| {
+                    segments
+                        .iter()
+                        .map(render_rejection_location)
+                        .collect::<Vec<_>>()
+                        .join(".")
+                })
+                .filter(|location| !location.is_empty())
+            else {
+                continue;
+            };
+            let kind = issue
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .filter(|kind| valid_error_token(kind))
+                .unwrap_or("invalid");
+            let rendered = format!("{location} ({kind})");
+            if STRUCTURAL_ERROR_TYPES.contains(&kind) {
+                structural.push(rendered);
+            } else {
+                specific.push(rendered);
+            }
+        }
+    }
+    // A union payload fails every branch at once, so a shape mismatch against
+    // a branch that never applied would otherwise bury the single constraint
+    // the producer actually broke.  Shape mismatches are reported only when
+    // there is no constraint failure to report instead.
+    let ranked = if specific.is_empty() {
+        structural
+    } else {
+        specific
+    };
+    let kept = ranked.len().min(MAX_REJECTION_ISSUES);
+    if kept == 0 && detail.is_none() {
+        return None;
+    }
+    let mut digest = detail.unwrap_or_else(|| "request is invalid".to_owned());
+    if kept > 0 {
+        digest.push_str(": ");
+        digest.push_str(&ranked[..kept].join("; "));
+        if reported > kept {
+            digest.push_str(&format!("; +{} more", reported - kept));
+        }
+    }
+    Some(
+        sanitize_text(&digest)
+            .chars()
+            .take(MAX_REJECTION_CONTEXT_CHARS)
+            .collect(),
+    )
+}
+
+/// Render one reported location segment as bounded, sanitized text.
+fn render_rejection_location(segment: &serde_json::Value) -> String {
+    let text = match segment {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Number(number) => number.to_string(),
+        _ => return "?".to_owned(),
+    };
+    sanitize_text(&text)
+        .chars()
+        .take(MAX_REJECTION_LOCATION_CHARS)
+        .collect()
+}
+
 fn controller_error(
     status: StatusCode,
     endpoint: &str,
@@ -2021,6 +2160,7 @@ fn controller_error(
         request_id,
         decision,
         retry_after_seconds: None,
+        summary: None,
     }
 }
 
@@ -2334,7 +2474,8 @@ fn valid_oci_digest(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentHttpClient, ClientError, ExactRecipeRunObservation, distribution_hash_read_bytes,
+        AgentHttpClient, AgentResult, ClientError, ExactRecipeRunObservation,
+        MAX_REJECTION_CONTEXT_CHARS, controller_rejection_digest, distribution_hash_read_bytes,
         is_rotation_conflict, partial_path, valid_reported_hostname,
     };
     use crate::{
@@ -4741,6 +4882,168 @@ mod tests {
             Some("00000000-0000-4000-8000-000000000099")
         );
         assert!(!error.retryable());
+    }
+
+    fn rejection_problem(issues: serde_json::Value) -> Vec<u8> {
+        serde_json::json!({
+            "context": null,
+            "detail": "request is invalid",
+            "issues": issues,
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    /// The failed distribution envelope spark-3542's agent retained.
+    fn retained_result() -> AgentResult {
+        let document = json!({
+            "schema_version": 1,
+            "job_id": "f4156489-a522-454b-bc6e-d2f871fa3db3",
+            "operation_id": "7c2ae819-58c1-4414-90b6-93dc19a33f48",
+            "attempt": 2,
+            "fence": "35a57c2a-0b03-4101-8f89-6b3806570c50",
+            "node_id": "spk_0123456789abcdef0123456789abcdef",
+            "deadline": "2026-09-16T23:30:02.001555Z",
+            "state": "failed",
+            "result": {
+                "status": "failed",
+                "error_code": "artifact_distribution_failed",
+                "failure_kind": "temporary-dependency",
+                "reason": "Controller distribution could not be verified and retained"
+            }
+        });
+        let bytes = document.to_string();
+        vonk_agent_protocol::parse_strict(bytes.as_bytes())
+            .expect("the retained failure envelope parses")
+    }
+
+    #[test]
+    fn a_union_refusal_digest_reports_the_broken_constraint_not_the_branches() {
+        // The Controller reports every union branch that did not match, so the
+        // digest must surface the one constraint the producer broke and count
+        // the rest, instead of listing branch shape mismatches.
+        let body = rejection_problem(serde_json::json!([
+            {
+                "type": "missing",
+                "loc": ["body", "result", "RuntimePreflightResult", "schema_version"],
+                "msg": "Field required"
+            },
+            {
+                "type": "extra_forbidden",
+                "loc": ["body", "result", "RuntimePreflightResult", "diagnostics"],
+                "msg": "Extra inputs are not permitted"
+            },
+            {
+                "type": "missing",
+                "loc": ["body", "result", "AgentInstallResult", "installed_bytes"],
+                "msg": "Field required"
+            },
+            {
+                "type": "string_pattern_mismatch",
+                "loc": ["body", "result", "failure_kind"],
+                "msg": "String should match pattern"
+            },
+            {
+                "type": "is_instance_of",
+                "loc": ["body", "result", "AgentFailureResult", "failure_kind"],
+                "msg": "Input should be an instance of AgentFailureKind"
+            },
+            {"type": "missing", "loc": ["body", "state"], "msg": "Field required"}
+        ]));
+
+        let digest = controller_rejection_digest(&body).expect("a declared problem digest");
+
+        assert!(digest.starts_with("request is invalid: "));
+        assert!(digest.contains("body.result.failure_kind (string_pattern_mismatch)"));
+        assert!(digest.contains("body.result.AgentFailureResult.failure_kind (is_instance_of)"));
+        assert!(digest.contains("+4 more"));
+        assert!(!digest.contains("RuntimePreflightResult"));
+        assert!(!digest.contains("AgentInstallResult"));
+        assert!(digest.len() <= MAX_REJECTION_CONTEXT_CHARS);
+    }
+
+    #[test]
+    fn a_refusal_digest_falls_back_to_shape_errors_and_stays_bounded() {
+        // With no constraint failure to report, the shape mismatches that
+        // remain are still more useful than nothing, and an over-long location
+        // is truncated rather than refusing the record.
+        let long = "segment".repeat(40);
+        let body = rejection_problem(serde_json::json!([
+            {"type": "missing", "loc": ["body", long, "state"], "msg": "Field required"}
+        ]));
+
+        let digest = controller_rejection_digest(&body).expect("a declared problem digest");
+
+        assert!(digest.starts_with("request is invalid: body."));
+        assert!(digest.ends_with("(missing)"));
+        assert!(!digest.contains(&"segment".repeat(20)));
+        assert!(digest.len() <= MAX_REJECTION_CONTEXT_CHARS);
+    }
+
+    #[test]
+    fn a_refusal_digest_redacts_credentials_and_rejects_undeclared_shapes() {
+        let sensitive = serde_json::json!({
+            "detail": "authorization: bearer suppressed",
+            "issues": []
+        })
+        .to_string()
+        .into_bytes();
+        assert_eq!(
+            controller_rejection_digest(&sensitive).as_deref(),
+            Some("[redacted diagnostic line]")
+        );
+
+        // A body that is absent, not JSON, or not the declared object shape
+        // yields no digest rather than a guess.
+        assert_eq!(controller_rejection_digest(b""), None);
+        assert_eq!(controller_rejection_digest(b"not json"), None);
+        assert_eq!(controller_rejection_digest(b"[1,2,3]"), None);
+        assert_eq!(controller_rejection_digest(b"{}"), None);
+        let detail_only = br#"{"detail":"request is invalid"}"#;
+        assert_eq!(
+            controller_rejection_digest(detail_only).as_deref(),
+            Some("request is invalid")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_result_records_the_controller_validation_digest() {
+        // End to end over the real transport: the 422 problem the Controller
+        // publishes is what the durable refusal keeps, so an operator can read
+        // the failing field and rule from the agent's own record.
+        let body = rejection_problem(serde_json::json!([
+            {
+                "type": "missing",
+                "loc": ["body", "result", "RuntimePreflightResult", "schema_version"],
+                "msg": "Field required"
+            },
+            {
+                "type": "is_instance_of",
+                "loc": ["body", "result", "AgentFailureResult", "failure_kind"],
+                "msg": "Input should be an instance of AgentFailureKind"
+            }
+        ]));
+        let (client, server) = request_capture_client(
+            422,
+            vec!["X-Vonk-Error-Code: controller.invalid_request".to_owned()],
+            body,
+            None,
+        );
+
+        let error = client
+            .submit_result(&retained_result())
+            .await
+            .expect_err("a 422 is a refusal, never an acceptance");
+        server.join().unwrap();
+
+        let ClientError::ResultRejected(error) = error else {
+            panic!("a 422 must map to a typed ingress refusal");
+        };
+        assert_eq!(
+            error.rejection_context(),
+            "request is invalid: body.result.AgentFailureResult.failure_kind \
+             (is_instance_of); +1 more"
+        );
     }
 
     #[tokio::test]

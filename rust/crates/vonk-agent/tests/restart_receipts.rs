@@ -151,6 +151,10 @@ fn ingress_refusal() -> ControllerError {
         request_id: Some("req-422".to_owned()),
         decision: "exit",
         retry_after_seconds: None,
+        summary: Some(
+            "request is invalid: body.result.AgentFailureResult.failure_kind (is_instance_of)"
+                .to_owned(),
+        ),
     }
 }
 
