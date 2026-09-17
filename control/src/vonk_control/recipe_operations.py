@@ -105,6 +105,28 @@ from .recovery_policy import FailureKind
 from .run_admission import RunAdmissionService, RunNodePlan, RunPlan
 from .source_policy import SourcePolicyReport
 
+# Longest rendered blocker reason kept in an install refusal.  Each reason names
+# the check and then the cause, so the bound has to preserve both ends.
+_BLOCKER_REASON_CHARS = 200
+
+
+def _bounded_blocker_reason(code: str, detail: str) -> str:
+    """Keep the innermost cause visible when a blocker reason is bounded.
+
+    Blocker details compose as "outer context: inner cause", so a prefix-only
+    bound discards the actionable part: a live refusal reported
+    "...is unavailable: runtime image receipt iden" and nothing else, leaving
+    the failing rule invisible on every operator surface.  The head names the
+    check; the tail carries the cause.
+    """
+
+    rendered = f"{code}: {detail}"
+    if len(rendered) <= _BLOCKER_REASON_CHARS:
+        return rendered
+    keep = _BLOCKER_REASON_CHARS - 3
+    head = keep // 2
+    return f"{rendered[:head]}...{rendered[-(keep - head):]}"
+
 
 def _active_recipe_revision(
     session: Session,
@@ -705,7 +727,7 @@ class RecipeOperationService:
                 )
             reasons = list(
                 dict.fromkeys(
-                    f"{reason.code}: {reason.detail}"[:200]
+                    _bounded_blocker_reason(reason.code, reason.detail)
                     for node in plan.nodes
                     for reason in node.blockers
                 )

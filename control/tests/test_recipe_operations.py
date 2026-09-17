@@ -5699,7 +5699,9 @@ def test_changed_plan_or_reused_request_key_is_rejected(tmp_path: Path) -> None:
         )
 
 
-def _blocked_install_plan(codes: tuple[str, ...]) -> InstallPlan:
+def _blocked_install_plan(
+    codes: tuple[str, ...], details: tuple[str, ...] | None = None
+) -> InstallPlan:
     return InstallPlan(
         mapping_id="10000000-0000-4000-8000-000000000001",
         mapping_generation=1,
@@ -5723,7 +5725,15 @@ def _blocked_install_plan(codes: tuple[str, ...]) -> InstallPlan:
                 disk_floor_bytes=0,
                 free_after_bytes=None,
                 blockers=tuple(
-                    AdmissionReason(code=code, detail=code) for code in codes
+                    AdmissionReason(
+                        code=code,
+                        detail=(
+                            details[index]
+                            if details is not None and index < len(details)
+                            else code
+                        ),
+                    )
+                    for index, code in enumerate(codes)
                 ),
                 warnings=(),
             ),
@@ -5759,3 +5769,32 @@ def test_prepare_installation_keeps_a_real_blocker_terminal() -> None:
         )
     assert not isinstance(error.value, RecipeInstallPreflightExpired)
     assert "install plan is blocked" in str(error.value)
+
+
+def test_a_bounded_install_blocker_keeps_the_specific_cause() -> None:
+    """A blocker chain must not lose its innermost cause to the bound.
+
+    Blocker details compose as "outer context: inner cause", so truncating the
+    tail discards exactly the part an operator needs.  The live GLM apply
+    reported "...is unavailable: runtime image receipt iden" and stopped there,
+    so the failing rule was invisible on every surface.
+    """
+
+    code = "install.compiled_plan_unavailable"
+    detail = (
+        "Controller-issued compiled execution plan is unavailable. "
+        "compiled execution plan for spk_2818d189042b4c77aefa7796f4befd23 "
+        "is unavailable: runtime image receipt identity is unavailable or malformed"
+    )
+    assert len(f"{code}: {detail}") > 200
+
+    service = object.__new__(RecipeOperationService)
+    with pytest.raises(RecipeOperationConflict) as error:
+        service.prepare_installation(
+            _blocked_install_plan((code,), details=(detail,)), actor="admin"
+        )
+
+    message = str(error.value)
+    assert "install plan is blocked" in message
+    # The innermost cause is the actionable part and must survive the bound.
+    assert "malformed" in message, message
