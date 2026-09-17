@@ -29,11 +29,55 @@ pub enum HostRuntimeError {
     Controller(#[from] ClientError),
     #[error("host runtime helper response is invalid")]
     Protocol,
+    #[error("host runtime helper protocol contract is invalid")]
+    HelperProtocol(HelperProtocolCause),
     #[error("host runtime helper rejected request: {code}")]
     HelperRejected {
         code: String,
         diagnostic: Option<String>,
     },
+}
+
+/// The distinct contracts this agent verifies while exchanging one message with
+/// the privileged helper.
+///
+/// Each was previously collapsed into [`HostRuntimeError::Protocol`], whose
+/// single `helper_protocol_invalid` label could not say whether the request body
+/// or signed grant failed to encode, the blocking helper-call worker failed to
+/// join, the length-prefixed message was empty, oversized or undecodable, the
+/// reply was bound to another request, the rejection broke the rejection
+/// contract, or the executed outcome broke the outcome contract. That label was
+/// the live symptom of a blocked privileged start, and it named no violated
+/// contract an operator could act on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelperProtocolCause {
+    /// The canonical request body or the signed grant could not be encoded.
+    RequestEncoding,
+    /// The blocking helper-call worker failed to join.
+    HelperCallJoin,
+    /// The length-prefixed helper message was empty, oversized or undecodable.
+    MessageFraming,
+    /// The reply did not bind to the request this agent sent.
+    ResponseUnbound,
+    /// A helper rejection did not match the stable rejection contract.
+    RejectionMalformed,
+    /// An executed helper outcome did not match the executed-outcome contract.
+    OutcomeMalformed,
+}
+
+impl HelperProtocolCause {
+    /// The stable, un-prefixed contract code. `preflight_code()` reports it in
+    /// the `helper_<code>` namespace.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::RequestEncoding => "request_encoding_invalid",
+            Self::HelperCallJoin => "call_join_failed",
+            Self::MessageFraming => "message_framing_invalid",
+            Self::ResponseUnbound => "response_unbound",
+            Self::RejectionMalformed => "rejection_malformed",
+            Self::OutcomeMalformed => "outcome_malformed",
+        }
+    }
 }
 
 impl HostRuntimeError {
@@ -49,6 +93,12 @@ impl HostRuntimeError {
             }
             Self::Controller(_) => "helper_grant_unavailable".to_owned(),
             Self::Protocol => "helper_protocol_invalid".to_owned(),
+            Self::HelperProtocol(cause) if stable_runtime_error_code(cause.code()) => {
+                format!("helper_{}", cause.code())
+            }
+            // A cause that is not on the namespace allowlist keeps the previous
+            // opaque label, exactly as an unlisted helper rejection code does.
+            Self::HelperProtocol(_) => "helper_protocol_invalid".to_owned(),
             Self::HelperRejected { code, .. } if stable_runtime_error_code(code) => {
                 format!("helper_{code}")
             }
@@ -111,7 +161,8 @@ impl HostRuntimeBoundary<'_> {
             installation_id: None,
         };
         request.validate().map_err(|_| HostRuntimeError::Protocol)?;
-        let body = canonical_json(&request).map_err(|_| HostRuntimeError::Protocol)?;
+        let body = canonical_json(&request)
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let digest = hex_sha256(&body);
         let request_path = write_request(self.request_root, &digest, &body)?;
         let _request_cleanup = RequestFileCleanup(request_path);
@@ -120,14 +171,14 @@ impl HostRuntimeBoundary<'_> {
             .recipe_run_inspection_grant(&binding, &request, &digest)
             .await?;
         let request_id = authorization.grant.claims.request_id.to_string();
-        let grant_bytes =
-            canonical_json(&authorization.grant).map_err(|_| HostRuntimeError::Protocol)?;
+        let grant_bytes = canonical_json(&authorization.grant)
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let helper_socket = self.helper_socket.to_path_buf();
         let response = tokio::task::spawn_blocking(move || {
             call_helper(&helper_socket, &grant_bytes, Duration::from_secs(15))
         })
         .await
-        .map_err(|_| HostRuntimeError::Protocol)??;
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))??;
         require_bound_response(&response, &request_id)?;
         if response.error_code.is_some() {
             return Err(runtime_rejection(&response, HostRuntimeAction::RunInspect));
@@ -221,7 +272,8 @@ impl HostRuntimeBoundary<'_> {
             installation_id,
         };
         request.validate().map_err(|_| HostRuntimeError::Protocol)?;
-        let body = canonical_json(&request).map_err(|_| HostRuntimeError::Protocol)?;
+        let body = canonical_json(&request)
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let digest = hex_sha256(&body);
         let request_path = write_request(self.request_root, &digest, &body)?;
         // The attached helper call is deliberately run on a blocking worker so a cancellation
@@ -234,39 +286,21 @@ impl HostRuntimeBoundary<'_> {
                 .host_runtime_grant(claim, action, &digest, installation_id)
                 .await?;
             let request_id = grant.claims.request_id.to_string();
-            let grant = canonical_json(&grant).map_err(|_| HostRuntimeError::Protocol)?;
+            let grant = canonical_json(&grant).map_err(|_| {
+                HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding)
+            })?;
             let helper_socket = self.helper_socket.to_path_buf();
             let response = tokio::task::spawn_blocking(move || {
                 call_helper(&helper_socket, &grant, helper_timeout)
             })
             .await
-            .map_err(|_| HostRuntimeError::Protocol)??;
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))??;
             let stop_uncertain = response.status == "container-runtime-stop-uncertain";
             require_bound_response(&response, &request_id)?;
             if response.error_code.is_some() {
                 return Err(runtime_rejection(&response, action));
             }
-            if response.observation_receipt.is_some() {
-                return Err(HostRuntimeError::Protocol);
-            }
-            if response.diagnostic.is_some()
-                || !stop_uncertain && response.status != "container-runtime-request-executed"
-            {
-                return Err(HostRuntimeError::Protocol);
-            }
-            if response
-                .evidence_sha256
-                .as_deref()
-                .is_none_or(|value| !lower_hex(value, 64))
-            {
-                return Err(HostRuntimeError::Protocol);
-            }
-            if response
-                .exit_code
-                .is_some_and(|code| !(0..=255).contains(&code))
-            {
-                return Err(HostRuntimeError::Protocol);
-            }
+            require_executed_outcome(&response, stop_uncertain)?;
             Ok(HostRuntimeOutcome {
                 exit_code: response.exit_code.map(|code| code as i32),
                 stop_uncertain,
@@ -292,7 +326,9 @@ fn require_bound_response(
     request_id: &str,
 ) -> Result<(), HostRuntimeError> {
     if response.schema_version != 1 {
-        return Err(HostRuntimeError::Protocol);
+        return Err(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::ResponseUnbound,
+        ));
     }
     if response.request_id.map(|id| id.to_string()).as_deref() == Some(request_id) {
         return Ok(());
@@ -305,7 +341,9 @@ fn require_bound_response(
     {
         return Ok(());
     }
-    Err(HostRuntimeError::Protocol)
+    Err(HostRuntimeError::HelperProtocol(
+        HelperProtocolCause::ResponseUnbound,
+    ))
 }
 
 /// The codes the helper can only raise before it has trusted the grant, and so
@@ -323,9 +361,43 @@ fn unbound_rejection_is_expected(code: &str) -> bool {
     )
 }
 
+/// The executed-outcome contract. A successful helper reply carries no
+/// rejection, no capture diagnostic and no signed inspection receipt, names the
+/// executed status unless it is the deliberate stop-uncertain outcome, and
+/// reports a 64-character lowercase evidence digest with, at most, a byte-sized
+/// exit code.
+fn require_executed_outcome(
+    response: &HelperResponse,
+    stop_uncertain: bool,
+) -> Result<(), HostRuntimeError> {
+    let malformed = || HostRuntimeError::HelperProtocol(HelperProtocolCause::OutcomeMalformed);
+    if response.observation_receipt.is_some() {
+        return Err(malformed());
+    }
+    if response.diagnostic.is_some()
+        || !stop_uncertain && response.status != "container-runtime-request-executed"
+    {
+        return Err(malformed());
+    }
+    if response
+        .evidence_sha256
+        .as_deref()
+        .is_none_or(|value| !lower_hex(value, 64))
+    {
+        return Err(malformed());
+    }
+    if response
+        .exit_code
+        .is_some_and(|code| !(0..=255).contains(&code))
+    {
+        return Err(malformed());
+    }
+    Ok(())
+}
+
 fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> HostRuntimeError {
     let Some(code) = response.error_code.as_deref() else {
-        return HostRuntimeError::Protocol;
+        return HostRuntimeError::HelperProtocol(HelperProtocolCause::RejectionMalformed);
     };
     if response.status != "rejected"
         || response.evidence_sha256.is_some()
@@ -335,7 +407,7 @@ fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> Ho
         || response.diagnostic.is_some()
             && (action != HostRuntimeAction::RunInspect || code != "runtime_process_exited")
     {
-        return HostRuntimeError::Protocol;
+        return HostRuntimeError::HelperProtocol(HelperProtocolCause::RejectionMalformed);
     }
     HostRuntimeError::HelperRejected {
         code: code.to_owned(),
@@ -376,6 +448,16 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "request_invalid"
             | "request_replayed"
             | "request_ledger_failed"
+            // The agent's own helper-protocol causes share the `helper_<code>`
+            // namespace, so this allowlist stays the single owner of the codes
+            // `preflight_code()` may name. A cause missing here keeps the
+            // previous opaque label instead of inventing an unowned code.
+            | "request_encoding_invalid"
+            | "call_join_failed"
+            | "message_framing_invalid"
+            | "response_unbound"
+            | "rejection_malformed"
+            | "outcome_malformed"
     )
 }
 
@@ -505,7 +587,9 @@ fn call_helper(
     read_timeout: Duration,
 ) -> Result<HelperResponse, HostRuntimeError> {
     if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
-        return Err(HostRuntimeError::Protocol);
+        return Err(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::MessageFraming,
+        ));
     }
     let mut stream = UnixStream::connect(socket)?;
     stream.set_read_timeout(Some(read_timeout))?;
@@ -517,11 +601,14 @@ fn call_helper(
     stream.read_exact(&mut prefix)?;
     let length = u32::from_be_bytes(prefix) as usize;
     if length == 0 || length > MAX_HELPER_MESSAGE_BYTES {
-        return Err(HostRuntimeError::Protocol);
+        return Err(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::MessageFraming,
+        ));
     }
     let mut response = vec![0_u8; length];
     stream.read_exact(&mut response)?;
-    parse_strict(&response).map_err(|_| HostRuntimeError::Protocol)
+    parse_strict(&response)
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::MessageFraming))
 }
 
 fn lower_hex(value: &str, length: usize) -> bool {
@@ -534,11 +621,17 @@ fn lower_hex(value: &str, length: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        HelperResponse, require_inspection_receipt, verify_observation_receipt, write_request,
+        HelperProtocolCause, HelperResponse, HostRuntimeError, call_helper, require_bound_response,
+        require_executed_outcome, require_inspection_receipt, runtime_rejection,
+        verify_observation_receipt, write_request,
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use std::fs;
+    use std::io::{Read, Write};
     use std::os::unix::fs::{PermissionsExt, symlink};
+    use std::os::unix::net::UnixListener;
+    use std::path::Path;
+    use std::time::Duration;
     use uuid::Uuid;
     use vonk_agent_protocol::{
         HostRuntimeAction, RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunObservationOutcome,
@@ -583,12 +676,12 @@ mod tests {
         assert!(!error.diagnostic().unwrap().contains("private-value"));
         assert!(matches!(
             super::runtime_rejection(&response, HostRuntimeAction::Start),
-            super::HostRuntimeError::Protocol
+            super::HostRuntimeError::HelperProtocol(super::HelperProtocolCause::RejectionMalformed,)
         ));
         response.error_code = Some("operation_unsafe_path".into());
         assert!(matches!(
             super::runtime_rejection(&response, HostRuntimeAction::RunInspect),
-            super::HostRuntimeError::Protocol
+            super::HostRuntimeError::HelperProtocol(super::HelperProtocolCause::RejectionMalformed,)
         ));
         // A rejection never carries the observation receipt that only an
         // executed run produces, whatever the action claimed it ran.
@@ -599,7 +692,7 @@ mod tests {
         ));
         assert!(matches!(
             super::runtime_rejection(&response, HostRuntimeAction::RunInspect),
-            super::HostRuntimeError::Protocol
+            super::HostRuntimeError::HelperProtocol(super::HelperProtocolCause::RejectionMalformed,)
         ));
     }
 
@@ -671,7 +764,6 @@ mod tests {
 
     #[test]
     fn preflight_reports_the_failed_boundary_without_exposing_error_details() {
-        use super::HostRuntimeError;
         use crate::client::ClientError;
         let cases = [
             (
@@ -692,6 +784,9 @@ mod tests {
                 HostRuntimeError::Io(std::io::Error::other("private path or transport detail")),
                 "helper_io_failed",
             ),
+            // The residual collapsed label now covers only the contracts
+            // this change did not name: request validation, observation-receipt
+            // verification and request-file storage.
             (HostRuntimeError::Protocol, "helper_protocol_invalid"),
             (
                 HostRuntimeError::HelperRejected {
@@ -856,5 +951,255 @@ mod tests {
         let link = temp.path().join("link");
         symlink(&target, &link).unwrap();
         assert!(write_request(&link, &"a".repeat(64), b"{}").is_err());
+    }
+
+    #[test]
+    fn request_encoding_refusal_names_the_request_body_contract() {
+        // Wrong implementation: a request body or signed grant that could not be
+        // canonically encoded collapsed into `helper_protocol_invalid`, which an
+        // operator could not tell apart from a corrupt reply.
+        let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding);
+        assert_eq!(error.preflight_code(), "helper_request_encoding_invalid");
+        assert!(error.diagnostic().is_none());
+    }
+
+    #[test]
+    fn helper_call_join_refusal_names_the_blocking_worker() {
+        // Wrong implementation: a blocking helper-call worker that failed to
+        // join collapsed into `helper_protocol_invalid`.
+        let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin);
+        assert_eq!(error.preflight_code(), "helper_call_join_failed");
+        assert!(error.diagnostic().is_none());
+    }
+
+    #[test]
+    fn helper_message_framing_refusal_names_the_message_contract() {
+        // Wrong implementation: an empty, oversized, truncated or undecodable
+        // length-prefixed helper message collapsed into
+        // `helper_protocol_invalid`.
+        let oversized = vec![0_u8; super::MAX_HELPER_MESSAGE_BYTES + 1];
+        for body in [&b""[..], &oversized[..]] {
+            let error = call_helper(Path::new("/nonexistent"), body, Duration::from_secs(1))
+                .expect_err("an out-of-range request body is refused before connecting");
+            assert_eq!(error.preflight_code(), "helper_message_framing_invalid");
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("helper.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            for reply in [
+                &0_u32.to_be_bytes()[..],
+                &(super::MAX_HELPER_MESSAGE_BYTES as u32 + 1).to_be_bytes()[..],
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut prefix = [0_u8; 4];
+                stream.read_exact(&mut prefix).unwrap();
+                let mut body = vec![0_u8; u32::from_be_bytes(prefix) as usize];
+                stream.read_exact(&mut body).unwrap();
+                stream.write_all(reply).unwrap();
+            }
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut prefix = [0_u8; 4];
+            stream.read_exact(&mut prefix).unwrap();
+            let mut body = vec![0_u8; u32::from_be_bytes(prefix) as usize];
+            stream.read_exact(&mut body).unwrap();
+            let undecodable = b"not-json";
+            stream
+                .write_all(&(undecodable.len() as u32).to_be_bytes())
+                .unwrap();
+            stream.write_all(undecodable).unwrap();
+        });
+        for attempt in 0..3 {
+            let error = match call_helper(&socket, b"{}", Duration::from_secs(5)) {
+                Ok(_) => panic!("helper reply {attempt} must be refused"),
+                Err(error) => error,
+            };
+            assert_eq!(error.preflight_code(), "helper_message_framing_invalid");
+            assert!(error.diagnostic().is_none());
+        }
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn foreign_request_identity_refusal_names_the_binding_contract() {
+        // Wrong implementation: a reply that named a different request, or
+        // declared a schema this agent cannot bind, collapsed into
+        // `helper_protocol_invalid`.
+        let request_id = "10000000-0000-4000-8000-000000000001";
+        let mut foreign: super::HelperResponse = vonk_agent_protocol::parse_strict(
+            br#"{"schema_version":1,"request_id":"20000000-0000-4000-8000-000000000002","status":"rejected","evidence_sha256":null,"error_code":"grant_unauthorized"}"#,
+        )
+        .unwrap();
+        let error = require_bound_response(&foreign, request_id)
+            .expect_err("a reply bound to another request must be refused");
+        assert_eq!(error.preflight_code(), "helper_response_unbound");
+        assert!(error.diagnostic().is_none());
+
+        // The wire schema pins `schema_version` to 1, so a reply that declares
+        // another schema can only arrive through a decoding path that skipped
+        // that constraint. The binding check still refuses it.
+        foreign.schema_version = 2;
+        foreign.request_id = Some(Uuid::parse_str(request_id).unwrap());
+        let error = require_bound_response(&foreign, request_id)
+            .expect_err("a reply declaring another schema must be refused");
+        assert_eq!(error.preflight_code(), "helper_response_unbound");
+    }
+
+    #[test]
+    fn malformed_helper_rejection_names_the_rejection_contract() {
+        // Wrong implementation: a rejection whose status, evidence, exit code or
+        // code broke the rejection contract, or a diagnostic attached to
+        // anything but `(RunInspect, runtime_process_exited)`, collapsed into
+        // `helper_protocol_invalid`.
+        let request_id = "10000000-0000-4000-8000-000000000001";
+        let digest = "a".repeat(64);
+        let baseline: super::HelperResponse = vonk_agent_protocol::parse_strict(
+            format!(
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"rejected","evidence_sha256":null,"error_code":"operation_failed"}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+
+        // A status other than `rejected`.
+        let other_status: super::HelperResponse = vonk_agent_protocol::parse_strict(
+            format!(
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-request-executed","evidence_sha256":null,"error_code":"operation_failed"}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_rejection_malformed(&other_status, HostRuntimeAction::RunInspect);
+
+        // A rejection never carries execution evidence, an exit code or the
+        // observation receipt only an executed run owns.
+        let mut response = baseline.clone();
+        response.evidence_sha256 = Some(digest);
+        assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
+        let mut response = baseline.clone();
+        response.exit_code = Some(0);
+        assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
+        let mut response = baseline.clone();
+        response.observation_receipt = Some(signed_receipt(
+            &Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap(),
+            Uuid::new_v4(),
+        ));
+        assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
+
+        // A code outside the stable set.
+        let mut response = baseline.clone();
+        response.error_code = Some("untrusted_response_detail".into());
+        assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
+
+        // A diagnostic is only meaningful for
+        // `(RunInspect, runtime_process_exited)`.
+        let mut response = baseline.clone();
+        response.diagnostic = Some("private detail".into());
+        assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
+
+        // A rejection must name a code at all.
+        let mut response = baseline;
+        response.error_code = None;
+        assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
+    }
+
+    fn assert_rejection_malformed(response: &super::HelperResponse, action: HostRuntimeAction) {
+        let error = runtime_rejection(response, action);
+        assert_eq!(error.preflight_code(), "helper_rejection_malformed");
+        assert!(error.diagnostic().is_none());
+    }
+
+    #[test]
+    fn malformed_executed_outcome_names_the_outcome_contract() {
+        // Wrong implementation: an executed outcome that carried a diagnostic,
+        // named the wrong status, omitted or mis-spelled its evidence digest, or
+        // reported a non-byte exit code collapsed into
+        // `helper_protocol_invalid`.
+        let request_id = "10000000-0000-4000-8000-000000000001";
+        let digest = "a".repeat(64);
+        let baseline: super::HelperResponse = vonk_agent_protocol::parse_strict(
+            format!(
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-request-executed","evidence_sha256":"{digest}"}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+
+        // A capture diagnostic is not part of an executed outcome.
+        let mut response = baseline.clone();
+        response.diagnostic = Some("private detail".into());
+        assert_outcome_malformed(&response);
+
+        // The status must be the executed one unless it is stop-uncertain.
+        let rejected: super::HelperResponse = vonk_agent_protocol::parse_strict(
+            format!(
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"rejected","evidence_sha256":null}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_outcome_malformed(&rejected);
+
+        // The evidence digest must be present, lowercase and 64 hex characters.
+        let mut response = baseline.clone();
+        response.evidence_sha256 = None;
+        assert_outcome_malformed(&response);
+        let mut response = baseline.clone();
+        response.evidence_sha256 = Some("A".repeat(64));
+        assert_outcome_malformed(&response);
+
+        // The exit code must fit a process byte.
+        let mut response = baseline.clone();
+        response.exit_code = Some(256);
+        assert_outcome_malformed(&response);
+
+        // An executed outcome never carries the signed inspection receipt only a
+        // rejection-free inspection does.
+        let mut response = baseline;
+        response.observation_receipt = Some(signed_receipt(
+            &Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap(),
+            Uuid::new_v4(),
+        ));
+        assert_outcome_malformed(&response);
+
+        // The deliberate stop-uncertain outcome and a byte-sized exit code stay
+        // accepted.
+        let stop_uncertain: super::HelperResponse = vonk_agent_protocol::parse_strict(
+            format!(
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-stop-uncertain","evidence_sha256":"{digest}","exit_code":137}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert!(require_executed_outcome(&stop_uncertain, true).is_ok());
+    }
+
+    fn assert_outcome_malformed(response: &super::HelperResponse) {
+        let error = require_executed_outcome(response, false)
+            .expect_err("a malformed executed outcome must be refused");
+        assert_eq!(error.preflight_code(), "helper_outcome_malformed");
+        assert!(error.diagnostic().is_none());
+    }
+
+    #[test]
+    fn every_helper_protocol_cause_is_on_the_stable_allowlist() {
+        // Wrong implementation: a cause whose code is absent from
+        // `stable_runtime_error_code` silently fell back to
+        // `helper_protocol_invalid`, which is the collapse this change removes.
+        for cause in [
+            HelperProtocolCause::RequestEncoding,
+            HelperProtocolCause::HelperCallJoin,
+            HelperProtocolCause::MessageFraming,
+            HelperProtocolCause::ResponseUnbound,
+            HelperProtocolCause::RejectionMalformed,
+            HelperProtocolCause::OutcomeMalformed,
+        ] {
+            assert!(
+                super::stable_runtime_error_code(cause.code()),
+                "{} is not on the helper_<code> allowlist",
+                cause.code()
+            );
+        }
     }
 }
