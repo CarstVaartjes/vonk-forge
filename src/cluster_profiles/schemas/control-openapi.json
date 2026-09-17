@@ -3194,7 +3194,7 @@
           },
           "ttl_seconds": {
             "default": 900,
-            "maximum": 86400.0,
+            "maximum": 900.0,
             "minimum": 1.0,
             "title": "Ttl Seconds",
             "type": "integer"
@@ -20709,6 +20709,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {

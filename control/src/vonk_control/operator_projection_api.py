@@ -18,11 +18,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
-from .agent_upgrades import AgentUpgradeService
+from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
 from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor, CursorError
 from .bounded_json import BoundedJSONError
 from .deployment_provenance_contract import DeploymentProvenance
+from .enrollment import (
+    MAX_ENROLLMENT_GRANT_TTL_SECONDS,
+    EnrollmentDenied,
+    RemoteRevocationUncertain,
+)
 from .enrollment_bootstrap import accepted_installer_url
 from .fleet_projection import (
     FleetNode,
@@ -34,6 +39,7 @@ from .fleet_projection import (
     TelemetryWorkloadsResponse,
 )
 from .library_projection import LibrarySelectorAmbiguous
+from .logging import redact_text
 from .models import Job, JobLogEntry
 from .operation_api import bounded_error_responses
 from .request_fault import RequestFault
@@ -74,7 +80,9 @@ class FleetEnrollRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=80, pattern=r"^[^\x00-\x1f\x7f]+$")
-    ttl_seconds: int = Field(default=900, ge=1, le=86_400)
+    # The enrollment authority caps a one-time bootstrap grant; advertising a
+    # longer TTL turned its refusal into an unavailable projection.
+    ttl_seconds: int = Field(default=900, ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
 
 
 class FleetUpgradeRequest(StrictJSONModel):
@@ -373,6 +381,16 @@ def _node(snapshot: FleetSnapshot, selector: str) -> FleetNode:
     return matches[0]
 
 
+def _domain_refusal_detail(error: Exception) -> str:
+    """Bound and redact a domain authority's own refusal text.
+
+    The refusal is built by the owning domain from policy copy, so the boundary
+    only has to keep it bounded and redacted; it never carries a stored document.
+    """
+
+    return redact_text(str(error))[:256]
+
+
 def _operator_error(error: Exception) -> HTTPException:
     if isinstance(error, LibrarySelectorAmbiguous):
         candidates = ", ".join(error.candidates[:16])
@@ -387,6 +405,30 @@ def _operator_error(error: Exception) -> HTTPException:
         # stored document that no longer validates, is the Controller's state
         # and answers the declared 503 rather than blaming the request.
         return HTTPException(status_code=422, detail=str(error)[:256])
+    if isinstance(error, AgentUpgradeConflict):
+        # The upgrade authority refused the plan. That is a conflict between the
+        # request and current Fleet state, not a projection fault, so name the
+        # layer and keep the authority's bounded reason instead of the generic
+        # "operator projection unavailable" tail.
+        return HTTPException(
+            status_code=409,
+            detail=_domain_refusal_detail(error),
+            headers={"x-vonk-error-code": "controller.fleet.upgrade_conflict"},
+        )
+    if isinstance(error, RemoteRevocationUncertain):
+        # Local revocation is durable; only the CA confirmation is pending. Stay
+        # retryable but name the uncertain authority rather than the projection.
+        return HTTPException(
+            status_code=503,
+            detail=_domain_refusal_detail(error),
+            headers={"x-vonk-error-code": "controller.fleet.revocation_uncertain"},
+        )
+    if isinstance(error, EnrollmentDenied):
+        return HTTPException(
+            status_code=409,
+            detail=_domain_refusal_detail(error),
+            headers={"x-vonk-error-code": "controller.fleet.enrollment_denied"},
+        )
     detail = stored_document_detail(error)
     if detail is not None:
         # Name the failing field path so the corrupt row can be found, without
@@ -736,7 +778,7 @@ def install_operator_projection_routes(
         "/api/fleet/{selector}/remove",
         openapi_extra={"x-vonk-request-body": "none"},
         response_model=FleetActionResponse,
-        responses=bounded_error_responses(401, 403, 404, 503),
+        responses=bounded_error_responses(401, 403, 404, 409, 503),
         operation_id="removeFleetNode",
     )
     def fleet_remove(

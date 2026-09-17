@@ -9,11 +9,13 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from vonk_control.agent_api import AgentApiServices, EnrollmentGrantResponse
+from vonk_control.agent_upgrades import AgentUpgradeConflict
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.deployment_provenance_contract import (
     DeploymentProvenance,
     PlatformObservation,
 )
+from vonk_control.enrollment import EnrollmentDenied, RemoteRevocationUncertain
 from vonk_control.library_api import _error as library_error
 from vonk_control.operator_projection_api import (
     FleetNodeDetailResponse,
@@ -350,3 +352,169 @@ def test_metrics_capabilities_forwards_the_telemetry_selectors() -> None:
             "run_id": "run-1",
         }
     ]
+
+
+class _SnapshotProjection:
+    """Serve the shared typed Fleet snapshot to the action routes."""
+
+    def read(self) -> object:
+        from .test_metrics import _fleet_snapshot
+
+        return _fleet_snapshot()
+
+
+def _action_app(actor: Actor, *, services: FleetOperatorServices) -> FastAPI:
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def request_id(request, call_next):
+        request.state.request_id = "request-1"
+        return await call_next(request)
+
+    install_operator_projection_routes(
+        app,
+        actor_dependency=Depends(lambda: actor),
+        fleet_projection=_SnapshotProjection(),
+        library_projection=None,
+        fleet_services=services,
+    )
+    return app
+
+
+class _RefusingUpgrade:
+    """An upgrade authority that refuses before it previews or enqueues."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    def current_package(self) -> dict[str, object]:
+        raise self._error
+
+    def preview(self, *args: object, **kwargs: object) -> object:
+        raise AssertionError("preview must not run once the authority refused")
+
+    def apply(self, *args: object, **kwargs: object) -> object:
+        raise AssertionError("apply must not run once the authority refused")
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "no outdated upgrade-capable Sparks were found",
+        f"Spark {_NODE} is not currently online",
+    ],
+)
+def test_a_refused_upgrade_names_the_authority_reason(reason: str) -> None:
+    """Every specific upgrade refusal used to arrive as an unavailable projection.
+
+    ``_operator_error`` had no branch for ``AgentUpgradeConflict``, so the
+    refusal fell through to the generic 503 tail: the caller saw "operator
+    projection unavailable" for a decision the upgrade domain had already
+    explained, and blamed the projection layer for it.
+    """
+
+    app = _action_app(
+        Actor("admin", "administrator"),
+        services=FleetOperatorServices(
+            upgrades=_RefusingUpgrade(AgentUpgradeConflict(reason))
+        ),
+    )
+    response = TestClient(app).post("/api/fleet/upgrade", json={"all": True})
+
+    assert response.status_code == 409, response.text
+    assert response.headers["x-vonk-error-code"] == "controller.fleet.upgrade_conflict"
+    assert response.json()["detail"] == reason
+
+
+class _RefusingEnrollment:
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    def create_named(self, **kwargs: object) -> dict[str, object]:
+        raise AssertionError("not used")
+
+    def create_reenrollment(self, *args: object, **kwargs: object) -> dict[str, object]:
+        raise AssertionError("not used")
+
+    def revoke_node(self, node_id: str, actor: str) -> None:
+        raise self._error
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code", "code"),
+    [
+        (
+            EnrollmentDenied("node identity does not exist"),
+            409,
+            "controller.fleet.enrollment_denied",
+        ),
+        (
+            RemoteRevocationUncertain(
+                "local revocation complete; remote CA revocation is uncertain"
+            ),
+            503,
+            "controller.fleet.revocation_uncertain",
+        ),
+    ],
+)
+def test_a_refused_removal_names_the_enrollment_layer(
+    error: Exception, status_code: int, code: str
+) -> None:
+    """Removal shares the upgrade route's old blind spot.
+
+    ``revoke_node`` refuses with ``EnrollmentDenied`` and reports a durable local
+    revocation with a pending CA confirmation as ``RemoteRevocationUncertain``.
+    Both are ``RuntimeError`` and used to reach the generic 503 tail, which
+    blamed the projection for the enrollment authority's own decision.
+    """
+
+    from .test_metrics import NODE
+
+    app = _action_app(
+        Actor("admin", "administrator"),
+        services=FleetOperatorServices(enrollment=_RefusingEnrollment(error)),
+    )
+    response = TestClient(app).post(f"/api/fleet/{NODE}/remove")
+
+    assert response.status_code == status_code, response.text
+    assert response.headers["x-vonk-error-code"] == code
+    assert response.json()["detail"] == str(error)
+
+
+class _RecordingEnrollment:
+    def __init__(self) -> None:
+        self.called = False
+
+    def create_named(self, **kwargs: object) -> dict[str, object]:
+        self.called = True
+        # EnrollmentService caps a bootstrap grant at 900 seconds and voices the
+        # refusal as this ValueError.
+        raise ValueError("enrollment grant TTL must be between one and 900 seconds")
+
+    def create_reenrollment(self, *args: object, **kwargs: object) -> dict[str, object]:
+        raise AssertionError("not used")
+
+    def revoke_node(self, node_id: str, actor: str) -> None:
+        raise AssertionError("not used")
+
+
+def test_enroll_rejects_a_ttl_the_bootstrap_authority_would_refuse() -> None:
+    """The request model advertised a TTL the authority always refuses.
+
+    ``ttl_seconds`` accepted up to 86400 while ``EnrollmentService`` caps a
+    bootstrap grant at 900, so an overlong value passed request validation and
+    the authority's ValueError arrived as "operator projection unavailable"
+    instead of a request rejection.
+    """
+
+    enrollment = _RecordingEnrollment()
+    app = _action_app(
+        Actor("admin", "administrator"),
+        services=FleetOperatorServices(enrollment=enrollment),
+    )
+    response = TestClient(app).post(
+        "/api/fleet/enroll", json={"name": "Spark", "ttl_seconds": 901}
+    )
+
+    assert response.status_code == 422, response.text
+    assert not enrollment.called
