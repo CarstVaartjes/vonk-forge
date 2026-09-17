@@ -160,6 +160,12 @@ def test_the_shipped_start_budget_default_is_the_controller_default(monkeypatch)
     refused a distributed cold start after one minute, and nothing failed, because
     the two defaults had no relationship in code.  Asserting that they agree,
     rather than restating either number, is what keeps them from drifting again.
+
+    All eleven ``${VAR:-default}`` interpolations in compose.yaml were audited
+    against the code that reads them once this shape was known, so nobody has to
+    re-run the sweep by hand: every other one agrees with its code fallback, and
+    ``VONK_BACKUP_INTERVAL_SECONDS`` / ``VONK_BACKUP_KEEP`` have no code fallback
+    at all -- ``deploy/compose/postgres/entrypoint.sh`` is their only owner.
     """
     from vonk_control.settings import _distributed_start_timeout
 
