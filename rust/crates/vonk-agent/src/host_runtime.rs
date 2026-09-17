@@ -27,10 +27,13 @@ pub enum HostRuntimeError {
     Io(#[from] std::io::Error),
     #[error("host runtime authority is unavailable")]
     Controller(#[from] ClientError),
-    #[error("host runtime helper response is invalid")]
-    Protocol,
     #[error("host runtime helper protocol contract is invalid")]
     HelperProtocol(HelperProtocolCause),
+    /// The helper answered, but did not confirm whether the workload started or
+    /// stopped. That is an ambiguous effect that needs reconciliation, not a
+    /// malformed reply, so it keeps a state of its own.
+    #[error("host runtime could not confirm the workload outcome")]
+    StopUncertain,
     #[error("host runtime helper rejected request: {code}")]
     HelperRejected {
         code: String,
@@ -41,14 +44,11 @@ pub enum HostRuntimeError {
 /// The distinct contracts this agent verifies while exchanging one message with
 /// the privileged helper.
 ///
-/// Each was previously collapsed into [`HostRuntimeError::Protocol`], whose
-/// single `helper_protocol_invalid` label could not say whether the request body
-/// or signed grant failed to encode, the blocking helper-call worker failed to
-/// join, the length-prefixed message was empty, oversized or undecodable, the
-/// reply was bound to another request, the rejection broke the rejection
-/// contract, or the executed outcome broke the outcome contract. That label was
-/// the live symptom of a blocked privileged start, and it named no violated
-/// contract an operator could act on.
+/// Every one of these contracts was previously collapsed into a single
+/// `helper_protocol_invalid` label that could not say which was violated -- the
+/// live symptom of a blocked privileged start, with no helper involvement and
+/// nothing to act on. That label now survives only as the fallback for a cause
+/// or helper code that is not on the stable allowlist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelperProtocolCause {
     /// The canonical request body or the signed grant could not be encoded.
@@ -63,6 +63,20 @@ pub enum HelperProtocolCause {
     RejectionMalformed,
     /// An executed helper outcome did not match the executed-outcome contract.
     OutcomeMalformed,
+    /// The agent-built runtime request or inspection binding failed canonical
+    /// validation before any helper was called.
+    RequestDocument,
+    /// The owner-only signed request file could not be established.
+    RequestStorage,
+    /// The host clock is before the Unix epoch.
+    SystemClock,
+    /// An executed inspection reply did not carry exactly one signed
+    /// observation receipt.
+    InspectionReceipt,
+    /// The signed observation receipt did not prove this inspection.
+    ObservationReceipt,
+    /// The signed observation time is not representable.
+    ObservationTimestamp,
 }
 
 impl HelperProtocolCause {
@@ -76,6 +90,12 @@ impl HelperProtocolCause {
             Self::ResponseUnbound => "response_unbound",
             Self::RejectionMalformed => "rejection_malformed",
             Self::OutcomeMalformed => "outcome_malformed",
+            Self::RequestDocument => "request_document_invalid",
+            Self::RequestStorage => "request_storage_invalid",
+            Self::SystemClock => "system_clock_invalid",
+            Self::InspectionReceipt => "inspection_receipt_invalid",
+            Self::ObservationReceipt => "observation_receipt_invalid",
+            Self::ObservationTimestamp => "observation_timestamp_invalid",
         }
     }
 }
@@ -92,13 +112,15 @@ impl HostRuntimeError {
                 "helper_grant_unauthorized".to_owned()
             }
             Self::Controller(_) => "helper_grant_unavailable".to_owned(),
-            Self::Protocol => "helper_protocol_invalid".to_owned(),
             Self::HelperProtocol(cause) if stable_runtime_error_code(cause.code()) => {
                 format!("helper_{}", cause.code())
             }
             // A cause that is not on the namespace allowlist keeps the previous
             // opaque label, exactly as an unlisted helper rejection code does.
             Self::HelperProtocol(_) => "helper_protocol_invalid".to_owned(),
+            // An ambiguous stop is named for what it is, so it can never be
+            // read as a malformed helper reply.
+            Self::StopUncertain => "helper_stop_uncertain".to_owned(),
             Self::HelperRejected { code, .. } if stable_runtime_error_code(code) => {
                 format!("helper_{code}")
             }
@@ -147,7 +169,9 @@ impl HostRuntimeBoundary<'_> {
         binding: RecipeRunInspectionBinding,
         arguments: Vec<String>,
     ) -> Result<RecipeRunInspectionOutcome, HostRuntimeError> {
-        binding.validate().map_err(|_| HostRuntimeError::Protocol)?;
+        binding
+            .validate()
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestDocument))?;
         let attempt = binding.run_generation;
         let request = HostRuntimeRequest {
             schema_version: 1,
@@ -160,7 +184,9 @@ impl HostRuntimeBoundary<'_> {
             observation: Some(binding.clone()),
             installation_id: None,
         };
-        request.validate().map_err(|_| HostRuntimeError::Protocol)?;
+        request
+            .validate()
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestDocument))?;
         let body = canonical_json(&request)
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let digest = hex_sha256(&body);
@@ -188,7 +214,7 @@ impl HostRuntimeBoundary<'_> {
         let expires_at = authorization.grant.claims.expires_at;
         let received_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| HostRuntimeError::Protocol)?
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::SystemClock))?
             .as_secs() as i64;
         let process_running = verify_observation_receipt(
             &receipt,
@@ -271,7 +297,9 @@ impl HostRuntimeBoundary<'_> {
             observation: None,
             installation_id,
         };
-        request.validate().map_err(|_| HostRuntimeError::Protocol)?;
+        request
+            .validate()
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestDocument))?;
         let body = canonical_json(&request)
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let digest = hex_sha256(&body);
@@ -458,6 +486,13 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "response_unbound"
             | "rejection_malformed"
             | "outcome_malformed"
+            // The rest of the agent-side contracts share the same namespace.
+            | "request_document_invalid"
+            | "request_storage_invalid"
+            | "system_clock_invalid"
+            | "inspection_receipt_invalid"
+            | "observation_receipt_invalid"
+            | "observation_timestamp_invalid"
     )
 }
 
@@ -472,12 +507,16 @@ fn require_inspection_receipt(
             .is_none_or(|value| !lower_hex(value, 64))
         || response.exit_code.is_some()
     {
-        return Err(HostRuntimeError::Protocol);
+        return Err(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::InspectionReceipt,
+        ));
     }
     response
         .observation_receipt
         .as_ref()
-        .ok_or(HostRuntimeError::Protocol)
+        .ok_or(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::InspectionReceipt,
+        ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -492,7 +531,9 @@ fn verify_observation_receipt(
     expires_at: i64,
     received_at: i64,
 ) -> Result<bool, HostRuntimeError> {
-    receipt.validate().map_err(|_| HostRuntimeError::Protocol)?;
+    receipt
+        .validate()
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::ObservationReceipt))?;
     if receipt.claims.node_id != node_id
         || receipt.claims.request_id.to_string() != request_id
         || receipt.claims.request_sha256 != request_sha256
@@ -502,17 +543,20 @@ fn verify_observation_receipt(
         || receipt.claims.observed_at >= expires_at
         || received_at > expires_at.saturating_add(5)
     {
-        return Err(HostRuntimeError::Protocol);
+        return Err(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::ObservationReceipt,
+        ));
     }
-    let signature_bytes =
-        hex::decode(&receipt.signature.value).map_err(|_| HostRuntimeError::Protocol)?;
+    let signature_bytes = hex::decode(&receipt.signature.value)
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::ObservationReceipt))?;
     signature::UnparsedPublicKey::new(&signature::ED25519, public_key)
         .verify(
-            &recipe_run_observation_receipt_signing_bytes(&receipt.claims)
-                .map_err(|_| HostRuntimeError::Protocol)?,
+            &recipe_run_observation_receipt_signing_bytes(&receipt.claims).map_err(|_| {
+                HostRuntimeError::HelperProtocol(HelperProtocolCause::ObservationReceipt)
+            })?,
             &signature_bytes,
         )
-        .map_err(|_| HostRuntimeError::Protocol)?;
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::ObservationReceipt))?;
     Ok(receipt.claims.outcome == RecipeRunObservationOutcome::Running)
 }
 
@@ -527,7 +571,9 @@ fn write_request(root: &Path, digest: &str, body: &[u8]) -> Result<PathBuf, Host
         || !metadata.is_dir()
         || metadata.permissions().mode() & 0o077 != 0
     {
-        return Err(HostRuntimeError::Protocol);
+        return Err(HostRuntimeError::HelperProtocol(
+            HelperProtocolCause::RequestStorage,
+        ));
     }
     let destination = root.join(format!("{digest}.json"));
     match fs::symlink_metadata(&destination) {
@@ -538,7 +584,9 @@ fn write_request(root: &Path, digest: &str, body: &[u8]) -> Result<PathBuf, Host
                 || metadata.permissions().mode() & 0o077 != 0
                 || fs::read(&destination)? != body
             {
-                return Err(HostRuntimeError::Protocol);
+                return Err(HostRuntimeError::HelperProtocol(
+                    HelperProtocolCause::RequestStorage,
+                ));
             }
             return Ok(destination);
         }
@@ -547,7 +595,7 @@ fn write_request(root: &Path, digest: &str, body: &[u8]) -> Result<PathBuf, Host
     }
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| HostRuntimeError::Protocol)?
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::SystemClock))?
         .as_nanos();
     let temporary = root.join(format!(".{digest}.{}.{nonce}.tmp", std::process::id()));
     let mut file = OpenOptions::new()
@@ -568,7 +616,9 @@ fn write_request(root: &Path, digest: &str, body: &[u8]) -> Result<PathBuf, Host
                 || metadata.permissions().mode() & 0o077 != 0
                 || fs::read(&destination)? != body
             {
-                return Err(HostRuntimeError::Protocol);
+                return Err(HostRuntimeError::HelperProtocol(
+                    HelperProtocolCause::RequestStorage,
+                ));
             }
             return Ok(destination);
         }
@@ -784,10 +834,6 @@ mod tests {
                 HostRuntimeError::Io(std::io::Error::other("private path or transport detail")),
                 "helper_io_failed",
             ),
-            // The residual collapsed label now covers only the contracts
-            // this change did not name: request validation, observation-receipt
-            // verification and request-file storage.
-            (HostRuntimeError::Protocol, "helper_protocol_invalid"),
             (
                 HostRuntimeError::HelperRejected {
                     code: "operation_unsafe_path".to_owned(),
@@ -1183,6 +1229,160 @@ mod tests {
     }
 
     #[test]
+    fn request_document_refusal_names_the_agent_built_request() {
+        // Wrong implementation: a HostRuntimeRequest (or inspection binding)
+        // that failed canonical validation collapsed into
+        // `helper_protocol_invalid`. This is the live Start signature -- the
+        // helper is never called, so there is no helper diagnostic, and an
+        // install that succeeded cannot start.
+        //
+        // The canonical validator is what refuses. A `Start` argument that
+        // carries a newline is rejected before the helper call, which is exactly
+        // the shape the single label could not name.
+        let request = super::HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::Start,
+            job_id: Uuid::new_v4(),
+            operation_id: Uuid::new_v4(),
+            attempt: 1,
+            fence: Uuid::new_v4(),
+            arguments: vec!["sha256:image".to_owned(), "run\n--flag".to_owned()],
+            observation: None,
+            installation_id: None,
+        };
+        assert!(
+            request.validate().is_err(),
+            "a Start argument containing a newline is refused by the canonical validator"
+        );
+
+        let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestDocument);
+        assert_eq!(error.preflight_code(), "helper_request_document_invalid");
+        assert!(error.diagnostic().is_none());
+    }
+
+    #[test]
+    fn request_storage_refusal_names_the_signed_request_file() {
+        // Wrong implementation: a request root or signed request file that
+        // violated the owner-only storage contract collapsed into
+        // `helper_protocol_invalid`, which runs on every Start before the
+        // helper call.
+        let temp = tempfile::tempdir().unwrap();
+        let permissive = temp.path().join("permissive");
+        fs::create_dir(&permissive).unwrap();
+        fs::set_permissions(&permissive, fs::Permissions::from_mode(0o755)).unwrap();
+        let error = write_request(&permissive, &"a".repeat(64), b"{}")
+            .expect_err("a group/world-readable request root must be refused");
+        assert_eq!(error.preflight_code(), "helper_request_storage_invalid");
+        assert!(error.diagnostic().is_none());
+
+        // An existing signed request file with different bytes is refused
+        // rather than overwritten.
+        let root = temp.path().join("requests");
+        let path = write_request(&root, &"b".repeat(64), b"{}").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{}");
+        let error = write_request(&root, &"b".repeat(64), b"[]")
+            .expect_err("a mismatched existing request file must be refused");
+        assert_eq!(error.preflight_code(), "helper_request_storage_invalid");
+    }
+
+    #[test]
+    fn system_clock_refusal_names_the_host_clock() {
+        // Wrong implementation: a host clock before the Unix epoch collapsed
+        // into `helper_protocol_invalid`. The conversion runs on the storage
+        // nonce, so it can fire on Start. A pre-epoch clock cannot be staged in
+        // a test; this pins the mapping both conversion sites use.
+        let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::SystemClock);
+        assert_eq!(error.preflight_code(), "helper_system_clock_invalid");
+        assert!(error.diagnostic().is_none());
+    }
+
+    #[test]
+    fn inspection_receipt_refusal_names_the_inspection_reply() {
+        // Wrong implementation: an executed RunInspect reply with the wrong
+        // status, unexpected execution evidence, or no signed receipt collapsed
+        // into `helper_protocol_invalid`.
+        let request_id = "10000000-0000-4000-8000-000000000001";
+        let digest = "a".repeat(64);
+        let no_receipt: super::HelperResponse = vonk_agent_protocol::parse_strict(
+            format!(
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-request-executed","evidence_sha256":"{digest}"}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let error = match require_inspection_receipt(&no_receipt) {
+            Ok(_) => panic!("an executed inspection without a receipt must be refused"),
+            Err(error) => error,
+        };
+        assert_eq!(error.preflight_code(), "helper_inspection_receipt_invalid");
+        assert!(error.diagnostic().is_none());
+
+        let rejected: super::HelperResponse = vonk_agent_protocol::parse_strict(
+            format!(
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"rejected","evidence_sha256":null,"error_code":"operation_failed"}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let error = match require_inspection_receipt(&rejected) {
+            Ok(_) => panic!("a rejection is never an executed inspection"),
+            Err(error) => error,
+        };
+        assert_eq!(error.preflight_code(), "helper_inspection_receipt_invalid");
+    }
+
+    #[test]
+    fn observation_receipt_refusal_names_the_signed_proof() {
+        // Wrong implementation: a signed observation receipt that did not prove
+        // this node, request, observation identity or freshness window collapsed
+        // into `helper_protocol_invalid`.
+        let signer = Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap();
+        let request_id = Uuid::new_v4();
+        let receipt = signed_receipt(&signer, request_id);
+        let public_key: [u8; 32] = signer.public_key().as_ref().try_into().unwrap();
+        let error = verify_observation_receipt(
+            &receipt,
+            &public_key,
+            "spk_11111111111111111111111111111111",
+            &request_id.to_string(),
+            &"a".repeat(64),
+            &"b".repeat(64),
+            100,
+            110,
+            106,
+        )
+        .expect_err("a receipt for another node must be refused");
+        assert_eq!(error.preflight_code(), "helper_observation_receipt_invalid");
+        assert!(error.diagnostic().is_none());
+    }
+
+    #[test]
+    fn observation_timestamp_refusal_names_the_receipt_time() {
+        // Wrong implementation: a signed observation time outside the
+        // representable range collapsed into `helper_protocol_invalid`. This is
+        // the executor's conversion of `receipt.claims.observed_at`; an
+        // unrepresentable value cannot be staged through the wire schema, so
+        // this pins the mapping that site uses.
+        let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::ObservationTimestamp);
+        assert_eq!(
+            error.preflight_code(),
+            "helper_observation_timestamp_invalid"
+        );
+        assert!(error.diagnostic().is_none());
+    }
+
+    #[test]
+    fn stop_uncertain_is_named_without_pretending_the_reply_was_malformed() {
+        // Wrong implementation: the executor's stop-uncertain short-circuit
+        // returned `HostRuntimeError::Protocol`, so "we could not confirm the
+        // stop" was reported as `helper_protocol_invalid` -- indistinguishable
+        // from a corrupt reply. It is an ambiguous effect, not a malformed one.
+        let error = HostRuntimeError::StopUncertain;
+        assert_eq!(error.preflight_code(), "helper_stop_uncertain");
+        assert!(error.diagnostic().is_none());
+    }
+
+    #[test]
     fn every_helper_protocol_cause_is_on_the_stable_allowlist() {
         // Wrong implementation: a cause whose code is absent from
         // `stable_runtime_error_code` silently fell back to
@@ -1194,6 +1394,12 @@ mod tests {
             HelperProtocolCause::ResponseUnbound,
             HelperProtocolCause::RejectionMalformed,
             HelperProtocolCause::OutcomeMalformed,
+            HelperProtocolCause::RequestDocument,
+            HelperProtocolCause::RequestStorage,
+            HelperProtocolCause::SystemClock,
+            HelperProtocolCause::InspectionReceipt,
+            HelperProtocolCause::ObservationReceipt,
+            HelperProtocolCause::ObservationTimestamp,
         ] {
             assert!(
                 super::stable_runtime_error_code(cause.code()),
