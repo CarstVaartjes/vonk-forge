@@ -16,6 +16,31 @@ AGENT_UPGRADE_AWAITING_IDENTITY_REASON = (
     "agent upgrade installed the package; awaiting identity confirmation"
 )
 
+#: The same by-design handoff as spelled by every agent package built before the
+#: rename above.  A Controller is deployed *ahead* of the agents it upgrades, so
+#: during a one-at-a-time rollout the handoff arrives from a peer that still
+#: spells it the old way.  That makes this a live agent's wire value, not a
+#: retired one: dropping it made a completed install read as a hard failure.
+#: Observed live on 2026-09-17, `vonkctl fleet upgrade --all --strategy
+#: one-at-a-time` recorded `failed` / `target_proven: false` /
+#: `reason: agent upgrade did not restart the service` for both Sparks while
+#: they were already running the exact target binary, and the operator could not
+#: tell a successful handoff from a real failure.  Remove this spelling once no
+#: deployable agent package predates the rename.
+AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON = (
+    "agent upgrade did not restart the service"
+)
+
+#: Every body that means "the signed helper accepted the package; prove the
+#: running identity from a later authenticated claim".  One set, so the
+#: recoverable reasons and the automatic-retry exclusion cannot drift apart.
+AGENT_UPGRADE_AWAITING_IDENTITY_REASONS = frozenset(
+    {
+        AGENT_UPGRADE_AWAITING_IDENTITY_REASON,
+        AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
+    }
+)
+
 GENERIC_AGENT_UPGRADE_REASONS = frozenset(
     {
         "agent upgrade request is invalid",
@@ -28,7 +53,7 @@ RECOVERABLE_AGENT_UPGRADE_REASONS = frozenset(
     {
         *GENERIC_AGENT_UPGRADE_REASONS,
         "agent upgrade helper is unavailable",
-        AGENT_UPGRADE_AWAITING_IDENTITY_REASON,
+        *AGENT_UPGRADE_AWAITING_IDENTITY_REASONS,
         "agent upgrade helper rejected the request: package_preflight_failed",
         "agent upgrade helper rejected the request: package_verification_failed",
         "agent upgrade helper rejected the request: package_metadata_failed",
