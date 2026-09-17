@@ -3466,9 +3466,7 @@
         },
         "arguments": {
           "items": {
-            "maxLength": 4096,
-            "minLength": 1,
-            "pattern": "^[^\\x00\\r\\n]+$",
+            "pattern": "^[^\\x00]+$",
             "type": "string"
           },
           "maxItems": 4096,

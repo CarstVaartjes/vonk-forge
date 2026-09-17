@@ -69,7 +69,10 @@ def _sessions(tmp_path):
     return sessionmaker(engine, expire_on_commit=False)
 
 
-def _failed_start(sessions, *, node_id: str = _NODE) -> str:
+def _failed_start(sessions, *, node_id: str = _NODE, preflight=None) -> str:
+    diagnostics = _diagnostics()
+    if preflight is not None:
+        diagnostics["preflight"] = preflight
     operation_id = str(uuid4())
     with sessions.begin() as session:
         session.add(
@@ -101,7 +104,7 @@ def _failed_start(sessions, *, node_id: str = _NODE) -> str:
                 result={
                     "reason": _REASON,
                     "error_code": "recipe_start_failed",
-                    "diagnostics": _diagnostics(),
+                    "diagnostics": diagnostics,
                 },
             )
         )
@@ -191,3 +194,25 @@ def test_failed_start_for_another_node_is_not_projected(tmp_path):
     _failed_start(sessions, node_id="spk_" + "b" * 32)
     payload = _client(sessions).get(f"/api/fleet/{_NODE}/loginfo").json()
     assert payload["entries"] == []
+
+
+def test_refused_request_bound_is_retrievable_through_the_operator_log(tmp_path):
+    # Wrong implementation: the refusal named its rule but not the bound, so an
+    # operator could not tell 518 of 4096 from 5000 of 4096.
+    sessions = _sessions(tmp_path)
+    _failed_start(
+        sessions,
+        preflight=[
+            {
+                "name": "request_refusal",
+                "value": (
+                    "rule=helper_request_argument_count_invalid limit=4096 observed=518"
+                ),
+            }
+        ],
+    )
+    payload = _client(sessions).get(f"/api/fleet/{_NODE}/loginfo").json()
+    messages = [entry["message"] for entry in payload["entries"]]
+    assert any(
+        "limit=4096" in message and "observed=518" in message for message in messages
+    ), messages
