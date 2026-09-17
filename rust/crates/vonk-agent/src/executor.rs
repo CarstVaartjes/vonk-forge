@@ -510,22 +510,45 @@ impl<R> RecipeExecutor<'_, R> {
     }
 }
 
+/// Why a readiness wait ended.
+///
+/// The runtime guard exists so a start stops observing a workload the agent can
+/// no longer inspect.  Collapsing its error into `false` made that failure
+/// indistinguishable from an expired readiness deadline, so a start whose
+/// privileged inspection failed was reported as "the workload did not become
+/// ready before its deadline" and the Controller's existing
+/// `runtime_observation_unavailable` retry could never fire.  Observed live on
+/// 2026-09-17, a two-Spark GLM start ended 51 s in -- five ten-second inspection
+/// ticks -- with 30 s still on the attempt lease and an hour on the start budget.
+enum ReadinessOutcome {
+    Ready,
+    Deadline,
+    Cancelled,
+    GuardFailed(crate::host_runtime::HostRuntimeError),
+}
+
 async fn wait_ready_with_runtime_guard_and_cancellation<R, G>(
     readiness: R,
     runtime_guard: G,
     mut cancellation: tokio::sync::watch::Receiver<bool>,
-) -> bool
+) -> ReadinessOutcome
 where
     R: Future<Output = Result<(), crate::health::HealthError>>,
-    G: Future<Output = bool>,
+    G: Future<Output = Result<std::convert::Infallible, crate::host_runtime::HostRuntimeError>>,
 {
     if *cancellation.borrow() {
-        return false;
+        return ReadinessOutcome::Cancelled;
     }
     tokio::select! {
-        result = readiness => result.is_ok(),
-        running = runtime_guard => running,
-        _ = cancellation.changed() => false,
+        result = readiness => match result {
+            Ok(()) => ReadinessOutcome::Ready,
+            Err(_) => ReadinessOutcome::Deadline,
+        },
+        guard = runtime_guard => match guard {
+            Ok(never) => match never {},
+            Err(error) => ReadinessOutcome::GuardFailed(error),
+        },
+        _ = cancellation.changed() => ReadinessOutcome::Cancelled,
     }
 }
 
@@ -2136,20 +2159,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let runtime_guard = async {
                     loop {
                         tokio::time::sleep(Duration::from_secs(10)).await;
-                        if self
-                            .execute_host_runtime(
-                                claim,
-                                HostRuntimeAction::RunInspect,
-                                runtime_guard_arguments.clone(),
-                            )
-                            .await
-                            .is_err()
-                        {
-                            return false;
-                        }
+                        self.execute_host_runtime(
+                            claim,
+                            HostRuntimeAction::RunInspect,
+                            runtime_guard_arguments.clone(),
+                        )
+                        .await?;
                     }
                 };
-                let ready = if collective_readiness {
+                let ready = match if collective_readiness {
                     wait_ready_with_runtime_guard_and_cancellation(
                         wait_ready_until(
                             request.endpoint_address,
@@ -2174,6 +2192,24 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         cancellation.clone(),
                     )
                     .await
+                } {
+                    ReadinessOutcome::Ready => true,
+                    ReadinessOutcome::Cancelled | ReadinessOutcome::Deadline => false,
+                    ReadinessOutcome::GuardFailed(error) => {
+                        // The runtime could not be inspected, so the effect cannot
+                        // be bound.  Name that instead of reporting a readiness
+                        // deadline the workload never reached: a temporary
+                        // inspection failure is the code the Controller already
+                        // retries for a start, so it becomes self-healing rather
+                        // than a park an operator has to read the journal to
+                        // explain.
+                        if temporary_observation_error(&error) {
+                            return temporary_runtime_observation_failure();
+                        }
+                        return failed_owned(format!(
+                            "exact workload runtime observation failed: {error}"
+                        ));
+                    }
                 };
                 if !ready {
                     if *cancellation.borrow() {
@@ -3503,12 +3539,13 @@ fn remaining_lease(deadline: DateTime<FixedOffset>) -> Duration {
 mod tests {
     use super::{
         ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, HeartbeatFailure, InterruptibleJob,
-        LoopClient, RecipeExecutor, RecipeObservationError, RejectingExecutor, RunOncePolicy,
-        classify_heartbeat_failure, controller_denial_diagnostic, distribution_failure_result,
-        distribution_success_evidence, normalize_execution_result, output_media_type,
-        parse_compiled_execution_plan, readiness_identity, recipe_install_success_body,
-        report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
-        run_once_with_heartbeat_interval, temporary_runtime_observation_failure,
+        LoopClient, ReadinessOutcome, RecipeExecutor, RecipeObservationError, RejectingExecutor,
+        RunOncePolicy, classify_heartbeat_failure, controller_denial_diagnostic,
+        distribution_failure_result, distribution_success_evidence, normalize_execution_result,
+        output_media_type, parse_compiled_execution_plan, readiness_identity,
+        recipe_install_success_body, report_complete_recipe_run_observations,
+        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
+        temporary_observation_error, temporary_runtime_observation_failure,
         wait_for_launch_stability, wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
@@ -4221,29 +4258,51 @@ mod tests {
         let readiness = std::future::pending::<Result<(), crate::health::HealthError>>();
 
         let (_sender, cancellation) = tokio::sync::watch::channel(false);
-        assert!(
-            !wait_ready_with_runtime_guard_and_cancellation(
-                readiness,
-                async { false },
-                cancellation
-            )
-            .await
-        );
+        let outcome = wait_ready_with_runtime_guard_and_cancellation(
+            readiness,
+            async { Err(crate::host_runtime::HostRuntimeError::StopUncertain) },
+            cancellation,
+        )
+        .await;
+        assert!(matches!(outcome, ReadinessOutcome::GuardFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn a_failed_runtime_inspection_names_the_inspection_not_a_readiness_deadline() {
+        // Wrong implementation this catches: the guard collapsed every error into
+        // `false`, so a failed privileged inspection was reported as "the workload
+        // did not become ready before its deadline" and the Controller's existing
+        // `runtime_observation_unavailable` retry could never fire.  Observed live
+        // on 2026-09-17, a two-Spark GLM start ended 51 s in -- five ten-second
+        // inspection ticks -- with an hour of start budget unused.
+        let error = crate::host_runtime::HostRuntimeError::Io(std::io::Error::other(
+            "privileged inspection failed",
+        ));
+        assert!(temporary_observation_error(&error));
+        let (_sender, cancellation) = tokio::sync::watch::channel(false);
+        let outcome = wait_ready_with_runtime_guard_and_cancellation(
+            std::future::pending::<Result<(), crate::health::HealthError>>(),
+            async { Err(error) },
+            cancellation,
+        )
+        .await;
+        assert!(matches!(outcome, ReadinessOutcome::GuardFailed(_)));
     }
 
     #[tokio::test]
     async fn successful_readiness_ends_a_still_running_runtime_guard() {
-        let runtime_guard = std::future::pending::<bool>();
+        let runtime_guard = std::future::pending::<
+            Result<std::convert::Infallible, crate::host_runtime::HostRuntimeError>,
+        >();
 
         let (_sender, cancellation) = tokio::sync::watch::channel(false);
-        assert!(
-            wait_ready_with_runtime_guard_and_cancellation(
-                async { Ok(()) },
-                runtime_guard,
-                cancellation,
-            )
-            .await
-        );
+        let outcome = wait_ready_with_runtime_guard_and_cancellation(
+            async { Ok(()) },
+            runtime_guard,
+            cancellation,
+        )
+        .await;
+        assert!(matches!(outcome, ReadinessOutcome::Ready));
     }
 
     #[tokio::test]
@@ -4251,15 +4310,17 @@ mod tests {
         let (sender, cancellation) = tokio::sync::watch::channel(false);
         let wait = wait_ready_with_runtime_guard_and_cancellation(
             std::future::pending::<Result<(), crate::health::HealthError>>(),
-            std::future::pending::<bool>(),
+            std::future::pending::<
+                Result<std::convert::Infallible, crate::host_runtime::HostRuntimeError>,
+            >(),
             cancellation,
         );
         let trigger = async {
             tokio::task::yield_now().await;
             sender.send_replace(true);
         };
-        let (ready, ()) = tokio::join!(wait, trigger);
-        assert!(!ready);
+        let (outcome, ()) = tokio::join!(wait, trigger);
+        assert!(matches!(outcome, ReadinessOutcome::Cancelled));
     }
 
     #[tokio::test]
