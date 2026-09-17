@@ -699,11 +699,7 @@ fn before_phase_deadline(
     lease_deadline: &tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
     start_deadline: Option<&DateTime<FixedOffset>>,
 ) -> bool {
-    let lease = lease_deadline.borrow().with_timezone(&Utc);
-    let effective = start_deadline
-        .map(|value| value.with_timezone(&Utc).min(lease))
-        .unwrap_or(lease);
-    Utc::now() < effective
+    Utc::now() < crate::health::phase_deadline(lease_deadline, start_deadline)
 }
 
 async fn wait_for_launch_stability(
@@ -719,11 +715,7 @@ async fn wait_for_launch_stability(
         {
             return false;
         }
-        let lease = lease_deadline.borrow().with_timezone(&Utc);
-        let effective = start_deadline
-            .as_ref()
-            .map(|value| value.with_timezone(&Utc).min(lease))
-            .unwrap_or(lease);
+        let effective = crate::health::phase_deadline(&lease_deadline, start_deadline.as_ref());
         let until_deadline = (effective - Utc::now()).to_std().unwrap_or(Duration::ZERO);
         tokio::select! {
             _ = tokio::time::sleep_until(stable_at) => {

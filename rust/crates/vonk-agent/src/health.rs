@@ -37,6 +37,26 @@ pub async fn wait_ready(
     wait_ready_until(address, port, path, lease_deadline, None).await
 }
 
+pub(crate) fn phase_deadline(
+    lease_deadline: &tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+    start_deadline: Option<&DateTime<FixedOffset>>,
+) -> DateTime<Utc> {
+    // An operation that binds an immutable start deadline is bounded by that
+    // budget.  The attempt lease is renewed by the heartbeat loop and exists to
+    // bound takeover latency, not recovery, so a lapse must not end work whose
+    // budget is still open: the Controller supersedes through the cancellation
+    // directive, and a late renewal re-acquires the exact fence inside this same
+    // budget.  Observed live on 2026-09-17, `clock=operation-lease ...
+    // elapsed_seconds=81 start_deadline=<an hour away>` ended a start with an
+    // hour left, so a model that needs minutes to load could never become ready.
+    // An operation that binds no start deadline is bounded by its own work,
+    // which is what a stop already is.
+    match start_deadline {
+        Some(value) => value.with_timezone(&Utc),
+        None => lease_deadline.borrow().with_timezone(&Utc),
+    }
+}
+
 pub async fn wait_ready_until(
     address: IpAddr,
     port: u16,
@@ -58,11 +78,7 @@ pub async fn wait_ready_until(
         .build()?;
     let endpoint = readiness_endpoint(address, port, path);
     loop {
-        let lease = lease_deadline.borrow().with_timezone(&Utc);
-        let deadline = immutable_deadline
-            .as_ref()
-            .map(|value| value.with_timezone(&Utc).min(lease))
-            .unwrap_or(lease);
+        let deadline = phase_deadline(&lease_deadline, immutable_deadline.as_ref());
         let remaining = (deadline - Utc::now()).to_std().unwrap_or(Duration::ZERO);
         if remaining.is_zero() {
             return Err(HealthError::Deadline);
@@ -76,11 +92,7 @@ pub async fn wait_ready_until(
         {
             return Ok(());
         }
-        let lease = lease_deadline.borrow().with_timezone(&Utc);
-        let deadline = immutable_deadline
-            .as_ref()
-            .map(|value| value.with_timezone(&Utc).min(lease))
-            .unwrap_or(lease);
+        let deadline = phase_deadline(&lease_deadline, immutable_deadline.as_ref());
         let until_deadline = (deadline - Utc::now()).to_std().unwrap_or(Duration::ZERO);
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_secs(1)) => {}
@@ -180,5 +192,49 @@ mod tests {
             .await,
             Err(HealthError::Deadline)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_lapsed_lease_does_not_end_a_wait_with_an_open_start_budget() {
+        // Wrong implementation this catches: the readiness deadline was
+        // `min(lease, start_deadline)`, so one late renewal ended a start whose
+        // own budget was still open.  Observed live on 2026-09-17 the Controller
+        // recorded `clock=operation-lease ... elapsed_seconds=81
+        // start_deadline=<an hour away>` for a `recipe.start` that then failed
+        // with "workload did not become ready before its deadline", which no
+        // model needing minutes to load can ever pass.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while request.windows(4).all(|value| value != b"\r\n\r\n") {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+            }
+            // A frontier model is not ready the instant the container starts.
+            thread::sleep(Duration::from_millis(300));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
+                .unwrap();
+        });
+        let lapsed = (Utc::now() - ChronoDuration::seconds(1))
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let open_budget = (Utc::now() + ChronoDuration::seconds(30))
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let (_sender, receiver) = tokio::sync::watch::channel(lapsed);
+
+        wait_ready_until(
+            "127.0.0.1".parse().unwrap(),
+            port,
+            "/health",
+            receiver,
+            Some(open_budget),
+        )
+        .await
+        .unwrap();
+        server.join().unwrap();
     }
 }
