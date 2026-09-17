@@ -19,7 +19,7 @@ from vonk_agent_protocol.package_source import AgentPackageSource
 from .agent_jobs import AgentJobService
 from .agent_package_source import load_package_source
 from .agent_upgrade_status import (
-    AGENT_UPGRADE_AWAITING_IDENTITY_REASON,
+    AGENT_UPGRADE_AWAITING_IDENTITY_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
 )
 from .bounded_json import require_integer
@@ -39,7 +39,7 @@ _AGENT_UPGRADE_RECOVERY_FENCE = timedelta(seconds=960)
 _TARGET_PROTOCOL_VERSION = 3
 _RECOVERABLE_HELPER_BRIDGE_FAILURES = RECOVERABLE_AGENT_UPGRADE_REASONS
 _RETRYABLE_HELPER_BRIDGE_FAILURES = _RECOVERABLE_HELPER_BRIDGE_FAILURES - {
-    AGENT_UPGRADE_AWAITING_IDENTITY_REASON,
+    *AGENT_UPGRADE_AWAITING_IDENTITY_REASONS,
     "agent upgrade helper rejected the request: package_preflight_failed",
     "agent upgrade helper rejected the request: package_verification_failed",
     "agent upgrade helper rejected the request: package_metadata_failed",

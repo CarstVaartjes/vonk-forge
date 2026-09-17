@@ -8,7 +8,10 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.agent_upgrade_status import AGENT_UPGRADE_AWAITING_IDENTITY_REASON
+from vonk_control.agent_upgrade_status import (
+    AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
+    AGENT_UPGRADE_AWAITING_IDENTITY_REASON,
+)
 from vonk_control.agent_upgrades import (
     _AGENT_UPGRADE_RECOVERY_FENCE,
     AgentUpgradeConflict,
@@ -2061,6 +2064,38 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
         final_operation = session.get(AgentOperation, first.operation_id)
         assert final_operation is not None and final_operation.state == "succeeded"
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
+
+
+def test_predecessor_agent_handoff_is_reconcilable_not_a_failed_upgrade(
+    tmp_path,
+) -> None:
+    """A peer that predates the handoff rename must still finish its rollout.
+
+    The Controller is deployed ahead of the agents it upgrades, so a
+    one-at-a-time rollout receives the by-design handoff spelled the predecessor
+    way.  Wrong implementation this catches: recognising only the current
+    spelling recorded `failed` with `target_proven: false` for both Sparks while
+    both were already running the exact target binary -- observed live on
+    2026-09-17 -- so the rollout stopped after its first node and an operator
+    could not tell a completed install from a real failure.
+    """
+    sessions, operations, _upgrades, job = _rollout(tmp_path, "predecessor-handoff")
+
+    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    operations.fail(first, AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON)
+
+    with sessions() as session:
+        operation = session.get(AgentOperation, first.operation_id)
+        assert operation is not None
+        assert operation.state == "waiting-for-operator"
+        # The handoff is never auto-retried: the package is already installed,
+        # so a retry would ask the helper to install it a second time.
+        assert operation.retry_disposition is None
+
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        assert parent is not None
+        assert parent.state == "waiting-for-operator"
 
 
 def test_reconciled_upgrade_past_preserved_helper_failure_binds_its_package_receipt(
