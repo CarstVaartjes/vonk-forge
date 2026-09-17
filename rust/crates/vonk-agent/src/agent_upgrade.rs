@@ -19,6 +19,18 @@ const HELPER_SOCKET: &str = "/run/vonk-forge-package-helper/package-helper.sock"
 /// Shared with the host-runtime frame and the privileged helper.
 const MAX_HELPER_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BYTES;
 
+/// The by-design handoff after the signed helper accepted the package.
+///
+/// A real upgrade restarts this service from dpkg postinst before the helper
+/// can answer, so an answered helper is not proof that the new runtime is
+/// active.  The Controller completes the upgrade only from a later
+/// authenticated claim that reports the exact target build and binary
+/// identities.  The recorded body must name that awaiting state: reusing a
+/// failure observation here makes a completed install read to an operator as a
+/// failed upgrade.  The executor reports this same reason, so it is named once.
+pub const UPGRADE_AWAITING_IDENTITY_REASON: &str =
+    "agent upgrade installed the package; awaiting identity confirmation";
+
 #[derive(Debug, Error)]
 pub enum AgentUpgradeError {
     #[error("agent upgrade claim is invalid")]
@@ -39,7 +51,7 @@ pub enum AgentUpgradeError {
     HelperResponseInvalid,
     #[error("agent upgrade helper is unavailable")]
     HelperUnavailable(#[source] std::io::Error),
-    #[error("agent upgrade did not restart the service")]
+    #[error("{}", UPGRADE_AWAITING_IDENTITY_REASON)]
     RestartNotObserved,
     #[error("agent upgrade transport failed")]
     Transport(#[from] reqwest::Error),
@@ -531,7 +543,20 @@ mod tests {
         ));
         assert_eq!(
             AgentUpgradeError::RestartNotObserved.to_string(),
-            "agent upgrade did not restart the service"
+            "agent upgrade installed the package; awaiting identity confirmation"
+        );
+    }
+
+    #[test]
+    fn the_by_design_handoff_names_its_awaiting_state_not_a_failure() {
+        // Wrong implementation: the successful helper-install handoff reused the
+        // failure observation "agent upgrade did not restart the service", so the
+        // Controller's operator surface recorded a completed install as a failed
+        // upgrade.  The handoff must name the state the Controller waits in.
+        let handoff = AgentUpgradeError::RestartNotObserved.to_string();
+        assert!(
+            handoff.contains("awaiting identity confirmation") && !handoff.contains("did not"),
+            "the by-design install handoff must name its awaiting state, not a failure: {handoff:?}"
         );
     }
 
@@ -574,7 +599,7 @@ mod tests {
             ),
             (
                 AgentUpgradeError::RestartNotObserved,
-                "agent upgrade did not restart the service",
+                "agent upgrade installed the package; awaiting identity confirmation",
             ),
         ];
         for (error, expected) in diagnostics {
