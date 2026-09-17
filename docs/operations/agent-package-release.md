@@ -35,6 +35,11 @@ signing, and promotion. Create each environment for both `dev` and `stable`:
 | `installer-acceptance-<channel>` | `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT` | `VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY` |
 | `installer-promotion-<channel>` | `R2_INSTALLER_PUBLIC_BUCKET`, `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT`, `VONK_INSTALLER_RELEASE_KEY_FINGERPRINT` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `VONK_INSTALLER_RELEASE_PRIVATE_KEY` |
 
+The table is the complete list of environment secrets in each environment. The
+canary row's two Tailscale entries are the whole of that environment's tailnet
+authority; the `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_*` names belong to a
+child tailnet created at run time and are never stored as environment secrets.
+
 Set `INSTALLER_PUBLIC_ORIGIN=https://install.vonkforge.ai`. Use one dedicated
 public R2 bucket and a token restricted to object read/write in only that
 bucket. Configure that token independently in candidate and promotion
@@ -43,19 +48,22 @@ runtime secrets into CI. Prefer workload identity if the selected object-store
 client supports it. The R2 S3 publication path requires an access key, so keep
 that exception bucket-scoped and rotate it deliberately.
 
-The canary environment must contain one dedicated OAuth factory credential with
-no device tags. It carries the `all` scope, and that is deliberate: the Tailnets
-API documents that a creating tailnet's OAuth client reaches an existing
-API-only child, or mints a new credential for it, only by naming that child in a
-token request, and only with the `all` scope. Stale cleanup is exactly that
-recovery, so a `tailnets`-only factory credential cannot remove a child whose
-own returned credential died with its runner. Never store an operator tailnet's
-DNS suffix, machine OAuth credential, or policy in this environment. Both the
-creation path and the cleanup path still refuse to touch anything that is not a
-`Vonk Forge CI ...` child: the factory is used to create one API-only child for
-the native NAS lane and to delete only children that match the CI display-name
-pattern, pass id and timestamp validation, and are older than the stale
-threshold. The production tailnet is never selected or modified.
+The canary environment holds exactly the two Tailscale secrets named in the
+table: `VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID` and
+`VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET`. That one factory OAuth
+client is the sole owner of the disposable-child-tailnet lifecycle, and it is
+the only durable Tailscale credential in the environment or the workflow. It
+must carry only the Tailscale `tailnets` write scope, no device tags, and no
+other scopes. Never store an operator tailnet's DNS suffix, machine OAuth
+credential, or policy in this environment. `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID`
+and `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET` are not environment
+secrets: the create step mints that child-local `auth_keys`-scoped gateway pair
+from the child's own response and writes it to `$GITHUB_ENV` for the acceptance
+lane. Both the creation path and the cleanup path refuse to touch anything that
+is not a `Vonk Forge CI ...` child: the factory is used to create one API-only
+child for the native NAS lane and to delete only children that match the CI
+display-name pattern, pass id and timestamp validation, and are older than the
+stale threshold. The production tailnet is never selected or modified.
 
 The child response contains a new all-scope OAuth credential for that child
 only. The workflow masks it immediately, stores it in a mode-`0600` runner file,
@@ -104,20 +112,29 @@ credential at runtime: a factory credential without the `all` scope fails the
 token exchange before any deletion. Rerun publication only after the factory
 list no longer contains the residual.
 
-The `installer-canary-dev` environment is the one that holds these four names
-(`VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID`,
-`VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET`,
-`VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID`,
-`VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET`); the cleanup job declares it
-explicitly rather than relying on a repository-wide secret, because a missing
-credential must fail at the token exchange instead of after selecting a child.
+The `installer-canary-dev` environment declares exactly two Tailscale secrets --
+`VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID` and
+`VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET` -- and the workflow passes
+that pair to the create step and to this cleanup job rather than relying on a
+repository-wide secret, because a missing credential must fail at the token
+exchange instead of after selecting a child. Those two factory secrets are the
+whole of the environment's tailnet authority, the sole owner of the
+disposable-child-tailnet lifecycle for both creation and cleanup; the
+`VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_*` names exist only as generated
+outputs of the child's own response and are never environment secrets. The
+factory client holds the `tailnets` write scope alone, so it can create one
+child and list the organization's children and cannot delete a child. Cleanup
+therefore refuses at the token exchange, and that refusal names the failing
+request and the documented `all` requirement instead of guessing at the cause,
+because the API's 403 body does not distinguish a scope refusal from any other
+403. When it appears, verify in the Tailscale admin console under Trust
+credentials which scopes this client id actually holds; an API-only child does
+not appear in that console, so this API path is the only cleanup route.
 
 These children belong to the separate Tailscale account that issued the factory
-OAuth client, and API-only children do not appear in the admin console at all.
-The listing the script itself performs is the only reliable way to enumerate
-them, and because the credential is environment-scoped, that dispatch is the
-primary cleanup interface rather than a convenience. Running the script on a
-developer machine cannot work and is not a defect.
+OAuth client, which is why the dispatch above is the primary cleanup interface
+rather than a convenience. Running the script on a developer machine cannot work
+and is not a defect.
 
 Generate separate RSA-3072 release and acceptance keys on an administrative
 workstation. Record each SHA-256 fingerprint from its DER-encoded public key:
