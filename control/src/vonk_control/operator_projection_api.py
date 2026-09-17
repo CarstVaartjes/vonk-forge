@@ -9,7 +9,7 @@ state or log evidence.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
@@ -29,6 +29,11 @@ from .enrollment import (
     RemoteRevocationUncertain,
 )
 from .enrollment_bootstrap import accepted_installer_url
+from .failure_evidence import (
+    EvidenceRetention,
+    FailureEvidenceBundle,
+    collect_failure,
+)
 from .fleet_projection import (
     FleetNode,
     FleetNodeIdentity,
@@ -40,13 +45,15 @@ from .fleet_projection import (
 )
 from .library_projection import LibrarySelectorAmbiguous
 from .logging import redact_text
-from .models import Job, JobLogEntry
+from .models import AgentOperation, AgentOperationAttempt, Job, JobLogEntry
 from .operation_api import bounded_error_responses
 from .request_fault import RequestFault
 from .strict_json import StrictJSONModel, stored_document_detail
 from .telemetry import TelemetryResolution
 
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
+LogSource = Literal["client", "monitor", "runtime", "job"]
+LogLevel = Literal["debug", "info", "warning", "error"]
 _SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
 
 FLEET_OPERATION_IDS = {
@@ -257,12 +264,102 @@ class _AgentEnrollmentAdapter:
         services.enrollment.revoke_node(node_id, actor)
 
 
-class ControllerJobLogProvider:
-    """Project retained, redacted Controller job evidence for one Spark."""
+#: The failure-evidence retention window is owned by ``EvidenceRetention``; the
+#: log projection never scans further back than the evidence it can still read.
+_EVIDENCE_RETENTION = EvidenceRetention()
+#: A fixed number of Controller job-log blobs per query, matching the previous
+#: bounded read.
+_JOB_LOG_SCAN_LIMIT = 512
+#: A fixed number of failed agent attempts per query.  Retention, not this
+#: projection, owns how long they stay readable.
+_AGENT_LOG_SCAN_LIMIT = 128
+#: A hard ceiling on projected agent entries before the caller's ``lines`` cut.
+_AGENT_LOG_ENTRY_LIMIT = 4_096
 
-    def __init__(self, sessions: sessionmaker[Session], job_logs: Any) -> None:
+
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _agent_log_source(kind: str) -> LogSource:
+    """Map an agent operation kind onto the log source an operator already uses.
+
+    Every agent-executed operation narrates the runtime path except a recipe job
+    run, which owns the ``job`` source.  ``client`` and ``monitor`` have no
+    producer in this build, so a query for them reports absence truthfully
+    instead of claiming an empty retained store.
+    """
+    return "job" if kind == "recipe.job.run.v1" else "runtime"
+
+
+def _failure_log_entries(
+    *,
+    operation_id: str,
+    kind: str,
+    source: LogSource,
+    bundle: FailureEvidenceBundle,
+    observed_at: datetime,
+) -> list[FleetLogEntry]:
+    """Project one bounded failure bundle into retrievable log entries.
+
+    The agent's own reason already names the stable refusal code for the
+    protocol causes, whose ``diagnostic()`` is deliberately ``None``; the entry
+    records that reason and the operation error code rather than any unbounded
+    or unredacted payload.
+    """
+    entries: list[FleetLogEntry] = []
+
+    def add(message: str, level: LogLevel = "error") -> None:
+        text = redact_text(message)[:4_096]
+        if text:
+            entries.append(
+                FleetLogEntry(
+                    observed_at=observed_at,
+                    source=source,
+                    level=level,
+                    message=text,
+                    evidence_id=operation_id,
+                )
+            )
+
+    add(f"{kind} failed: {bundle.summary}")
+    add(f"error_code={bundle.receipt.error_code}")
+    if bundle.receipt.detail:
+        add(f"detail={bundle.receipt.detail}")
+    for line in bundle.diagnostics.stderr.text.splitlines():
+        add(f"stderr: {line}")
+    for line in bundle.diagnostics.stdout.text.splitlines():
+        add(f"stdout: {line}")
+    for item in bundle.diagnostics.collector_errors:
+        add(f"collector={item}", level="warning")
+    for item in bundle.collector_errors:
+        add(f"evidence-collector={item}", level="warning")
+    return entries
+
+
+class ControllerJobLogProvider:
+    """Project retained, redacted Controller and agent evidence for one Spark.
+
+    Two durable sources are projected.  The Controller job-log store keeps the
+    redacted, content-addressed log lines of Controller-owned jobs.  The agent
+    operation attempts keep the agent's own bounded failure result -- its reason
+    (which names the stable refusal code), its operation error code and its
+    sanitized process-log tails -- which is the narrative a failed
+    ``recipe.start`` never reached the log surface with.  Neither source is a
+    live stream, neither is written here, and neither becomes an authority for
+    anything.
+    """
+
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        job_logs: Any,
+        *,
+        clock: Any | None = None,
+    ) -> None:
         self._sessions = sessions
         self._job_logs = job_logs
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     def list(
         self,
@@ -274,29 +371,45 @@ class ControllerJobLogProvider:
         source: str | None,
         follow: bool,
     ) -> FleetLogResponse:
-        if source is not None and source != "job":
-            return FleetLogResponse(
-                node_id=node_id,
-                since=since,
-                lines=lines,
-                entries=[],
-                retained=True,
-                follow=False,
-            )
+        entries: list[FleetLogEntry] = []
+        retained = False
+        if source in (None, "job"):
+            entries.extend(self._job_log_entries(node_id, since=since, recipe=recipe))
+            retained = True
+        if source in (None, "job", "runtime"):
+            entries.extend(self._agent_failure_entries(node_id, since=since))
+            retained = True
+        entries.sort(key=lambda item: item.observed_at, reverse=True)
+        return FleetLogResponse(
+            node_id=node_id,
+            since=since,
+            lines=lines,
+            entries=entries[:lines],
+            # ``retained`` names whether a durable store was actually consulted
+            # for this query.  A source with no producer reports False rather
+            # than an empty retained store.
+            retained=retained,
+            # Both projected stores are retained evidence, not live streams.
+            follow=False,
+        )
+
+    def _job_log_entries(
+        self, node_id: str, *, since: datetime | None, recipe: str | None
+    ) -> list[FleetLogEntry]:
         with self._sessions() as session:
             rows = list(
                 session.execute(
                     select(Job, JobLogEntry)
                     .join(JobLogEntry, JobLogEntry.job_id == Job.id)
                     .order_by(JobLogEntry.created_at.desc(), JobLogEntry.digest.desc())
-                    .limit(512)
+                    .limit(_JOB_LOG_SCAN_LIMIT)
                 )
             )
         entries: list[FleetLogEntry] = []
         for job, log in rows:
             if node_id not in job.targets:
                 continue
-            if since is not None and log.created_at < since:
+            if since is not None and _aware(log.created_at) < _aware(since):
                 continue
             if recipe is not None:
                 payload = job.payload if isinstance(job.payload, Mapping) else {}
@@ -317,16 +430,94 @@ class ControllerJobLogProvider:
                             evidence_id=log.digest,
                         )
                     )
-        entries.sort(key=lambda item: item.observed_at, reverse=True)
-        return FleetLogResponse(
-            node_id=node_id,
-            since=since,
-            lines=lines,
-            entries=entries[:lines],
-            retained=True,
-            # DatabaseJobLogStore is retained evidence, not a live stream.
-            follow=False,
+        return entries
+
+    def _agent_failure_entries(
+        self, node_id: str, *, since: datetime | None
+    ) -> list[FleetLogEntry]:
+        now = _aware(self._clock())
+        cutoff = (
+            _aware(since)
+            if since is not None
+            else now - timedelta(days=_EVIDENCE_RETENTION.days)
         )
+        with self._sessions() as session:
+            rows = list(
+                session.execute(
+                    select(AgentOperation, AgentOperationAttempt)
+                    .join(
+                        AgentOperationAttempt,
+                        AgentOperationAttempt.operation_id == AgentOperation.id,
+                    )
+                    .where(
+                        AgentOperation.node_id == node_id,
+                        AgentOperationAttempt.state.in_(
+                            ("failed", "waiting-for-operator")
+                        ),
+                        AgentOperation.updated_at >= cutoff,
+                    )
+                    .order_by(
+                        AgentOperation.updated_at.desc(),
+                        AgentOperation.id.desc(),
+                        AgentOperationAttempt.attempt.desc(),
+                    )
+                    .limit(_AGENT_LOG_SCAN_LIMIT)
+                )
+            )
+        entries: list[FleetLogEntry] = []
+        for operation, attempt in rows:
+            payload = (
+                operation.payload if isinstance(operation.payload, Mapping) else {}
+            )
+            result = (
+                attempt.result
+                or payload.get("failure")
+                or {"reason": operation.status_reason or "Operation failed"}
+            )
+            observed_at = _aware(operation.updated_at)
+            source_name = _agent_log_source(operation.kind)
+            item = {
+                "id": operation.id,
+                "attempt": attempt.attempt,
+                "kind": operation.kind,
+                "node_ids": [operation.node_id],
+                "authority_revision": operation.authority_revision,
+                "payload_digest": operation.payload_digest,
+                "updated_at": observed_at.isoformat(),
+                "source": "agent",
+                "progress": attempt.progress,
+                "result": result,
+            }
+            try:
+                bundle = collect_failure(item, now=now)
+            except Exception:  # noqa: BLE001 - one malformed row must not hide the rest
+                fallback = redact_text(
+                    f"{operation.kind} failed: "
+                    f"{operation.status_reason or 'Operation failed'}"
+                )[:4_096]
+                if fallback:
+                    entries.append(
+                        FleetLogEntry(
+                            observed_at=observed_at,
+                            source=source_name,
+                            level="error",
+                            message=fallback,
+                            evidence_id=operation.id,
+                        )
+                    )
+                continue
+            entries.extend(
+                _failure_log_entries(
+                    operation_id=operation.id,
+                    kind=operation.kind,
+                    source=source_name,
+                    bundle=bundle,
+                    observed_at=observed_at,
+                )
+            )
+            if len(entries) >= _AGENT_LOG_ENTRY_LIMIT:
+                break
+        return entries
 
 
 def build_fleet_operator_services(
