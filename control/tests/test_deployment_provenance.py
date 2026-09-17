@@ -58,6 +58,9 @@ def test_all_boundaries_and_stable_json(tmp_path):
     assert all(b.state == "unknown" for b in result.platform)
     assert result.agents[0].binary_sha256 == "b" * 64
     assert result.agents[0].package_sha256 is None
+    assert result.agents[0].package_evidence.source == (
+        "No package receipt bound to the observed binary"
+    )
     workload = result.workloads[0]
     assert workload.models[0].repository.startswith("https://")
     assert workload.source_bundle_sha256 == "c" * 64
@@ -254,12 +257,29 @@ def test_package_receipt_must_match_the_current_authenticated_binary(tmp_path):
             )
         )
     service = DeploymentProvenanceService(sessions, clock=lambda: now)
-    assert service.snapshot().agents[0].package_sha256 == "d" * 64
+    bound = service.snapshot().agents[0]
+    assert bound.package_sha256 == "d" * 64
+    assert bound.package_evidence.source == "Authenticated package upgrade receipt"
+    assert bound.package_evidence.freshness == "current"
     with sessions.begin() as session:
         agent = session.get(AgentNode, node)
         assert agent is not None
         agent.binary_digest = "e" * 64
-    assert service.snapshot().agents[0].package_sha256 is None
+    other_binary = service.snapshot().agents[0]
+    assert other_binary.package_sha256 is None
+    assert other_binary.package_evidence.source == (
+        "Package upgrade receipt does not match the observed binary"
+    )
+    with sessions.begin() as session:
+        agent = session.get(AgentNode, node)
+        assert agent is not None
+        agent.binary_digest = "b" * 64
+        agent.build_digest = "sha256:" + "f" * 64
+    other_build = service.snapshot().agents[0]
+    assert other_build.package_sha256 is None
+    assert other_build.package_evidence.source == (
+        "Package upgrade receipt does not match the observed binary"
+    )
 
 
 def test_cli_human_view_preserves_evidence_boundaries(tmp_path):

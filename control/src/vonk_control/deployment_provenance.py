@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentUpgradePayload,
     AgentUpgradeResult,
     RecipeStartPayload,
     RecipeStartResult,
@@ -72,6 +74,52 @@ def local_deployment_observations() -> DeploymentObservations:
             source_commit=build.source_commit,
         )
     return observations
+
+
+@dataclass(frozen=True, slots=True)
+class _UpgradePackageReceipt:
+    """Package identity the Controller proved for one succeeded agent upgrade."""
+
+    binary_digest: str
+    build_digest: str
+    package_sha256: str
+    observed_at: datetime
+
+
+def _upgrade_package_receipt(
+    operation: AgentOperation, attempts: Sequence[AgentOperationAttempt]
+) -> _UpgradePackageReceipt:
+    """Resolve the bound package identity of one succeeded agent upgrade.
+
+    The ordinary path stores the Controller-normalized :class:`AgentUpgradeResult`
+    on the attempt.  Exact authenticated contact can instead reconcile an
+    operation whose current attempt is a preserved signed-helper failure, and
+    then no per-attempt result exists to read.  The operation's own bound
+    :class:`AgentUpgradePayload` is authoritative in that case, because the
+    Controller only marks the operation succeeded after the root activation
+    receipt and the exact observed identity match that authority.
+    """
+
+    for attempt in attempts:
+        document = attempt.result
+        if not isinstance(document, Mapping) or document.get("status") != "upgraded":
+            # A preserved signed-helper failure is truthful attempt audit, not
+            # an upgrade receipt.
+            continue
+        result = AgentUpgradeResult.model_validate(document)
+        return _UpgradePackageReceipt(
+            binary_digest=result.binary_digest,
+            build_digest=result.build_digest,
+            package_sha256=result.package_sha256,
+            observed_at=operation.updated_at,
+        )
+    payload = AgentUpgradePayload.model_validate(operation.payload)
+    return _UpgradePackageReceipt(
+        binary_digest=payload.target_binary_digest,
+        build_digest=payload.target_build_digest,
+        package_sha256=payload.package_sha256,
+        observed_at=operation.updated_at,
+    )
 
 
 class DeploymentProvenanceService:
@@ -160,7 +208,6 @@ class DeploymentProvenanceService:
             publication.state = "publication_not_deployed"
 
         with self._sessions() as session:
-            package_receipts = {}
             start_receipts = {}
             for operation, attempt in session.execute(
                 select(AgentOperation, AgentOperationAttempt)
@@ -169,7 +216,7 @@ class DeploymentProvenanceService:
                     AgentOperationAttempt.operation_id == AgentOperation.id,
                 )
                 .where(
-                    AgentOperation.kind.in_(("agent.upgrade.v1", "recipe.start")),
+                    AgentOperation.kind == "recipe.start",
                     AgentOperationAttempt.state == "succeeded",
                 )
                 .order_by(
@@ -178,17 +225,44 @@ class DeploymentProvenanceService:
                     AgentOperationAttempt.attempt,
                 )
             ):
-                if operation.kind == "agent.upgrade.v1":
-                    package_receipts[operation.node_id] = (
-                        AgentUpgradeResult.model_validate(attempt.result),
-                        operation.updated_at,
-                    )
-                else:
-                    payload = RecipeStartPayload.model_validate(operation.payload)
-                    start_receipts[(payload.run_id, operation.node_id)] = (
-                        RecipeStartResult.model_validate(attempt.result),
-                        operation.updated_at,
-                    )
+                payload = RecipeStartPayload.model_validate(operation.payload)
+                start_receipts[(payload.run_id, operation.node_id)] = (
+                    RecipeStartResult.model_validate(attempt.result),
+                    operation.updated_at,
+                )
+            attempts_by_operation: dict[str, list[AgentOperationAttempt]] = {}
+            for attempt in session.scalars(
+                select(AgentOperationAttempt)
+                .join(
+                    AgentOperation,
+                    AgentOperationAttempt.operation_id == AgentOperation.id,
+                )
+                .where(AgentOperation.kind == "agent.upgrade.v1")
+                .order_by(
+                    AgentOperationAttempt.operation_id,
+                    AgentOperationAttempt.attempt,
+                )
+            ):
+                attempts_by_operation.setdefault(attempt.operation_id, []).append(
+                    attempt
+                )
+            # ``AgentOperation.state`` is the Controller's authoritative upgrade
+            # outcome: only exact activation evidence and observed identity set
+            # it.  A per-attempt ``AgentUpgradeResult`` is absent when that
+            # reconciliation completed an operation whose current attempt is a
+            # preserved signed-helper failure, so the operation owns the binding.
+            package_receipts = {}
+            for operation in session.scalars(
+                select(AgentOperation)
+                .where(
+                    AgentOperation.kind == "agent.upgrade.v1",
+                    AgentOperation.state == "succeeded",
+                )
+                .order_by(AgentOperation.updated_at, AgentOperation.id)
+            ):
+                package_receipts[operation.node_id] = _upgrade_package_receipt(
+                    operation, attempts_by_operation.get(operation.id, ())
+                )
             profiles = {
                 row.node_id: row for row in session.scalars(select(AgentNodeProfile))
             }
@@ -199,8 +273,8 @@ class DeploymentProvenanceService:
                 package = package_receipts.get(node.node_id)
                 package_matches = bool(
                     package
-                    and package[0].binary_digest == node.binary_digest
-                    and package[0].build_digest == node.build_digest
+                    and package.binary_digest == node.binary_digest
+                    and package.build_digest == node.build_digest
                 )
                 agents.append(
                     AgentDeploymentEvidence(
@@ -216,14 +290,19 @@ class DeploymentProvenanceService:
                         build_digest=node.build_digest,
                         binary_sha256=node.binary_digest,
                         evidence=evidence,
-                        package_sha256=package[0].package_sha256
+                        package_sha256=package.package_sha256
                         if package is not None and package_matches
                         else None,
                         package_evidence=age(
-                            "Authenticated package upgrade receipt", package[1]
+                            "Authenticated package upgrade receipt",
+                            package.observed_at,
                         )
                         if package is not None and package_matches
-                        else age("No package receipt bound to the observed binary"),
+                        else age(
+                            "Package upgrade receipt does not match the observed binary"
+                            if package is not None
+                            else "No package receipt bound to the observed binary"
+                        ),
                     )
                 )
             sync = session.scalar(
