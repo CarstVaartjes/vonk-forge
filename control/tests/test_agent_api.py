@@ -3386,8 +3386,18 @@ INCIDENT_DISTRIBUTION_FAILURE = {
         "category": "runtime",
         "collected_at": "2026-09-16T23:29:02.483132899+00:00",
         "phase": "artifact.distribution.v1",
-        "stdout": {"text": "", "truncated": False, "dropped_bytes": 0, "dropped_lines": 0},
-        "stderr": {"text": "", "truncated": False, "dropped_bytes": 0, "dropped_lines": 0},
+        "stdout": {
+            "text": "",
+            "truncated": False,
+            "dropped_bytes": 0,
+            "dropped_lines": 0,
+        },
+        "stderr": {
+            "text": "",
+            "truncated": False,
+            "dropped_bytes": 0,
+            "dropped_lines": 0,
+        },
         "collector_errors": [],
         "preflight": [],
         "versions": [

@@ -2175,9 +2175,7 @@ class FleetProfileService:
             # then refused with "profile child plan blocked:
             # run-switch.container-build-plan-invalid" a moment later.  Missing
             # target bytes are not blockers; only a reported blocker is.
-            blocker_count = sum(
-                reason.severity == "error" for reason in reasons
-            ) + sum(
+            blocker_count = sum(reason.severity == "error" for reason in reasons) + sum(
                 1
                 for item in assignment_preparations
                 for reason in item.preparation.reasons

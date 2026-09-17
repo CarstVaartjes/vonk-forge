@@ -125,7 +125,7 @@ def _bounded_blocker_reason(code: str, detail: str) -> str:
         return rendered
     keep = _BLOCKER_REASON_CHARS - 3
     head = keep // 2
-    return f"{rendered[:head]}...{rendered[-(keep - head):]}"
+    return f"{rendered[:head]}...{rendered[-(keep - head) :]}"
 
 
 def _active_recipe_revision(

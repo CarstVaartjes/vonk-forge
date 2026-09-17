@@ -2162,9 +2162,10 @@ def test_a_conflict_names_a_spark_only_by_its_canonical_identifier() -> None:
     else becomes the generic target refusal instead of echoing stored text.
     """
 
-    assert str(
-        AgentUpgradeConflict("is not currently online", spark_id=NODE_A)
-    ) == f"Spark {NODE_A} is not currently online"
+    assert (
+        str(AgentUpgradeConflict("is not currently online", spark_id=NODE_A))
+        == f"Spark {NODE_A} is not currently online"
+    )
     leaked = AgentUpgradeConflict(
         "is not currently online", spark_id="api_key=stored-secret"
     )

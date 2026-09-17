@@ -3240,11 +3240,8 @@ class RunSwitchOperationService:
             or type(candidate.image_bytes) is not int
         ):
             return False
-        return (
-            self._build_archive_available is None
-            or self._build_archive_available(
-                candidate.oci_layout_sha256, candidate.image_bytes
-            )
+        return self._build_archive_available is None or self._build_archive_available(
+            candidate.oci_layout_sha256, candidate.image_bytes
         )
 
     def _matching_build(
@@ -3431,11 +3428,9 @@ class RunSwitchOperationService:
             # the exact prepared image; require the recorded input identity and
             # present bytes rather than the revision id, and never accept a
             # mismatched identity.
-            if (
-                getattr(proposed, "build_input_sha256", None)
-                != selected.build_input_sha256
-                or not self._build_is_available(selected)
-            ):
+            if getattr(
+                proposed, "build_input_sha256", None
+            ) != selected.build_input_sha256 or not self._build_is_available(selected):
                 errors.append(f"{node.node_id}: build preview receipt is unavailable")
                 continue
             return _BuildSelection(build=selected, candidate=selected)

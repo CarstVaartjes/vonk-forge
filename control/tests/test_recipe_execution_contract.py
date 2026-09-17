@@ -257,7 +257,9 @@ def test_installation_plan_payload_expectation_is_optional_and_byte_stable() -> 
     assert (
         parse_stored_installation_plan(
             _installation_plan({"required_payload_bytes": None})
-        ).nodes[0].required_payload_bytes
+        )
+        .nodes[0]
+        .required_payload_bytes
         is None
     )
     assert "required_payload_bytes" not in _plan_node(

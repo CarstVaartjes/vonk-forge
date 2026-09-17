@@ -552,9 +552,7 @@ class ControllerJobLogProvider:
                     )
                     .where(
                         AgentOperation.node_id == node_id,
-                        failed_attempt_condition(
-                            AgentOperation, AgentOperationAttempt
-                        ),
+                        failed_attempt_condition(AgentOperation, AgentOperationAttempt),
                         AgentOperation.updated_at >= cutoff,
                     )
                     .order_by(
