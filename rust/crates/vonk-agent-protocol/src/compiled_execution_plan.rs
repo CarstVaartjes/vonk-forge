@@ -795,17 +795,14 @@ mod argv_bound_tests {
     }
 
     #[test]
-    fn the_argv_byte_budget_sits_strictly_below_the_request_ceiling() {
+    fn the_argv_byte_budget_is_admitted_exactly_and_refused_one_byte_over() {
         // Wrong implementation: this budget was `1024 * 1024`, exactly the
         // helper frame budget, while its comment called it a backstop *below*
         // that budget -- so an argv the plan admitted could still be
-        // unframeable by the request that has to carry it.
-        assert!(MAX_ARGV_BYTES < crate::MAX_HOST_RUNTIME_REQUEST_BYTES);
-        assert_eq!(
-            crate::MAX_HOST_RUNTIME_REQUEST_BYTES - MAX_ARGV_BYTES,
-            crate::HOST_RUNTIME_REQUEST_ENVELOPE_BYTES
-        );
-        // The item ceiling is separate, so reach the total in item-sized pieces.
+        // unframeable by the request that has to carry it. The envelope test in
+        // `lib.rs` proves the budget still derives below that request ceiling.
+        // The item ceiling is separate, so reach this total in item-sized
+        // pieces.
         let mut exact = vec!["x".repeat(MAX_ARGV_ITEM_BYTES); MAX_ARGV_BYTES / MAX_ARGV_ITEM_BYTES];
         exact.push("x".repeat(MAX_ARGV_BYTES % MAX_ARGV_ITEM_BYTES));
         assert_eq!(exact.iter().map(String::len).sum::<usize>(), MAX_ARGV_BYTES);
