@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor
 from vonk_control.fleet_projection import FleetSnapshot
@@ -191,3 +191,34 @@ def test_failed_start_for_another_node_is_not_projected(tmp_path):
     _failed_start(sessions, node_id="spk_" + "b" * 32)
     payload = _client(sessions).get(f"/api/fleet/{_NODE}/loginfo").json()
     assert payload["entries"] == []
+
+
+def test_refused_request_bound_is_retrievable_through_the_operator_log(tmp_path):
+    # Wrong implementation: the refusal named its rule but not the bound, so an
+    # operator could not tell 518 of 4096 from 5000 of 4096.
+    sessions = _sessions(tmp_path)
+    operation_id = _failed_start(sessions)
+    with sessions.begin() as session:
+        attempt = session.scalars(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation_id
+            )
+        ).one()
+        result = dict(attempt.result)
+        diagnostics = dict(result["diagnostics"])
+        diagnostics["preflight"] = [
+            {
+                "name": "request_refusal",
+                "value": (
+                    "rule=helper_request_argument_count_invalid limit=4096 observed=518"
+                ),
+            }
+        ]
+        result["diagnostics"] = diagnostics
+        attempt.result = result
+
+    payload = _client(sessions).get(f"/api/fleet/{_NODE}/loginfo").json()
+    messages = [entry["message"] for entry in payload["entries"]]
+    assert any(
+        "limit=4096" in message and "observed=518" in message for message in messages
+    ), messages

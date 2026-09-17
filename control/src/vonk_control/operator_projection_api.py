@@ -330,6 +330,10 @@ def _failure_log_entries(
         add(f"stderr: {line}")
     for line in bundle.diagnostics.stdout.text.splitlines():
         add(f"stdout: {line}")
+    # The refusing rule and its measured bound, e.g. "rule=… limit=4096
+    # observed=518", so an operator sees how far over the request was.
+    for property in bundle.diagnostics.preflight:
+        add(f"preflight: {property.name}={property.value}", level="warning")
     for item in bundle.diagnostics.collector_errors:
         add(f"collector={item}", level="warning")
     for item in bundle.collector_errors:
