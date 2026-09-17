@@ -154,10 +154,27 @@ def project_progress(
         advanced is not None and (now - advanced).total_seconds() >= STALL_AFTER_SECONDS
     )
     activity = "waiting" if stale or value.phase in WAITING_PHASES else "active"
+    # A transfer phase is stall-able whenever bytes remain (or are unknown).  A
+    # non-transfer phase is stall-able only when the operation itself declared a
+    # measurable total that is still incomplete, so a phase with no declared
+    # bound (an unbounded build, for example) is never called unhealthy, and an
+    # intentional operator wait never is.
+    bytes_remaining = (
+        value.total_bytes is None or value.completed_bytes < value.total_bytes
+    )
+    declared_remaining = (
+        value.total_bytes is not None and value.completed_bytes < value.total_bytes
+    ) or (
+        value.total_items is not None
+        and (value.completed_items or 0) < value.total_items
+    )
     if (
-        value.phase in TRANSFER_PHASES
-        and stopped
-        and (value.total_bytes is None or value.completed_bytes < value.total_bytes)
+        stopped
+        and value.phase not in WAITING_PHASES
+        and (
+            (value.phase in TRANSFER_PHASES and bytes_remaining)
+            or (value.phase not in TRANSFER_PHASES and declared_remaining)
+        )
     ):
         activity = "possibly_stalled"
     changes: dict[str, object] = {"activity": activity}

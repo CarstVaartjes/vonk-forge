@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import OperationProgress
 
 from .models import (
     AgentCertificate,
@@ -19,6 +20,7 @@ from .models import (
     AgentOperation,
     AgentOperationAttempt,
 )
+from .operation_progress import project_progress
 
 if TYPE_CHECKING:
     from .fleet_projection import FleetSnapshot
@@ -147,6 +149,7 @@ class MetricsRegistry:
         self._api_durations: dict[tuple[str, str], list[float]] = defaultdict(list)
         self._agent_nodes: dict[str, tuple[str, str, float | None, float | None]] = {}
         self._agent_operations: dict[tuple[str, str], int] = {}
+        self._stalled_operations: dict[str, int] = {}
         self._agent_leases: dict[tuple[str, str], float] = {}
 
     @staticmethod
@@ -263,6 +266,7 @@ class MetricsRegistry:
         *,
         nodes: dict[str, tuple[str, str, float | None, float | None]],
         operations: dict[tuple[str, str], int],
+        stalled: dict[str, int],
         leases: dict[tuple[str, str], float],
     ) -> None:
         safe_nodes = {}
@@ -306,9 +310,15 @@ class MetricsRegistry:
             )
             safe_age = self._number(age, "operation lease age")
             safe_leases[safe_key] = max(safe_leases.get(safe_key, 0.0), safe_age)
+        safe_stalled: dict[str, int] = defaultdict(int)
+        for operation, count in stalled.items():
+            safe_stalled[
+                operation if operation in _AGENT_OPERATIONS else "other"
+            ] += int(self._number(count, "stalled operation count"))
         with self._lock:
             self._agent_nodes = safe_nodes
             self._agent_operations = dict(safe_operations)
+            self._stalled_operations = dict(safe_stalled)
             self._agent_leases = safe_leases
 
     def render(self) -> str:
@@ -323,6 +333,7 @@ class MetricsRegistry:
             }
             agent_nodes = dict(self._agent_nodes)
             agent_operations = dict(self._agent_operations)
+            stalled_operations = dict(self._stalled_operations)
             agent_leases = dict(self._agent_leases)
         lines = [
             "# HELP vonk_route_state Current inference route state.",
@@ -459,6 +470,14 @@ class MetricsRegistry:
             )
         lines.extend(
             (
+                "# HELP vonk_stalled_operations Running agent operations whose declared progress has stopped.",
+                "# TYPE vonk_stalled_operations gauge",
+            )
+        )
+        for operation, count in sorted(stalled_operations.items()):
+            lines.append(f'vonk_stalled_operations{{operation="{operation}"}} {count}')
+        lines.extend(
+            (
                 "# HELP vonk_agent_operation_lease_age_seconds Age since the active operation lease was last updated.",
                 "# TYPE vonk_agent_operation_lease_age_seconds gauge",
             )
@@ -567,6 +586,25 @@ class OperationalMetricsCollector:
                     )
                 )
             )
+            progress_rows = list(
+                session.execute(
+                    select(AgentOperation.kind, AgentOperationAttempt.progress)
+                    .join(
+                        AgentOperationAttempt,
+                        (AgentOperationAttempt.operation_id == AgentOperation.id)
+                        & (
+                            AgentOperationAttempt.attempt
+                            == AgentOperation.current_attempt
+                        ),
+                    )
+                    .where(
+                        AgentOperation.state == "running",
+                        AgentOperationAttempt.state == "running",
+                        AgentOperationAttempt.progress.is_not(None),
+                    )
+                    .order_by(AgentOperation.kind, AgentOperation.id)
+                )
+            )
         active_certificates: dict[str, AgentCertificate] = {}
         for certificate in certificates:
             active_certificates.setdefault(certificate.node_id, certificate)
@@ -595,8 +633,23 @@ class OperationalMetricsCollector:
             key = (node_id, operation)
             age = max(0.0, (now - _aware(updated_at)).total_seconds())
             leases[key] = max(leases.get(key, 0.0), age)
+        # Stalled work is derived from the same advisory projection the operator
+        # API already exposes: a running operation that declared measurable
+        # progress and has stopped advancing.  A malformed stored snapshot is
+        # skipped rather than failing the whole scrape.
+        stalled: dict[str, int] = defaultdict(int)
+        for kind, progress in progress_rows:
+            try:
+                projected = project_progress(
+                    OperationProgress.model_validate(progress), now
+                )
+            except (TypeError, ValueError):
+                continue
+            if projected.activity == "possibly_stalled":
+                stalled[kind] += 1
         self._registry._replace_agent_snapshot(
             nodes=nodes,
             operations=operations,
+            stalled=dict(stalled),
             leases=leases,
         )

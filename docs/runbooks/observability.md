@@ -60,3 +60,14 @@ into the alert; if the alert fires, the wait is not the explanation.
 Confirm the worker container is healthy and holds the online shared lock. Check
 expired attempts and database connectivity. Stale fences must never be reused;
 allow the durable queue to issue a new attempt.
+
+## Stalled agent operation
+
+`AgentOperationStalled` fires when `vonk_stalled_operations` reports a running
+operation that declared measurable progress and has not advanced for at least
+the stall window. A transfer phase is stall-able whenever bytes remain; a
+non-transfer phase only when the operation itself declared an incomplete byte or
+item total, so an unbounded build and an intentional `waiting-for-operator` wait
+never alert. Inspect the operation's progress and last accepted contact, then
+reconcile the actual effect before retrying; an expired lease alone does not
+prove the host action ended.

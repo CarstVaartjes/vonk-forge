@@ -133,6 +133,14 @@ def _sessions(tmp_path):
                 lease_deadline=NOW + timedelta(seconds=18),
                 agent_certificate_serial="certificate-secret-value",
                 state="running",
+                progress={
+                    "phase": "copying",
+                    "completed_bytes": 10,
+                    "total_bytes": 100,
+                    "total_bytes_known": True,
+                    "observed_at": (NOW - timedelta(seconds=200)).isoformat(),
+                    "last_progress_at": (NOW - timedelta(seconds=200)).isoformat(),
+                },
             )
         )
     return sessions
@@ -178,6 +186,9 @@ def test_operational_metrics_project_existing_agent_state_with_bounded_labels(
         f'vonk_agent_operation_lease_age_seconds{{node_id="{NODE}",operation="recipe.start"}} 12'
         in rendered
     )
+    # The running operation declared a byte total and stopped advancing, so the
+    # advisory stall verdict is exposed as a metric an alert can use.
+    assert 'vonk_stalled_operations{operation="recipe.start"} 1' in rendered
 
     allowed = {"node_id", "operation", "state", "version_bucket"}
     for line in rendered.splitlines():
