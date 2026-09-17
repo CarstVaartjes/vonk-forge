@@ -177,6 +177,35 @@ def _request(
     return ApiResponse(document=document, etag=etag)
 
 
+def _delete_token_refusal(
+    error: ApiRequestError, request_path: str
+) -> ApiRequestError:
+    """Explain a refused `all`-scoped token exchange for a child deletion.
+
+    The API answers a scope refusal on this exchange with the same 403 and the
+    same generic `{message}` body as any other rejection, so the body does not
+    prove that a missing scope is the cause.  The refusal therefore reports only
+    the observed request and the documented requirement, and hands the operator
+    the console check that decides it.  The request body is never repeated: it
+    carries the OAuth client secret.
+    """
+    return ApiRequestError(
+        f"Tailscale API POST {request_path} failed with HTTP "
+        f"{error.status_code}: deleting an API-only tailnet is documented to "
+        "require the `all` scope, and only a token minted with it can act on "
+        "the child being deleted; listing API-only tailnets needs only the "
+        "`tailnets` scope, which is why `cleanup` lists the children but cannot "
+        "delete them. The 403 body does not distinguish a scope refusal from "
+        "any other 403, so verify in the Tailscale admin console (Trust "
+        "credentials) which scopes `VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID` "
+        "actually holds before retrying. An API-only child does not appear in "
+        "the admin console, so this API path is its only cleanup route.",
+        method=error.method,
+        path=error.path,
+        status_code=error.status_code,
+    )
+
+
 def _oauth_token(
     client_id: str,
     client_secret: str,
@@ -197,15 +226,22 @@ def _oauth_token(
         "client_secret": client_secret,
         "scope": scope,
     }
+    request_path = "/oauth/token"
     if tailnet is not None:
         if SAFE_ID.fullmatch(tailnet) is None:
             raise LifecycleError("disposable tailnet ID is invalid")
         form_body["tailnet"] = tailnet
-    response = _request(
-        "POST",
-        "/oauth/token",
-        form_body=form_body,
-    )
+        request_path = f"/oauth/token?tailnet={tailnet}"
+    try:
+        response = _request(
+            "POST",
+            request_path,
+            form_body=form_body,
+        )
+    except ApiRequestError as error:
+        if tailnet is not None and error.status_code == 403:
+            raise _delete_token_refusal(error, request_path) from error
+        raise
     token = response.document.get("access_token")
     if not isinstance(token, str) or not token or any(c in token for c in "\0\r\n"):
         raise LifecycleError("Tailscale OAuth returned an invalid access token")
