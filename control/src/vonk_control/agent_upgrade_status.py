@@ -4,6 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+#: The agent's recorded body for the by-design handoff after the signed helper
+#: accepted the package: the agent cannot observe its own restart, so the
+#: Controller completes the upgrade only from a later authenticated claim that
+#: proves the exact running identity.  The name is owned by
+#: ``vonk_agent::agent_upgrade::UPGRADE_AWAITING_IDENTITY_REASON``; this is the
+#: Controller's single copy of the wire string, so the recoverable set, the
+#: retry set and the operator surface cannot drift from each other.  It names
+#: the awaiting state, never a failed install.
+AGENT_UPGRADE_AWAITING_IDENTITY_REASON = (
+    "agent upgrade installed the package; awaiting identity confirmation"
+)
+
 GENERIC_AGENT_UPGRADE_REASONS = frozenset(
     {
         "agent upgrade request is invalid",
@@ -16,7 +28,7 @@ RECOVERABLE_AGENT_UPGRADE_REASONS = frozenset(
     {
         *GENERIC_AGENT_UPGRADE_REASONS,
         "agent upgrade helper is unavailable",
-        "agent upgrade did not restart the service",
+        AGENT_UPGRADE_AWAITING_IDENTITY_REASON,
         "agent upgrade helper rejected the request: package_preflight_failed",
         "agent upgrade helper rejected the request: package_verification_failed",
         "agent upgrade helper rejected the request: package_metadata_failed",

@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_upgrade_status import AGENT_UPGRADE_AWAITING_IDENTITY_REASON
 from vonk_control.agent_upgrades import (
     _AGENT_UPGRADE_RECOVERY_FENCE,
     AgentUpgradeConflict,
@@ -2068,13 +2069,13 @@ def test_reconciled_upgrade_past_preserved_helper_failure_binds_its_package_rece
     """A proven upgrade must leave its authorized package bound.
 
     The Rust agent cannot prove its own restart, so the successful install
-    reports the recoverable failure ``agent upgrade did not restart the
-    service`` instead of a result document.  Exact authenticated contact then
-    reconciles the operation to succeeded while the attempt keeps that truthful
-    failure audit, so the bound package identity only survives on the succeeded
-    operation.  A projection that reads the receipt from a succeeded attempt
-    alone silently reports the node as never having had a receipt, and falls
-    back to the previous upgrade's now-mismatching receipt.
+    reports the by-design awaiting-identity handoff instead of a result
+    document.  Exact authenticated contact then reconciles the operation to
+    succeeded while the attempt keeps that truthful handoff audit, so the bound
+    package identity only survives on the succeeded operation.  A projection
+    that reads the receipt from a succeeded attempt alone silently reports the
+    node as never having had a receipt, and falls back to the previous
+    upgrade's now-mismatching receipt.
     """
     from vonk_control.deployment_provenance import DeploymentProvenanceService
 
@@ -2120,7 +2121,7 @@ def test_reconciled_upgrade_past_preserved_helper_failure_binds_its_package_rece
         )
 
     first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    operations.fail(first, "agent upgrade did not restart the service")
+    operations.fail(first, AGENT_UPGRADE_AWAITING_IDENTITY_REASON)
     assert (
         operations.claim(
             NODE_A,
