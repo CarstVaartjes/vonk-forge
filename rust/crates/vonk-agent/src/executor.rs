@@ -3342,6 +3342,73 @@ fn phase_progress(phase: &str) -> OperationProgress {
     }
 }
 
+/// Whether a failed renewal may be attempted again.
+///
+/// A renewal loop that terminates on an unclassified error is a one-way
+/// ratchet: the first failure it does not recognise ends all future renewals,
+/// and with them the agent's ability to observe cancellation.  Classifying every
+/// `ClientError` variant names the closed set of conditions a renewal can never
+/// repair.
+#[derive(Debug, PartialEq, Eq)]
+enum HeartbeatFailure {
+    /// The same request may be attempted again on the retry schedule.
+    Retryable,
+    /// The Controller cancelled this exact superseded command.
+    SupersededCancellation,
+    /// Renewal can never succeed again; stop the loop and cancel the work.
+    Terminal,
+}
+
+/// Classify one failed renewal against the complete `ClientError` set.
+///
+/// There is deliberately no catch-all arm: adding an error class is a compile
+/// error here until someone decides, in writing, whether it is recoverable.
+fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailure {
+    match error {
+        ClientError::Transport(_) | ClientError::Retryable => HeartbeatFailure::Retryable,
+        ClientError::Controller(controller) => {
+            if controller.status == 409 && controller.code == "superseded_operation_cancelled" {
+                HeartbeatFailure::SupersededCancellation
+            } else if controller.retryable() {
+                HeartbeatFailure::Retryable
+            } else {
+                // A refused renewal: revoked authority, a fence another attempt
+                // has taken over, a lease lapsed past its renewal allowance, or
+                // an invalid claim.  Sending the same renewal again cannot
+                // repair any of them.
+                HeartbeatFailure::Terminal
+            }
+        }
+        // None of these is repaired by renewing again: the credential, TLS
+        // identity or pinned CA cannot be read; the response cannot be parsed;
+        // the result boundary is not the renewal boundary at all.
+        ClientError::CredentialRead(_)
+        | ClientError::Identity
+        | ClientError::Protocol
+        | ClientError::ResultSuperseded
+        | ClientError::ResultRejected(_)
+        | ClientError::ObservationNotReady
+        | ClientError::Pin => HeartbeatFailure::Terminal,
+    }
+}
+
+/// The immutable start deadline a two-phase start bound, if this claim is one.
+///
+/// The lease is the thing a renewal recovers, so it cannot also be the recovery
+/// budget.  A distributed start persists its own budget in the payload the agent
+/// executes, and that is the clock the renewal loop retries against.
+fn claim_start_deadline(claim: &AgentClaim) -> Option<DateTime<FixedOffset>> {
+    let vonk_agent_protocol::generated::AgentClaimPayload::RecipeStartPayload(request) =
+        &claim.payload
+    else {
+        return None;
+    };
+    request
+        .start_deadline
+        .as_deref()
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+}
+
 async fn run_heartbeats<C: LoopClient>(
     client: C,
     mut state: StateStore,
@@ -3352,6 +3419,11 @@ async fn run_heartbeats<C: LoopClient>(
     schedule: HeartbeatSchedule,
 ) -> Result<bool, LoopError> {
     let mut deadline = claim.deadline;
+    // Both sides of the wire agree on this one budget: the Controller lets a
+    // lapsed renewal re-acquire while the start budget is still open, and the
+    // loop retries until the same instant.  An operation that binds no start
+    // deadline is bounded by its own work, which is what ``stop`` already is.
+    let renewal_budget_end = claim_start_deadline(&claim);
     let mut cancellation_observed = false;
     let mut delay = schedule.interval;
     loop {
@@ -3371,32 +3443,47 @@ async fn run_heartbeats<C: LoopClient>(
         };
         let directive = match client.heartbeat(&progress).await {
             Ok(directive) => directive,
-            Err(ClientError::Controller(error))
-                if error.status == 409 && error.code == "superseded_operation_cancelled" =>
-            {
-                // The Controller has already invalidated this exact old
-                // command. It is an expected cancellation, not an agent loop
-                // failure; preserve the executor's eventual stop evidence.
-                eprintln!(
-                    "vonk-agent: superseded operation cancellation observed for {}",
-                    claim.operation_id
-                );
-                cancellation.send_replace(true);
-                return Ok(true);
-            }
-            Err(error) if error.retryable() && Utc::now() < deadline => {
-                // Retry promptly while the accepted lease still authorises a
-                // renewal.  Waiting the whole renewal cadence here is what
-                // pushed the next attempt past the deadline after a single
-                // lost request, so keep the retry inside the remaining lease
-                // and leave the lease margin for the request itself.
-                delay = schedule
-                    .retry_interval
-                    .min(remaining_lease(deadline).saturating_sub(HEARTBEAT_LEASE_MARGIN))
-                    .max(HEARTBEAT_RETRY_FLOOR);
-                continue;
-            }
-            Err(error) => return Err(error.into()),
+            Err(error) => match classify_heartbeat_failure(&error) {
+                HeartbeatFailure::SupersededCancellation => {
+                    // The Controller has already invalidated this exact old
+                    // command. It is an expected cancellation, not an agent loop
+                    // failure; preserve the executor's eventual stop evidence.
+                    eprintln!(
+                        "vonk-agent: superseded operation cancellation observed for {}",
+                        claim.operation_id
+                    );
+                    cancellation.send_replace(true);
+                    return Ok(true);
+                }
+                HeartbeatFailure::Terminal => return Err(error.into()),
+                HeartbeatFailure::Retryable => {
+                    let now = Utc::now();
+                    if let Some(budget_end) = renewal_budget_end
+                        && now >= budget_end.with_timezone(&Utc)
+                    {
+                        // The start's own immutable budget is spent, so no
+                        // renewal can restore this attempt; the executor's own
+                        // phase-deadline failure owns the outcome instead.
+                        return Err(error.into());
+                    }
+                    // Retry promptly while the accepted lease can still be
+                    // extended in time, then settle onto the ordinary renewal
+                    // cadence: a lapsed lease bounds how often we may ask, not
+                    // whether we may ask.  The loop stays alive so a renewal
+                    // that lands inside the Controller's allowance still
+                    // re-acquires the attempt, and so the agent keeps observing
+                    // the Controller's cancellation.
+                    delay = if now < deadline.with_timezone(&Utc) {
+                        schedule
+                            .retry_interval
+                            .min(remaining_lease(deadline).saturating_sub(HEARTBEAT_LEASE_MARGIN))
+                            .max(HEARTBEAT_RETRY_FLOOR)
+                    } else {
+                        schedule.interval
+                    };
+                    continue;
+                }
+            },
         };
         // The accepted lease advanced, so the ordinary renewal cadence
         // applies again until the next transient failure.
@@ -3421,14 +3508,14 @@ fn remaining_lease(deadline: DateTime<FixedOffset>) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, InterruptibleJob, LoopClient,
-        RecipeExecutor, RecipeObservationError, RejectingExecutor, RunOncePolicy,
-        controller_denial_diagnostic, distribution_failure_result, distribution_success_evidence,
-        normalize_execution_result, output_media_type, parse_compiled_execution_plan,
-        readiness_identity, recipe_install_success_body, report_complete_recipe_run_observations,
-        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
-        temporary_runtime_observation_failure, wait_for_launch_stability,
-        wait_ready_with_runtime_guard_and_cancellation,
+        ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, HeartbeatFailure, InterruptibleJob,
+        LoopClient, RecipeExecutor, RecipeObservationError, RejectingExecutor, RunOncePolicy,
+        classify_heartbeat_failure, controller_denial_diagnostic, distribution_failure_result,
+        distribution_success_evidence, normalize_execution_result, output_media_type,
+        parse_compiled_execution_plan, readiness_identity, recipe_install_success_body,
+        report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
+        run_once_with_heartbeat_interval, temporary_runtime_observation_failure,
+        wait_for_launch_stability, wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
         client::{AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence},
@@ -4308,6 +4395,92 @@ mod tests {
 
         async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
             self.inner.submit_result(result).await
+        }
+    }
+
+    /// Refuses every renewal until ``lapsed_after`` and accepts them afterwards.
+    ///
+    /// That is the shape of a Controller restart or a lost round trip: the
+    /// accepted lease runs out while the Controller is unreachable, then it
+    /// answers again.
+    #[derive(Clone)]
+    struct LeaseLapseClient {
+        inner: RecordingClient,
+        lapsed_after: DateTime<Utc>,
+        accepted_at: Arc<Mutex<Vec<DateTime<Utc>>>>,
+    }
+    #[async_trait]
+    impl LoopClient for LeaseLapseClient {
+        async fn claim(
+            &self,
+            capabilities: &[&str],
+            wait_seconds: u64,
+            runtime_identity: Option<&AgentRuntimeIdentity>,
+        ) -> Result<Option<AgentClaim>, ClientError> {
+            self.inner
+                .claim(capabilities, wait_seconds, runtime_identity)
+                .await
+        }
+
+        async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+            self.inner.heartbeats.lock().unwrap().push(progress.clone());
+            if Utc::now() < self.lapsed_after {
+                return Err(ClientError::Retryable);
+            }
+            self.accepted_at.lock().unwrap().push(Utc::now());
+            Ok(AgentDirective {
+                attempt: progress.attempt,
+                cancel_requested: false,
+                deadline: progress.deadline + ChronoDuration::seconds(30),
+                fence: progress.fence,
+                job_id: progress.job_id,
+                node_id: progress.node_id.clone(),
+                operation_id: progress.operation_id,
+                schema_version: progress.schema_version,
+            })
+        }
+
+        async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+            self.inner.submit_result(result).await
+        }
+    }
+
+    /// Keeps the work alive until a renewal is accepted.
+    ///
+    /// The lease under test lapses in real time, so a fixed work duration would
+    /// race the executor's own finish against the renewal the test asserts.  It
+    /// still honours cancellation, so a loop that gives up early ends the test
+    /// promptly instead of waiting out the cap.
+    struct RenewalGatedExecutor {
+        accepted: Arc<Mutex<Vec<DateTime<Utc>>>>,
+        minimum: usize,
+        cap: Duration,
+        cancelled: Arc<AtomicBool>,
+    }
+
+    #[async_trait(?Send)]
+    impl Executor for RenewalGatedExecutor {
+        async fn execute(
+            &self,
+            _claim: &AgentClaim,
+            _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+            cancellation: tokio::sync::watch::Receiver<bool>,
+        ) -> ExecutionResult {
+            let deadline = std::time::Instant::now() + self.cap;
+            while std::time::Instant::now() < deadline {
+                if *cancellation.borrow() {
+                    self.cancelled.store(true, Ordering::SeqCst);
+                    break;
+                }
+                if self.accepted.lock().unwrap().len() >= self.minimum {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            ExecutionResult {
+                state: "succeeded",
+                body: recipe_install_success_body(1),
+            }
         }
     }
 
@@ -5411,6 +5584,217 @@ mod tests {
                 "executor continued after heartbeat failure (panic={panic})"
             );
             assert!(client.inner.results.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_retryable_renewal_failure_after_the_lease_lapses_still_renews() {
+        // Wrong implementation: the retry arm was guarded by
+        // ``Utc::now() < deadline``, so the first renewal that could not be
+        // re-sent inside the accepted lease fell through to the catch-all, the
+        // heartbeat task returned, and the work was cancelled.  One lost round
+        // trip near the expiry therefore ended renewal for a start that was
+        // still healthy -- and ended the agent's ability to observe the
+        // Controller's cancellation with it.
+        let directory = tempdir().unwrap();
+        let heartbeats = Arc::new(Mutex::new(Vec::new()));
+        let accepted_at = Arc::new(Mutex::new(Vec::new()));
+        let mut lease = claim();
+        // The lease lapses in real time, because that is the condition under
+        // test.  The margins are wide enough to survive a loaded runner:
+        // `state.begin` refuses an already-expired claim, so the accepted lease
+        // must comfortably outlive loop startup, and the refusal window must
+        // comfortably outlive the lease.
+        let lease_deadline = Utc::now() + ChronoDuration::milliseconds(500);
+        lease.deadline = lease_deadline.with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let client = LeaseLapseClient {
+            inner: RecordingClient {
+                cancel_requested: false,
+                claim: Arc::new(Mutex::new(Some(lease))),
+                fail_heartbeat: false,
+                heartbeats: heartbeats.clone(),
+                results: Arc::new(Mutex::new(Vec::new())),
+            },
+            // Comfortably past the accepted lease, so every renewal before this
+            // instant is refused and the lease has certainly lapsed.
+            lapsed_after: Utc::now() + ChronoDuration::milliseconds(1000),
+            accepted_at: accepted_at.clone(),
+        };
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let executor = RenewalGatedExecutor {
+            accepted: accepted_at.clone(),
+            minimum: 1,
+            cap: Duration::from_secs(5),
+            cancelled: cancelled.clone(),
+        };
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &executor,
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(5),
+                heartbeat_retry_interval: Duration::from_millis(5),
+            },
+            || Ok(()),
+        )
+        .await
+        .expect("a lapsed lease that the Controller still accepts must be re-acquired");
+
+        assert!(
+            !cancelled.load(Ordering::SeqCst),
+            "the work was cancelled although the Controller still accepted renewals"
+        );
+        let accepted_at = accepted_at.lock().unwrap();
+        assert!(
+            accepted_at.iter().any(|instant| *instant > lease_deadline),
+            "no renewal was accepted after the lease lapsed: {accepted_at:?}"
+        );
+        assert!(heartbeats.lock().unwrap().len() > accepted_at.len());
+        assert_eq!(client.inner.results.lock().unwrap().len(), 1);
+        assert!(state.pending_results().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_retryable_renewal_failure_stops_once_the_start_budget_is_spent() {
+        // The lease is what a renewal recovers, so it cannot also be the
+        // recovery budget.  Wrong implementation: the loop retried while the
+        // accepted lease was live, ignoring the start's own immutable budget, so
+        // it kept renewing an attempt whose start deadline had already elapsed.
+        let directory = tempdir().unwrap();
+        let mut start = claim();
+        start.operation = "recipe.start".parse().unwrap();
+        let payload = json!({
+            "schema_version": 2,
+            "run_id": "00000000-0000-4000-8000-0000000000aa",
+            "installation_id": "00000000-0000-4000-8000-000000000001",
+            "recipe_revision_id": "00000000-0000-4000-8000-0000000000bb",
+            "recipe_content_sha256": "c".repeat(64),
+            "mapping_id": "00000000-0000-4000-8000-0000000000cc",
+            "mapping_generation": 1,
+            "run_generation": 1,
+            "image_digest": format!("sha256:{}", "d".repeat(64)),
+            "plan_digest": "a".repeat(64),
+            "alias": "rank-0",
+            "rank": 0,
+            "role": "entrypoint",
+            "port": 29500,
+            "reserved_memory_bytes": 1,
+            "endpoint_address": "10.0.0.1",
+            "world_size": 2,
+            "compiled_execution_plan": serde_json::from_str::<Value>(include_str!(
+                "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+            ))
+            .unwrap(),
+            "local_address": "10.0.0.1",
+            "master_address": "10.0.0.1",
+            "master_port": 29500,
+            "phase": "rank-launch",
+            "start_deadline": (Utc::now() - ChronoDuration::seconds(1)).to_rfc3339(),
+        });
+        let typed: vonk_agent_protocol::generated::AgentClaimPayload =
+            serde_json::from_value(payload).unwrap();
+        start.payload_digest = hex_sha256(&canonical_json(&typed).unwrap());
+        start.payload = typed;
+        let client = LeaseLapseClient {
+            inner: RecordingClient {
+                cancel_requested: false,
+                claim: Arc::new(Mutex::new(Some(start))),
+                fail_heartbeat: false,
+                heartbeats: Arc::new(Mutex::new(Vec::new())),
+                results: Arc::new(Mutex::new(Vec::new())),
+            },
+            // Never accepts, so only the start budget can end the loop.
+            lapsed_after: Utc::now() + ChronoDuration::hours(1),
+            accepted_at: Arc::new(Mutex::new(Vec::new())),
+        };
+        let executor = BlockingCancellationExecutor {
+            cancelled: Arc::new(AtomicBool::new(false)),
+        };
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(500),
+            run_once_with_heartbeat_interval(
+                &client,
+                &mut state,
+                &executor,
+                RunOncePolicy {
+                    capabilities: &["recipe.start"],
+                    wait_seconds: 0,
+                    runtime_identity: None,
+                    heartbeat_interval: Duration::from_millis(5),
+                    heartbeat_retry_interval: Duration::from_millis(5),
+                },
+                || Ok(()),
+            ),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "renewal retried past the start's own immutable budget"
+        );
+        assert!(result.unwrap().is_err());
+        assert!(executor.cancelled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn heartbeat_failure_classification_is_a_closed_set() {
+        // Wrong implementation: ``Err(error) => return Err(...)`` treated every
+        // error class it did not recognise as terminal, so a new class added to
+        // the client would silently end renewal.  The replacement names each
+        // class and is exhaustive, so adding one is a compile error here.
+        let refusal = |status: u16, code: &str| {
+            ClientError::Controller(Box::new(ControllerError {
+                operation: "controller.request /agent/heartbeat".to_owned(),
+                endpoint: "/agent/heartbeat".to_owned(),
+                status,
+                code: code.to_owned(),
+                request_id: None,
+                decision: "exit",
+                retry_after_seconds: None,
+                summary: None,
+            }))
+        };
+        // A Controller that is asking for the same request again.
+        for status in [408, 429, 500, 503] {
+            assert_eq!(
+                classify_heartbeat_failure(&refusal(status, "controller_unavailable")),
+                HeartbeatFailure::Retryable,
+                "status {status}"
+            );
+        }
+        assert_eq!(
+            classify_heartbeat_failure(&ClientError::Retryable),
+            HeartbeatFailure::Retryable
+        );
+        // A refused renewal: authority, fence, a lease past its allowance, or an
+        // invalid claim.  None of these is repaired by sending it again.
+        for status in [400, 401, 403, 404, 409, 410, 422] {
+            assert_eq!(
+                classify_heartbeat_failure(&refusal(status, "stale_agent_attempt")),
+                HeartbeatFailure::Terminal,
+                "status {status}"
+            );
+        }
+        assert_eq!(
+            classify_heartbeat_failure(&refusal(409, "superseded_operation_cancelled")),
+            HeartbeatFailure::SupersededCancellation
+        );
+        for terminal in [
+            ClientError::Identity,
+            ClientError::Protocol,
+            ClientError::ObservationNotReady,
+            ClientError::Pin,
+        ] {
+            assert_eq!(
+                classify_heartbeat_failure(&terminal),
+                HeartbeatFailure::Terminal
+            );
         }
     }
 
