@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from .host_helper import Digest, SignedRecipeRunObservationReceipt, Uuid4Text
-from .wire_model import WireModel
+from .wire_model import ErrorCode, WireModel
 
 
 class HostHelperResponse(WireModel):
@@ -24,6 +24,6 @@ class HostHelperResponse(WireModel):
     ]
     evidence_sha256: Digest | None
     exit_code: Annotated[int, Field(ge=0, le=255)] | None = None
-    error_code: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")] | None = None
+    error_code: ErrorCode | None = None
     observation_receipt: SignedRecipeRunObservationReceipt | None = None
     diagnostic: Annotated[str, Field(max_length=8192)] | None = None

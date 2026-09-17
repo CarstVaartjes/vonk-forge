@@ -60,7 +60,6 @@ from vonk_agent_protocol.enrollment import (
     RenewRequest,
 )
 from vonk_agent_protocol.host_helper import ContainerRuntimeActionName
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
@@ -2000,16 +1999,11 @@ def install_agent_routes(
         _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
-            if message.state == "failed" and not isinstance(
-                message.result, RecipeJobRunResult
-            ):
-                error_code = message.result.get("error_code")
-                if (
-                    message.result.get("status") != "failed"
-                    or not isinstance(error_code, str)
-                    or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", error_code) is None
-                ):
-                    raise ValueError("stable failure error code is required")
+            # The failed-result identity rule (a failed status plus a stable
+            # error code) is part of the operation result contract and is
+            # applied by ``validate_result_for_operation`` inside
+            # ``record_result``.  Keeping no second copy here is what makes the
+            # producer and the ingress enforce exactly one rule.
             required.operations.record_result(message, source=source)
         except StaleAgentAttempt as error:
             try:

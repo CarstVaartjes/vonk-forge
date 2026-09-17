@@ -3272,6 +3272,105 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         assert "/proc: permission denied" in bundle.diagnostics.stderr.text
 
 
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    (
+        # The accepted boundary is the longest stable code the shared rule
+        # allows; a shorter conventional code is the same path.
+        ({"status": "failed", "error_code": "a" * 64}, 204),
+        ({"status": "failed", "error_code": "a" * 65}, 422),
+        ({"status": "failed", "error_code": "stop.failed"}, 422),
+        ({"status": "failed", "error_code": "Stop_failed"}, 422),
+        # A failed envelope that omits its failed status cannot identify the
+        # failure and is refused by the same contextual rule.
+        ({"error_code": "stop_failed"}, 422),
+    ),
+)
+def test_failed_result_error_code_obeys_the_shared_contract_rule(
+    agent_system, failure, expected_status
+) -> None:
+    client, services, _, clock = agent_system
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
+    )
+    claim = client.post(
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
+    ).json()
+    result = {
+        key: claim[key]
+        for key in (
+            "schema_version",
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "node_id",
+            "deadline",
+        )
+    } | {"state": "failed", "result": failure}
+
+    response = client.post(
+        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
+    )
+
+    assert response.status_code == expected_status
+
+
+def test_failed_result_rejection_names_the_failing_field_and_rule(
+    agent_system,
+) -> None:
+    client, services, _, clock = agent_system
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
+    )
+    claim = client.post(
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
+    ).json()
+    envelope = {
+        key: claim[key]
+        for key in (
+            "schema_version",
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "node_id",
+            "deadline",
+        )
+    } | {"state": "failed"}
+
+    malformed = client.post(
+        "/agent/result",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=envelope | {"result": {"status": "failed", "error_code": "stop.failed"}},
+    )
+
+    assert malformed.status_code == 422
+    assert any(
+        issue["type"] == "string_pattern_mismatch" and issue["loc"][-1] == "error_code"
+        for issue in malformed.json()["issues"]
+    )
+
+    unnamed = client.post(
+        "/agent/result",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=envelope | {"result": {"error_code": "stop_failed"}},
+    )
+
+    assert unnamed.status_code == 422
+    assert any(
+        "stable error_code" in issue["msg"] for issue in unnamed.json()["issues"]
+    )
+
+
 def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
     agent_system,
 ) -> None:

@@ -231,6 +231,52 @@ def _lease_expiry_reason(
     return ("; ".join(parts) + "; the effect is unobserved")[:512]
 
 
+def _attempt_is_live(attempt: AgentOperationAttempt | None, now: datetime) -> bool:
+    """Return whether an attempt can still renew its lease and report.
+
+    This is the same liveness boundary ``_active`` and the expired-attempt
+    candidate predicate use: a missing attempt, an attempt that already
+    stopped, or a lease deadline at or before ``now`` can never renew or
+    deliver a receipt.
+    """
+
+    return (
+        attempt is not None
+        and attempt.state == "running"
+        and _aware(attempt.lease_deadline) > _aware(now)
+    )
+
+
+def _reconciled_dead_attempt_reason(
+    operation: StoredOperation,
+    attempt: AgentOperationAttempt | None,
+    node: AgentNode,
+    now: datetime,
+) -> str:
+    """Name why a non-terminal order no longer has an executor.
+
+    A missing or already-stopped attempt is a different defect from an expired
+    lease, so the operator surface keeps them apart instead of claiming a lease
+    expired when none was ever recorded.
+    """
+
+    if attempt is None:
+        detail = f"attempt {max(1, operation.current_attempt)} has no recorded attempt"
+    elif attempt.state != "running":
+        detail = f"attempt {operation.current_attempt} stopped in state {attempt.state}"
+    else:
+        return _lease_expiry_reason(operation, attempt, node, now)
+    contact = (
+        "last accepted contact never observed"
+        if node.last_seen_at is None
+        else f"last accepted contact {_aware(node.last_seen_at).isoformat()}"
+    )
+    return (
+        f"{detail}; {contact}; reconciled at {_aware(now).isoformat()}; "
+        "the effect is unobserved"
+    )[:512]
+
+
 #: Every recorded claim refusal starts with this prefix.  It keeps the
 #: structured reason recognisable, and it lets the recorder replace an earlier
 #: refusal on the parent job without overwriting an unrelated domain reason.
@@ -828,7 +874,13 @@ class AgentJobService:
                     "attempt": operation.current_attempt,
                     "attempt_state": attempt.state,
                 }
-            return operation, "running-lease-not-expired", {
+            if _attempt_is_live(attempt, now):
+                return operation, "running-lease-live", {
+                    **facts,
+                    "attempt": operation.current_attempt,
+                    "lease_deadline": _aware(attempt.lease_deadline).isoformat(),
+                }
+            return operation, "running-lease-expired", {
                 **facts,
                 "attempt": operation.current_attempt,
                 "lease_deadline": _aware(attempt.lease_deadline).isoformat(),
@@ -902,6 +954,93 @@ class AgentJobService:
                 "cancel_requested carried no cancel_requested_at; the superseded "
                 "order was reconciled to cancelled"
             )[:1024]
+
+    def _superseded_cancellation_state(
+        self,
+        session: Session,
+        old: StoredOperation,
+        operation: StoredOperation,
+        now: datetime,
+    ) -> str:
+        """Classify a prior order against the current order's supersession.
+
+        ``block`` means an authorised cleanup window is still live, so the prior
+        order must finish before later work runs.  ``cancelled`` means the prior
+        order was already driven to its known terminal state here.  Anything
+        else is not a supersession and is decided by the caller.
+        """
+
+        if not (
+            operation.kind in _WORKLOAD_INTENT_OPERATIONS
+            and old.kind in _WORKLOAD_INTENT_OPERATIONS
+            and old.current_attempt > 0
+            and old.workload_intent_ordinal is not None
+            and operation.workload_intent_ordinal is not None
+            and old.workload_intent_ordinal < operation.workload_intent_ordinal
+        ):
+            return "not-applicable"
+        old_parent = session.get(Job, old.parent_job_id)
+        if not (
+            old_parent is not None
+            and isinstance(old_parent.result, Mapping)
+            and old_parent.result.get("cancel_requested") is True
+        ):
+            return "not-applicable"
+        cancellation_deadline = superseded_cancellation_deadline(old_parent.result)
+        if cancellation_deadline is not None and _aware(now) < cancellation_deadline:
+            return "block"
+        self._cancel_superseded_operation(
+            session,
+            old,
+            old_parent,
+            now,
+            superseded_by=operation.workload_intent_ordinal,
+            disarmed=cancellation_deadline is None,
+        )
+        return "cancelled"
+
+    def _reconcile_dead_running_operation(
+        self,
+        session: Session,
+        operation: StoredOperation,
+        attempt: AgentOperationAttempt | None,
+        node: AgentNode,
+        now: datetime,
+        *,
+        superseded_by: int | None,
+    ) -> None:
+        """Park a running order whose attempt can no longer report.
+
+        The order's effect is unobserved, never proved ended, so it becomes a
+        durable operator-visible wait instead of a permanent blocker.  The
+        effect is never re-issued: only the existing exact-resume path may
+        schedule a retry, and only for a restart-safe operation.  The recorded
+        result and fence are retained so a late receipt is still accepted.
+        """
+
+        if attempt is not None and attempt.state in {
+            "running",
+            "waiting-for-operator",
+        }:
+            attempt.state = "expired"
+        operation.state = "waiting-for-operator"
+        reason = _reconciled_dead_attempt_reason(operation, attempt, node, now)
+        if superseded_by is not None and operation.workload_intent_ordinal is not None:
+            reason = f"superseded by workload intent {superseded_by}; {reason}"
+        operation.retry_disposition = None
+        operation.retry_disposition_attempt = None
+        operation.retry_due_at = None
+        if operation.kind in _RESTART_REISSUE_OPERATIONS:
+            self._schedule_safe_retry(operation, now)
+            scheduled = operation.status_reason
+            if isinstance(scheduled, str) and scheduled:
+                reason = f"{reason}; {scheduled}"
+        # The reconciliation reason is the durable fact an operator needs, so
+        # it survives the schedule note instead of being replaced by it.
+        operation.status_reason = reason[:512]
+        operation.updated_at = now
+        self._project_artifact_job_expiry(session, operation, now)
+        self._aggregate_parent(session, operation.parent_job_id)
 
     @staticmethod
     def _claimable_operations(
@@ -1201,55 +1340,78 @@ class AgentJobService:
                     )
                 )
                 active_mutations_list = []
+                reconciled_dead_running = False
                 for old in candidates:
                     if old.state == "running":
-                        active_mutations_list.append(old)
-                    elif (
-                        operation.kind in _WORKLOAD_INTENT_OPERATIONS
-                        and old.kind in _WORKLOAD_INTENT_OPERATIONS
-                        and old.current_attempt > 0
-                        and old.workload_intent_ordinal is not None
-                        and operation.workload_intent_ordinal is not None
-                        and old.workload_intent_ordinal
-                        < operation.workload_intent_ordinal
-                    ):
-                        old_parent = session.get(Job, old.parent_job_id)
-                        if (
-                            old_parent is not None
-                            and isinstance(old_parent.result, Mapping)
-                            and old_parent.result.get("cancel_requested") is True
-                        ):
-                            cancellation_deadline = superseded_cancellation_deadline(
-                                old_parent.result
+                        attempt = session.scalar(
+                            select(AgentOperationAttempt)
+                            .where(
+                                AgentOperationAttempt.operation_id == old.id,
+                                AgentOperationAttempt.attempt == old.current_attempt,
                             )
-                            if (
-                                cancellation_deadline is not None
-                                and _aware(now) < cancellation_deadline
-                            ):
-                                # The cancellation is live: its cleanup STOP is
-                                # still authorised, so the prior effect must
-                                # cease before any later mutation runs.
-                                active_mutations_list.append(old)
-                            else:
-                                # The order is cancelled but its cleanup is
-                                # either disarmed (no parseable
-                                # cancel_requested_at, a defect) or past its
-                                # authorised window.  A waiting-for-operator
-                                # operation has no live attempt and can never
-                                # deliver the receipt this wait needs, so the
-                                # wait has no bound.  The terminal state is
-                                # known, not uncertain: cancel it instead of
-                                # wedging every later mutation on this node
-                                # forever.  The effect is never re-issued.
-                                self._cancel_superseded_operation(
-                                    session,
-                                    old,
-                                    old_parent,
-                                    now,
-                                    superseded_by=operation.workload_intent_ordinal,
-                                    disarmed=cancellation_deadline is None,
+                            .with_for_update(of=AgentOperationAttempt)
+                        )
+                        if _attempt_is_live(attempt, now):
+                            # A live lease can still renew and report its exact
+                            # effect; nothing may overlap it.
+                            active_mutations_list.append(old)
+                            continue
+                        # The order is `running` but its attempt can no longer
+                        # renew or report.  It can never deliver the receipt a
+                        # wait needs, so leaving it as a blocker wedges every
+                        # later mutation on this node forever (#811).  A
+                        # superseded cancellation is reconciled first; anything
+                        # else becomes a durable operator-visible wait.  The
+                        # effect is never re-issued.
+                        supersession = self._superseded_cancellation_state(
+                            session, old, operation, now
+                        )
+                        if supersession == "block":
+                            active_mutations_list.append(old)
+                            continue
+                        if supersession == "cancelled":
+                            continue
+                        self._reconcile_dead_running_operation(
+                            session,
+                            old,
+                            attempt,
+                            node,
+                            now,
+                            superseded_by=(
+                                operation.workload_intent_ordinal
+                                if (
+                                    old.workload_intent_ordinal is not None
+                                    and operation.workload_intent_ordinal is not None
+                                    and old.workload_intent_ordinal
+                                    < operation.workload_intent_ordinal
                                 )
+                                else None
+                            ),
+                        )
+                        reconciled_dead_running = True
+                        continue
+                    # A waiting-for-operator order is decided by the
+                    # supersession state alone: #810 reconciles an authorised
+                    # cancellation that can no longer arrive, and a plain wait
+                    # never blocks later work.
+                    if (
+                        self._superseded_cancellation_state(
+                            session, old, operation, now
+                        )
+                        == "block"
+                    ):
+                        active_mutations_list.append(old)
                 active_mutations = tuple(active_mutations_list)
+                if reconciled_dead_running and not active_mutations:
+                    self._record_claim_refusal(
+                        session,
+                        operation=operation,
+                        job_id=operation.parent_job_id,
+                        check="dead-mutation-reconciled",
+                        kind=operation.kind,
+                        operation_intent=operation.workload_intent_ordinal,
+                    )
+                    return None
                 # A current exact STOP is the cleanup action for an older
                 # cancelled workload. Do not let the old order's bookkeeping
                 # prevent that STOP from reaching the agent; every other
@@ -1578,7 +1740,11 @@ class AgentJobService:
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
         operation.updated_at = now
-        reason = {"reason": "builder runtime identity changed before claim"}
+        reason = _failure_result(
+            "recipe_build_failed",
+            "builder runtime identity changed before claim",
+            uncertain=False,
+        )
         fence = str(uuid.uuid4())
         attempt = AgentOperationAttempt(
             operation_id=operation.id,
@@ -1596,18 +1762,20 @@ class AgentJobService:
                 session,
                 operation,
                 attempt,
-                AgentResult.model_validate(
-                    {
-                        "schema_version": 1,
-                        "job_id": operation.parent_job_id,
-                        "operation_id": operation.id,
-                        "attempt": attempt.attempt,
-                        "fence": fence,
-                        "node_id": operation.node_id,
-                        "deadline": _aware(now),
-                        "state": "failed",
-                        "result": reason,
-                    }
+                AgentResult.model_validate_json(
+                    canonical_message(
+                        {
+                            "schema_version": 1,
+                            "job_id": operation.parent_job_id,
+                            "operation_id": operation.id,
+                            "attempt": attempt.attempt,
+                            "fence": fence,
+                            "node_id": operation.node_id,
+                            "deadline": _aware(now),
+                            "state": "failed",
+                            "result": reason,
+                        }
+                    )
                 ),
             )
         self._aggregate_parent(session, operation.parent_job_id)
