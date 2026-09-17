@@ -1141,7 +1141,12 @@ class RunSwitchFleetProfileAdapter:
         child_state = _operation_state(state.get("state"), default="running")
         raw_progress = state.get("child_progress")
         progress = (
-            FleetProfileChildProgress.model_validate(raw_progress)
+            # The stored document is JSON that the database driver already
+            # decoded, so it must be read with the contract's JSON semantics:
+            # Python mode refuses the ISO string this same model serializes for
+            # ``start_deadline``, which failed a whole live application after
+            # its distribution and install had already succeeded.
+            FleetProfileChildProgress.model_validate_json(json.dumps(raw_progress))
             if isinstance(raw_progress, Mapping)
             else FleetProfileChildProgress(
                 phase="final-verify" if child_state == "succeeded" else "prepare",
