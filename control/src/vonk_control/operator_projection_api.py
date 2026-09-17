@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from pydantic import ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
@@ -275,6 +275,20 @@ _JOB_LOG_SCAN_LIMIT = 512
 _AGENT_LOG_SCAN_LIMIT = 128
 #: A hard ceiling on projected agent entries before the caller's ``lines`` cut.
 _AGENT_LOG_ENTRY_LIMIT = 4_096
+#: The attempt states whose own narrative an operator must be able to read back.
+#: ``expired`` is deliberately absent: a lease lapse leaves the attempt
+#: ``expired`` while parking the whole operation, so the park is selected by the
+#: operation's state instead.  Resurrecting every expired attempt would also
+#: report the lapses of operations that have since been retried, whose current
+#: status reason and timestamps no longer describe that lapse at all.
+_FAILED_ATTEMPT_STATES = ("failed", "waiting-for-operator")
+#: The headline and level one attempt state narrates.  A lapse and a wait are
+#: things an operator must act on, not errors that claim the start died.
+_ATTEMPT_OUTCOME: Mapping[str, tuple[str, LogLevel]] = {
+    "failed": ("failed", "error"),
+    "expired": ("lease expired", "warning"),
+    "waiting-for-operator": ("waiting for operator", "warning"),
+}
 
 
 def _aware(value: datetime) -> datetime:
@@ -292,6 +306,71 @@ def _agent_log_source(kind: str) -> LogSource:
     return "job" if kind == "recipe.job.run.v1" else "runtime"
 
 
+def _phase_start_deadline(operation: AgentOperation) -> str | None:
+    """Return the immutable start deadline a two-phase start bound, if any.
+
+    Only a distributed start persists one, and it is the immutable budget the
+    start may not outlive.  It is reported verbatim: the repository preserves a
+    formatted timestamp's spelling rather than rewriting it.
+    """
+
+    payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+    value = payload.get("start_deadline")
+    return value if isinstance(value, str) and value else None
+
+
+def _attempt_is_parked(
+    operation: AgentOperation, attempt: AgentOperationAttempt
+) -> bool:
+    """Return whether this exact attempt is why the order is waiting.
+
+    The park sets the operation's state and reason, and the attempt keeps no
+    timestamp of its own, so a lapse can only be dated while its attempt is
+    still the current one.
+    """
+
+    return (
+        operation.state == "waiting-for-operator"
+        and attempt.attempt == operation.current_attempt
+    )
+
+
+def _lease_clock(
+    operation: AgentOperation, attempt: AgentOperationAttempt
+) -> str | None:
+    """Name the clock that lapsed and the numbers that bound it.
+
+    A lease lapse is the Controller's own outcome, so the projection reports the
+    Controller's facts: which clock stopped authorising renewal, the deadline it
+    stopped renewing before, the instant the lapse was recorded, how far into the
+    operation that instant was, and the separate start deadline that had not
+    elapsed.  The requested lease window is deliberately not among them, and no
+    existing field dates the grant: the attempt row keeps no timestamp, and the
+    node's ``last_seen_at`` dates its last accepted *contact* -- which may be a
+    claim or a result, not the renewal that set this deadline -- so subtracting
+    it yields a lower bound rather than the window.  A missing number is
+    acceptable here; an invented one is not.
+    """
+
+    if attempt.state != "expired":
+        return None
+    parts = [
+        "clock=operation-lease",
+        f"lease_deadline={_aware(attempt.lease_deadline).isoformat()}",
+    ]
+    if _attempt_is_parked(operation, attempt):
+        expired_at = _aware(operation.updated_at)
+        parts.append(f"expired_at={expired_at.isoformat()}")
+        parts.append(
+            "elapsed_seconds="
+            f"{int((expired_at - _aware(operation.created_at)).total_seconds())}"
+        )
+    start_deadline = _phase_start_deadline(operation)
+    if start_deadline is not None:
+        parts.append(f"start_deadline={start_deadline}")
+    return " ".join(parts)
+
+
 def _failure_log_entries(
     *,
     operation_id: str,
@@ -299,33 +378,52 @@ def _failure_log_entries(
     source: LogSource,
     bundle: FailureEvidenceBundle,
     observed_at: datetime,
+    state: str,
+    clock: str | None,
+    controller_reason: str | None,
+    has_receipt: bool,
 ) -> list[FleetLogEntry]:
-    """Project one bounded failure bundle into retrievable log entries.
+    """Project one bounded attempt narrative into retrievable log entries.
 
     The agent's own reason already names the stable refusal code for the
     protocol causes, whose ``diagnostic()`` is deliberately ``None``; the entry
     records that reason and the operation error code rather than any unbounded
-    or unredacted payload.
+    or unredacted payload.  An attempt that stopped renewing is the Controller's
+    wait rather than an agent refusal, so it is narrated as a wait, it names the
+    clock that lapsed with its numbers, and it claims no agent error code it
+    never received.
     """
-    entries: list[FleetLogEntry] = []
 
-    def add(message: str, level: LogLevel = "error") -> None:
+    entries: list[FleetLogEntry] = []
+    headline, default_level = _ATTEMPT_OUTCOME.get(state, _ATTEMPT_OUTCOME["failed"])
+
+    def add(message: str, level: LogLevel | None = None) -> None:
         text = redact_text(message)[:4_096]
         if text:
             entries.append(
                 FleetLogEntry(
                     observed_at=observed_at,
                     source=source,
-                    level=level,
+                    level=level or default_level,
                     message=text,
                     evidence_id=operation_id,
                 )
             )
 
-    add(f"{kind} failed: {bundle.summary}")
-    add(f"error_code={bundle.receipt.error_code}")
+    add(f"{kind} {headline}: {bundle.summary}")
+    # An error code is an agent's own stable refusal.  A lapsed lease came with
+    # no receipt at all, so the default "operation_failed" would name a refusal
+    # that never happened.
+    if has_receipt:
+        add(f"error_code={bundle.receipt.error_code}")
     if bundle.receipt.detail:
         add(f"detail={bundle.receipt.detail}")
+    # The Controller's own record of the wait, which the agent's receipt cannot
+    # carry: it is what says the effect is unobserved rather than dead.
+    if controller_reason is not None and controller_reason != bundle.summary:
+        add(f"controller: {controller_reason}", level="warning")
+    if clock is not None:
+        add(f"wait: {clock}", level="warning")
     for line in bundle.diagnostics.stderr.text.splitlines():
         add(f"stderr: {line}")
     for line in bundle.diagnostics.stdout.text.splitlines():
@@ -349,7 +447,9 @@ class ControllerJobLogProvider:
     operation attempts keep the agent's own bounded failure result -- its reason
     (which names the stable refusal code), its operation error code and its
     sanitized process-log tails -- which is the narrative a failed
-    ``recipe.start`` never reached the log surface with.  Neither source is a
+    ``recipe.start`` never reached the log surface with.  An attempt whose lease
+    lapsed left no result at all, so the Controller's own record of the wait and
+    the clock that lapsed are projected in its place.  Neither source is a
     live stream, neither is written here, and neither becomes an authority for
     anything.
     """
@@ -455,8 +555,13 @@ class ControllerJobLogProvider:
                     )
                     .where(
                         AgentOperation.node_id == node_id,
-                        AgentOperationAttempt.state.in_(
-                            ("failed", "waiting-for-operator")
+                        or_(
+                            AgentOperationAttempt.state.in_(_FAILED_ATTEMPT_STATES),
+                            and_(
+                                AgentOperation.state == "waiting-for-operator",
+                                AgentOperationAttempt.attempt
+                                == AgentOperation.current_attempt,
+                            ),
                         ),
                         AgentOperation.updated_at >= cutoff,
                     )
@@ -473,11 +578,15 @@ class ControllerJobLogProvider:
             payload = (
                 operation.payload if isinstance(operation.payload, Mapping) else {}
             )
-            result = (
-                attempt.result
-                or payload.get("failure")
-                or {"reason": operation.status_reason or "Operation failed"}
-            )
+            # Only the agent's own receipt may name an error code; a lease lapse
+            # arrived with no receipt, so the fallback narrative is the
+            # Controller's reason for the wait.
+            receipt = attempt.result or payload.get("failure")
+            result = receipt or {
+                "reason": operation.status_reason or "Operation failed"
+            }
+            parked = _attempt_is_parked(operation, attempt)
+            clock = _lease_clock(operation, attempt)
             observed_at = _aware(operation.updated_at)
             source_name = _agent_log_source(operation.kind)
             item = {
@@ -495,8 +604,11 @@ class ControllerJobLogProvider:
             try:
                 bundle = collect_failure(item, now=now)
             except Exception:  # noqa: BLE001 - one malformed row must not hide the rest
+                headline, level = _ATTEMPT_OUTCOME.get(
+                    attempt.state, _ATTEMPT_OUTCOME["failed"]
+                )
                 fallback = redact_text(
-                    f"{operation.kind} failed: "
+                    f"{operation.kind} {headline}: "
                     f"{operation.status_reason or 'Operation failed'}"
                 )[:4_096]
                 if fallback:
@@ -504,7 +616,7 @@ class ControllerJobLogProvider:
                         FleetLogEntry(
                             observed_at=observed_at,
                             source=source_name,
-                            level="error",
+                            level=level,
                             message=fallback,
                             evidence_id=operation.id,
                         )
@@ -517,6 +629,10 @@ class ControllerJobLogProvider:
                     source=source_name,
                     bundle=bundle,
                     observed_at=observed_at,
+                    state=attempt.state,
+                    clock=clock,
+                    controller_reason=(operation.status_reason if parked else None),
+                    has_receipt=receipt is not None,
                 )
             )
             if len(entries) >= _AGENT_LOG_ENTRY_LIMIT:
