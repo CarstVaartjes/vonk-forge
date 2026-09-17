@@ -2200,15 +2200,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         // be bound.  Name that instead of reporting a readiness
                         // deadline the workload never reached: a temporary
                         // inspection failure is the code the Controller already
-                        // retries for a start, so it becomes self-healing rather
-                        // than a park an operator has to read the journal to
-                        // explain.
+                        // retries for a start, so it becomes self-healing, and any
+                        // other rejection carries the captured container output
+                        // the inspection gate admits.
                         if temporary_observation_error(&error) {
                             return temporary_runtime_observation_failure();
                         }
-                        return failed_owned(format!(
-                            "exact workload runtime observation failed: {error}"
-                        ));
+                        return runtime_observation_failure(&error);
                     }
                 };
                 if !ready {
@@ -2526,6 +2524,37 @@ fn temporary_runtime_observation_failure() -> ExecutionResult {
             "failure_kind": "temporary-dependency",
             "retry_after_seconds": 5,
         }),
+    }
+}
+
+/// Refuse a start whose observation failed, carrying what the helper captured.
+///
+/// A rejection raised on the inspection path can carry the exact container's
+/// output -- the one case the diagnostic gate admits for a privileged action,
+/// admitted because the inspection already proved the container's identity and
+/// sanitized the text.  Reporting only the code left an operator with "the
+/// observation failed" when the answer was that the workload process had exited
+/// and printed why.
+fn runtime_observation_failure(error: &crate::host_runtime::HostRuntimeError) -> ExecutionResult {
+    let reason = match error.diagnostic() {
+        Some(detail) if !detail.is_empty() => {
+            format!("exact workload runtime observation failed: {error}: {detail}")
+        }
+        _ => format!("exact workload runtime observation failed: {error}"),
+    };
+    let mut body = json!({"reason": reason});
+    if let Some(detail) = error.diagnostic() {
+        body["diagnostic_logs"] = json!({
+            "stdout": crate::failure_evidence::log_tail(&[]),
+            "stderr": crate::failure_evidence::log_tail(detail.as_bytes()),
+        });
+    }
+    if let crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } = error {
+        body["helper_error_code"] = json!(code);
+    }
+    ExecutionResult {
+        state: "failed",
+        body,
     }
 }
 
@@ -3545,8 +3574,9 @@ mod tests {
         output_media_type, parse_compiled_execution_plan, readiness_identity,
         recipe_install_success_body, report_complete_recipe_run_observations,
         run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
-        temporary_observation_error, temporary_runtime_observation_failure,
-        wait_for_launch_stability, wait_ready_with_runtime_guard_and_cancellation,
+        runtime_observation_failure, temporary_observation_error,
+        temporary_runtime_observation_failure, wait_for_launch_stability,
+        wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
         client::{AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence},
@@ -4305,6 +4335,27 @@ mod tests {
         assert!(matches!(outcome, ReadinessOutcome::Ready));
     }
 
+    #[test]
+    fn an_exited_workload_failure_carries_the_captured_container_output() {
+        // Wrong implementation this catches: the guard's rejection was reported as
+        // its code alone, so an operator read "the observation failed" when the
+        // answer was that the workload process had exited and printed why.  The
+        // inspection gate admits that text precisely because the inspection
+        // already proved the container's identity and sanitized it.
+        let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code: "runtime_process_exited".to_owned(),
+            diagnostic: Some("ModuleNotFoundError: runtime module".to_owned()),
+        };
+        let result = runtime_observation_failure(&error);
+        assert_eq!(result.state, "failed");
+        let reason = result.body["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("runtime_process_exited"), "{reason}");
+        assert!(reason.contains("ModuleNotFoundError"), "{reason}");
+        let stderr = result.body["diagnostic_logs"]["stderr"]["text"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(stderr.contains("ModuleNotFoundError"), "{stderr}");
+    }
     #[tokio::test]
     async fn collective_readiness_exits_when_the_controller_cancels() {
         let (sender, cancellation) = tokio::sync::watch::channel(false);
