@@ -15,8 +15,8 @@ use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
     agent_upgrade::AgentUpgradeExecutor,
     client::{
-        AgentHttpClient, ClientError, DistributionDownloadEvidence, DistributionProgress,
-        ExactRecipeRunObservation, HEARTBEAT_LEASE_MARGIN,
+        AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence,
+        DistributionProgress, ExactRecipeRunObservation, HEARTBEAT_LEASE_MARGIN,
     },
     health::{wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome},
@@ -2934,12 +2934,21 @@ where
     E: Executor,
     F: FnOnce() -> Result<(), LoopError>,
 {
+    let now = Utc::now();
     for (operation, result) in state.unreconciled_results()? {
         result
             .validate_for_operation(&operation)
             .map_err(StateError::from)?;
+        if state.result_rejection(&result, now)?.is_some() {
+            // A refused receipt stays in local custody until its bounded
+            // cool-down elapses; re-sending the same bytes cannot succeed.
+            continue;
+        }
         match client.submit_result(&result).await {
             Ok(()) | Err(ClientError::ResultSuperseded) => state.mark_reconciled(&result)?,
+            Err(ClientError::ResultRejected(error)) => {
+                record_result_rejection(state, &result, &error, now)?;
+            }
             Err(error) => return Err(error.into()),
         }
     }
@@ -2947,6 +2956,9 @@ where
         result
             .validate_for_operation(&operation)
             .map_err(StateError::from)?;
+        if state.result_rejection(&result, now)?.is_some() {
+            continue;
+        }
         match client.submit_result(&result).await {
             Ok(()) => state.acknowledge(&result)?,
             // The Controller refused this attempt's outcome as no longer
@@ -2954,6 +2966,13 @@ where
             // instead of discarding it, and stop re-sending an outcome that
             // already cannot be applied.
             Err(ClientError::ResultSuperseded) => state.supersede(&result)?,
+            // The Controller refused these exact bytes at its ingress
+            // validation boundary.  Keep the receipt and the bounded reason,
+            // suppress the resend for a cool-down, and keep unrelated work and
+            // health alive instead of terminating the loop.
+            Err(ClientError::ResultRejected(error)) => {
+                record_result_rejection(state, &result, &error, now)?;
+            }
             Err(error) => return Err(error.into()),
         }
     }
@@ -3015,11 +3034,43 @@ where
     result
         .validate_for_operation(&claim.operation)
         .map_err(StateError::from)?;
-    match client.submit_result(&result).await {
-        Ok(()) => state.acknowledge(&result)?,
-        Err(ClientError::ResultSuperseded) => state.supersede(&result)?,
-        Err(error) => return Err(error.into()),
+    if state.result_rejection(&result, now)?.is_none() {
+        match client.submit_result(&result).await {
+            Ok(()) => state.acknowledge(&result)?,
+            Err(ClientError::ResultSuperseded) => state.supersede(&result)?,
+            Err(ClientError::ResultRejected(error)) => {
+                record_result_rejection(state, &result, &error, now)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
+    Ok(())
+}
+
+/// Persist one Controller ingress refusal and make it retrievable.
+///
+/// Only bounded, correlated control-plane facts are recorded: the durable
+/// `result_rejections` row carries the HTTP status, the validated error code,
+/// the request id and the Controller's bounded summary, while this line makes
+/// the same facts retrievable from the agent's log surface.  The rejected
+/// values and the request body are never included.
+fn record_result_rejection(
+    state: &mut StateStore,
+    result: &AgentResult,
+    error: &ControllerError,
+    now: DateTime<Utc>,
+) -> Result<(), LoopError> {
+    let rejection = state.reject_result(result, error, now)?;
+    eprintln!(
+        "vonk-agent: controller refused result for operation {} attempt {} \
+         (http {} {} request_id={}): retrying the retained result after {}",
+        result.operation_id,
+        result.attempt,
+        rejection.http_status,
+        rejection.code,
+        rejection.request_id.as_deref().unwrap_or("none"),
+        rejection.retry_due_at.to_rfc3339(),
+    );
     Ok(())
 }
 
@@ -4459,6 +4510,59 @@ mod tests {
         assert!(request.starts_with("post /agent/result"));
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_validation_rejected_result_response_is_typed_for_local_custody() {
+        // The real client has to separate a 422 ingress refusal from the
+        // generic "protocol response is invalid" and from a transport failure,
+        // so the loop can record the bounded reason and continue.  Treating it
+        // as a bare non-retryable controller error is what exited the agent.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            while !request.windows(4).any(|value| value == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).unwrap();
+                assert_ne!(read, 0);
+                request.extend_from_slice(&buffer[..read]);
+            }
+            stream
+                .write_all(
+                    b"HTTP/1.1 422 Unprocessable Entity\r\n\
+                      content-type: application/json\r\n\
+                      x-vonk-error-code: controller.invalid_request\r\n\
+                      x-request-id: req-422\r\n\
+                      content-length: 0\r\n\
+                      connection: close\r\n\r\n",
+                )
+                .unwrap();
+            request
+        });
+        let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), NODE_ID);
+
+        let directory = tempdir().unwrap();
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+        let claim = claim();
+        assert!(matches!(
+            state.begin(&claim, Utc::now()).unwrap(),
+            BeginDecision::Execute
+        ));
+        let result = state
+            .finish(&claim, "succeeded", recipe_install_success_body(0))
+            .unwrap();
+
+        let Err(ClientError::ResultRejected(error)) = client.submit_result(&result).await else {
+            panic!("a 422 must be a typed result rejection");
+        };
+        assert_eq!(error.status, 422);
+        assert_eq!(error.code, "controller.invalid_request");
+        assert_eq!(error.request_id.as_deref(), Some("req-422"));
+        assert_eq!(error.endpoint, "/agent/result");
+        let request = String::from_utf8_lossy(&server.join().unwrap()).to_ascii_lowercase();
+        assert!(request.starts_with("post /agent/result"));
+    }
+
     #[derive(Clone)]
     struct RefusingResultClient {
         submitted: Arc<Mutex<Vec<AgentResult>>>,
@@ -4557,6 +4661,205 @@ mod tests {
             )
             .unwrap();
         assert!(stored.is_some());
+    }
+
+    fn ingress_refusal() -> ControllerError {
+        ControllerError {
+            operation: "controller.request /agent/result".to_owned(),
+            endpoint: "/agent/result".to_owned(),
+            status: 422,
+            code: "controller.invalid_request".to_owned(),
+            request_id: Some("req-422".to_owned()),
+            decision: "exit",
+            retry_after_seconds: None,
+        }
+    }
+
+    #[derive(Clone)]
+    struct IngressRejectingClient {
+        accept: Arc<Mutex<bool>>,
+        submitted: Arc<Mutex<Vec<AgentResult>>>,
+    }
+
+    #[async_trait]
+    impl LoopClient for IngressRejectingClient {
+        async fn claim(
+            &self,
+            _capabilities: &[&str],
+            _wait_seconds: u64,
+            _runtime_identity: Option<&AgentRuntimeIdentity>,
+        ) -> Result<Option<AgentClaim>, ClientError> {
+            Ok(None)
+        }
+
+        async fn heartbeat(
+            &self,
+            _progress: &AgentProgress,
+        ) -> Result<AgentDirective, ClientError> {
+            Err(ClientError::Protocol)
+        }
+
+        async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+            self.submitted.lock().unwrap().push(result.clone());
+            if *self.accept.lock().unwrap() {
+                Ok(())
+            } else {
+                Err(ClientError::ResultRejected(Box::new(ingress_refusal())))
+            }
+        }
+    }
+
+    fn completed_install_result(state: &mut StateStore) -> AgentResult {
+        let claim = claim();
+        assert!(matches!(
+            state.begin(&claim, Utc::now()).unwrap(),
+            BeginDecision::Execute
+        ));
+        state
+            .finish(&claim, "succeeded", recipe_install_success_body(0))
+            .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_ingress_rejected_result_is_recorded_and_the_loop_stays_alive() {
+        // A 422 refuses these exact bytes at the Controller's validation
+        // boundary.  The general client policy treats a non-retryable 4xx as
+        // "exit", so before this the refusal propagated out of the loop and the
+        // restarted agent replayed the same durable result.  The receipt now
+        // stays in custody, the bounded refusal is durable, and the loop keeps
+        // serving claim/heartbeat work.
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.sqlite");
+        let mut state = StateStore::open(&path, NODE_ID).unwrap();
+        let result = completed_install_result(&mut state);
+        let client = IngressRejectingClient {
+            accept: Arc::new(Mutex::new(false)),
+            submitted: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        for _ in 0..2 {
+            run_once_with_heartbeat_interval(
+                &client,
+                &mut state,
+                &RejectingExecutor,
+                RunOncePolicy {
+                    capabilities: &["recipe.install"],
+                    wait_seconds: 0,
+                    runtime_identity: None,
+                    heartbeat_interval: Duration::from_millis(10),
+                    heartbeat_retry_interval: Duration::from_millis(1),
+                },
+                || Ok(()),
+            )
+            .await
+            .unwrap();
+        }
+
+        // The same bytes were offered once and then not hot-looped, the receipt
+        // is still unacknowledged, and the refusal names its boundary.
+        assert_eq!(client.submitted.lock().unwrap().len(), 1);
+        assert_eq!(state.pending_results().unwrap().len(), 1);
+        let rejection = state
+            .result_rejection(&result, Utc::now())
+            .unwrap()
+            .expect("a recorded ingress refusal");
+        assert_eq!(rejection.http_status, 422);
+        assert_eq!(rejection.code, "controller.invalid_request");
+        assert_eq!(rejection.request_id.as_deref(), Some("req-422"));
+        assert!(rejection.reason.contains("/agent/result"));
+        assert!(rejection.reason.len() <= 256);
+        assert!(rejection.retry_due_at > Utc::now());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_corrected_ingress_reconciles_the_retained_result() {
+        // Reconciliation after the cause is corrected: once the recorded
+        // cool-down has elapsed the retained receipt is offered again, and the
+        // Controller's acceptance acknowledges it.
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.sqlite");
+        let mut state = StateStore::open(&path, NODE_ID).unwrap();
+        let result = completed_install_result(&mut state);
+        state
+            .reject_result(
+                &result,
+                &ingress_refusal(),
+                Utc::now() - ChronoDuration::seconds(1200),
+            )
+            .unwrap();
+        assert!(
+            state
+                .result_rejection(&result, Utc::now())
+                .unwrap()
+                .is_none()
+        );
+        let client = IngressRejectingClient {
+            accept: Arc::new(Mutex::new(true)),
+            submitted: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &RejectingExecutor,
+            RunOncePolicy {
+                capabilities: &["recipe.install"],
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(10),
+                heartbeat_retry_interval: Duration::from_millis(1),
+            },
+            || Ok(()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(client.submitted.lock().unwrap().len(), 1);
+        assert!(state.pending_results().unwrap().is_empty());
+        assert!(
+            state
+                .result_rejection(&result, Utc::now())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_new_attempt_clears_the_previous_attempts_refusal() {
+        // A refusal must not leak onto a newer authorised attempt, and it must
+        // not survive the Controller accepting or superseding the result.
+        let directory = tempdir().unwrap();
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+        let mut first = claim();
+        assert!(matches!(
+            state.begin(&first, Utc::now()).unwrap(),
+            BeginDecision::Execute
+        ));
+        let result = state
+            .finish(&first, "succeeded", recipe_install_success_body(0))
+            .unwrap();
+        state
+            .reject_result(&result, &ingress_refusal(), Utc::now())
+            .unwrap();
+        assert!(
+            state
+                .result_rejection(&result, Utc::now())
+                .unwrap()
+                .is_some()
+        );
+
+        first.attempt = 2;
+        first.fence = Uuid::new_v4();
+        assert!(matches!(
+            state.begin(&first, Utc::now()).unwrap(),
+            BeginDecision::Execute
+        ));
+        assert!(
+            state
+                .result_rejection(&result, Utc::now())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
