@@ -312,13 +312,8 @@ fn handle(
     verifier
         .authorize(&request, &peer, now)
         .map_err(|error| HelperRejection::new("grant_unauthorized", error.safe_detail()))?;
-    claim_once(&request_id).map_err(|error| {
-        let error_code = if error == "request grant was already consumed" {
-            "request_replayed"
-        } else {
-            "request_ledger_failed"
-        };
-        HelperRejection::for_request(&request_id, error_code, error)
+    claim_once(&request_id).map_err(|failure| {
+        HelperRejection::for_request(&request_id, failure.error_code(), failure.detail())
     })?;
     let outcome = executor
         .execute_for_node(&request.claims.operation, Some(node_id))
@@ -406,12 +401,47 @@ fn handle(
     })
 }
 
-fn claim_once(request_id: &str) -> Result<(), String> {
+/// Why the request ledger refused to claim a request identity.
+///
+/// Only a marker that already exists proves the grant was consumed. A full,
+/// read-only or otherwise unwritable ledger is a different failure, and calling
+/// it a replay sends the operator after the wrong cause -- so the distinction is
+/// carried as a type rather than compared as a string, and it reaches the agent
+/// as a distinct error code.
+enum ClaimFailure {
+    Consumed,
+    Ledger,
+}
+
+impl ClaimFailure {
+    fn from_ledger_io(error: &std::io::Error) -> Self {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            Self::Consumed
+        } else {
+            Self::Ledger
+        }
+    }
+
+    fn error_code(&self) -> &'static str {
+        match self {
+            Self::Consumed => "request_replayed",
+            Self::Ledger => "request_ledger_failed",
+        }
+    }
+
+    fn detail(&self) -> &'static str {
+        match self {
+            Self::Consumed => "request grant was already consumed",
+            Self::Ledger => "request ledger could not be updated",
+        }
+    }
+}
+
+fn claim_once(request_id: &str) -> Result<(), ClaimFailure> {
     let root = Path::new(REQUEST_LEDGER);
-    let metadata = fs::symlink_metadata(root)
-        .map_err(|_| "request ledger could not be inspected".to_owned())?;
+    let metadata = fs::symlink_metadata(root).map_err(|_| ClaimFailure::Ledger)?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() || metadata.uid() != 0 {
-        return Err("request ledger is unsafe".to_owned());
+        return Err(ClaimFailure::Ledger);
     }
     let marker = root.join(request_id);
     let mut file = OpenOptions::new()
@@ -419,16 +449,15 @@ fn claim_once(request_id: &str) -> Result<(), String> {
         .create_new(true)
         .mode(0o600)
         .open(&marker)
-        .map_err(|_| "request grant was already consumed".to_owned())?;
+        .map_err(|error| ClaimFailure::from_ledger_io(&error))?;
     file.write_all(b"pending\n")
-        .map_err(|_| "request ledger could not be updated".to_owned())?;
-    file.sync_all()
-        .map_err(|_| "request ledger could not be synchronized".to_owned())?;
+        .map_err(|_| ClaimFailure::Ledger)?;
+    file.sync_all().map_err(|_| ClaimFailure::Ledger)?;
     OpenOptions::new()
         .read(true)
         .open(root)
         .and_then(|directory| directory.sync_all())
-        .map_err(|_| "request ledger could not be synchronized".to_owned())
+        .map_err(|_| ClaimFailure::Ledger)
 }
 
 fn peer_identity(stream: &UnixStream) -> Result<PeerIdentity, String> {
@@ -757,6 +786,29 @@ mod tests {
         let after_authorization =
             HelperRejection::for_request("request-1", "operation_failed", "dpkg failed");
         assert_eq!(after_authorization.request_id.as_deref(), Some("request-1"));
+    }
+
+    #[test]
+    fn only_an_existing_ledger_marker_names_a_replay() {
+        use std::io::{Error, ErrorKind};
+        // The agent reports these as distinct codes, so a ledger that is full,
+        // read-only or missing must not arrive as a replayed grant.
+        assert_eq!(
+            super::ClaimFailure::from_ledger_io(&Error::from(ErrorKind::AlreadyExists))
+                .error_code(),
+            "request_replayed"
+        );
+        for kind in [
+            ErrorKind::PermissionDenied,
+            ErrorKind::NotFound,
+            ErrorKind::Other,
+        ] {
+            assert_eq!(
+                super::ClaimFailure::from_ledger_io(&Error::from(kind)).error_code(),
+                "request_ledger_failed",
+                "{kind:?} was reported as a replayed grant"
+            );
+        }
     }
 
     #[test]

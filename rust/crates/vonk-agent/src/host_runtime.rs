@@ -128,10 +128,9 @@ impl HostRuntimeBoundary<'_> {
         })
         .await
         .map_err(|_| HostRuntimeError::Protocol)??;
-        if response.schema_version != 1
-            || response.request_id.map(|id| id.to_string()).as_deref() != Some(request_id.as_str())
-        {
-            return Err(HostRuntimeError::Protocol);
+        require_bound_response(&response, &request_id)?;
+        if response.error_code.is_some() {
+            return Err(runtime_rejection(&response, HostRuntimeAction::RunInspect));
         }
         let receipt = require_inspection_receipt(&response)?.clone();
         let issued_at = authorization.grant.claims.issued_at;
@@ -243,15 +242,12 @@ impl HostRuntimeBoundary<'_> {
             .await
             .map_err(|_| HostRuntimeError::Protocol)??;
             let stop_uncertain = response.status == "container-runtime-stop-uncertain";
-            if response.schema_version != 1
-                || response.request_id.map(|id| id.to_string()).as_deref()
-                    != Some(request_id.as_str())
-                || response.observation_receipt.is_some()
-            {
-                return Err(HostRuntimeError::Protocol);
-            }
+            require_bound_response(&response, &request_id)?;
             if response.error_code.is_some() {
                 return Err(runtime_rejection(&response, action));
+            }
+            if response.observation_receipt.is_some() {
+                return Err(HostRuntimeError::Protocol);
             }
             if response.diagnostic.is_some()
                 || !stop_uncertain && response.status != "container-runtime-request-executed"
@@ -280,6 +276,53 @@ impl HostRuntimeBoundary<'_> {
     }
 }
 
+/// Bind the helper's reply to the request this agent sent before anything in it
+/// is trusted.
+///
+/// The helper attaches the request identity only once it has authorized the
+/// grant, so a rejection raised by an earlier check arrives with
+/// `request_id: null`. That is the normal shape of the helper saying which check
+/// refused -- `grant_node_mismatch` and `grant_unauthorized` cannot be reported
+/// any other way -- and demanding an identity that the helper deliberately
+/// withholds reported each of them as a malformed reply instead. The code set
+/// keeps acceptance closed to the rejections the helper can only raise before it
+/// trusts the grant, so an unbound reply can never be mistaken for a bound one.
+fn require_bound_response(
+    response: &HelperResponse,
+    request_id: &str,
+) -> Result<(), HostRuntimeError> {
+    if response.schema_version != 1 {
+        return Err(HostRuntimeError::Protocol);
+    }
+    if response.request_id.map(|id| id.to_string()).as_deref() == Some(request_id) {
+        return Ok(());
+    }
+    if response.request_id.is_none()
+        && response
+            .error_code
+            .as_deref()
+            .is_some_and(unbound_rejection_is_expected)
+    {
+        return Ok(());
+    }
+    Err(HostRuntimeError::Protocol)
+}
+
+/// The codes the helper can only raise before it has trusted the grant, and so
+/// the only rejections that legitimately arrive without the request identity.
+/// Every other code is produced after the helper knows the request, so an
+/// unbound reply claiming one is a reply this agent cannot account for.
+fn unbound_rejection_is_expected(code: &str) -> bool {
+    matches!(
+        code,
+        "grant_invalid"
+            | "grant_node_mismatch"
+            | "grant_unauthorized"
+            | "peer_identity_invalid"
+            | "request_invalid"
+    )
+}
+
 fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> HostRuntimeError {
     let Some(code) = response.error_code.as_deref() else {
         return HostRuntimeError::Protocol;
@@ -287,6 +330,7 @@ fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> Ho
     if response.status != "rejected"
         || response.evidence_sha256.is_some()
         || response.exit_code.is_some()
+        || response.observation_receipt.is_some()
         || !stable_runtime_error_code(code)
         || response.diagnostic.is_some()
             && (action != HostRuntimeAction::RunInspect || code != "runtime_process_exited")
@@ -303,6 +347,11 @@ fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> Ho
 }
 
 fn stable_runtime_error_code(value: &str) -> bool {
+    // Every code the privileged helper can name, not only the operation ones.
+    // The helper's grant, peer and request rejections were absent, so the agent
+    // reported each of them as an opaque protocol error even when the helper had
+    // said which check refused -- which is how a live privileged start became
+    // unattributable.
     matches!(
         value,
         "operation_failed"
@@ -320,6 +369,13 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "runtime_run_missing"
             | "runtime_fabric_unavailable"
             | "runtime_fabric_firewall_rejected"
+            | "grant_invalid"
+            | "grant_node_mismatch"
+            | "grant_unauthorized"
+            | "peer_identity_invalid"
+            | "request_invalid"
+            | "request_replayed"
+            | "request_ledger_failed"
     )
 }
 
@@ -534,6 +590,83 @@ mod tests {
             super::runtime_rejection(&response, HostRuntimeAction::RunInspect),
             super::HostRuntimeError::Protocol
         ));
+        // A rejection never carries the observation receipt that only an
+        // executed run produces, whatever the action claimed it ran.
+        response.error_code = Some("runtime_process_exited".into());
+        response.observation_receipt = Some(signed_receipt(
+            &Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap(),
+            Uuid::new_v4(),
+        ));
+        assert!(matches!(
+            super::runtime_rejection(&response, HostRuntimeAction::RunInspect),
+            super::HostRuntimeError::Protocol
+        ));
+    }
+
+    #[test]
+    fn unbound_helper_rejection_names_the_check_that_refused() {
+        // The helper attaches the request identity only after it authorizes the
+        // grant, so these refusals cannot echo it. Requiring the identity anyway
+        // reported each as `helper_protocol_invalid` -- the same label a corrupt
+        // reply gets -- which is how a live privileged start became
+        // unattributable with no diagnostic to read.
+        let request_id = "10000000-0000-4000-8000-000000000001";
+        for (code, expected) in [
+            ("grant_node_mismatch", "helper_grant_node_mismatch"),
+            ("grant_unauthorized", "helper_grant_unauthorized"),
+            ("peer_identity_invalid", "helper_peer_identity_invalid"),
+        ] {
+            let response: super::HelperResponse = vonk_agent_protocol::parse_strict(
+                format!(
+                    r#"{{"schema_version":1,"request_id":null,"status":"rejected","evidence_sha256":null,"error_code":"{code}"}}"#
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+            super::require_bound_response(&response, request_id).unwrap();
+            assert_eq!(
+                super::runtime_rejection(&response, HostRuntimeAction::Start).preflight_code(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn a_reply_this_agent_cannot_bind_is_still_a_protocol_error() {
+        let request_id = "10000000-0000-4000-8000-000000000001";
+        let rejected_for_another_request: super::HelperResponse =
+            vonk_agent_protocol::parse_strict(
+                br#"{"schema_version":1,"request_id":"20000000-0000-4000-8000-000000000002","status":"rejected","evidence_sha256":null,"error_code":"grant_unauthorized"}"#,
+            )
+            .unwrap();
+        assert!(super::require_bound_response(&rejected_for_another_request, request_id).is_err());
+
+        // Every other code is produced only after the helper knows the request,
+        // so an unbound reply claiming one cannot be accounted for.
+        for code in [
+            "request_replayed",
+            "request_ledger_failed",
+            "operation_failed",
+            "runtime_process_exited",
+        ] {
+            let unbound: super::HelperResponse = vonk_agent_protocol::parse_strict(
+                format!(
+                    r#"{{"schema_version":1,"request_id":null,"status":"rejected","evidence_sha256":null,"error_code":"{code}"}}"#
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+            assert!(
+                super::require_bound_response(&unbound, request_id).is_err(),
+                "{code} must not be accepted without a request identity"
+            );
+        }
+
+        let unbound_success: super::HelperResponse = vonk_agent_protocol::parse_strict(
+            br#"{"schema_version":1,"request_id":null,"status":"container-runtime-request-executed","evidence_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
+        )
+        .unwrap();
+        assert!(super::require_bound_response(&unbound_success, request_id).is_err());
     }
 
     #[test]
@@ -566,6 +699,29 @@ mod tests {
                     diagnostic: None,
                 },
                 "helper_operation_unsafe_path",
+            ),
+            // The helper's own grant and request rejections name the refusing
+            // check, so the operator must see them rather than a protocol error.
+            (
+                HostRuntimeError::HelperRejected {
+                    code: "grant_unauthorized".to_owned(),
+                    diagnostic: None,
+                },
+                "helper_grant_unauthorized",
+            ),
+            (
+                HostRuntimeError::HelperRejected {
+                    code: "grant_node_mismatch".to_owned(),
+                    diagnostic: None,
+                },
+                "helper_grant_node_mismatch",
+            ),
+            (
+                HostRuntimeError::HelperRejected {
+                    code: "request_replayed".to_owned(),
+                    diagnostic: None,
+                },
+                "helper_request_replayed",
             ),
             (
                 HostRuntimeError::HelperRejected {
