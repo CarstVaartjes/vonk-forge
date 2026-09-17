@@ -1164,21 +1164,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             let mut body = json!({
                                 "reason": "host runtime could not import the accepted OCI image",
                             });
-                            let code = match error {
-                                crate::host_runtime::HostRuntimeError::HelperRejected {
-                                    code,
-                                    ..
-                                } => code,
-                                crate::host_runtime::HostRuntimeError::Io(_) => {
-                                    "runtime_helper_unavailable".to_owned()
-                                }
-                                crate::host_runtime::HostRuntimeError::Controller(_) => {
-                                    "runtime_authority_unavailable".to_owned()
-                                }
-                                crate::host_runtime::HostRuntimeError::Protocol => {
-                                    "runtime_helper_protocol_invalid".to_owned()
-                                }
-                            };
+                            let code = image_import_helper_code(&error);
                             body["helper_error_code"] = Value::String(code);
                             ExecutionResult {
                                 state: "failed",
@@ -2480,6 +2466,7 @@ fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) ->
         }
         HostRuntimeError::Controller(_) => true,
         HostRuntimeError::HelperRejected { code, .. } => code == "operation_io",
+        HostRuntimeError::HelperProtocol(_) => false,
         HostRuntimeError::Protocol => false,
     }
 }
@@ -3117,6 +3104,22 @@ fn record_result_rejection(
     Ok(())
 }
 
+/// The bounded helper error code an OCI image import failure reports. This is
+/// the producer for `stable_runtime_helper_error_code`, which decides whether
+/// the code survives into the Controller's normalized failure body.
+fn image_import_helper_code(error: &crate::host_runtime::HostRuntimeError) -> String {
+    use crate::host_runtime::HostRuntimeError;
+    match error {
+        HostRuntimeError::HelperRejected { code, .. } => code.clone(),
+        HostRuntimeError::Io(_) => "runtime_helper_unavailable".to_owned(),
+        HostRuntimeError::Controller(_) => "runtime_authority_unavailable".to_owned(),
+        HostRuntimeError::HelperProtocol(cause) => {
+            format!("runtime_helper_{}", cause.code())
+        }
+        HostRuntimeError::Protocol => "runtime_helper_protocol_invalid".to_owned(),
+    }
+}
+
 fn runtime_failure(reason: &str, error: &crate::host_runtime::HostRuntimeError) -> ExecutionResult {
     let mut result = failed_owned(format!("{reason}: {}", error.preflight_code()));
     if let Some(detail) = error.diagnostic() {
@@ -3264,6 +3267,15 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "request_invalid"
             | "request_replayed"
             | "request_ledger_failed"
+            // An agent-side helper-protocol cause keeps its own code here or
+            // normalization silently drops it from the Controller's failure
+            // body.
+            | "runtime_helper_request_encoding_invalid"
+            | "runtime_helper_call_join_failed"
+            | "runtime_helper_message_framing_invalid"
+            | "runtime_helper_response_unbound"
+            | "runtime_helper_rejection_malformed"
+            | "runtime_helper_outcome_malformed"
     )
 }
 
@@ -4462,6 +4474,68 @@ mod tests {
                 .unwrap()
                 .contains("private-value")
         );
+    }
+
+    #[test]
+    fn runtime_failure_names_the_helper_protocol_cause_to_the_controller() {
+        // Wrong implementation: the named cause stopped at `preflight_code()`,
+        // so the Controller only ever saw the collapsed
+        // `helper_protocol_invalid` label on the live blocked-start path.
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let error = crate::host_runtime::HostRuntimeError::HelperProtocol(
+            crate::host_runtime::HelperProtocolCause::OutcomeMalformed,
+        );
+        let failed =
+            super::runtime_failure("container runtime could not start the workload", &error);
+        let result = super::normalize_execution_result(&start_claim, failed);
+        let body: vonk_agent_protocol::generated::AgentFailureResult =
+            serde_json::from_value(result.body).unwrap();
+        let reason = body.reason.as_deref().unwrap();
+        assert!(
+            reason.contains(
+                "container runtime could not start the workload: helper_outcome_malformed"
+            ),
+            "the failure reason must name the violated contract, got {reason}"
+        );
+    }
+
+    #[test]
+    fn image_import_helper_protocol_cause_survives_normalization() {
+        // Wrong implementation: a new cause's code was absent from
+        // `stable_runtime_helper_error_code`, so normalization silently dropped
+        // it and the Controller saw no cause at all.
+        let mut import_claim = claim();
+        import_claim.operation = "recipe.image.import.v1".parse().unwrap();
+        for cause in [
+            crate::host_runtime::HelperProtocolCause::RequestEncoding,
+            crate::host_runtime::HelperProtocolCause::HelperCallJoin,
+            crate::host_runtime::HelperProtocolCause::MessageFraming,
+            crate::host_runtime::HelperProtocolCause::ResponseUnbound,
+            crate::host_runtime::HelperProtocolCause::RejectionMalformed,
+            crate::host_runtime::HelperProtocolCause::OutcomeMalformed,
+        ] {
+            let error = crate::host_runtime::HostRuntimeError::HelperProtocol(cause);
+            let code = super::image_import_helper_code(&error);
+            assert!(
+                code.starts_with("runtime_helper_"),
+                "an import failure code stays in the runtime_helper_ namespace, got {code}"
+            );
+            let result = super::normalize_execution_result(
+                &import_claim,
+                ExecutionResult {
+                    state: "failed",
+                    body: json!({
+                        "reason": "runtime image import failed",
+                        "helper_error_code": code,
+                    }),
+                },
+            );
+            assert_eq!(
+                result.body["helper_error_code"], code,
+                "{code} must survive normalization rather than be silently dropped"
+            );
+        }
     }
 
     #[test]
