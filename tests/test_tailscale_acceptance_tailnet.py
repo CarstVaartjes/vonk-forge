@@ -245,7 +245,9 @@ def _cleanup_requests(urlopen: _Urlopen) -> list[Any]:
 
 def _deleted_ids(urlopen: _Urlopen) -> list[str]:
     return [
-        urllib.parse.unquote(urllib.parse.urlsplit(request.full_url).path.rsplit("/", 1)[-1])
+        urllib.parse.unquote(
+            urllib.parse.urlsplit(request.full_url).path.rsplit("/", 1)[-1]
+        )
         for request in _cleanup_requests(urlopen)
     ]
 
@@ -303,7 +305,10 @@ def test_two_stale_children_are_both_deleted_by_their_own_exact_ids(
     urlopen = _install_urlopen(
         lifecycle,
         monkeypatch,
-        [_Response({"access_token": "factory-list-token"}), _listing_response(oldest, newer)]
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(oldest, newer),
+        ]
         + _child_delete_responses("tailnet_stale_111")
         + _child_delete_responses("tailnet_stale_222"),
     )
@@ -508,11 +513,36 @@ def test_explicit_non_ci_child_id_is_refused_by_name(
 @pytest.mark.parametrize(
     ("display_name", "child_id", "created_at", "reason"),
     [
-        ("Vonk Forge CI 1 attempt 1\u0000", "tailnet_bad_name", "stale", "unsafe CI child identity"),
-        ("Vonk Forge CI " + "x" * 80, "tailnet_long_name", "stale", "unsafe CI child identity"),
-        ("Vonk Forge CI 1 attempt 1", "tailnet\u0000bad", "stale", "unsafe CI child identity"),
-        ("Vonk Forge CI 1 attempt 1", "tailnet_ok", "not-a-timestamp", "invalid CI child timestamp"),
-        ("Vonk Forge CI 1 attempt 1", "tailnet_ok", "2020-01-01T00:00:00", "invalid CI child timestamp"),
+        (
+            "Vonk Forge CI 1 attempt 1\u0000",
+            "tailnet_bad_name",
+            "stale",
+            "unsafe CI child identity",
+        ),
+        (
+            "Vonk Forge CI " + "x" * 80,
+            "tailnet_long_name",
+            "stale",
+            "unsafe CI child identity",
+        ),
+        (
+            "Vonk Forge CI 1 attempt 1",
+            "tailnet\u0000bad",
+            "stale",
+            "unsafe CI child identity",
+        ),
+        (
+            "Vonk Forge CI 1 attempt 1",
+            "tailnet_ok",
+            "not-a-timestamp",
+            "invalid CI child timestamp",
+        ),
+        (
+            "Vonk Forge CI 1 attempt 1",
+            "tailnet_ok",
+            "2020-01-01T00:00:00",
+            "invalid CI child timestamp",
+        ),
     ],
 )
 def test_ci_child_with_unvalidatable_identity_raises_instead_of_being_skipped(
@@ -614,7 +644,10 @@ def test_cleanup_refuses_a_backlog_larger_than_the_bound(
     urlopen = _install_urlopen(
         lifecycle,
         monkeypatch,
-        [_Response({"access_token": "factory-list-token"}), _listing_response(*children)],
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(*children),
+        ],
     )
 
     with pytest.raises(lifecycle.LifecycleError, match="bounded cleanup limit of 2"):
@@ -671,9 +704,9 @@ def test_cleanup_never_prints_the_credential_or_an_access_token(
     # appear; every other line must be free of it.
     for secret in ("factory-list-token", "delete-token-tailnet_stale_999"):
         assert f"::add-mask::{secret}" in output
-        assert [
-            line for line in output.splitlines() if secret in line
-        ] == [f"::add-mask::{secret}"]
+        assert [line for line in output.splitlines() if secret in line] == [
+            f"::add-mask::{secret}"
+        ]
 
 
 def test_create_configures_only_the_child_and_delete_uses_its_exact_id(

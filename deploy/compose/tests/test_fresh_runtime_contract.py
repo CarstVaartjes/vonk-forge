@@ -151,7 +151,9 @@ def test_canonical_model_has_no_bootstrap_runtime_dependency() -> None:
     )
 
 
-def test_the_shipped_start_budget_default_is_the_controller_default(monkeypatch) -> None:
+def test_the_shipped_start_budget_default_is_the_controller_default(
+    monkeypatch,
+) -> None:
     """The deployment default and the Controller's own default must be one number.
 
     Wrong implementation: Compose shipped ``:-60`` -- the *minimum* the validator

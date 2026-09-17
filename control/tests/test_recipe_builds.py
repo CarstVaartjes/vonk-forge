@@ -380,7 +380,9 @@ def test_an_adapter_change_invalidates_the_prepared_build(
     # produced and leave the built recipe unadapted.
     adapter = cached.input_intent["runtime_adapter"]
     assert isinstance(adapter, dict)
-    current = runtime_adapters_module._ENGINE_ADAPTERS[adapter["adapter_id"].split(".")[-2]]
+    current = runtime_adapters_module._ENGINE_ADAPTERS[
+        adapter["adapter_id"].split(".")[-2]
+    ]
     monkeypatch.setitem(
         runtime_adapters_module._ENGINE_ADAPTERS,
         current.adapter_id.split(".")[-2],

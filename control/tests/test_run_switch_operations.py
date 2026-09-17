@@ -2682,6 +2682,77 @@ def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_befo
     ]
 
 
+def test_switch_replaces_the_run_that_holds_the_nodes_capacity(
+    tmp_path: Path,
+) -> None:
+    """The run a plan stops must not block that same plan.
+
+    Wrong implementation this catches: the low-level run admission summed every
+    active reservation, so an installed replacement reported
+    ``run.insufficient_memory`` and ``run-switch.run_admission_blocked`` for the
+    memory and ports the stopped run itself held.  Because the only release
+    path is a successful stop, no reviewed plan could ever stop that run; live,
+    that wedged a GLM load behind a 122 GB unified-memory reservation whose run
+    was no longer running.
+    """
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    node_id = nodes[0]
+    installation_operation = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    installation_id = installation_operation.owner_id
+    run_plan = lifecycle._run_admission.plan_run(
+        installation_id,
+        "old",
+        now=lifecycle._clock(),
+    )
+    run_id = lifecycle._run_admission.accept_run(
+        run_plan,
+        actor="admin",
+        now=lifecycle._clock(),
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.state = "running"
+        run.route_state = "published"
+        # The live run holds nearly all of the node's memory, so a replacement
+        # can only be admitted once the plan's own Stop phase frees it.
+        for item in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            item.state = "running"
+            item.reserved_memory_bytes = 7_900
+        for reservation in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run_id,
+                ResourceReservation.kind == "unified-memory",
+            )
+        ):
+            reservation.amount_bytes = 7_900
+
+    request = _request(sessions, node_id, action="switch")
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    plan = service.preview(request, actor="admin")
+
+    codes = {reason.code for reason in plan.blockers}
+    assert "run.insufficient_memory" not in codes
+    assert "run.port_occupied" not in codes
+    assert "run.rendezvous_port_occupied" not in codes
+    assert "run-switch.run_admission_blocked" not in codes
+    assert plan.allowed is True
+    assert [stop.run_id for stop in plan.stops] == [run_id]
+
+
 def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(
     tmp_path: Path,
 ) -> None:

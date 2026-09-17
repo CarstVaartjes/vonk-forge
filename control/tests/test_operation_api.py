@@ -296,9 +296,12 @@ def test_operation_read_surfaces_a_recorded_claim_refusal_reason() -> None:
     assert response.status_reason == reason
     assert response.model_dump()["status_reason"] == reason
     # A claim that was never refused keeps the response shape it always had.
-    assert "status_reason" not in operation_api.operation_detail_response(
-        {**item, "status_reason": None}
-    ).model_dump()
+    assert (
+        "status_reason"
+        not in operation_api.operation_detail_response(
+            {**item, "status_reason": None}
+        ).model_dump()
+    )
 
     operation = SimpleNamespace(
         current_attempt=0,
@@ -311,10 +314,12 @@ def test_operation_read_surfaces_a_recorded_claim_refusal_reason() -> None:
         status_reason=reason,
         updated_at=datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
     )
-    assert operation_api._operation_item(
-        cast(AgentOperation, operation), None
-    )["status_reason"] == reason
-
+    assert (
+        operation_api._operation_item(cast(AgentOperation, operation), None)[
+            "status_reason"
+        ]
+        == reason
+    )
 
 
 def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> None:

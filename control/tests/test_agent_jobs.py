@@ -95,9 +95,7 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
             ).read_text(encoding="utf-8")
         )
     )
-    plan["topology"].update(
-        name="dual", mode="distributed", node_count=2, backend="mp"
-    )
+    plan["topology"].update(name="dual", mode="distributed", node_count=2, backend="mp")
     plan["security"]["devices"] = ["nvidia.com/gpu=all"]
     compiled = _bind_compiled_execution_plan(
         plan,
@@ -1542,9 +1540,10 @@ def test_a_lapsed_renewal_is_reacquired_inside_the_start_budget(service) -> None
         # SQLite hands back a naive timestamp; the fact under test is that the
         # stored deadline moved past the lease the agent had accepted.
         stored = attempt.lease_deadline
-        assert stored.replace(
-            tzinfo=UTC if stored.tzinfo is None else stored.tzinfo
-        ) > claim.deadline
+        assert (
+            stored.replace(tzinfo=UTC if stored.tzinfo is None else stored.tzinfo)
+            > claim.deadline
+        )
         current = session.get(AgentOperation, operation.id)
         assert current is not None
         assert current.state == "running"
@@ -2520,7 +2519,6 @@ def test_live_cancellation_still_blocks_later_work(service) -> None:
         assert waiting is not None and waiting.state == "waiting-for-operator"
 
 
-
 def test_live_prior_mutation_still_blocks_later_work(service) -> None:
     jobs, sessions, clock = service
     old_parent = parent(sessions, clock)
@@ -2822,7 +2820,9 @@ def _scenario_parent_job_missing(sessions, clock, parent_job, operation) -> None
     _set_operation(sessions, operation, parent_job_id=str(uuid.uuid4()))
 
 
-def _scenario_workload_intent_superseded(sessions, clock, parent_job, operation) -> None:
+def _scenario_workload_intent_superseded(
+    sessions, clock, parent_job, operation
+) -> None:
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
@@ -2836,7 +2836,9 @@ def _scenario_parent_cancel_requested(sessions, clock, parent_job, operation) ->
         job.result = {"cancel_requested": True}
 
 
-def _scenario_parent_cancel_flag_malformed(sessions, clock, parent_job, operation) -> None:
+def _scenario_parent_cancel_flag_malformed(
+    sessions, clock, parent_job, operation
+) -> None:
     with sessions.begin() as session:
         job = session.get(Job, parent_job.id)
         assert job is not None
@@ -2851,7 +2853,9 @@ def _scenario_running_attempt_missing(sessions, clock, parent_job, operation) ->
     _set_operation(sessions, operation, state="running", current_attempt=1)
 
 
-def _scenario_running_attempt_not_running(sessions, clock, parent_job, operation) -> None:
+def _scenario_running_attempt_not_running(
+    sessions, clock, parent_job, operation
+) -> None:
     _set_operation(sessions, operation, state="running", current_attempt=1)
     _add_attempt(sessions, operation, clock, state="failed", lease_seconds=60)
 
@@ -2867,7 +2871,9 @@ def _scenario_operator_retry_not_authorized(
     _set_operation(sessions, operation, state="waiting-for-operator", current_attempt=1)
 
 
-def _scenario_upgrade_safety_not_elapsed(sessions, clock, parent_job, operation) -> None:
+def _scenario_upgrade_safety_not_elapsed(
+    sessions, clock, parent_job, operation
+) -> None:
     _set_operation(
         sessions,
         operation,
