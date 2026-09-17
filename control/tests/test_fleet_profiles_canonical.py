@@ -13,7 +13,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
 from vonk_control.models import (
     AgentNode,
     AgentNodeProfile,
@@ -328,7 +328,10 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
         calls.append(kwargs)
         return {
             "schema_version": 2,
-            "recipe": {"recipe_revision_id": RECIPE_REVISION_ID, "cached": True},
+            "recipe": {
+                "recipe_revision_id": kwargs["exact_revision_id"],
+                "cached": True,
+            },
             "model": {"cached": True, "variant": "fp16"},
             "resources": {"per_spark_memory_bytes": 10, "additional_disk_bytes": 20},
             "blockers": [],
@@ -355,11 +358,17 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
         ),
         actor="test",
     )
-    assert calls == [{"recipe_identity": RECIPE_DOCUMENT_ID, "model_variant": "fp16"}]
+    assert calls == [
+        {
+            "recipe_identity": RECIPE_DOCUMENT_ID,
+            "model_variant": "fp16",
+            "exact_revision_id": newer_revision_id,
+        }
+    ]
     assert profile.assignments[0].recipe["state"] == "Cached"
     assert profile.assignments[0].model["state"] == "Cached"
     preview = service.preview(profile.id)
-    assert preview.assignments[0].recipe_revision_id == RECIPE_REVISION_ID
+    assert preview.assignments[0].recipe_revision_id == newer_revision_id
     application = service.load(
         profile.number,
         actor="test",
@@ -368,5 +377,137 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
     assert application.progress.intended_profile is not None
     assert (
         application.progress.intended_profile.assignments[0].recipe_revision_id
-        == RECIPE_REVISION_ID
+        == newer_revision_id
     )
+
+
+def test_profile_read_refuses_a_resolver_that_substitutes_an_older_revision() -> None:
+    # The reported defect: the cache resolver returned the newest *cached*
+    # revision even when the profile's head was a newer uncached one, and the
+    # profile silently bound the older bytes.  A resolver that still substitutes
+    # must now fail closed instead of retargeting the profile.
+    sessions = _sessions()
+    _seed(sessions)
+    newer_revision_id = "00000000-0000-4000-8000-000000000022"
+    with sessions.begin() as session:
+        current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert current is not None
+        session.add(
+            CatalogDocumentRevision(
+                id=newer_revision_id,
+                document_id=RECIPE_DOCUMENT_ID,
+                kind="recipe",
+                publisher=current.publisher,
+                slug=current.slug,
+                revision_number=2,
+                schema_version=2,
+                state="active",
+                document=current.document,
+                content_digest="d" * 64,
+                execution_key="c" * 64,
+                created_by="test",
+                created_at=datetime(2026, 9, 6, tzinfo=UTC),
+            )
+        )
+
+    def substitute(**_kwargs: object) -> dict[str, object]:
+        return {
+            "schema_version": 2,
+            "recipe": {"recipe_revision_id": RECIPE_REVISION_ID, "cached": True},
+            "model": {"cached": True, "variant": "fp16"},
+            "resources": {"per_spark_memory_bytes": 10, "additional_disk_bytes": 20},
+            "blockers": [],
+        }
+
+    from .test_fleet_profiles import _SwitchAdapter
+
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        cache_resolver=substitute,
+        switch_adapter=_SwitchAdapter(),
+    )
+    with pytest.raises(FleetProfileConflict, match="selected recipe revision"):
+        service.create(
+            FleetProfileInput(
+                name="Substituted",
+                assignments=[
+                    FleetProfileAssignmentInput(
+                        recipe_selector="vonk-forge/synthetic-tiny-image",
+                        spark_ids=[NODE_1],
+                        model_variant="fp16",
+                    )
+                ],
+            ),
+            actor="test",
+        )
+
+
+def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> None:
+    # The other half of the reported defect: when the selected head is not in
+    # the local cache, the profile keeps that exact revision and names the
+    # prepare-cache blocker rather than silently binding an older cached one.
+    sessions = _sessions()
+    _seed(sessions)
+    newer_revision_id = "00000000-0000-4000-8000-000000000022"
+    with sessions.begin() as session:
+        current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert current is not None
+        session.add(
+            CatalogDocumentRevision(
+                id=newer_revision_id,
+                document_id=RECIPE_DOCUMENT_ID,
+                kind="recipe",
+                publisher=current.publisher,
+                slug=current.slug,
+                revision_number=2,
+                schema_version=2,
+                state="active",
+                document=current.document,
+                content_digest="d" * 64,
+                execution_key="c" * 64,
+                created_by="test",
+                created_at=datetime(2026, 9, 6, tzinfo=UTC),
+            )
+        )
+
+    def uncached(**kwargs: object) -> dict[str, object]:
+        return {
+            "schema_version": 2,
+            "recipe": {
+                "recipe_revision_id": kwargs["exact_revision_id"],
+                "cached": False,
+            },
+            "model": {"cached": True, "variant": "fp16"},
+            "resources": {
+                "per_spark_memory_bytes": None,
+                "additional_disk_bytes": None,
+            },
+            "blockers": ["recipe-not-cached"],
+        }
+
+    from .test_fleet_profiles import _SwitchAdapter
+
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        cache_resolver=uncached,
+        switch_adapter=_SwitchAdapter(),
+    )
+    profile = service.create(
+        FleetProfileInput(
+            name="Uncached",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="vonk-forge/synthetic-tiny-image",
+                    spark_ids=[NODE_1],
+                    model_variant="fp16",
+                )
+            ],
+        ),
+        actor="test",
+    )
+
+    assert profile.assignments[0].recipe["revision_id"] == newer_revision_id
+    assert profile.assignments[0].recipe["state"] == "Recipe not cached"
+    assert any("is not in the local cache" in warning for warning in profile.warnings)

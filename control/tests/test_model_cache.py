@@ -611,6 +611,20 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         "image_bytes": 17,
     }
 
+    # An explicitly selected exact revision is never silently replaced by an
+    # older cached one: the newer head comes back with its missing cache
+    # reported instead.
+    exact = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=new_revision.id,
+    )
+    assert exact["recipe"]["recipe_revision_id"] == new_revision.id
+    assert exact["recipe"]["cached"] is False
+    assert exact["recipe"]["cache_state"] == "missing"
+    assert exact["recipe"]["content_sha256"] == new_digest
+    assert "recipe-not-cached" in exact["blockers"]
+
     real_open = os.open
 
     def deny_model_object(path, *args, **kwargs):
