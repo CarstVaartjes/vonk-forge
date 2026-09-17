@@ -43,12 +43,19 @@ runtime secrets into CI. Prefer workload identity if the selected object-store
 client supports it. The R2 S3 publication path requires an access key, so keep
 that exception bucket-scoped and rotate it deliberately.
 
-The canary environment must contain a dedicated OAuth factory credential with
-only the Tailscale `tailnets` write scope, no device tags, and no other scopes.
-Never store an operator tailnet's DNS suffix, machine OAuth credential, or
-policy in this environment. The workflow uses the factory solely to create one
-API-only child tailnet for the native NAS lane; the production tailnet is never
-selected or modified.
+The canary environment must contain one dedicated OAuth factory credential with
+no device tags. It carries the `all` scope, and that is deliberate: the Tailnets
+API documents that a creating tailnet's OAuth client reaches an existing
+API-only child, or mints a new credential for it, only by naming that child in a
+token request, and only with the `all` scope. Stale cleanup is exactly that
+recovery, so a `tailnets`-only factory credential cannot remove a child whose
+own returned credential died with its runner. Never store an operator tailnet's
+DNS suffix, machine OAuth credential, or policy in this environment. Both the
+creation path and the cleanup path still refuse to touch anything that is not a
+`Vonk Forge CI ...` child: the factory is used to create one API-only child for
+the native NAS lane and to delete only children that match the CI display-name
+pattern, pass id and timestamp validation, and are older than the stale
+threshold. The production tailnet is never selected or modified.
 
 The child response contains a new all-scope OAuth credential for that child
 only. The workflow masks it immediately, stores it in a mode-`0600` runner file,
@@ -76,24 +83,41 @@ fails, the state file is retained and the lane fails rather than reporting
 acceptance. Bounded setup and acceptance steps plus explicit job-timeout
 headroom reserve time for the finalizer.
 
-The Tailnets API is currently alpha. Keep the factory credential scoped only to
-tailnet creation and rotate it if Tailscale changes that contract. Never widen
-it to `all` merely to recover an interrupted CI run. A hard force-cancel,
-runner loss, or GitHub infrastructure termination can prevent every runner-local
-finalizer from running; GitHub Actions cannot make unconditional cleanup claims
-for those events. Before creation, the workflow lists API-only tailnets and
-fails closed when a `Vonk Forge CI ...` child older than the maximum job lifetime
-exists. It reports only the exact child ID and display name, creates nothing new,
-and never attempts a production-tailnet mutation.
+The Tailnets API is currently alpha. A hard force-cancel, runner loss, or GitHub
+infrastructure termination can prevent every runner-local finalizer from
+running, and GitHub Actions cannot make unconditional cleanup claims for those
+events. Before creation, the workflow lists API-only tailnets and fails closed
+when a `Vonk Forge CI ...` child older than the maximum job lifetime exists. It
+reports only the exact child ID and display name and creates nothing new.
 
-Treat such a residual as a blocked incident. CI must not widen the factory
-scope, create credentials in the production tailnet, or mutate any production
-resource to recover it. Escalate the exact reported child ID and display name to
-Tailscale-supported recovery, or obtain separate explicit authorization for an
-administrative recovery procedure outside this CI change. Rerun publication
-only after the factory list no longer contains the residual. This is necessary
-because an API-only child does not appear in the admin console and its returned
-child secret is otherwise available only on the lost runner.
+Remove that residual with the sanctioned cleanup rather than by hand. Dispatch
+`.github/workflows/installer-publication.yml` with the `tailnet_cleanup` input
+enabled, optionally passing the exact child id in `child_id`; the job runs
+`scripts/tailscale-acceptance-tailnet cleanup` under the `installer-canary-dev`
+environment, which is the only place the factory credential exists. Cleanup
+deletes only children whose display name matches the CI pattern, whose id and
+timestamp validate, and that are older than the stale threshold; it refuses
+anything else, caps how many children it will consider and delete, prints each
+deleted id and display name, and is safe to run twice because a second run finds
+nothing and succeeds. There is no `--force`, and cleanup never widens the
+credential at runtime: a factory credential without the `all` scope fails the
+token exchange before any deletion. Rerun publication only after the factory
+list no longer contains the residual.
+
+The `installer-canary-dev` environment is the one that holds these four names
+(`VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID`,
+`VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET`,
+`VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID`,
+`VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET`); the cleanup job declares it
+explicitly rather than relying on a repository-wide secret, because a missing
+credential must fail at the token exchange instead of after selecting a child.
+
+These children belong to the separate Tailscale account that issued the factory
+OAuth client, and API-only children do not appear in the admin console at all.
+The listing the script itself performs is the only reliable way to enumerate
+them, and because the credential is environment-scoped, that dispatch is the
+primary cleanup interface rather than a convenience. Running the script on a
+developer machine cannot work and is not a defect.
 
 Generate separate RSA-3072 release and acceptance keys on an administrative
 workstation. Record each SHA-256 fingerprint from its DER-encoded public key:

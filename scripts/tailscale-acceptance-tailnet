@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Create and destroy the API-only tailnet used by NAS acceptance."""
+"""Create and destroy the API-only tailnet used by NAS acceptance.
+
+`cleanup` is the sanctioned removal for a stale disposable child whose creating
+run died before its runner-local state file could be used.  It cannot run on a
+developer machine: the factory credential that reaches the API-only children is
+an environment secret on the `installer-canary-dev` GitHub environment, so the
+`workflow_dispatch` path in `.github/workflows/installer-publication.yml` is the
+primary interface rather than a convenience.  Running it locally fails on the
+missing credential, which is expected and not a broken script.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +24,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 API_BASE = "https://api.tailscale.com/api/v2"
 ISOLATED_TAILNET_KIND = "isolated-disposable-test"
@@ -28,6 +37,17 @@ SERVICES = (
     ("svc:hermes-dashboard", "Hermes dashboard"),
 )
 STALE_CHILD_AGE = timedelta(minutes=60)
+# Every disposable CI child is named `Vonk Forge CI <run> attempt <n>`.  Only
+# this exact prefix is eligible for stale cleanup; `Vonk Forge CI` alone is a
+# production-name candidate, so the trailing space is part of the boundary.
+CI_CHILD_DISPLAY_PREFIX = "Vonk Forge CI "
+# One page is both the request bound and the consideration bound: cleanup never
+# paginates, so it can only ever act on what a single listing showed it.
+ORGANIZATION_TAILNET_LIST_LIMIT = 100
+# A run that dies leaves at most one child, so a healthy backlog is a handful of
+# dead runs.  Refuse a listing that would delete more than this rather than
+# emptying an organization in one manual dispatch.
+MAX_CLEANUP_CHILDREN = 20
 
 
 class LifecycleError(RuntimeError):
@@ -157,15 +177,34 @@ def _request(
     return ApiResponse(document=document, etag=etag)
 
 
-def _oauth_token(client_id: str, client_secret: str, *, scope: str) -> str:
+def _oauth_token(
+    client_id: str,
+    client_secret: str,
+    *,
+    scope: str,
+    tailnet: str | None = None,
+) -> str:
+    """Exchange an OAuth client for an access token.
+
+    `tailnet` selects an API-only child tailnet to act against.  That is the
+    documented recovery path when the child's own returned OAuth credential died
+    with its runner: an OAuth client owned by the creating tailnet names the
+    target in the token request.  It requires the `all` scope, so only the
+    cleanup path passes it.
+    """
+    form_body = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": scope,
+    }
+    if tailnet is not None:
+        if SAFE_ID.fullmatch(tailnet) is None:
+            raise LifecycleError("disposable tailnet ID is invalid")
+        form_body["tailnet"] = tailnet
     response = _request(
         "POST",
         "/oauth/token",
-        form_body={
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "scope": scope,
-        },
+        form_body=form_body,
     )
     token = response.document.get("access_token")
     if not isinstance(token, str) or not token or any(c in token for c in "\0\r\n"):
@@ -232,15 +271,46 @@ def _read_state(path: Path) -> ProtectedState | None:
     )
 
 
-def _delete_tailnet(tailnet_id: str, client_id: str, client_secret: str) -> None:
+def _child_token_factory(
+    client_id: str,
+    client_secret: str,
+    *,
+    tailnet_id: str | None = None,
+) -> Callable[[], str]:
+    """Mint `all`-scoped access tokens for one child tailnet.
+
+    Without `tailnet_id` the tokens come from the child's own OAuth credential,
+    which exists only on the runner that created it.  With `tailnet_id` they
+    come from the creating OAuth client naming the target child, which is the
+    documented recovery for a stale child whose runner is gone: the creating
+    client must carry the `all` scope.  A `tailnets`-only creating credential
+    cannot mint this token, which is a clean refusal and never a mutation.
+    """
+
+    def token() -> str:
+        return _oauth_token(
+            client_id, client_secret, scope="all", tailnet=tailnet_id
+        )
+
+    return token
+
+
+def _delete_tailnet(
+    tailnet_id: str, access_token_factory: Callable[[], str]
+) -> None:
+    """Delete exactly one tailnet, with one owner for the DELETE request.
+
+    The token is minted per attempt so a retry cannot present an expired
+    credential; `delete(state=...)` supplies the child's own lifecycle token and
+    `cleanup` supplies a factory-minted token for the child.
+    """
     if SAFE_ID.fullmatch(tailnet_id) is None:
         raise LifecycleError("disposable tailnet ID is invalid")
     path = f"/tailnet/{urllib.parse.quote(tailnet_id, safe='')}"
     transient_statuses = {408, 409, 425, 429, *range(500, 600)}
     for attempt in range(4):
         try:
-            token = _oauth_token(client_id, client_secret, scope="all")
-            _request("DELETE", path, access_token=token)
+            _request("DELETE", path, access_token=access_token_factory())
             return
         except ApiRequestError as error:
             if (
@@ -258,51 +328,162 @@ def _delete_tailnet(tailnet_id: str, client_id: str, client_secret: str) -> None
     raise AssertionError("unreachable")
 
 
-def _assert_no_stale_children(access_token: str) -> None:
+def _list_organization_tailnets(access_token: str) -> list[dict[str, Any]]:
+    """Read the organization tailnet list. One owner for this request shape.
+
+    Preflight and cleanup share this, so they cannot drift into disagreeing
+    about which children exist or how the list is validated.
+    """
     response = _request(
         "GET",
-        "/organizations/-/tailnets?limit=100",
+        f"/organizations/-/tailnets?limit={ORGANIZATION_TAILNET_LIST_LIMIT}",
         access_token=access_token,
     )
     tailnets = response.document.get("tailnets")
-    if not isinstance(tailnets, list):
+    if not isinstance(tailnets, list) or not all(
+        isinstance(tailnet, dict) for tailnet in tailnets
+    ):
         raise LifecycleError("Tailscale returned an invalid organization tailnet list")
-    now = datetime.now(UTC)
-    stale: list[tuple[str, str]] = []
-    for tailnet in tailnets:
-        if not isinstance(tailnet, dict):
-            raise LifecycleError(
-                "Tailscale returned an invalid organization tailnet list"
-            )
-        display_name = tailnet.get("displayName")
-        if not isinstance(display_name, str) or not display_name.startswith(
-            "Vonk Forge CI "
-        ):
-            continue
-        tailnet_id = tailnet.get("id")
-        created_at = tailnet.get("createdAt")
-        if (
-            SAFE_DISPLAY_NAME.fullmatch(display_name) is None
-            or not isinstance(tailnet_id, str)
-            or SAFE_ID.fullmatch(tailnet_id) is None
-            or not isinstance(created_at, str)
-        ):
-            raise LifecycleError("Tailscale returned an unsafe CI child identity")
-        try:
-            created = datetime.fromisoformat(created_at)
-        except ValueError as error:
-            raise LifecycleError(
-                "Tailscale returned an invalid CI child timestamp"
-            ) from error
-        if created.tzinfo is None:
-            raise LifecycleError("Tailscale returned an invalid CI child timestamp")
-        if now - created.astimezone(UTC) >= STALE_CHILD_AGE:
-            stale.append((tailnet_id, display_name))
+    return tailnets
+
+
+def _assert_no_stale_children(access_token: str) -> None:
+    """Fail closed while a live run still owns its child tailnet.
+
+    Selection -- not this function -- decides staleness.  Creation never
+    deletes: the child's own state file is the only child-authorized cleanup
+    path, and `create` does not have it.  `cleanup` is the sanctioned
+    child-authorized path for a child whose state file died with its runner.
+    """
+    stale = _select_stale_ci_children(_list_organization_tailnets(access_token))
     if stale:
         children = ", ".join(f"{tailnet_id} ({name})" for tailnet_id, name in stale)
         raise LifecycleError(
             "stale disposable CI tailnets require explicit child-authorized cleanup: "
             f"{children}"
+        )
+
+
+def _stale_ci_child(now: datetime, tailnet: dict[str, Any]) -> tuple[str, str] | None:
+    """Classify one organization tailnet; refuse anything unproven.
+
+    Returns the identity of a stale CI child, `None` for a tailnet this
+    lifecycle does not own (a production tailnet, or a live run's young child),
+    and raises for a CI-named tailnet whose identity cannot be validated.  An
+    unreadable name, id or timestamp is never skipped: skipping would silently
+    leave a wedge in place, and reading it as stale could delete a live run's
+    network mid-acceptance.
+    """
+    display_name = tailnet.get("displayName")
+    if not isinstance(display_name, str) or not display_name.startswith(
+        CI_CHILD_DISPLAY_PREFIX
+    ):
+        return None
+    tailnet_id = tailnet.get("id")
+    created_at = tailnet.get("createdAt")
+    if (
+        SAFE_DISPLAY_NAME.fullmatch(display_name) is None
+        or not isinstance(tailnet_id, str)
+        or SAFE_ID.fullmatch(tailnet_id) is None
+        or not isinstance(created_at, str)
+    ):
+        raise LifecycleError("Tailscale returned an unsafe CI child identity")
+    try:
+        created = datetime.fromisoformat(created_at)
+    except ValueError as error:
+        raise LifecycleError(
+            "Tailscale returned an invalid CI child timestamp"
+        ) from error
+    if created.tzinfo is None:
+        raise LifecycleError("Tailscale returned an invalid CI child timestamp")
+    if now - created.astimezone(UTC) < STALE_CHILD_AGE:
+        return None
+    return tailnet_id, display_name
+
+
+def _select_stale_ci_children(
+    tailnets: list[dict[str, Any]], *, child_id: str | None = None
+) -> list[tuple[str, str]]:
+    """Select the stale CI children a caller may delete, and nothing else.
+
+    Without `child_id` this is every stale CI child in reading order.  With an
+    explicit id it is exactly that child, still only after the same name,
+    identity, timestamp and age checks; an id this listing cannot prove is
+    refused by name rather than skipped.  The returned order is the deletion
+    order, so a caller can report each id and display name as it acts.
+    """
+    now = datetime.now(UTC)
+    selected: list[tuple[str, str]] = []
+    for tailnet in tailnets:
+        child = _stale_ci_child(now, tailnet)
+        if child is None:
+            continue
+        if child_id is not None:
+            if child[0] == child_id:
+                # The listing repeated this id; deleting it twice is pointless
+                # and a duplicated identity is itself not worth acting on twice.
+                return [child]
+            continue
+        selected.append(child)
+    if child_id is not None:
+        raise LifecycleError(
+            "no stale disposable CI tailnet matches the requested id "
+            f"{child_id}: it is absent from the organization listing, is not a "
+            f"{CI_CHILD_DISPLAY_PREFIX.strip()} child, or is younger than "
+            f"{_describe_age(STALE_CHILD_AGE)}"
+        )
+    return selected
+
+
+def _describe_age(age: timedelta) -> str:
+    minutes = int(age.total_seconds() // 60)
+    return f"{minutes} minutes"
+
+
+def _factory_credentials() -> tuple[str, str]:
+    """Read the repository-secret factory credential pair, or fail closed."""
+    return (
+        _required_environment("VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID"),
+        _required_environment("VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET"),
+    )
+
+
+def cleanup(*, child_id: str | None = None) -> None:
+    """Delete stale disposable CI children the factory credential authorizes.
+
+    Bounded and idempotent: it considers one organization listing, deletes at
+    most `MAX_CLEANUP_CHILDREN` proven-stale CI children, and reports each
+    deletion by id and display name.  A second run finds nothing and succeeds.
+    """
+    if child_id is not None and SAFE_ID.fullmatch(child_id) is None:
+        raise LifecycleError("disposable tailnet ID is invalid")
+    factory_id, factory_secret = _factory_credentials()
+    stale = _select_stale_ci_children(
+        _list_organization_tailnets(
+            _oauth_token(factory_id, factory_secret, scope="tailnets")
+        ),
+        child_id=child_id,
+    )
+    if len(stale) > MAX_CLEANUP_CHILDREN:
+        raise LifecycleError(
+            f"{len(stale)} stale disposable CI tailnets exceed the bounded "
+            f"cleanup limit of {MAX_CLEANUP_CHILDREN}"
+        )
+    deleted = 0
+    try:
+        for tailnet_id, display_name in stale:
+            _delete_tailnet(
+                tailnet_id,
+                _child_token_factory(
+                    factory_id, factory_secret, tailnet_id=tailnet_id
+                ),
+            )
+            deleted += 1
+            print(f"Deleted stale disposable CI tailnet {tailnet_id} ({display_name})")
+    finally:
+        print(
+            f"Stale disposable CI tailnet cleanup: deleted {deleted} of "
+            f"{len(stale)} selected (bounded at {MAX_CLEANUP_CHILDREN})"
         )
 
 
@@ -494,7 +675,7 @@ def create(*, display_name: str, github_env: Path, state: Path) -> None:
             },
         )
     except BaseException:
-        _delete_tailnet(tailnet_id, client_id, client_secret)
+        _delete_tailnet(tailnet_id, _child_token_factory(client_id, client_secret))
         raise
     try:
         if (
@@ -516,7 +697,7 @@ def create(*, display_name: str, github_env: Path, state: Path) -> None:
             },
         )
     except BaseException:
-        _delete_tailnet(tailnet_id, client_id, client_secret)
+        _delete_tailnet(tailnet_id, _child_token_factory(client_id, client_secret))
         state.unlink()
         raise
 
@@ -530,7 +711,8 @@ def delete(*, state: Path) -> None:
         raise LifecycleError("disposable tailnet state is incomplete")
     print(f"::add-mask::{document['client_secret']}")
     _delete_tailnet(
-        document["tailnet_id"], document["client_id"], document["client_secret"]
+        document["tailnet_id"],
+        _child_token_factory(document["client_id"], document["client_secret"]),
     )
     try:
         current = state.lstat()
@@ -555,6 +737,16 @@ def main() -> None:
     create_parser.add_argument("--state", type=Path, required=True)
     delete_parser = subparsers.add_parser("delete")
     delete_parser.add_argument("--state", type=Path, required=True)
+    cleanup_parser = subparsers.add_parser("cleanup")
+    cleanup_parser.add_argument(
+        "--id",
+        default=None,
+        help=(
+            "Clean exactly this stale CI child instead of every stale CI child "
+            "in the organization listing. The same name, identity and age "
+            "checks still apply."
+        ),
+    )
     arguments = parser.parse_args()
     if arguments.command == "create":
         create(
@@ -562,8 +754,10 @@ def main() -> None:
             github_env=arguments.github_env,
             state=arguments.state,
         )
-    else:
+    elif arguments.command == "delete":
         delete(state=arguments.state)
+    else:
+        cleanup(child_id=arguments.id)
 
 
 if __name__ == "__main__":
