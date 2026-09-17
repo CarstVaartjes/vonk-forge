@@ -14,9 +14,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from pydantic import ValidationError
-from sqlalchemy import and_, case, or_, select, update
+from sqlalchemy import Boolean, and_, case, or_, select, update
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.functions import FunctionElement
 from vonk_agent_protocol import (
     AgentClaim,
     AgentDirective,
@@ -320,10 +322,19 @@ def _reconciled_dead_attempt_reason(
 #: the structured reason recognisable, and they let a recorder replace an earlier
 #: refusal on the parent job without overwriting an unrelated domain reason.
 _CLAIM_REFUSAL_PREFIX = "claim refused: "
+#: An admitted claim whose parent cancellation document is malformed is
+#: recorded with this prefix.  It is a note, not a refusal: the claim is not
+#: blocked, but the malformation is named rather than silently reading a
+#: non-boolean value as the default ``false``.
+_CLAIM_NOTE_PREFIX = "claim note: "
 #: The heartbeat and result boundaries persist their own refusal notes so a
 #: stalled operation is not left with no reason at all.
 _BOUNDARY_REFUSAL_PREFIXES = ("heartbeat refused: ", "result refused: ")
-_REFUSAL_PREFIXES = (_CLAIM_REFUSAL_PREFIX, *_BOUNDARY_REFUSAL_PREFIXES)
+_REFUSAL_PREFIXES = (
+    _CLAIM_REFUSAL_PREFIX,
+    _CLAIM_NOTE_PREFIX,
+    *_BOUNDARY_REFUSAL_PREFIXES,
+)
 _MAX_CLAIM_REFUSAL_REASON = 512
 
 
@@ -353,6 +364,10 @@ def _claim_refusal_reason(check: str, **facts: object) -> str:
     return _refusal_reason(_CLAIM_REFUSAL_PREFIX, check, **facts)
 
 
+def _claim_note_reason(check: str, **facts: object) -> str:
+    return _refusal_reason(_CLAIM_NOTE_PREFIX, check, **facts)
+
+
 def _document(value: Mapping[str, object]) -> dict[str, object]:
     """Return the protocol's validated, deterministic JSON representation."""
     return json.loads(canonical_message(value))
@@ -361,6 +376,85 @@ def _document(value: Mapping[str, object]) -> dict[str, object]:
 def _signer_message(value: Mapping[str, object]) -> bytes:
     """Return the signer's canonical newline-delimited wire representation."""
     return canonical_message(value) + b"\n"
+
+
+def _json_flag_parts(element: FunctionElement, compiler, **kwargs) -> tuple[str, str]:
+    column, key = list(element.clauses)
+    column_sql = compiler.process(column, **kwargs)
+    key_sql = compiler.process(key, **kwargs)
+    return column_sql, key_sql
+
+
+class _JsonFlagIsTrue(FunctionElement[bool]):
+    """True only when a JSON member is exactly the boolean ``true``.
+
+    The predicate must not accept a SQL-coerced truthy value: the canonical
+    lifecycle result declares ``cancel_requested: Literal[True]``, so a stored
+    ``1`` or ``"true"`` is malformed and must not silently mean "cancelled".
+    This is a JSON-level read, never a boolean cast.
+    """
+
+    type = Boolean()
+    inherit_cache = True
+
+
+@compiles(_JsonFlagIsTrue, "postgresql")
+def _compile_json_flag_is_true_postgresql(element, compiler, **kwargs) -> str:
+    column, key = _json_flag_parts(element, compiler, **kwargs)
+    return (
+        f"COALESCE(json_typeof({column} -> {key}) = 'boolean' "
+        f"AND ({column} ->> {key}) = 'true', false)"
+    )
+
+
+@compiles(_JsonFlagIsTrue, "sqlite")
+def _compile_json_flag_is_true_sqlite(element, compiler, **kwargs) -> str:
+    column, key = _json_flag_parts(element, compiler, **kwargs)
+    return f"COALESCE(json_type({column}, '$.' || {key}) = 'true', 0)"
+
+
+@compiles(_JsonFlagIsTrue)
+def _compile_json_flag_is_true_unsupported(element, compiler, **kwargs) -> str:
+    raise NotImplementedError(
+        "an exact JSON boolean read is not defined for this dialect"
+    )
+
+
+class _JsonFlagIsBoolean(FunctionElement[bool]):
+    """True when a JSON member is absent or is a JSON boolean.
+
+    False means the persisted value is present but malformed for a
+    ``Literal[True]`` field.  It is a diagnostic only: the claim predicate
+    reads it strictly and never blocks on it.
+    """
+
+    type = Boolean()
+    inherit_cache = True
+
+
+@compiles(_JsonFlagIsBoolean, "postgresql")
+def _compile_json_flag_is_boolean_postgresql(element, compiler, **kwargs) -> str:
+    column, key = _json_flag_parts(element, compiler, **kwargs)
+    return (
+        f"COALESCE(json_typeof({column} -> {key}) IS NULL "
+        f"OR json_typeof({column} -> {key}) = 'boolean', true)"
+    )
+
+
+@compiles(_JsonFlagIsBoolean, "sqlite")
+def _compile_json_flag_is_boolean_sqlite(element, compiler, **kwargs) -> str:
+    column, key = _json_flag_parts(element, compiler, **kwargs)
+    return (
+        f"COALESCE(json_type({column}, '$.' || {key}) IS NULL "
+        f"OR json_type({column}, '$.' || {key}) IN ('true', 'false'), 1)"
+    )
+
+
+@compiles(_JsonFlagIsBoolean)
+def _compile_json_flag_is_boolean_unsupported(element, compiler, **kwargs) -> str:
+    raise NotImplementedError(
+        "an exact JSON boolean read is not defined for this dialect"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -400,13 +494,15 @@ class _ClaimPredicate:
 
     ``common`` holds the conditions every claimable operation satisfies;
     ``branches`` holds the state-specific ones, of which exactly one applies to
-    any non-terminal operation.  Keeping the decomposition beside the single
-    ``expression`` is what lets the refusal path name the first condition that
-    failed instead of restating the whole conjunction in Python.
+    any non-terminal operation.  ``diagnostics`` are named conditions that do
+    not decide claimability but must still be visible when the refusal path
+    explains an operation; keeping them beside the decision is what stops a
+    malformed persisted value from becoming a silent default.
     """
 
     common: tuple[_ClaimCondition, ...]
     branches: tuple[_ClaimBranch, ...]
+    diagnostics: tuple[_ClaimCondition, ...] = ()
 
     @property
     def expression(self) -> ColumnElement[bool]:
@@ -498,7 +594,11 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
             ),
             _ClaimCondition(
                 "parent-cancel-requested",
-                Job.result["cancel_requested"].as_boolean().is_not(True),
+                # The canonical lifecycle result declares
+                # ``cancel_requested: Literal[True]``.  Read the JSON member
+                # exactly, so a stored ``1`` or ``"true"`` is malformed rather
+                # than a coercion of the SQL boolean type.
+                _JsonFlagIsTrue(Job.result, "cancel_requested").is_not(True),
             ),
         ),
         branches=(
@@ -550,6 +650,15 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
                         "operator-retry-attempt-not-ready", retry_ready_attempt
                     ),
                 ),
+            ),
+        ),
+        diagnostics=(
+            # Not a claimability condition: a malformed flag must not block
+            # legitimate work, but it must not be read as a silent ``false``
+            # either.  The refusal path names it when it explains an operation.
+            _ClaimCondition(
+                "parent-cancel-flag-malformed",
+                _JsonFlagIsBoolean(Job.result, "cancel_requested"),
             ),
         ),
     )
@@ -1119,6 +1228,36 @@ class AgentJobService:
             ):
                 job.status_reason = reason
 
+    def _note_malformed_cancel_flag(
+        self, session: Session, operation: StoredOperation
+    ) -> None:
+        """Name a malformed persisted cancel flag without blocking the claim.
+
+        ``_JsonFlagIsTrue`` reads the parent's ``cancel_requested`` exactly, so
+        a stored ``1`` or ``"true"`` no longer cancels and legitimate work is
+        not blocked.  Reading it silently would invent the default ``false``,
+        which the persisted-contract rule forbids, so the malformation is named
+        on the operator surface instead.  The refusal classifier cannot carry
+        this case: it only runs when no operation is admitted, and this
+        operation was just admitted.
+        """
+
+        job = session.get(Job, operation.parent_job_id)
+        if job is None or not isinstance(job.result, Mapping):
+            return
+        if "cancel_requested" not in job.result:
+            return
+        if isinstance(job.result["cancel_requested"], bool):
+            return
+        self._write_refusal_note(
+            session,
+            operation=None,
+            job_id=job.id,
+            reason=_claim_note_reason(
+                "parent-cancel-flag-malformed", kind=operation.kind
+            ),
+        )
+
     def record_boundary_refusal(
         self,
         operation_id: str,
@@ -1205,8 +1344,12 @@ class AgentJobService:
         facts: dict[str, object] = {"kind": operation.kind, "state": operation.state}
         predicate = _claim_predicate(now)
         branch = predicate.branch_for(operation.state)
-        conditions = predicate.common + (
-            () if branch is None else branch.conditions
+        # Diagnostics come first so a malformed persisted value is named before
+        # the condition it may have masked.
+        conditions = (
+            predicate.diagnostics
+            + predicate.common
+            + (() if branch is None else branch.conditions)
         )
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
@@ -1798,6 +1941,7 @@ class AgentJobService:
                 progress=resumable_progress,
             )
             session.add(attempt)
+            self._note_malformed_cancel_flag(session, operation)
             return AgentClaim.model_validate(
                 {
                     "schema_version": 1,

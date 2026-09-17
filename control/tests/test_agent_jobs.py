@@ -2726,6 +2726,36 @@ def test_excluded_work_refusal_records_an_unready_retry_attempt(service) -> None
         assert "operator-retry-attempt-not-ready" in stored.status_reason
 
 
+@pytest.mark.parametrize("malformed", (1, "true"))
+def test_claim_admits_and_names_a_malformed_cancel_flag(service, malformed) -> None:
+    """A non-boolean cancel flag does not cancel, and is not silent either.
+
+    The canonical lifecycle result declares
+    ``cancel_requested: Literal[True]``, so a stored ``1`` or ``"true"`` is
+    malformed.  The predicate reads it exactly instead of coercing it, so
+    legitimate work is not blocked, and the admission path records the
+    malformation so reading it as "not cancelled" never becomes a silent
+    default.
+    """
+
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    with sessions.begin() as session:
+        job = session.get(Job, parent_job.id)
+        assert job is not None
+        job.result = {"cancel_requested": malformed}
+
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None and claim.operation_id == operation.id
+
+    with sessions() as session:
+        job = session.get(Job, parent_job.id)
+        assert job is not None and job.status_reason is not None
+        assert job.status_reason.startswith("claim note: ")
+        assert "parent-cancel-flag-malformed" in job.status_reason
+
+
 def test_no_work_claim_records_no_refusal(service) -> None:
     jobs, sessions, clock = service
 
@@ -2755,7 +2785,8 @@ def _claim_refusal_check_names() -> tuple[str, ...]:
     """
 
     predicate = _claim_predicate(datetime(2026, 8, 3, tzinfo=UTC))
-    names = [condition.check for condition in predicate.common]
+    names = [condition.check for condition in predicate.diagnostics]
+    names.extend(condition.check for condition in predicate.common)
     for branch in predicate.branches:
         names.extend(condition.check for condition in branch.conditions)
     return tuple(names)
@@ -2803,6 +2834,13 @@ def _scenario_parent_cancel_requested(sessions, clock, parent_job, operation) ->
         job = session.get(Job, parent_job.id)
         assert job is not None
         job.result = {"cancel_requested": True}
+
+
+def _scenario_parent_cancel_flag_malformed(sessions, clock, parent_job, operation) -> None:
+    with sessions.begin() as session:
+        job = session.get(Job, parent_job.id)
+        assert job is not None
+        job.result = {"cancel_requested": 1}
 
 
 def _scenario_queued_attempt_not_zero(sessions, clock, parent_job, operation) -> None:
@@ -2871,6 +2909,7 @@ def _scenario_operator_retry_attempt_not_ready(
 #: One scenario per condition the predicate can fail.  Each leaves exactly one
 #: named condition false, so the classifier must name that condition.
 _REFUSAL_SCENARIOS: dict[str, Callable[..., None]] = {
+    "parent-cancel-flag-malformed": _scenario_parent_cancel_flag_malformed,
     "parent-job-missing": _scenario_parent_job_missing,
     "workload-intent-superseded": _scenario_workload_intent_superseded,
     "parent-cancel-requested": _scenario_parent_cancel_requested,
