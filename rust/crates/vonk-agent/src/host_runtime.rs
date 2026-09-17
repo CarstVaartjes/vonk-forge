@@ -303,6 +303,11 @@ fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> Ho
 }
 
 fn stable_runtime_error_code(value: &str) -> bool {
+    // Every code the privileged helper can name, not only the operation ones.
+    // The helper's grant, peer and request rejections were absent, so the agent
+    // reported each of them as an opaque protocol error even when the helper had
+    // said which check refused -- which is how a live privileged start became
+    // unattributable.
     matches!(
         value,
         "operation_failed"
@@ -320,6 +325,13 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "runtime_run_missing"
             | "runtime_fabric_unavailable"
             | "runtime_fabric_firewall_rejected"
+            | "grant_invalid"
+            | "grant_node_mismatch"
+            | "grant_unauthorized"
+            | "peer_identity_invalid"
+            | "request_invalid"
+            | "request_replayed"
+            | "request_ledger_failed"
     )
 }
 
@@ -566,6 +578,29 @@ mod tests {
                     diagnostic: None,
                 },
                 "helper_operation_unsafe_path",
+            ),
+            // The helper's own grant and request rejections name the refusing
+            // check, so the operator must see them rather than a protocol error.
+            (
+                HostRuntimeError::HelperRejected {
+                    code: "grant_unauthorized".to_owned(),
+                    diagnostic: None,
+                },
+                "helper_grant_unauthorized",
+            ),
+            (
+                HostRuntimeError::HelperRejected {
+                    code: "grant_node_mismatch".to_owned(),
+                    diagnostic: None,
+                },
+                "helper_grant_node_mismatch",
+            ),
+            (
+                HostRuntimeError::HelperRejected {
+                    code: "request_replayed".to_owned(),
+                    diagnostic: None,
+                },
+                "helper_request_replayed",
             ),
             (
                 HostRuntimeError::HelperRejected {
