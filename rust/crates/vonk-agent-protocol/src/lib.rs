@@ -59,13 +59,27 @@ use thiserror::Error;
 #[cfg(test)]
 use uuid::Uuid;
 
+/// The authoritative ceiling on one privileged-helper frame, in bytes.
+///
+/// This is the resource bound for the whole host-runtime exchange: the agent
+/// canonicalizes the request body, writes the owner-only request file and
+/// frames the message, and the helper allocates exactly the framed length
+/// before it parses. The basis is the largest legitimate request, not taste:
+/// the compiled plan admits 4096 artifacts, and at one `--mount` pair per
+/// mounted file the container command line can reach roughly 0.6 MiB, so a
+/// 256 KiB ceiling was one larger model away from refusing a valid start. 1 MiB
+/// carries the plan-admitted maximum with margin. The worst case is one body
+/// plus one request file plus one helper frame and its parsed form -- a few
+/// MiB, acceptable on a node that already stages multi-gigabyte images.
+///
+/// `MAX_HOST_RUNTIME_ARGUMENTS` and `MAX_ARGV_BYTES` are backstops below this.
+pub const MAX_HELPER_FRAME_BYTES: usize = 1024 * 1024;
 /// The most arguments one bounded helper request may carry.
 ///
 /// This count is a coarse sanity bound, not the payload authority. The
-/// authoritative size limit is the agent's `MAX_HELPER_MESSAGE_BYTES` frame
-/// ceiling (256 KiB) on the canonical request body, which the agent enforces
-/// before it frames the message and the privilege boundary enforces when it
-/// reads the frame. One request frames the whole container command line --
+/// authoritative size limit is the `MAX_HELPER_FRAME_BYTES` frame ceiling on
+/// the canonical request body. One request frames the whole container command
+/// line --
 /// four image identities, the `podman run` options and one `--mount` pair per
 /// mounted model file -- so a legitimate many-artifact recipe needs far more
 /// than 512 elements: the GLM EXL3 dual recipe mounts 149 model files, which
@@ -77,7 +91,25 @@ use uuid::Uuid;
 /// configuration is a legal, possibly large, single element, and the frame
 /// ceiling already bounds the whole payload.
 pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 4096;
-pub const MAX_DOCUMENT_BYTES: usize = 64 * 1024;
+/// The ceiling on one generic claim payload or progress document.
+///
+/// The load-bearing case is an `artifact.distribution.v1` claim, whose
+/// assignment admits up to 4096 distribution objects; at the measured ~120
+/// bytes per object a full assignment is roughly 0.5 MiB, so the previous
+/// 64 KiB was a latent refusal for a large model (the real GLM shape is ~150
+/// objects, ~18 KiB -- only 3x under the old ceiling). 2 MiB is a backstop
+/// above the admitted assignment; the compiled plan document is separately
+/// bounded below.
+pub const MAX_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
+/// The ceiling on the compiled execution plan document.
+///
+/// This is the largest document on the wire, so it keeps the largest bound.
+/// The plan admits 4096 artifacts; at the measured marginal cost of a fixture
+/// artifact (~1.2 KiB) that is roughly 5 MiB, and the largest real plan (the
+/// GLM EXL3 dual shape, 149 artifacts) is about 180 KiB. 16 MiB is already
+/// more than 3x the admitted maximum and ~90x the real maximum, so it is kept.
+/// It also bounds the agent's single largest HTTP body allocation, which is
+/// why it is not raised further.
 pub const MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES: usize =
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES;

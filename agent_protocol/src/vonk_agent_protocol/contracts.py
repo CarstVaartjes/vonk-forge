@@ -27,7 +27,9 @@ from pydantic import (
 from .failure_evidence import FailureDiagnostics
 from .wire_model import ErrorCode, OperationProgress, WireModel
 
-MAX_DOCUMENT_BYTES = 64 * 1024
+# Backstop above a full 4096-object distribution assignment (~0.5 MiB); the
+# real GLM shape is ~18 KiB, only 3x under the previous 64 KiB.
+MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES = 16 * 1024 * 1024
 MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES = (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES

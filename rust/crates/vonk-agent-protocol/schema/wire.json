@@ -1993,7 +1993,7 @@
           "items": {
             "type": "string"
           },
-          "maxItems": 512,
+          "maxItems": 4096,
           "title": "Argv",
           "type": "array"
         },
