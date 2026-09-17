@@ -225,7 +225,9 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
             return match self.upgrades.execute(claim).await {
                 Ok(()) => ExecutionResult {
                     state: "waiting-for-operator",
-                    body: json!({"reason": "agent upgrade did not restart the service"}),
+                    body: json!({
+                        "reason": crate::agent_upgrade::UPGRADE_AWAITING_IDENTITY_REASON,
+                    }),
                 },
                 Err(error) => {
                     let reason = match error.diagnostic() {

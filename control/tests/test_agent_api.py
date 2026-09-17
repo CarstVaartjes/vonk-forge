@@ -3546,6 +3546,68 @@ def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> 
         assert "attempt=1" in operation.status_reason
 
 
+def test_a_concluded_operation_never_acquires_a_boundary_refusal_note(
+    agent_system,
+) -> None:
+    """A refusal must never be attached to an outcome that already concluded.
+
+    Wrong implementation: ``_write_refusal_note`` keyed only on the submission's
+    correlating attempt and fence, so a late heartbeat for an operation that had
+    already succeeded wrote ``heartbeat refused: stale-attempt`` onto the
+    succeeded operation and its succeeded parent job.  The job then reported a
+    refusal while its owning state said ``succeeded`` -- a success that reads to
+    an operator as a refusal of work that already completed.
+    """
+
+    client, services, _, clock = agent_system
+    job = parent(services.sessions, clock)
+    operation = services.operations.enqueue(
+        job.id, NODE_A, "recipe.stop", "a" * 64, STOP_PAYLOAD
+    )
+    claim = client.post(
+        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
+    ).json()
+    envelope = {
+        key: claim[key]
+        for key in (
+            "schema_version",
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "node_id",
+            "deadline",
+        )
+    }
+    completed = client.post(
+        "/agent/result",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=envelope | {"state": "succeeded", "result": {"stopped": True}},
+    )
+    assert completed.status_code == 204, completed.text
+    with services.sessions() as session:
+        concluded = session.get(AgentOperation, operation.id)
+        succeeded = session.get(Job, job.id)
+        assert concluded is not None and concluded.state == "succeeded"
+        assert succeeded is not None and succeeded.state == "succeeded"
+
+    stale = client.post(
+        "/agent/heartbeat",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=envelope | {"progress": {"phase": "stopping"}},
+    )
+    assert stale.status_code == 409, stale.text
+    with services.sessions() as session:
+        concluded = session.get(AgentOperation, operation.id)
+        succeeded = session.get(Job, job.id)
+        assert concluded is not None and concluded.state == "succeeded"
+        assert succeeded is not None and succeeded.state == "succeeded"
+        # The parent job is the owner surface the operator reads; it must not
+        # carry a refusal for work that already reached its outcome.
+        assert succeeded.status_reason is None
+        assert concluded.status_reason is None
+
+
 def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
     agent_system,
 ) -> None:

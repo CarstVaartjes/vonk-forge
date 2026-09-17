@@ -138,6 +138,18 @@ _RESTART_REISSUE_OPERATIONS = _LIFECYCLE_RESTART_OPERATIONS | frozenset(
 _TERMINAL_PARENT_STATES = frozenset(
     {"succeeded", "failed", "waiting-for-operator", "expired", "cancelled"}
 )
+#: An outcome that has already concluded, so the work it belongs to will not
+#: proceed and no refusal can describe it.  A refusal note written afterwards
+#: annotates a finished result: on the operator surface a success then reads as
+#: a refusal of work that already completed.  Derived from the aggregate-final
+#: set so a new final state cannot be added without deciding whether it may
+#: carry a refusal; ``waiting-for-operator`` is excluded because such work can
+#: resume, and a refusal that explains why it is not progressing is genuine
+#: evidence that must stay.
+_AGGREGATE_FINAL_STATES = frozenset(
+    {"cancelled", "compensated", "failed", "succeeded", "waiting-for-operator"}
+)
+_CONCLUDED_OUTCOMES = _AGGREGATE_FINAL_STATES - {"waiting-for-operator"}
 _RETRY_DISPOSITION = "retry"
 _DATABASE_REPOLL_SECONDS = 0.25
 _SUPERSEDED_CANCELLATION_SECONDS = 660
@@ -1208,10 +1220,19 @@ class AgentJobService:
         job_id: str | None,
         reason: str,
     ) -> None:
-        """Write one bounded refusal note without erasing a domain reason."""
+        """Write one bounded refusal note without erasing a domain reason.
+
+        A refusal explains work that will not proceed, so it may annotate only a
+        target whose outcome is still open.  The owning state decides that, not
+        the submission's correlating fence: a late but genuinely stale heartbeat
+        or result still names the current attempt and fence of an operation that
+        has already concluded, and writing the note then leaves the record
+        carrying a refusal for a completed result.
+        """
 
         if (
             operation is not None
+            and operation.state not in _CONCLUDED_OUTCOMES
             and operation.status_reason != reason
             and _is_refusal_reason(operation.status_reason)
         ):
@@ -1223,6 +1244,7 @@ class AgentJobService:
             job = session.get(Job, job_id)
             if (
                 job is not None
+                and job.state not in _CONCLUDED_OUTCOMES
                 and job.status_reason != reason
                 and _is_refusal_reason(job.status_reason)
             ):
@@ -3490,13 +3512,7 @@ class AgentJobService:
             # service's specific operator-facing reason instead of declaring the
             # job successful merely because every materialized operation passed.
             return
-        terminal = {
-            "cancelled",
-            "compensated",
-            "failed",
-            "succeeded",
-            "waiting-for-operator",
-        }
+        terminal = _AGGREGATE_FINAL_STATES
         if not operations or any(
             operation.state not in terminal for operation in operations
         ):
