@@ -111,8 +111,10 @@ class HostRuntimeRequest(WireModel):
     # One request frames the whole container command line. The item count is a
     # sanity bound; the authoritative size limit is the helper frame ceiling
     # (`MAX_MESSAGE_BYTES`, 256 KiB), so a single item has no separate ceiling.
-    # NUL is the one byte an exec argv cannot carry; CR and LF are legal bytes.
-    arguments: list[Annotated[str, Field(min_length=1, pattern=r"^[^\x00]+$")]] = Field(
+    # NUL is the one byte an exec argv cannot carry; CR and LF are legal bytes,
+    # and an empty element is legal too (the plan's opaque-argv contract admits
+    # it), so only the payload ceiling bounds a single item.
+    arguments: list[Annotated[str, Field(pattern=r"^[^\x00]+$")]] = Field(
         max_length=4096
     )
     observation: RecipeRunInspectionBinding | None = None

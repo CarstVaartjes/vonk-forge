@@ -3310,7 +3310,6 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "runtime_helper_request_arguments_presence_invalid"
             | "runtime_helper_request_installation_identity_invalid"
             | "runtime_helper_request_argument_count_invalid"
-            | "runtime_helper_request_argument_empty"
             | "runtime_helper_request_argument_nul_byte"
             | "runtime_helper_request_storage_invalid"
             | "runtime_helper_system_clock_invalid"
@@ -4643,7 +4642,6 @@ mod tests {
             crate::host_runtime::HelperProtocolCause::RequestArgumentsPresence,
             crate::host_runtime::HelperProtocolCause::RequestInstallationIdentity,
             crate::host_runtime::HelperProtocolCause::RequestArgumentCount,
-            crate::host_runtime::HelperProtocolCause::RequestArgumentEmpty,
             crate::host_runtime::HelperProtocolCause::RequestArgumentNulByte,
             crate::host_runtime::HelperProtocolCause::RequestStorage,
             crate::host_runtime::HelperProtocolCause::SystemClock,

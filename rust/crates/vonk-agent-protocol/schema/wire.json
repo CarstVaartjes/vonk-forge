@@ -3466,7 +3466,6 @@
         },
         "arguments": {
           "items": {
-            "minLength": 1,
             "pattern": "^[^\\x00]+$",
             "type": "string"
           },

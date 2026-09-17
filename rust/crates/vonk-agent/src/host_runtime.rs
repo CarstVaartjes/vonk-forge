@@ -88,8 +88,6 @@ pub enum HelperProtocolCause {
     /// The agent-built request carries more arguments than the transport
     /// accepts.
     RequestArgumentCount,
-    /// An agent-built request argument is empty.
-    RequestArgumentEmpty,
     /// An agent-built request argument carries a NUL byte an exec argv cannot
     /// frame.
     RequestArgumentNulByte,
@@ -123,7 +121,6 @@ impl HelperProtocolCause {
             Self::RequestArgumentsPresence => "request_arguments_presence_invalid",
             Self::RequestInstallationIdentity => "request_installation_identity_invalid",
             Self::RequestArgumentCount => "request_argument_count_invalid",
-            Self::RequestArgumentEmpty => "request_argument_empty",
             Self::RequestArgumentNulByte => "request_argument_nul_byte",
             Self::RequestStorage => "request_storage_invalid",
             Self::SystemClock => "system_clock_invalid",
@@ -143,7 +140,6 @@ impl HelperProtocolCause {
             HostRuntimeRequestRule::ArgumentsPresence => Self::RequestArgumentsPresence,
             HostRuntimeRequestRule::InstallationIdentity => Self::RequestInstallationIdentity,
             HostRuntimeRequestRule::ArgumentCount { .. } => Self::RequestArgumentCount,
-            HostRuntimeRequestRule::ArgumentEmpty { .. } => Self::RequestArgumentEmpty,
             HostRuntimeRequestRule::ArgumentNulByte { .. } => Self::RequestArgumentNulByte,
             // The observation binding is an inspection contract rather than one
             // of the argument-envelope rules, and it is unreachable from a
@@ -579,7 +575,6 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "request_arguments_presence_invalid"
             | "request_installation_identity_invalid"
             | "request_argument_count_invalid"
-            | "request_argument_empty"
             | "request_argument_nul_byte"
             | "request_storage_invalid"
             | "system_clock_invalid"
@@ -1423,10 +1418,6 @@ mod tests {
         // exec argv cannot frame, collapsed into
         // `helper_request_document_invalid`, so the code could not name the
         // kind of violation rather than an index.
-        let mut empty = start_request();
-        empty.arguments = vec!["sha256:image".to_owned(), String::new()];
-        assert_eq!(request_rule_code(&empty), "helper_request_argument_empty");
-
         let mut nul = start_request();
         nul.arguments = vec!["sha256:image".to_owned(), "run\0--flag".to_owned()];
         assert_eq!(request_rule_code(&nul), "helper_request_argument_nul_byte");
@@ -1487,16 +1478,6 @@ mod tests {
     #[test]
     fn a_per_argument_refusal_carries_the_element_length() {
         // Only the offending element's length crosses, never the element.
-        let mut empty = start_request();
-        empty.arguments = vec!["sha256:image".to_owned(), String::new()];
-        let rule = empty
-            .validate()
-            .expect_err("an empty argument must be refused");
-        assert_eq!(
-            HostRuntimeError::request_refusal(rule).refusal_bound(),
-            Some((Some(1), 0))
-        );
-
         let mut nul = start_request();
         nul.arguments = vec!["sha256:image".to_owned(), "run\0--flag".to_owned()];
         let rule = nul.validate().expect_err("a NUL argument must be refused");
@@ -1664,7 +1645,6 @@ mod tests {
             HelperProtocolCause::RequestArgumentsPresence,
             HelperProtocolCause::RequestInstallationIdentity,
             HelperProtocolCause::RequestArgumentCount,
-            HelperProtocolCause::RequestArgumentEmpty,
             HelperProtocolCause::RequestArgumentNulByte,
             HelperProtocolCause::RequestStorage,
             HelperProtocolCause::SystemClock,

@@ -187,9 +187,6 @@ pub enum HostRuntimeRequestRule {
     /// There are more arguments than the bounded transport accepts.
     #[error("host runtime request argument count is invalid")]
     ArgumentCount { limit: u64, observed: u64 },
-    /// An argument is empty.
-    #[error("host runtime request argument is empty")]
-    ArgumentEmpty { observed: u64 },
     /// An argument carries a NUL byte, which an exec argv cannot frame.
     #[error("host runtime request argument carries a NUL byte")]
     ArgumentNulByte { observed: u64 },
@@ -212,8 +209,6 @@ impl HostRuntimeRequestRule {
     pub fn bound(self) -> Option<(Option<u64>, u64)> {
         match self {
             Self::ArgumentCount { limit, observed } => Some((Some(limit), observed)),
-            // The empty rule's ceiling is the canonical model's `min_length`.
-            Self::ArgumentEmpty { observed } => Some((Some(1), observed)),
             Self::ArgumentNulByte { observed } => Some((None, observed)),
             _ => None,
         }
@@ -247,9 +242,6 @@ impl HostRuntimeRequest {
             });
         }
         for value in &self.arguments {
-            if value.is_empty() {
-                return Err(HostRuntimeRequestRule::ArgumentEmpty { observed: 0 });
-            }
             if value.contains('\0') {
                 return Err(HostRuntimeRequestRule::ArgumentNulByte {
                     observed: value.len() as u64,
