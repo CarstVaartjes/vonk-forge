@@ -31,6 +31,7 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImagePreparationError,
     RuntimeImageReceipt,
     SkopeoOCIImageTransport,
+    _parse_runtime_image_receipt,
     persist_runtime_image_receipt,
     prefixed_image_digest,
     prepare_runtime_image,
@@ -1672,3 +1673,43 @@ def test_controller_build_receipt_requires_its_adapter_identity() -> None:
             runtime_adapter=adapter.adapter_id,
             runtime_adapter_sha256=adapter.digest,
         )
+
+
+def test_an_unreadable_stored_receipt_names_the_rule_that_rejected_it() -> None:
+    """A stored receipt that will not validate must say which rule rejected it.
+
+    The reader collapsed every validation failure into one sentence, so a live
+    ``install.compiled_plan_unavailable`` blocker could report only "runtime
+    image receipt identity is unavailable or malformed" and the failing rule
+    stayed invisible on every operator surface.
+    """
+
+    malformed = {
+        "schema_version": 2,
+        "source": "controller-build",
+        "build_id": "build",
+        "distribution_publisher": "vonk",
+        "distribution_slug": "cached",
+        "distribution_content_sha256": "a" * 64,
+        "registry_manifest_digest": None,
+        "platform_manifest_digest": PLATFORM_IMAGE_DIGEST,
+        "image_digest": PLATFORM_IMAGE_DIGEST,
+        "oci_archive_sha256": "b" * 64,
+        "image_bytes": 1,
+        "local_image_config_id": "sha256:" + "c" * 64,
+        "local_image_reference": None,
+        "architecture": "linux-arm64",
+        "runtime_interface": "vonk.runtime.v1",
+        "runtime_interface_label": "v1",
+        "archive_path": "/state/runtime-images/" + "b" * 64,
+        "recorded_at": "2026-09-15T00:00:00Z",
+        # A Controller build must carry the adapter identity that produced the
+        # bytes; this receipt omits it.
+    }
+
+    with pytest.raises(RuntimeImagePreparationError) as raised:
+        _parse_runtime_image_receipt(malformed)
+
+    message = str(raised.value)
+    assert "runtime image receipt identity" in message
+    assert "lacks its adapter" in message, message
