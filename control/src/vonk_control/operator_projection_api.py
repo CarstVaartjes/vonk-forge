@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from pydantic import ConfigDict, Field
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
@@ -33,6 +33,7 @@ from .failure_evidence import (
     EvidenceRetention,
     FailureEvidenceBundle,
     collect_failure,
+    failed_attempt_condition,
 )
 from .fleet_projection import (
     FleetNode,
@@ -275,13 +276,9 @@ _JOB_LOG_SCAN_LIMIT = 512
 _AGENT_LOG_SCAN_LIMIT = 128
 #: A hard ceiling on projected agent entries before the caller's ``lines`` cut.
 _AGENT_LOG_ENTRY_LIMIT = 4_096
-#: The attempt states whose own narrative an operator must be able to read back.
-#: ``expired`` is deliberately absent: a lease lapse leaves the attempt
-#: ``expired`` while parking the whole operation, so the park is selected by the
-#: operation's state instead.  Resurrecting every expired attempt would also
-#: report the lapses of operations that have since been retried, whose current
-#: status reason and timestamps no longer describe that lapse at all.
-_FAILED_ATTEMPT_STATES = ("failed", "waiting-for-operator")
+#: Which attempts an operator must be able to read back is owned by
+#: ``failed_attempt_condition`` in the failure-evidence module, so this
+#: projection and the durable evidence collector cannot disagree about it.
 #: The headline and level one attempt state narrates.  A lapse and a wait are
 #: things an operator must act on, not errors that claim the start died.
 _ATTEMPT_OUTCOME: Mapping[str, tuple[str, LogLevel]] = {
@@ -555,13 +552,8 @@ class ControllerJobLogProvider:
                     )
                     .where(
                         AgentOperation.node_id == node_id,
-                        or_(
-                            AgentOperationAttempt.state.in_(_FAILED_ATTEMPT_STATES),
-                            and_(
-                                AgentOperation.state == "waiting-for-operator",
-                                AgentOperationAttempt.attempt
-                                == AgentOperation.current_attempt,
-                            ),
+                        failed_attempt_condition(
+                            AgentOperation, AgentOperationAttempt
                         ),
                         AgentOperation.updated_at >= cutoff,
                     )

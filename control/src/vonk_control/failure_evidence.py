@@ -16,7 +16,7 @@ from typing import Literal
 from urllib.parse import quote
 
 from pydantic import ConfigDict, Field, TypeAdapter
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 
 from .bounded_json import BoundedJSONError, mapping, require_integer, sequence
@@ -118,10 +118,28 @@ class FailureEvidenceBundle(EvidenceModel):
     collector_errors: list[str] = Field(max_length=8)
 
 
+#: The Controller database budget for retained failure evidence.  The record
+#: count is not a second, independent cap: it is exactly the number of
+#: maximum-size bundles this budget holds, so the count can never refuse a
+#: bundle the byte budget still has room for.  Evidence is per attempt, so this
+#: one budget is what bounds a retried operation's whole attempt history.
+EVIDENCE_BYTE_BUDGET = 64 * 1024**2
+MAX_RETAINED_ENTRIES = EVIDENCE_BYTE_BUDGET // MAX_BUNDLE_BYTES
+
+#: The attempt states whose own terminal failure receipt must stay readable.
+#: ``expired`` is not among them by itself: a lease lapse or a supersession owns
+#: no receipt, and its operation-level reason may already describe a later
+#: attempt.  Only a receipt the attempt actually kept, or the park that still
+#: names it, qualifies.
+FAILED_ATTEMPT_STATES = ("failed", "waiting-for-operator")
+#: The one state a superseded or lapsed attempt keeps while owning no receipt.
+EXPIRED_ATTEMPT_STATE = "expired"
+
+
 class EvidenceRetention(EvidenceModel):
     days: int = Field(default=14, ge=1, le=365)
-    max_entries: int = Field(default=2000, ge=1, le=10000)
-    max_bytes: int = Field(default=64 * 1024**2, ge=MAX_BUNDLE_BYTES)
+    max_entries: int = Field(default=MAX_RETAINED_ENTRIES, ge=1, le=10000)
+    max_bytes: int = Field(default=EVIDENCE_BYTE_BUDGET, ge=MAX_BUNDLE_BYTES)
 
 
 def _aware(value: datetime) -> datetime:
@@ -345,6 +363,36 @@ def collect_failure(
     )
 
 
+def failed_attempt_condition(operation, attempt):
+    """SQL predicate: this attempt's failure evidence must stay readable.
+
+    One owner for "which attempt is a failure attempt": the durable evidence
+    collector and the operator log projection both select attempts through this
+    predicate, so neither can drift into showing or hiding an attempt the other
+    disagrees about.  An attempt qualifies when its own state is a terminal
+    failure, when it lapsed its lease but kept the agent's late failure receipt,
+    or when it is the current attempt of a parked operation -- the one lapse
+    whose narrative the operation's own reason still owns.  A bare superseded
+    lapse qualifies on none of them: it kept no receipt, and the operation's
+    reason already describes a different attempt, so neither may be invented.
+    """
+
+    return or_(
+        attempt.state.in_(FAILED_ATTEMPT_STATES),
+        and_(
+            attempt.state == EXPIRED_ATTEMPT_STATE,
+            # A receipt is a JSON object.  An absent one is stored as the JSON
+            # ``null`` value rather than SQL NULL, so the plain ``IS NOT NULL``
+            # test would read every bare lapse as if it had kept a receipt.
+            cast(attempt.result, String) != "null",
+        ),
+        and_(
+            operation.state == "waiting-for-operator",
+            attempt.attempt == operation.current_attempt,
+        ),
+    )
+
+
 class FailureEvidenceService:
     def __init__(
         self, sessions, *, clock=None, retention: EvidenceRetention | None = None
@@ -559,6 +607,14 @@ class FailureEvidenceService:
                 else model.current_attempt
             )
             state = AgentOperationAttempt.state if family == "agent" else model.state
+            # Agent operations keep one row per attempt, so they select through
+            # the shared attempt rule; the other families own a single attempt
+            # in place and are selected by their own state.
+            failures = (
+                failed_attempt_condition(model, AgentOperationAttempt)
+                if family == "agent"
+                else state.in_(FAILED_ATTEMPT_STATES)
+            )
             query = (
                 select(model, AgentOperationAttempt)
                 if family == "agent"
@@ -571,7 +627,7 @@ class FailureEvidenceService:
                 )
             query = (
                 query.where(
-                    state.in_(["failed", "waiting-for-operator"]),
+                    failures,
                     or_(
                         model.updated_at > after,
                         and_(model.updated_at == after, model.id > last_id),

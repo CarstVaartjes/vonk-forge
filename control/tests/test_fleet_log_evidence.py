@@ -329,3 +329,55 @@ def test_a_resumed_operation_does_not_report_a_stale_expiry_instant(tmp_path):
     )
     payload = _client(sessions).get(f"/api/fleet/{_NODE}/loginfo").json()
     assert payload["entries"] == []
+
+
+def test_a_superseded_lapse_that_kept_its_receipt_stays_readable(tmp_path):
+    # Wrong implementation: the projection selected the parked current attempt
+    # and the ``failed``/``waiting-for-operator`` states only, so an attempt
+    # that lapsed its lease and kept the agent's own late failure receipt
+    # disappeared from the operator surface the moment a later attempt existed
+    # -- the same attempt the evidence download must also keep.
+    sessions = _sessions(tmp_path)
+    operation_id = str(uuid4())
+    with sessions.begin() as session:
+        session.add(
+            AgentOperation(
+                id=operation_id,
+                parent_job_id=str(uuid4()),
+                node_id=_NODE,
+                kind="recipe.start",
+                payload_digest="d" * 64,
+                payload={},
+                authority_revision="b" * 64,
+                state="running",
+                status_reason="attempt 2 is running",
+                current_attempt=2,
+                created_at=_NOW - timedelta(seconds=600),
+                updated_at=_NOW,
+            )
+        )
+        session.add(
+            AgentOperationAttempt(
+                id=str(uuid4()),
+                operation_id=operation_id,
+                attempt=1,
+                fence=str(uuid4()),
+                lease_deadline=_LEASE_DEADLINE,
+                agent_certificate_serial="test-serial",
+                state="expired",
+                progress={"phase": "starting"},
+                result={
+                    "reason": _REASON,
+                    "error_code": "recipe_start_failed",
+                    "diagnostics": _diagnostics(),
+                },
+            )
+        )
+    payload = _client(sessions).get(f"/api/fleet/{_NODE}/loginfo").json()
+    messages = [entry["message"] for entry in payload["entries"]]
+    assert {entry["evidence_id"] for entry in payload["entries"]} == {operation_id}
+    assert any(_STABLE_CODE in message for message in messages), messages
+    # The attempt kept its own receipt, so its stable code is named rather than
+    # the Controller's wait for a receipt that never arrived.
+    assert any("error_code=recipe_start_failed" in message for message in messages)
+    assert any(_HELPER_DETAIL in message for message in messages)
