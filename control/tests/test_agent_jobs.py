@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -43,6 +44,10 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_start_payloads import (
+    RecipeStartPlacement,
+    _bind_compiled_execution_plan,
+)
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 
@@ -66,6 +71,80 @@ STOP_PAYLOAD = {
     "plan_digest": COMMIT,
 }
 STOP_RESULT = {"stopped": True}
+
+
+def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
+    """One wire-valid distributed rank-launch document.
+
+    Built through the production binder, because the payload model cross-checks
+    every placement field against the compiled plan: a hand-written document
+    would prove nothing about the shape a queued start actually carries.  What
+    this fixture pins is the field the renewal allowance consumes; the real
+    producer that writes it onto a queued start operation keeps its own witness
+    in ``test_recipe_operations``.
+    """
+
+    plan = copy.deepcopy(
+        json.loads(
+            (
+                Path(__file__).parents[2]
+                / "agent_protocol"
+                / "tests"
+                / "fixtures"
+                / "compiled-execution-plan-v2.json"
+            ).read_text(encoding="utf-8")
+        )
+    )
+    plan["topology"].update(
+        name="dual", mode="distributed", node_count=2, backend="mp"
+    )
+    plan["security"]["devices"] = ["nvidia.com/gpu=all"]
+    compiled = _bind_compiled_execution_plan(
+        plan,
+        placement=RecipeStartPlacement(
+            node_id=NODE_A,
+            rank=0,
+            role="entrypoint",
+            port=8000,
+            reserved_memory_bytes=4096,
+            fabric_address="192.168.100.10",
+        ),
+        endpoint_address="192.168.100.10",
+        master_address="192.168.100.10",
+        master_port=29500,
+        world_size=2,
+    )
+    # Binding rewrites the live rank placement and nothing else, so the identity
+    # and image digests are read from the document they came from.  The parse
+    # below re-checks both against the bound plan, so a binder that ever started
+    # rewriting them would fail loudly here instead of drifting.
+    payload: dict[str, object] = {
+        "schema_version": 2,
+        "run_id": "00000000-0000-4000-8000-0000000000aa",
+        "installation_id": "00000000-0000-4000-8000-000000000001",
+        "recipe_revision_id": "00000000-0000-4000-8000-0000000000bb",
+        "recipe_content_sha256": plan["identity"]["recipe_revision_sha256"],
+        "mapping_id": "00000000-0000-4000-8000-0000000000cc",
+        "mapping_generation": 1,
+        "run_generation": 1,
+        "image_digest": plan["runtime"]["image_digest"],
+        "plan_digest": "b" * 64,
+        "alias": "rank-0",
+        "rank": 0,
+        "role": "entrypoint",
+        "port": 8000,
+        "reserved_memory_bytes": 4096,
+        "endpoint_address": "192.168.100.10",
+        "world_size": 2,
+        "compiled_execution_plan": compiled,
+        "local_address": "192.168.100.10",
+        "master_address": "192.168.100.10",
+        "master_port": 29500,
+        "phase": "rank-launch",
+        "start_deadline": start_deadline.isoformat(),
+    }
+    RecipeOperationRequest.parse(ProtocolAgentOperation.RECIPE_START, payload)
+    return payload
 
 
 def canonical_install_payload() -> dict[str, object]:
@@ -1430,6 +1509,106 @@ def test_heartbeat_never_shortens_a_longer_existing_lease(service) -> None:
     assert progress.deadline >= claim.deadline
 
 
+def test_a_lapsed_renewal_is_reacquired_inside_the_start_budget(service) -> None:
+    # Wrong implementation: ``_active`` refused every renewal once the accepted
+    # lease deadline had passed, so a Controller that was briefly unreachable --
+    # one lost round trip, a restart, a slow database -- turned a healthy
+    # multi-minute start into a parked operation whose effect was unobserved.
+    jobs, sessions, clock = service
+    operation = jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_A,
+        "recipe.start",
+        COMMIT,
+        canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30)),
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+
+    # The Controller was unreachable for twice the accepted lease.
+    clock.advance(seconds=60)
+    renewed = jobs.heartbeat(claim, {"phase": "rank-launch"}, 30)
+
+    assert renewed.deadline > claim.deadline
+    assert renewed.cancel_requested is False
+    with sessions() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        assert attempt is not None
+        assert attempt.state == "running"
+        # SQLite hands back a naive timestamp; the fact under test is that the
+        # stored deadline moved past the lease the agent had accepted.
+        stored = attempt.lease_deadline
+        assert stored.replace(
+            tzinfo=UTC if stored.tzinfo is None else stored.tzinfo
+        ) > claim.deadline
+        current = session.get(AgentOperation, operation.id)
+        assert current is not None
+        assert current.state == "running"
+
+
+def test_a_lapsed_renewal_is_refused_once_the_start_budget_is_spent(service) -> None:
+    # The allowance is bounded by the operation's own immutable budget, not by
+    # the lease being recovered: wrong implementation lets any fence re-acquire
+    # an attempt whose start deadline has already elapsed.
+    jobs, sessions, clock = service
+    jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_A,
+        "recipe.start",
+        COMMIT,
+        canonical_start_payload(start_deadline=clock.now + timedelta(seconds=40)),
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+
+    clock.advance(seconds=60)
+    with pytest.raises(StaleAgentAttempt):
+        jobs.heartbeat(claim, {"phase": "rank-launch"}, 30)
+
+
+def test_a_lapsed_renewal_without_a_start_budget_is_refused(service) -> None:
+    # Deliberate limitation, recorded rather than papered over: an operation that
+    # binds no start deadline has no second clock to bound an allowance, and
+    # inventing one would widen the fence with no fact behind it.  Its lease
+    # stays the only clock.
+    jobs, sessions, clock = service
+    jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+
+    clock.advance(seconds=60)
+    with pytest.raises(StaleAgentAttempt):
+        jobs.heartbeat(claim, None, 30)
+
+
+def test_a_late_result_is_still_not_applied_to_a_lapsed_attempt(service) -> None:
+    # The allowance is a renewal door, not a result door: a receipt that arrives
+    # after the lease lapsed is still refused as no longer current, because a
+    # late outcome is a different decision with its own fencing.  The payload
+    # binds a start deadline, so the allowance is open and only the result
+    # boundary can be what refuses.
+    jobs, sessions, clock = service
+    jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_A,
+        "recipe.start",
+        COMMIT,
+        canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30)),
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+
+    clock.advance(seconds=60)
+    with pytest.raises(StaleAgentAttempt):
+        jobs.fail(claim, "outcome arrived for an attempt whose lease had lapsed")
+
+
 @pytest.mark.parametrize(
     "restriction", (None, "expired", "revoked", "cancelled", "stale")
 )
@@ -2547,6 +2726,36 @@ def test_excluded_work_refusal_records_an_unready_retry_attempt(service) -> None
         assert "operator-retry-attempt-not-ready" in stored.status_reason
 
 
+@pytest.mark.parametrize("malformed", (1, "true"))
+def test_claim_admits_and_names_a_malformed_cancel_flag(service, malformed) -> None:
+    """A non-boolean cancel flag does not cancel, and is not silent either.
+
+    The canonical lifecycle result declares
+    ``cancel_requested: Literal[True]``, so a stored ``1`` or ``"true"`` is
+    malformed.  The predicate reads it exactly instead of coercing it, so
+    legitimate work is not blocked, and the admission path records the
+    malformation so reading it as "not cancelled" never becomes a silent
+    default.
+    """
+
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    with sessions.begin() as session:
+        job = session.get(Job, parent_job.id)
+        assert job is not None
+        job.result = {"cancel_requested": malformed}
+
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None and claim.operation_id == operation.id
+
+    with sessions() as session:
+        job = session.get(Job, parent_job.id)
+        assert job is not None and job.status_reason is not None
+        assert job.status_reason.startswith("claim note: ")
+        assert "parent-cancel-flag-malformed" in job.status_reason
+
+
 def test_no_work_claim_records_no_refusal(service) -> None:
     jobs, sessions, clock = service
 
@@ -2576,7 +2785,8 @@ def _claim_refusal_check_names() -> tuple[str, ...]:
     """
 
     predicate = _claim_predicate(datetime(2026, 8, 3, tzinfo=UTC))
-    names = [condition.check for condition in predicate.common]
+    names = [condition.check for condition in predicate.diagnostics]
+    names.extend(condition.check for condition in predicate.common)
     for branch in predicate.branches:
         names.extend(condition.check for condition in branch.conditions)
     return tuple(names)
@@ -2624,6 +2834,13 @@ def _scenario_parent_cancel_requested(sessions, clock, parent_job, operation) ->
         job = session.get(Job, parent_job.id)
         assert job is not None
         job.result = {"cancel_requested": True}
+
+
+def _scenario_parent_cancel_flag_malformed(sessions, clock, parent_job, operation) -> None:
+    with sessions.begin() as session:
+        job = session.get(Job, parent_job.id)
+        assert job is not None
+        job.result = {"cancel_requested": 1}
 
 
 def _scenario_queued_attempt_not_zero(sessions, clock, parent_job, operation) -> None:
@@ -2692,6 +2909,7 @@ def _scenario_operator_retry_attempt_not_ready(
 #: One scenario per condition the predicate can fail.  Each leaves exactly one
 #: named condition false, so the classifier must name that condition.
 _REFUSAL_SCENARIOS: dict[str, Callable[..., None]] = {
+    "parent-cancel-flag-malformed": _scenario_parent_cancel_flag_malformed,
     "parent-job-missing": _scenario_parent_job_missing,
     "workload-intent-superseded": _scenario_workload_intent_superseded,
     "parent-cancel-requested": _scenario_parent_cancel_requested,

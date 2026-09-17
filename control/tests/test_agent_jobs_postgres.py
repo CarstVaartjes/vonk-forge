@@ -1014,17 +1014,16 @@ def test_postgres_concurrent_final_completions_aggregate_parent_once(
     assert state(sessions, parent_job.id) == "succeeded"
 
 
-@pytest.mark.parametrize("coerced", (1, "true"))
-def test_postgres_cancel_requested_coercion_matches_the_predicate(
-    service, coerced
-) -> None:
-    """A truthy stored cancel flag is named, not left unclassified.
+@pytest.mark.parametrize("malformed", (1, "true"))
+def test_postgres_non_boolean_cancel_flag_does_not_cancel(service, malformed) -> None:
+    """A JSON value the SQL cast would read as true must not mean "cancelled".
 
-    The authoritative predicate filters on PostgreSQL's cast of the JSON text
-    to boolean, so a stored ``1`` or ``"true"`` is excluded.  A classifier that
-    tested the Python singleton ``True`` could not see those values and fell
-    through to ``unclassified-unclaimable``; deriving the refusal from the
-    predicate's own expression keeps the two in step.
+    The canonical lifecycle result declares
+    ``cancel_requested: Literal[True]``, so a stored ``1`` or ``"true"`` is
+    malformed.  PostgreSQL's ``CAST(... ->> 'cancel_requested' AS BOOLEAN)``
+    accepted both and silently cancelled the operation; the exact JSON read
+    does not, and the admission path names the malformation instead of leaving
+    it silent.
     """
 
     sessions, clock = service
@@ -1034,7 +1033,28 @@ def test_postgres_cancel_requested_coercion_matches_the_predicate(
     with sessions.begin() as session:
         job = session.get(Job, parent_job.id)
         assert job is not None
-        job.result = {"cancel_requested": coerced}
+        job.result = {"cancel_requested": malformed}
+
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None and claim.operation_id == operation.id
+
+    with sessions() as session:
+        job = session.get(Job, parent_job.id)
+        assert job is not None and job.status_reason is not None
+        assert "parent-cancel-flag-malformed" in job.status_reason
+
+
+def test_postgres_boolean_cancel_request_is_named(service) -> None:
+    """A genuine JSON ``true`` still cancels and is named by the classifier."""
+
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    with sessions.begin() as session:
+        job = session.get(Job, parent_job.id)
+        assert job is not None
+        job.result = {"cancel_requested": True}
 
     assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
 
