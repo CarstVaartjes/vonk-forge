@@ -446,3 +446,83 @@ compare "before" and "after", extract a detached worktree at the commit you
 want (`git worktree add --detach /private/tmp/before origin/main`) or stash
 explicit paths (`git stash push -- <paths>`), and delete the worktree when you
 are done.
+
+### Land one pull request at a time
+
+Staggering merges is a deployment requirement, not tidiness.
+
+Every merge to `main` triggers image builds and an installer generation, and the
+publisher **refuses to promote a superseded build**. Merging several pull
+requests in a burst therefore leaves the later images built, published and
+addressable but referenced by no accepted generation — they cannot be deployed,
+and redeploying silently pulls the older Controller. That is not hypothetical:
+`dev-sha-17c4276a…` was published and referenced by nothing, so a redeploy
+appeared to do nothing.
+
+Arm auto-merge on **one** pull request at a time, and arm the next only once the
+accepted generation has been built from a commit that **contains** the previous
+merge. Until then, deploy by pinning the immutable tag a build produced
+(`dev-sha-<full-commit-sha>`) or the digest set a generation names — never rely on
+a floating alias, which follows *accepted* images rather than the newest build.
+
+Two consequences:
+
+- Every branch regenerates `inventory/sbom/manifest.json`, so a branch based on
+  an earlier `main` arrives `DIRTY` rather than merely behind. Resolve it by
+  merging `main` and **regenerating**, never by hand. If a conflict appears
+  anywhere other than that generated file, keep both sides deliberately and say
+  which — do not let a script pick for you.
+- **Never arm auto-merge on a pull request that changes the schema.**
+  `control/src/vonk_control/models.py` and `control/migrations/` are the marker.
+  Under the fresh-schema contract a deployed Controller refuses startup on any
+  schema difference and `0000_fresh_schema` has no upgrade path, so merging one
+  means wiping the database — fleet enrollment, profiles, every installation
+  record and the audit trail — and re-enrolling a Spark needs node access. That
+  is an operator decision every time. Prefer removing the schema change: a value
+  a projection needs is usually already persisted in an existing JSON document,
+  which costs no column at all.
+
+### Two artifacts are called "the manifest"
+
+They have different owners and different update rules.
+
+- `inventory/sbom/manifest.json` is a curated **file→digest map** over declared
+  inputs (`image_lock_sha256`, `inputs`, `protocol_wheel_sha256`, `sboms`,
+  `signature_key_sha256`) with no `source_sha`. Regenerate it last, and expect
+  **no change** when a commit touches nothing curated — a no-op is correct, not a
+  failure.
+- `install.vonkforge.ai/artifacts/dev/current.manifest` is the signed **release**
+  manifest, carrying `version`, `source_sha`, `generation` and `release_path`.
+  Its `version` ends in `g<commit>` — the commit the artifacts were **built
+  from** — while `source_sha` is refreshed by the scheduled re-sign **without
+  rebuilding**. When comparing a generation to `main`, use the build commit from
+  `version`; `source_sha` alone reports a generation as covering a tip whose
+  artifacts predate it.
+
+### Derive a rule; do not restate it
+
+A rule with two implementations drifts, and the drift stays invisible until it
+refuses real work. Two conditions of the claim predicate went unchecked in a
+hand-written refusal classifier purely because the predicate grew and the
+restatement did not, and a JSON value read one way in SQL and another in Python
+turned a malformed row into an opaque `unclassified-` refusal. When a predicate
+decides something, name its conditions once and have both the decision and the
+explanation evaluate **those same objects**, so a condition cannot exist without
+a name. Pair it with a test that fails when a condition has no named reason, so
+the next addition cannot reintroduce the gap.
+
+### Bound the resource, and say what the bound is
+
+A cap is fault tolerance only if it derives from the resource it protects and
+reports itself when it fires. Count caps chosen as round numbers do not: a
+512-element cap beside a 256 KiB frame budget refused a legitimate container
+command line of 518 arguments, and the refusal surfaced under a name that blamed
+an unrelated component for hours. Prefer bounding bytes, time, disk or memory;
+derive any structural count from that bound or drop it; separate legal bytes from
+unframeable ones; and record the limit **and** the observed value, so a refusal
+reads "613 of 4096" rather than "invalid".
+
+Never refuse legitimate work for carrying a value the plan contract permits —
+an argument that is empty, or contains a newline, for instance. Either both
+layers agree, or the stricter one moves to where it can fail early, at compile or
+admission, rather than after a successful install.
