@@ -2859,6 +2859,7 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
                                 "reused_bytes": 0,
                                 "required_download_bytes": 0,
                                 "required_bytes": 1024,
+                                "required_payload_bytes": 1024,
                                 "disk_floor_bytes": 0,
                                 "free_after_bytes": 0,
                                 "blockers": [],

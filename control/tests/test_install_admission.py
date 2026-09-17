@@ -33,6 +33,7 @@ from vonk_control.models import (
     RecipeInstallation,
     ResourceReservation,
 )
+from vonk_control.recipe_execution_contract import parse_stored_installation_plan
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .preflight_fixtures import record_passing_preflight
@@ -689,6 +690,15 @@ def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> 
         assert installation.recipe_build_id == build
         assert installation.mapping_generation == 1
         assert reservation.amount_bytes == plan.nodes[0].required_bytes
+        # The persisted admission plan carries the materialized payload
+        # expectation the Fleet presence byte check reads, and the recorded
+        # digest is the admitted one.  ``required_bytes`` stays the reservation.
+        stored_plan = parse_stored_installation_plan(installation.plan)
+        assert stored_plan.nodes[0].required_payload_bytes == (
+            plan.nodes[0].required_payload_bytes
+        )
+        assert stored_plan.nodes[0].required_bytes == plan.nodes[0].required_bytes
+        assert stored_plan.plan_digest == plan.plan_digest
 
 
 def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) -> None:

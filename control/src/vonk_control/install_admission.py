@@ -68,6 +68,10 @@ class InstallNodePlan:
     reused_bytes: int
     required_download_bytes: int
     required_bytes: int
+    #: The model payload the compiled plan materializes into the installation
+    #: tree.  ``required_bytes`` is the disk reservation, so the presence health
+    #: check compares the agent's measured tree against this payload instead.
+    required_payload_bytes: int
     disk_floor_bytes: int
     free_after_bytes: int | None
     blockers: tuple[AdmissionReason, ...]
@@ -557,6 +561,7 @@ class InstallAdmissionService:
                     reused,
                     required_download,
                     required,
+                    actual_artifact_bytes,
                     floor,
                     free_after,
                     tuple(blockers),

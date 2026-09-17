@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -44,6 +45,7 @@ from vonk_control.models import (
     ResourceReservation,
     RunNode,
 )
+from vonk_control.recipe_execution_contract import installation_plan_document
 from vonk_control.telemetry import TelemetryRepository
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -2142,3 +2144,259 @@ def test_projection_rejects_more_than_500_registered_nodes_before_state_queries(
     assert "from fleet_event_cursor" in selects[0]
     assert "from agent_nodes" in selects[1]
     assert "agent_node_profiles" not in " ".join(selects)
+
+
+def _stored_installation_plan(
+    *,
+    mapping_id: str,
+    revision_id: str,
+    node_id: str,
+    node: dict[str, object],
+) -> dict[str, object]:
+    """Build the admission plan document the way the producer persists it.
+
+    The compiled execution plan is the real fixture the wire contract tests use,
+    so the plan validates as the current contract rather than a hand-written
+    approximation.
+    """
+
+    compiled_plan = json.loads(
+        (Path(__file__).parent / "fixtures" / "compiled_workload_v2.json").read_text()
+    )
+    return installation_plan_document(
+        {
+            "schema_version": 1,
+            "mapping_id": mapping_id,
+            "mapping_generation": 1,
+            "recipe_build_id": None,
+            "image_digest": "sha256:" + "5" * 64,
+            "recipe_revision_id": revision_id,
+            "recipe_content_sha256": "7" * 64,
+            "allowed": True,
+            "plan_digest": "7" * 64,
+            "nodes": [
+                {
+                    "node_id": node_id,
+                    "rank": 0,
+                    "role": "entrypoint",
+                    "allowed": True,
+                    "inventory_observed_at": None,
+                    "free_bytes": 1024,
+                    "active_reserved_bytes": 0,
+                    "reused_bytes": 0,
+                    "required_download_bytes": 0,
+                    "required_bytes": 120,
+                    "disk_floor_bytes": 0,
+                    "free_after_bytes": 0,
+                    "blockers": [],
+                    "warnings": [],
+                    **node,
+                }
+            ],
+            "compiled_execution_plans": {node_id: compiled_plan},
+        }
+    )
+
+
+def _installed_byte_group(
+    sessions,
+    *,
+    installation_id: str,
+    reservation_bytes: int,
+    payload_expectation_bytes: int | None,
+    installed_bytes: int,
+) -> None:
+    """Persist one installed single-rank group the way the producer records it.
+
+    ``reservation_bytes`` is the disk reservation admission stores on the
+    ``installation_nodes`` row, ``payload_expectation_bytes`` is the materialized
+    payload the admitted plan records (``None`` for a plan written before the
+    expectation existed), and ``installed_bytes`` is the installation-tree total
+    the agent measured and reported as install evidence.
+    """
+
+    recipe_id = "00000000-0000-4000-8000-000000000501"
+    revision_id = "00000000-0000-4000-8000-000000000502"
+    mapping_id = "00000000-0000-4000-8000-000000000503"
+    build_id = "00000000-0000-4000-8000-000000000504"
+    node: dict[str, object] = {"required_bytes": reservation_bytes}
+    if payload_expectation_bytes is not None:
+        node["required_payload_bytes"] = payload_expectation_bytes
+    plan = _stored_installation_plan(
+        mapping_id=mapping_id,
+        revision_id=revision_id,
+        node_id=NODE_A,
+        node=node,
+    )
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                architecture="linux-arm64",
+                capabilities=[],
+                last_seen_at=NOW,
+            )
+        )
+        session.add(_certificate(NODE_A, "byte-recipe"))
+        documents, revisions = _canonical_catalog_documents(
+            recipe_id,
+            revision_id,
+            "00000000-0000-4000-8000-000000000505",
+            "00000000-0000-4000-8000-000000000506",
+            slug="byte-recipe",
+            title="Byte Recipe",
+        )
+        session.add_all(documents)
+        session.flush()
+        session.add_all(revisions)
+        session.add(
+            ClusterMapping(
+                id=mapping_id,
+                recipe_revision_id=revision_id,
+                topology_name="solo",
+                generation=1,
+                node_count=1,
+                state="ready",
+                parameters={},
+                placement_digest="2" * 64,
+                endpoint_owner_node_id=NODE_A,
+                created_by="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            RecipeBuild(
+                id=build_id,
+                recipe_revision_id=revision_id,
+                builder_node_id=NODE_A,
+                source_bundle_sha256="3" * 64,
+                build_input_sha256="4" * 64,
+                state="succeeded",
+                policy_report={},
+                plan={},
+                image_digest="sha256:" + "5" * 64,
+                oci_layout_sha256="6" * 64,
+                image_bytes=100,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            ClusterMappingNode(
+                id="00000000-0000-4000-8000-000000000507",
+                mapping_id=mapping_id,
+                node_id=NODE_A,
+                rank=0,
+                role="entrypoint",
+                endpoint_owner=True,
+                created_at=NOW,
+            )
+        )
+        session.add(
+            RecipeInstallation(
+                id=installation_id,
+                recipe_revision_id=revision_id,
+                mapping_id=mapping_id,
+                mapping_generation=1,
+                recipe_build_id=build_id,
+                image_digest="sha256:" + "5" * 64,
+                plan_digest="7" * 64,
+                plan=plan,
+                state="installed",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            InstallationNode(
+                id="00000000-0000-4000-8000-000000000508",
+                installation_id=installation_id,
+                node_id=NODE_A,
+                rank=0,
+                role="entrypoint",
+                state="installed",
+                required_bytes=reservation_bytes,
+                installed_bytes=installed_bytes,
+                updated_at=NOW,
+            )
+        )
+
+
+def _installed_presence(sessions, installation_id: str) -> RecipePresence:
+    nodes = {
+        NODE_A: {
+            "display_name": "Alpha",
+            "hostname": "alpha.internal",
+            "lifecycle": "managed",
+            "labels": {},
+        }
+    }
+    snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
+    return next(
+        value
+        for value in snapshot.nodes[0].installed
+        if value.installation_id == installation_id
+    )
+
+
+@pytest.mark.parametrize(
+    ("reservation_bytes", "payload_expectation_bytes", "installed_bytes", "complete", "reason"),
+    [
+        # Admission reserves the materialized payload plus staging, cache and
+        # rollback headroom, so the reservation exceeds the tree the agent
+        # measures for an honest, finished installation.
+        (120, 100, 100, True, None),
+        # A tree that really is short of the admitted payload stays incomplete.
+        (120, 100, 99, False, "rank-incomplete-bytes"),
+    ],
+)
+def test_installed_bytes_flag_compares_the_persisted_payload_expectation(
+    reservation_bytes: int,
+    payload_expectation_bytes: int,
+    installed_bytes: int,
+    complete: bool,
+    reason: str | None,
+) -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    installation_id = "00000000-0000-4000-8000-000000000509"
+    _installed_byte_group(
+        sessions,
+        installation_id=installation_id,
+        reservation_bytes=reservation_bytes,
+        payload_expectation_bytes=payload_expectation_bytes,
+        installed_bytes=installed_bytes,
+    )
+    presence = _installed_presence(sessions, installation_id)
+    assert (presence.complete, presence.degraded_reason) == (complete, reason)
+
+
+def test_presence_does_not_fire_the_byte_reason_without_a_persisted_expectation() -> (
+    None
+):
+    """A plan written before the expectation existed reads and stays complete.
+
+    The measured tree is far below the disk reservation here, so the assertion
+    fails if the byte check falls back to comparing against the reservation or
+    treats an absent expectation as a short install.
+    """
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    installation_id = "00000000-0000-4000-8000-000000000510"
+    _installed_byte_group(
+        sessions,
+        installation_id=installation_id,
+        reservation_bytes=120,
+        payload_expectation_bytes=None,
+        installed_bytes=1,
+    )
+    presence = _installed_presence(sessions, installation_id)
+    assert (presence.complete, presence.degraded_reason) == (True, None)
