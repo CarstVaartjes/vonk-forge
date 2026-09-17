@@ -50,7 +50,21 @@ def _aware(value: datetime) -> datetime:
 
 
 class AgentUpgradeConflict(RuntimeError):
-    """An agent upgrade plan is invalid, stale, or not safely executable."""
+    """An agent upgrade plan is invalid, stale, or not safely executable.
+
+    The refusal text is surfaced to an operator, so a Spark is named only by its
+    canonical identifier.  Any other ``spark_id`` is a stored row value and is
+    replaced rather than echoed.
+    """
+
+    def __init__(self, detail: str, *, spark_id: str | None = None) -> None:
+        if spark_id is not None:
+            detail = (
+                f"Spark {spark_id} {detail}"
+                if _NODE_ID.fullmatch(spark_id) is not None
+                else "agent upgrade target is invalid"
+            )
+        super().__init__(detail)
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,10 +232,10 @@ class AgentUpgradeService:
                 node = nodes[node_id]
                 reason = self._ineligible_reason(node, payload, now)
                 if reason is not None:
-                    raise AgentUpgradeConflict(f"Spark {node_id} {reason}")
+                    raise AgentUpgradeConflict(reason, spark_id=node_id)
                 if self._at_target(node, payload):
                     raise AgentUpgradeConflict(
-                        f"Spark {node_id} already runs the requested agent build"
+                        "already runs the requested agent build", spark_id=node_id
                     )
                 try:
                     source = load_package_source(
@@ -232,7 +246,7 @@ class AgentUpgradeService:
                     )
                 except (httpx.HTTPError, ValueError) as error:
                     raise AgentUpgradeConflict(
-                        f"Spark {node_id} exact signed rollback package is unavailable"
+                        "exact signed rollback package is unavailable", spark_id=node_id
                     ) from error
                 sources[node_id] = source.model_dump(mode="json")
         document = {

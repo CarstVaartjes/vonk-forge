@@ -2151,3 +2151,20 @@ def test_reconciled_upgrade_past_preserved_helper_failure_binds_its_package_rece
     assert agent.package_sha256 == PACKAGE["package_sha256"]
     assert agent.package_evidence.source == "Authenticated package upgrade receipt"
     assert agent.package_evidence.freshness == "current"
+
+
+def test_a_conflict_names_a_spark_only_by_its_canonical_identifier() -> None:
+    """A stored row value must never reach an operator through a refusal.
+
+    ``Spark {node_id} {reason}`` is surfaced by the Controller API, so the node
+    token is accepted only when it is a canonical Spark identifier. Anything
+    else becomes the generic target refusal instead of echoing stored text.
+    """
+
+    assert str(
+        AgentUpgradeConflict("is not currently online", spark_id=NODE_A)
+    ) == f"Spark {NODE_A} is not currently online"
+    leaked = AgentUpgradeConflict(
+        "is not currently online", spark_id="api_key=stored-secret"
+    )
+    assert str(leaked) == "agent upgrade target is invalid"
