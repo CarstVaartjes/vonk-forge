@@ -16,7 +16,9 @@ pub use vonk_agent_protocol::{
     SignedHostHelperGrant as SignedGrant,
 };
 
-pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
+/// The same frame ceiling the agent frames against; declared once in the wire
+/// contract so the two sides cannot drift.
+pub const MAX_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BYTES;
 pub const MAX_GRANT_LIFETIME_SECONDS: i64 = 300;
 pub const AUTHORITY: &str = HOST_HELPER_AUTHORITY;
 const ARTIFACT_DOMAIN: &[u8] = b"VONK-HOST-ARTIFACT-V1\0";
