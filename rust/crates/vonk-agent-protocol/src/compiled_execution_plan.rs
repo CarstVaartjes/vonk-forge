@@ -483,11 +483,17 @@ impl CompiledJob {
 }
 
 impl CompiledRuntimeImage {
-    /// Derive the local imported reference from the immutable archive and
-    /// registry/platform identity. Controller transport paths never become
-    /// container-engine image arguments.
+    /// The local imported reference for this exact archive and
+    /// registry/platform identity.
+    ///
+    /// The Controller owns and sends its own derivation in the transported
+    /// `local_image_reference` field, and `validate()` requires that field to
+    /// equal this derivation. The accessor therefore answers with the
+    /// derivation itself: a Controller transport path can never become a
+    /// container-engine image argument, even if a caller reads the reference
+    /// before validation.
     pub fn local_image_reference(&self) -> String {
-        self.local_image_reference.clone()
+        self.expected_local_image_reference()
     }
 
     fn validate(&self) -> Result<(), WorkloadError> {

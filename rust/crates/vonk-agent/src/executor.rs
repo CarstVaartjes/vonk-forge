@@ -3292,6 +3292,14 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "runtime_helper_rejection_malformed"
             | "runtime_helper_outcome_malformed"
             | "runtime_helper_request_document_invalid"
+            | "runtime_helper_request_schema_version_invalid"
+            | "runtime_helper_request_attempt_invalid"
+            | "runtime_helper_request_arguments_presence_invalid"
+            | "runtime_helper_request_installation_identity_invalid"
+            | "runtime_helper_request_argument_count_invalid"
+            | "runtime_helper_request_argument_empty"
+            | "runtime_helper_request_argument_too_long"
+            | "runtime_helper_request_argument_control_byte"
             | "runtime_helper_request_storage_invalid"
             | "runtime_helper_system_clock_invalid"
             | "runtime_helper_inspection_receipt_invalid"
@@ -4584,6 +4592,14 @@ mod tests {
             crate::host_runtime::HelperProtocolCause::RejectionMalformed,
             crate::host_runtime::HelperProtocolCause::OutcomeMalformed,
             crate::host_runtime::HelperProtocolCause::RequestDocument,
+            crate::host_runtime::HelperProtocolCause::RequestSchemaVersion,
+            crate::host_runtime::HelperProtocolCause::RequestAttempt,
+            crate::host_runtime::HelperProtocolCause::RequestArgumentsPresence,
+            crate::host_runtime::HelperProtocolCause::RequestInstallationIdentity,
+            crate::host_runtime::HelperProtocolCause::RequestArgumentCount,
+            crate::host_runtime::HelperProtocolCause::RequestArgumentEmpty,
+            crate::host_runtime::HelperProtocolCause::RequestArgumentTooLong,
+            crate::host_runtime::HelperProtocolCause::RequestArgumentControlByte,
             crate::host_runtime::HelperProtocolCause::RequestStorage,
             crate::host_runtime::HelperProtocolCause::SystemClock,
             crate::host_runtime::HelperProtocolCause::InspectionReceipt,

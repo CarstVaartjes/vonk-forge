@@ -60,6 +60,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 512;
+/// The per-value ceiling an argument may occupy in one bounded helper request.
+pub const MAX_HOST_RUNTIME_ARGUMENT_BYTES: usize = 4096;
 pub const MAX_DOCUMENT_BYTES: usize = 64 * 1024;
 pub const MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES: usize =
@@ -143,40 +145,102 @@ pub fn host_helper_grant_signing_bytes(
     Ok(value)
 }
 
+/// One distinct contract of an agent-built [`HostRuntimeRequest`].
+///
+/// `validate()` used to answer every violation with one opaque `ProtocolError`,
+/// so the agent could only report `helper_request_document_invalid` no matter
+/// which rule refused. A live blocked Start could not say whether the request
+/// version, the attempt, the argument envelope, the argument count or one
+/// argument's value was wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum HostRuntimeRequestRule {
+    /// `schema_version` is not the current schema.
+    #[error("host runtime request schema version is invalid")]
+    SchemaVersion,
+    /// `attempt` is zero.
+    #[error("host runtime request attempt is invalid")]
+    Attempt,
+    /// Arguments are present or absent for the wrong action.
+    #[error("host runtime request argument presence is invalid")]
+    ArgumentsPresence,
+    /// An installation identity is present or absent for the wrong action.
+    #[error("host runtime request installation identity is invalid")]
+    InstallationIdentity,
+    /// There are more arguments than the bounded transport accepts.
+    #[error("host runtime request argument count is invalid")]
+    ArgumentCount,
+    /// An argument is empty.
+    #[error("host runtime request argument is empty")]
+    ArgumentEmpty,
+    /// An argument exceeds the per-value transport ceiling.
+    #[error("host runtime request argument is too long")]
+    ArgumentTooLong,
+    /// An argument carries a control byte the transport refuses.
+    #[error("host runtime request argument carries a control byte")]
+    ArgumentControlByte,
+    /// The inspection observation binding does not match the request.
+    #[error("host runtime request observation binding is invalid")]
+    ObservationBinding,
+    /// A non-inspection action carried an observation binding.
+    #[error("host runtime request observation action is invalid")]
+    ObservationAction,
+    /// The arguments could not be canonicalized.
+    #[error("host runtime request arguments could not be encoded")]
+    Encoding,
+}
+
 impl HostRuntimeRequest {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema_version != 1
-            || self.attempt == 0
-            || (self.arguments.is_empty()
-                != matches!(
-                    self.action,
-                    HostRuntimeAction::RuntimePreflight | HostRuntimeAction::InstallationCleanup
-                ))
-            || (self.installation_id.is_some()
-                != (self.action == HostRuntimeAction::InstallationCleanup))
-            || self.arguments.len() > MAX_HOST_RUNTIME_ARGUMENTS
-            || self.arguments.iter().any(|value| {
-                value.is_empty() || value.len() > 4096 || value.contains(['\0', '\r', '\n'])
-            })
+    pub fn validate(&self) -> Result<(), HostRuntimeRequestRule> {
+        if self.schema_version != 1 {
+            return Err(HostRuntimeRequestRule::SchemaVersion);
+        }
+        if self.attempt == 0 {
+            return Err(HostRuntimeRequestRule::Attempt);
+        }
+        if self.arguments.is_empty()
+            != matches!(
+                self.action,
+                HostRuntimeAction::RuntimePreflight | HostRuntimeAction::InstallationCleanup
+            )
         {
-            return Err(ProtocolError::Identity("host runtime request"));
+            return Err(HostRuntimeRequestRule::ArgumentsPresence);
+        }
+        if self.installation_id.is_some() != (self.action == HostRuntimeAction::InstallationCleanup)
+        {
+            return Err(HostRuntimeRequestRule::InstallationIdentity);
+        }
+        if self.arguments.len() > MAX_HOST_RUNTIME_ARGUMENTS {
+            return Err(HostRuntimeRequestRule::ArgumentCount);
+        }
+        for value in &self.arguments {
+            if value.is_empty() {
+                return Err(HostRuntimeRequestRule::ArgumentEmpty);
+            }
+            if value.len() > MAX_HOST_RUNTIME_ARGUMENT_BYTES {
+                return Err(HostRuntimeRequestRule::ArgumentTooLong);
+            }
+            if value.contains(['\0', '\r', '\n']) {
+                return Err(HostRuntimeRequestRule::ArgumentControlByte);
+            }
         }
         match (&self.action, &self.observation) {
             (HostRuntimeAction::RunInspect, Some(binding)) => {
-                binding.validate()?;
+                binding
+                    .validate()
+                    .map_err(|_| HostRuntimeRequestRule::ObservationBinding)?;
                 if self.job_id != binding.run_id
                     || binding.run_generation != self.attempt
-                    || hex_sha256(&canonical_json(&self.arguments)?)
-                        != binding.runtime_arguments_sha256
+                    || hex_sha256(
+                        &canonical_json(&self.arguments)
+                            .map_err(|_| HostRuntimeRequestRule::Encoding)?,
+                    ) != binding.runtime_arguments_sha256
                 {
-                    return Err(ProtocolError::Identity("host runtime observation binding"));
+                    return Err(HostRuntimeRequestRule::ObservationBinding);
                 }
             }
             (HostRuntimeAction::RunInspect, None) => {}
             (_, None) => {}
-            (_, Some(_)) => {
-                return Err(ProtocolError::Identity("host runtime observation action"));
-            }
+            (_, Some(_)) => return Err(HostRuntimeRequestRule::ObservationAction),
         }
         Ok(())
     }
