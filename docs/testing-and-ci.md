@@ -58,7 +58,9 @@ uv run --project control --frozen --with-editable . \
 TMPDIR=/tmp/vk uv run --project control --frozen --with-editable . \
   pytest -q deploy/compose/tests
 
-# Release evidence and generated supply-chain inventory
+# Release evidence and generated supply-chain inventory. The same offline
+# verifier runs in the always-on "Supply-chain evidence" CI job, so a stale
+# SBOM, protocol wheel or image pin fails a pull request rather than the tag.
 scripts/verify-supply-chain --json
 ```
 
