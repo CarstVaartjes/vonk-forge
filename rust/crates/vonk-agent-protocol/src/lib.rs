@@ -59,7 +59,20 @@ use thiserror::Error;
 #[cfg(test)]
 use uuid::Uuid;
 
-pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 512;
+/// The most arguments one bounded helper request may carry.
+///
+/// This count is a coarse sanity bound, not the payload authority. The
+/// authoritative size limit is the agent's `MAX_HELPER_MESSAGE_BYTES` frame
+/// ceiling (256 KiB) on the canonical request body, which the agent enforces
+/// before it frames the message and the privilege boundary enforces when it
+/// reads the frame. One request frames the whole container command line --
+/// four image identities, the `podman run` options and one `--mount` pair per
+/// mounted model file -- so a legitimate many-artifact recipe needs far more
+/// than 512 elements: the GLM EXL3 dual recipe mounts 149 model files, which
+/// alone project to 152 mount pairs. 4096 leaves that shape room while still
+/// refusing an absurd count, and for realistic argument lengths the frame
+/// ceiling binds first.
+pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 4096;
 /// The per-value ceiling an argument may occupy in one bounded helper request.
 pub const MAX_HOST_RUNTIME_ARGUMENT_BYTES: usize = 4096;
 pub const MAX_DOCUMENT_BYTES: usize = 64 * 1024;

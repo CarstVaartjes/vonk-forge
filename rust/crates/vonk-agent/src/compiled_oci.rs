@@ -654,6 +654,82 @@ mod tests {
     }
 
     #[test]
+    fn a_many_artifact_runtime_command_is_framed() {
+        // Wrong implementation: `MAX_HOST_RUNTIME_ARGUMENTS = 512` refused the
+        // live GLM EXL3 dual command line, whose 149 model files alone project
+        // to 152 `--mount` pairs, before the helper was ever called.
+        use super::OciMount;
+        use uuid::Uuid;
+        use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest};
+
+        let plan: CompiledExecutionPlan = serde_json::from_value(fixture()).unwrap();
+        let mut invocation = project(&plan, &paths()).unwrap();
+        // The GLM EXL3 dual recipe selects 149 model files (144 + 5), so the
+        // projection emits one read-only bind mount per file plus the outputs,
+        // cache and runtime mounts.
+        invocation.mounts = (0..152)
+            .map(|index| OciMount {
+                source: PathBuf::from(format!("/run/vonk/models/shard-{index:03}")),
+                target: format!("/models/shard-{index:03}"),
+                read_only: true,
+            })
+            .collect();
+        // Its 29 recipe environment entries plus the platform ones.
+        invocation.environment = (0..38)
+            .map(|index| super::CompiledEnvironmentEntry {
+                name: format!("VONK_ENV_{index:02}"),
+                value: "1".to_owned(),
+            })
+            .collect();
+        // The adapter's compiled vllm command: the entrypoint, the recipe's 21
+        // arguments and the adapter's own engine flags.
+        invocation.command = std::iter::once("/opt/vonk/bin/vllm".to_owned())
+            .chain((0..96).map(|index| format!("--argument-{index:02}=value")))
+            .collect();
+
+        let mut podman = invocation.podman_arguments();
+        // `start_arguments_for_paths` splices the run identity in after `run`.
+        podman.splice(
+            1..1,
+            [
+                "--name".to_owned(),
+                "vonk-run".to_owned(),
+                "--restart".to_owned(),
+                "no".to_owned(),
+            ],
+        );
+        let mut arguments = vec![
+            "a".repeat(64),
+            format!("sha256:{}", "b".repeat(64)),
+            format!("sha256:{}", "c".repeat(64)),
+            format!(
+                "localhost/vonk/compiled-runtime-{}@sha256:{}",
+                "d".repeat(64),
+                "e".repeat(64)
+            ),
+        ];
+        arguments.extend(podman);
+        let count = arguments.len();
+        assert!(
+            count > 512,
+            "the live many-artifact command must exceed the old cap, got {count}"
+        );
+
+        let request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::Start,
+            job_id: Uuid::new_v4(),
+            operation_id: Uuid::new_v4(),
+            attempt: 1,
+            fence: Uuid::new_v4(),
+            arguments,
+            observation: None,
+            installation_id: None,
+        };
+        assert_eq!(request.validate(), Ok(()));
+    }
+
+    #[test]
     fn conflicting_platform_environment_is_rejected() {
         let mut value = fixture();
         value["runtime"]["env"] = json!([{"name":"VONK_RUNTIME_SPEC","value":"/tmp/override"}]);

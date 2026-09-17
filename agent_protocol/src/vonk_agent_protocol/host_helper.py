@@ -110,7 +110,7 @@ class HostRuntimeRequest(WireModel):
     fence: Uuid4Text
     arguments: list[
         Annotated[str, Field(min_length=1, max_length=4096, pattern=r"^[^\x00\r\n]+$")]
-    ] = Field(max_length=512)
+    ] = Field(max_length=4096)
     observation: RecipeRunInspectionBinding | None = None
     installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None
