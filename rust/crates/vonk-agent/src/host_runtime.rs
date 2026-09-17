@@ -20,7 +20,9 @@ use vonk_agent_protocol::{
 
 use crate::client::{AgentHttpClient, ClientError};
 
-const MAX_HELPER_MESSAGE_BYTES: usize = 256 * 1024;
+/// The frame ceiling is owned by the wire contract so the agent, the upgrade
+/// channel and the privileged helper cannot drift.
+const MAX_HELPER_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BYTES;
 
 #[derive(Debug, Error)]
 pub enum HostRuntimeError {
@@ -725,9 +727,13 @@ fn call_helper(
     read_timeout: Duration,
 ) -> Result<HelperResponse, HostRuntimeError> {
     if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
-        return Err(HostRuntimeError::HelperProtocol(
-            HelperProtocolCause::MessageFraming,
-        ));
+        // Report the ceiling and the observed length; the body itself is
+        // engine-owned content and never travels into the evidence.
+        return Err(HostRuntimeError::HelperProtocolBound {
+            cause: HelperProtocolCause::MessageFraming,
+            limit: Some(MAX_HELPER_MESSAGE_BYTES as u64),
+            observed: body.len() as u64,
+        });
     }
     let mut stream = UnixStream::connect(socket)?;
     stream.set_read_timeout(Some(read_timeout))?;
@@ -1061,6 +1067,36 @@ mod tests {
         }))
         .unwrap();
         assert!(require_inspection_receipt(&response).is_err());
+    }
+
+    #[test]
+    fn a_large_frame_is_admitted_and_an_oversized_one_reports_its_bound() {
+        // Wrong implementation: the 256 KiB ceiling refused a legitimate large
+        // command line while the plan it came from was still admitted.
+        let above_the_old_ceiling = vec![b'x'; 256 * 1024 + 1];
+        let error = call_helper(
+            Path::new("/nonexistent"),
+            &above_the_old_ceiling,
+            Duration::from_secs(1),
+        )
+        .expect_err("the absent socket refuses");
+        assert_eq!(error.preflight_code(), "helper_io_failed");
+
+        let oversized = vec![b'x'; super::MAX_HELPER_MESSAGE_BYTES + 1];
+        let error = call_helper(
+            Path::new("/nonexistent"),
+            &oversized,
+            Duration::from_secs(1),
+        )
+        .expect_err("a frame above the ceiling is refused");
+        assert_eq!(error.preflight_code(), "helper_message_framing_invalid");
+        assert_eq!(
+            error.refusal_bound(),
+            Some((
+                Some(super::MAX_HELPER_MESSAGE_BYTES as u64),
+                super::MAX_HELPER_MESSAGE_BYTES as u64 + 1,
+            ))
+        );
     }
 
     #[test]

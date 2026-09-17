@@ -24,7 +24,13 @@ pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934c
 // is the executable), while subsequent items are opaque values and may be
 // empty.  The total bound prevents a large number of individually valid
 // values from creating an unbounded launch request.
-const MAX_ARGV_ITEMS: usize = 512;
+/// The element ceiling for one compiled argv vector.
+///
+/// The argv size authority is `MAX_ARGV_BYTES` (1 MiB); this item count is a
+/// backstop aligned with the plan's own 4096-element artifact ceiling. The
+/// largest argv in the recipe library is 45 elements, so a 512 ceiling was a
+/// round number rather than a derived one.
+const MAX_ARGV_ITEMS: usize = 4096;
 const MAX_ARGV_ITEM_BYTES: usize = 65_536;
 const MAX_ARGV_BYTES: usize = 1024 * 1024;
 // A canonical launch can project one mount for each selected model artifact,
@@ -751,4 +757,26 @@ fn validate_distribution_object(
         .map_err(|_| WorkloadError::Invalid("compiled distribution object"))?;
     crate::wire_schema::validate_and_materialize("CompiledDistributionObject", &mut document)
         .map_err(|_| WorkloadError::Invalid("compiled distribution object"))
+}
+
+
+#[cfg(test)]
+mod argv_bound_tests {
+    use super::{MAX_ARGV_ITEMS, valid_argv, valid_opaque_argv};
+
+    #[test]
+    fn a_long_command_is_admitted_and_an_absurd_one_is_refused() {
+        // Wrong implementation: MAX_ARGV_ITEMS = 512 refused a 600-element
+        // engine command while the argv byte ceiling (1 MiB) was nowhere near.
+        let long: Vec<String> = (0..600).map(|index| format!("--flag-{index}")).collect();
+        assert!(valid_opaque_argv(&long));
+        let mut with_executable = vec!["/opt/vonk/bin/vllm".to_owned()];
+        with_executable.extend(long);
+        assert!(valid_argv(&with_executable));
+
+        let absurd: Vec<String> = (0..MAX_ARGV_ITEMS + 1)
+            .map(|index| format!("--flag-{index}"))
+            .collect();
+        assert!(!valid_opaque_argv(&absurd));
+    }
 }

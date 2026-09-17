@@ -30,6 +30,9 @@ _EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85
 # compiled artifact ceiling rather than imposing a small engine-specific cap.
 MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS = 4096
 MAX_COMPILED_EXECUTION_PLAN_MOUNTS = MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS + 2
+# The argv byte ceiling (1 MiB) is authoritative; this item count is a backstop
+# aligned with the compiled artifact ceiling.
+MAX_ARGV_ITEMS = 4096
 # Only the Controller's uninstall reader supplies this process-local context.
 # It cannot be selected by fields in a persisted or incoming JSON document.
 COMPILED_PLAN_STORAGE_CONTEXT = object()
@@ -73,7 +76,7 @@ def _valid_role(value: str) -> bool:
 def _validate_argv(value: list[str], *, required: bool = False) -> list[str]:
     if (
         (required and (not value or not value[0]))
-        or len(value) > 512
+        or len(value) > MAX_ARGV_ITEMS
         or any("\x00" in item or len(item.encode()) > 65536 for item in value)
         or sum(len(item.encode()) for item in value) > 1024 * 1024
     ):
@@ -163,7 +166,7 @@ class CompiledRuntimeTelemetry(_Strict):
 
 class CompiledRuntime(_Strict):
     executable: str = Field(min_length=1, max_length=65536)
-    argv: list[str] = Field(max_length=512)
+    argv: list[str] = Field(max_length=MAX_ARGV_ITEMS)
     env: list[CompiledEnvironmentEntry] = Field(max_length=128)
     image_digest: ImageDigest
     placement: CompiledPlacement

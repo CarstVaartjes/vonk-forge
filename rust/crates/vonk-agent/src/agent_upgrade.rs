@@ -16,7 +16,8 @@ use vonk_agent_protocol::{AgentClaim, AgentUpgradeRequest, canonical_json, parse
 use crate::client::{AgentHttpClient, ClientError};
 
 const HELPER_SOCKET: &str = "/run/vonk-forge-package-helper/package-helper.sock";
-const MAX_HELPER_MESSAGE_BYTES: usize = 256 * 1024;
+/// Shared with the host-runtime frame and the privileged helper.
+const MAX_HELPER_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BYTES;
 
 #[derive(Debug, Error)]
 pub enum AgentUpgradeError {
