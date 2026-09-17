@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,7 +25,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
+from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt, _claim_predicate
 from vonk_control.distribution import (
     DistributionError,
     DistributionService,
@@ -2525,6 +2526,27 @@ def test_excluded_work_refusal_records_a_cancelled_parent(service) -> None:
         assert "parent-cancel-requested" in stored.status_reason
 
 
+def test_excluded_work_refusal_records_an_unready_retry_attempt(service) -> None:
+    """The missing ``retry_ready_attempt`` condition is named on the operator surface.
+
+    A ``waiting-for-operator`` operation whose attempt is not available for a
+    retry satisfied every condition the old Python classifier checked, so the
+    recorded reason was ``unclassified-unclaimable``.
+    """
+
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    _scenario_operator_retry_attempt_not_ready(sessions, clock, parent_job, operation)
+
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.status_reason is not None
+        assert "operator-retry-attempt-not-ready" in stored.status_reason
+
+
 def test_no_work_claim_records_no_refusal(service) -> None:
     jobs, sessions, clock = service
 
@@ -2543,3 +2565,174 @@ def test_no_work_claim_records_no_refusal(service) -> None:
         assert session.scalars(select(AgentOperation)).all() != []
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None and stored.status_reason is None
+
+
+def _claim_refusal_check_names() -> tuple[str, ...]:
+    """Every named condition of the authoritative claim predicate, in order.
+
+    The cases below are derived from the predicate itself rather than from a
+    hand-written list, so adding a condition without a scenario is a test
+    failure instead of a silently unclassified refusal.
+    """
+
+    predicate = _claim_predicate(datetime(2026, 8, 3, tzinfo=UTC))
+    names = [condition.check for condition in predicate.common]
+    for branch in predicate.branches:
+        names.extend(condition.check for condition in branch.conditions)
+    return tuple(names)
+
+
+def _set_operation(sessions, operation: AgentOperation, **fields: object) -> None:
+    with sessions.begin() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None
+        for name, value in fields.items():
+            setattr(stored, name, value)
+
+
+def _add_attempt(
+    sessions, operation: AgentOperation, clock, *, state: str, lease_seconds: int
+) -> None:
+    with sessions.begin() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None
+        session.add(
+            AgentOperationAttempt(
+                operation_id=operation.id,
+                attempt=stored.current_attempt,
+                fence=str(uuid.uuid4()),
+                lease_deadline=clock.now + timedelta(seconds=lease_seconds),
+                agent_certificate_serial="serial-a",
+                state=state,
+            )
+        )
+
+
+def _scenario_parent_job_missing(sessions, clock, parent_job, operation) -> None:
+    _set_operation(sessions, operation, parent_job_id=str(uuid.uuid4()))
+
+
+def _scenario_workload_intent_superseded(sessions, clock, parent_job, operation) -> None:
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        node.workload_intent_ordinal = operation.workload_intent_ordinal + 1
+
+
+def _scenario_parent_cancel_requested(sessions, clock, parent_job, operation) -> None:
+    with sessions.begin() as session:
+        job = session.get(Job, parent_job.id)
+        assert job is not None
+        job.result = {"cancel_requested": True}
+
+
+def _scenario_queued_attempt_not_zero(sessions, clock, parent_job, operation) -> None:
+    _set_operation(sessions, operation, current_attempt=1)
+
+
+def _scenario_running_attempt_missing(sessions, clock, parent_job, operation) -> None:
+    _set_operation(sessions, operation, state="running", current_attempt=1)
+
+
+def _scenario_running_attempt_not_running(sessions, clock, parent_job, operation) -> None:
+    _set_operation(sessions, operation, state="running", current_attempt=1)
+    _add_attempt(sessions, operation, clock, state="failed", lease_seconds=60)
+
+
+def _scenario_running_lease_live(sessions, clock, parent_job, operation) -> None:
+    _set_operation(sessions, operation, state="running", current_attempt=1)
+    _add_attempt(sessions, operation, clock, state="running", lease_seconds=60)
+
+
+def _scenario_operator_retry_not_authorized(
+    sessions, clock, parent_job, operation
+) -> None:
+    _set_operation(sessions, operation, state="waiting-for-operator", current_attempt=1)
+
+
+def _scenario_upgrade_safety_not_elapsed(sessions, clock, parent_job, operation) -> None:
+    _set_operation(
+        sessions,
+        operation,
+        kind=ProtocolAgentOperation.AGENT_UPGRADE.value,
+        state="waiting-for-operator",
+        current_attempt=1,
+        retry_disposition="retry",
+        retry_disposition_attempt=1,
+    )
+    _add_attempt(sessions, operation, clock, state="running", lease_seconds=60)
+
+
+def _scenario_operator_retry_not_due(sessions, clock, parent_job, operation) -> None:
+    _set_operation(
+        sessions,
+        operation,
+        state="waiting-for-operator",
+        current_attempt=1,
+        retry_disposition="retry",
+        retry_disposition_attempt=1,
+        retry_due_at=clock.now + timedelta(seconds=60),
+    )
+
+
+def _scenario_operator_retry_attempt_not_ready(
+    sessions, clock, parent_job, operation
+) -> None:
+    _set_operation(
+        sessions,
+        operation,
+        state="waiting-for-operator",
+        current_attempt=1,
+        retry_disposition="retry",
+        retry_disposition_attempt=1,
+        retry_due_at=None,
+    )
+
+
+#: One scenario per condition the predicate can fail.  Each leaves exactly one
+#: named condition false, so the classifier must name that condition.
+_REFUSAL_SCENARIOS: dict[str, Callable[..., None]] = {
+    "parent-job-missing": _scenario_parent_job_missing,
+    "workload-intent-superseded": _scenario_workload_intent_superseded,
+    "parent-cancel-requested": _scenario_parent_cancel_requested,
+    "queued-attempt-not-zero": _scenario_queued_attempt_not_zero,
+    "running-attempt-missing": _scenario_running_attempt_missing,
+    "running-attempt-not-running": _scenario_running_attempt_not_running,
+    "running-lease-live": _scenario_running_lease_live,
+    "operator-retry-not-authorized": _scenario_operator_retry_not_authorized,
+    "upgrade-safety-not-elapsed": _scenario_upgrade_safety_not_elapsed,
+    "operator-retry-not-due": _scenario_operator_retry_not_due,
+    "operator-retry-attempt-not-ready": _scenario_operator_retry_attempt_not_ready,
+}
+
+
+def test_claim_refusal_scenarios_cover_the_predicate() -> None:
+    """Every predicate condition has a scenario, and no scenario is stale."""
+
+    assert set(_REFUSAL_SCENARIOS) == set(_claim_refusal_check_names())
+
+
+@pytest.mark.parametrize("check", _claim_refusal_check_names())
+def test_excluded_work_refusal_names_every_predicate_condition(service, check) -> None:
+    """An operation failing only one predicate condition is never opaque.
+
+    The old classifier restated the predicate in Python, so it missed
+    ``retry_ready_attempt`` and coerce-differently ``cancel_requested`` values
+    and fell through to ``unclassified-unclaimable``.  Deriving from the one
+    predicate makes that fallback unreachable for any modelled condition.
+    """
+
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    _REFUSAL_SCENARIOS[check](sessions, clock, parent_job, operation)
+
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        excluded = jobs._excluded_work_refusal(session, node, clock.now)
+
+    assert excluded is not None
+    _, refusal, _ = excluded
+    assert refusal == check
+    assert refusal != "unclassified-unclaimable"

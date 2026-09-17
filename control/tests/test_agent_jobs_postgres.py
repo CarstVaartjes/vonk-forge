@@ -1012,3 +1012,33 @@ def test_postgres_concurrent_final_completions_aggregate_parent_once(
     assert not errors
     assert not thread_a.is_alive() and not thread_b.is_alive()
     assert state(sessions, parent_job.id) == "succeeded"
+
+
+@pytest.mark.parametrize("coerced", (1, "true"))
+def test_postgres_cancel_requested_coercion_matches_the_predicate(
+    service, coerced
+) -> None:
+    """A truthy stored cancel flag is named, not left unclassified.
+
+    The authoritative predicate filters on PostgreSQL's cast of the JSON text
+    to boolean, so a stored ``1`` or ``"true"`` is excluded.  A classifier that
+    tested the Python singleton ``True`` could not see those values and fell
+    through to ``unclassified-unclaimable``; deriving the refusal from the
+    predicate's own expression keeps the two in step.
+    """
+
+    sessions, clock = service
+    jobs = AgentJobService(sessions, clock=clock)
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    with sessions.begin() as session:
+        job = session.get(Job, parent_job.id)
+        assert job is not None
+        job.result = {"cancel_requested": coerced}
+
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.status_reason is not None
+        assert "parent-cancel-requested" in stored.status_reason

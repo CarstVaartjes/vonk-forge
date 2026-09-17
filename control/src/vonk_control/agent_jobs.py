@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import ValidationError
 from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     AgentClaim,
     AgentDirective,
@@ -322,6 +323,265 @@ def _document(value: Mapping[str, object]) -> dict[str, object]:
 def _signer_message(value: Mapping[str, object]) -> bytes:
     """Return the signer's canonical newline-delimited wire representation."""
     return canonical_message(value) + b"\n"
+
+
+@dataclass(frozen=True, slots=True)
+class _ClaimCondition:
+    """One named conjunct of the authoritative claimability predicate.
+
+    ``expression`` is the single owner of the condition.  The claim query ANDs
+    these objects together and the refusal classifier evaluates the very same
+    objects one at a time, so a condition cannot exist without a name and an
+    explanation cannot drift into a narrower re-implementation of the
+    decision.  ``check`` is the operator-facing reason string rendered when the
+    condition is the first one that does not hold.
+    """
+
+    check: str
+    expression: ColumnElement[bool]
+
+
+@dataclass(frozen=True, slots=True)
+class _ClaimBranch:
+    """The claimability conditions that apply to one non-terminal state."""
+
+    state: str
+    conditions: tuple[_ClaimCondition, ...]
+
+    @property
+    def expression(self) -> ColumnElement[bool]:
+        return and_(
+            StoredOperation.state == self.state,
+            *(condition.expression for condition in self.conditions),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _ClaimPredicate:
+    """The authoritative claimability predicate, decomposed by named condition.
+
+    ``common`` holds the conditions every claimable operation satisfies;
+    ``branches`` holds the state-specific ones, of which exactly one applies to
+    any non-terminal operation.  Keeping the decomposition beside the single
+    ``expression`` is what lets the refusal path name the first condition that
+    failed instead of restating the whole conjunction in Python.
+    """
+
+    common: tuple[_ClaimCondition, ...]
+    branches: tuple[_ClaimBranch, ...]
+
+    @property
+    def expression(self) -> ColumnElement[bool]:
+        return and_(
+            *(condition.expression for condition in self.common),
+            or_(*(branch.expression for branch in self.branches)),
+        )
+
+    def branch_for(self, state: str) -> _ClaimBranch | None:
+        for branch in self.branches:
+            if branch.state == state:
+                return branch
+        return None
+
+
+def _claim_predicate(now: datetime) -> _ClaimPredicate:
+    """Build the one authoritative predicate deciding what this node may claim.
+
+    Every condition the predicate can fail is named here.  ``_claimable_operations``
+    evaluates the whole conjunction; ``_excluded_work_refusal`` evaluates the
+    same named conditions for one operation, so a reason cannot diverge from the
+    decision it explains.
+    """
+
+    attempt_present = (
+        select(AgentOperationAttempt.id)
+        .where(
+            AgentOperationAttempt.operation_id == StoredOperation.id,
+            AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+        )
+        .exists()
+    )
+    attempt_running = (
+        select(AgentOperationAttempt.id)
+        .where(
+            AgentOperationAttempt.operation_id == StoredOperation.id,
+            AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+            AgentOperationAttempt.state == "running",
+        )
+        .exists()
+    )
+    attempt_lease_elapsed = (
+        select(AgentOperationAttempt.id)
+        .where(
+            AgentOperationAttempt.operation_id == StoredOperation.id,
+            AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+            AgentOperationAttempt.lease_deadline <= now,
+        )
+        .exists()
+    )
+    # ``attempt_running`` and ``attempt_present`` are implied by
+    # ``attempt_lease_elapsed``; they are separate named conditions only so the
+    # refusal can tell a missing executor from a stopped one from a live lease.
+    retry_ready_attempt = (
+        select(AgentOperationAttempt.id)
+        .where(
+            AgentOperationAttempt.operation_id == StoredOperation.id,
+            AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+            or_(
+                AgentOperationAttempt.state.in_({"failed", "waiting-for-operator"}),
+                and_(
+                    AgentOperationAttempt.state == "expired",
+                    AgentOperationAttempt.lease_deadline <= now,
+                ),
+            ),
+        )
+        .exists()
+    )
+    upgrade_safety_elapsed = (
+        select(AgentOperationAttempt.id)
+        .where(
+            AgentOperationAttempt.operation_id == StoredOperation.id,
+            AgentOperationAttempt.attempt == StoredOperation.current_attempt,
+            AgentOperationAttempt.lease_deadline <= now,
+        )
+        .exists()
+    )
+    upgrade = AgentOperation.AGENT_UPGRADE.value
+    return _ClaimPredicate(
+        common=(
+            _ClaimCondition("parent-job-missing", Job.id.is_not(None)),
+            _ClaimCondition(
+                "workload-intent-superseded",
+                or_(
+                    StoredOperation.workload_intent_ordinal.is_(None),
+                    StoredOperation.workload_intent_ordinal
+                    == AgentNode.workload_intent_ordinal,
+                ),
+            ),
+            _ClaimCondition(
+                "parent-cancel-requested",
+                Job.result["cancel_requested"].as_boolean().is_not(True),
+            ),
+        ),
+        branches=(
+            _ClaimBranch(
+                "queued",
+                (
+                    _ClaimCondition(
+                        "queued-attempt-not-zero",
+                        StoredOperation.current_attempt == 0,
+                    ),
+                ),
+            ),
+            _ClaimBranch(
+                "running",
+                (
+                    _ClaimCondition("running-attempt-missing", attempt_present),
+                    _ClaimCondition("running-attempt-not-running", attempt_running),
+                    _ClaimCondition("running-lease-live", attempt_lease_elapsed),
+                ),
+            ),
+            _ClaimBranch(
+                "waiting-for-operator",
+                (
+                    _ClaimCondition(
+                        "operator-retry-not-authorized",
+                        and_(
+                            StoredOperation.retry_disposition == _RETRY_DISPOSITION,
+                            StoredOperation.retry_disposition_attempt
+                            == StoredOperation.current_attempt,
+                        ),
+                    ),
+                    # The upgrade timing gate and the ordinary retry-clock gate
+                    # are mutually exclusive by kind; each is trivially true for
+                    # the other kind, so ANDing them matches the predicate's
+                    # kind-switched OR while still naming which one failed.
+                    _ClaimCondition(
+                        "upgrade-safety-not-elapsed",
+                        or_(StoredOperation.kind != upgrade, upgrade_safety_elapsed),
+                    ),
+                    _ClaimCondition(
+                        "operator-retry-not-due",
+                        or_(
+                            StoredOperation.kind == upgrade,
+                            StoredOperation.retry_due_at.is_(None),
+                            StoredOperation.retry_due_at <= now,
+                        ),
+                    ),
+                    _ClaimCondition(
+                        "operator-retry-attempt-not-ready", retry_ready_attempt
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def _claim_condition_facts(
+    check: str,
+    operation: StoredOperation,
+    attempt: AgentOperationAttempt | None,
+    node: AgentNode,
+    now: datetime,
+) -> dict[str, object]:
+    """Return the bounded facts that explain one failed named condition."""
+
+    if check == "workload-intent-superseded":
+        return {
+            "operation_intent": operation.workload_intent_ordinal,
+            "node_intent": node.workload_intent_ordinal,
+        }
+    if check in {
+        "queued-attempt-not-zero",
+        "operator-retry-not-authorized",
+        "operator-retry-attempt-not-ready",
+    }:
+        return {"attempt": operation.current_attempt}
+    if check in {"running-attempt-missing", "running-attempt-not-running"}:
+        facts: dict[str, object] = {"attempt": operation.current_attempt}
+        if attempt is not None:
+            facts["attempt_state"] = attempt.state
+        return facts
+    if check in {"running-lease-live", "upgrade-safety-not-elapsed"}:
+        facts = {"attempt": operation.current_attempt}
+        if attempt is not None:
+            facts["lease_deadline"] = _aware(attempt.lease_deadline).isoformat()
+        return facts
+    if check == "operator-retry-not-due":
+        facts = {"attempt": operation.current_attempt}
+        if operation.retry_due_at is not None:
+            facts["retry_due_at"] = _aware(operation.retry_due_at).isoformat()
+        return facts
+    return {}
+
+
+def _held_claim_conditions(
+    session: Session,
+    operation: StoredOperation,
+    conditions: tuple[_ClaimCondition, ...],
+) -> tuple[bool, ...]:
+    """Evaluate each named claim condition for one operation, in order.
+
+    The statement selects the predicate's own expressions, so the outcome is
+    the decision itself rather than a second statement of it.  A SQL NULL is
+    reported as "did not hold", matching the claim query's three-valued
+    filtering.
+    """
+
+    statement = (
+        select(
+            *[
+                condition.expression.label(f"claim_condition_{index}")
+                for index, condition in enumerate(conditions)
+            ]
+        )
+        .select_from(StoredOperation)
+        .outerjoin(Job, Job.id == StoredOperation.parent_job_id)
+        .outerjoin(AgentNode, AgentNode.node_id == StoredOperation.node_id)
+        .where(StoredOperation.id == operation.id)
+    )
+    row = session.execute(statement).one()
+    return tuple(bool(value) for value in row)
 
 
 class AgentJobService:
@@ -884,9 +1144,11 @@ class AgentJobService:
         ``_claimable_operations`` is a closed predicate.  When it matches
         nothing, the claim path cannot tell "no work exists" from "work exists
         and this node may not execute it now", which is exactly the silent
-        wedge an operator cannot diagnose.  This read-only probe re-evaluates
-        the same conditions for the oldest non-terminal operation so the
-        refusal can be recorded.  It never grants or retries a claim.
+        wedge an operator cannot diagnose.  This read-only probe evaluates the
+        predicate's own named conditions, in order, for the oldest non-terminal
+        operation and reports the first that did not hold, so the explanation
+        cannot become a narrower restatement of the decision.  It never grants
+        or retries a claim.
         """
 
         operation = session.scalar(
@@ -903,79 +1165,31 @@ class AgentJobService:
         if operation is None:
             return None
         facts: dict[str, object] = {"kind": operation.kind, "state": operation.state}
-        parent = session.get(Job, operation.parent_job_id)
-        if parent is None:
-            return operation, "parent-job-missing", facts
-        if parent.state in _TERMINAL_PARENT_STATES:
-            return operation, "parent-not-claimable", {
-                **facts,
-                "parent_state": parent.state,
-            }
-        if (
-            operation.workload_intent_ordinal is not None
-            and operation.workload_intent_ordinal != node.workload_intent_ordinal
-        ):
-            return operation, "workload-intent-superseded", {
-                **facts,
-                "operation_intent": operation.workload_intent_ordinal,
-                "node_intent": node.workload_intent_ordinal,
-            }
-        if (
-            isinstance(parent.result, Mapping)
-            and parent.result.get("cancel_requested") is True
-        ):
-            return operation, "parent-cancel-requested", facts
+        predicate = _claim_predicate(now)
+        branch = predicate.branch_for(operation.state)
+        conditions = predicate.common + (
+            () if branch is None else branch.conditions
+        )
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
                 AgentOperationAttempt.attempt == operation.current_attempt,
             )
         )
-        if operation.state == "queued" and operation.current_attempt != 0:
-            return operation, "queued-attempt-not-zero", {
+        held = _held_claim_conditions(session, operation, conditions)
+        for condition, condition_held in zip(conditions, held, strict=True):
+            if condition_held:
+                continue
+            return operation, condition.check, {
                 **facts,
-                "attempt": operation.current_attempt,
+                **_claim_condition_facts(
+                    condition.check, operation, attempt, node, now
+                ),
             }
-        if operation.state == "running":
-            if attempt is None:
-                return operation, "running-attempt-missing", {
-                    **facts,
-                    "attempt": operation.current_attempt,
-                }
-            if attempt.state != "running":
-                return operation, "running-attempt-not-running", {
-                    **facts,
-                    "attempt": operation.current_attempt,
-                    "attempt_state": attempt.state,
-                }
-            if _attempt_is_live(attempt, now):
-                return operation, "running-lease-live", {
-                    **facts,
-                    "attempt": operation.current_attempt,
-                    "lease_deadline": _aware(attempt.lease_deadline).isoformat(),
-                }
-            return operation, "running-lease-expired", {
-                **facts,
-                "attempt": operation.current_attempt,
-                "lease_deadline": _aware(attempt.lease_deadline).isoformat(),
-            }
-        if operation.state == "waiting-for-operator" and (
-            operation.retry_disposition != _RETRY_DISPOSITION
-            or operation.retry_disposition_attempt != operation.current_attempt
-        ):
-            return operation, "operator-retry-not-authorized", {
-                **facts,
-                "attempt": operation.current_attempt,
-            }
-        if operation.state == "waiting-for-operator" and (
-            operation.retry_due_at is not None
-            and _aware(operation.retry_due_at) > _aware(now)
-        ):
-            return operation, "operator-retry-not-due", {
-                **facts,
-                "attempt": operation.current_attempt,
-                "retry_due_at": _aware(operation.retry_due_at).isoformat(),
-            }
+        # Every modelled condition held, yet the claim query matched nothing.
+        # No unmodelled condition can exist - the predicate is built from the
+        # conditions just evaluated - so this is a defensive last resort, not a
+        # path any real operation takes.
         return operation, "unclassified-unclaimable", {
             **facts,
             "attempt": operation.current_attempt,
@@ -1129,84 +1343,16 @@ class AgentJobService:
                     == StoredOperation.current_attempt,
                 ).is_not(True),
             )
-        expired_attempt = (
-            select(AgentOperationAttempt.id)
-            .where(
-                AgentOperationAttempt.operation_id == StoredOperation.id,
-                AgentOperationAttempt.attempt == StoredOperation.current_attempt,
-                AgentOperationAttempt.state == "running",
-                AgentOperationAttempt.lease_deadline <= now,
-            )
-            .exists()
-        )
-        retry_ready_attempt = (
-            select(AgentOperationAttempt.id)
-            .where(
-                AgentOperationAttempt.operation_id == StoredOperation.id,
-                AgentOperationAttempt.attempt == StoredOperation.current_attempt,
-                or_(
-                    AgentOperationAttempt.state.in_({"failed", "waiting-for-operator"}),
-                    and_(
-                        AgentOperationAttempt.state == "expired",
-                        AgentOperationAttempt.lease_deadline <= now,
-                    ),
-                ),
-            )
-            .exists()
-        )
-        upgrade_safety_elapsed = (
-            select(AgentOperationAttempt.id)
-            .where(
-                AgentOperationAttempt.operation_id == StoredOperation.id,
-                AgentOperationAttempt.attempt == StoredOperation.current_attempt,
-                AgentOperationAttempt.lease_deadline <= now,
-            )
-            .exists()
-        )
         return (
             select(StoredOperation)
             .join(Job, Job.id == StoredOperation.parent_job_id)
             .join(AgentNode, AgentNode.node_id == StoredOperation.node_id)
             .where(
                 StoredOperation.node_id == node_id,
-                or_(
-                    StoredOperation.workload_intent_ordinal.is_(None),
-                    StoredOperation.workload_intent_ordinal
-                    == AgentNode.workload_intent_ordinal,
-                ),
-                Job.result["cancel_requested"].as_boolean().is_not(True),
-                or_(
-                    and_(
-                        StoredOperation.state == "queued",
-                        StoredOperation.current_attempt == 0,
-                    ),
-                    and_(
-                        StoredOperation.state == "running",
-                        expired_attempt,
-                    ),
-                    and_(
-                        StoredOperation.state == "waiting-for-operator",
-                        StoredOperation.retry_disposition == _RETRY_DISPOSITION,
-                        StoredOperation.retry_disposition_attempt
-                        == StoredOperation.current_attempt,
-                        or_(
-                            and_(
-                                StoredOperation.kind
-                                == AgentOperation.AGENT_UPGRADE.value,
-                                upgrade_safety_elapsed,
-                            ),
-                            and_(
-                                StoredOperation.kind
-                                != AgentOperation.AGENT_UPGRADE.value,
-                                or_(
-                                    StoredOperation.retry_due_at.is_(None),
-                                    StoredOperation.retry_due_at <= now,
-                                ),
-                            ),
-                        ),
-                        retry_ready_attempt,
-                    ),
-                ),
+                # The one owner of every claimability condition, shared with
+                # ``_excluded_work_refusal`` so a refusal cannot restate (and
+                # drift from) the decision it explains.
+                _claim_predicate(now).expression,
             )
             # Choose work this agent can perform before limiting the queue.
             # Otherwise a retry requiring a newer agent starves its own upgrade.
