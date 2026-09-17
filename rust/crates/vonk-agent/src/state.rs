@@ -500,7 +500,10 @@ impl StateStore {
         let delay = backoff_delay(rejections, u64::from(now.timestamp_subsec_nanos()), 15, 900);
         let retry_due_at =
             now + chrono::Duration::from_std(delay).map_err(|_| StateError::ResultState)?;
-        let reason: String = error.to_string().chars().take(256).collect();
+        // Keep the Controller's own bounded validation digest: it names the
+        // failing boundary, field and rule, which is what makes the refusal
+        // actionable.  Status, code and request id have their own columns.
+        let reason: String = error.rejection_context();
         self.connection.execute(
             "INSERT INTO result_rejections(
                operation_id,attempt,fence,http_status,code,decision,request_id,reason,

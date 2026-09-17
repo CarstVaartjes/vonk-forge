@@ -3105,12 +3105,13 @@ fn record_result_rejection(
     let rejection = state.reject_result(result, error, now)?;
     eprintln!(
         "vonk-agent: controller refused result for operation {} attempt {} \
-         (http {} {} request_id={}): retrying the retained result after {}",
+         (http {} {} request_id={}): {}; retrying the retained result after {}",
         result.operation_id,
         result.attempt,
         rejection.http_status,
         rejection.code,
         rejection.request_id.as_deref().unwrap_or("none"),
+        rejection.reason,
         rejection.retry_due_at.to_rfc3339(),
     );
     Ok(())
@@ -3864,6 +3865,7 @@ mod tests {
             request_id: Some("req-403".to_owned()),
             decision: "exit",
             retry_after_seconds: None,
+            summary: None,
         }));
 
         let diagnostic = controller_denial_diagnostic(&error);
@@ -3887,6 +3889,7 @@ mod tests {
             request_id: Some("req-401".to_owned()),
             decision: "exit",
             retry_after_seconds: None,
+            summary: None,
         }));
 
         let raw = distribution_failure_result(&error);
@@ -4202,6 +4205,7 @@ mod tests {
                 request_id: None,
                 decision: "exit",
                 retry_after_seconds: None,
+                summary: None,
             })))
         }
 
@@ -4768,6 +4772,11 @@ mod tests {
             request_id: Some("req-422".to_owned()),
             decision: "exit",
             retry_after_seconds: None,
+            summary: Some(
+                "request is invalid: body.result.AgentFailureResult.failure_kind \
+                 (is_instance_of)"
+                    .to_owned(),
+            ),
         }
     }
 
@@ -4862,7 +4871,11 @@ mod tests {
         assert_eq!(rejection.http_status, 422);
         assert_eq!(rejection.code, "controller.invalid_request");
         assert_eq!(rejection.request_id.as_deref(), Some("req-422"));
-        assert!(rejection.reason.contains("/agent/result"));
+        // The refusal names the failing field and rule from the Controller's
+        // own validation digest, rather than only the endpoint it was refused
+        // at, so the durable record is actionable without Controller access.
+        assert!(rejection.reason.contains("failure_kind"));
+        assert!(rejection.reason.contains("is_instance_of"));
         assert!(rejection.reason.len() <= 256);
         assert!(rejection.retry_due_at > Utc::now());
     }
