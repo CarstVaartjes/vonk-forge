@@ -12,6 +12,20 @@ on:
   schedule:
     # Refresh only re-signs the already published immutable generation.
     - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      tailnet_cleanup:
+        description: >-
+          Delete stale disposable CI tailnets and exit without publishing
+        required: true
+        type: boolean
+        default: false
+      child_id:
+        description: >-
+          Optional exact stale child id to clean; empty cleans every stale child
+        required: false
+        type: string
+        default: ""
 
 permissions:
   actions: read
@@ -1228,3 +1242,50 @@ jobs:
             --signing-key "$signing_key" \
             --signing-public-key "$public_key" \
             --rclone-remote "r2:$R2_INSTALLER_PUBLIC_BUCKET"
+
+  tailnet-cleanup:
+    name: Delete stale disposable CI tailnets
+    # A manual dispatch is the only event that may delete a child, and even then
+    # only when the operator selected the cleanup input.  A producer completion
+    # carries no dispatch inputs, and the scheduled refresh must never delete.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.tailnet_cleanup == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The canary environment owns the factory OAuth credential, and that
+    # credential is environment-scoped, so this job -- not a developer machine
+    # -- is the only place stale cleanup can run.  The cleanup never needs the
+    # release or acceptance signing keys that live in the other environments.
+    environment: installer-canary-dev
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact cleanup tooling from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require current main cleanup authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          test "$GITHUB_SHA" = \
+            "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+
+      - name: Delete stale disposable Tailscale CI children
+        timeout-minutes: 10
+        shell: bash
+        env:
+          CHILD_ID: ${{ inputs.child_id }}
+          VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID }}
+          VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CHILD_ID" ]]; then
+            python scripts/tailscale-acceptance-tailnet cleanup --id "$CHILD_ID"
+          else
+            python scripts/tailscale-acceptance-tailnet cleanup
+          fi

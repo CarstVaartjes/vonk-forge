@@ -10,6 +10,7 @@ import sys
 import urllib.error
 import urllib.parse
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Self
@@ -189,6 +190,490 @@ def _http_error(status: int) -> urllib.error.HTTPError:
         email.message.Message(),
         None,
     )
+
+
+def _freeze_now(lifecycle: ModuleType, monkeypatch: pytest.MonkeyPatch) -> datetime:
+    """Pin the script's clock so the stale boundary is exact, not flaky.
+
+    Cleanup decides staleness by comparing the listing's `createdAt` against the
+    wall clock.  A test that reads the real clock drifts across `STALE_CHILD_AGE`
+    while it runs; this fixes one instant and derives both sides of the boundary
+    from it.
+    """
+    now = datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            return now
+
+    monkeypatch.setattr(lifecycle, "datetime", _FrozenDatetime)
+    return now
+
+
+def _created_at(*, minutes_old: float, now: datetime) -> str:
+    return (now - timedelta(minutes=minutes_old)).isoformat()
+
+
+def _organization_child(
+    *, child_id: str, display_name: str, created_at: str
+) -> dict[str, object]:
+    return {
+        "createdAt": created_at,
+        "displayName": display_name,
+        "id": child_id,
+    }
+
+
+def _listing_response(
+    *children: dict[str, object],
+) -> _Response:
+    return _Response({"tailnets": list(children)})
+
+
+def _child_delete_responses(child_id: str) -> list[_Response]:
+    """The tailnet-scoped token exchange and DELETE for exactly one child."""
+    return [
+        _Response({"access_token": f"delete-token-{child_id}"}),
+        _Response({}),
+    ]
+
+
+def _cleanup_requests(urlopen: _Urlopen) -> list[Any]:
+    return [request for request in urlopen.requests if request.method == "DELETE"]
+
+
+def _deleted_ids(urlopen: _Urlopen) -> list[str]:
+    return [
+        urllib.parse.unquote(urllib.parse.urlsplit(request.full_url).path.rsplit("/", 1)[-1])
+        for request in _cleanup_requests(urlopen)
+    ]
+
+
+def test_stale_well_formed_ci_child_is_selected_and_deleted(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    child = _organization_child(
+        child_id="tailnet_stale_999",
+        display_name="Vonk Forge CI 35232305043 attempt 1",
+        created_at=_created_at(minutes_old=90, now=now),
+    )
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [_Response({"access_token": "factory-list-token"}), _listing_response(child)]
+        + _child_delete_responses("tailnet_stale_999"),
+    )
+
+    lifecycle.cleanup()
+
+    assert _deleted_ids(urlopen) == ["tailnet_stale_999"]
+    assert (
+        urlopen.requests[-1].get_header("Authorization")
+        == "Bearer delete-token-tailnet_stale_999"
+    )
+    output = capsys.readouterr().out
+    assert (
+        "Deleted stale disposable CI tailnet tailnet_stale_999 "
+        "(Vonk Forge CI 35232305043 attempt 1)" in output
+    )
+    assert "deleted 1 of 1" in output
+
+
+def test_two_stale_children_are_both_deleted_by_their_own_exact_ids(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    oldest = _organization_child(
+        child_id="tailnet_stale_111",
+        display_name="Vonk Forge CI 35232305043 attempt 1",
+        created_at=_created_at(minutes_old=180, now=now),
+    )
+    newer = _organization_child(
+        child_id="tailnet_stale_222",
+        display_name="Vonk Forge CI 35266396689 attempt 1",
+        created_at=_created_at(minutes_old=90, now=now),
+    )
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [_Response({"access_token": "factory-list-token"}), _listing_response(oldest, newer)]
+        + _child_delete_responses("tailnet_stale_111")
+        + _child_delete_responses("tailnet_stale_222"),
+    )
+
+    lifecycle.cleanup()
+
+    assert _deleted_ids(urlopen) == ["tailnet_stale_111", "tailnet_stale_222"]
+    token_bodies = [
+        _request_body(request)
+        for request in urlopen.requests
+        if urllib.parse.urlsplit(request.full_url).path.endswith("/oauth/token")
+    ]
+    # The creating credential reaches an existing API-only child only by naming
+    # that child in the token request; without `tailnet` the exchange mints an
+    # organization token and the DELETE would not address this child.
+    assert token_bodies[0] == {
+        "client_id": ["factory-client"],
+        "client_secret": ["factory-secret"],
+        "scope": ["tailnets"],
+    }
+    assert token_bodies[1:] == [
+        {
+            "client_id": ["factory-client"],
+            "client_secret": ["factory-secret"],
+            "scope": ["all"],
+            "tailnet": ["tailnet_stale_111"],
+        },
+        {
+            "client_id": ["factory-client"],
+            "client_secret": ["factory-secret"],
+            "scope": ["all"],
+            "tailnet": ["tailnet_stale_222"],
+        },
+    ]
+
+
+def test_young_ci_child_is_refused_not_deleted(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refuse a live run's child. Deleting this would break running acceptance.
+
+    A cleanup that treated every CI-named child as disposable would delete the
+    child of a concurrent, healthy run mid-acceptance. The age threshold is what
+    keeps a second dispatch from destroying live work.
+    """
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(
+                _organization_child(
+                    child_id="tailnet_live_456",
+                    display_name="Vonk Forge CI 35266396689 attempt 1",
+                    created_at=_created_at(minutes_old=5, now=now),
+                )
+            ),
+        ],
+    )
+
+    lifecycle.cleanup()
+
+    assert _cleanup_requests(urlopen) == []
+
+
+@pytest.mark.parametrize("minutes_old", [0, 59])
+def test_ci_child_inside_the_stale_threshold_is_never_deleted(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    minutes_old: int,
+) -> None:
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(
+                _organization_child(
+                    child_id="tailnet_recent_456",
+                    display_name="Vonk Forge CI 35266396689 attempt 1",
+                    created_at=_created_at(minutes_old=minutes_old, now=now),
+                )
+            ),
+        ],
+    )
+
+    lifecycle.cleanup()
+
+    assert _cleanup_requests(urlopen) == []
+
+
+def test_ci_child_at_the_stale_boundary_is_deleted(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    child = _organization_child(
+        child_id="tailnet_boundary_456",
+        display_name="Vonk Forge CI 35266396689 attempt 1",
+        created_at=_created_at(
+            minutes_old=lifecycle.STALE_CHILD_AGE.total_seconds() / 60, now=now
+        ),
+    )
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [_Response({"access_token": "factory-list-token"}), _listing_response(child)]
+        + _child_delete_responses("tailnet_boundary_456"),
+    )
+
+    lifecycle.cleanup()
+
+    assert _deleted_ids(urlopen) == ["tailnet_boundary_456"]
+
+
+def test_young_explicit_child_id_is_refused_rather_than_deleted(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(
+                _organization_child(
+                    child_id="tailnet_live_456",
+                    display_name="Vonk Forge CI 35266396689 attempt 1",
+                    created_at=_created_at(minutes_old=5, now=now),
+                )
+            ),
+        ],
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="tailnet_live_456"):
+        lifecycle.cleanup(child_id="tailnet_live_456")
+
+    assert _cleanup_requests(urlopen) == []
+
+
+def test_tailnet_without_the_ci_name_pattern_is_refused(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(
+                _organization_child(
+                    child_id="tailnet_production_789",
+                    display_name="Production",
+                    created_at=_created_at(minutes_old=100000, now=now),
+                )
+            ),
+        ],
+    )
+
+    lifecycle.cleanup()
+
+    assert _cleanup_requests(urlopen) == []
+
+
+def test_explicit_non_ci_child_id_is_refused_by_name(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(
+                _organization_child(
+                    child_id="tailnet_production_789",
+                    display_name="Production",
+                    created_at=_created_at(minutes_old=100000, now=now),
+                )
+            ),
+        ],
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="tailnet_production_789"):
+        lifecycle.cleanup(child_id="tailnet_production_789")
+
+    assert _cleanup_requests(urlopen) == []
+
+
+@pytest.mark.parametrize(
+    ("display_name", "child_id", "created_at", "reason"),
+    [
+        ("Vonk Forge CI 1 attempt 1\u0000", "tailnet_bad_name", "stale", "unsafe CI child identity"),
+        ("Vonk Forge CI " + "x" * 80, "tailnet_long_name", "stale", "unsafe CI child identity"),
+        ("Vonk Forge CI 1 attempt 1", "tailnet\u0000bad", "stale", "unsafe CI child identity"),
+        ("Vonk Forge CI 1 attempt 1", "tailnet_ok", "not-a-timestamp", "invalid CI child timestamp"),
+        ("Vonk Forge CI 1 attempt 1", "tailnet_ok", "2020-01-01T00:00:00", "invalid CI child timestamp"),
+    ],
+)
+def test_ci_child_with_unvalidatable_identity_raises_instead_of_being_skipped(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    display_name: str,
+    child_id: str,
+    created_at: str,
+    reason: str,
+) -> None:
+    """A malformed CI child is an explicit blocker, never a silent skip.
+
+    Skipping it would leave the wedge in place while reporting success, which is
+    the failure this whole path exists to remove; guessing it is stale would
+    delete a network nothing here can attribute to a dead run.
+    """
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(
+                _organization_child(
+                    child_id=child_id,
+                    display_name=display_name,
+                    created_at=(
+                        _created_at(minutes_old=90, now=now)
+                        if created_at == "stale"
+                        else created_at
+                    ),
+                )
+            ),
+        ],
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match=reason):
+        lifecycle.cleanup()
+
+    assert _cleanup_requests(urlopen) == []
+
+
+def test_invalid_explicit_child_id_is_refused_before_the_api(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _factory_environment(monkeypatch)
+    urlopen = _install_urlopen(lifecycle, monkeypatch, [])
+
+    with pytest.raises(lifecycle.LifecycleError, match="ID is invalid"):
+        lifecycle.cleanup(child_id="bad id")
+
+    assert urlopen.requests == []
+
+
+def test_absent_explicit_child_id_is_refused(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(
+                _organization_child(
+                    child_id="tailnet_stale_999",
+                    display_name="Vonk Forge CI 1 attempt 1",
+                    created_at=_created_at(minutes_old=90, now=now),
+                )
+            ),
+        ],
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="tailnet_absent_555"):
+        lifecycle.cleanup(child_id="tailnet_absent_555")
+
+    assert _cleanup_requests(urlopen) == []
+
+
+def test_cleanup_refuses_a_backlog_larger_than_the_bound(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    monkeypatch.setattr(lifecycle, "MAX_CLEANUP_CHILDREN", 2)
+    children = [
+        _organization_child(
+            child_id=f"tailnet_stale_{index}",
+            display_name=f"Vonk Forge CI 1000{index} attempt 1",
+            created_at=_created_at(minutes_old=90, now=now),
+        )
+        for index in range(3)
+    ]
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [_Response({"access_token": "factory-list-token"}), _listing_response(*children)],
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="bounded cleanup limit of 2"):
+        lifecycle.cleanup()
+
+    assert _cleanup_requests(urlopen) == []
+
+
+def test_second_cleanup_run_with_nothing_stale_succeeds_and_deletes_nothing(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _factory_environment(monkeypatch)
+    urlopen = _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            _Response({"access_token": "factory-list-token"}),
+            _listing_response(),
+        ],
+    )
+
+    lifecycle.cleanup()
+
+    assert _cleanup_requests(urlopen) == []
+    assert "deleted 0 of 0" in capsys.readouterr().out
+
+
+def test_cleanup_never_prints_the_credential_or_an_access_token(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _factory_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    child = _organization_child(
+        child_id="tailnet_stale_999",
+        display_name="Vonk Forge CI 35232305043 attempt 1",
+        created_at=_created_at(minutes_old=90, now=now),
+    )
+    _install_urlopen(
+        lifecycle,
+        monkeypatch,
+        [_Response({"access_token": "factory-list-token"}), _listing_response(child)]
+        + _child_delete_responses("tailnet_stale_999"),
+    )
+
+    lifecycle.cleanup()
+
+    output = capsys.readouterr().out
+    assert "factory-secret" not in output
+    # The workflow command that registers a secret is the one place a token may
+    # appear; every other line must be free of it.
+    for secret in ("factory-list-token", "delete-token-tailnet_stale_999"):
+        assert f"::add-mask::{secret}" in output
+        assert [
+            line for line in output.splitlines() if secret in line
+        ] == [f"::add-mask::{secret}"]
 
 
 def test_create_configures_only_the_child_and_delete_uses_its_exact_id(
