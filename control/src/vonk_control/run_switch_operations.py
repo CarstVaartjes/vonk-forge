@@ -2752,9 +2752,17 @@ class RunSwitchOperationService:
                         )
                     )
             elif installation.state == "installed" and self._lifecycle is not None:
+                # The runs this plan stops release their reservations in the
+                # Stop phase, so admission must not count that capacity against
+                # the replacement's own preview.  Counting it refused the plan
+                # for the workload it was replacing, and since the only release
+                # path is a successful stop, nothing could break the tie.
+                planned_stop_ids = frozenset(stop.run_id for stop in stops)
                 try:
                     low_level_plan = self._lifecycle.preview_run(
-                        installation.id, request.alias
+                        installation.id,
+                        request.alias,
+                        released_run_ids=planned_stop_ids,
                     )
                 except (
                     KeyError,
@@ -2773,37 +2781,9 @@ class RunSwitchOperationService:
                     )
                 else:
                     start_plan_digest = low_level_plan.plan_digest
-                    planned_stop_ids = {stop.run_id for stop in stops}
-                    deferred_port_reservations: set[tuple[str, str]] = set()
-                    if planned_stop_ids:
-                        deferred_port_reservations = {
-                            (reservation.node_id, reservation.resource_key)
-                            for reservation in session.scalars(
-                                select(ResourceReservation).where(
-                                    ResourceReservation.owner_kind == "run",
-                                    ResourceReservation.owner_id.in_(planned_stop_ids),
-                                    ResourceReservation.kind == "port",
-                                    ResourceReservation.state == "active",
-                                )
-                            )
-                        }
                     remaining_admission_blockers = False
                     for item in low_level_plan.nodes:
                         for reason in item.blockers:
-                            if (
-                                reason.code == "run.port_occupied"
-                                and (item.node_id, str(item.port))
-                                in deferred_port_reservations
-                            ) or (
-                                reason.code == "run.rendezvous_port_occupied"
-                                and item.rendezvous_port is not None
-                                and item.rendezvous_port != item.port
-                                and (item.node_id, str(item.rendezvous_port))
-                                in deferred_port_reservations
-                            ):
-                                # The exact Stop phase releases this reservation.
-                                # Start re-runs low-level admission after Stop.
-                                continue
                             remaining_admission_blockers = True
                             blockers.append(
                                 _as_reason(
@@ -2856,8 +2836,13 @@ class RunSwitchOperationService:
                 and fit_after_stop is not None
                 and fit_after_stop.allowed
                 and any(
-                    reason.code.startswith("run-switch.insufficient-memory")
-                    or reason.code.startswith("run-switch.resource.insufficient")
+                    # A memory shortfall reaches this list from the resource
+                    # planner, which ``_resource_reason`` namespaces as
+                    # ``run-switch.resource.*``.  There is no producer for a
+                    # separate ``run-switch.insufficient-memory`` code, so
+                    # matching it only made this condition look broader than it
+                    # was.
+                    reason.code.startswith("run-switch.resource.insufficient")
                     for reason in current_fit_blockers
                 )
             )

@@ -7,7 +7,7 @@ import ipaddress
 import json
 import logging
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -998,8 +998,19 @@ class RecipeOperationService:
             workload_intent_ordinal=workload_intent_ordinal,
         )
 
-    def preview_run(self, installation_id: str, alias: str) -> RunPlan:
-        return self._run_admission.plan_run(installation_id, alias, now=self._clock())
+    def preview_run(
+        self,
+        installation_id: str,
+        alias: str,
+        *,
+        released_run_ids: Collection[str] = (),
+    ) -> RunPlan:
+        return self._run_admission.plan_run(
+            installation_id,
+            alias,
+            now=self._clock(),
+            released_run_ids=released_run_ids,
+        )
 
     def _adopt_start_in_session(
         self,

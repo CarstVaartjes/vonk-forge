@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .install_admission import AdmissionReason
@@ -120,8 +120,19 @@ class RunAdmissionService:
         alias: str,
         *,
         now: datetime,
+        released_run_ids: Collection[str] = (),
         _session: Session | None = None,
     ) -> RunPlan:
+        """Build the admission plan for one run.
+
+        ``released_run_ids`` names runs that a reviewed plan stops before it
+        starts this one.  Their Stop phase releases their reservations, so
+        counting those bytes here refuses the replacement for the workload it
+        replaces -- the deadlock an operator can only break by hand.  This is a
+        preview-only relaxation: accepting the run still re-derives the plan
+        without it and refuses when the Stop did not really release the
+        capacity (``run.plan_stale_or_blocked``).
+        """
         with (
             nullcontext(_session) if _session is not None else self._sessions()
         ) as session:
@@ -262,6 +273,21 @@ class RunAdmissionService:
             raise TypeError("mapping endpoint owner is missing")
         plans: list[RunNodePlan] = []
         fabric_addresses: list[str] = []
+        released = tuple(released_run_ids)
+        # Reservations owned by a run this plan stops are released by its Stop
+        # phase, so they must not be counted against the replacement it makes
+        # room for.  One predicate covers every kind the run holds -- capacity
+        # and ports -- because one lifecycle event releases all of them.
+        released_scope = (
+            (
+                or_(
+                    ResourceReservation.owner_kind != "run",
+                    ResourceReservation.owner_id.not_in(released),
+                ),
+            )
+            if released
+            else ()
+        )
         for placement in ordered:
             blockers = [] if topology_reason is None else [topology_reason]
             warnings: list[AdmissionReason] = []
@@ -357,6 +383,7 @@ class RunAdmissionService:
                             ResourceReservation.node_id == placement.node_id,
                             ResourceReservation.kind == reservation_kind,
                             ResourceReservation.state == "active",
+                            *released_scope,
                         )
                     )
                     or 0
@@ -370,6 +397,7 @@ class RunAdmissionService:
                             ResourceReservation.kind == "port",
                             ResourceReservation.resource_key == str(port),
                             ResourceReservation.state == "active",
+                            *released_scope,
                         )
                     )
                 )
@@ -380,6 +408,7 @@ class RunAdmissionService:
                             ResourceReservation.kind == "port",
                             ResourceReservation.resource_key == "29500",
                             ResourceReservation.state == "active",
+                            *released_scope,
                         )
                     )
                     if multi_node and placement.node_id == endpoint_owner.node_id
