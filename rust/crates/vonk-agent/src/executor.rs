@@ -340,7 +340,9 @@ impl<R> RecipeExecutor<'_, R> {
                 // an owner-only HTTP probe follows and remains independently
                 // bounded to five seconds.
                 let observed_at = DateTime::from_timestamp(outcome.receipt.claims.observed_at, 0)
-                    .ok_or(crate::host_runtime::HostRuntimeError::Protocol)?;
+                    .ok_or(crate::host_runtime::HostRuntimeError::HelperProtocol(
+                    crate::host_runtime::HelperProtocolCause::ObservationTimestamp,
+                ))?;
                 let endpoint_ready = endpoint.map(|address| {
                     outcome.process_running
                         && self.runtime.readiness_request(
@@ -423,7 +425,7 @@ impl<R> RecipeExecutor<'_, R> {
             .await
             .and_then(|outcome| {
                 if outcome.stop_uncertain {
-                    Err(crate::host_runtime::HostRuntimeError::Protocol)
+                    Err(crate::host_runtime::HostRuntimeError::StopUncertain)
                 } else {
                     Ok(())
                 }
@@ -446,7 +448,7 @@ impl<R> RecipeExecutor<'_, R> {
         .await
         .and_then(|outcome| {
             if outcome.stop_uncertain {
-                Err(crate::host_runtime::HostRuntimeError::Protocol)
+                Err(crate::host_runtime::HostRuntimeError::StopUncertain)
             } else {
                 Ok(())
             }
@@ -2480,7 +2482,7 @@ fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) ->
         HostRuntimeError::Controller(_) => true,
         HostRuntimeError::HelperRejected { code, .. } => code == "operation_io",
         HostRuntimeError::HelperProtocol(_) => false,
-        HostRuntimeError::Protocol => false,
+        HostRuntimeError::StopUncertain => false,
     }
 }
 
@@ -3129,7 +3131,7 @@ fn image_import_helper_code(error: &crate::host_runtime::HostRuntimeError) -> St
         HostRuntimeError::HelperProtocol(cause) => {
             format!("runtime_helper_{}", cause.code())
         }
-        HostRuntimeError::Protocol => "runtime_helper_protocol_invalid".to_owned(),
+        HostRuntimeError::StopUncertain => "runtime_helper_stop_uncertain".to_owned(),
     }
 }
 
@@ -3289,6 +3291,13 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "runtime_helper_response_unbound"
             | "runtime_helper_rejection_malformed"
             | "runtime_helper_outcome_malformed"
+            | "runtime_helper_request_document_invalid"
+            | "runtime_helper_request_storage_invalid"
+            | "runtime_helper_system_clock_invalid"
+            | "runtime_helper_inspection_receipt_invalid"
+            | "runtime_helper_observation_receipt_invalid"
+            | "runtime_helper_observation_timestamp_invalid"
+            | "runtime_helper_stop_uncertain"
     )
 }
 
@@ -3693,7 +3702,9 @@ mod tests {
     #[tokio::test]
     async fn exact_snapshot_inspection_failure_never_reports_partial_or_empty() {
         for error in [
-            crate::host_runtime::HostRuntimeError::Protocol,
+            crate::host_runtime::HostRuntimeError::HelperProtocol(
+                crate::host_runtime::HelperProtocolCause::ObservationTimestamp,
+            ),
             crate::host_runtime::HostRuntimeError::Controller(ClientError::ObservationNotReady),
         ] {
             let server = ObservationServer::new(Some(204));
@@ -4514,21 +4525,76 @@ mod tests {
     }
 
     #[test]
+    fn runtime_failure_names_the_agent_built_request_to_the_controller() {
+        // Wrong implementation: a Start whose agent-built request failed
+        // canonical validation reported the collapsed `helper_protocol_invalid`
+        // on the live blocked-start path, with no helper involved and nothing
+        // for an operator to act on.
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let error = crate::host_runtime::HostRuntimeError::HelperProtocol(
+            crate::host_runtime::HelperProtocolCause::RequestDocument,
+        );
+        let failed =
+            super::runtime_failure("container runtime could not start the workload", &error);
+        let result = super::normalize_execution_result(&start_claim, failed);
+        let body: vonk_agent_protocol::generated::AgentFailureResult =
+            serde_json::from_value(result.body).unwrap();
+        let reason = body.reason.as_deref().unwrap();
+        assert!(
+            reason.contains(
+                "container runtime could not start the workload: helper_request_document_invalid"
+            ),
+            "the failure reason must name the agent-built request, got {reason}"
+        );
+    }
+
+    #[test]
+    fn runtime_failure_names_stop_uncertain_without_calling_it_protocol() {
+        // Wrong implementation: an ambiguous stop carried the protocol label,
+        // so "we could not confirm the stop" read as a corrupt helper reply.
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let error = crate::host_runtime::HostRuntimeError::StopUncertain;
+        let failed =
+            super::runtime_failure("container runtime could not start the workload", &error);
+        let result = super::normalize_execution_result(&start_claim, failed);
+        let body: vonk_agent_protocol::generated::AgentFailureResult =
+            serde_json::from_value(result.body).unwrap();
+        let reason = body.reason.as_deref().unwrap();
+        assert!(
+            reason
+                .contains("container runtime could not start the workload: helper_stop_uncertain"),
+            "an ambiguous stop must not read as a malformed reply, got {reason}"
+        );
+    }
+
+    #[test]
     fn image_import_helper_protocol_cause_survives_normalization() {
         // Wrong implementation: a new cause's code was absent from
         // `stable_runtime_helper_error_code`, so normalization silently dropped
         // it and the Controller saw no cause at all.
         let mut import_claim = claim();
         import_claim.operation = "recipe.image.import.v1".parse().unwrap();
-        for cause in [
+        let mut errors: Vec<crate::host_runtime::HostRuntimeError> = [
             crate::host_runtime::HelperProtocolCause::RequestEncoding,
             crate::host_runtime::HelperProtocolCause::HelperCallJoin,
             crate::host_runtime::HelperProtocolCause::MessageFraming,
             crate::host_runtime::HelperProtocolCause::ResponseUnbound,
             crate::host_runtime::HelperProtocolCause::RejectionMalformed,
             crate::host_runtime::HelperProtocolCause::OutcomeMalformed,
-        ] {
-            let error = crate::host_runtime::HostRuntimeError::HelperProtocol(cause);
+            crate::host_runtime::HelperProtocolCause::RequestDocument,
+            crate::host_runtime::HelperProtocolCause::RequestStorage,
+            crate::host_runtime::HelperProtocolCause::SystemClock,
+            crate::host_runtime::HelperProtocolCause::InspectionReceipt,
+            crate::host_runtime::HelperProtocolCause::ObservationReceipt,
+            crate::host_runtime::HelperProtocolCause::ObservationTimestamp,
+        ]
+        .into_iter()
+        .map(crate::host_runtime::HostRuntimeError::HelperProtocol)
+        .collect();
+        errors.push(crate::host_runtime::HostRuntimeError::StopUncertain);
+        for error in errors {
             let code = super::image_import_helper_code(&error);
             assert!(
                 code.starts_with("runtime_helper_"),
