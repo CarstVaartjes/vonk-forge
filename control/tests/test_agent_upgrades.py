@@ -2060,3 +2060,20 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
         final_operation = session.get(AgentOperation, first.operation_id)
         assert final_operation is not None and final_operation.state == "succeeded"
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
+
+
+def test_a_conflict_names_a_spark_only_by_its_canonical_identifier() -> None:
+    """A stored row value must never reach an operator through a refusal.
+
+    ``Spark {node_id} {reason}`` is surfaced by the Controller API, so the node
+    token is accepted only when it is a canonical Spark identifier. Anything
+    else becomes the generic target refusal instead of echoing stored text.
+    """
+
+    assert str(
+        AgentUpgradeConflict("is not currently online", spark_id=NODE_A)
+    ) == f"Spark {NODE_A} is not currently online"
+    leaked = AgentUpgradeConflict(
+        "is not currently online", spark_id="api_key=stored-secret"
+    )
+    assert str(leaked) == "agent upgrade target is invalid"
