@@ -638,7 +638,7 @@ def test_distributed_start_timeout_default_override_and_bounds(
     monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
     monkeypatch.delenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", raising=False)
     assert (
-        settings_class.from_env_and_secrets().distributed_start_timeout_seconds == 1800
+        settings_class.from_env_and_secrets().distributed_start_timeout_seconds == 3600
     )
     for valid in (60, 1800, 3600):
         monkeypatch.setenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", str(valid))

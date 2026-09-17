@@ -137,15 +137,23 @@ implementation or weaken the runtime security and evidence contract.
 ### Distributed cold-start budget
 
 Set `VONK_DISTRIBUTED_START_TIMEOUT_SECONDS` on both the Controller API and
-worker when a distributed model needs more than the default 1800 seconds to load
-weights or compile kernels. Values must be between 60 and 3600 seconds; for
-example, 1800 allows a bounded 30-minute cold start. This sets one immutable
-deadline when the run is admitted, covering rank launch and collective readiness.
+worker to change the budget a distributed model gets to load weights or compile
+kernels. Values must be between 60 and 3600 seconds, and the default is 3600 —
+a bounded 60-minute cold start. The shipped Compose default is the same 3600, so
+a deployment that sets nothing still admits a long cold start; a test asserts
+those two defaults agree rather than repeating the number. This sets one
+immutable deadline when the run is admitted, covering rank launch and
+collective readiness.
 Changing the setting affects newly admitted runs only. It does not extend active
 deadlines, publish an unready endpoint, or change rank-loss recovery and stop
 timeouts. Native agents continue enforcing the signed operation's deadline.
-The default follows the bounded 30-minute budget used for Mia cold-start
-qualification; it is not a promise that every model needs that long. Normal
+The default is deliberately the largest value the contract allows: 60 minutes is
+headroom for a frontier model that must load weights and compile kernels across
+two Sparks, and the lease-lapse evidence now makes a start that stalls visible
+long before the budget ends. It is not a promise that every model needs that
+long, and it is not evidence that 60 minutes is enough — if a real start
+exhausts it, that is the number to raise the ceiling for, rather than a guess
+made now. Normal
 `vonkctl profile load` progress displays the effective initial-start budget,
 deadline, and current load/JIT phase when the Run/Switch child reaches startup.
 Rank-loss recovery and final route publication keep their separate deadlines.

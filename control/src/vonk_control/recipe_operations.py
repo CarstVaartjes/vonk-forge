@@ -473,7 +473,7 @@ class RecipeOperationService:
         builds: RecipeBuildService | None = None,
         mappings: ClusterMappingService | None = None,
         run_health_maximum_age_seconds: int = 300,
-        distributed_start_timeout_seconds: int = 1800,
+        distributed_start_timeout_seconds: int = 3600,
     ) -> None:
         if not 1 <= run_health_maximum_age_seconds <= 300:
             raise ValueError("recipe run health age is invalid")
