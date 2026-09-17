@@ -2162,7 +2162,22 @@ class FleetProfileService:
                 FleetProfilePlanStep(index=index, **step)
                 for index, step in enumerate(raw_steps)
             ]
-            blocker_count = sum(reason.severity == "error" for reason in reasons)
+            # A preparation blocker blocks admission.  Preparation reasons carry
+            # the run-switch severity vocabulary, whose blocking value is
+            # "blocker" rather than this contract's "error", so counting only
+            # "error" reported a profile as allowed while its own preparation
+            # said the persisted source-build plan is invalid -- and the apply
+            # then refused with "profile child plan blocked:
+            # run-switch.container-build-plan-invalid" a moment later.  Missing
+            # target bytes are not blockers; only a reported blocker is.
+            blocker_count = sum(
+                reason.severity == "error" for reason in reasons
+            ) + sum(
+                1
+                for item in assignment_preparations
+                for reason in item.preparation.reasons
+                if reason.severity == "blocker"
+            )
             summary = FleetProfilePlanSummary(
                 already_correct=sum(
                     item.actions == ["keep"] for item in assignment_previews
