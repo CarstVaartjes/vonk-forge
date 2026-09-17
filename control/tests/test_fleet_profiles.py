@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
+    FleetProfileAssignment,
     FleetProfileAssignmentInput,
     FleetProfileChildOperation,
     FleetProfileChildProgress,
@@ -53,7 +54,14 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.operation_api import OperationQuery
-from vonk_control.preparation_contract import RolloutPreparation
+from vonk_control.preparation_contract import (
+    ControllerAssetState,
+    ModelArtifactPreparation,
+    PreparationReason,
+    RolloutPreparation,
+    RuntimeImagePreparation,
+    TargetAssetState,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
@@ -903,6 +911,116 @@ def test_preview_reports_an_unreadable_pending_plan_without_a_scope() -> None:
     assert any(
         reason.code == "profile.pending_record_unreadable" for reason in preview.reasons
     )
+
+
+def test_preview_treats_a_preparation_blocker_as_not_allowed() -> None:
+    """A preparation blocker blocks admission instead of only being listed.
+
+    Preparation reasons carry the run-switch severity vocabulary, whose blocking
+    value is ``blocker`` rather than this contract's ``error``.  Counting only
+    ``error`` reported the profile as allowed while its own preparation said the
+    persisted source-build plan is invalid -- and the apply then refused with
+    ``profile child plan blocked: run-switch.container-build-plan-invalid`` a
+    moment later, which is the silent admission the profile cache contract
+    forbids.
+    """
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    node_id = _node_id(1)
+    digest = "a" * 64
+    asset_bytes = 1024
+
+    def blocking_preparation(
+        session: Session,
+        assignment: FleetProfileAssignment,
+        expected_nodes: tuple[str, ...],
+    ) -> RolloutPreparation:
+        del session, assignment, expected_nodes
+        # Shaped like the live GLM receipt: the Controller holds verified bytes,
+        # no Spark has the asset yet, and the stored build plan cannot be
+        # revalidated under the current executable identity.
+        return RolloutPreparation(
+            model=ModelArtifactPreparation(
+                artifact_set_sha256=digest,
+                model_content_sha256="b" * 64,
+                recipe_revision_sha256="c" * 64,
+                artifact_count=1,
+                artifact_set_bytes=asset_bytes,
+                completeness="complete",
+                controller=ControllerAssetState(
+                    state="ready",
+                    expected_bytes=asset_bytes,
+                    verified_bytes=asset_bytes,
+                    missing_bytes=0,
+                    verified_sha256=digest,
+                    verified_at=NOW,
+                    source="nas-cache",
+                ),
+                targets=[
+                    TargetAssetState(
+                        node_id=node_id,
+                        state="unknown",
+                        expected_bytes=asset_bytes,
+                        present_bytes=0,
+                        missing_bytes=asset_bytes,
+                    )
+                ],
+            ),
+            runtime_image=RuntimeImagePreparation(
+                image_digest="sha256:" + "d" * 64,
+                oci_layout_sha256="e" * 64,
+                image_bytes=asset_bytes,
+                architecture="linux-arm64",
+                runtime_interface="openai",
+                build_id=_uuid(1234),
+                controller=ControllerAssetState(
+                    state="ready",
+                    expected_bytes=asset_bytes,
+                    verified_bytes=asset_bytes,
+                    missing_bytes=0,
+                    verified_sha256="e" * 64,
+                    verified_at=NOW,
+                    source="controller-build",
+                ),
+                targets=[
+                    TargetAssetState(
+                        node_id=node_id,
+                        state="unknown",
+                        expected_bytes=asset_bytes,
+                        present_bytes=0,
+                        missing_bytes=asset_bytes,
+                    )
+                ],
+            ),
+            target_node_ids=[node_id],
+            controller_ready=True,
+            targets_ready=False,
+            ready=False,
+            reasons=[
+                PreparationReason(
+                    code="run-switch.container-build-plan-invalid",
+                    detail="The persisted source-build plan is invalid.",
+                    severity="blocker",
+                )
+            ],
+        )
+
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        switch_adapter=_SwitchAdapter(),
+        preparation_provider=blocking_preparation,
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+
+    preview = service.preview(profile.id)
+
+    # The blocker is carried by the preparation, not by the profile's own
+    # reasons, and it must still decide the admission verdict.
+    assert [(reason.code, reason.detail) for reason in preview.reasons] == []
+    assert preview.summary.blockers == 1
+    assert preview.allowed is False
 
 
 def test_activity_projection_keeps_valid_records_when_one_is_unreadable() -> None:
