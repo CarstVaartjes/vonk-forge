@@ -46,15 +46,21 @@ const FAILURE_HEADERS: [&str; 11] = [
 ];
 
 /// The last failure header in the capture, as a byte offset.
+///
+/// The scan is over the raw bytes: decoding first would make every line longer
+/// than the bytes it came from whenever the container wrote a byte that is not
+/// valid UTF-8, and an offset measured in decoded characters would then name a
+/// position the stream does not have -- which is both a wrong anchor and a
+/// panic in the slice below.
 fn header_index(stream: &[u8]) -> Option<usize> {
-    let text = String::from_utf8_lossy(stream);
     let mut found = None;
     let mut offset = 0;
-    for line in text.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\n', '\r']);
+    for line in stream.split_inclusive(|byte| *byte == b'\n') {
+        let trimmed = line.strip_suffix(b"\n").unwrap_or(line);
+        let trimmed = trimmed.strip_suffix(b"\r").unwrap_or(trimmed);
         if FAILURE_HEADERS
             .iter()
-            .any(|header| trimmed.trim_start().starts_with(header))
+            .any(|header| trimmed.trim_ascii_start().starts_with(header.as_bytes()))
         {
             found = Some(offset);
         }
@@ -177,6 +183,29 @@ mod tests {
         stream.extend(b"RuntimeError: Engine core initialization failed. See root cause above.\n");
         let tail = retain(&stream);
         assert!(tail.text.contains("See root cause above"));
+    }
+
+    #[test]
+    fn an_undecodable_byte_cannot_move_the_anchor_out_of_the_stream() {
+        // Wrong implementation this catches: the header offset was measured in
+        // decoded characters, so a byte that is not valid UTF-8 made every
+        // earlier line count for more than it occupies. The anchor then named a
+        // position past the end of the capture -- a wrong window at best, and a
+        // slice panic at worst -- exactly when a crashed process is most likely
+        // to have written one.
+        let mut stream = b"ERROR drafter checkpoint is incompatible\n".to_vec();
+        stream.extend_from_slice(&[0xff, 0xfe, 0x00, 0x80]);
+        stream.extend_from_slice(b"\nTraceback (most recent call last):\n");
+        stream.extend(cut_off_traceback());
+        let index = header_index(&stream).expect("the capture has a header");
+        assert!(index < stream.len(), "{index} >= {}", stream.len());
+        let tail = retain(&stream);
+        assert!(tail.text.contains("drafter checkpoint is incompatible"));
+        // The declared bound is characters. An undecodable byte becomes one
+        // replacement character, so the window can never decode into more
+        // characters than the bytes it selected; it can only weigh more bytes.
+        assert!(tail.text.chars().count() <= RETAINED_BYTES);
+        assert!(tail.text.len() <= RETAINED_BYTES * 3);
     }
 
     #[test]
