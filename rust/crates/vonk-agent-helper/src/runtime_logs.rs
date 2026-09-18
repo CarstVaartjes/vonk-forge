@@ -15,13 +15,18 @@
 
 use vonk_agent_protocol::generated::{FailureLogTail, HostHelperProcessLogs};
 
-/// Bytes retained per container stream.  This is the evidence the operator
-/// receives, and the protocol declares the same bound, so this is the single
-/// place the bound is applied.
-const RETAINED_BYTES: usize = 2048;
+/// Bytes retained per container stream.
+///
+/// The protocol declares 2048 for this field, but the consumer that actually
+/// displays it keeps only the first 1024 characters of whatever arrives: a
+/// 2048-byte window therefore reached the operator as its older half, and the
+/// exception that ended the stream was the half that was dropped.  The single
+/// owner of the retention bound retains what is shown, so the newest bytes --
+/// the ones a failure ends with -- are the ones that survive.
+const RETAINED_BYTES: usize = 1024;
 /// Bytes retained before a failure header, so the cause printed above the
 /// header survives alongside the head of the block that reports it.
-const CAUSE_BYTES: usize = 1024;
+const CAUSE_BYTES: usize = 512;
 /// Lines read back from the container.  Kept well above what is retained so a
 /// failure header above the retained window is still visible to the anchor.
 pub const CAPTURE_LINES: &str = "400";
@@ -232,12 +237,22 @@ mod tests {
             "{}",
             tail.text
         );
-        assert_eq!(tail.text.len(), RETAINED_BYTES);
+        // The whole budget, less at most the one partial line the window had to
+        // open on, and it ends where the stream ended.
+        assert!(RETAINED_BYTES - tail.text.len() < 8, "{}", tail.text.len());
+        assert!(
+            tail.text.ends_with("ERROR engine core died\n"),
+            "{}",
+            tail.text
+        );
         assert!(tail.truncated);
+        // Everything the window did not keep is reported, including the
+        // partial line it opened on.
         assert_eq!(
             tail.dropped_bytes,
-            Some((stream.len() - RETAINED_BYTES) as u64)
+            Some((stream.len() - tail.text.len()) as u64)
         );
+        assert!(tail.dropped_bytes.unwrap_or_default() >= (stream.len() - RETAINED_BYTES) as u64);
     }
 
     #[test]
