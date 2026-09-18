@@ -1450,6 +1450,12 @@ impl AgentHttpClient {
                             destination.to_path_buf(),
                             DistributionObjectReceipt::new(sha256, &metadata),
                         );
+                    // Verifying an object already on disk reads all of it, so it
+                    // fills the page cache exactly as a transfer does. The live
+                    // observation that motivated this: a re-verified 199 GB
+                    // object left the device reporting about 2 GB free, and the
+                    // checkpoint loader refused its 1.27 GB staging buffer.
+                    release_distribution_page_cache(destination);
                     return Ok(());
                 }
                 // The object sits at its exact digest name with exact custody
