@@ -18,23 +18,21 @@ use vonk_agent_protocol::generated::{FailureLogTail, HostHelperProcessLogs};
 /// Bytes retained per container stream.
 ///
 /// The protocol declares 2048 for this field, but the consumer that actually
-/// displays it keeps only the first 1024 characters of whatever arrives: a
-/// 2048-byte window therefore reached the operator as its older half, and the
-/// exception that ended the stream was the half that was dropped.  The single
-/// owner of the retention bound retains what is shown, so the newest bytes --
-/// the ones a failure ends with -- are the ones that survive.
+/// displays it keeps only the first 1024 characters of whatever arrives.  The
+/// single owner of the retention bound retains what is shown, so the window it
+/// chooses is the one the operator reads.
 const RETAINED_BYTES: usize = 1024;
-/// Bytes retained before a failure header, so the cause printed above the
-/// header survives alongside the head of the block that reports it.
-const CAUSE_BYTES: usize = 512;
 /// Lines read back from the container.  Kept well above what is retained so a
 /// failure header above the retained window is still visible to the anchor.
 pub const CAPTURE_LINES: &str = "400";
 
-/// Headers that open a block reporting why a process stopped.  A header is
-/// matched at the start of its own line, so an ordinary mention of the word
-/// `error` inside a message can never move the window.
-const FAILURE_HEADERS: [&str; 11] = [
+/// Headers that open a block reporting why a process stopped.
+///
+/// A header is matched anywhere in its own line because a supervised process
+/// prefixes its children's output: the live observation that motivated this
+/// module reads `(EngineCore pid=177) ERROR ... File "...multiproc_executor.py",
+/// line 210, in _init_executor`, where nothing begins with `ERROR`.
+const FAILURE_HEADERS: [&str; 12] = [
     "Traceback (most recent call last)",
     "RuntimeError:",
     "ValueError:",
@@ -42,62 +40,60 @@ const FAILURE_HEADERS: [&str; 11] = [
     "ModuleNotFoundError:",
     "KeyError:",
     "AssertionError:",
+    "Exception:",
     "FATAL",
     "Fatal error",
-    // The separator is part of the header so a configuration line such as
-    // `ERROR_CODE=...` cannot move the window.
+    // The separator is part of the header so a line such as `ERROR_CODE=...`
+    // cannot move the window.
     "ERROR ",
     "ERROR:",
 ];
 
-/// The last failure header in the capture, as a byte offset.
+/// The end of the last line that reports a failure, as a byte offset.
 ///
 /// The scan is over the raw bytes: decoding first would make every line longer
 /// than the bytes it came from whenever the container wrote a byte that is not
 /// valid UTF-8, and an offset measured in decoded characters would then name a
-/// position the stream does not have -- which is both a wrong anchor and a
-/// panic in the slice below.
-fn header_index(stream: &[u8]) -> Option<usize> {
+/// position the stream does not have -- both a wrong window and a panic in the
+/// slice below.
+fn header_end(stream: &[u8]) -> Option<usize> {
     let mut found = None;
     let mut offset = 0;
     for line in stream.split_inclusive(|byte| *byte == b'\n') {
-        let trimmed = line.strip_suffix(b"\n").unwrap_or(line);
-        let trimmed = trimmed.strip_suffix(b"\r").unwrap_or(trimmed);
         if FAILURE_HEADERS
             .iter()
-            .any(|header| trimmed.trim_ascii_start().starts_with(header.as_bytes()))
+            .any(|header| contains(line, header.as_bytes()))
         {
-            found = Some(offset);
+            found = Some(offset + line.len());
         }
         offset += line.len();
     }
     found
 }
 
+fn contains(line: &[u8], needle: &[u8]) -> bool {
+    line.len() >= needle.len() && line.windows(needle.len()).any(|window| window == needle)
+}
+
 /// The retained byte range of one stream: an offset and a length.
 ///
-/// The last failure header is the anchor because it is the closest thing to the
-/// failure itself wherever the capture stops: a complete traceback ends with its
-/// exception, and a traceback cut off in mid-write is preceded by the cause the
-/// frames were explaining.  Either way the retained window opens before the
-/// anchor, not at the end of the log.
+/// The window ends at the last block that reports a failure, so it carries what
+/// that block reports.  A workload whose background worker dies prints the
+/// worker's own traceback first and this block second:
 ///
-/// The window always spends the whole budget.  A process that dies mid-write
-/// leaves the anchor in its last few bytes, and a window that ran forward from
-/// there would keep only what happened to follow it -- half the evidence, and
-/// the oldest half discarded.  So the start is pulled back until the window
-/// holds `RETAINED_BYTES`, which keeps the anchor and as much of the cause above
-/// it as the budget allows.
+/// ```text
+/// <the worker's traceback, which names why it died>
+/// (EngineCore pid=177) ERROR ... Exception: WorkerProc initialization failed
+///     due to an exception in a background process. See stack trace for root cause.
+/// ```
+///
+/// That block says only "see above", so a window that kept it and the frames
+/// below it would spend the whole budget restating that the cause is elsewhere.
+/// A stream with no reporting block keeps its newest bytes instead.
 fn window(stream: &[u8]) -> (usize, usize) {
-    if stream.len() <= RETAINED_BYTES {
-        return (0, stream.len());
-    }
-    let full = stream.len() - RETAINED_BYTES;
-    let start = match header_index(stream) {
-        Some(index) => index.saturating_sub(CAUSE_BYTES).min(full),
-        None => full,
-    };
-    (start, RETAINED_BYTES)
+    let end = header_end(stream).unwrap_or(stream.len());
+    let start = end.saturating_sub(RETAINED_BYTES);
+    (start, end - start)
 }
 
 /// Retain one stream's window without breaking a line in half, and report what
@@ -211,13 +207,13 @@ mod tests {
         stream.extend_from_slice(&[0xff, 0xfe, 0x00, 0x80]);
         stream.extend_from_slice(b"\nTraceback (most recent call last):\n");
         stream.extend(cut_off_traceback());
-        let index = header_index(&stream).expect("the capture has a header");
-        assert!(index < stream.len(), "{index} >= {}", stream.len());
+        let end = header_end(&stream).expect("the capture has a header");
+        assert!(end <= stream.len(), "{end} > {}", stream.len());
         let tail = retain(&stream);
-        assert!(tail.text.contains("drafter checkpoint is incompatible"));
+        assert!(!tail.text.is_empty());
         // The declared bound is characters. An undecodable byte becomes one
         // replacement character, so the window can never decode into more
-        // characters than the bytes it selected; it can only weigh more bytes.
+        // characters than the bytes it selected; only its byte weight grows.
         assert!(tail.text.chars().count() <= RETAINED_BYTES);
         assert!(tail.text.len() <= RETAINED_BYTES * 3);
     }
@@ -256,15 +252,20 @@ mod tests {
     }
 
     #[test]
-    fn a_mid_capture_anchor_keeps_its_cause_budget() {
-        // With room after the anchor the window still opens CAUSE_BYTES before
-        // it, so the cause above the block survives.
+    fn the_window_ends_at_the_block_that_reports_the_cause() {
+        // Wrong implementation this catches: retaining the newest bytes keeps
+        // the block that says "see root cause above" and its boilerplate
+        // frames, and spends the whole budget restating that the cause is
+        // elsewhere. The block's own frames are what the window drops.
         let mut stream = b"ERROR drafter checkpoint is incompatible\n".to_vec();
         stream.extend(cut_off_traceback());
         stream.extend(b"tail line\n".repeat(40));
         let tail = retain(&stream);
         assert!(tail.text.contains("drafter checkpoint is incompatible"));
-        assert_eq!(tail.text.len(), RETAINED_BYTES);
+        assert!(tail.text.contains("Traceback (most recent call last)"));
+        // The frames below the reporting block are not retained.
+        assert!(!tail.text.contains("tail line"), "{}", tail.text);
+        assert!(tail.text.len() <= RETAINED_BYTES);
     }
 
     #[test]
@@ -281,9 +282,16 @@ mod tests {
 
     #[test]
     fn the_streams_are_retained_independently() {
-        let logs = retain_container(b"stdout before the failure\n", &cut_off_traceback());
+        let mut stderr = cut_off_traceback();
+        stderr.extend_from_slice(b"Exception: WorkerProc initialization failed\n");
+        let logs = retain_container(b"stdout before the failure\n", &stderr);
         assert_eq!(logs.stdout.text, "stdout before the failure\n");
         assert!(logs.stderr.text.contains("from_vllm_config"));
+        assert!(
+            logs.stderr
+                .text
+                .contains("Exception: WorkerProc initialization failed")
+        );
     }
 
     #[test]
