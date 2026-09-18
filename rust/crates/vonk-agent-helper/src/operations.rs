@@ -17,7 +17,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::generated::{
     ConfirmPackageActivationOperation, ExecuteContainerRuntimeRequestOperation,
-    InstallVonkDebOperation, RestartVonkUnitOperation, ScheduleRebootOperation,
+    HostHelperProcessLogs, InstallVonkDebOperation, RestartVonkUnitOperation,
+    ScheduleRebootOperation,
 };
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeRunObservationOutcome,
@@ -74,8 +75,14 @@ pub enum OperationError {
     RuntimeImageIdentityInvalid,
     #[error("runtime image receipt could not be written")]
     RuntimeImageReceiptFailed,
-    #[error("runtime process exited: {diagnostic}")]
-    RuntimeProcessExited { diagnostic: String },
+    /// The exact inspected container had already exited.
+    #[error("runtime process exited")]
+    RuntimeProcessExited {
+        /// The container's own retained output, per stream. Absent when the
+        /// log could not be read; the reason is then reported instead.
+        logs: Option<Box<HostHelperProcessLogs>>,
+        capture_error: Option<&'static str>,
+    },
     #[error("exact runtime container is absent")]
     RuntimeRunMissing,
     #[error("native fabric is unavailable or ambiguous")]
@@ -176,6 +183,9 @@ impl ManagedRoots {
 pub struct CommandOutput {
     pub success: bool,
     pub stdout: Vec<u8>,
+    /// The retained standard error of the same command, kept apart so a
+    /// container failure can report both streams instead of one merged tail.
+    pub stderr: Vec<u8>,
     pub exit_code: Option<i32>,
 }
 
@@ -287,7 +297,8 @@ impl CommandRunner for ProcessCommandRunner {
             let result = crate::package_command::run(&mut command, timeout)?;
             return Ok(CommandOutput {
                 success: result.status.success() && !result.timed_out,
-                stdout: result.diagnostic,
+                stdout: result.diagnostic(),
+                stderr: Vec::new(),
                 exit_code: result.status.code(),
             });
         }
@@ -297,7 +308,8 @@ impl CommandRunner for ProcessCommandRunner {
             let result = crate::package_command::run_quiet(&mut command, timeout)?;
             return Ok(CommandOutput {
                 success: result.status.success() && !result.timed_out,
-                stdout: result.diagnostic,
+                stdout: result.stdout,
+                stderr: result.stderr,
                 exit_code: result.status.code(),
             });
         }
@@ -335,6 +347,7 @@ impl CommandRunner for ProcessCommandRunner {
         Ok(CommandOutput {
             success: status.success(),
             stdout,
+            stderr: Vec::new(),
             exit_code: status.code(),
         })
     }
@@ -1694,16 +1707,30 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 &[
                     "logs".into(),
                     "--tail".into(),
-                    "32".into(),
+                    crate::runtime_logs::CAPTURE_LINES.into(),
                     (*container_id).into(),
                 ],
-                Duration::from_secs(5),
+                Duration::from_secs(30),
             );
-            let diagnostic = match logs {
-                Ok(logs) if logs.success => String::from_utf8_lossy(&logs.stdout).into_owned(),
-                _ => "container log capture unavailable".into(),
-            };
-            return Err(OperationError::RuntimeProcessExited { diagnostic });
+            return Err(match logs {
+                Ok(logs) if logs.success => OperationError::RuntimeProcessExited {
+                    logs: Some(Box::new(crate::runtime_logs::retain_container(
+                        &logs.stdout,
+                        &logs.stderr,
+                    ))),
+                    capture_error: None,
+                },
+                // An unread log is reported as unread; it never becomes an
+                // empty tail that reads like a container with nothing to say.
+                Ok(_) => OperationError::RuntimeProcessExited {
+                    logs: None,
+                    capture_error: Some("the container log command failed"),
+                },
+                Err(_) => OperationError::RuntimeProcessExited {
+                    logs: None,
+                    capture_error: Some("the container log command did not run"),
+                },
+            });
         }
         Ok(false)
     }
@@ -3626,6 +3653,7 @@ mod tests {
             Ok(CommandOutput {
                 success: daemon_probe || missing_listing,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
                 exit_code: Some(if daemon_probe || missing_listing {
                     0
                 } else {
@@ -3645,6 +3673,7 @@ mod tests {
             Ok(CommandOutput {
                 success: daemon_probe,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
                 exit_code: Some(if daemon_probe { 0 } else { 1 }),
             })
         }
@@ -3662,6 +3691,7 @@ mod tests {
             Ok(CommandOutput {
                 success: true,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
                 exit_code: Some(0),
             })
         }
@@ -3690,6 +3720,7 @@ mod tests {
                 } else {
                     Vec::new()
                 },
+                stderr: Vec::new(),
                 exit_code: Some(if digest_lookup { 1 } else { 0 }),
             })
         }
@@ -3718,6 +3749,7 @@ mod tests {
                     success: false,
                     stdout: b"\n".to_vec(),
                     exit_code: Some(1),
+                    stderr: Vec::new(),
                 });
             }
             if inspect_compiled && self.wrong_image.load(SeqCst) {
@@ -3726,6 +3758,7 @@ mod tests {
                     stdout: format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "c".repeat(64))
                         .into_bytes(),
                     exit_code: Some(0),
+                    stderr: Vec::new(),
                 });
             }
             if inspect_compiled && self.malformed_image.load(SeqCst) {
@@ -3733,6 +3766,7 @@ mod tests {
                     success: true,
                     stdout: b"malformed\n".to_vec(),
                     exit_code: Some(0),
+                    stderr: Vec::new(),
                 });
             }
             if arguments.first().map(String::as_str) == Some("image")
@@ -3749,6 +3783,7 @@ mod tests {
                         format!("sha256:{}\n", "b".repeat(64)).into_bytes()
                     },
                     exit_code: Some(0),
+                    stderr: Vec::new(),
                 });
             }
             if arguments.first().map(String::as_str) == Some("load") {
@@ -3782,6 +3817,7 @@ mod tests {
             Ok(CommandOutput {
                 success: true,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
                 exit_code: Some(0),
             })
         }
@@ -3832,6 +3868,7 @@ mod tests {
                     success: true,
                     stdout: Vec::new(),
                     exit_code: Some(0),
+                    stderr: Vec::new(),
                 });
             }
             RuntimeImportRunner.run(executable, arguments)
@@ -4020,6 +4057,7 @@ mod tests {
                 success: false,
                 stdout: Vec::new(),
                 exit_code: Some(37),
+                stderr: Vec::new(),
             }),
             37
         );
@@ -4029,6 +4067,7 @@ mod tests {
                     success: false,
                     stdout: Vec::new(),
                     exit_code,
+                    stderr: Vec::new(),
                 }),
                 1
             );
@@ -4672,6 +4711,7 @@ mod tests {
                     success: true,
                     stdout: b"enp1s0f1np1\n".to_vec(),
                     exit_code: Some(0),
+                    stderr: Vec::new(),
                 })
             }
         }

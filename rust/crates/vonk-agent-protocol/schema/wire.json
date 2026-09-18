@@ -3204,6 +3204,24 @@
       "title": "HostHelperGrantResponse",
       "type": "object"
     },
+    "HostHelperProcessLogs": {
+      "additionalProperties": false,
+      "description": "The exact failed container's own output, retained per stream.\n\nThe helper is the only party that ever holds the container's log, so it owns\nthe retention bound and reports it per stream.  Keeping the two streams\napart matters more than the bound: a merged document can only ever show one\ntail, and whichever stream is written first is always the one discarded.",
+      "properties": {
+        "stderr": {
+          "$ref": "#/$defs/FailureLogTail"
+        },
+        "stdout": {
+          "$ref": "#/$defs/FailureLogTail"
+        }
+      },
+      "required": [
+        "stdout",
+        "stderr"
+      ],
+      "title": "HostHelperProcessLogs",
+      "type": "object"
+    },
     "HostHelperResponse": {
       "additionalProperties": false,
       "description": "Shared response shape; consumers also enforce their grant/action context.",
@@ -3264,6 +3282,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/SignedRecipeRunObservationReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "process_logs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostHelperProcessLogs"
             },
             {
               "type": "null"
@@ -11122,6 +11151,7 @@
     "FailureProperty": "vonk_agent_protocol.failure_evidence.FailureProperty",
     "HostHelperGrantClaims": "vonk_agent_protocol.host_helper.HostHelperGrantClaims",
     "HostHelperGrantResponse": "vonk_control.agent_api.HostHelperGrantResponse",
+    "HostHelperProcessLogs": "vonk_agent_protocol.helper_response.HostHelperProcessLogs",
     "HostHelperResponse": "vonk_agent_protocol.helper_response.HostHelperResponse",
     "HostHelperSignature": "vonk_agent_protocol.host_helper.HostHelperSignature",
     "HostRuntimeGrantRequest": "vonk_control.agent_api.HostRuntimeGrantRequest",
@@ -11288,6 +11318,7 @@
     "FailureProperty": "#/$defs/FailureProperty",
     "HostHelperGrantClaims": "#/$defs/HostHelperGrantClaims",
     "HostHelperGrantResponse": "#/$defs/HostHelperGrantResponse",
+    "HostHelperProcessLogs": "#/$defs/HostHelperProcessLogs",
     "HostHelperResponse": "#/$defs/HostHelperResponse",
     "HostHelperSignature": "#/$defs/HostHelperSignature",
     "HostRuntimeGrantRequest": "#/$defs/HostRuntimeGrantRequest",

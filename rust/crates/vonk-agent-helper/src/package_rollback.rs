@@ -114,7 +114,7 @@ fn command_with_nonce(
         if !output.status.success() || output.timed_out {
             return Err(format!(
                 "package command failed: {path}: {}",
-                String::from_utf8_lossy(&output.diagnostic)
+                String::from_utf8_lossy(&output.diagnostic())
             ));
         }
         return Ok(String::new());

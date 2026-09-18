@@ -2083,6 +2083,13 @@ pub struct HostHelperGrantResponse {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct HostHelperProcessLogs {
+    pub stderr: FailureLogTail,
+    pub stdout: FailureLogTail,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct HostHelperResponse {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub diagnostic: ::std::option::Option<::std::string::String>,
@@ -2093,6 +2100,8 @@ pub struct HostHelperResponse {
     pub exit_code: ::std::option::Option<u32>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub observation_receipt: ::std::option::Option<SignedRecipeRunObservationReceipt>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub process_logs: ::std::option::Option<HostHelperProcessLogs>,
     pub request_id: ::std::option::Option<::uuid::Uuid>,
     pub schema_version: u8,
     pub status: HostHelperResponseStatus,
@@ -8293,6 +8302,25 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperGrantResponse {
         Ok(Self { grant: raw.grant })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for HostHelperProcessLogs {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("HostHelperProcessLogs", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub stderr: FailureLogTail,
+            pub stdout: FailureLogTail,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            stderr: raw.stderr,
+            stdout: raw.stdout,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -8311,6 +8339,8 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             pub exit_code: ::std::option::Option<u32>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub observation_receipt: ::std::option::Option<SignedRecipeRunObservationReceipt>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub process_logs: ::std::option::Option<HostHelperProcessLogs>,
             pub request_id: ::std::option::Option<::uuid::Uuid>,
             pub schema_version: u8,
             pub status: HostHelperResponseStatus,
@@ -8322,6 +8352,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             evidence_sha256: raw.evidence_sha256,
             exit_code: raw.exit_code,
             observation_receipt: raw.observation_receipt,
+            process_logs: raw.process_logs,
             request_id: raw.request_id,
             schema_version: raw.schema_version,
             status: raw.status,

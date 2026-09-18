@@ -2543,11 +2543,10 @@ fn runtime_observation_failure(error: &crate::host_runtime::HostRuntimeError) ->
         _ => format!("exact workload runtime observation failed: {error}"),
     };
     let mut body = json!({"reason": reason});
-    if let Some(detail) = error.diagnostic() {
-        body["diagnostic_logs"] = json!({
-            "stdout": crate::failure_evidence::log_tail(&[]),
-            "stderr": crate::failure_evidence::log_tail(detail.as_bytes()),
-        });
+    if let Some(logs) =
+        crate::failure_evidence::diagnostic_logs(error.process_logs(), error.diagnostic())
+    {
+        body["diagnostic_logs"] = logs;
     }
     if let crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } = error {
         body["helper_error_code"] = json!(code);
@@ -3209,11 +3208,10 @@ fn runtime_failure(reason: &str, error: &crate::host_runtime::HostRuntimeError) 
             "observed": observed,
         });
     }
-    if let Some(detail) = error.diagnostic() {
-        result.body["diagnostic_logs"] = json!({
-            "stdout": crate::failure_evidence::log_tail(&[]),
-            "stderr": crate::failure_evidence::log_tail(detail.as_bytes()),
-        });
+    if let Some(logs) =
+        crate::failure_evidence::diagnostic_logs(error.process_logs(), error.diagnostic())
+    {
+        result.body["diagnostic_logs"] = logs;
     }
     result
 }
@@ -4344,13 +4342,22 @@ mod tests {
         // already proved the container's identity and sanitized it.
         let error = crate::host_runtime::HostRuntimeError::HelperRejected {
             code: "runtime_process_exited".to_owned(),
-            diagnostic: Some("ModuleNotFoundError: runtime module".to_owned()),
+            diagnostic: None,
+            process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
+                stdout: crate::failure_evidence::log_tail(b"rank 0 listening on 8888\n"),
+                stderr: crate::failure_evidence::log_tail(b"ModuleNotFoundError: runtime module\n"),
+            })),
         };
         let result = runtime_observation_failure(&error);
         assert_eq!(result.state, "failed");
         let reason = result.body["reason"].as_str().unwrap_or_default();
         assert!(reason.contains("runtime_process_exited"), "{reason}");
-        assert!(reason.contains("ModuleNotFoundError"), "{reason}");
+        // Both streams arrive as themselves: merging them into one tail is what
+        // discarded the stream that was written first.
+        let stdout = result.body["diagnostic_logs"]["stdout"]["text"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(stdout.contains("listening on 8888"), "{stdout}");
         let stderr = result.body["diagnostic_logs"]["stderr"]["text"]
             .as_str()
             .unwrap_or_default();
@@ -4773,9 +4780,13 @@ mod tests {
         start_claim.operation = "recipe.start".parse().unwrap();
         let error = crate::host_runtime::HostRuntimeError::HelperRejected {
             code: "runtime_process_exited".into(),
-            diagnostic: Some(
-                "ModuleNotFoundError: runtime module\nAPI_TOKEN=private-value\n".into(),
-            ),
+            diagnostic: None,
+            process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
+                stdout: crate::failure_evidence::log_tail(b"starting the engine core\n"),
+                stderr: crate::failure_evidence::log_tail(
+                    b"ModuleNotFoundError: runtime module\nAPI_TOKEN=private-value\n",
+                ),
+            })),
         };
         let failed =
             super::runtime_failure("rank process did not remain stable after launch", &error);
@@ -4790,6 +4801,7 @@ mod tests {
         );
         let diagnostics = body.diagnostics.as_ref().unwrap();
         diagnostics.validate().unwrap();
+        assert!(diagnostics.stdout.text.contains("starting the engine core"));
         assert!(diagnostics.stderr.text.contains("ModuleNotFoundError"));
         assert!(
             !serde_json::to_string(&body)
@@ -5704,14 +5716,18 @@ mod tests {
         // still healthy -- and ended the agent's ability to observe the
         // Controller's cancellation with it.
         let directory = tempdir().unwrap();
+        // Open the store before the lease is timed.  `state.begin` refuses an
+        // already-expired claim, so anything slow on the path to the loop is
+        // inside the lease's margin; a SQLite open plus schema creation is
+        // exactly that, and on a loaded two-core runner it was enough to make
+        // the claim expire before the loop started.
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
         let heartbeats = Arc::new(Mutex::new(Vec::new()));
         let accepted_at = Arc::new(Mutex::new(Vec::new()));
         let mut lease = claim();
         // The lease lapses in real time, because that is the condition under
-        // test.  The margins are wide enough to survive a loaded runner:
-        // `state.begin` refuses an already-expired claim, so the accepted lease
-        // must comfortably outlive loop startup, and the refusal window must
-        // comfortably outlive the lease.
+        // test.  The margin now covers only loop startup, and the refusal
+        // window comfortably outlives the lease.
         let lease_deadline = Utc::now() + ChronoDuration::milliseconds(500);
         lease.deadline = lease_deadline.with_timezone(&FixedOffset::east_opt(0).unwrap());
         let client = LeaseLapseClient {
@@ -5724,7 +5740,7 @@ mod tests {
             },
             // Comfortably past the accepted lease, so every renewal before this
             // instant is refused and the lease has certainly lapsed.
-            lapsed_after: Utc::now() + ChronoDuration::milliseconds(1000),
+            lapsed_after: Utc::now() + ChronoDuration::milliseconds(2000),
             accepted_at: accepted_at.clone(),
         };
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -5734,7 +5750,6 @@ mod tests {
             cap: Duration::from_secs(5),
             cancelled: cancelled.clone(),
         };
-        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
 
         run_once_with_heartbeat_interval(
             &client,
