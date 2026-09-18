@@ -76,14 +76,23 @@ fn header_index(stream: &[u8]) -> Option<usize> {
 /// exception, and a traceback cut off in mid-write is preceded by the cause the
 /// frames were explaining.  Either way the retained window opens before the
 /// anchor, not at the end of the log.
+///
+/// The window always spends the whole budget.  A process that dies mid-write
+/// leaves the anchor in its last few bytes, and a window that ran forward from
+/// there would keep only what happened to follow it -- half the evidence, and
+/// the oldest half discarded.  So the start is pulled back until the window
+/// holds `RETAINED_BYTES`, which keeps the anchor and as much of the cause above
+/// it as the budget allows.
 fn window(stream: &[u8]) -> (usize, usize) {
     if stream.len() <= RETAINED_BYTES {
         return (0, stream.len());
     }
-    match header_index(stream) {
-        Some(index) => (index.saturating_sub(CAUSE_BYTES), RETAINED_BYTES),
-        None => (stream.len() - RETAINED_BYTES, RETAINED_BYTES),
-    }
+    let full = stream.len() - RETAINED_BYTES;
+    let start = match header_index(stream) {
+        Some(index) => index.saturating_sub(CAUSE_BYTES).min(full),
+        None => full,
+    };
+    (start, RETAINED_BYTES)
 }
 
 /// Retain one stream's window without breaking a line in half, and report what
@@ -206,6 +215,41 @@ mod tests {
         // characters than the bytes it selected; it can only weigh more bytes.
         assert!(tail.text.chars().count() <= RETAINED_BYTES);
         assert!(tail.text.len() <= RETAINED_BYTES * 3);
+    }
+
+    #[test]
+    fn an_anchor_in_the_last_bytes_still_spends_the_whole_budget() {
+        // Wrong implementation this catches: the window ran forward from the
+        // anchor, so a process that died mid-write -- leaving the anchor in its
+        // final line -- retained only the handful of bytes after it. The first
+        // live GLM 5.3 Flash observation arrived as 1024 characters of an
+        // EngineCore traceback for exactly this reason.
+        let mut stream = b"zz\n".repeat(1000);
+        stream.extend_from_slice(b"ERROR engine core died\n");
+        let tail = retain(&stream);
+        assert!(
+            tail.text.contains("ERROR engine core died"),
+            "{}",
+            tail.text
+        );
+        assert_eq!(tail.text.len(), RETAINED_BYTES);
+        assert!(tail.truncated);
+        assert_eq!(
+            tail.dropped_bytes,
+            Some((stream.len() - RETAINED_BYTES) as u64)
+        );
+    }
+
+    #[test]
+    fn a_mid_capture_anchor_keeps_its_cause_budget() {
+        // With room after the anchor the window still opens CAUSE_BYTES before
+        // it, so the cause above the block survives.
+        let mut stream = b"ERROR drafter checkpoint is incompatible\n".to_vec();
+        stream.extend(cut_off_traceback());
+        stream.extend(b"tail line\n".repeat(40));
+        let tail = retain(&stream);
+        assert!(tail.text.contains("drafter checkpoint is incompatible"));
+        assert_eq!(tail.text.len(), RETAINED_BYTES);
     }
 
     #[test]
