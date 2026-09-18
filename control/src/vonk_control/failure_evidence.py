@@ -44,16 +44,24 @@ _SENSITIVE = re.compile(
     r"password|secret|token|authorization|cookie|credential|private.?key|api.?key|environment",
     re.IGNORECASE,
 )
-# A line-level filter, so each alternative must name a credential *value*, not
+# A line-level filter, so every alternative must name a credential *value*, not
 # merely a topic.  A bare ``authorization`` alternative redacted any line that
-# mentioned a table such as ``runtime_image_authorizations`` -- exactly the
-# constraint violation an operator needs to read.  Header and assignment shapes
-# still match, and ``redact_text`` removes the credential inside them.
+# mentioned a table such as ``runtime_image_authorizations``, and a bare
+# ``token`` alternative redacted any line that mentioned
+# ``num_speculative_tokens`` -- both are exactly the configuration and history a
+# failed workload is diagnosed from.  Assignment and authentication shapes still
+# match, and ``redact_text`` removes the credential inside them.
 _SECRET_LINE = re.compile(
-    r"password|secret|token|authorization\s*[:=]|cookie|credential|private[ _-]?key|api[ _-]?key|-----BEGIN|-----END",
+    r"(?:password|passwd|secret|token|authorization|cookie|credential)\s*[:=]"
+    r"|private[ _-]?key|api[ _-]?key"
+    r"|(?:bearer|basic)\s+\S"
+    r"|-----BEGIN|-----END",
     re.IGNORECASE,
 )
-_OPAQUE_SECRET = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9+/=_-]{40,}(?![A-Za-z0-9])")
+# An opaque value is a whole token.  Matching a run inside a longer word cut the
+# module out of every Python frame path, so a traceback arrived as
+# ``python3.[redacted opaque value].py`` and named no frame at all.
+_OPAQUE_SECRET = re.compile(r"(?<![A-Za-z0-9/.])([A-Za-z0-9+/=_-]{40,})(?![A-Za-z0-9/.])")
 
 # The failure-evidence closed sets are named once here so the bundle fields and
 # the helpers that build them cannot disagree. ``FailureCategory`` mirrors the
@@ -171,6 +179,23 @@ def safe_text(value: str) -> str:
     return "\n".join(lines)
 
 
+def _keep_end(text: str, limit: int) -> tuple[str, int]:
+    """Keep the end of ``text`` within ``limit`` bytes, and report what it dropped.
+
+    The end is what happened last, so a bound is applied from the front.  Cutting
+    the end of a tail keeps stale lines and discards the failure that ended it.
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text, 0
+    cut = len(encoded) - limit
+    candidate = encoded[cut:]
+    boundary = candidate.find(b"\n")
+    if boundary >= 0:
+        cut += boundary + 1
+    return encoded[cut:].decode("utf-8", errors="ignore"), cut
+
+
 def log_tail(value: str) -> FailureLogTail:
     original = value.encode("utf-8")
     truncated = len(original) > MAX_LOG_BYTES or len(value.splitlines()) > MAX_LOG_LINES
@@ -274,7 +299,17 @@ def sanitize_diagnostics(value: object) -> FailureDiagnostics:
     diagnostics = FailureDiagnostics.model_validate(value)
     document = diagnostics.model_dump(mode="json")
     for field in ("stdout", "stderr"):
-        document[field]["text"] = safe_text(document[field]["text"])[:MAX_LOG_BYTES]
+        # The agent already retained this tail from the whole stream, so the
+        # Controller only redacts it.  Re-selecting the window here would keep
+        # the head of a tail and discard the failure that ended it, and it would
+        # report a bound the agent had already reported.
+        cleaned, dropped = _keep_end(safe_text(document[field]["text"]), MAX_LOG_BYTES)
+        document[field]["text"] = cleaned
+        if dropped:
+            document[field]["truncated"] = True
+            document[field]["dropped_bytes"] = (
+                document[field]["dropped_bytes"] or 0
+            ) + dropped
     for field in ("versions", "sandbox", "storage", "preflight"):
         document[field] = [
             {

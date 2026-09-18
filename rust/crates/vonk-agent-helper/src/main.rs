@@ -21,7 +21,7 @@ use vonk_agent_helper::protocol::{
     GrantVerifier, HelperError, HostOperation, PeerIdentity, parse_request, read_frame,
     sign_observation_receipt, write_frame,
 };
-use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
+use vonk_agent_protocol::generated::{HostHelperProcessLogs, HostHelperResponse as HelperResponse};
 
 const GRANT_KEY: &str = "/etc/vonk-forge-agent/host-helper-authority.pub";
 const RELEASE_KEY: &str = "/usr/share/keyrings/vonk-forge-release.pub";
@@ -59,6 +59,7 @@ struct HelperRejection {
     exit_code: Option<i32>,
     detail: String,
     diagnostic: Option<String>,
+    process_logs: Option<Box<HostHelperProcessLogs>>,
 }
 
 impl HelperRejection {
@@ -69,6 +70,7 @@ impl HelperRejection {
             exit_code: None,
             detail: detail.into(),
             diagnostic: None,
+            process_logs: None,
         }
     }
 
@@ -83,6 +85,7 @@ impl HelperRejection {
             exit_code: None,
             detail: detail.into(),
             diagnostic: None,
+            process_logs: None,
         }
     }
 
@@ -92,9 +95,15 @@ impl HelperRejection {
         error: OperationError,
     ) -> Self {
         let package_install = matches!(operation, HostOperation::InstallVonkDebOperation(_));
-        let diagnostic = match &error {
-            OperationError::RuntimeProcessExited { diagnostic } => Some(diagnostic.clone()),
-            _ => None,
+        let (diagnostic, process_logs) = match &error {
+            // The container's own output is the evidence for an exited
+            // workload, so it crosses as its own typed per-stream document
+            // rather than as a line of free text.
+            OperationError::RuntimeProcessExited {
+                logs,
+                capture_error,
+            } => (capture_error.map(str::to_owned), logs.clone()),
+            _ => (None, None),
         };
         let (error_code, exit_code) = match error {
             OperationError::InvalidArtifact if package_install => {
@@ -137,6 +146,7 @@ impl HelperRejection {
             exit_code,
             detail: error.safe_detail().to_owned(),
             diagnostic,
+            process_logs,
         }
     }
 }
@@ -260,7 +270,14 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
             .or_else(|| {
                 (error.error_code == "package_install_failed").then_some(error.detail.as_str())
             })
-            .map(|detail| detail.chars().take(8192).collect()),
+            // A diagnostic is a tail: the newest text is the text that explains
+            // the failure, so the bound keeps the end rather than the head.
+            .map(|detail| {
+                let mut kept: Vec<char> = detail.chars().rev().take(8192).collect();
+                kept.reverse();
+                kept.into_iter().collect()
+            }),
+        process_logs: error.process_logs.as_deref().cloned(),
         schema_version: 1,
         request_id,
         status: "rejected".parse().expect("declared helper response status"),
@@ -365,6 +382,7 @@ fn handle(
     };
     let response = HelperResponse {
         diagnostic: None,
+        process_logs: None,
         schema_version: 1,
         request_id: Some(request.claims.request_id),
         status: outcome.status.parse().map_err(|_| {
@@ -728,15 +746,22 @@ mod tests {
             "10000000-0000-4000-8000-000000000001",
             &operation,
             OperationError::RuntimeProcessExited {
-                diagnostic: "startup failed\n".repeat(2000),
+                logs: Some(Box::new(vonk_agent_helper::runtime_logs::retain_container(
+                    b"worker rank 1 is starting\n",
+                    &b"startup failed\n".repeat(2000),
+                ))),
+                capture_error: None,
             },
         );
         super::reject(&mut server, &rejection);
         let bytes = vonk_agent_helper::protocol::read_frame(&mut client).unwrap();
         let response: HelperResponse = vonk_agent_protocol::parse_strict(&bytes).unwrap();
-        let diagnostic = response.diagnostic.unwrap();
-        assert!(diagnostic.contains("startup failed"));
-        assert_eq!(diagnostic.len(), 8192);
+        let logs = response.process_logs.unwrap();
+        assert_eq!(logs.stdout.text, "worker rank 1 is starting\n");
+        assert!(logs.stderr.text.contains("startup failed"));
+        assert!(logs.stderr.truncated);
+        assert!(logs.stderr.text.chars().count() <= 2048);
+        assert!(response.diagnostic.is_none());
         assert_eq!(rejection.detail, "runtime process exited");
     }
 
@@ -744,6 +769,7 @@ mod tests {
     fn rejection_response_contains_only_stable_diagnostics() {
         let response = HelperResponse {
             diagnostic: None,
+            process_logs: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: "rejected".parse().expect("declared helper response status"),
@@ -764,6 +790,7 @@ mod tests {
     fn success_response_omits_unused_optional_fields() {
         let response = HelperResponse {
             diagnostic: None,
+            process_logs: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: "package-installed".parse().unwrap(),

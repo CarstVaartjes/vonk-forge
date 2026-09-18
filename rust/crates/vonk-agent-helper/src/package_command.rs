@@ -7,14 +7,43 @@ use std::thread;
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
+/// Bytes retained per stream.  Wide enough that a runtime failure's own cause
+/// is still in hand when the retention window is chosen, and bounded so a
+/// command that never stops writing cannot grow the helper.
+const STREAM_RETAINED_BYTES: usize = 32 * 1024;
+/// Bytes of the two retained tails that a single-document caller receives.
+const DIAGNOSTIC_BYTES: usize = 8192;
+/// Bytes of that budget each stream keeps for itself.  A share rather than a
+/// first-come tail, so a command that writes a lot to one stream cannot
+/// displace the other stream's last words.
+const DIAGNOSTIC_SHARE_BYTES: usize = DIAGNOSTIC_BYTES / 2;
+
 pub struct Output {
     pub status: ExitStatus,
     pub timed_out: bool,
-    pub diagnostic: Vec<u8>,
+    /// The retained tail of standard output alone.
+    pub stdout: Vec<u8>,
+    /// The retained tail of standard error alone.
+    pub stderr: Vec<u8>,
+}
+
+impl Output {
+    /// Both retained tails as one bounded document, for the callers that only
+    /// ever had one stream of interest -- package and rollback commands.  A
+    /// container failure keeps its streams apart instead of merging them here.
+    pub fn diagnostic(&self) -> Vec<u8> {
+        let mut diagnostic = tail_of(&self.stdout, DIAGNOSTIC_SHARE_BYTES).to_vec();
+        diagnostic.extend_from_slice(tail_of(&self.stderr, DIAGNOSTIC_SHARE_BYTES));
+        diagnostic
+    }
+}
+
+fn tail_of(stream: &[u8], limit: usize) -> &[u8] {
+    &stream[stream.len().saturating_sub(limit)..]
 }
 
 fn drain(mut source: impl Read, stderr: bool, mirror: bool) -> std::io::Result<Vec<u8>> {
-    let mut tail = VecDeque::with_capacity(4096);
+    let mut tail = VecDeque::with_capacity(STREAM_RETAINED_BYTES);
     let mut buffer = [0; 4096];
     loop {
         let size = source.read(&mut buffer)?;
@@ -28,7 +57,7 @@ fn drain(mut source: impl Read, stderr: bool, mirror: bool) -> std::io::Result<V
             let _ = std::io::stdout().write_all(&buffer[..size]);
         }
         for byte in &buffer[..size] {
-            if tail.len() == 4096 {
+            if tail.len() == STREAM_RETAINED_BYTES {
                 tail.pop_front();
             }
             tail.push_back(*byte);
@@ -81,26 +110,23 @@ fn run_inner(command: &mut Command, timeout: Duration, mirror: bool) -> Result<O
                 .map_err(|e| format!("package process could not be reaped: {e}"))?
         }
     };
-    let mut diagnostic = out_reader
+    let stdout = out_reader
         .join()
         .map_err(|_| "package output reader failed")?
         .map_err(|e| e.to_string())?;
-    let stderr = err_reader
+    let mut stderr = err_reader
         .join()
         .map_err(|_| "package error reader failed")?
         .map_err(|e| e.to_string())?;
-    diagnostic.extend_from_slice(&stderr);
     if timed_out {
-        diagnostic
+        stderr
             .extend_from_slice(b"\nPackage command timed out; its process group was terminated.\n");
-    }
-    if diagnostic.len() > 8192 {
-        diagnostic.drain(..diagnostic.len() - 8192);
     }
     Ok(Output {
         status,
         timed_out,
-        diagnostic,
+        stdout,
+        stderr,
     })
 }
 
@@ -127,8 +153,9 @@ mod tests {
         let result = run_quiet(&mut command, Duration::from_secs(5)).unwrap();
         assert!(result.status.success());
         assert!(!result.timed_out);
-        assert!(result.diagnostic.len() <= 8192);
-        let text = String::from_utf8_lossy(&result.diagnostic);
+        let diagnostic = result.diagnostic();
+        assert!(diagnostic.len() <= 8192);
+        let text = String::from_utf8_lossy(&diagnostic);
         assert!(text.contains("final-stdout"));
         assert!(text.contains("final-stderr"));
     }
@@ -139,6 +166,6 @@ mod tests {
         let result = run(&mut command, Duration::from_secs(5)).unwrap();
         assert_eq!(result.status.code(), Some(7));
         assert!(!result.timed_out);
-        assert!(String::from_utf8_lossy(&result.diagnostic).contains("configuration-failed"));
+        assert!(String::from_utf8_lossy(&result.diagnostic()).contains("configuration-failed"));
     }
 }

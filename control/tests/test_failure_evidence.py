@@ -22,6 +22,7 @@ from vonk_control.failure_evidence import (
     collect_failure,
     log_tail,
     safe_text,
+    sanitize_diagnostics,
 )
 from vonk_control.failure_evidence_api import install_failure_evidence_routes
 from vonk_control.failure_evidence_models import (
@@ -280,6 +281,87 @@ def test_redaction_keeps_a_constraint_violation_that_names_an_authorization_tabl
     header = safe_text("Authorization: Bearer super-sensitive")
     assert "[redacted diagnostic line]" == header
     assert "super-sensitive" not in header
+
+
+def test_a_traceback_frame_path_is_not_redacted() -> None:
+    """An opaque value is a whole token, not a run inside a longer word.
+
+    The opaque-value rule matched any 40-character run of base64-ish characters
+    anywhere in a line, so every Python frame arrived as
+    ``python3.[redacted opaque value].py`` and the traceback named no module at
+    all -- the one thing a failed workload has to say.
+    """
+
+    frame = (
+        '  File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/'
+        'async_llm.py", line 220, in from_vllm_config'
+    )
+    assert safe_text(frame) == frame
+    opaque = "A" * 64
+    assert opaque not in safe_text(f"signature={opaque}")
+
+
+def test_a_configuration_line_that_names_tokens_is_not_redacted() -> None:
+    """The line filter redacts credential values, not the topic's name.
+
+    A bare ``token`` alternative replaced every line that mentioned
+    ``num_speculative_tokens`` with ``[redacted diagnostic line]``, which removed
+    the launch configuration a failed workload is diagnosed from.
+    """
+
+    configuration = (
+        "speculative-config {num_speculative_tokens: 7, model: /models/drafter}"
+    )
+    assert safe_text(configuration) == configuration
+    assert safe_text("tokenizer_config.json was read") == (
+        "tokenizer_config.json was read"
+    )
+    assert safe_text("HF_TOKEN=hunter2") == "[redacted diagnostic line]"
+    assert safe_text("token: hunter2") == "[redacted diagnostic line]"
+
+
+def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail() -> None:
+    """Redaction grows a tail past the bound, so the bound belongs at its front.
+
+    ``[redacted diagnostic line]`` is longer than the credential line it
+    replaces, so a stream that is mostly credential lines grows past the
+    declared bound. A head slice then kept the redacted noise and discarded the
+    failure that ended the stream -- the opposite of what a tail field means.
+    """
+
+    text = "token: v\n" * 150 + "the container exited here\n"
+    assert len(text.encode()) <= 2048
+    diagnostics = FailureDiagnostics.model_validate(
+        {
+            "schema_version": 1,
+            "collected_at": NOW.isoformat(),
+            "phase": "recipe.start",
+            "category": "runtime",
+            "stdout": {
+                "text": "",
+                "truncated": False,
+                "dropped_bytes": 0,
+                "dropped_lines": 0,
+            },
+            "stderr": {
+                "text": text,
+                "truncated": False,
+                "dropped_bytes": 0,
+                "dropped_lines": 0,
+            },
+            "versions": [],
+            "sandbox": [],
+            "storage": [],
+            "preflight": [],
+            "collector_errors": [],
+        }
+    )
+    cleaned = sanitize_diagnostics(diagnostics)
+    assert cleaned.stderr.text.endswith("the container exited here")
+    assert len(cleaned.stderr.text.encode()) <= 2048
+    assert cleaned.stderr.truncated
+    assert (cleaned.stderr.dropped_bytes or 0) > 0
+    assert "token: v" not in cleaned.stderr.text
 
 
 def test_ring_buffer_preserves_last_lines_and_reports_loss():

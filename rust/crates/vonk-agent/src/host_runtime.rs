@@ -19,6 +19,7 @@ use vonk_agent_protocol::{
 };
 
 use crate::client::{AgentHttpClient, ClientError};
+use crate::failure_evidence::{FailureProcessLogs, sanitize_tail};
 
 /// The frame ceiling is owned by the wire contract so the agent, the upgrade
 /// channel and the privileged helper cannot drift.
@@ -50,6 +51,9 @@ pub enum HostRuntimeError {
     HelperRejected {
         code: String,
         diagnostic: Option<String>,
+        /// The rejected container's own retained output, per stream, when the
+        /// helper could read it. Absence is reported, never read as empty.
+        process_logs: Option<Box<FailureProcessLogs>>,
     },
 }
 
@@ -216,6 +220,14 @@ impl HostRuntimeError {
     pub fn diagnostic(&self) -> Option<&str> {
         match self {
             Self::HelperRejected { diagnostic, .. } => diagnostic.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// The rejected container's own retained output, when the helper read it.
+    pub fn process_logs(&self) -> Option<&FailureProcessLogs> {
+        match self {
+            Self::HelperRejected { process_logs, .. } => process_logs.as_deref(),
             _ => None,
         }
     }
@@ -528,6 +540,12 @@ fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> Ho
             .diagnostic
             .as_deref()
             .map(crate::failure_evidence::sanitize_text),
+        process_logs: response.process_logs.as_ref().map(|logs| {
+            Box::new(FailureProcessLogs {
+                stdout: sanitize_tail(&logs.stdout),
+                stderr: sanitize_tail(&logs.stderr),
+            })
+        }),
     }
 }
 
@@ -933,6 +951,7 @@ mod tests {
                 HostRuntimeError::HelperRejected {
                     code: "operation_unsafe_path".to_owned(),
                     diagnostic: None,
+                    process_logs: None,
                 },
                 "helper_operation_unsafe_path",
             ),
@@ -942,6 +961,7 @@ mod tests {
                 HostRuntimeError::HelperRejected {
                     code: "grant_unauthorized".to_owned(),
                     diagnostic: None,
+                    process_logs: None,
                 },
                 "helper_grant_unauthorized",
             ),
@@ -949,6 +969,7 @@ mod tests {
                 HostRuntimeError::HelperRejected {
                     code: "grant_node_mismatch".to_owned(),
                     diagnostic: None,
+                    process_logs: None,
                 },
                 "helper_grant_node_mismatch",
             ),
@@ -956,6 +977,7 @@ mod tests {
                 HostRuntimeError::HelperRejected {
                     code: "request_replayed".to_owned(),
                     diagnostic: None,
+                    process_logs: None,
                 },
                 "helper_request_replayed",
             ),
@@ -963,6 +985,7 @@ mod tests {
                 HostRuntimeError::HelperRejected {
                     code: "untrusted response detail".to_owned(),
                     diagnostic: None,
+                    process_logs: None,
                 },
                 "helper_protocol_invalid",
             ),

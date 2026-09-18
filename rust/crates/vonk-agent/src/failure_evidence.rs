@@ -26,6 +26,77 @@ pub struct FailureProcessLogs {
     pub stderr: FailureLogTail,
 }
 
+/// Credential names whose *value* makes a line sensitive.
+///
+/// The names are matched as whole words followed by an assignment, because the
+/// words themselves appear in the configuration an operator has to read: a bare
+/// `token` alternative replaced every line mentioning `num_speculative_tokens`
+/// with `[redacted diagnostic line]`, which is exactly the launch configuration
+/// a failed workload is diagnosed from.
+const CREDENTIAL_NAMES: [&str; 12] = [
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "authorization",
+    "cookie",
+    "credential",
+    "api_key",
+    "api-key",
+    "private_key",
+    "private-key",
+    "private key",
+];
+
+/// A name is bounded by non-alphanumeric characters, so `HF_TOKEN=...` and
+/// `API_TOKEN=...` are credentials while `num_speculative_tokens` and
+/// `tokenizer_config.json` are configuration: only an adjacent *letter or
+/// digit* glues a name into a longer word.
+fn is_word_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+}
+
+/// True when `rest` begins with an assignment that carries a value.
+fn carries_value(rest: &str) -> bool {
+    let rest = rest.trim_start();
+    match rest.strip_prefix(':').or_else(|| rest.strip_prefix('=')) {
+        Some(value) => !value.trim().is_empty(),
+        None => false,
+    }
+}
+
+/// True when the line carries a credential value rather than the topic's name.
+pub fn names_credential_value(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    if lower.contains("-----begin") || lower.contains("-----end") {
+        return true;
+    }
+    // An authentication scheme always carries its value inline.
+    if lower
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|pair| matches!(pair[0].trim_end_matches(':'), "bearer" | "basic"))
+    {
+        return true;
+    }
+    let bytes = lower.as_bytes();
+    CREDENTIAL_NAMES.iter().any(|name| {
+        let mut from = 0;
+        while let Some(index) = lower[from..].find(name) {
+            let start = from + index;
+            let end = start + name.len();
+            let whole_word = (start == 0 || !is_word_byte(bytes[start - 1]))
+                && (end == lower.len() || !is_word_byte(bytes[end]));
+            if whole_word && carries_value(&lower[end..]) {
+                return true;
+            }
+            from = end;
+        }
+        false
+    })
+}
+
 pub fn sanitize_text(text: &str) -> String {
     let text: String = text
         .chars()
@@ -36,24 +107,7 @@ pub fn sanitize_text(text: &str) -> String {
         .collect();
     text.lines()
         .map(|line| {
-            let lower = line.to_lowercase();
-            if [
-                "password",
-                "secret",
-                "token",
-                "authorization",
-                "cookie",
-                "credential",
-                "private key",
-                "private_key",
-                "api_key",
-                "api-key",
-                "-----begin",
-                "-----end",
-            ]
-            .iter()
-            .any(|marker| lower.contains(marker))
-            {
+            if names_credential_value(line) {
                 return "[redacted diagnostic line]".to_owned();
             }
             line.split_whitespace()
@@ -84,6 +138,25 @@ pub fn sanitize_text(text: &str) -> String {
         .join("\n")
 }
 
+/// Keep the end of `text` within `limit` bytes, preferring a line boundary, and
+/// report how many bytes that dropped.
+///
+/// The bound is applied from the front because the end is what happened last.
+/// Cutting the end instead would keep stale lines and discard the failure.
+fn clamp_tail(text: String, limit: usize) -> (String, usize) {
+    if text.len() <= limit {
+        return (text, 0);
+    }
+    let mut cut = text.len() - limit;
+    while cut < text.len() && !text.is_char_boundary(cut) {
+        cut += 1;
+    }
+    if let Some(index) = text[cut..].find('\n') {
+        cut += index + 1;
+    }
+    (text[cut..].to_owned(), cut)
+}
+
 pub fn log_tail(bytes: &[u8]) -> FailureLogTail {
     let start = bytes.len().saturating_sub(LOG_BYTES);
     let selected = &bytes[start..];
@@ -99,20 +172,57 @@ pub fn log_tail(bytes: &[u8]) -> FailureLogTail {
     let lines = text.lines().collect::<Vec<_>>();
     let total_lines = bytes.iter().filter(|b| **b == b'\n').count();
     let tail = lines[lines.len().saturating_sub(LOG_LINES)..].join("\n");
-    let mut safe = sanitize_text(&tail);
-    while safe.len() > LOG_BYTES {
-        safe.pop();
-    }
+    let safe = sanitize_text(&tail);
+    let capped = safe.len().saturating_sub(LOG_BYTES);
+    let (safe, dropped_by_bound) = clamp_tail(safe, LOG_BYTES);
+    let announced = bytes.starts_with(b"[earlier diagnostic output truncated]");
     FailureLogTail {
         text: safe,
         truncated: start > 0
             || lines.len() > LOG_LINES
-            || bytes.starts_with(b"[earlier diagnostic output truncated]"),
-        dropped_bytes: (!bytes.starts_with(b"[earlier diagnostic output truncated]"))
-            .then_some((bytes.len() - selected.len()) as u64),
-        dropped_lines: (!bytes.starts_with(b"[earlier diagnostic output truncated]"))
-            .then_some(total_lines.saturating_sub(LOG_LINES) as u64),
+            || dropped_by_bound > 0
+            || capped > 0
+            || announced,
+        dropped_bytes: (!announced)
+            .then_some((bytes.len() - selected.len()) as u64 + dropped_by_bound as u64),
+        dropped_lines: (!announced).then_some(total_lines.saturating_sub(LOG_LINES) as u64),
     }
+}
+
+/// Apply the current redaction to a tail the helper already bounded from the
+/// whole stream, without re-selecting it.  The agent never sees that stream, so
+/// it cannot choose a better window; it may only shrink the text to the bound
+/// and report the bytes it had to drop.
+pub fn sanitize_tail(tail: &FailureLogTail) -> FailureLogTail {
+    let safe = sanitize_text(&tail.text);
+    let (safe, dropped) = clamp_tail(safe, LOG_BYTES);
+    FailureLogTail {
+        text: safe,
+        truncated: tail.truncated || dropped > 0,
+        dropped_bytes: Some(tail.dropped_bytes.unwrap_or_default() + dropped as u64),
+        dropped_lines: tail.dropped_lines,
+    }
+}
+
+/// The evidence a failed action reports: the rejected container's own output
+/// when the helper read it, and otherwise the rejection's bounded detail.
+///
+/// A single detail string is the last resort, not the shape of the evidence:
+/// merging a container's two streams into one tail is what discarded the
+/// engine's own explanation of why a workload exited.
+pub fn diagnostic_logs(
+    process_logs: Option<&FailureProcessLogs>,
+    diagnostic: Option<&str>,
+) -> Option<Value> {
+    if let Some(logs) = process_logs {
+        return serde_json::to_value(logs).ok();
+    }
+    diagnostic.map(|detail| {
+        serde_json::json!({
+            "stdout": log_tail(&[]),
+            "stderr": log_tail(detail.as_bytes()),
+        })
+    })
 }
 
 pub fn category(code: &str) -> FailureCategory {
@@ -415,6 +525,78 @@ mod tests {
                 "Auth\u{200b}orization: Bearer hidden\nsecret\0=hidden\npermission denied"
             ),
             "[redacted diagnostic line]\n[redacted diagnostic line]\npermission denied"
+        );
+    }
+
+    #[test]
+    fn a_configuration_line_that_names_tokens_is_not_redacted() {
+        // Wrong implementation this catches: a bare ``token`` alternative in the
+        // line filter replaced every line that mentioned
+        // ``num_speculative_tokens`` with ``[redacted diagnostic line]``, which
+        // removed the launch configuration a failed workload is diagnosed from
+        // while redacting nothing that was secret.
+        let configuration = "vllm: speculative-config {num_speculative_tokens: 7, method: dflash}";
+        assert_eq!(sanitize_text(configuration), configuration);
+        assert_eq!(
+            sanitize_text("tokenizer_config.json was loaded without a token"),
+            "tokenizer_config.json was loaded without a token"
+        );
+        // The credential value itself is still removed.
+        assert_eq!(
+            sanitize_text("HF_TOKEN=hunter2"),
+            "[redacted diagnostic line]"
+        );
+        assert_eq!(
+            sanitize_text("token: hunter2"),
+            "[redacted diagnostic line]"
+        );
+    }
+
+    #[test]
+    fn a_bounded_tail_keeps_its_last_line_and_reports_the_drop() {
+        // Wrong implementation this catches: the byte bound popped characters
+        // off the end, so the text ended in a half-written word and the line
+        // that reported the failure was the first thing discarded.
+        let text = "noise\n".repeat(2000) + "the engine exited here\n";
+        let (kept, dropped) = clamp_tail(text.clone(), LOG_BYTES);
+        assert!(kept.ends_with("the engine exited here\n"), "{kept}");
+        assert!(kept.len() <= LOG_BYTES);
+        assert_eq!(dropped, text.len() - kept.len());
+        assert!(dropped > 0);
+    }
+
+    #[test]
+    fn a_helper_tail_is_redacted_without_being_reselected() {
+        // The helper chose the window from the whole stream; the engine's cause
+        // sits at the front of it. Re-tailing here would discard that cause,
+        // which is the defect this keeps out.
+        let cause = "RuntimeError: engine core could not bind NCCL to the fabric\n";
+        let tail = FailureLogTail {
+            text: format!("{cause}{}", "frame\n".repeat(300)),
+            truncated: true,
+            dropped_bytes: Some(9000),
+            dropped_lines: Some(300),
+        };
+        let sanitized = sanitize_tail(&tail);
+        assert!(sanitized.text.contains(cause.trim()), "{}", sanitized.text);
+        assert!(sanitized.text.len() <= LOG_BYTES);
+        assert!(sanitized.truncated);
+        assert!(sanitized.dropped_bytes.unwrap_or_default() >= 9000);
+        assert_eq!(sanitized.dropped_lines, Some(300));
+    }
+
+    #[test]
+    fn an_unread_container_log_is_not_reported_as_an_empty_one() {
+        // Absence of evidence is reported as absence: a container log that could
+        // not be read must not arrive as a tail with nothing in it.
+        let logs = diagnostic_logs(None, Some("the container log command failed"));
+        let value = logs.expect("a detail is evidence");
+        assert_eq!(value["stdout"]["text"], "");
+        assert!(
+            value["stderr"]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("the container log command failed")
         );
     }
 

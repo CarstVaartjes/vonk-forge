@@ -409,6 +409,7 @@ impl CommandRunner for AdversarialPackageRunner {
                 success: true,
                 stdout,
                 exit_code: Some(0),
+                stderr: Vec::new(),
             });
         }
         let success = !*self.fail_dpkg.lock().unwrap();
@@ -416,6 +417,7 @@ impl CommandRunner for AdversarialPackageRunner {
             success,
             stdout: Vec::new(),
             exit_code: Some(if success { 0 } else { 1 }),
+            stderr: Vec::new(),
         })
     }
 }
@@ -542,6 +544,7 @@ impl CommandRunner for RecordingRunner {
             success,
             stdout,
             exit_code: Some(if success { 0 } else { 1 }),
+            stderr: Vec::new(),
         })
     }
 }
@@ -1040,17 +1043,27 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     let failure = executor
         .execute(&runtime_operation(&inspect, inspect_digest.clone()))
         .unwrap_err();
-    assert!(
-        failure.to_string().contains("fixture startup stderr"),
-        "{failure}"
-    );
+    // The container's own output crosses as its own per-stream document, not
+    // as a line of the rejection's text, and the capture window is the
+    // declared constant rather than a number written twice.
+    let OperationError::RuntimeProcessExited {
+        logs,
+        capture_error,
+    } = &failure
+    else {
+        panic!("expected a runtime exit, got {failure}");
+    };
+    assert_eq!(*capture_error, None);
+    let logs = logs.as_ref().expect("the fixture log is readable");
+    let retained = format!("{}{}", logs.stdout.text, logs.stderr.text);
+    assert!(retained.contains("fixture startup stderr"), "{retained}");
     assert!(runner.calls.lock().unwrap().iter().any(|(program, args)| {
         program == std::path::Path::new("/usr/bin/docker")
             && args
                 == &[
                     "logs".to_owned(),
                     "--tail".to_owned(),
-                    "32".to_owned(),
+                    vonk_agent_helper::runtime_logs::CAPTURE_LINES.to_owned(),
                     "e".repeat(64),
                 ]
     }));

@@ -556,15 +556,12 @@ def test_database_integrity_failure_names_the_violated_constraint(
     assert view.failure is not None
     assert view.failure.code == "integrityerror"
     # The operator-facing evidence bundle reuses this contract, so it must
-    # carry the failure instead of a summary of "[]". Its own line sanitizer
-    # still redacts this particular line -- ``_SECRET_LINE`` matches the bare
-    # substring ``authorization`` inside the ``runtime_image_authorizations``
-    # table name -- which is a separate sanitizer decision, so only the
-    # persisted failure detail above is asserted to name the constraint.
+    # carry the failure instead of a summary of "[]" -- including the table
+    # name, which names the constraint the operator has to repair.
     receipt = failure_receipt(failure)
     assert receipt.error_code == "integrityerror"
     assert receipt.summary != "[]"
-    assert receipt.summary
+    assert "runtime_image_authorizations" in receipt.summary
 
 
 def test_model_cache_error_coerces_a_non_string_detail() -> None:
