@@ -1600,6 +1600,26 @@ fn sync_parent(parent: &Path) -> Result<(), OciError> {
     Ok(())
 }
 
+/// Release the kernel's page cache for a file this agent has finished with.
+///
+/// A materialized model is hundreds of gigabytes.  Where the device's memory is
+/// the system's unified memory, the page cache holding those bytes is memory the
+/// GPU cannot allocate from: after one 199 GB installation the workload's own
+/// loader read about 950 MB of free device memory and refused the 1.27 GB
+/// staging buffer its checkpoint needs, on a node that reported 126 GB
+/// available.  The agent wrote those bytes, so releasing them is the agent's
+/// job, and it is a hint: the file's content is unaffected and the next read
+/// simply caches again.
+fn release_page_cache(path: &Path) -> Result<(), OciError> {
+    if !path.is_file() {
+        return Err(OciError::Artifact);
+    }
+    let file = File::open(path)?;
+    rustix::fs::fadvise(&file, 0, None, rustix::fs::Advice::DontNeed)
+        .map_err(std::io::Error::from)?;
+    Ok(())
+}
+
 struct TemporaryArtifact {
     path: PathBuf,
     retained: bool,
@@ -2046,6 +2066,12 @@ fn materialize_compiled_models(
         fs::rename(&temporary, &destination)?;
         temporary_guard.retain();
         sync_parent(parent)?;
+        // The copy just filled the page cache with the destination, and the
+        // read that verified it filled the same cache with the source object.
+        // Neither is needed once this artifact is complete, and the workload
+        // this installation exists for needs the memory more.
+        release_page_cache(&destination)?;
+        release_page_cache(&source)?;
         physical_by_path.insert(physical_key, (destination.clone(), physical));
         materialized.push(destination);
     }
@@ -2208,7 +2234,7 @@ fn canonical_uuid(value: &str) -> bool {
 mod tests {
     use super::{
         OciError, OciRuntime, SHA256_OPEN_FILE_CALLS, materialize_compiled_models,
-        read_installation_metadata, reset_runtime_tmp, unique_plan_artifacts,
+        read_installation_metadata, release_page_cache, reset_runtime_tmp, unique_plan_artifacts,
         write_installation_metadata,
     };
     use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
@@ -2222,6 +2248,26 @@ mod tests {
     };
     use tempfile::tempdir;
     use uuid::Uuid;
+
+    #[test]
+    fn releasing_a_models_pages_keeps_its_bytes_and_refuses_a_directory() {
+        // The hint must be exactly that: the artifact stays on disk, unchanged,
+        // and only its resident pages are dropped. A directory is a caller
+        // mistake rather than a silently ignored no-op.
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("model.safetensors");
+        let content = vec![7_u8; 4 * 1024 * 1024];
+        fs::write(&path, &content).unwrap();
+        // Read it once so the pages are resident before the release.
+        let observed = fs::read(&path).unwrap();
+        assert_eq!(observed.len(), content.len());
+        release_page_cache(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), content);
+        assert!(matches!(
+            release_page_cache(directory.path()),
+            Err(OciError::Artifact)
+        ));
+    }
 
     struct NoProcess;
 
