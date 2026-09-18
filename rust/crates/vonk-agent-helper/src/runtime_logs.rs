@@ -49,49 +49,103 @@ const FAILURE_HEADERS: [&str; 12] = [
     "ERROR:",
 ];
 
-/// The end of the last line that reports a failure, as a byte offset.
+/// A block that names itself as a summary of a cause printed above it.
+///
+/// vLLM's executor ends a worker failure with "See stack trace for root cause."
+/// and its engine ends with "See root cause above.".  A window that keeps such a
+/// block keeps a pointer instead of the cause, so it ends at the start of the
+/// block and carries what the block reports.
+const SELF_REFERENTIAL: [&str; 3] = [
+    "see stack trace for root cause",
+    "see root cause above",
+    "see above",
+];
+
+const TRACEBACK: &[u8] = b"Traceback (most recent call last)";
+
+fn contains(line: &[u8], needle: &[u8]) -> bool {
+    line.len() >= needle.len() && line.windows(needle.len()).any(|window| window == needle)
+}
+
+fn contains_ascii_case(text: &[u8], needle: &str) -> bool {
+    let needle = needle.as_bytes();
+    text.len() >= needle.len()
+        && text
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle))
+}
+
+/// The last line that reports a failure: its start, its end, the start of the
+/// traceback block it belongs to, and the start of the block above that one.
 ///
 /// The scan is over the raw bytes: decoding first would make every line longer
 /// than the bytes it came from whenever the container wrote a byte that is not
 /// valid UTF-8, and an offset measured in decoded characters would then name a
 /// position the stream does not have -- both a wrong window and a panic in the
 /// slice below.
-fn header_end(stream: &[u8]) -> Option<usize> {
-    let mut found = None;
+fn last_failure_line(stream: &[u8]) -> Option<(usize, usize, usize, Option<usize>)> {
+    let mut last_traceback = None;
+    let mut previous_traceback = None;
+    let mut header = None;
     let mut offset = 0;
     for line in stream.split_inclusive(|byte| *byte == b'\n') {
+        let start = offset;
+        let end = offset + line.len();
+        offset = end;
+        if contains(line, TRACEBACK) {
+            previous_traceback = last_traceback;
+            last_traceback = Some(start);
+        }
         if FAILURE_HEADERS
             .iter()
-            .any(|header| contains(line, header.as_bytes()))
+            .any(|marker| contains(line, marker.as_bytes()))
         {
-            found = Some(offset + line.len());
+            let block = last_traceback.unwrap_or(start);
+            let cause = previous_traceback.filter(|earlier| *earlier < block);
+            header = Some((start, end, block, cause));
         }
-        offset += line.len();
     }
-    found
-}
-
-fn contains(line: &[u8], needle: &[u8]) -> bool {
-    line.len() >= needle.len() && line.windows(needle.len()).any(|window| window == needle)
+    header
 }
 
 /// The retained byte range of one stream: an offset and a length.
 ///
-/// The window ends at the last block that reports a failure, so it carries what
-/// that block reports.  A workload whose background worker dies prints the
-/// worker's own traceback first and this block second:
+/// The window ends where the stream's own account of the failure ends, so it
+/// carries the cause rather than a pointer to it.  A workload whose background
+/// worker dies prints the worker's traceback first and a summary second:
 ///
 /// ```text
-/// <the worker's traceback, which names why it died>
+/// (WorkerProc pid=200) Traceback (most recent call last):
+/// (WorkerProc pid=200)   File "...", line 300, in init_device
+/// (WorkerProc pid=200) RuntimeError: <why the worker died>
+/// (EngineCore pid=177) ERROR ... Traceback (most recent call last):
 /// (EngineCore pid=177) ERROR ... Exception: WorkerProc initialization failed
 ///     due to an exception in a background process. See stack trace for root cause.
 /// ```
 ///
-/// That block says only "see above", so a window that kept it and the frames
-/// below it would spend the whole budget restating that the cause is elsewhere.
-/// A stream with no reporting block keeps its newest bytes instead.
+/// The summary occupies the whole budget restating that the cause is above it,
+/// so a block that points above itself ends the window at its own start.  A
+/// block that names its own cause ends the window at itself, and a stream with
+/// no reporting block keeps its newest bytes.
 fn window(stream: &[u8]) -> (usize, usize) {
-    let end = header_end(stream).unwrap_or(stream.len());
+    let Some((header_start, header_end, block_start, cause_above)) = last_failure_line(stream)
+    else {
+        let start = stream.len().saturating_sub(RETAINED_BYTES);
+        return (start, stream.len() - start);
+    };
+    // Give way only when the cause above is itself a failure block.  A summary
+    // that names its own cause -- "Engine core initialization failed" -- is more
+    // than a pointer, and there is nothing above it to prefer.
+    let end = if header_start > block_start
+        && cause_above.is_some()
+        && SELF_REFERENTIAL
+            .iter()
+            .any(|marker| contains_ascii_case(&stream[block_start..header_end], marker))
+    {
+        block_start
+    } else {
+        header_end
+    };
     let start = end.saturating_sub(RETAINED_BYTES);
     (start, end - start)
 }
@@ -207,7 +261,7 @@ mod tests {
         stream.extend_from_slice(&[0xff, 0xfe, 0x00, 0x80]);
         stream.extend_from_slice(b"\nTraceback (most recent call last):\n");
         stream.extend(cut_off_traceback());
-        let end = header_end(&stream).expect("the capture has a header");
+        let (_, end, _, _) = last_failure_line(&stream).expect("the capture has a header");
         assert!(end <= stream.len(), "{end} > {}", stream.len());
         let tail = retain(&stream);
         assert!(!tail.text.is_empty());
@@ -249,6 +303,74 @@ mod tests {
             Some((stream.len() - tail.text.len()) as u64)
         );
         assert!(tail.dropped_bytes.unwrap_or_default() >= (stream.len() - RETAINED_BYTES) as u64);
+    }
+
+    /// The live shape: a worker traceback, then the executor's summary that
+    /// points above itself.
+    fn worker_then_summary() -> Vec<u8> {
+        let mut stream = b"(WorkerProc pid=200) Traceback (most recent call last):\n".to_vec();
+        for frame in 0..8 {
+            stream.extend_from_slice(
+                format!(
+                    "(WorkerProc pid=200)   File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu_worker.py\", line {}, in init_device\n",
+                    300 + frame
+                )
+                .as_bytes(),
+            );
+        }
+        stream.extend_from_slice(
+            b"(WorkerProc pid=200) RuntimeError: NCCL error in: ncclAllReduce, unhandled cuda error\n",
+        );
+        stream.extend_from_slice(
+            b"(EngineCore pid=177) ERROR 09-18 04:30:01 [core.py:1355] Traceback (most recent call last):\n",
+        );
+        for frame in 0..8 {
+            stream.extend_from_slice(
+                format!(
+                    "(EngineCore pid=177) ERROR 09-18 04:30:01 [core.py:1355]   File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line {}, in _init_executor\n",
+                    210 + frame
+                )
+                .as_bytes(),
+            );
+        }
+        stream.extend_from_slice(
+            b"(EngineCore pid=177) ERROR 09-18 04:30:01 [core.py:1355] Exception: WorkerProc initialization failed due to an exception in a background process. See stack trace for root cause.\n",
+        );
+        stream
+    }
+
+    #[test]
+    fn a_block_that_points_above_itself_yields_to_the_cause_it_reports() {
+        // Wrong implementation this catches: ending the window at the last
+        // failure line keeps the summary's own frames and the sentence "See
+        // stack trace for root cause.", spending the whole budget on a pointer
+        // while the worker's RuntimeError is one block above it.
+        let tail = retain(&worker_then_summary());
+        assert!(tail.text.contains("NCCL error"), "{}", tail.text);
+        assert!(
+            !tail.text.contains("See stack trace for root cause"),
+            "{}",
+            tail.text
+        );
+        assert!(tail.text.len() <= RETAINED_BYTES);
+    }
+
+    #[test]
+    fn a_block_that_names_its_own_cause_is_kept() {
+        // The same rule must not drop a summary that is itself the answer.
+        let mut stream =
+            b"(EngineCore pid=177) ERROR [core.py:1355] Traceback (most recent call last):\n"
+                .to_vec();
+        stream.extend_from_slice(
+            b"(EngineCore pid=177) ERROR [core.py:1355]   File \"x.py\", line 1, in y\n",
+        );
+        stream.extend_from_slice(b"(EngineCore pid=177) ERROR [core.py:1355] ValueError: drafter checkpoint is incompatible\n");
+        let tail = retain(&stream);
+        assert!(
+            tail.text.contains("drafter checkpoint is incompatible"),
+            "{}",
+            tail.text
+        );
     }
 
     #[test]
