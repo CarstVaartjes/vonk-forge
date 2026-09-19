@@ -30,6 +30,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 
+from .agent_jobs import authorize_operator_resume_in_session
 from .agent_upgrade_status import (
     GENERIC_AGENT_UPGRADE_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
@@ -1676,12 +1677,17 @@ class _DurableOperationProjection:
                 )
                 .execution_options(synchronize_session=False)
             )
-            if result.rowcount == 1:
-                job.state = "queued"
-                job.status_reason = None
-                job.updated_at = now
-                return
-            raise ValueError("job is not waiting for operator")
+            if result.rowcount != 1:
+                raise ValueError("job is not waiting for operator")
+            # The parent transition alone does not release the parked child:
+            # the claim predicate requires the operation's own retry
+            # authorisation.  It is written in this same transaction so an
+            # exhausted budget rolls the parent transition back and no
+            # half-queued job that can never be claimed is committed.
+            authorize_operator_resume_in_session(session, job_id, now)
+            job.state = "queued"
+            job.status_reason = None
+            job.updated_at = now
 
 
 def durable_operation_services(

@@ -193,6 +193,86 @@ class StaleAgentAttempt(RuntimeError):
     """An agent attempted to update an operation it no longer owns."""
 
 
+class OperatorRetryExhausted(ValueError):
+    """A parked operation cannot be authorised another attempt.
+
+    ``resume`` is the operator action that releases a job parked in
+    ``waiting-for-operator``, and the retry authorisation it writes is bounded
+    by the same :class:`RecoveryPolicy` budget every other retry path uses.
+    The refusal is typed so a caller reports the spent budget instead of
+    returning a queued job whose operation can never be claimed.
+    """
+
+    def __init__(self, operation_id: str, kind: str, attempt: int, limit: int) -> None:
+        self.operation_id = operation_id
+        self.kind = kind
+        self.attempt = attempt
+        self.limit = limit
+        super().__init__(
+            f"operation {operation_id} ({kind}) exhausted its {limit}-attempt "
+            f"retry budget at attempt {attempt}"
+        )
+
+
+def authorize_operator_resume_in_session(
+    session: Session, job_id: str, now: datetime
+) -> None:
+    """Authorise one bounded claim for each parked operation of ``job_id``.
+
+    The claim predicate requires a ``waiting-for-operator`` operation to carry
+    its own retry authorisation, so releasing the parent job alone leaves the
+    operation unclaimable and an operator resume that wrote only the parent
+    state silently did nothing.  This writes the very disposition the
+    exact-resume path writes, due immediately, and refuses once the operation
+    has spent :class:`RecoveryPolicy`'s attempt budget so a resume cannot be
+    replayed into an unbounded retry loop.  It performs no external work, so it
+    is safe inside the caller's SQL transaction.
+    """
+
+    operations = list(
+        session.scalars(
+            select(StoredOperation)
+            .where(
+                StoredOperation.parent_job_id == job_id,
+                StoredOperation.state == "waiting-for-operator",
+            )
+            .order_by(StoredOperation.id)
+            .with_for_update(of=StoredOperation)
+        )
+    )
+    policy = RecoveryPolicy()
+    for operation in operations:
+        if (
+            operation.retry_disposition == _RETRY_DISPOSITION
+            and operation.retry_disposition_attempt == operation.current_attempt
+        ):
+            # Already authorised at this attempt: resume is idempotent and must
+            # neither spend budget nor move a scheduled retry earlier.
+            continue
+        if (
+            policy.next_attempt(operation.id, operation.current_attempt, _aware(now))
+            is None
+        ):
+            raise OperatorRetryExhausted(
+                operation.id,
+                operation.kind,
+                operation.current_attempt,
+                policy.max_failures,
+            )
+        operation.retry_disposition = _RETRY_DISPOSITION
+        operation.retry_disposition_attempt = operation.current_attempt
+        # The operator's authorisation is due now, but the due time must still
+        # be set: the parent aggregate treats an authorised retry without one as
+        # unparked and would return the job to ``waiting-for-operator`` before
+        # the agent polls.
+        operation.retry_due_at = now
+        operation.status_reason = (
+            f"operator resumed; attempt {operation.current_attempt + 1} of "
+            f"{policy.max_failures} authorised"
+        )[:512]
+        operation.updated_at = now
+
+
 def _failure_result(
     error_code: str, reason: str, *, uncertain: bool
 ) -> dict[str, object]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from collections.abc import Mapping
@@ -13,7 +14,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control import operation_api
+from vonk_control.agent_jobs import AgentJobService, OperatorRetryExhausted
 from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
@@ -46,11 +49,35 @@ from vonk_control.operation_api import (
     OperationQuery,
     durable_operation_services,
 )
+from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.strict_json import serialize_json_value
+
+from .runtime_identity_support import claim_agent
 
 COMMIT = "a" * 64
 DIGEST = "d" * 64
 NODE_ID = "spk_" + "1" * 32
+PARKED_NODE_ID = "spk_" + "2" * 32
+PARKED_CAPABILITIES = (
+    "agent.runtime.rust.v1",
+    "recipe.stop",
+    "agent.lifecycle.resume.exact.v1",
+)
+PARKED_PAYLOAD = {
+    "schema_version": 1,
+    "run_id": "00000000-0000-4000-8000-000000000001",
+    "plan_digest": COMMIT,
+}
+
+
+class MutableClock:
+    """A frozen clock the resume tests advance past a scheduled retry."""
+
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
 
 
 def _profile_operation_plan(
@@ -790,6 +817,32 @@ def test_operator_resume_is_rbac_guarded_strict_and_audited() -> None:
     assert audits.for_request(request_id).action == "job.resume"
 
 
+def test_operator_resume_reports_an_exhausted_retry_budget() -> None:
+    """A spent budget is a loud typed conflict, not a queued no-op."""
+
+    def exhausted(_job_id: str) -> None:
+        raise OperatorRetryExhausted("op-1", "recipe.stop", 5, 5)
+
+    services = OperationApiServices(
+        endpoint=lambda _alias: {},
+        agents=lambda: (),
+        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
+            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
+        ),
+        resume_job=exhausted,
+    )
+    client, operator, *_ = _client(operations=services)
+    job_id = "11111111-1111-4111-8111-111111111111"
+
+    response = client.post(f"/api/jobs/{job_id}/resume", headers=operator)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "operation op-1 (recipe.stop) exhausted its 5-attempt retry budget "
+        "at attempt 5"
+    )
+
+
 def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
     now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
     engine = create_engine(
@@ -1491,3 +1544,221 @@ def test_agent_upgrade_diagnostics_distinguish_absent_from_corrupt() -> None:
     corrupt = stored({"package": "not-a-document"})
     with pytest.raises(BoundedJSONError, match=f"{corrupt} package payload is invalid"):
         diagnostics(corrupt)
+
+
+def _parked_stop_services(tmp_path, *, clock: MutableClock):
+    """Build the durable rows one real parked ``recipe.stop`` needs.
+
+    Production resumes and claims in separate transactions, so the test keeps
+    the agent queue that parks and claims apart from the operator projection
+    that resumes.  The node advertises the exact-resume capability a lifecycle
+    operation must hold before a retry is offered to it.
+    """
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'parked-resume.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    payload = {"workload_intent_ordinal": 1}
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=PARKED_NODE_ID,
+                state="active",
+                protocol_version=3,
+                workload_intent_ordinal=1,
+                capabilities=list(PARKED_CAPABILITIES),
+                architecture="linux-arm64",
+                semantic_version="1.0.0",
+                build_digest="sha256:" + "f" * 64,
+                binary_digest="f" * 64,
+                self_test_passed=True,
+            )
+        )
+        session.add(
+            AgentCertificate(
+                serial="serial-parked",
+                node_id=PARKED_NODE_ID,
+                not_before=clock.now - timedelta(seconds=1),
+                not_after=clock.now + timedelta(hours=1),
+                fingerprint="fingerprint-parked",
+            )
+        )
+        job = Job(
+            request_id="44444444-4444-4444-8444-444444444444",
+            kind="agent.operations",
+            state="queued",
+            actor="operator",
+            authority_revision=COMMIT,
+            targets=[PARKED_NODE_ID],
+            payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+            payload=payload,
+            current_attempt=0,
+            created_at=clock.now,
+            updated_at=clock.now,
+        )
+        session.add(job)
+        session.flush()
+        job_id = job.id
+    jobs = AgentJobService(sessions, clock=clock)
+    operation = jobs.enqueue(
+        job_id, PARKED_NODE_ID, "recipe.stop", COMMIT, PARKED_PAYLOAD
+    )
+    services = durable_operation_services(
+        sessions,
+        tmp_path / "routes",
+        clock=clock,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+    )
+    return sessions, jobs, services, operation, job_id
+
+
+def _claim_parked(jobs):
+    return claim_agent(
+        jobs,
+        PARKED_NODE_ID,
+        "serial-parked",
+        30,
+        protocol_version=3,
+        capabilities=PARKED_CAPABILITIES,
+    )
+
+
+def _restart_interrupted_result(claim) -> AgentResult:
+    """One canonical result that parks a restart-safe operation for retry."""
+
+    return AgentResult.model_validate_json(
+        canonical_message(
+            {
+                **{
+                    key: getattr(claim, key)
+                    for key in (
+                        "schema_version",
+                        "job_id",
+                        "operation_id",
+                        "attempt",
+                        "fence",
+                        "node_id",
+                        "deadline",
+                    )
+                },
+                "state": "waiting-for-operator",
+                "result": {
+                    "error_code": "agent_restart_interrupted",
+                    "failure_kind": "uncertain-effect",
+                    "uncertain": True,
+                    "reason": "agent process restarted",
+                },
+            }
+        )
+    )
+
+
+def test_durable_resume_authorises_the_parked_operation_for_the_next_claim(
+    tmp_path,
+) -> None:
+    """A 200 from resume must release the operation, not only the parent job.
+
+    The claim predicate requires the parked operation's own retry
+    authorisation, so a resume that wrote only ``Job.state`` returned success
+    while the operation stayed unclaimable forever.
+    """
+
+    clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    sessions, jobs, services, operation, job_id = _parked_stop_services(
+        tmp_path, clock=clock
+    )
+    first = _claim_parked(jobs)
+    assert first is not None
+    jobs.wait_for_operator(first, "operator must inspect the effect")
+
+    services.resume_job(job_id)
+
+    resumed = _claim_parked(jobs)
+    assert resumed is not None
+    assert resumed.operation_id == operation.id
+    assert resumed.attempt == first.attempt + 1
+    with sessions() as session:
+        parent = session.get(Job, job_id)
+        assert parent is not None and parent.state == "queued"
+
+
+def test_durable_resume_refuses_a_job_that_is_not_parked(tmp_path) -> None:
+    clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    engine = create_engine(f"sqlite:///{tmp_path / 'not-parked.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    job = Job(
+        request_id="55555555-5555-4555-8555-555555555555",
+        kind="reconcile",
+        state="queued",
+        actor="operator",
+        authority_revision=COMMIT,
+        targets=[NODE_ID],
+        payload_digest="e" * 64,
+        payload={},
+        current_attempt=1,
+        created_at=clock.now,
+        updated_at=clock.now,
+    )
+    with sessions.begin() as session:
+        session.add(job)
+    services = durable_operation_services(
+        sessions,
+        tmp_path / "routes",
+        clock=clock,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+    )
+
+    with pytest.raises(ValueError, match="job is not waiting for operator"):
+        services.resume_job(job.id)
+
+    with sessions() as session:
+        stored = session.get(Job, job.id)
+        assert stored is not None and stored.state == "queued"
+
+
+def test_durable_resume_refuses_an_exhausted_retry_budget(tmp_path) -> None:
+    """A spent budget must refuse loudly instead of queueing dead work.
+
+    The attempts are spent through the real automatic retry path, so the bound
+    the refusal reports is the module's own :class:`RecoveryPolicy` budget and
+    not a number this test chose.
+    """
+
+    clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    sessions, jobs, services, operation, job_id = _parked_stop_services(
+        tmp_path, clock=clock
+    )
+    limit = RecoveryPolicy().max_failures
+    for expected_attempt in range(1, limit + 1):
+        claim = _claim_parked(jobs)
+        assert claim is not None and claim.attempt == expected_attempt
+        jobs.record_result(_restart_interrupted_result(claim))
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation.id)
+            assert stored is not None
+            if expected_attempt < limit:
+                assert stored.retry_due_at is not None
+                due = stored.retry_due_at
+                if due.tzinfo is None:
+                    due = due.replace(tzinfo=UTC)
+                clock.now = due + timedelta(seconds=1)
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        parent = session.get(Job, job_id)
+        assert stored is not None and parent is not None
+        assert stored.retry_disposition is None and stored.retry_due_at is None
+        assert "budget exhausted" in (stored.status_reason or "")
+        assert parent.state == "waiting-for-operator"
+
+    with pytest.raises(OperatorRetryExhausted) as refusal:
+        services.resume_job(job_id)
+
+    assert refusal.value.operation_id == operation.id
+    assert refusal.value.limit == limit
+    with sessions() as session:
+        parent = session.get(Job, job_id)
+        assert parent is not None and parent.state == "waiting-for-operator"
