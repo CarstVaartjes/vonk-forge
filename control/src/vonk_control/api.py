@@ -49,6 +49,7 @@ from .agent_api import (
     active_agent_identity,
     install_agent_routes,
 )
+from .agent_jobs import OperatorRetryExhausted
 from .artifact_blob_store import ArtifactBlobStore
 from .artifact_job_api import install_artifact_job_routes
 from .artifact_jobs import ArtifactJobService
@@ -1227,6 +1228,8 @@ def create_app(
             operations.resume_job(job_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="job not found") from None
+        except OperatorRetryExhausted as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
         except ValueError:
             raise HTTPException(
                 status_code=409, detail="job is not waiting for operator"
