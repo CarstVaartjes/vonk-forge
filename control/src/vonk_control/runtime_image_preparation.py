@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Annotated, Literal, Protocol
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.wire_model import Digest, WireModel
@@ -47,6 +47,7 @@ from .runtime_adapters import (
     RuntimeAdapterError,
     resolve_runtime_adapter,
 )
+from .validation_detail import validation_error_detail
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -480,31 +481,6 @@ class RuntimeImageReceipt(WireModel):
         return self.model_dump(mode="json")
 
 
-def _receipt_validation_detail(error: Exception) -> str:
-    """Name the failing field and rule without carrying the document.
-
-    A stored receipt that will not validate was reported as one generic
-    sentence, so an operator could not tell which field or rule rejected it --
-    the same blind spot the agent result boundary had.  Bounded locations,
-    error types and the redactor-approved message are enough to identify the
-    rule; the document itself is never included.
-    """
-
-    if not isinstance(error, ValidationError):
-        return ""
-    from .logging import redact_text
-
-    rendered: list[str] = []
-    for issue in error.errors()[:2]:
-        location = ".".join(str(part) for part in issue.get("loc", ())) or "<root>"
-        kind = str(issue.get("type", "invalid"))
-        message = redact_text(str(issue.get("msg", "")))[:80]
-        rendered.append(
-            f"{location}:{kind}:{message}" if message else f"{location}:{kind}"
-        )
-    return f" ({'; '.join(rendered)})" if rendered else ""
-
-
 def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
     if not isinstance(value, Mapping) or value.get("schema_version") != 2:
         raise RuntimeImagePreparationError(
@@ -517,7 +493,7 @@ def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
         raise RuntimeImagePreparationError(
             "runtime_image.receipt_unavailable",
             "runtime image receipt identity is unavailable or malformed"
-            + _receipt_validation_detail(error),
+            + validation_error_detail(error),
         ) from error
 
 
