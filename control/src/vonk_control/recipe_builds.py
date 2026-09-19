@@ -1002,7 +1002,8 @@ class RecipeBuildService:
             policy = parse_stored_build_policy(policy_document)
         except RecipeExecutionContractError as error:
             raise RecipeBuildError(
-                "build.plan_invalid", "prepared source build policy is invalid"
+                "build.plan_invalid",
+                "prepared source build policy is invalid" + error.detail,
             ) from error
         if policy.builder_binary_digest != node.binary_digest:
             raise RecipeBuildError(
@@ -1070,7 +1071,8 @@ class RecipeBuildService:
                 parse_stored_build_policy(existing.policy_report)
             except RecipeExecutionContractError as error:
                 raise RecipeBuildError(
-                    "build.plan_invalid", "stored source build envelope is invalid"
+                    "build.plan_invalid",
+                    "stored source build envelope is invalid" + error.detail,
                 ) from error
         else:
             payload["build_id"] = existing.id
@@ -1080,7 +1082,8 @@ class RecipeBuildService:
             payload = build_plan_document(payload)
         except RecipeExecutionContractError as error:
             raise RecipeBuildError(
-                "build.plan_invalid", "stored source build plan is invalid"
+                "build.plan_invalid",
+                "stored source build plan is invalid" + error.detail,
             ) from error
         return RecipeBuildPlan(
             build_id=existing.id,
@@ -1176,7 +1179,8 @@ class RecipeBuildService:
             requested_plan = parse_stored_build_plan(plan.agent_payload)
         except RecipeExecutionContractError as error:
             raise RecipeBuildError(
-                "build.plan_invalid", "stored source build envelope is invalid"
+                "build.plan_invalid",
+                "stored source build envelope is invalid" + error.detail,
             ) from error
         expected_binary_digest = stored_policy.builder_binary_digest
         expected_format = stored_policy.artifact_format

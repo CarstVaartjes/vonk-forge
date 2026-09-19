@@ -1021,6 +1021,46 @@ def test_build_reservation_rejects_changed_builder_runtime(tmp_path: Path) -> No
         service.reserve_in_session(session, plan, now=now)
 
 
+def test_stored_build_envelope_names_the_field_that_invalidated_it(
+    tmp_path: Path,
+) -> None:
+    """The stored-envelope reader must name the field and rule it rejected.
+
+    Every contract failure was collapsed into "stored source build envelope is
+    invalid", so a live ``build.plan_invalid`` blocker could not say which
+    stored field an older Controller had written outside the current model.
+    The field path and error type are what make the blocker actionable.
+    """
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    with sessions.begin() as session:
+        stored = session.get(RecipeBuild, plan.build_id)
+        assert stored is not None
+        document = copy.deepcopy(stored.plan)
+        # Valid JSON that the current model still rejects: the limit must be
+        # strictly positive.  Corrupt the stored JSON directly so the real
+        # stored-envelope read boundary is what rejects it.
+        _json_object(document["limits"])["temporary_bytes"] = 0
+        table = RecipeBuild.__table__
+        assert isinstance(table, Table)
+        session.execute(
+            table.update().where(RecipeBuild.id == plan.build_id).values(plan=document)
+        )
+
+    with (
+        sessions.begin() as session,
+        pytest.raises(RecipeBuildError) as raised,
+    ):
+        service.reserve_in_session(session, plan, now=now)
+
+    assert raised.value.code == "build.plan_invalid"
+    message = str(raised.value)
+    assert "limits.temporary_bytes" in message, message
+    assert "greater_than" in message, message
+
+
 def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     with sessions.begin() as session:

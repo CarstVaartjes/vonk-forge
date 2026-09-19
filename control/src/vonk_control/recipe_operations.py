@@ -2259,8 +2259,11 @@ class RecipeOperationService:
                 agent_payload=payload,
             )
         except (RecipeExecutionContractError, KeyError, TypeError) as error:
+            detail = (
+                error.detail if isinstance(error, RecipeExecutionContractError) else ""
+            )
             raise RecipeOperationConflict(
-                "stored recipe build plan is invalid"
+                "stored recipe build plan is invalid" + detail
             ) from error
         if (
             payload.get("build_id") != owner_id
@@ -4513,7 +4516,7 @@ def _record_build_evidence(
         parse_stored_build_policy(build.policy_report)
     except RecipeExecutionContractError as error:
         raise RecipeOperationConflict(
-            "stored recipe build envelope is invalid"
+            "stored recipe build envelope is invalid" + error.detail
         ) from error
     if (
         set(evidence) != expected
