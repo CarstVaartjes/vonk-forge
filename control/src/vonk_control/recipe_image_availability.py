@@ -657,8 +657,12 @@ class RecipeImageAvailabilityService:
                 )
             )
             for build in builds:
-                plan = dict(build.plan) if isinstance(build.plan, Mapping) else {}
-                build.plan = plan | {"removal_fence": fence, "cancelled": True}
+                # RecipeBuild.plan is the canonical RecipeBuildRequest contract
+                # document, and the removal fence already lives on the removal
+                # operation's payload.  A cancellation is recorded here as
+                # state plus error only: injecting an engine marker into the
+                # contract document would make the row unparseable forever and
+                # permanently block rebuilding the revision.
                 build.state = "failed"
                 build.error = "recipe Controller cache removal cancelled the build"
                 build.updated_at = now

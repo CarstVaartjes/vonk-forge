@@ -49,6 +49,8 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
+from vonk_control.recipe_execution_contract import parse_stored_build_plan
+from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
@@ -1059,6 +1061,142 @@ def test_stored_build_envelope_names_the_field_that_invalidated_it(
     message = str(raised.value)
     assert "limits.temporary_bytes" in message, message
     assert "greater_than" in message, message
+
+
+def test_removal_does_not_corrupt_the_stored_build_envelope(tmp_path: Path) -> None:
+    """A cache removal must not write engine keys into the build contract.
+
+    ``remove_selector`` marked cancelled builds by merging ``removal_fence``
+    and ``cancelled`` into ``RecipeBuild.plan``.  That column is the canonical
+    ``RecipeBuildRequest`` document, whose model forbids extra keys, so the row
+    could never be parsed again and every later plan failed with
+    ``build.plan_invalid``.  A removal cancels the build through state and
+    error; the fence belongs to the removal operation that owns it.
+    """
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    planned = builds.plan(revision.id, node_id, now=now)
+    recipe = RecipeDefinition.model_validate(revision.document)
+    availability = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path / "cache"),
+        authority=lambda *_args, **_kwargs: (
+            recipe,
+            {
+                "architecture": "linux/arm64",
+                "interface": "vonk.runtime.v1",
+                "image_bytes": 1,
+            },
+        ),
+        clock=lambda: now,
+    )
+
+    result = availability.remove_selector(
+        recipe.identity.slug, actor="operator", request_id="1" * 36
+    )
+    assert result["cancelled_builds"] == [planned.build_id]
+
+    with sessions() as session:
+        stored = session.get(RecipeBuild, planned.build_id)
+        assert stored is not None
+        assert stored.state == "failed"
+        # The exact stored document still satisfies the canonical contract.
+        assert parse_stored_build_plan(stored.plan).build_id == planned.build_id
+
+    # The fence is recorded on the removal operation that owns the
+    # cancellation, not smuggled into the build contract document.
+    with sessions() as session:
+        removal = session.scalar(select(Job).where(Job.request_id == "1" * 36))
+        assert removal is not None
+        assert isinstance(_json_object(removal.payload).get("removal_fence"), str)
+
+    # The planning path the operator runs next must return the cancelled row to
+    # a clean planned attempt with a usable envelope, not reject it.
+    replanned = builds.plan(revision.id, node_id, now=now)
+    assert replanned.build_id == planned.build_id
+    assert parse_stored_build_plan(replanned.agent_payload).build_id == planned.build_id
+    with sessions() as session:
+        rebuilt = session.get(RecipeBuild, planned.build_id)
+        assert rebuilt is not None
+        assert rebuilt.state == "planned"
+        assert rebuilt.error is None
+
+
+def test_planner_repairs_a_build_envelope_an_older_removal_fence_damaged(
+    tmp_path: Path,
+) -> None:
+    """The planner rebuilds a row whose stored envelope no longer parses.
+
+    An older Controller's removal merged ``removal_fence`` and ``cancelled``
+    into the stored ``RecipeBuildRequest``.  The row is damaged history, not a
+    live request, so the planner must replace its documents with a freshly
+    derived envelope instead of rejecting the operator's build with
+    ``build.plan_invalid``.  Repair derives new bytes; it never blesses the
+    damaged document.
+    """
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    planned = service.plan(revision.id, node_id, now=now)
+    damaged = copy.deepcopy(planned.agent_payload) | {
+        "removal_fence": "00000000-0000-4000-8000-0000000000ff",
+        "cancelled": True,
+    }
+    table = RecipeBuild.__table__
+    assert isinstance(table, Table)
+    with sessions.begin() as session:
+        session.execute(
+            table.update()
+            .where(RecipeBuild.id == planned.build_id)
+            .values(
+                plan=damaged,
+                state="failed",
+                error="recipe Controller cache removal cancelled the build",
+            )
+        )
+
+    repaired = service.plan(revision.id, node_id, now=now)
+
+    assert parse_stored_build_plan(repaired.agent_payload).build_id == planned.build_id
+    with sessions() as session:
+        stored = session.get(RecipeBuild, planned.build_id)
+        assert stored is not None
+        assert stored.state == "planned"
+        assert stored.error is None
+        repaired_document = _json_object(stored.plan)
+        # Repair replaces the damaged bytes; the forbidden engine keys are gone.
+        assert "removal_fence" not in repaired_document
+        assert "cancelled" not in repaired_document
+        assert parse_stored_build_plan(repaired_document).build_id == planned.build_id
+
+
+def test_planner_fails_closed_for_an_in_flight_build_with_a_damaged_envelope(
+    tmp_path: Path,
+) -> None:
+    """Repair is for stale history; an active attempt is not overwritten.
+
+    The tolerant read only applies to a row whose stored envelope is stale
+    metadata.  A row that a worker is currently building is still owned by that
+    attempt, so a damaged envelope there stays a named ``build.plan_invalid``
+    rejection rather than being rewritten under the running work.
+    """
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    planned = service.plan(revision.id, node_id, now=now)
+    damaged = copy.deepcopy(planned.agent_payload) | {"removal_fence": "x"}
+    with sessions.begin() as session:
+        stored = session.get(RecipeBuild, planned.build_id)
+        assert stored is not None
+        stored.state = "building"
+        stored.plan = damaged
+
+    with pytest.raises(RecipeBuildError) as raised:
+        service.plan(revision.id, node_id, now=now)
+
+    assert raised.value.code == "build.plan_invalid"
+    assert "removal_fence" in str(raised.value)
 
 
 def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:

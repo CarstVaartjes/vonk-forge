@@ -1022,12 +1022,7 @@ class RecipeBuildService:
             and _valid_succeeded_receipt(existing)
             and not self._succeeded_build_available(existing)
         ):
-            existing.state = "planned"
-            existing.image_digest = None
-            existing.oci_layout_sha256 = None
-            existing.image_bytes = None
-            existing.error = None
-            existing.updated_at = now
+            _reopen_build_attempt(existing, now=now)
         if existing is None:
             # Reusable image bytes are keyed by executable inputs, not by
             # editorial recipe provenance. Only a succeeded receipt may cross
@@ -1070,10 +1065,33 @@ class RecipeBuildService:
                 payload = build_plan_document(existing.plan)
                 parse_stored_build_policy(existing.policy_report)
             except RecipeExecutionContractError as error:
-                raise RecipeBuildError(
-                    "build.plan_invalid",
-                    "stored source build envelope is invalid" + error.detail,
-                ) from error
+                if existing.state == "building":
+                    # An in-flight attempt owns this row, so its stored
+                    # envelope is not stale metadata this planner may rewrite
+                    # underneath it.  Fail closed and name the bad field.
+                    raise RecipeBuildError(
+                        "build.plan_invalid",
+                        "stored source build envelope is invalid" + error.detail,
+                    ) from error
+                # The stored envelope no longer satisfies the current contract
+                # (an engine marker an older removal path wrote, or a field an
+                # older Controller wrote).  That makes this row unusable
+                # history, not a barrier for the build the operator asked for.
+                # Replace the damaged documents with the freshly prepared and
+                # already-validated envelope bound to this row's own build
+                # identity, and clear the stale result so a fresh attempt can
+                # start from current bytes rather than the damaged document.
+                payload["build_id"] = existing.id
+                existing.plan = copy.deepcopy(payload)
+                existing.policy_report = copy.deepcopy(policy_document)
+                _reopen_build_attempt(existing, now=now)
+            else:
+                if existing.state == "failed":
+                    # A cancelled or failed attempt must not block the rebuild
+                    # the operator asked for.  The stored envelope is still
+                    # exact, so keep it and return the row to a clean planned
+                    # attempt rather than reusing a terminal row.
+                    _reopen_build_attempt(existing, now=now)
         else:
             payload["build_id"] = existing.id
             payload["recipe_revision_id"] = plan.recipe_revision_id
@@ -1420,6 +1438,23 @@ def _valid_succeeded_receipt(build: RecipeBuild) -> bool:
         and not isinstance(build.image_bytes, bool)
         and build.image_bytes > 0
     )
+
+
+def _reopen_build_attempt(build: RecipeBuild, *, now: datetime) -> None:
+    """Return one build row to a clean planned attempt.
+
+    A failed or cancelled row must not be a permanent barrier to the rebuild
+    the operator asked for, and a repaired row must not keep stale result
+    evidence.  This clears the terminal state and the recorded result while
+    leaving the contract documents to the caller.
+    """
+
+    build.state = "planned"
+    build.image_digest = None
+    build.oci_layout_sha256 = None
+    build.image_bytes = None
+    build.error = None
+    build.updated_at = now
 
 
 def _digest(value: object) -> str:
