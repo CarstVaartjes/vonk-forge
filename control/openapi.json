@@ -6449,6 +6449,23 @@
         "title": "JobProgress",
         "type": "object"
       },
+      "JobResumeRequest": {
+        "additionalProperties": false,
+        "description": "What the operator wants the parked job's bounded authorisation to do.\n\n``resume`` is the default and preserves the historic request shape: an\nomitted body or an omitted field authorises one more claim.  ``retire`` is\nthe terminal disposition for work whose retry budget is already spent.",
+        "properties": {
+          "disposition": {
+            "default": "resume",
+            "enum": [
+              "resume",
+              "retire"
+            ],
+            "title": "Disposition",
+            "type": "string"
+          }
+        },
+        "title": "JobResumeRequest",
+        "type": "object"
+      },
       "JobResumeResponse": {
         "additionalProperties": false,
         "properties": {
@@ -6459,7 +6476,7 @@
             "type": "string"
           },
           "state": {
-            "pattern": "^queued$",
+            "pattern": "^(queued|failed)$",
             "title": "State",
             "type": "string"
           }
@@ -21635,8 +21652,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "title": "Body",
-                "type": "null"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/JobResumeRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
               }
             }
           }

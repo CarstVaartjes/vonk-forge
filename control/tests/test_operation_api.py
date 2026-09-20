@@ -16,7 +16,11 @@ from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control import operation_api
-from vonk_control.agent_jobs import AgentJobService, OperatorRetryExhausted
+from vonk_control.agent_jobs import (
+    AgentJobService,
+    OperatorRetirementRefused,
+    OperatorRetryExhausted,
+)
 from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
@@ -39,6 +43,8 @@ from vonk_control.models import (
     FleetProfile,
     FleetProfileApplication,
     Job,
+    RecipeRun,
+    ResourceReservation,
 )
 from vonk_control.operation_api import (
     JobProgress,
@@ -1656,6 +1662,30 @@ def _restart_interrupted_result(claim) -> AgentResult:
     )
 
 
+def _exhaust_parked_retry_budget(clock, sessions, jobs, operation):
+    """Spend one parked operation's budget through the real automatic path.
+
+    The bound the refusals report is therefore the module's own
+    :class:`RecoveryPolicy` budget, not a number this test chose.
+    """
+
+    limit = RecoveryPolicy().max_failures
+    for expected_attempt in range(1, limit + 1):
+        claim = _claim_parked(jobs)
+        assert claim is not None and claim.attempt == expected_attempt
+        jobs.record_result(_restart_interrupted_result(claim))
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation.id)
+            assert stored is not None
+            if expected_attempt < limit:
+                assert stored.retry_due_at is not None
+                due = stored.retry_due_at
+                if due.tzinfo is None:
+                    due = due.replace(tzinfo=UTC)
+                clock.now = due + timedelta(seconds=1)
+    return limit
+
+
 def test_durable_resume_authorises_the_parked_operation_for_the_next_claim(
     tmp_path,
 ) -> None:
@@ -1732,20 +1762,7 @@ def test_durable_resume_refuses_an_exhausted_retry_budget(tmp_path) -> None:
     sessions, jobs, services, operation, job_id = _parked_stop_services(
         tmp_path, clock=clock
     )
-    limit = RecoveryPolicy().max_failures
-    for expected_attempt in range(1, limit + 1):
-        claim = _claim_parked(jobs)
-        assert claim is not None and claim.attempt == expected_attempt
-        jobs.record_result(_restart_interrupted_result(claim))
-        with sessions() as session:
-            stored = session.get(AgentOperation, operation.id)
-            assert stored is not None
-            if expected_attempt < limit:
-                assert stored.retry_due_at is not None
-                due = stored.retry_due_at
-                if due.tzinfo is None:
-                    due = due.replace(tzinfo=UTC)
-                clock.now = due + timedelta(seconds=1)
+    limit = _exhaust_parked_retry_budget(clock, sessions, jobs, operation)
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         parent = session.get(Job, job_id)
@@ -1762,3 +1779,227 @@ def test_durable_resume_refuses_an_exhausted_retry_budget(tmp_path) -> None:
     with sessions() as session:
         parent = session.get(Job, job_id)
         assert parent is not None and parent.state == "waiting-for-operator"
+
+
+def test_operator_retire_is_a_distinct_audited_disposition() -> None:
+    """Retirement is requested explicitly; the default request still resumes."""
+
+    resumed: list[str] = []
+    retired: list[str] = []
+    services = OperationApiServices(
+        endpoint=lambda _alias: {},
+        agents=lambda: (),
+        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
+            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
+        ),
+        resume_job=resumed.append,
+        retire_job=retired.append,
+    )
+    client, operator, _reconciler, audits = _client(operations=services)
+    job_id = "11111111-1111-4111-8111-111111111111"
+
+    resumed_request = "33333333-3333-4333-8333-333333333333"
+    default_response = client.post(
+        f"/api/jobs/{job_id}/resume",
+        headers={**operator, "X-Request-ID": resumed_request},
+    )
+    retired_request = "33333333-3333-4333-8333-333333333334"
+    retired_response = client.post(
+        f"/api/jobs/{job_id}/resume",
+        headers={**operator, "X-Request-ID": retired_request},
+        json={"disposition": "retire"},
+    )
+
+    assert default_response.status_code == 202
+    assert default_response.json() == {"id": job_id, "state": "queued"}
+    assert resumed == [job_id]
+    assert retired == [job_id]
+    assert retired_response.status_code == 202
+    assert retired_response.json() == {"id": job_id, "state": "failed"}
+    assert audits.for_request(resumed_request).action == "job.resume"
+    assert audits.for_request(retired_request).action == "job.retire"
+
+
+def test_operator_retire_reports_a_live_operation_refusal() -> None:
+    """A refusal is a typed 409, never a silent terminal transition."""
+
+    def refused(_job_id: str) -> None:
+        raise OperatorRetirementRefused("op-1", "its bounded retry budget is not spent")
+
+    services = OperationApiServices(
+        endpoint=lambda _alias: {},
+        agents=lambda: (),
+        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
+            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
+        ),
+        resume_job=lambda _job_id: None,
+        retire_job=refused,
+    )
+    client, operator, *_ = _client(operations=services)
+
+    response = client.post(
+        "/api/jobs/11111111-1111-4111-8111-111111111111/resume",
+        headers=operator,
+        json={"disposition": "retire"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "operation op-1 cannot be retired: its bounded retry budget is not spent"
+    )
+
+
+def _retire_parked(services, job_id: str) -> None:
+    """Call the optional retirement projection, failing if it is unavailable."""
+
+    retire = services.retire_job
+    assert retire is not None
+    retire(job_id)
+
+
+def test_durable_retire_fails_the_exhausted_operation_and_releases_its_owner(
+    tmp_path,
+) -> None:
+    """Retirement is terminal, auditable and gives the owned capacity back.
+
+    A parked operation whose retry budget is spent can never make progress, so
+    the fleet it holds must not stay wedged.  Retiring it fails both the
+    operation and the parent job with the typed reason, releases the active
+    reservations the job's owner still holds, and leaves the node free for the
+    next admitted intent.
+    """
+
+    clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    sessions, jobs, services, operation, job_id = _parked_stop_services(
+        tmp_path, clock=clock
+    )
+    owner_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        parent = session.get(Job, job_id)
+        assert parent is not None
+        parent.payload = {
+            **parent.payload,
+            "owner_kind": "run",
+            "owner_id": owner_id,
+        }
+        session.add(
+            RecipeRun(
+                id=owner_id,
+                installation_id=str(uuid.uuid4()),
+                mapping_id=str(uuid.uuid4()),
+                mapping_generation=1,
+                alias="retire-me",
+                plan_digest=COMMIT,
+                plan={},
+                state="starting",
+                route_state="withdrawn",
+                actor="operator",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        session.add(
+            ResourceReservation(
+                node_id=PARKED_NODE_ID,
+                kind="unified-memory",
+                resource_key=COMMIT,
+                amount_bytes=1024,
+                owner_kind="run",
+                owner_id=owner_id,
+                state="active",
+                plan_digest=COMMIT,
+                created_at=clock.now,
+            )
+        )
+    limit = _exhaust_parked_retry_budget(clock, sessions, jobs, operation)
+
+    _retire_parked(services, job_id)
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        parent = session.get(Job, job_id)
+        run = session.get(RecipeRun, owner_id)
+        reservation = session.scalar(
+            select(ResourceReservation).where(ResourceReservation.owner_id == owner_id)
+        )
+        assert stored is not None and parent is not None
+        assert run is not None and reservation is not None
+        assert stored.state == "failed"
+        assert stored.retry_disposition is None and stored.retry_due_at is None
+        assert f"{limit}-attempt retry budget was spent" in (stored.status_reason or "")
+        assert "operator retired" in (stored.status_reason or "")
+        assert parent.state == "failed"
+        assert parent.status_reason == stored.status_reason
+        assert run.state == "failed"
+        assert run.route_state == "withdrawn"
+        assert reservation.state == "released"
+        assert reservation.released_at is not None
+
+
+def test_durable_retire_refuses_a_parked_operation_with_budget_remaining(
+    tmp_path,
+) -> None:
+    """An operation that can still progress must never be silently discarded."""
+
+    clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    sessions, jobs, services, operation, job_id = _parked_stop_services(
+        tmp_path, clock=clock
+    )
+    first = _claim_parked(jobs)
+    assert first is not None
+    jobs.wait_for_operator(first, "operator must inspect the effect")
+
+    with pytest.raises(OperatorRetirementRefused) as refusal:
+        _retire_parked(services, job_id)
+
+    assert refusal.value.operation_id == operation.id
+    assert "retry budget is not spent" in refusal.value.reason
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        parent = session.get(Job, job_id)
+        assert stored is not None and parent is not None
+        assert stored.state == "waiting-for-operator"
+        assert parent.state == "waiting-for-operator"
+
+
+def test_durable_retire_refuses_a_parked_operation_whose_lease_is_live(
+    tmp_path,
+) -> None:
+    """A held lease is live work, even when the parent row looks parked."""
+
+    clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    sessions, _jobs, services, operation, job_id = _parked_stop_services(
+        tmp_path, clock=clock
+    )
+    _claim_parked(_jobs)
+    with sessions.begin() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        assert attempt is not None
+        # The parent was re-parked at the spent budget, but the attempt still
+        # holds an unexpired lease, so the effect is live and must not be
+        # abandoned.
+        stored.state = "waiting-for-operator"
+        stored.current_attempt = RecoveryPolicy().max_failures
+        stored.retry_disposition = None
+        stored.retry_disposition_attempt = None
+        stored.retry_due_at = None
+        attempt.attempt = stored.current_attempt
+        attempt.state = "running"
+        parent = session.get(Job, job_id)
+        assert parent is not None
+        parent.state = "waiting-for-operator"
+
+    with pytest.raises(OperatorRetirementRefused) as refusal:
+        _retire_parked(services, job_id)
+
+    assert "holds its lease" in refusal.value.reason
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None
+        assert stored.state == "waiting-for-operator"

@@ -120,6 +120,10 @@ _OPERATION_STATE_ADAPTER = TypeAdapter(FleetProfileOperationState)
 _PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
 _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
 _MAX_AUTOMATIC_CACHE_RECOVERY_ATTEMPTS = 3
+#: How many parked applications one worker tick observes for a terminal child.
+#: Bounded so a large parked backlog cannot turn one tick into an unbounded
+#: scan, while still letting every parked order record its own ending.
+_MAX_PARKED_APPLICATION_OBSERVATIONS = 8
 
 
 class _PlanStepDraftRequired(TypedDict):
@@ -2415,7 +2419,11 @@ class FleetProfileService:
                 )
                 for prior_application in session.scalars(
                     select(FleetProfileApplication)
-                    .where(FleetProfileApplication.state.in_(("queued", "running")))
+                    .where(
+                        FleetProfileApplication.state.in_(
+                            ("queued", "running", "waiting-for-operator")
+                        )
+                    )
                     .with_for_update()
                 ):
                     try:
@@ -2880,7 +2888,7 @@ class FleetProfileService:
                 .limit(1)
             )
             if row is None:
-                return False
+                return self._observe_parked_applications(now)
             try:
                 plan = _persisted_profile_plan(row)
                 progress = _persisted_profile_progress(row)
@@ -3063,6 +3071,92 @@ class FleetProfileService:
                 current.status_reason = str(error)[:512]
             current.updated_at = _aware(self._clock())
         return True
+
+    def _observe_parked_applications(self, now: datetime) -> bool:
+        """Record the ending of a parked application whose child has ended.
+
+        A ``waiting-for-operator`` order owns no live execution step, so the
+        ordinary advancement path never revisits it and its receipt could stay
+        parked forever after the operation that parked it terminated.  This is
+        the same decision the live path makes, applied to the parked state: a
+        superseding intent cancels the order, a terminal child fails it with
+        that child's reason, and a child that resumed returns the order to
+        ``running`` so the normal advancement continues.  A child that is still
+        parked leaves the order exactly as it is.
+        """
+
+        adapter = self._switch_adapter
+        if adapter is None:
+            return False
+        with self._sessions.begin() as session:
+            rows = tuple(
+                session.scalars(
+                    select(FleetProfileApplication)
+                    .where(FleetProfileApplication.state == "waiting-for-operator")
+                    .order_by(
+                        FleetProfileApplication.created_at,
+                        FleetProfileApplication.id,
+                    )
+                    .with_for_update(skip_locked=True)
+                    .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
+                )
+            )
+            for row in rows:
+                try:
+                    progress = _persisted_profile_progress(row)
+                except FleetProfileConflict as error:
+                    row.state = "failed"
+                    row.status_reason = str(error)[:512]
+                    row.updated_at = now
+                    return True
+                if self._superseding_intent(session, row, progress):
+                    row.state = "cancelled"
+                    row.status_reason = (
+                        "Profile order was replaced by a changed profile or later "
+                        "scoped intent; issued effects retain their own cancellation receipts"
+                    )
+                    row.updated_at = now
+                    return True
+                if not row.current_operation_id:
+                    continue
+                try:
+                    child = adapter.get(row.current_operation_id, session=session)
+                except (KeyError, RuntimeError, ValueError) as error:
+                    row.state = "failed"
+                    row.status_reason = (
+                        str(error)[:512] or "Child operation is unavailable"
+                    )
+                    row.updated_at = now
+                    return True
+                if child.state == "waiting-for-operator":
+                    continue
+                if child.state in _CHILD_PENDING_STATES:
+                    # A resume or an authorised retry made the child live
+                    # again; hand the order back to the advancement path.
+                    row.state = "running"
+                    row.updated_at = now
+                    return True
+                if child.state in _CHILD_FAILED_STATES:
+                    row.state = "failed"
+                    row.status_reason = child.status_reason or (
+                        f"Profile step {row.current_step + 1} ended in {child.state}"
+                    )
+                    row.updated_at = now
+                    return True
+                if child.state != "succeeded":
+                    row.state = "failed"
+                    row.status_reason = (
+                        f"Profile step {row.current_step + 1} returned unsupported "
+                        f"state {child.state}"
+                    )
+                    row.updated_at = now
+                    return True
+                # The parked child concluded successfully; promote the order so
+                # the next tick records its receipt and starts the next step.
+                row.state = "running"
+                row.updated_at = now
+                return True
+        return False
 
     def _automatic_cache_recovery(self, now: datetime) -> tuple[str, str] | None:
         """Find one current failed profile whose only blocker is vanished cache bytes."""

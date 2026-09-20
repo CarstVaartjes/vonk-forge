@@ -34,7 +34,11 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
-from .agent_jobs import AgentJobService, superseded_cancellation_deadline
+from .agent_jobs import (
+    AgentJobService,
+    release_owned_reservations_in_session,
+    superseded_cancellation_deadline,
+)
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
 from .compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -4279,15 +4283,7 @@ class RecipeOperationService:
     def _release(
         session: Session, owner_kind: str, owner_id: str, now: datetime
     ) -> None:
-        for reservation in session.scalars(
-            select(ResourceReservation).where(
-                ResourceReservation.owner_kind == owner_kind,
-                ResourceReservation.owner_id == owner_id,
-                ResourceReservation.state == "active",
-            )
-        ):
-            reservation.state = "released"
-            reservation.released_at = now
+        release_owned_reservations_in_session(session, owner_kind, owner_id, now)
 
 
 def _required_string(value: Mapping[str, object], key: str) -> str:

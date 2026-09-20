@@ -45,6 +45,9 @@ from .models import (
     ArtifactJob,
     Job,
     RecipeBuild,
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
 )
 from .models import AgentOperation as StoredOperation
 from .operation_contract import sanitize_failure_evidence, validate_progress_update
@@ -153,6 +156,9 @@ _CONCLUDED_OUTCOMES = _AGGREGATE_FINAL_STATES - {"waiting-for-operator"}
 _RETRY_DISPOSITION = "retry"
 _DATABASE_REPOLL_SECONDS = 0.25
 _SUPERSEDED_CANCELLATION_SECONDS = 660
+#: Run states whose abandoned effect must be ended when an operator retires the
+#: parked operation that still owns them.
+_ACTIVE_RETIRE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 
 
 def superseded_cancellation_deadline(result: object) -> datetime | None:
@@ -214,6 +220,55 @@ class OperatorRetryExhausted(ValueError):
         )
 
 
+class OperatorRetirementRefused(ValueError):
+    """An operator asked to retire parked work that is not genuinely exhausted.
+
+    Retirement is the terminal counterpart of ``resume``: it fails a parked
+    operation whose bounded retry budget is spent so the fleet it owns is
+    released.  The same :class:`RecoveryPolicy` decision that refuses an
+    over-budget resume decides whether retirement is permitted, and this typed
+    refusal names the one condition that still makes the operation live.
+    """
+
+    def __init__(self, operation_id: str, reason: str) -> None:
+        self.operation_id = operation_id
+        self.reason = reason
+        super().__init__(f"operation {operation_id} cannot be retired: {reason}")
+
+
+def retry_due_after_operator_action(
+    operation: StoredOperation, now: datetime, policy: RecoveryPolicy | None = None
+) -> datetime | None:
+    """The one bounded operator-retry decision for one parked operation.
+
+    Both the resume authorisation and the retirement refusal evaluate this
+    object, so a change to the budget cannot move one without the other: a
+    ``None`` due time *is* "the budget is spent" for each of them.  The caller
+    passes the same :class:`RecoveryPolicy` whose ``max_failures`` it reports,
+    so the refusal cannot name a different bound from the one it decided.
+    """
+
+    return (policy or RecoveryPolicy()).next_attempt(
+        operation.id, operation.current_attempt, _aware(now)
+    )
+
+
+def release_owned_reservations_in_session(
+    session: Session, owner_kind: str, owner_id: str, now: datetime
+) -> None:
+    """Release every active resource reservation an operation owner holds."""
+
+    for reservation in session.scalars(
+        select(ResourceReservation).where(
+            ResourceReservation.owner_kind == owner_kind,
+            ResourceReservation.owner_id == owner_id,
+            ResourceReservation.state == "active",
+        )
+    ):
+        reservation.state = "released"
+        reservation.released_at = now
+
+
 def authorize_operator_resume_in_session(
     session: Session, job_id: str, now: datetime
 ) -> None:
@@ -249,10 +304,7 @@ def authorize_operator_resume_in_session(
             # Already authorised at this attempt: resume is idempotent and must
             # neither spend budget nor move a scheduled retry earlier.
             continue
-        if (
-            policy.next_attempt(operation.id, operation.current_attempt, _aware(now))
-            is None
-        ):
+        if retry_due_after_operator_action(operation, now, policy) is None:
             raise OperatorRetryExhausted(
                 operation.id,
                 operation.kind,
@@ -271,6 +323,136 @@ def authorize_operator_resume_in_session(
             f"{policy.max_failures} authorised"
         )[:512]
         operation.updated_at = now
+
+
+def retire_exhausted_operations_in_session(
+    session: Session, job_id: str, now: datetime
+) -> tuple[str, ...]:
+    """Fail a parked job's genuinely exhausted operations and release their owner.
+
+    This is the bounded, audited terminal counterpart to
+    :func:`authorize_operator_resume_in_session`.  It is admitted only when
+    every parked operation of the job has spent :class:`RecoveryPolicy`'s
+    attempt budget *and* holds no live attempt lease and no already-authorised
+    retry; anything else is a refusal, so a live operation is never silently
+    discarded.  The parked operations, the parent job, and the owner effect the
+    job still holds are all terminal in the caller's transaction.
+    """
+
+    job = session.scalar(select(Job).where(Job.id == job_id).with_for_update(of=Job))
+    if job is None:
+        raise KeyError(job_id)
+    if job.state != "waiting-for-operator":
+        raise OperatorRetirementRefused(job_id, "job is not waiting for operator")
+    operations = tuple(
+        session.scalars(
+            select(StoredOperation)
+            .where(
+                StoredOperation.parent_job_id == job_id,
+                StoredOperation.state == "waiting-for-operator",
+            )
+            .order_by(StoredOperation.id)
+            .with_for_update(of=StoredOperation)
+        )
+    )
+    if not operations:
+        raise OperatorRetirementRefused(job_id, "job has no parked operation")
+    policy = RecoveryPolicy()
+    for operation in operations:
+        if retry_due_after_operator_action(operation, now, policy) is not None:
+            raise OperatorRetirementRefused(
+                operation.id, "its bounded retry budget is not spent"
+            )
+        if (
+            operation.retry_disposition == _RETRY_DISPOSITION
+            and operation.retry_disposition_attempt == operation.current_attempt
+            and operation.retry_due_at is not None
+        ):
+            raise OperatorRetirementRefused(
+                operation.id, "another attempt is already authorised"
+            )
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == operation.current_attempt,
+            )
+        )
+        if (
+            attempt is not None
+            and attempt.state == "running"
+            and _aware(attempt.lease_deadline) > _aware(now)
+        ):
+            raise OperatorRetirementRefused(
+                operation.id, "a live attempt still holds its lease"
+            )
+    reasons = {
+        operation.id: (
+            f"operator retired the parked {operation.kind} operation after its "
+            f"{policy.max_failures}-attempt retry budget was spent; the effect "
+            "is abandoned and its owner is released"
+        )
+        for operation in operations
+    }
+    for operation in operations:
+        operation.state = "failed"
+        operation.status_reason = reasons[operation.id][:512]
+        operation.retry_disposition = None
+        operation.retry_disposition_attempt = None
+        operation.retry_due_at = None
+        operation.updated_at = now
+    job_reason = reasons[operations[0].id]
+    _release_retired_owner_in_session(session, job, job_reason, now)
+    job.state = "failed"
+    job.status_reason = job_reason[:1024]
+    job.updated_at = now
+    return tuple(operation.id for operation in operations)
+
+
+def _release_retired_owner_in_session(
+    session: Session, job: Job, reason: str, now: datetime
+) -> None:
+    """Release the node effect and reservations a retired job still owns.
+
+    The owner binding is read from the job's own payload, so this stays the
+    same authority the operation was admitted under.  A retired ``run`` can
+    never stay active -- otherwise the next admission would keep being blocked
+    by the abandoned effect -- so its route is withdrawn and its capacity is
+    returned.  Queued child work that never ran is cancelled instead of being
+    left claimable.
+    """
+
+    payload = job.payload if isinstance(job.payload, Mapping) else {}
+    owner_kind = payload.get("owner_kind")
+    owner_id = payload.get("owner_id")
+    if isinstance(owner_kind, str) and isinstance(owner_id, str):
+        if owner_kind == "run":
+            run = session.get(RecipeRun, owner_id, with_for_update=True)
+            if run is not None and run.state in _ACTIVE_RETIRE_RUN_STATES:
+                run.state = "failed"
+                run.route_state = "withdrawn"
+                run.route_error = reason[:512]
+                run.updated_at = now
+        elif owner_kind == "installation":
+            installation = session.get(
+                RecipeInstallation, owner_id, with_for_update=True
+            )
+            if installation is not None and installation.state not in {
+                "uninstalled",
+                "failed",
+            }:
+                installation.state = "failed"
+                installation.updated_at = now
+        release_owned_reservations_in_session(session, owner_kind, owner_id, now)
+    for child in session.scalars(
+        select(StoredOperation).where(
+            StoredOperation.parent_job_id == job.id,
+            StoredOperation.state == "queued",
+            StoredOperation.current_attempt == 0,
+        )
+    ):
+        child.state = "cancelled"
+        child.status_reason = "parent operation was retired by the operator"[:512]
+        child.updated_at = now
 
 
 def _failure_result(
