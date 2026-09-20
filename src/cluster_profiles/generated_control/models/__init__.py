@@ -162,6 +162,8 @@ from .job_logs_response import JobLogsResponse
 from .job_operation_response import JobOperationResponse
 from .job_payload import JobPayload
 from .job_progress import JobProgress
+from .job_resume_request import JobResumeRequest
+from .job_resume_request_disposition import JobResumeRequestDisposition
 from .job_resume_response import JobResumeResponse
 from .job_summary import JobSummary
 from .jobs_response import JobsResponse
@@ -612,6 +614,8 @@ __all__ = (
     "JobOperationResponse",
     "JobPayload",
     "JobProgress",
+    "JobResumeRequest",
+    "JobResumeRequestDisposition",
     "JobResumeResponse",
     "JobsResponse",
     "JobSummary",

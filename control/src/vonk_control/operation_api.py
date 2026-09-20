@@ -30,7 +30,10 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 
-from .agent_jobs import authorize_operator_resume_in_session
+from .agent_jobs import (
+    authorize_operator_resume_in_session,
+    retire_exhausted_operations_in_session,
+)
 from .agent_upgrade_status import (
     GENERIC_AGENT_UPGRADE_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
@@ -373,9 +376,20 @@ class JobDetailResponse(StrictModel):
     agent_upgrade_diagnostics: AgentUpgradeDiagnosticsResponse | None = None
 
 
+class JobResumeRequest(StrictModel):
+    """What the operator wants the parked job's bounded authorisation to do.
+
+    ``resume`` is the default and preserves the historic request shape: an
+    omitted body or an omitted field authorises one more claim.  ``retire`` is
+    the terminal disposition for work whose retry budget is already spent.
+    """
+
+    disposition: Literal["resume", "retire"] = "resume"
+
+
 class JobResumeResponse(StrictModel):
     id: str = Field(min_length=1, max_length=128)
-    state: str = Field(pattern=r"^queued$")
+    state: str = Field(pattern=r"^(queued|failed)$")
 
 
 class JobSummary(StrictModel):
@@ -410,6 +424,7 @@ class OperationApiServices:
     get_operation: Callable[[str], Mapping[str, object]] | None = None
     operation_providers: tuple[OperationProviderProtocol, ...] = ()
     cursor_codec: CursorCodec | None = None
+    retire_job: Callable[[str], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -1689,6 +1704,17 @@ class _DurableOperationProjection:
             job.status_reason = None
             job.updated_at = now
 
+    def retire_job(self, job_id: str) -> None:
+        """Fail a parked job whose bounded retry budget is spent.
+
+        The refusal is raised inside this transaction and rolls it back, so a
+        live or still-recoverable operation is left exactly as it was.
+        """
+
+        with self._sessions.begin() as session:
+            now = self._clock()
+            retire_exhausted_operations_in_session(session, job_id, now)
+
 
 def durable_operation_services(
     sessions: sessionmaker[Session],
@@ -1723,6 +1749,9 @@ def durable_operation_services(
             return
         projection.resume_job(job_id)
 
+    def retire_job(job_id: str) -> None:
+        projection.retire_job(job_id)
+
     return OperationApiServices(
         endpoint=projection.endpoint,
         agents=projection.agents,
@@ -1739,6 +1768,7 @@ def durable_operation_services(
             *operation_providers,
         ),
         cursor_codec=cursors,
+        retire_job=retire_job,
     )
 
 

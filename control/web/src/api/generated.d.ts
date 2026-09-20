@@ -3035,6 +3035,22 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * JobResumeRequest
+         * @description What the operator wants the parked job's bounded authorisation to do.
+         *
+         *     ``resume`` is the default and preserves the historic request shape: an
+         *     omitted body or an omitted field authorises one more claim.  ``retire`` is
+         *     the terminal disposition for work whose retry budget is already spent.
+         */
+        JobResumeRequest: {
+            /**
+             * Disposition
+             * @default resume
+             * @enum {string}
+             */
+            disposition: "resume" | "retire";
+        };
         /** JobResumeResponse */
         JobResumeResponse: {
             /** Id */
@@ -8553,7 +8569,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": null;
+                "application/json": components["schemas"]["JobResumeRequest"] | null;
             };
         };
         responses: {

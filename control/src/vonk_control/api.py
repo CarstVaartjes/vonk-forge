@@ -49,7 +49,7 @@ from .agent_api import (
     active_agent_identity,
     install_agent_routes,
 )
-from .agent_jobs import OperatorRetryExhausted
+from .agent_jobs import OperatorRetirementRefused, OperatorRetryExhausted
 from .artifact_blob_store import ArtifactBlobStore
 from .artifact_job_api import install_artifact_job_routes
 from .artifact_jobs import ArtifactJobService
@@ -98,6 +98,7 @@ from .operation_api import (
     JobDetailResponse,
     JobLogsResponse,
     JobProgress,
+    JobResumeRequest,
     JobResumeResponse,
     JobsResponse,
     JobSummary,
@@ -1216,14 +1217,39 @@ def create_app(
     def resume_job(
         request: Request,
         job_id: str,
-        body: None = Body(default=None),
+        body: Annotated[JobResumeRequest | None, Body()] = None,
         authenticated: Actor = authenticated_actor,
     ) -> JobResumeResponse:
-        del body
         route = "/api/jobs/{job_id}/resume"
         require_mutation_role(authenticated, route)
         if operations is None:
             raise HTTPException(status_code=503, detail="job resume unavailable")
+        disposition = "resume" if body is None else body.disposition
+        if disposition == "retire":
+            if operations.retire_job is None:
+                raise HTTPException(
+                    status_code=503, detail="job retirement unavailable"
+                )
+            try:
+                operations.retire_job(job_id)
+            except KeyError:
+                raise HTTPException(status_code=404, detail="job not found") from None
+            except OperatorRetirementRefused as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
+            except ValueError:
+                raise HTTPException(
+                    status_code=409, detail="job is not waiting for operator"
+                ) from None
+            audits.append(
+                AuditRecord(
+                    request.state.request_id,
+                    authenticated.subject,
+                    "job.retire",
+                    None,
+                    (),
+                )
+            )
+            return JobResumeResponse(id=job_id, state="failed")
         try:
             operations.resume_job(job_id)
         except KeyError:

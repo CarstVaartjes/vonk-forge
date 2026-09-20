@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_control.agent_jobs import retire_exhausted_operations_in_session
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
     build_production_fleet_profile_service,
 )
-from vonk_control.models import AgentNode, CatalogDocumentRevision, Job
+from vonk_control.models import (
+    AgentNode,
+    AgentOperation,
+    CatalogDocumentRevision,
+    FleetProfileApplication,
+    Job,
+)
+from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .test_fleet_profiles import _uuid
@@ -190,3 +200,145 @@ def test_repeated_idle_loads_preserve_distinct_noop_receipts(tmp_path: Path) -> 
     assert first.result is not None and first.result.changed is False
     assert second.result is not None and second.result.changed is False
     assert service.load(idle.number, request_key=_uuid(806), actor="admin") == second
+
+
+def _park_exhausted_application(sessions, application, child_id, nodes, *, attempt: int):
+    """Re-park a real Run/Switch child with one bounded exhausted operation.
+
+    The child and its application are left exactly as a spent retry budget
+    leaves them: parked, non-terminal, and still holding the node until an
+    operator decision or a newer intent replaces them.
+    """
+
+    parked_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        child = session.get(Job, child_id)
+        assert child is not None
+        child.state = "waiting-for-operator"
+        child.status_reason = "interrupted before the exact effect was observed"
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.state = "waiting-for-operator"
+        row.status_reason = "interrupted before the exact effect was observed"
+        session.add(
+            AgentOperation(
+                id=parked_id,
+                parent_job_id=child_id,
+                node_id=nodes[0],
+                kind="recipe.start",
+                payload_digest="a" * 64,
+                payload={},
+                authority_revision="b" * 64,
+                state="waiting-for-operator",
+                status_reason=(
+                    f"exact recipe.start retry budget exhausted at attempt {attempt}"
+                ),
+                current_attempt=attempt,
+                created_at=datetime(2020, 1, 1, tzinfo=UTC),
+                updated_at=datetime(2020, 1, 1, tzinfo=UTC),
+            )
+        )
+    return parked_id
+
+
+def test_new_intent_supersedes_a_parked_exhausted_application(tmp_path: Path) -> None:
+    """A newer authorized load replaces a parked order instead of queueing behind it."""
+
+    sessions, _lifecycle, service, profile, _desired, first, child_id, nodes = (
+        _failed_profile(tmp_path)
+    )
+    _park_exhausted_application(
+        sessions,
+        first,
+        child_id,
+        nodes,
+        attempt=RecoveryPolicy().max_failures,
+    )
+
+    second = service.load(profile.number, request_key=_uuid(810), actor="admin")
+
+    assert second.id != first.id
+    assert second.state == "queued"
+    ended = service.application(first.id)
+    assert ended.state == "cancelled"
+    assert "replaced by a later scoped intent" in (ended.status_reason or "")
+
+
+def test_a_changed_profile_cancels_its_own_parked_application_on_tick(
+    tmp_path: Path,
+) -> None:
+    """A parked order is revisited once the saved profile it bound has changed.
+
+    The parked state owns no live step, so the advancement path never sees it.
+    Without observing it, an edit to the saved profile would leave the order
+    waiting forever even though its recorded intent is already obsolete.
+    """
+
+    sessions, _lifecycle, service, profile, desired, first, child_id, nodes = (
+        _failed_profile(tmp_path)
+    )
+    _park_exhausted_application(
+        sessions,
+        first,
+        child_id,
+        nodes,
+        attempt=RecoveryPolicy().max_failures,
+    )
+    changed = desired.assignments[0].model_copy(
+        update={"assignment_name": "different-chat"}
+    )
+    service.update(
+        profile.id,
+        desired.model_copy(update={"assignments": [changed]}),
+        actor="admin",
+    )
+
+    assert service.tick() is True
+
+    ended = service.application(first.id)
+    assert ended.state == "cancelled"
+    assert "changed profile" in (ended.status_reason or "")
+
+
+def test_explicit_retirement_ends_the_parked_operation_and_admits_a_new_intent(
+    tmp_path: Path,
+) -> None:
+    """An exhausted parked operation is retired, recorded, and stops blocking.
+
+    The operation cannot make progress, so retirement is the operator's bounded
+    terminal decision.  The operation and the application both record the typed
+    reason, and the next explicit load for the same profile is admitted.
+    """
+
+    sessions, lifecycle, service, profile, _desired, first, child_id, nodes = (
+        _failed_profile(tmp_path)
+    )
+    parked_id = _park_exhausted_application(
+        sessions,
+        first,
+        child_id,
+        nodes,
+        attempt=RecoveryPolicy().max_failures,
+    )
+    assert service.tick() is False
+
+    with sessions.begin() as session:
+        retired = retire_exhausted_operations_in_session(
+            session, child_id, lifecycle._clock()
+        )
+
+    assert retired == (parked_id,)
+    with sessions() as session:
+        operation = session.get(AgentOperation, parked_id)
+        assert operation is not None
+        assert operation.state == "failed"
+        assert "operator retired" in (operation.status_reason or "")
+
+    assert service.tick() is True
+    ended = service.application(first.id)
+    assert ended.state == "failed"
+    assert "operator retired" in (ended.status_reason or "")
+
+    second = service.load(profile.number, request_key=_uuid(811), actor="admin")
+    assert second.id != first.id
+    assert second.state == "queued"
