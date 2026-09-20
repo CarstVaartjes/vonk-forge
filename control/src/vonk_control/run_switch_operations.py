@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol, TypeGuard, runtime_checkable
+from typing import Any, Literal, Protocol, TypeGuard, runtime_checkable
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
@@ -1528,6 +1528,31 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     "run-switch.uninstall_target_unavailable"
                 )
+            if plan.cleanup_disposition == "abandon":
+                # The installation's own assessment proved the plan never
+                # reached a node, so no agent order is queued.  The lifecycle
+                # re-checks that disposition under the row lock and records the
+                # disposal on the cleanup operation's receipt.
+                try:
+                    abandoned = self._lifecycle.abandon_never_installed(
+                        installation_id
+                    )
+                except (
+                    KeyError,
+                    RecipeOperationConflict,
+                    RuntimeError,
+                    TypeError,
+                    ValueError,
+                ) as error:
+                    raise RunSwitchOperationConflict(
+                        f"run-switch.uninstall-abandon-failed: {error}"
+                    ) from error
+                return PhaseExecution(
+                    result={
+                        **abandoned,
+                        "reason": "installation-not-installed",
+                    }
+                )
             uninstall_request_id = str(uuid.uuid5(uuid.UUID(request_key), "uninstall"))
             # Reconnect to the removal this operation already queued before
             # asking for a fresh assessment, so a restart never creates a
@@ -2058,6 +2083,7 @@ class RunSwitchOperationService:
             node_ids = [node.node_id for node in group.nodes]
             blockers: list[RunSwitchReason] = []
             warnings = [*document_warnings, *fit_warnings, *inspection.warnings]
+            cleanup_disposition: Literal["uninstall", "abandon"] = "uninstall"
             if self._lifecycle is None:
                 blockers.append(
                     _as_reason(
@@ -2117,6 +2143,21 @@ class RunSwitchOperationService:
                             warnings.append(reason)
                         else:
                             blockers.append(reason)
+                else:
+                    # The installation's own assessment decides whether this is
+                    # a removal or an abandonment; the phase executor reads the
+                    # same disposition rather than re-deriving it.
+                    cleanup_disposition = assessment.disposition
+                    for warning in assessment.warnings:
+                        warnings.append(
+                            _as_reason(
+                                f"run-switch.{warning.code}",
+                                warning.detail,
+                                scope="operation",
+                                node_ids=node_ids,
+                                severity="warning",
+                            )
+                        )
             phases = self._phases(
                 action="cleanup",
                 group=group,
@@ -2130,6 +2171,7 @@ class RunSwitchOperationService:
                 blockers=blockers,
                 stop_before_transfer=False,
                 stop_before_prepare=False,
+                cleanup_disposition=cleanup_disposition,
             )
             storage = self._storage(inspection, retention="retain-cached")
             preparation = self._preparation(
@@ -2155,6 +2197,7 @@ class RunSwitchOperationService:
                 "mapping": self._mapping_selection(mapping, mapping_nodes),
                 "installation_id": installation.id,
                 "installation_state": installation.state,
+                "cleanup_disposition": cleanup_disposition,
                 "recipe_build_id": installation.recipe_build_id,
                 "image_digest": installation.image_digest,
                 "start_plan_digest": None,
@@ -4676,21 +4719,29 @@ class RunSwitchOperationService:
         stop_before_prepare: bool,
         build_required: bool = False,
         build_on_target: bool = False,
+        cleanup_disposition: Literal["uninstall", "abandon"] = "uninstall",
     ) -> list[RunSwitchPhase]:
         node_ids = [node.node_id for node in group.nodes]
         phases: list[RunSwitchPhase] = []
         if action == "cleanup":
-            # Removal is authorized by the installation's own uninstall
+            # Disposal is authorized by the installation's own uninstall
             # assessment, so the phase sequence never consults launch
             # readiness: being unable to start work must not prevent removing
-            # work.
+            # work.  A plan that never reached a node has nothing to remove,
+            # so its first phase abandons the record instead of uninstalling it.
             phases.append(
                 RunSwitchPhase(
                     index=0,
                     kind="uninstall",
                     state="planned" if not blockers else "blocked",
                     node_ids=node_ids,
-                    detail="Remove the installation that is no longer desired, scoped to its authorized membership.",
+                    detail=(
+                        "Abandon the persisted plan that never reached a node; "
+                        "there are no installed bytes to remove."
+                        if cleanup_disposition == "abandon"
+                        else "Remove the installation that is no longer desired, "
+                        "scoped to its authorized membership."
+                    ),
                 )
             )
             phases.append(

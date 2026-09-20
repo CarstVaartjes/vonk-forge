@@ -5895,6 +5895,12 @@ export interface components {
          * @description The removal of one installation that is no longer desired.
          */
         RunSwitchUninstallResult: {
+            /**
+             * Disposition
+             * @default uninstalled
+             * @enum {string}
+             */
+            disposition: "uninstalled" | "abandoned";
             /** Installation Id */
             installation_id: string;
             /**
@@ -5902,6 +5908,8 @@ export interface components {
              * @constant
              */
             phase: "uninstall";
+            /** Reason */
+            reason?: string | null;
             /** Subphase */
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
         };

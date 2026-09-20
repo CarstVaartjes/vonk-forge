@@ -56,6 +56,10 @@ class UninstallNodeImpact:
     role: str
     state: str
     installed_bytes: int | None
+    # Node-level install evidence.  A ``planned`` membership row that already
+    # recorded bytes or evidence contradicts its own plan, so it can never be
+    # treated as a never-installed leftover.
+    evidence_digest: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +98,10 @@ class UninstallPlan:
     original_plan_digest: str
     installation_state: str
     allowed: bool
+    # A persistence-only plan that never reached a node is abandoned rather
+    # than uninstalled: there are no installed bytes to remove.  ``blockers``
+    # stays authoritative for both dispositions.
+    disposition: Literal["uninstall", "abandon"]
     nodes: tuple[UninstallNodeImpact, ...]
     bytes_removed: int | None
     active_runs: tuple[UninstallActiveRun, ...]
@@ -261,7 +269,27 @@ def uninstall_plan(
         else "recipe-only"
     )
     canonical_content = json.loads(canonical_message(recipe_content))
-    bytes_known = (
+    # A plan that was persisted but never applied has nothing on any node to
+    # remove.  It may only be abandoned while every membership row still proves
+    # that: the deterministic plan still matches, every rank is still
+    # ``planned``, and no rank recorded installed bytes or install evidence.
+    # Any of those facts contradicting the plan keeps the row on the ordinary
+    # uninstall path, where the integrity check above reports it.
+    never_installed = bool(
+        installation_state == "planned"
+        and ordered_nodes
+        and immutable_membership_exact
+        and all(
+            node.state == "planned"
+            and node.installed_bytes in (None, 0)
+            and node.evidence_digest is None
+            for node in ordered_nodes
+        )
+    )
+    disposition: Literal["uninstall", "abandon"] = (
+        "abandon" if never_installed else "uninstall"
+    )
+    bytes_known = disposition == "abandon" or (
         installation_state == "installed"
         and bool(ordered_nodes)
         and immutable_membership_exact
@@ -271,12 +299,18 @@ def uninstall_plan(
         )
     )
     bytes_removed = (
-        sum(node.installed_bytes or 0 for node in ordered_nodes)
+        0
+        if disposition == "abandon"
+        else sum(node.installed_bytes or 0 for node in ordered_nodes)
         if bytes_known
         else None
     )
     blockers: list[ActionReason] = []
-    if installation_state not in {"installed", "partial", "failed"}:
+    if disposition != "abandon" and installation_state not in {
+        "installed",
+        "partial",
+        "failed",
+    }:
         blockers.append(
             ActionReason(
                 "uninstall.installation_not_uninstallable",
@@ -324,6 +358,7 @@ def uninstall_plan(
         "installation_authority_digest": recipe_content_sha256,
         "original_plan_digest": original_plan_digest,
         "installation_state": installation_state,
+        "disposition": disposition,
         "nodes": [
             {
                 "node_id": node.node_id,
@@ -331,6 +366,7 @@ def uninstall_plan(
                 "role": node.role,
                 "state": node.state,
                 "installed_bytes": node.installed_bytes,
+                "evidence_digest": node.evidence_digest,
             }
             for node in ordered_nodes
         ],
@@ -357,6 +393,22 @@ def uninstall_plan(
         },
     }
     digest = hashlib.sha256(canonical_message(identity)).hexdigest()
+    warnings: list[ActionReason] = []
+    if disposition == "abandon":
+        warnings.append(
+            ActionReason(
+                "uninstall.abandon-never-installed",
+                "The persisted plan never reached a node; it is abandoned "
+                "rather than uninstalled.",
+            )
+        )
+    elif not bytes_known:
+        warnings.append(
+            ActionReason(
+                "uninstall.bytes_unknown",
+                "Reclaimable bytes are unknown; cleanup remains scoped to this installation.",
+            )
+        )
     return UninstallPlan(
         installation_id=installation_id,
         recipe_id=recipe_id,
@@ -367,22 +419,14 @@ def uninstall_plan(
         original_plan_digest=original_plan_digest,
         installation_state=installation_state,
         allowed=not blockers,
+        disposition=disposition,
         nodes=ordered_nodes,
         bytes_removed=bytes_removed,
         active_runs=ordered_runs,
         active_run_count=active_run_count,
         active_runs_truncated=active_runs_truncated,
         blockers=tuple(blockers),
-        warnings=(
-            (
-                ActionReason(
-                    "uninstall.bytes_unknown",
-                    "Reclaimable bytes are unknown; cleanup remains scoped to this installation.",
-                ),
-            )
-            if not bytes_known
-            else ()
-        ),
+        warnings=tuple(warnings),
         consequences=UninstallConsequences(),
         model_impact=UninstallModelImpact(
             model_content_sha256=model_content_sha256,
