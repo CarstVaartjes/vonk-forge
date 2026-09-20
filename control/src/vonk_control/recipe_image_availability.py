@@ -25,7 +25,7 @@ from typing import Any, Protocol
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, aliased, sessionmaker
 from vonk_agent_protocol import OperationMemberProgress, OperationProgress
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
@@ -34,6 +34,7 @@ from .catalog_queries import active_head_revision
 from .model_cache import ModelCacheNotFound
 from .model_cache_progress import project_cache_progress
 from .models import (
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
@@ -89,6 +90,11 @@ _INTEGRITY_FAILURE_CODES = frozenset(
     }
 )
 _ADMISSION_WAIT_CODES = frozenset({"recipe_image.build_capacity_wait"})
+# A newer preparation for the same recipe supersedes an older one that has not
+# started.  The cancellation is recorded on the operation itself (terminal
+# state, typed failure evidence, and a bounded status reason) so newer intent
+# wins visibly and the older attempt never consumes a builder or a queue slot.
+SUPERSEDED_PREPARATION_CODE = "recipe_image.superseded_by_newer_revision"
 # Verified cache bytes can disappear (NAS restore, eviction, partial cleanup).
 # That is ordinary cache loss, not corruption: it must re-prepare, never ask an
 # operator to inspect a terminal failure.
@@ -1065,6 +1071,14 @@ class RecipeImageAvailabilityService:
             )
             session.add(operation)
             session.flush()
+            # A newer preparation intent wins immediately.  An older queued
+            # preparation for the same recipe is cancelled here, before the
+            # builder scheduler can pick it, so the revision the operator just
+            # asked for is not stuck behind superseded work.  The operation
+            # created above is the newer intent and is never a candidate.
+            self._cancel_older_preparations(
+                session, newer_revision=revision, now=now
+            )
             return self._view(operation)
 
     def _ensure_model_child(
@@ -1585,6 +1599,14 @@ class RecipeImageAvailabilityService:
         lease_until = _iso(now + timedelta(seconds=self._claim_lease_seconds))
         claims: list[RecipeImageAvailabilityClaim] = []
         with self._sessions.begin() as session:
+            # The dispatch boundary.  A queued preparation whose recipe has
+            # advanced to a newer active revision is cancelled here, before any
+            # claim is handed to a builder executor, so a superseded operation
+            # can never occupy the build slot the current revision needs.  Only
+            # not-yet-started operations are eligible; a running attempt with a
+            # live lease is left alone because the active revision may reuse its
+            # shared build inputs.
+            self._cancel_superseded_by_active_head(session, now=now)
             active_rows = list(
                 session.scalars(
                     select(Job)
@@ -1709,6 +1731,168 @@ class RecipeImageAvailabilityService:
                 if len(claims) >= limit:
                     break
         return tuple(claims)
+
+    @staticmethod
+    def _holds_live_lease(payload: Mapping[str, object], now: datetime) -> bool:
+        """Report whether the operation still holds an unexpired claim lease.
+
+        A queued operation normally has no owner.  The check is defensive: a
+        lease that cannot be parsed or that has no deadline is treated as live,
+        so this path can never revoke an attempt that might still be running.
+        """
+        owner = payload.get("claim_owner")
+        if not isinstance(owner, str) or not owner:
+            return False
+        until = payload.get("claim_until")
+        if not isinstance(until, str):
+            return True
+        try:
+            parsed = datetime.fromisoformat(until)
+        except ValueError:
+            return True
+        parsed = parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+        return now < parsed
+
+    def _cancel_superseded_operation(
+        self,
+        operation: Job,
+        newer_revision_id: str,
+        *,
+        now: datetime,
+    ) -> bool:
+        """Cancel one not-yet-started operation superseded by newer intent.
+
+        The operation record is rewritten to a terminal ``cancelled`` state with
+        typed failure evidence that names the replacement, never to a success.
+        An operation that already holds a durable image result or a live lease
+        is left alone, and a state other than ``queued`` is never touched: a
+        running build may still produce an image the active revision reuses.
+        """
+        if operation.state != "queued":
+            return False
+        payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+        if isinstance(payload.get("image_result"), Mapping):
+            return False
+        if self._holds_live_lease(payload, now):
+            return False
+        detail = f"superseded by newer recipe revision {newer_revision_id}"
+        failure = sanitize_failure_evidence(
+            {
+                "code": SUPERSEDED_PREPARATION_CODE,
+                "detail": detail,
+                "recovery_actions": ["download_again"],
+                "retryable": False,
+            }
+        )
+        updated = dict(payload)
+        # Release the queue position and any lease keys the cancelled operation
+        # held so the replacing preparation can be claimed immediately.
+        updated.pop("claim_owner", None)
+        updated.pop("claim_until", None)
+        updated.pop("retry_after_at", None)
+        updated["failure"] = failure
+        updated["supersession"] = {
+            "code": SUPERSEDED_PREPARATION_CODE,
+            "recipe_revision_id": newer_revision_id,
+            "superseded_at": _iso(now),
+        }
+        operation.payload = updated
+        operation.result = None
+        operation.state = "cancelled"
+        operation.status_reason = detail[:512]
+        operation.updated_at = now
+        return True
+
+    def _cancel_older_preparations(
+        self,
+        session: Session,
+        *,
+        newer_revision: CatalogDocumentRevision,
+        now: datetime,
+        limit: int = 64,
+    ) -> tuple[str, ...]:
+        """Cancel queued preparations older than a newer intent for the recipe.
+
+        ``newer_revision`` is the revision the caller is recording an intent
+        for.  Revisions are ordered by the monotonic ``revision_number`` within
+        one canonical recipe document, so a retained older digest that becomes
+        the head again does not fall into this older-than comparison.
+        """
+        now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        candidates = tuple(
+            session.scalars(
+                select(Job)
+                .join(
+                    CatalogDocumentRevision,
+                    CatalogDocumentRevision.id == Job.authority_revision,
+                )
+                .where(
+                    Job.kind == OPERATION_KIND,
+                    Job.state == "queued",
+                    Job.authority_revision != newer_revision.id,
+                    CatalogDocumentRevision.document_id
+                    == newer_revision.document_id,
+                    CatalogDocumentRevision.revision_number
+                    < newer_revision.revision_number,
+                )
+                .order_by(Job.created_at, Job.id)
+                .limit(limit)
+                .with_for_update(of=Job, skip_locked=True)
+            )
+        )
+        return tuple(
+            operation.id
+            for operation in candidates
+            if self._cancel_superseded_operation(
+                operation, newer_revision.id, now=now
+            )
+        )
+
+    def _cancel_superseded_by_active_head(
+        self, session: Session, *, now: datetime, limit: int = 64
+    ) -> tuple[str, ...]:
+        """Cancel queued preparations older than their recipe's active head.
+
+        This is the durable counterpart to the intent-time cancellation: it
+        catches a head that advanced without a fresh preparation request (for
+        example a managed-recipes sync).  Only strictly older revisions of the
+        same recipe are eligible, and only not-yet-started ones, so a running
+        build whose shared inputs the active revision can reuse is untouched.
+        """
+        now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        operation_revision = aliased(CatalogDocumentRevision)
+        head_revision = aliased(CatalogDocumentRevision)
+        rows = session.execute(
+            select(Job, head_revision.id)
+            .join(operation_revision, operation_revision.id == Job.authority_revision)
+            .join(
+                CatalogDocumentHead,
+                (CatalogDocumentHead.kind == operation_revision.kind)
+                & (CatalogDocumentHead.publisher == operation_revision.publisher)
+                & (CatalogDocumentHead.slug == operation_revision.slug),
+            )
+            .join(
+                head_revision,
+                head_revision.id == CatalogDocumentHead.active_revision_id,
+            )
+            .where(
+                Job.kind == OPERATION_KIND,
+                Job.state == "queued",
+                operation_revision.kind == "recipe",
+                head_revision.id != operation_revision.id,
+                head_revision.revision_number > operation_revision.revision_number,
+            )
+            .order_by(Job.created_at, Job.id)
+            .limit(limit)
+            .with_for_update(of=Job, skip_locked=True)
+        ).all()
+        return tuple(
+            operation.id
+            for operation, head_revision_id in rows
+            if self._cancel_superseded_operation(
+                operation, str(head_revision_id), now=now
+            )
+        )
 
     def run_claim(self, claim: RecipeImageAvailabilityClaim) -> None:
         """Execute one claim; callers may run claims in their own bounded pool."""
@@ -2555,6 +2739,7 @@ class RecipeImageAvailabilityService:
 __all__ = [
     "OPERATION_KIND",
     "REMOVE_OPERATION_KIND",
+    "SUPERSEDED_PREPARATION_CODE",
     "RecipeAuthorityResolver",
     "RecipeImageAvailabilityClaim",
     "RecipeImageAvailabilityError",
