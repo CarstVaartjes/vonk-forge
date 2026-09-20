@@ -32,6 +32,7 @@ from vonk_control.models import (
     RuntimeImageAuthorization,
 )
 from vonk_control.recipe_image_availability import (
+    SUPERSEDED_PREPARATION_CODE,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
 )
@@ -161,6 +162,47 @@ def _add_head(
     )
     session.add(head)
     return head
+
+
+def _add_recipe_successors(
+    session: Session,
+    *,
+    older_id: str,
+    older: RecipeDefinition,
+    newer_id: str,
+    newer: RecipeDefinition,
+) -> tuple[CatalogDocumentRevision, CatalogDocumentRevision]:
+    """Two revisions of one recipe document with the head on the older one."""
+
+    older_revision = _add_revision(session, older_id, older)
+    newer_revision = _add_revision(session, newer_id, newer)
+    document_id = older_revision.document_id
+    newer_revision.document_id = document_id
+    newer_revision.revision_number = 2
+    _add_head(session, older_revision)
+    return older_revision, newer_revision
+
+
+def _set_active_head(session: Session, revision_id: str) -> None:
+    """Move the authoritative head, as a catalogue sync would."""
+
+    revision = session.get(CatalogDocumentRevision, revision_id)
+    assert revision is not None
+    head = session.scalar(
+        select(CatalogDocumentHead).where(
+            CatalogDocumentHead.kind == revision.kind,
+            CatalogDocumentHead.publisher == revision.publisher,
+            CatalogDocumentHead.slug == revision.slug,
+        )
+    )
+    assert head is not None
+    head.active_revision_id = revision_id
+
+
+def _successor(recipe: RecipeDefinition, title: str) -> RecipeDefinition:
+    return recipe.model_copy(
+        update={"metadata": recipe.metadata.model_copy(update={"title": title})}
+    )
 
 
 def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions(
@@ -1060,6 +1102,158 @@ def test_same_immutable_image_reuses_preparation_across_recipe_revisions(
     assert service.get(first.id).state == "succeeded"
     assert service.get(second.id).state == "succeeded"
     assert transport.calls == 1
+
+
+def test_newer_preparation_intent_cancels_the_older_queued_preparation(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    successor = _successor(recipe, "Successor recipe revision")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_recipe_successors(
+            session,
+            older_id="revision-superseded",
+            older=recipe,
+            newer_id="revision-current",
+            newer=successor,
+        )
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe if recipe_revision_id == "revision-superseded" else successor,
+            _runtime(),
+        ),
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+        max_parallel=1,
+    )
+    older = service.start(
+        "revision-superseded", actor="operator", request_id="o" * 36
+    )
+    newer = service.start("revision-current", actor="operator", request_id="n" * 36)
+
+    cancelled = service.get(older.id)
+    assert cancelled.state == "cancelled"
+    assert cancelled.result is None
+    failure = cancelled.failure
+    assert failure is not None
+    assert failure["code"] == SUPERSEDED_PREPARATION_CODE
+    detail = failure["detail"]
+    assert isinstance(detail, str)
+    assert "revision-current" in detail
+    with sessions() as session:
+        stored = session.get(Job, older.id)
+        assert stored is not None
+        assert stored.status_reason == (
+            "superseded by newer recipe revision revision-current"
+        )
+        supersession = stored.payload["supersession"]
+        assert isinstance(supersession, Mapping)
+        assert supersession["code"] == SUPERSEDED_PREPARATION_CODE
+        assert stored.result is None
+
+    # The newer intent is untouched, and the cancelled preparation released its
+    # single scheduler slot: the only claim available is the current revision.
+    assert service.get(newer.id).state == "queued"
+    claims = service.claim_pending(limit=1, owner_id="worker-a")
+    assert [claim.operation_id for claim in claims] == [newer.id]
+    assert service.resume_operations() == 1
+
+
+def test_active_head_advance_cancels_a_queued_older_preparation_at_dispatch(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    successor = _successor(recipe, "Successor recipe revision")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_recipe_successors(
+            session,
+            older_id="revision-superseded",
+            older=recipe,
+            newer_id="revision-current",
+            newer=successor,
+        )
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe if recipe_revision_id == "revision-superseded" else successor,
+            _runtime(),
+        ),
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+        max_parallel=1,
+    )
+    older = service.start(
+        "revision-superseded", actor="operator", request_id="o" * 36
+    )
+    # A catalogue sync advances the active revision with no fresh download
+    # request.  The dispatch boundary must refuse to start the older build.
+    with sessions.begin() as session:
+        _set_active_head(session, "revision-current")
+
+    assert service.claim_pending(limit=1, owner_id="worker-a") == ()
+    cancelled = service.get(older.id)
+    assert cancelled.state == "cancelled"
+    assert cancelled.failure is not None
+    assert cancelled.failure["code"] == SUPERSEDED_PREPARATION_CODE
+    assert service.resume_operations() == 0
+
+
+def test_running_preparation_for_an_older_revision_is_not_cancelled(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    successor = _successor(recipe, "Successor source-build revision")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_recipe_successors(
+            session,
+            older_id="revision-running",
+            older=recipe,
+            newer_id="revision-current",
+            newer=successor,
+        )
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe if recipe_revision_id == "revision-running" else successor,
+            _build_runtime(),
+        ),
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+        max_parallel=1,
+        max_parallel_builds=1,
+        claim_lease_seconds=120,
+    )
+    running = service.start("revision-running", actor="operator", request_id="o" * 36)
+    claim = service.claim_pending(limit=1, owner_id="worker-a")
+    assert [item.operation_id for item in claim] == [running.id]
+    with sessions.begin() as session:
+        _set_active_head(session, "revision-current")
+
+    # The older attempt is already building with a live lease.  Its shared build
+    # inputs may still be reused by the active revision, so it is fail-closed
+    # and must keep running.
+    assert service.claim_pending(limit=1, owner_id="worker-b") == ()
+    retained = service.get(running.id)
+    assert retained.state == "running"
+    assert retained.failure is None
+    with sessions() as session:
+        stored = session.get(Job, running.id)
+        assert stored is not None
+        assert stored.state == "running"
+        assert stored.payload["claim_owner"] == "worker-a"
 
 
 def test_request_replay_returns_original_before_metadata_refresh(
