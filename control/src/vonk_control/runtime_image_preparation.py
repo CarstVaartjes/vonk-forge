@@ -16,6 +16,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import re
 import stat
@@ -52,6 +53,10 @@ from .validation_detail import validation_error_detail
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_CACHE_DIRECTORY = "image-cache"
+_LOGGER = logging.getLogger(__name__)
+# One rejection detail is enough to name the rule; the document itself is
+# never recorded and the rendered detail is already bounded per issue.
+_MAX_RECEIPT_REJECTION_DETAIL = 512
 
 
 class RuntimeImagePreparationError(ValueError):
@@ -497,6 +502,70 @@ def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
         ) from error
 
 
+class _ReceiptDocumentRejected(Exception):
+    """A present receipt file the current contract cannot parse.
+
+    Deliberately not a ``RuntimeImagePreparationError``: a scan over all
+    receipts treats the file as one archive's stale metadata and skips it,
+    while an exact-identity read of that archive still reports it.  It carries
+    the contract code and bounded detail that rejected the document, never a
+    field read out of it.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        self.code = code
+        self.detail = detail
+        super().__init__(detail)
+
+
+def _load_receipt_document(path: Path) -> RuntimeImageReceipt:
+    """Read one stored receipt file under the current contract.
+
+    An unreadable file -- including a denied read -- raises
+    ``RuntimeImagePreparationError``: an access failure is never a scan miss
+    and remains an explicit blocker.  A document that is present but does not
+    satisfy the current contract raises ``_ReceiptDocumentRejected`` naming the
+    rule that rejected it.
+    """
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_unavailable",
+            "runtime image receipt could not be read",
+        ) from error
+    except UnicodeDecodeError as error:
+        raise _ReceiptDocumentRejected(
+            "runtime_image.receipt_unavailable",
+            "runtime image receipt is not valid UTF-8 JSON",
+        ) from error
+    try:
+        return _parse_runtime_image_receipt(json.loads(text))
+    except RuntimeImagePreparationError as error:
+        raise _ReceiptDocumentRejected(error.code, error.detail) from error
+    except (TypeError, ValueError) as error:
+        raise _ReceiptDocumentRejected(
+            "runtime_image.receipt_unavailable",
+            "runtime image receipt identity is unavailable or malformed",
+        ) from error
+
+
+def _log_rejected_receipt(path: Path, rejection: _ReceiptDocumentRejected) -> None:
+    """Record the bounded rule that rejected one stored receipt file.
+
+    The archive digest and the rejecting contract rule are diagnostic; the
+    unreadable document is never carried into the record.
+    """
+
+    _LOGGER.warning(
+        "runtime image receipt %s rejected by %s: %s",
+        path.name.removesuffix(".receipt.json"),
+        rejection.code,
+        rejection.detail[:_MAX_RECEIPT_REJECTION_DETAIL],
+    )
+
+
 def prefixed_image_digest(value: str | None) -> str | None:
     """Return a ``sha256:``-prefixed image digest.
 
@@ -914,7 +983,17 @@ class FilesystemRuntimeImageStorage:
             receipt_path = self.root / f"{receipt.oci_archive_sha256}.receipt.json"
             if receipt_path.exists():
                 try:
-                    existing_receipt = self.read_receipt(receipt.oci_archive_sha256)
+                    existing_receipt = _load_receipt_document(receipt_path)
+                except _ReceiptDocumentRejected as rejection:
+                    # The archive is content-addressed and its bytes were
+                    # verified before this receipt was derived, so a document
+                    # the current contract cannot parse is stale metadata about
+                    # those exact bytes -- not a conflicting identity.  Replace
+                    # it below from the freshly validated receipt and record
+                    # the rule that rejected the old file.  A read failure is
+                    # not a parse failure and stays a conflict.
+                    _log_rejected_receipt(receipt_path, rejection)
+                    existing_receipt = None
                 except RuntimeImagePreparationError as error:
                     raise RuntimeImagePreparationError(
                         "runtime_image.archive_conflict",
@@ -1197,17 +1276,20 @@ class FilesystemRuntimeImageStorage:
         return None
 
     def _iter_receipts(self) -> Iterable[RuntimeImageReceipt]:
+        """Yield every receipt the current contract can parse.
+
+        A scan spans unrelated archives and recipes, so a file this contract
+        cannot parse is one archive's stale metadata: skip it with a bounded
+        warning naming its digest instead of failing every lookup that happens
+        to walk past it.  ``read_receipt`` for that exact digest stays strict.
+        An unreadable file is not a parse failure and still raises.
+        """
+
         for receipt_path in sorted(self.root.glob("*.receipt.json")):
             try:
-                value = json.loads(receipt_path.read_text(encoding="utf-8"))
-                yield _parse_runtime_image_receipt(value)
-            except RuntimeImagePreparationError:
-                raise
-            except (OSError, TypeError, ValueError, KeyError) as error:
-                raise RuntimeImagePreparationError(
-                    "runtime_image.receipt_unavailable",
-                    "runtime image receipt index is malformed",
-                ) from error
+                yield _load_receipt_document(receipt_path)
+            except _ReceiptDocumentRejected as rejection:
+                _log_rejected_receipt(receipt_path, rejection)
 
     def _archive_is_present(self, receipt: RuntimeImageReceipt) -> bool:
         """Report archive presence; clean absence is a miss, not a failure."""
@@ -1221,17 +1303,20 @@ class FilesystemRuntimeImageStorage:
         return True
 
     def read_receipt(self, archive_sha256: str) -> RuntimeImageReceipt:
+        """Read the exact receipt for one named archive; never a scan miss.
+
+        A document the current contract cannot parse is reported here rather
+        than skipped, so an exact-identity read cannot silently degrade into
+        "no receipt".
+        """
+
         path = self.root / f"{archive_sha256}.receipt.json"
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-            return _parse_runtime_image_receipt(value)
-        except RuntimeImagePreparationError:
-            raise
-        except (OSError, TypeError, ValueError, KeyError) as error:
+            return _load_receipt_document(path)
+        except _ReceiptDocumentRejected as rejection:
             raise RuntimeImagePreparationError(
-                "runtime_image.receipt_unavailable",
-                "runtime image receipt is unavailable or malformed",
-            ) from error
+                rejection.code, rejection.detail
+            ) from rejection
 
 
 def prepare_runtime_image(

@@ -231,7 +231,16 @@ def test_prebuilt_cache_reuse_ignores_editorial_recipe_digest(
     assert len(transport.calls) == 1
 
 
-def test_corrupt_prebuilt_receipt_fails_before_redownload(tmp_path: Path) -> None:
+def test_unparseable_prebuilt_receipt_is_replaced_from_verified_bytes(
+    tmp_path: Path,
+) -> None:
+    """A published receipt the contract cannot parse is stale metadata.
+
+    The archive is content-addressed and the transport re-verifies its bytes,
+    so the receipt beside it is replaced from that verified evidence instead of
+    pinning the recipe forever.
+    """
+
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     transport = TinyTransport()
     receipt = prepare_runtime_image(
@@ -244,17 +253,19 @@ def test_corrupt_prebuilt_receipt_fails_before_redownload(tmp_path: Path) -> Non
     value = json.loads(receipt_path.read_text(encoding="utf-8"))
     value["image_digest"] = "sha256:" + "f" * 64
     receipt_path.write_text(json.dumps(value), encoding="utf-8")
-    with pytest.raises(RuntimeImagePreparationError, match="receipt identity"):
-        prepare_runtime_image(
-            _recipe("recipe-image.json"),
-            runtime=_runtime(),
-            storage=storage,
-            transport=transport,
-        )
-    assert len(transport.calls) == 1
+    repaired = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=transport,
+    )
+    assert storage.read_receipt(receipt.oci_archive_sha256) == repaired
+    assert repaired.image_digest == PLATFORM_IMAGE_DIGEST
 
 
-def test_non_schema_two_receipt_is_rejected_by_all_read_paths(tmp_path: Path) -> None:
+def test_non_schema_two_receipt_is_skipped_by_scans_but_refused_by_exact_read(
+    tmp_path: Path,
+) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = prepare_runtime_image(
         _recipe("recipe-image.json"),
@@ -266,21 +277,26 @@ def test_non_schema_two_receipt_is_rejected_by_all_read_paths(tmp_path: Path) ->
     value = json.loads(receipt_path.read_text(encoding="utf-8"))
     value["schema_version"] = 1
     receipt_path.write_text(json.dumps(value), encoding="utf-8")
-    for read in (
-        lambda: storage.find_published(
+    # A scan cannot match a document the current contract rejects, and one
+    # archive's unusable receipt must not poison unrelated lookups.
+    assert (
+        storage.find_published(
             IMAGE_DIGEST,
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
-        ),
-        lambda: storage.find_verified(
+        )
+        is None
+    )
+    assert (
+        storage.find_verified(
             IMAGE_DIGEST,
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
-        ),
-        lambda: storage.read_receipt(receipt.oci_archive_sha256),
-    ):
-        with pytest.raises(RuntimeImagePreparationError, match="schema version"):
-            read()
+        )
+        is None
+    )
+    with pytest.raises(RuntimeImagePreparationError, match="schema version"):
+        storage.read_receipt(receipt.oci_archive_sha256)
 
 
 @pytest.mark.parametrize(
@@ -1713,3 +1729,129 @@ def test_an_unreadable_stored_receipt_names_the_rule_that_rejected_it() -> None:
     message = str(raised.value)
     assert "runtime image receipt identity" in message
     assert "lacks its adapter" in message, message
+
+
+def test_unreadable_receipt_is_skipped_by_scan_but_refused_by_exact_read(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One archive's unusable receipt must not poison a scan over all receipts.
+
+    The scan spans unrelated archives and recipes, so a file the current
+    contract rejects is skipped with a bounded warning naming its digest.  The
+    exact-identity read for that same digest still refuses.
+    """
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    published = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    legacy_archive = b"legacy controller build archive"
+    legacy_digest = hashlib.sha256(legacy_archive).hexdigest()
+    (storage.root / legacy_digest).write_bytes(legacy_archive)
+    (storage.root / f"{legacy_digest}.receipt.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "source": "controller-build",
+                "distribution_publisher": "vonk",
+                "distribution_slug": "cached",
+                "distribution_content_sha256": "a" * 64,
+                "registry_manifest_digest": None,
+                "platform_manifest_digest": BUILT_IMAGE_DIGEST,
+                "image_digest": BUILT_IMAGE_DIGEST,
+                "oci_archive_sha256": legacy_digest,
+                "image_bytes": len(legacy_archive),
+                "local_image_config_id": "sha256:" + "c" * 64,
+                "local_image_reference": None,
+                "architecture": "linux-arm64",
+                "runtime_interface": "vonk.runtime.v1",
+                "runtime_interface_label": "v1",
+                "archive_path": str(storage.root / legacy_digest),
+                "recorded_at": "2026-09-15T00:00:00Z",
+                "build_id": "legacy-build",
+                "build_input_sha256": "b" * 64,
+                # No runtime_adapter / runtime_adapter_sha256: the file a
+                # Controller wrote before the adapter identity existed.
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING", logger="vonk_control.runtime_image_preparation"):
+        found = storage.find_published(
+            IMAGE_DIGEST,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        assert (
+            storage.find_build(
+                "b" * 64,
+                expected_architecture="linux-arm64",
+                expected_runtime_interface="vonk.runtime.v1",
+            )
+            is None
+        )
+    assert found == published
+    warnings = [record.getMessage() for record in caplog.records]
+    assert any(legacy_digest in message for message in warnings), warnings
+    assert any("lacks its adapter" in message for message in warnings), warnings
+
+    with pytest.raises(RuntimeImagePreparationError) as raised:
+        storage.read_receipt(legacy_digest)
+    assert raised.value.code == "runtime_image.receipt_unavailable"
+    assert "lacks its adapter" in str(raised.value)
+
+
+def test_parseable_receipt_with_a_different_identity_stays_a_conflict(
+    tmp_path: Path,
+) -> None:
+    """Stale metadata is replaceable; a parsed, disagreeing identity is not.
+
+    The replacement rule applies only to a document the current contract
+    cannot parse.  A receipt that parses and names a different immutable
+    identity for the same content-addressed archive remains an explicit
+    conflict.
+    """
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    adapter = resolve_runtime_adapter("vllm", {"mode": "single"})
+    archive = b"content addressed controller build archive"
+    digest = hashlib.sha256(archive).hexdigest()
+    existing = RuntimeImageReceipt(
+        schema_version=2,
+        source="controller-build",
+        distribution_publisher="vonk",
+        distribution_slug="cached",
+        distribution_content_sha256="a" * 64,
+        registry_manifest_digest=None,
+        platform_manifest_digest=BUILT_IMAGE_DIGEST,
+        image_digest=BUILT_IMAGE_DIGEST,
+        oci_archive_sha256=digest,
+        image_bytes=len(archive),
+        local_image_config_id="sha256:" + "c" * 64,
+        local_image_reference=None,
+        architecture="linux-arm64",
+        runtime_interface="vonk.runtime.v1",
+        runtime_interface_label="v1",
+        archive_path=str(storage.root / digest),
+        recorded_at="2026-09-15T00:00:00Z",
+        build_id="build-one",
+        build_input_sha256="b" * 64,
+        runtime_adapter=adapter.adapter_id,
+        runtime_adapter_sha256=adapter.digest,
+    )
+    first = storage.prepare_path()
+    first.write_bytes(archive)
+    storage.commit(first, receipt=existing)
+
+    disagreeing = existing.model_copy(update={"build_id": "build-two"})
+    second = storage.prepare_path()
+    second.write_bytes(archive)
+    with pytest.raises(RuntimeImagePreparationError) as raised:
+        storage.commit(second, receipt=disagreeing)
+
+    assert raised.value.code == "runtime_image.archive_conflict"
+    assert storage.read_receipt(digest) == existing
