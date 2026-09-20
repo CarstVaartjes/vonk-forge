@@ -5,9 +5,11 @@ from unittest.mock import Mock
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import ValidationError
 from vonk_control.auth import Actor
 from vonk_control.recipe_image_availability import (
+    RecipeImageAvailabilityError,
     RecipeImageAvailabilityView,
 )
 from vonk_control.recipe_image_availability_api import (
@@ -203,3 +205,161 @@ def test_recipe_operation_observation_is_readable_by_any_authenticated_actor() -
     response = TestClient(app).get(f"/api/recipe/operations/{view.id}")
     assert response.status_code == 200, response.text
     assert response.json()["id"] == view.id
+
+
+_REQUEST_KEY = "00000000-0000-4000-8000-000000000001"
+
+
+def _operator_client(service: Mock) -> TestClient:
+    app = FastAPI()
+    install_recipe_operator_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("operator", "operator")),
+        service=service,
+    )
+    return TestClient(app)
+
+
+def _download(service: Mock) -> Response:
+    return _operator_client(service).post(
+        "/api/recipe/example/download",
+        json={"schema_version": 2, "request_key": _REQUEST_KEY},
+    )
+
+
+def test_download_names_a_transient_availability_refusal() -> None:
+    """A retryable dependency failure keeps 503 but names the code and cause."""
+
+    service = Mock()
+    service.start_selector.side_effect = RecipeImageAvailabilityError(
+        "recipe_image.metadata_refresh_failed",
+        "latest recipe metadata could not be refreshed",
+        retryable=True,
+    )
+
+    response = _download(service)
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == (
+        "recipe_image.metadata_refresh_failed: "
+        "latest recipe metadata could not be refreshed"
+    )
+
+
+def test_download_names_a_terminal_availability_refusal() -> None:
+    """A non-retryable refusal is a 409 conflict, not a retryable 503."""
+
+    service = Mock()
+    service.start_selector.side_effect = RecipeImageAvailabilityError(
+        "recipe_image.recipe_unavailable",
+        "selected recipe revision is unavailable or inactive",
+    )
+
+    response = _download(service)
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == (
+        "recipe_image.recipe_unavailable: "
+        "selected recipe revision is unavailable or inactive"
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code", "detail"),
+    [
+        (
+            RecipeImageAvailabilityError(
+                "recipe_image.selector_missing", "recipe selector was not found"
+            ),
+            404,
+            "recipe selector was not found",
+        ),
+        (
+            RecipeImageAvailabilityError(
+                "recipe_image.selector_ambiguous",
+                "recipe selector matches multiple recipes",
+            ),
+            409,
+            "recipe selector matches multiple recipes",
+        ),
+        (
+            RecipeImageAvailabilityError(
+                "recipe_image.request_key_reused", "request key was already used"
+            ),
+            409,
+            "request key was already used",
+        ),
+        (
+            RecipeImageAvailabilityError(
+                "runtime_image.receipt_invalid",
+                "source-build receipt is not readable",
+            ),
+            422,
+            "source-build receipt is not readable",
+        ),
+    ],
+)
+def test_download_keeps_the_special_case_refusals_unchanged(
+    error: RecipeImageAvailabilityError, status_code: int, detail: str
+) -> None:
+    service = Mock()
+    service.start_selector.side_effect = error
+
+    response = _download(service)
+
+    assert response.status_code == status_code, response.text
+    assert response.json()["detail"] == detail
+
+
+def test_remove_names_a_terminal_availability_refusal() -> None:
+    service = Mock()
+    service.remove_selector.side_effect = RecipeImageAvailabilityError(
+        "recipe_image.identity_conflict",
+        "selected recipe execution identity changed",
+    )
+
+    response = _operator_client(service).post(
+        "/api/recipe/example/remove",
+        json={"schema_version": 2, "request_key": _REQUEST_KEY},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == (
+        "recipe_image.identity_conflict: selected recipe execution identity changed"
+    )
+
+
+def test_operation_observation_names_a_transient_availability_refusal() -> None:
+    service = Mock()
+    service.get_operator_operation.side_effect = RecipeImageAvailabilityError(
+        "recipe_image.model_cache_unavailable",
+        "exact Model artifact preparation could not be queued",
+        retryable=True,
+    )
+
+    response = _operator_client(service).get(
+        "/api/recipe/operations/00000000-0000-4000-8000-000000000002"
+    )
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == (
+        "recipe_image.model_cache_unavailable: "
+        "exact Model artifact preparation could not be queued"
+    )
+
+
+def test_availability_refusal_detail_is_redacted_and_bounded() -> None:
+    service = Mock()
+    service.start_selector.side_effect = RecipeImageAvailabilityError(
+        "recipe_image.metadata_refresh_failed",
+        "token=swordfish " + "x" * 200,
+        retryable=True,
+    )
+
+    detail = _download(service).json()["detail"]
+
+    assert "swordfish" not in detail
+    assert detail.startswith(
+        "recipe_image.metadata_refresh_failed: token=<redacted>"
+    )
+    assert len(detail) == len("recipe_image.metadata_refresh_failed: ") + 80
