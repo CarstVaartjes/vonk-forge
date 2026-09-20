@@ -10,6 +10,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .auth import MUTATION_ROLES
 from .bounded_json import integer, require_integer, require_sequence
+from .logging import redact_text
 from .model_cache_contract import Digest
 from .operation_api import bounded_error_responses
 from .operation_contract import (
@@ -311,6 +312,34 @@ def _mutating(actor: Any, route: str) -> None:
         raise HTTPException(status_code=403, detail="insufficient role")
 
 
+# One refusal leaves the Controller as evidence, so its detail names the stable
+# code and an operator-facing message instead of a sentence that identifies
+# nothing.  The bound matches the one ``validation_detail`` puts on a single
+# contract error; the redactor runs first so a secret cannot survive truncation
+# in the middle of a token.
+_MAX_REFUSAL_DETAIL = 80
+
+
+def _refusal_detail(error: BaseException) -> str:
+    """Name one availability refusal, bounded and redacted.
+
+    Every failure outside the four special cases used to answer with the same
+    sentence, so the documented ``recipe download`` prepare-cache recovery step
+    left an operator with nothing to inspect and no durable operation record to
+    read.  The typed error already carries a stable code and an operator-facing
+    message; render both and never echo a stored document, a token, or an
+    unbounded value.
+    """
+
+    code = redact_text(str(getattr(error, "code", "") or type(error).__name__))
+    message = getattr(error, "detail", None)
+    if not isinstance(message, str) or not message.strip():
+        message = str(error)
+    named = code[:_MAX_REFUSAL_DETAIL]
+    message = redact_text(message)[:_MAX_REFUSAL_DETAIL]
+    return f"{named}: {message}" if message else named
+
+
 def _recipe_error(error: BaseException) -> HTTPException:
     if isinstance(error, KeyError):
         return HTTPException(status_code=404, detail="recipe operation was not found")
@@ -321,9 +350,16 @@ def _recipe_error(error: BaseException) -> HTTPException:
         return HTTPException(status_code=409, detail=str(error))
     if code.endswith("invalid"):
         return HTTPException(status_code=422, detail=str(error))
-    return HTTPException(
-        status_code=503, detail="recipe image availability is unavailable"
-    )
+    # A typed refusal outside those families is either a transient dependency
+    # failure that a later identical request can clear, or a terminal condition
+    # (stale metadata, a changed execution identity, an exhausted retry budget,
+    # an unrecoverable integrity failure) that it cannot.  The typed error
+    # already decided which one it is, so keep 503 Service Unavailable for the
+    # former and 409 Conflict for the latter: a client may retry the first and
+    # must not loop on the second.
+    if isinstance(error, RecipeImageAvailabilityError) and not error.retryable:
+        return HTTPException(status_code=409, detail=_refusal_detail(error))
+    return HTTPException(status_code=503, detail=_refusal_detail(error))
 
 
 def install_recipe_operator_routes(
