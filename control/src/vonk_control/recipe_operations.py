@@ -1981,6 +1981,13 @@ class RecipeOperationService:
                         "uninstall plan is stale or blocked: "
                         + "; ".join(reason.code for reason in plan.blockers)
                     )
+                if plan.disposition != "uninstall":
+                    # A plan that never reached a node is abandoned by the
+                    # cleanup phase; it must never queue agent removal work.
+                    raise RecipeOperationConflict(
+                        "installation was never installed; abandon it instead "
+                        "of uninstalling it"
+                    )
                 if plan.plan_digest != plan_digest:
                     raise RecipeOperationConflict("uninstall plan is stale or blocked")
                 job = self._queue_in_session(
@@ -2031,6 +2038,59 @@ class RecipeOperationService:
             ) from error
         self._agent_jobs.notify_available()
         return self.get(job.id)
+
+    def abandon_never_installed(self, installation_id: str) -> dict[str, object]:
+        """Resolve a persisted plan that never reached a node.
+
+        The cleanup phase uses this instead of ``uninstall`` when the
+        installation's own assessment reports the never-installed
+        disposition.  Nothing is queued to an agent: there are no installed
+        bytes, only the admission record and its disk reservation.  The
+        assessment is re-derived under the installation row lock, so a
+        concurrent install turns this into a refusal rather than a silent
+        state flip.  The installation row and its immutable plan are retained,
+        so the history stays auditable.
+        """
+
+        now = self._clock()
+        with self._sessions.begin() as session:
+            installation = session.scalar(
+                select(RecipeInstallation)
+                .where(RecipeInstallation.id == installation_id)
+                .with_for_update(of=RecipeInstallation)
+            )
+            if installation is None:
+                raise RecipeOperationConflict("recipe installation does not exist")
+            if installation.state == "uninstalled":
+                # A restarted cleanup phase replays the disposal.  The row is
+                # already resolved, so the replay succeeds instead of failing
+                # the operation after the effect has landed.
+                return {
+                    "installation_id": installation_id,
+                    "disposition": "abandoned",
+                }
+            plan = self._uninstall_plan_in_session(session, installation_id, lock=True)
+            if not plan.allowed or plan.disposition != "abandon":
+                raise RecipeOperationConflict(
+                    "installation is not a never-installed plan; it cannot be abandoned"
+                )
+            nodes = tuple(
+                session.scalars(
+                    select(InstallationNode)
+                    .where(InstallationNode.installation_id == installation_id)
+                    .with_for_update(of=InstallationNode)
+                )
+            )
+            for node in nodes:
+                node.state = "uninstalled"
+                node.updated_at = now
+            installation.state = "uninstalled"
+            installation.updated_at = now
+            self._release(session, "installation", installation_id, now)
+        return {
+            "installation_id": installation_id,
+            "disposition": "abandoned",
+        }
 
     def retry(
         self, operation_id: str, *, actor: str, request_id: str
@@ -3859,6 +3919,7 @@ class RecipeOperationService:
                     installed_bytes=(
                         node.installed_bytes if node.state == "installed" else None
                     ),
+                    evidence_digest=node.evidence_digest,
                 )
                 for node in nodes
             ),

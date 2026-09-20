@@ -2924,6 +2924,115 @@ def test_profile_preview_delegates_removal_to_the_orchestrator(
     assert preview.summary.uninstalls == 1
 
 
+def _exact_planned_cleanup_profile(tmp_path: Path):
+    """A production-wired exact profile whose only leftover is a persisted plan."""
+
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    admission = lifecycle._install_admission
+    plan = admission.plan_install(mapping_id, build_id, now=lifecycle._clock())
+    assert plan.allowed, [
+        (node.node_id, reason.code)
+        for node in plan.nodes
+        for reason in node.blockers
+    ]
+    planned = admission.accept_install(plan, actor="admin", now=lifecycle._clock())
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions, clock=lifecycle._clock, switch_adapter=adapter
+    )
+    profile = service.create(
+        FleetProfileInput(
+            name="Exact planned cleanup",
+            installation_policy="exact",
+            assignments=[],
+        ),
+        actor="admin",
+    )
+    return sessions, lifecycle, adapter, run_switch, service, profile, planned, nodes
+
+
+def test_exact_profile_switch_abandons_a_never_installed_leftover(
+    tmp_path: Path,
+) -> None:
+    """A switch must not be blocked by a plan that was never installed.
+
+    The cleanup candidate set still hands the superseded installation to
+    Run/Switch, but the installation's own assessment resolves it as an
+    abandonment, so the switch is admitted and the leftover is disposed of
+    without node work.  Before the disposition existed this exact load failed
+    with ``run-switch.plan_blocked: run-switch.uninstall-blocked``.
+    """
+
+    sessions, _lifecycle, _adapter, run_switch, service, profile, planned, _nodes = (
+        _exact_planned_cleanup_profile(tmp_path)
+    )
+
+    preview = service.preview(profile.id)
+    assert preview.allowed is True
+    assert [step.kind for step in preview.steps] == ["switch"]
+
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(910),
+        actor="admin",
+    )
+    for _ in range(12):
+        run_switch.tick()
+        service.tick()
+        if service.application(application.id).state in {"succeeded", "failed"}:
+            break
+
+    completed = service.application(application.id)
+    assert completed.state == "succeeded", completed.status_reason
+    # The profile application keeps the Run/Switch receipt, so the operator
+    # sees the abandonment and its reason rather than a silent disappearance.
+    from vonk_control.run_switch_contract import RunSwitchUninstallResult
+
+    receipts = [
+        item.result.run_switch
+        for item in completed.progress.step_results.values()
+        if isinstance(item.result, FleetProfileSwitchChildResult)
+    ]
+    dispositions = [
+        phase
+        for receipt in receipts
+        for phase in receipt.phase_results
+        if isinstance(phase, RunSwitchUninstallResult)
+    ]
+    assert [phase.disposition for phase in dispositions] == ["abandoned"]
+    assert [phase.reason for phase in dispositions] == ["installation-not-installed"]
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, planned)
+        assert installation is not None and installation.state == "uninstalled"
+        assert all(
+            node.state == "uninstalled"
+            for node in session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == planned
+                )
+            )
+        )
+
+
 def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
     tmp_path: Path,
     postgres_engine: Engine,

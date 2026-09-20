@@ -33,6 +33,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
+    InstallationNode,
     Job,
     NodeArtifact,
     NodeInventorySnapshot,
@@ -68,6 +69,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchRetention,
     RunSwitchStartResult,
     RunSwitchTargetTransferEvidenceResult,
+    RunSwitchUninstallResult,
     SparkGroup,
     SparkGroupNode,
 )
@@ -4144,3 +4146,143 @@ def test_scoped_cleanup_removes_the_installation_through_run_switch(
     with sessions() as session:
         row = session.get(RecipeInstallation, installation.owner_id)
         assert row is None or row.state == "uninstalled"
+
+
+def _planned_installation(tmp_path: Path, *, nodes: int = 2):
+    """Admit a plan that is persisted but never launched on any node."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, node_ids = setup_services(
+        tmp_path, nodes=nodes
+    )
+    admission = lifecycle._install_admission
+    plan = admission.plan_install(mapping_id, build_id, now=NOW)
+    assert plan.allowed, [
+        (node.node_id, reason.code)
+        for node in plan.nodes
+        for reason in node.blockers
+    ]
+    installation_id = admission.accept_install(plan, actor="admin", now=NOW)
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None and installation.state == "planned"
+    return sessions, lifecycle, installation_id, node_ids
+
+
+def test_scoped_cleanup_abandons_a_never_installed_plan(tmp_path: Path) -> None:
+    """A persisted plan that never reached a node is abandoned, not removed.
+
+    Uninstalling it would ask every Spark to remove bytes it never received.
+    The installation's own assessment owns the disposition, so cleanup queues
+    no agent work and the receipt still names why the record was disposed of.
+    """
+
+    sessions, lifecycle, installation_id, _nodes = _planned_installation(tmp_path)
+    service = _service(
+        sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
+    )
+
+    preview = service.preview_cleanup(installation_id, actor="admin")
+
+    assert preview.allowed is True, [reason.code for reason in preview.blockers]
+    assert preview.cleanup_disposition == "abandon"
+    assert any(
+        reason.code == "run-switch.uninstall.abandon-never-installed"
+        for reason in preview.warnings
+    ), [reason.code for reason in preview.warnings]
+
+    operation = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation_id, request_key=str(uuid.uuid4())
+        ),
+        actor="admin",
+    )
+    for _ in range(4):
+        if service.get(operation.operation_id).state not in {"queued", "running"}:
+            break
+        service.tick()
+
+    completed = service.get(operation.operation_id)
+    assert completed.state == "succeeded", completed.status_reason
+    receipt = next(
+        item
+        for item in _result(completed).phase_results
+        if isinstance(item, RunSwitchUninstallResult)
+    )
+    assert receipt.disposition == "abandoned"
+    assert receipt.reason == "installation-not-installed"
+    # A restarted phase replays the disposal, so the effect is idempotent.
+    replay = lifecycle.abandon_never_installed(installation_id)
+    assert replay == {
+        "installation_id": installation_id,
+        "disposition": "abandoned",
+    }
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None and installation.state == "uninstalled"
+        members = tuple(
+            session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
+        assert members
+        assert all(node.state == "uninstalled" for node in members)
+        # The admission reservation must not leak for an abandoned plan.
+        assert all(
+            reservation.state == "released"
+            for reservation in session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == installation_id
+                )
+            )
+        )
+
+
+def test_scoped_cleanup_refuses_a_planned_row_with_install_evidence(
+    tmp_path: Path,
+) -> None:
+    """A planned row that contradicts itself stays a reported blocker.
+
+    Installed bytes or a recorded install evidence digest on a never-launched
+    plan is exactly the contradiction that must not be silently abandoned, so
+    the uninstall assessment keeps refusing it under
+    ``run-switch.uninstall-blocked``.
+    """
+
+    sessions, lifecycle, installation_id, _nodes = _planned_installation(tmp_path)
+    with sessions.begin() as session:
+        member = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation_id
+            )
+        )
+        assert member is not None
+        member.state = "installing"
+        member.installed_bytes = 120
+        member.evidence_digest = "a" * 64
+    service = _service(
+        sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
+    )
+
+    preview = service.preview_cleanup(installation_id, actor="admin")
+
+    assert preview.allowed is False
+    assert preview.cleanup_disposition == "uninstall"
+    assert any(
+        reason.code == "run-switch.uninstall-blocked"
+        and "uninstall.installation_not_uninstallable" in reason.detail
+        for reason in preview.blockers
+    ), [(reason.code, reason.detail) for reason in preview.blockers]
+    with pytest.raises(
+        RunSwitchOperationConflict, match="run-switch.uninstall-blocked"
+    ):
+        service.apply_cleanup(
+            RunSwitchCleanupApplyRequest(
+                installation_id=installation_id, request_key=str(uuid.uuid4())
+            ),
+            actor="admin",
+        )
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None and installation.state == "planned"

@@ -398,6 +398,7 @@ from .run_switch_target_transfer_evidence_result import RunSwitchTargetTransferE
 from .run_switch_target_transfer_result import RunSwitchTargetTransferResult
 from .run_switch_target_transfer_result_assignments import RunSwitchTargetTransferResultAssignments
 from .run_switch_uninstall_result import RunSwitchUninstallResult
+from .run_switch_uninstall_result_disposition import RunSwitchUninstallResultDisposition
 from .run_switch_uninstall_result_subphase_type_0 import RunSwitchUninstallResultSubphaseType0
 from .run_switch_verify_result import RunSwitchVerifyResult
 from .run_switch_verify_result_cached_target_totals import RunSwitchVerifyResultCachedTargetTotals
@@ -847,6 +848,7 @@ __all__ = (
     "RunSwitchTargetTransferResult",
     "RunSwitchTargetTransferResultAssignments",
     "RunSwitchUninstallResult",
+    "RunSwitchUninstallResultDisposition",
     "RunSwitchUninstallResultSubphaseType0",
     "RunSwitchVerifyResult",
     "RunSwitchVerifyResultCachedTargetTotals",

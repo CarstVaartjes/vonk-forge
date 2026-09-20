@@ -418,6 +418,10 @@ class RunSwitchPlan(_StrictModel):
     installation_state: (
         Annotated[str, StringConstraints(min_length=1, max_length=24)] | None
     )
+    # A scoped cleanup either removes installed bytes or abandons a persisted
+    # plan that never reached a node.  The assessment owns the decision; the
+    # phase executor reads it here instead of re-deriving it from state.
+    cleanup_disposition: Literal["uninstall", "abandon"] = "uninstall"
     recipe_build_id: UuidId | None
     image_digest: (
         Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
@@ -764,6 +768,10 @@ class RunSwitchUninstallResult(_RunSwitchPhaseBase):
     phase: Literal["uninstall"]
     subphase: RunSwitchSubphase | None = None
     installation_id: UuidId
+    # ``abandoned`` records a persisted plan that never reached a node, so the
+    # operator sees why the record was disposed of without node work.
+    disposition: Literal["uninstalled", "abandoned"] = "uninstalled"
+    reason: Annotated[str, StringConstraints(max_length=512)] | None = None
 
 
 class RunSwitchCleanupVerifyResult(_RunSwitchPhaseBase):
