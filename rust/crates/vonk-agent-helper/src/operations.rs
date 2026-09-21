@@ -1655,7 +1655,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let marker = match rustix::fs::openat(
             &metadata,
             "tmp-reset-required",
-            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
+            // Inspect the descriptor before accepting its type. A malformed
+            // FIFO must not block the helper while open waits for a writer.
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::NONBLOCK
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC,
             rustix::fs::Mode::empty(),
         ) {
             Ok(marker) => marker,
@@ -5639,6 +5644,66 @@ mod tests {
             assert!(validate_docker_run(&arguments, &roots, Some(owner)).is_err());
             fs::set_permissions(&path, fs::Permissions::from_mode(0o750)).unwrap();
         }
+    }
+
+    #[test]
+    fn runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer() {
+        use std::os::unix::fs::FileTypeExt;
+        use wait_timeout::ChildExt;
+
+        const CHILD_ROOT: &str = "VONK_TMP_RESET_FIFO_TEST_ROOT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            let roots = ManagedRoots::under(Path::new(&root));
+            let executor =
+                OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+            assert!(matches!(
+                executor.reset_runtime_tmp_if_requested(RUN_ID),
+                Err(OperationError::UnsafePath)
+            ));
+            return;
+        }
+
+        let (_temp, roots) = runtime_fixture();
+        let marker = roots
+            .agent_data
+            .join("run-metadata")
+            .join(RUN_ID)
+            .join("tmp-reset-required");
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            &marker,
+            rustix::fs::FileType::Fifo,
+            rustix::fs::Mode::from_raw_mode(0o600),
+            0,
+        )
+        .unwrap();
+        let temporary = roots
+            .agent_data
+            .join("runs")
+            .join(RUN_ID)
+            .join("outputs/tmp");
+        fs::create_dir(&temporary).unwrap();
+        fs::write(temporary.join("sentinel"), b"keep").unwrap();
+        // Run the real open/fstat boundary in another process so the wrong
+        // blocking open fails this test within a deadline rather than hanging
+        // the suite indefinitely on a FIFO with no writer.
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "operations::tests::runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer",
+            ])
+            .env(CHILD_ROOT, &roots.agent_data)
+            .spawn()
+            .unwrap();
+        let status = child.wait_timeout(Duration::from_secs(5)).unwrap();
+        if status.is_none() {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("runtime tmp cleanup blocked on a FIFO marker with no writer");
+        }
+        assert!(status.unwrap().success());
+        assert!(fs::symlink_metadata(marker).unwrap().file_type().is_fifo());
+        assert_eq!(fs::read(temporary.join("sentinel")).unwrap(), b"keep");
     }
 
     #[test]

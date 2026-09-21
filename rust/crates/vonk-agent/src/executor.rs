@@ -350,9 +350,9 @@ impl<R> RecipeExecutor<'_, R> {
                 let outcome = boundary
                     .inspect_recipe_run(plan.binding.clone(), plan.arguments)
                     .await
-                    .map_err(|error| {
+                    .inspect_err(|error| {
                         if !matches!(
-                            &error,
+                            error,
                             crate::host_runtime::HostRuntimeError::Controller(
                                 ClientError::ObservationNotReady
                             )
@@ -363,7 +363,6 @@ impl<R> RecipeExecutor<'_, R> {
                                 error.preflight_code()
                             );
                         }
-                        error
                     })?;
                 // This timestamp is part of the signed-grant freshness proof.
                 // Capture it immediately after the local privileged inspection;
