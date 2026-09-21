@@ -129,9 +129,10 @@ does not close that step.
 Attach evidence to the corresponding action above: timestamp in UTC, full
 platform and recipe-library commits, recipe content digest, model and image
 identities, test command/result or CI URL, and the boundary established. For a
-deployment, include the signed generation and immutable image identities; use
-the build commit in release `version`, not a refreshed `source_sha` alone, to
-decide which code the artifacts contain. For a physical run, include the
+deployment, include the signed generation and immutable image identities, then
+check the build provenance of the particular artifact being deployed. A
+refreshed manifest `source_sha` alone is insufficient; a package version can
+also predate a separately rebuilt Controller image. For a physical run, include the
 application and per-node operation identities and readiness/inference results.
 
 Record unavailable inputs and unrun scenarios explicitly. Do not inject faults,

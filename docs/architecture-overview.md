@@ -116,24 +116,28 @@ implementing a second scheduler or cross-record transaction engine in files.
 Its use does not require every local byte counter or cache receipt to live in
 SQL. Replacing PostgreSQL or LiteLLM's database is outside this direction.
 
-### Current implementation and remaining cutover
+### Current implementation
 
 Today, `ModelCacheSet` and `ModelCacheSetArtifact` retain the logical
 artifact-set identity and membership in SQL, while every model object's bytes,
 size, and verification receipt are owned by managed storage under the cache
 root. `ModelCacheOperation` retains the operation record and its checkpoints.
-Image preparation writes filesystem receipts and `RuntimeImageReceipt` rows;
-SQL receipt state still participates in admission. `RecipeBuild`, `Job`, and
-agent-operation rows retain build and preparation results. These are existing
-paths to refactor, not justification for adding another independently writable
-copy.
+Image preparation writes managed filesystem receipts. SQL
+`RuntimeImageAuthorization` records current recipe authorization for the exact
+archive; the former SQL `RuntimeImageReceipt` table has been removed. Admission
+requires both current authorization and the managed receipt with present bytes.
+`RecipeBuild`, `Job`, and agent-operation rows retain request and output
+identities, coordination, and reported results; they do not independently prove
+that an archive is available.
 
 Recent cache-recovery work already reconciles absent bytes after a NAS restore,
 reuses completed transfers, and rebuilds missing source images. Preserve that
-behavior while changing ownership. The target removes SQL ownership of physical
-availability and local checkpoints, while retaining control intent, exact
-selected identities, authorization, reservations, and audit. Each cutover must
-update all consumers and retire the old path together.
+behavior. The [implementation plan](plans/resilient-artifact-storage.md) records
+the completed model-availability and image-receipt changes and their repository
+evidence. Deployed recovery and physical Spark acceptance remain separate
+checks. Future ownership changes must update all consumers and retire the old
+path together, while retaining control intent, exact selected identities,
+authorization, reservations, and audit.
 
 ## Artifact recovery
 
