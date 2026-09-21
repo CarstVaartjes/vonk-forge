@@ -37,6 +37,7 @@ from .cluster_mappings import (
     ClusterMappingService,
     validate_mapping_parameters,
 )
+from .disk_reservations import outstanding_disk_reservation_bytes
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .logging import log_event
 from .model_cache import ModelCacheService
@@ -4482,9 +4483,12 @@ class RunSwitchOperationService:
                     disk_free = (
                         snapshot.disk_free_bytes if snapshot is not None else None
                     )
-                    if disk_free is not None:
-                        reserved_disk = self._active_reservation_bytes(
-                            session, item.node_id, "disk", excluded
+                    if snapshot is not None and disk_free is not None:
+                        reserved_disk = outstanding_disk_reservation_bytes(
+                            session,
+                            item.node_id,
+                            inventory_observed_at=snapshot.observed_at,
+                            excluded_run_ids=excluded,
                         )
                         disk_free_after = disk_free - reserved_disk - required_disk
                         if disk_free_after < 0:

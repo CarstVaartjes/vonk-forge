@@ -27,6 +27,7 @@ from .catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
 )
+from .disk_reservations import outstanding_disk_reservation_bytes
 from .inventory_repository import InventoryRepository
 from .models import (
     AgentNode,
@@ -843,7 +844,9 @@ class RecipeBuildService:
         processes = resources.processes
         capabilities = list(security.capabilities)
         with self._sessions() as session:
-            disk_reserved = _reserved(session, builder_node_id, "disk")
+            disk_reserved = outstanding_disk_reservation_bytes(
+                session, builder_node_id, inventory_observed_at=snapshot.observed_at
+            )
             memory_reserved = _reserved(session, builder_node_id, "host-memory")
         # The rootless builder retains inputs while exporting the image. Treat
         # recipe storage as a generous peak envelope, not an exact quota over
@@ -1259,8 +1262,8 @@ class RecipeBuildService:
             source_bytes=source_bytes,
             output_bytes=output_bytes,
         )
-        if snapshot.disk_free_bytes - _reserved(
-            session, plan.builder_node_id, "disk"
+        if snapshot.disk_free_bytes - outstanding_disk_reservation_bytes(
+            session, plan.builder_node_id, inventory_observed_at=snapshot.observed_at
         ) < disk_bytes + _build_disk_reserve(snapshot.disk_total_bytes):
             raise RecipeBuildError(
                 "build.insufficient_disk", "builder disk capacity changed"
