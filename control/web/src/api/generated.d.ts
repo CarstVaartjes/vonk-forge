@@ -3299,6 +3299,8 @@ export interface components {
             attempts?: {
                 [key: string]: number;
             };
+            /** Next Check At */
+            next_check_at?: string | null;
             /** Pending Job Id */
             pending_job_id?: string | null;
             /** Pending Node Id */
