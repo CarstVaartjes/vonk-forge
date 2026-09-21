@@ -1499,24 +1499,27 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let semantic_digest = hex_sha256(
             &canonical_json(&validated.arguments).map_err(|_| OperationError::InvalidOperation)?,
         );
-        if validated.detached {
-            let existing = self.run_docker(&[
-                "container".to_owned(),
-                "inspect".to_owned(),
-                "--format".to_owned(),
-                "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
-                format!("vonk-{}", validated.run_id),
-            ])?;
-            if existing.success {
-                let expected = format!("true\t{semantic_digest}\ttrue\t{}", validated.run_id);
-                if std::str::from_utf8(&existing.stdout).ok().map(str::trim)
+        let existing = self.run_docker(&[
+            "container".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
+            format!("vonk-{}", validated.run_id),
+        ])?;
+        if existing.success {
+            let expected = format!("true\t{semantic_digest}\ttrue\t{}", validated.run_id);
+            if !validated.detached
+                || std::str::from_utf8(&existing.stdout).ok().map(str::trim)
                     != Some(expected.as_str())
-                {
-                    return Err(OperationError::InvalidArtifact);
-                }
-                return Ok(None);
+            {
+                return Err(OperationError::InvalidArtifact);
             }
+            return Ok(None);
         }
+        if !self.prove_container_absent(&format!("vonk-{}", validated.run_id), &existing)? {
+            return Err(OperationError::CommandFailed);
+        }
+        self.reset_runtime_tmp_if_requested(&validated.run_id)?;
         self.prepare_runtime_access(&validated)?;
         // The signed wire shape carries the executable once after the image as
         // an explicit marker for validation. Docker already receives that
@@ -1619,6 +1622,87 @@ impl<R: CommandRunner> OperationExecutor<R> {
         run.arguments
             .splice(run.image_index..run.image_index, arguments);
         run.image_index += added;
+        Ok(())
+    }
+
+    /// The agent cannot traverse private directories created by root or the
+    /// workload UID. Reset only this authorized run's disposable tmp tree,
+    /// after exact container absence, without following any path component or
+    /// descendant symlink. Outputs and the installation cache are untouched.
+    fn reset_runtime_tmp_if_requested(&self, run_id: &str) -> Result<(), OperationError> {
+        if uuid::Uuid::parse_str(run_id)
+            .ok()
+            .map(|value| value.to_string())
+            .as_deref()
+            != Some(run_id)
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        let flags = rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC;
+        let root: std::os::fd::OwnedFd = OpenOptions::new()
+            .read(true)
+            .custom_flags(flags.bits() as i32)
+            .open(&self.roots.agent_data)?
+            .into();
+        let metadata_root =
+            rustix::fs::openat(&root, "run-metadata", flags, rustix::fs::Mode::empty())
+                .map_err(errno_io)?;
+        let metadata = rustix::fs::openat(&metadata_root, run_id, flags, rustix::fs::Mode::empty())
+            .map_err(errno_io)?;
+        let marker = match rustix::fs::openat(
+            &metadata,
+            "tmp-reset-required",
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        ) {
+            Ok(marker) => marker,
+            Err(rustix::io::Errno::NOENT) => return Ok(()),
+            Err(error) => return Err(errno_io(error).into()),
+        };
+        let marker_state = rustix::fs::fstat(&marker).map_err(errno_io)?;
+        if rustix::fs::FileType::from_raw_mode(marker_state.st_mode)
+            != rustix::fs::FileType::RegularFile
+            || marker_state.st_mode & 0o777 != 0o600
+            || marker_state.st_size != 0
+            || marker_state.st_nlink != 1
+            || self
+                .runtime_request_owner_uid
+                .is_some_and(|owner| marker_state.st_uid != owner)
+        {
+            return Err(OperationError::UnsafePath);
+        }
+        let device = rustix::fs::fstat(&root).map_err(errno_io)?.st_dev;
+        let mut directory = Some(root);
+        for component in ["runs", run_id, "outputs", "tmp"] {
+            let Some(parent) = directory.take() else {
+                break;
+            };
+            directory =
+                match rustix::fs::openat(&parent, component, flags, rustix::fs::Mode::empty()) {
+                    Ok(directory) => Some(directory),
+                    Err(rustix::io::Errno::NOENT) => None,
+                    Err(error) => return Err(errno_io(error).into()),
+                };
+            if let Some(directory) = &directory
+                && rustix::fs::fstat(directory).map_err(errno_io)?.st_dev != device
+            {
+                return Err(OperationError::UnsafePath);
+            }
+        }
+        if let Some(directory) = &directory {
+            remove_directory_contents(directory, device)?;
+            rustix::fs::fsync(directory).map_err(errno_io)?;
+        }
+        rustix::fs::unlinkat(
+            &metadata,
+            "tmp-reset-required",
+            rustix::fs::AtFlags::empty(),
+        )
+        .map_err(errno_io)?;
+        rustix::fs::fsync(&metadata).map_err(errno_io)?;
         Ok(())
     }
 
