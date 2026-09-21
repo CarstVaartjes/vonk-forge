@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select
 from vonk_control.install_admission import InstallPlanConflict
 from vonk_control.inventory_repository import (
+    MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     InventorySnapshotInput,
 )
@@ -22,11 +23,11 @@ from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
 
 
-def _record_disk(sessions, node_id, *, at, free):
+def _record_disk(sessions, node_id, *, at, free, observed_at=None):
     InventoryRepository(sessions, clock=lambda: at).record(
         InventorySnapshotInput(
             node_id,
-            at,
+            observed_at if observed_at is not None else at,
             10_000,
             free,
             10_000,
@@ -52,7 +53,7 @@ def test_postgres_completed_install_is_not_reserved_twice(tmp_path, postgres_eng
     assert lifecycle.preview_install(mapping, build).nodes[0].active_reserved_bytes == (
         original_node.required_bytes
     )
-    later = NOW + timedelta(seconds=1)
+    later = NOW + MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=1)
     _record_disk(sessions, nodes[0], at=later, free=2_000)
     lifecycle._clock = lambda: later
     fresh = lifecycle.preview_install(mapping, build)
@@ -92,6 +93,40 @@ def test_postgres_completed_install_is_not_reserved_twice(tmp_path, postgres_eng
     assert not admission.plan_install(mapping, build, now=latest).allowed
 
 
+def test_future_dated_inventory_cannot_discount_a_later_install(
+    tmp_path, postgres_engine
+):
+    sessions, lifecycle, _queue, mapping, build, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    before_completion = NOW - timedelta(seconds=1)
+    _record_disk(
+        sessions,
+        nodes[0],
+        at=before_completion,
+        observed_at=before_completion + MAX_INVENTORY_FUTURE_SKEW,
+        free=2_000,
+    )
+    original = lifecycle.preview_install(mapping, build)
+    installed_recipe(lifecycle, mapping, build, nodes, request_id=str(uuid.uuid4()))
+    # The agent clock is within ingress's accepted +30s window, but the bytes
+    # in this snapshot predate completion. Comparing the two clocks directly
+    # would discount this installation against free space that never included it.
+    assert lifecycle.preview_install(mapping, build).nodes[0].active_reserved_bytes == (
+        original.nodes[0].required_bytes
+    )
+    for offset, materialized in ((0, False), (1, True)):
+        at = NOW + MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=offset)
+        _record_disk(sessions, nodes[0], at=at, free=2_000)
+        lifecycle._clock = lambda at=at: at
+        reserved = (
+            lifecycle.preview_install(mapping, build).nodes[0].active_reserved_bytes
+        )
+        assert reserved == original.nodes[0].required_bytes - (
+            original.nodes[0].required_download_bytes if materialized else 0
+        )
+
+
 @pytest.mark.parametrize(
     "uncertainty", ["partial", "malformed", "mismatched", "unknown-owner"]
 )
@@ -120,7 +155,7 @@ def test_uncertain_install_reservations_keep_their_full_charge(tmp_path, uncerta
             reservation.plan_digest = "0" * 64
         else:
             reservation.owner_id = str(uuid.uuid4())
-    later = NOW + timedelta(seconds=1)
+    later = NOW + MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=1)
     _record_disk(sessions, nodes[0], at=later, free=2_000)
     lifecycle._clock = lambda: later
     assert lifecycle.preview_install(mapping, build).nodes[0].active_reserved_bytes == (

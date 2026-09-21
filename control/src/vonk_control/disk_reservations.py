@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
+from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from .models import InstallationNode, RecipeInstallation, ResourceReservation
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -27,7 +28,8 @@ def outstanding_disk_reservation_bytes(
     A successful install verifies the exact imported image, archive and compiled
     model projection before acknowledging completion. A later disk observation
     includes those effects. Only the admitted download component can therefore
-    be deducted from its reservation; reused bytes were never reserved, and
+    be deducted from its reservation once the accepted agent-clock skew cannot
+    place the observation before completion; reused bytes were never reserved, and
     staging/cache/rollback headroom remains committed. Logical ``installed_bytes``
     is not a physical allocation counter (projections may be hardlinked).
 
@@ -67,7 +69,8 @@ def outstanding_disk_reservation_bytes(
             and installation.state == "installed"
             and node is not None
             and node.state == "installed"
-            and _aware(inventory_observed_at) > _aware(node.updated_at)
+            and _aware(inventory_observed_at)
+            > _aware(node.updated_at) + MAX_INVENTORY_FUTURE_SKEW
             and reservation.plan_digest == installation.plan_digest
         ):
             try:

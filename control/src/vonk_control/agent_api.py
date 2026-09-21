@@ -95,7 +95,11 @@ from .host_helper_authority import (
     RecipeRunObservationPendingError,
     RecipeRunObservationReplayError,
 )
-from .inventory_repository import InventoryRepository, InventorySnapshotInput
+from .inventory_repository import (
+    MAX_INVENTORY_FUTURE_SKEW,
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -1288,8 +1292,9 @@ def install_agent_routes(
             )
         observed_at = body.observed_at.astimezone(UTC)
         now = _now(required.clock()).astimezone(UTC)
-        if observed_at > now + timedelta(seconds=30) or now - observed_at > timedelta(
-            hours=24
+        if (
+            observed_at > now + MAX_INVENTORY_FUTURE_SKEW
+            or now - observed_at > timedelta(hours=24)
         ):
             raise HTTPException(
                 status_code=422, detail="inventory time is outside the accepted window"
