@@ -57,6 +57,10 @@ from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,
 )
+from .recipe_lifecycle_contract import (
+    RecipeOperationCancellationResult,
+    parse_recipe_lifecycle_result,
+)
 from .recovery_policy import (
     FailureKind,
     RecoveryDecision,
@@ -156,9 +160,6 @@ _CONCLUDED_OUTCOMES = _AGGREGATE_FINAL_STATES - {"waiting-for-operator"}
 _RETRY_DISPOSITION = "retry"
 _DATABASE_REPOLL_SECONDS = 0.25
 _SUPERSEDED_CANCELLATION_SECONDS = 660
-#: Run states whose abandoned effect must be ended when an operator retires the
-#: parked operation that still owns them.
-_ACTIVE_RETIRE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 
 
 def superseded_cancellation_deadline(result: object) -> datetime | None:
@@ -195,6 +196,67 @@ _CONTROL_OPERATIONS = (
 ) | _OPTIONAL_CAPABILITIES
 
 
+def _safe_retry_failure(kind: str, state: str, result: Mapping[str, object]) -> bool:
+    """One classification for both fresh results and retained interrupted work."""
+    if kind not in _RESTART_REISSUE_OPERATIONS:
+        return False
+    if state == "waiting-for-operator":
+        return (
+            result.get("error_code") == "agent_restart_interrupted"
+            and kind_for_agent_error(result) is FailureKind.UNCERTAIN_EFFECT
+            and result.get("uncertain") is True
+        )
+    if (
+        state != "failed"
+        or result.get("status") != "failed"
+        or classify(kind_for_agent_error(result)) is not RecoveryDecision.RETRY
+    ):
+        return False
+    return kind in {
+        AgentOperation.ARTIFACT_DISTRIBUTION.value,
+        AgentOperation.RECIPE_STOP.value,
+        AgentOperation.RECIPE_UNINSTALL.value,
+    } or (
+        kind == AgentOperation.RECIPE_START.value
+        and result.get("error_code") == "runtime_observation_unavailable"
+    )
+
+
+def _parked_retry_evidence(
+    operation: StoredOperation, attempt: AgentOperationAttempt, now: datetime
+) -> bool:
+    """Prove that a parked current-schema attempt still owns safe recovery."""
+    if (
+        operation.state != "waiting-for-operator"
+        or operation.retry_disposition is not None
+        or operation.retry_disposition_attempt is not None
+        or operation.retry_due_at is not None
+        or operation.current_attempt < 1
+        or operation.current_attempt != attempt.attempt
+        or operation.kind not in _RESTART_REISSUE_OPERATIONS
+    ):
+        return False
+    try:
+        payload = canonical_payload(AgentOperation(operation.kind), operation.payload)
+    except (TypeError, ValueError):
+        return False
+    if hashlib.sha256(payload).hexdigest() != operation.payload_digest:
+        return False
+    if attempt.state == "expired":
+        # Expiry never proves the old executor stopped. Only exact-resume
+        # operations qualify, whose agent reconciles the old effect first.
+        return attempt.result is None and _aware(attempt.lease_deadline) <= _aware(now)
+    if attempt.state not in {"failed", "waiting-for-operator"}:
+        return False
+    try:
+        result = validate_result_for_operation(
+            operation.kind, attempt.result, state=attempt.state
+        ).model_dump(mode="json")
+    except (TypeError, ValueError):
+        return False
+    return _safe_retry_failure(operation.kind, attempt.state, result)
+
+
 class StaleAgentAttempt(RuntimeError):
     """An agent attempted to update an operation it no longer owns."""
 
@@ -224,8 +286,8 @@ class OperatorRetirementRefused(ValueError):
     """An operator asked to retire parked work that is not genuinely exhausted.
 
     Retirement is the terminal counterpart of ``resume``: it fails a parked
-    operation whose bounded retry budget is spent so the fleet it owns is
-    released.  The same :class:`RecoveryPolicy` decision that refuses an
+    order whose bounded retry budget is spent, retaining uncertain effects
+    for exact cleanup. The same :class:`RecoveryPolicy` decision that refuses an
     over-budget resume decides whether retirement is permitted, and this typed
     refusal names the one condition that still makes the operation live.
     """
@@ -328,22 +390,47 @@ def authorize_operator_resume_in_session(
 def retire_exhausted_operations_in_session(
     session: Session, job_id: str, now: datetime
 ) -> tuple[str, ...]:
-    """Fail a parked job's genuinely exhausted operations and release their owner.
+    """Fence exhausted orders while retaining their effects for exact cleanup.
 
     This is the bounded, audited terminal counterpart to
     :func:`authorize_operator_resume_in_session`.  It is admitted only when
     every parked operation of the job has spent :class:`RecoveryPolicy`'s
     attempt budget *and* holds no live attempt lease and no already-authorised
-    retry; anything else is a refusal, so a live operation is never silently
-    discarded.  The parked operations, the parent job, and the owner effect the
-    job still holds are all terminal in the caller's transaction.
+    retry or open launch budget. An expired lease does not prove the effect
+    stopped. The worker resumes the ordinary stop/uninstall path from durable
+    cancellation facts; only its successful receipt releases reservations.
     """
 
-    job = session.scalar(select(Job).where(Job.id == job_id).with_for_update(of=Job))
+    job = session.get(Job, job_id)
     if job is None:
         raise KeyError(job_id)
+    scope = AgentJobService._target_scope(job.targets)
+    if not scope or not AgentJobService._lock_target_scopes(
+        session, {"retire": (job_id, scope)}, scope[0]
+    ):
+        raise OperatorRetirementRefused(job_id, "its target scope changed")
     if job.state != "waiting-for-operator":
         raise OperatorRetirementRefused(job_id, "job is not waiting for operator")
+    if (
+        session.scalar(
+            select(StoredOperation.id)
+            .where(
+                StoredOperation.parent_job_id == job_id,
+                or_(
+                    StoredOperation.state == "running",
+                    and_(
+                        StoredOperation.state == "queued",
+                        StoredOperation.current_attempt > 0,
+                    ),
+                ),
+            )
+            .limit(1)
+        )
+        is not None
+    ):
+        raise OperatorRetirementRefused(
+            job_id, "another issued operation is still active"
+        )
     operations = tuple(
         session.scalars(
             select(StoredOperation)
@@ -358,6 +445,7 @@ def retire_exhausted_operations_in_session(
     if not operations:
         raise OperatorRetirementRefused(job_id, "job has no parked operation")
     policy = RecoveryPolicy()
+    attempts: list[AgentOperationAttempt] = []
     for operation in operations:
         if retry_due_after_operator_action(operation, now, policy) is not None:
             raise OperatorRetirementRefused(
@@ -385,11 +473,17 @@ def retire_exhausted_operations_in_session(
             raise OperatorRetirementRefused(
                 operation.id, "a live attempt still holds its lease"
             )
+        if _attempt_holds_open_launch_budget(operation, attempt, now):
+            raise OperatorRetirementRefused(
+                operation.id, "its issued start still holds an open launch budget"
+            )
+        if attempt is not None:
+            attempts.append(attempt)
     reasons = {
         operation.id: (
             f"operator retired the parked {operation.kind} operation after its "
-            f"{policy.max_failures}-attempt retry budget was spent; the effect "
-            "is abandoned and its owner is released"
+            f"{policy.max_failures}-attempt retry budget was spent; capacity "
+            "is retained until exact cleanup confirms the effect stopped"
         )
         for operation in operations
     }
@@ -400,7 +494,40 @@ def retire_exhausted_operations_in_session(
         operation.retry_disposition_attempt = None
         operation.retry_due_at = None
         operation.updated_at = now
+    for attempt in attempts:
+        if attempt.state == "running":
+            attempt.state = "expired"
     job_reason = reasons[operations[0].id]
+    if job.kind in {
+        "recipe.start",
+        "recipe.stop",
+        "recipe.install",
+        "recipe.uninstall",
+    }:
+        previous = {} if job.result is None else job.result
+        if job.result is not None:
+            parse_recipe_lifecycle_result(job.kind, previous)
+        # Reuse the lifecycle cancellation contract. Failed + cancelled is the
+        # durable retirement handoff; ordinary cancellation uses cancelled state.
+        job.result = RecipeOperationCancellationResult.model_validate_json(
+            canonical_message(
+                {
+                    "cancel_requested": True,
+                    "cancelled": True,
+                    "cancel_requested_at": _aware(now).isoformat(),
+                    "cancel_request_id": str(
+                        uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:retire:{job.id}")
+                    ),
+                    "cancel_actor": job.actor,
+                    "reason": job_reason[:512],
+                    **{
+                        key: previous[key]
+                        for key in ("node_evidence", "launch_evidence")
+                        if key in previous
+                    },
+                }
+            )
+        ).model_dump(mode="json", exclude_none=True)
     _release_retired_owner_in_session(session, job, job_reason, now)
     job.state = "failed"
     job.status_reason = job_reason[:1024]
@@ -411,14 +538,12 @@ def retire_exhausted_operations_in_session(
 def _release_retired_owner_in_session(
     session: Session, job: Job, reason: str, now: datetime
 ) -> None:
-    """Release the node effect and reservations a retired job still owns.
+    """Retain uncertain effects for the normal exact cleanup lifecycle.
 
     The owner binding is read from the job's own payload, so this stays the
-    same authority the operation was admitted under.  A retired ``run`` can
-    never stay active -- otherwise the next admission would keep being blocked
-    by the abandoned effect -- so its route is withdrawn and its capacity is
-    returned.  Queued child work that never ran is cancelled instead of being
-    left claimable.
+    same authority the operation was admitted under. Retirement proves only
+    that the order ended; even failed owners can still have physical effects.
+    Only an already stopped/uninstalled owner has evidence to release capacity.
     """
 
     payload = job.payload if isinstance(job.payload, Mapping) else {}
@@ -427,22 +552,26 @@ def _release_retired_owner_in_session(
     if isinstance(owner_kind, str) and isinstance(owner_id, str):
         if owner_kind == "run":
             run = session.get(RecipeRun, owner_id, with_for_update=True)
-            if run is not None and run.state in _ACTIVE_RETIRE_RUN_STATES:
-                run.state = "failed"
+            if run is not None and run.state != "stopped":
+                run.state = "lost"
                 run.route_state = "withdrawn"
                 run.route_error = reason[:512]
                 run.updated_at = now
+            elif run is not None:
+                release_owned_reservations_in_session(
+                    session, owner_kind, owner_id, now
+                )
         elif owner_kind == "installation":
             installation = session.get(
                 RecipeInstallation, owner_id, with_for_update=True
             )
-            if installation is not None and installation.state not in {
-                "uninstalled",
-                "failed",
-            }:
-                installation.state = "failed"
+            if installation is not None and installation.state != "uninstalled":
+                installation.state = "partial"
                 installation.updated_at = now
-        release_owned_reservations_in_session(session, owner_kind, owner_id, now)
+            elif installation is not None:
+                release_owned_reservations_in_session(
+                    session, owner_kind, owner_id, now
+                )
     for child in session.scalars(
         select(StoredOperation).where(
             StoredOperation.parent_job_id == job.id,
@@ -1897,6 +2026,36 @@ class AgentJobService:
                     node_id, now, capabilities
                 ).with_only_columns(StoredOperation.id)
             )
+            recovery_id = None
+            if candidate_id is None:
+                predicate = _claim_predicate(now)
+                for parked, attempt in session.execute(
+                    select(StoredOperation, AgentOperationAttempt)
+                    .join(Job, Job.id == StoredOperation.parent_job_id)
+                    .join(AgentNode, AgentNode.node_id == StoredOperation.node_id)
+                    .join(
+                        AgentOperationAttempt,
+                        and_(
+                            AgentOperationAttempt.operation_id == StoredOperation.id,
+                            AgentOperationAttempt.attempt
+                            == StoredOperation.current_attempt,
+                        ),
+                    )
+                    .where(
+                        StoredOperation.node_id == node_id,
+                        StoredOperation.state == "waiting-for-operator",
+                        StoredOperation.kind.in_(_RESTART_REISSUE_OPERATIONS),
+                        StoredOperation.retry_disposition.is_(None),
+                        StoredOperation.retry_due_at.is_(None),
+                        Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                        *(condition.expression for condition in predicate.common),
+                        *(condition.expression for condition in predicate.diagnostics),
+                    )
+                    .order_by(StoredOperation.created_at, StoredOperation.id)
+                ):
+                    if _parked_retry_evidence(parked, attempt, now):
+                        recovery_id = parked.id
+                        break
             upgrade_id = None
             if (
                 capabilities is not None
@@ -1923,7 +2082,7 @@ class AgentJobService:
                 tuple(
                     dict.fromkeys(
                         value
-                        for value in (candidate_id, upgrade_id)
+                        for value in (candidate_id, upgrade_id, recovery_id)
                         if value is not None
                     )
                 ),
@@ -1975,6 +2134,58 @@ class AgentJobService:
                 operation_id=upgrade_id,
                 parent_job_id=None if upgrade_id is None else scopes[upgrade_id][0],
             )
+            if recovery_id is not None:
+                parked = session.scalar(
+                    select(StoredOperation)
+                    .where(StoredOperation.id == recovery_id)
+                    .with_for_update(of=StoredOperation)
+                    .execution_options(populate_existing=True)
+                )
+                attempt = (
+                    session.scalar(
+                        select(AgentOperationAttempt)
+                        .where(
+                            AgentOperationAttempt.operation_id == recovery_id,
+                            AgentOperationAttempt.attempt == parked.current_attempt,
+                        )
+                        .with_for_update(of=AgentOperationAttempt)
+                    )
+                    if parked is not None
+                    else None
+                )
+                if (
+                    parked is not None
+                    and attempt is not None
+                    and _parked_retry_evidence(parked, attempt, now)
+                ):
+                    retry_after = (
+                        attempt.result.get("retry_after_seconds")
+                        if isinstance(attempt.result, Mapping)
+                        else None
+                    )
+                    previous_reason = parked.status_reason
+                    self._schedule_safe_retry(
+                        parked, now, retry_after if type(retry_after) is int else None
+                    )
+                    if self._claim_has_authority(
+                        session,
+                        parked,
+                        now,
+                        node=node,
+                        protocol_version=protocol_version,
+                        capabilities=capabilities,
+                        locked_targets=scopes[recovery_id][1],
+                    ):
+                        parked.updated_at = now
+                        self._aggregate_parent(session, parked.parent_job_id)
+                    else:
+                        parked.retry_disposition = None
+                        parked.retry_disposition_attempt = None
+                        parked.retry_due_at = None
+                        parked.status_reason = previous_reason
+                # Recovery schedules a future exact claim. It never reissues
+                # an effect inside this observation of an old parked attempt.
+                return None
             if candidate_id is None:
                 excluded = self._excluded_work_refusal(session, node, now)
                 if excluded is not None:
@@ -3022,13 +3233,12 @@ class AgentJobService:
             operation.current_attempt,
             _aware(now),
             retry_after=retry_after,
+            ongoing_intent=True,
         )
-        if due is None:
-            operation.retry_disposition = None
-            operation.retry_disposition_attempt = None
-            operation.retry_due_at = None
-            operation.status_reason = f"exact {operation.kind} retry budget exhausted; inspect the last attempt"
-            return
+        # Exact-resume support reconciles the prior effect before any new work.
+        # Bound frequency, not the lifetime of current authorized intent: a long
+        # outage must not require an operator to retire and recreate this job.
+        assert due is not None
         operation.retry_disposition = _RETRY_DISPOSITION
         operation.retry_disposition_attempt = operation.current_attempt
         operation.retry_due_at = due
@@ -3349,47 +3559,15 @@ class AgentJobService:
                 )
             attempt.result = message_result
             attempt.state = state
-            distribution_retry = (
-                state == "failed"
-                and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
-                and classify(kind_for_agent_error(message_result))
-                is RecoveryDecision.RETRY
-                and not (
-                    isinstance(parent.result, Mapping)
-                    and parent.result.get("cancel_requested") is True
-                )
+            safe_retry = _safe_retry_failure(
+                operation.kind, state, message_result
+            ) and not (
+                isinstance(parent.result, Mapping)
+                and parent.result.get("cancel_requested") is True
             )
-            start_observation_retry = (
-                state == "failed"
-                and operation.kind == AgentOperation.RECIPE_START.value
-                and message_result.get("error_code")
-                == "runtime_observation_unavailable"
-                and message_result.get("failure_kind")
-                == FailureKind.TEMPORARY_DEPENDENCY.value
-                and not (
-                    isinstance(parent.result, Mapping)
-                    and parent.result.get("cancel_requested") is True
-                )
-            )
-            restart_retry = (
-                state == "waiting-for-operator"
-                and operation.kind in _RESTART_REISSUE_OPERATIONS
-                and message_result.get("error_code") == "agent_restart_interrupted"
-                and message_result.get("failure_kind")
-                == FailureKind.UNCERTAIN_EFFECT.value
-                and message_result.get("uncertain") is True
-                and not (
-                    isinstance(parent.result, Mapping)
-                    and parent.result.get("cancel_requested") is True
-                )
-            )
-            operation.state = (
-                "waiting-for-operator"
-                if distribution_retry or start_observation_retry
-                else state
-            )
+            operation.state = "waiting-for-operator" if safe_retry else state
             operation.updated_at = now
-            if distribution_retry or start_observation_retry or restart_retry:
+            if safe_retry:
                 retry_after_seconds = message_result.get("retry_after_seconds")
                 self._schedule_safe_retry(
                     operation,

@@ -7284,13 +7284,24 @@
             "maxProperties": 33,
             "patternProperties": {
               "^spk_[0-9a-f]{32}$": {
-                "maximum": 3.0,
                 "minimum": 1.0,
                 "type": "integer"
               }
             },
             "title": "Attempts",
             "type": "object"
+          },
+          "next_check_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Check At"
           },
           "pending_job_id": {
             "anyOf": [

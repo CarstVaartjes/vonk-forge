@@ -2293,7 +2293,7 @@ def test_late_result_is_retained_under_expired_fence_without_completing_operatio
     assert jobs.record_late_result(late) is True
 
 
-def test_transient_distribution_failure_backs_off_across_restart_then_blocks(
+def test_transient_distribution_failure_recovers_after_repeated_faults_and_restart(
     service,
 ) -> None:
     from vonk_agent_protocol import AgentResult
@@ -2308,7 +2308,7 @@ def test_transient_distribution_failure_backs_off_across_restart_then_blocks(
         {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
     )
     capabilities = ["agent.runtime.rust.v1", kind]
-    for attempt_number in range(1, 6):
+    for attempt_number in range(1, 8):
         claim = claim_agent(
             jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
         )
@@ -2363,18 +2363,36 @@ def test_transient_distribution_failure_backs_off_across_restart_then_blocks(
             )
             is None
         )
-        if attempt_number < 5:
-            assert due is not None
-            if attempt_number == 1:
-                assert due.replace(tzinfo=UTC) >= clock.now + timedelta(seconds=120)
-            clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
+        assert due is not None
+        if attempt_number == 1:
+            assert due.replace(tzinfo=UTC) >= clock.now + timedelta(seconds=120)
         else:
-            assert due is None
-            with sessions() as session:
-                assert (
-                    "budget exhausted"
-                    in session.get(AgentOperation, operation.id).status_reason
-                )
+            assert (
+                clock.now < due.replace(tzinfo=UTC) <= clock.now + timedelta(seconds=60)
+            )
+        clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
+
+    recovered = claim_agent(
+        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+    )
+    assert recovered is not None and recovered.operation_id == operation.id
+    jobs.succeed(
+        recovered,
+        {
+            "assignment_id": "33333333-3333-4333-8333-333333333333",
+            "model_artifact_set_sha256": COMMIT,
+            "verified": True,
+            "verified_digests": [COMMIT],
+            "verified_image_digest": "sha256:" + COMMIT,
+            "imported_image_digest": "sha256:" + COMMIT,
+            "verified_oci_layout_sha256": COMMIT,
+            "oci_image_digest": "sha256:" + COMMIT,
+            "downloaded_bytes": 0,
+            "evidence_digest": COMMIT,
+        },
+    )
+    with sessions() as session:
+        assert session.get(AgentOperation, operation.id).state == "succeeded"
 
 
 def test_successful_distribution_receipt_closes_coalesced_final_counters(
@@ -3146,3 +3164,135 @@ def test_excluded_work_refusal_names_every_predicate_condition(service, check) -
     _, refusal, _ = excluded
     assert refusal == check
     assert refusal != "unclassified-unclaimable"
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "temporary",
+        "expired",
+        "cancelled",
+        "revoked",
+        "superseded",
+        "invalid-authority",
+        "integrity-failure",
+        "unknown",
+    ],
+)
+def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
+    service, condition
+):
+    """Reconcile valid persisted exhaustion without reviving obsolete authority."""
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    job = parent(sessions, clock)
+    operation = jobs.enqueue(
+        job.id,
+        NODE_A,
+        kind,
+        COMMIT,
+        {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+    )
+    capabilities = ["agent.runtime.rust.v1", kind]
+    for _ in range(5):
+        claim = claim_agent(
+            jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+        )
+        assert claim is not None
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                canonical_message(
+                    {
+                        **{
+                            key: claim.model_dump(mode="json")[key]
+                            for key in (
+                                "schema_version",
+                                "job_id",
+                                "operation_id",
+                                "attempt",
+                                "fence",
+                                "node_id",
+                                "deadline",
+                            )
+                        },
+                        "state": "failed",
+                        "result": {
+                            "status": "failed",
+                            "error_code": "artifact_distribution_failed",
+                            "reason": "NAS transport unavailable",
+                            "failure_kind": "temporary-dependency",
+                        },
+                    }
+                )
+            )
+        )
+        with sessions() as session:
+            row = session.get(AgentOperation, operation.id)
+            assert row is not None and row.retry_due_at is not None
+            clock.now = row.retry_due_at.replace(tzinfo=UTC) + timedelta(seconds=1)
+    with sessions.begin() as session:
+        row = session.get(AgentOperation, operation.id)
+        assert row is not None
+        original_payload = dict(row.payload)
+        # The prior finite policy legitimately persisted this current-schema
+        # state after its fifth interrupted attempt.
+        row.retry_disposition = None
+        row.retry_disposition_attempt = None
+        row.retry_due_at = None
+        parent_row = session.get(Job, job.id)
+        assert parent_row is not None
+        parent_row.state = "waiting-for-operator"
+        last = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == 5,
+            )
+        )
+        assert last is not None
+        if condition == "expired":
+            last.state = "expired"
+            last.result = None
+            last.lease_deadline = clock.now - timedelta(seconds=1)
+        elif condition == "cancelled":
+            parent_row.result = {"cancel_requested": True}
+        elif condition in {"revoked", "superseded"}:
+            node = session.get(AgentNode, NODE_A)
+            assert node is not None
+            if condition == "revoked":
+                node.revoked_at = clock.now
+            else:
+                node.workload_intent_ordinal += 1
+        elif condition in {"invalid-authority", "integrity-failure", "unknown"}:
+            last.result = {
+                "status": "failed",
+                "error_code": "artifact_distribution_failed",
+                "reason": "Blocked",
+                **({"failure_kind": condition} if condition != "unknown" else {}),
+            }
+    jobs = AgentJobService(sessions, clock=clock)
+    assert (
+        claim_agent(
+            jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+        )
+        is None
+    )
+    with sessions() as session:
+        row = session.get(AgentOperation, operation.id)
+        assert row is not None
+        due = row.retry_due_at
+        assert row.current_attempt == 5 and row.payload == original_payload
+        if condition not in {"temporary", "expired"}:
+            assert due is None
+            return
+        assert due is not None
+        assert clock.now < due.replace(tzinfo=UTC) <= clock.now + timedelta(seconds=60)
+    clock.now = due.replace(tzinfo=UTC)
+    jobs = AgentJobService(sessions, clock=clock)
+    resumed = claim_agent(
+        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+    )
+    assert (
+        resumed is not None
+        and resumed.operation_id == operation.id
+        and resumed.attempt == 6
+    )

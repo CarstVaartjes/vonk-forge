@@ -119,7 +119,7 @@ _CHILD_FAILED_STATES = frozenset(
 _OPERATION_STATE_ADAPTER = TypeAdapter(FleetProfileOperationState)
 _PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
 _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
-_MAX_AUTOMATIC_CACHE_RECOVERY_ATTEMPTS = 3
+_MAX_CACHE_RECOVERY_DELAY_SECONDS = 60
 #: How many parked applications one worker tick observes for a terminal child.
 #: Bounded so a large parked backlog cannot turn one tick into an unbounded
 #: scan, while still letting every parked order record its own ending.
@@ -259,8 +259,87 @@ class FleetProfileConflict(RuntimeError):
     """A Fleet profile is invalid, stale, or cannot be safely applied."""
 
 
+class _FleetProfileRecoveryBindingConflict(FleetProfileConflict):
+    """Recovery cannot adopt the currently available artifact identity."""
+
+
+def _recovery_preparation_identity(preparation: RolloutPreparation) -> object:
+    """Retain typed artifact identities, excluding observations and build provenance."""
+
+    return preparation.model_dump(
+        mode="json",
+        exclude={
+            "model": {"controller", "targets", "completeness"},
+            "runtime_image": {"controller", "targets", "build_id"},
+            "exceptions": {"__all__": {"state", "reason"}},
+            "controller_ready": True,
+            "targets_ready": True,
+            "ready": True,
+            "reasons": True,
+        },
+    )
+
+
+def _require_recovery_preparation(
+    assignment_id: str,
+    expected: RolloutPreparation | None,
+    observed: RolloutPreparation | None,
+) -> None:
+    if expected is None:
+        raise _FleetProfileRecoveryBindingConflict(
+            "profile.recovery_identity_unavailable: The accepted artifact identity "
+            f"for assignment {assignment_id} is unavailable; an explicit new load "
+            "must bind verified cache assets."
+        )
+    image = expected.runtime_image
+    if observed is None:
+        raise _FleetProfileRecoveryBindingConflict(
+            "profile.recovery_cache_pending: Prepare cache on the Controller for "
+            f"assignment {assignment_id}, image {image.image_digest}, archive "
+            f"{image.oci_layout_sha256}; recovery retains these exact identities."
+        )
+    if _recovery_preparation_identity(expected) != _recovery_preparation_identity(
+        observed
+    ):
+        raise _FleetProfileRecoveryBindingConflict(
+            "profile.recovery_artifact_changed: Prepared assets for assignment "
+            f"{assignment_id} differ from its accepted model/image identity; "
+            "restore the exact accepted assets or use an explicit new load "
+            "to bind the replacement."
+        )
+
+
+def _cache_recovery_delay(attempt: int) -> timedelta:
+    # Bound exponent work as well as the retry rate for long-lived intent.
+    exponent = min(attempt - 1, _MAX_CACHE_RECOVERY_DELAY_SECONDS.bit_length())
+    return timedelta(seconds=min(_MAX_CACHE_RECOVERY_DELAY_SECONDS, 2**exponent))
+
+
+def _require_recovery_preparations(
+    accepted: FleetProfilePreview, current: FleetProfilePreview
+) -> None:
+    expected = {item.assignment_id: item.preparation for item in accepted.preparations}
+    observed = {item.assignment_id: item.preparation for item in current.preparations}
+    current_assignments = {item.assignment_id: item for item in current.assignments}
+    for assignment in accepted.assignments:
+        current_assignment = current_assignments.get(assignment.assignment_id)
+        if (
+            assignment.actions == ["keep"]
+            and current_assignment is not None
+            and current_assignment.actions == ["keep"]
+        ):
+            # Kept runtime state needs no cache preparation. A later run child
+            # still checks its accepted identity before it can issue any work.
+            continue
+        _require_recovery_preparation(
+            assignment.assignment_id,
+            expected.get(assignment.assignment_id),
+            observed.get(assignment.assignment_id),
+        )
+
+
 class _FleetProfileCachePreparationPending(ValueError):
-    """The exact accepted source build can safely recreate vanished cache bytes."""
+    """A source build is pending and has no verified output identity yet."""
 
 
 def _operation_state(
@@ -819,7 +898,24 @@ class RunSwitchFleetProfileAdapter:
             request = self._assignment_request(
                 session, assignment, request_key=child_request_key
             )
+            application = session.get(FleetProfileApplication, application_id)
+            if application is None:
+                raise KeyError(application_id)
+            accepted = _persisted_profile_plan(application)
+            progress = _persisted_profile_progress(application)
+            expected_preparation = next(
+                (
+                    item.preparation
+                    for item in accepted.preparations
+                    if item.assignment_id == assignment.id
+                ),
+                None,
+            )
         plan = self._run_switch.preview(request, actor=actor)
+        if expected_preparation is not None or progress.retry_of_application_id:
+            _require_recovery_preparation(
+                assignment.id, expected_preparation, plan.preparation
+            )
         if not plan.allowed:
             raise RunSwitchOperationConflict(
                 "profile child plan blocked: "
@@ -2273,6 +2369,7 @@ class FleetProfileService:
         actor: str,
         operation_kind: FleetProfileOperationKind,
         retry_of_application_id: str | None = None,
+        automatic_cache_recovery: bool = False,
     ) -> FleetProfileApplicationView:
         now = _aware(self._clock())
         if preview.steps and self._switch_adapter is None:
@@ -2347,6 +2444,7 @@ class FleetProfileService:
                     "Profile switch scope changed during admission"
                 )
             attempt = 1
+            recovery_ordinal: int | None = None
             if retry_of_application_id is not None:
                 parent = session.get(
                     FleetProfileApplication,
@@ -2396,11 +2494,30 @@ class FleetProfileService:
                     raise FleetProfileConflict(
                         "Application has been superseded by another workload intent"
                     )
+                _require_recovery_preparations(_persisted_profile_plan(parent), preview)
+                if automatic_cache_recovery:
+                    if self._switch_adapter is None or not (
+                        self._switch_adapter.recoverable_cache_loss(
+                            parent.id, session=session
+                        )
+                    ):
+                        raise FleetProfileConflict(
+                            "Automatic recovery requires a pre-effect cache loss"
+                        )
+                    recovery_ordinal = prior.workload_intent_ordinal
+                    if recovery_ordinal is None:
+                        raise FleetProfileConflict(
+                            "Automatic recovery has no bound workload intent"
+                        )
+            elif automatic_cache_recovery:
+                raise FleetProfileConflict("Automatic recovery has no parent receipt")
             affected_nodes = [
                 node for node in scope_nodes if node.node_id in execution_nodes
             ]
             workload_intent_ordinal = (
-                max(node.workload_intent_ordinal for node in affected_nodes) + 1
+                recovery_ordinal
+                if recovery_ordinal is not None
+                else max(node.workload_intent_ordinal for node in affected_nodes) + 1
                 if affected_nodes
                 else None
             )
@@ -2540,7 +2657,12 @@ class FleetProfileService:
         )
 
     def retry(
-        self, application_id: str, *, request_key: str, actor: str
+        self,
+        application_id: str,
+        *,
+        request_key: str,
+        actor: str,
+        automatic_cache_recovery: bool = False,
     ) -> FleetProfileApplicationView:
         """Persist a new reconciliation attempt, retaining the original receipt."""
         with self._sessions() as session:
@@ -2639,12 +2761,14 @@ class FleetProfileService:
             raise FleetProfileConflict(
                 "Profile assignment scope changed during application recovery"
             )
+        _require_recovery_preparations(persisted_plan, preview)
         return self._queue_application(
             preview,
             request_key=request_key,
             actor=actor,
             operation_kind=operation_kind,
             retry_of_application_id=application_id,
+            automatic_cache_recovery=automatic_cache_recovery,
         )
 
     def operation_provider(self) -> OperationProviderProtocol:
@@ -2855,11 +2979,16 @@ class FleetProfileService:
             return self._application_view(row)
 
     def tick(self) -> bool:
-        """Advance at most one profile application step; safe to call repeatedly."""
+        """Observe bounded parked work, then advance at most one runnable step."""
 
         if self._switch_adapter is None:
             return False
         now = _aware(self._clock())
+        # Complete the bounded observation transaction before selecting active
+        # work. An unrelated active application must not starve a recovered
+        # parent, and observing a parent must not consume the active work unit.
+        parked_observed = self._observe_parked_applications(now)
+        recovery_deferred = False
         recovery = self._automatic_cache_recovery(now)
         if recovery is not None:
             application_id, actor = recovery
@@ -2870,7 +2999,27 @@ class FleetProfileService:
                 )
             )
             try:
-                self.retry(application_id, request_key=request_key, actor=actor)
+                self.retry(
+                    application_id,
+                    request_key=request_key,
+                    actor=actor,
+                    automatic_cache_recovery=True,
+                )
+            except _FleetProfileRecoveryBindingConflict as error:
+                with self._sessions.begin() as session:
+                    row = session.get(
+                        FleetProfileApplication, application_id, with_for_update=True
+                    )
+                    if row is not None and self._retry_eligible(session, row):
+                        progress = _persisted_profile_progress(row)
+                        next_check = now + _cache_recovery_delay(progress.attempt)
+                        row.status_reason = (
+                            f"{error} Next cache check: {next_check.isoformat()}."
+                        )[:512]
+                        row.updated_at = now
+                        recovery_deferred = True
+                # No replacement intent or unknown-output build was admitted.
+                # The existing backoff revisits this receipt after cache repair.
             except FleetProfileConflict:
                 # Retry performs the authoritative profile, scope, ordinal and
                 # lineage checks again after this read-only candidate scan.
@@ -2888,7 +3037,7 @@ class FleetProfileService:
                 .limit(1)
             )
             if row is None:
-                return self._observe_parked_applications(now)
+                return parked_observed or recovery_deferred
             try:
                 plan = _persisted_profile_plan(row)
                 progress = _persisted_profile_progress(row)
@@ -2933,7 +3082,7 @@ class FleetProfileService:
                     row.progress = progress.model_dump(mode="json")
                 if child.state in _CHILD_PENDING_STATES:
                     if row.state == "running" and not session.is_modified(row):
-                        return False
+                        return parked_observed or recovery_deferred
                     row.state = "running"
                     row.updated_at = now
                     return True
@@ -3180,8 +3329,7 @@ class FleetProfileService:
                 except FleetProfileConflict:
                     continue
                 if (
-                    progress.attempt >= _MAX_AUTOMATIC_CACHE_RECOVERY_ATTEMPTS
-                    or progress.intended_profile is None
+                    progress.intended_profile is None
                     or not adapter.recoverable_cache_loss(row.id, session=session)
                 ):
                     continue
@@ -3196,8 +3344,9 @@ class FleetProfileService:
                     progress.intended_profile.scope.node_ids
                 ) != current_scope or not self._retry_eligible(session, row):
                     continue
-                delay = min(60, 2 ** (progress.attempt - 1))
-                if now < _aware(row.updated_at) + timedelta(seconds=delay):
+                if now < _aware(row.updated_at) + _cache_recovery_delay(
+                    progress.attempt
+                ):
                     continue
                 return row.id, row.actor
         return None

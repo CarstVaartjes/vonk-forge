@@ -50,6 +50,10 @@ from .runtime_adapters import (
     RuntimeAdapterError,
     resolve_runtime_adapter,
 )
+from .runtime_image_preparation import (
+    RuntimeImageReceipt,
+    require_runtime_image_authorization,
+)
 from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
 from .source_policy import (
     SourcePolicyError,
@@ -483,6 +487,7 @@ class PreparedBuildLookup(Protocol):
         *,
         expected_architecture: str,
         expected_runtime_interface: str,
+        expected_archive_sha256: str | None = None,
     ) -> PreparedBuildReceipt | None: ...
 
 
@@ -1314,14 +1319,60 @@ class RecipeBuildService:
                 raise RecipeBuildError(
                     "build.result_unavailable", "successful OCI build is unavailable"
                 )
-            if (
-                mapping.state != "ready"
-                or mapping.generation != generation
-                or mapping.recipe_revision_id != build.recipe_revision_id
-            ):
+            if mapping.state != "ready" or mapping.generation != generation:
                 raise RecipeBuildError(
                     "build.mapping_mismatch",
                     "mapping generation does not match the build",
+                )
+            revision = session.get(CatalogDocumentRevision, mapping.recipe_revision_id)
+            if revision is None or revision.content_digest is None:
+                raise RecipeBuildError(
+                    "build.mapping_mismatch", "mapping recipe is unavailable"
+                )
+            # Snapshot SQL provenance, then consult its managed-storage owner
+            # with no transaction open. Select the bound archive, never another
+            # successful output for the same executable build inputs.
+            session.close()
+            receipt = (
+                self._prepared_builds(
+                    build.build_input_sha256,
+                    expected_architecture=_BUILD_RUNTIME_PLATFORM,
+                    expected_runtime_interface=_BUILD_RUNTIME_INTERFACE,
+                    expected_archive_sha256=build.oci_layout_sha256,
+                )
+                if self._prepared_builds is not None
+                else None
+            )
+            if (
+                not isinstance(receipt, RuntimeImageReceipt)
+                or receipt.build_id != build.id
+                or receipt.image_digest != build.image_digest
+                or receipt.oci_archive_sha256 != build.oci_layout_sha256
+                or receipt.image_bytes != build.image_bytes
+            ):
+                raise RecipeBuildError(
+                    "build.result_unavailable",
+                    "exact prepared build archive is unavailable",
+                )
+            try:
+                require_runtime_image_authorization(
+                    session,
+                    recipe_revision_id=revision.id,
+                    current_content_digest=revision.content_digest,
+                    receipt=receipt,
+                )
+            except ValueError as error:
+                raise RecipeBuildError("build.mapping_mismatch", str(error)) from error
+            current_mapping = session.get(ClusterMapping, mapping_id)
+            if (
+                current_mapping is None
+                or current_mapping.state != "ready"
+                or current_mapping.generation != generation
+                or current_mapping.recipe_revision_id != revision.id
+            ):
+                raise RecipeBuildError(
+                    "build.mapping_mismatch",
+                    "mapping changed during archive verification",
                 )
             nodes = tuple(
                 session.scalars(

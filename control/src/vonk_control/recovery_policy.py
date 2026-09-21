@@ -66,8 +66,13 @@ class RecoveryPolicy:
         failed_attempts: int,
         now: datetime,
         retry_after: datetime | None = None,
+        *,
+        ongoing_intent: bool = False,
     ) -> datetime | None:
         """Return a stable, bounded retry time or ``None`` when exhausted.
+
+        ``ongoing_intent=True`` bounds the retry rate instead of the lifetime of
+        authorized intent. Use it only when the owner reconciles exact effects.
 
         ``failed_attempts`` includes the failure just observed.  Stable jitter
         prevents worker restarts from shifting the persisted schedule.
@@ -81,7 +86,7 @@ class RecoveryPolicy:
             or self.max_delay_seconds < self.base_delay_seconds
         ):
             raise ValueError("invalid recovery policy")
-        if failed_attempts >= self.max_failures:
+        if not ongoing_intent and failed_attempts >= self.max_failures:
             return None
         if now.tzinfo is None or (
             retry_after is not None and retry_after.tzinfo is None

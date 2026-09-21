@@ -36,6 +36,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .agent_jobs import (
     AgentJobService,
+    _JsonFlagIsTrue,
     release_owned_reservations_in_session,
     superseded_cancellation_deadline,
 )
@@ -56,6 +57,7 @@ from .install_admission import (
     InstallPreflightExpired,
     refreshable_preflight_is_the_only_blocker,
 )
+from .logging import redact_text
 from .models import (
     AgentNode,
     AgentOperation,
@@ -98,7 +100,11 @@ from .recipe_lifecycle_contract import (
     parse_recipe_lifecycle_result,
     validate_recipe_lifecycle_terminal,
 )
-from .recipe_routes import RecipeRouteService, route_publication_transaction
+from .recipe_routes import (
+    RecipeRouteError,
+    RecipeRouteService,
+    route_publication_transaction,
+)
 from .recipe_runtime_specs import recipe_topology
 from .recipe_start_payloads import (
     RecipeStartPayloadError,
@@ -740,33 +746,20 @@ class RecipeOperationService:
                 "install plan is blocked: " + "; ".join(reasons[:3])
             )
         now = self._clock()
+        with self._sessions() as session:
+            existing_id = self._prepared_installation_id(session, plan)
+        if existing_id is not None:
+            return existing_id
+        try:
+            self._install_admission.refresh_install_receipts(plan, now=now)
+        except InstallPreflightExpired as error:
+            raise RecipeInstallPreflightExpired(str(error)) from error
+        except (RuntimeError, ValueError) as error:
+            raise RecipeOperationConflict(str(error)) from error
         with self._sessions.begin() as session:
-            existing = session.scalar(
-                select(RecipeInstallation)
-                .where(
-                    RecipeInstallation.mapping_id == plan.mapping_id,
-                    RecipeInstallation.mapping_generation == plan.mapping_generation,
-                    RecipeInstallation.recipe_build_id == plan.recipe_build_id,
-                    RecipeInstallation.plan_digest == plan.plan_digest,
-                    RecipeInstallation.state.in_(
-                        ("planned", "installing", "partial", "installed")
-                    ),
-                )
-                .order_by(RecipeInstallation.created_at.desc())
-                .limit(1)
-            )
-            if existing is not None:
-                try:
-                    stored_plan = parse_stored_installation_plan(existing.plan)
-                except RecipeExecutionContractError as error:
-                    raise RecipeOperationConflict(
-                        "stored installation plan is invalid"
-                    ) from error
-                if not stored_plan.compiled_execution_plans:
-                    raise RecipeOperationConflict(
-                        "stored installation has no compiled execution plan"
-                    )
-                return existing.id
+            existing_id = self._prepared_installation_id(session, plan)
+            if existing_id is not None:
+                return existing_id
             try:
                 installation_id = self._install_admission.accept_install_in_session(
                     session, plan, actor=actor, now=now
@@ -790,6 +783,36 @@ class RecipeOperationService:
                     "compiled execution plan was not persisted"
                 )
             return installation_id
+
+    @staticmethod
+    def _prepared_installation_id(session: Session, plan: InstallPlan) -> str | None:
+        existing = session.scalar(
+            select(RecipeInstallation)
+            .where(
+                RecipeInstallation.mapping_id == plan.mapping_id,
+                RecipeInstallation.mapping_generation == plan.mapping_generation,
+                RecipeInstallation.recipe_build_id == plan.recipe_build_id,
+                RecipeInstallation.plan_digest == plan.plan_digest,
+                RecipeInstallation.state.in_(
+                    ("planned", "installing", "partial", "installed")
+                ),
+            )
+            .order_by(RecipeInstallation.created_at.desc())
+            .limit(1)
+        )
+        if existing is None:
+            return None
+        try:
+            stored_plan = parse_stored_installation_plan(existing.plan)
+        except RecipeExecutionContractError as error:
+            raise RecipeOperationConflict(
+                "stored installation plan is invalid"
+            ) from error
+        if not stored_plan.compiled_execution_plans:
+            raise RecipeOperationConflict(
+                "stored installation has no compiled execution plan"
+            )
+        return existing.id
 
     def start_installation(
         self,
@@ -1199,6 +1222,10 @@ class RecipeOperationService:
                 "submitted plan digest does not match preview"
             )
         now = self._clock()
+        try:
+            self._install_admission.refresh_install_receipts(plan, now=now)
+        except (RuntimeError, ValueError) as error:
+            raise RecipeOperationConflict(str(error)) from error
         with self._sessions.begin() as session:
             try:
                 installation_id = self._install_admission.accept_install_in_session(
@@ -2475,19 +2502,17 @@ class RecipeOperationService:
                 # establish whether a hook or runtime effect completed.
                 return
         if (
-            job.kind == "recipe.start"
-            and state == "failed"
+            state == "failed"
             and operation.state == "waiting-for-operator"
             and operation.retry_disposition == "retry"
             and operation.retry_disposition_attempt == operation.current_attempt
             and isinstance(result, Mapping)
         ):
             parsed = validate_result_for_operation(operation.kind, result, state=state)
-            if (
-                isinstance(parsed, AgentFailureResult)
-                and parsed.error_code == "runtime_observation_unavailable"
-                and parsed.failure_kind is AgentFailureKind.TEMPORARY_DEPENDENCY
-            ):
+            if isinstance(parsed, AgentFailureResult):
+                # The queue owner has already admitted this exact retry using
+                # its failure policy. Do not independently restate that policy
+                # here or turn its scheduled cleanup into a terminal failure.
                 return
         if state not in {"succeeded", "failed"} or not isinstance(result, Mapping):
             raise RecipeOperationConflict("recipe agent result is invalid")
@@ -3258,6 +3283,166 @@ class RecipeOperationService:
                 )
                 or progressed
             )
+        return progressed
+
+    def reconcile_retired_operations(self) -> bool:
+        """Resume retired owners through the ordinary exact cleanup path.
+
+        A failed job with typed completed cancellation is the retirement
+        handoff. Successful cleanup permits a fresh request through the
+        cancellation contract's recovery disposition. Five seconds bounds retry
+        traffic per owner; the original job reports the next reconciliation time. No
+        execution slot or SQL transaction spans the child admission call.
+        """
+        now = self._clock()
+        interval = timedelta(seconds=5)
+        with self._sessions() as session:
+            candidates = tuple(
+                session.scalars(
+                    select(Job)
+                    .where(
+                        Job.kind.in_(
+                            {
+                                "recipe.start",
+                                "recipe.stop",
+                                "recipe.install",
+                                "recipe.uninstall",
+                            }
+                        ),
+                        Job.state == "failed",
+                        _JsonFlagIsTrue(Job.result, "cancelled"),
+                        _JsonFlagIsTrue(Job.result, "cancel_requested"),
+                        Job.result["recovery"].as_string().is_(None),
+                        Job.updated_at <= now - interval,
+                    )
+                    .order_by(Job.updated_at, Job.id)
+                    # At most one child admission/publication per worker tick,
+                    # matching the route worker's one-effect scheduling unit.
+                    # Updating oldest-first candidates rotates blocked owners.
+                    .limit(1)
+                )
+            )
+        progressed = False
+        for job in candidates:
+            completed = False
+            request_id = str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:retirement-cleanup:{job.id}")
+            )
+            try:
+                _validated_result(job.kind, job.result)
+                owner_id = _required_string(job.payload, "owner_id")
+                ordinal = _bound_workload_intent(job)
+                kind = (
+                    "recipe.stop"
+                    if job.kind in {"recipe.start", "recipe.stop"}
+                    else "recipe.uninstall"
+                )
+                owner_kind = "run" if kind == "recipe.stop" else "installation"
+                if job.payload.get("owner_kind") != owner_kind:
+                    raise RecipeOperationConflict("retired owner binding is invalid")
+                with self._sessions() as session:
+                    existing = self._idempotent_in_session(
+                        session,
+                        request_id,
+                        kind,
+                        None,
+                        owner_kind=owner_kind,
+                        owner_id=owner_id,
+                    )
+                    current = _intent_is_current(session, ordinal, job.targets)
+                    owner = session.get(
+                        RecipeRun if kind == "recipe.stop" else RecipeInstallation,
+                        owner_id,
+                    )
+                    completed = (
+                        owner is not None
+                        and owner.state
+                        == ("stopped" if kind == "recipe.stop" else "uninstalled")
+                        and session.scalar(
+                            select(ResourceReservation.id)
+                            .where(
+                                ResourceReservation.owner_kind
+                                == ("run" if kind == "recipe.stop" else "installation"),
+                                ResourceReservation.owner_id == owner_id,
+                                ResourceReservation.state == "active",
+                            )
+                            .limit(1)
+                        )
+                        is None
+                    )
+                if completed:
+                    reason = "exact cleanup confirmed; capacity released"
+                elif existing is not None:
+                    if existing.state in {
+                        "failed",
+                        "cancelled",
+                        "waiting-for-operator",
+                    }:
+                        reason = (
+                            f"exact cleanup {existing.id} is {existing.state}: "
+                            f"{existing.status_reason or 'inspect its retained failure evidence'}; "
+                            "inspect/correct the blocker and submit a new exact stop or uninstall; capacity retained"
+                        )
+                    else:
+                        reason = f"exact cleanup {existing.id} is {existing.state}; capacity retained until its receipt"
+                elif not current:
+                    reason = "newer workload intent owns cleanup; uncertain capacity remains reserved"
+                else:
+                    if kind == "recipe.stop":
+                        plan = self.preview_stop(owner_id)
+                        cleanup = self.stop(
+                            owner_id,
+                            plan_digest=plan.plan_digest,
+                            actor=job.actor,
+                            request_id=request_id,
+                            workload_intent_ordinal=ordinal,
+                        )
+                    else:
+                        plan = self.preview_uninstall(owner_id)
+                        cleanup = self.uninstall(
+                            owner_id,
+                            plan_digest=plan.plan_digest,
+                            actor=job.actor,
+                            request_id=request_id,
+                            workload_intent_ordinal=ordinal,
+                        )
+                    progressed = True
+                    reason = f"exact cleanup {cleanup.id} is {cleanup.state}; capacity retained until its receipt"
+            except (
+                RecipeOperationConflict,
+                RecipeRouteError,
+                ValueError,
+                TypeError,
+                KeyError,
+                OSError,
+            ) as error:
+                # One unavailable or invalid owner never starves unrelated
+                # cleanup. The normal admission path retains its blockers.
+                reason = f"exact cleanup blocked: {redact_text(str(error))}"
+            with self._sessions.begin() as session:
+                stored = session.get(Job, job.id, with_for_update=True)
+                if (
+                    stored is not None
+                    and stored.state == "failed"
+                    and stored.result == job.result
+                ):
+                    stored.status_reason = (
+                        f"operator retired; {reason}"
+                        + (
+                            ""
+                            if completed
+                            else f"; next reconciliation at {(now + interval).isoformat()}"
+                        )
+                    )[:1024]
+                    if completed:
+                        stored.result = _validated_result(
+                            stored.kind,
+                            {
+                                **(stored.result or {}),
+                                "recovery": "retry creates a new operation",
+                            },
+                        )
+                    stored.updated_at = now
         return progressed
 
     def _cancel_build(

@@ -3,8 +3,9 @@
 This runbook describes implemented workload recovery. The
 [coordination architecture](../architecture-overview.md#coordination-and-deadlock-prevention)
 sets the required lock and scheduling boundaries; the
-[implementation plan](../plans/resilient-artifact-storage.md) tracks enforcement
-and artifact/build recovery work that remains pending. That plan does not make
+[implementation plan](../plans/resilient-artifact-storage.md) records implemented
+coordination and artifact-storage work and the evidence still required for
+deployed recovery. That plan does not make
 arbitrary jobs, hooks, or upgrades safe to replay.
 
 An accepted workload request remains the owner of its preparation, installation,
@@ -25,6 +26,13 @@ transfer or read-only preflight. It retains the exact operation, payload and
 progress, and issues a fresh attempt under current authorization. Finished cache
 objects are reused and partial files resume at their retained offset. A pending
 retry remains visible as pending work, with a reason and next retry time.
+
+Safe retries of current intent retain a bounded retry rate without a lifetime
+attempt ceiling. A delayed preflight, runtime, cancellation, or route observation
+keeps its exact dependency and slows its checks after the normal observation
+window. Neither an expired lease nor an overdue observation proves that an
+effect stopped. Current authority, cancellation, and newer intent are checked
+before further work.
 
 Lifecycle recovery requires an agent advertising exact lifecycle resumption.
 Installation, Start, Stop and uninstall reconcile the exact stored receipt or
@@ -49,6 +57,26 @@ resolved. Agent restart or delayed success cannot reactivate the old workload.
 Cancellation of a known invalidated order is an informational no-op. It does not
 fail the replacement or accept an old result as current success. Unrelated
 workloads and shared immutable caches remain outside the cleanup scope.
+
+Retirement fences an exhausted order but retains uncertain runtime and disk
+reservations. The Controller follows the ordinary exact stop/uninstall path,
+retries classified temporary cleanup failures, and releases capacity only after
+cleanup succeeds. An open launch budget refuses retirement. A denied or invalid
+cleanup remains an explicit blocker with capacity retained.
+
+## Missing cache recovery
+
+Automatic profile cache recovery retains the accepted model and image identities
+and workload-intent ordinal. It can create a linked application receipt after a
+pre-effect cache loss, without raising that intent above a newer request. An
+explicit operator retry retains its cancellation-fencing behavior.
+
+Missing exact bytes expose a Prepare cache dependency and a next check. Restoring
+the same bytes permits recovery; a rebuild with a different image or archive
+digest requires an explicit new load. Recovery checks the binding again before
+dispatching the child operation. The authorized preparation path can reuse an
+existing verified build for a currently authorized recipe revision with the same
+executable build inputs.
 
 ## Route and CLI recovery
 

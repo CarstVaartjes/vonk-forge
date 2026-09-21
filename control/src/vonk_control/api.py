@@ -1342,7 +1342,10 @@ def production_app() -> FastAPI:
     from .fleet_events import FleetEventRepository
     from .fleet_projection import FleetProjection
     from .fleet_stream import FleetStream
-    from .install_admission import InstallAdmissionService
+    from .install_admission import (
+        InstallAdmissionService,
+        authorize_installation_runtime_images,
+    )
     from .jobs import JobService
     from .library_projection import LibraryProjection
     from .logging import DatabaseJobLogStore
@@ -1587,6 +1590,7 @@ def production_app() -> FastAPI:
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=execution_plans.compile_installation,
+            runtime_image_authorizer=authorize_installation_runtime_images,
         ),
         run_admission=RunAdmissionService(
             sessions,

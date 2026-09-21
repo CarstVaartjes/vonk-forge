@@ -62,6 +62,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
     RuntimeImageReceipt,
+    persist_runtime_image_receipt,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -2261,11 +2262,55 @@ def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> 
         )
 
 
+def _authorize_distribution_fixture(sessions, plan, revision, now):
+    """Wire/import tests start after the image verifier has produced its receipt."""
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        assert build.image_digest is not None
+        assert build.oci_layout_sha256 is not None
+        assert build.image_bytes is not None
+        receipt = RuntimeImageReceipt(
+            schema_version=2,
+            source="controller-build",
+            distribution_publisher=revision.publisher,
+            distribution_slug=revision.slug,
+            distribution_content_sha256=revision.content_digest,
+            registry_manifest_digest=None,
+            image_digest=build.image_digest,
+            platform_manifest_digest=build.image_digest,
+            oci_archive_sha256=build.oci_layout_sha256,
+            image_bytes=build.image_bytes,
+            local_image_config_id="sha256:" + "c" * 64,
+            local_image_reference=None,
+            architecture="linux-arm64",
+            runtime_interface="vonk.runtime.v1",
+            runtime_interface_label="v1",
+            archive_path="/verified/fixture/archive",
+            recorded_at=now.isoformat(),
+            build_id=build.id,
+            build_input_sha256=build.build_input_sha256,
+            runtime_adapter=_CACHED_ADAPTER.adapter_id,
+            runtime_adapter_sha256=_CACHED_ADAPTER.digest,
+        )
+        persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=revision.id,
+            original_content_digest=revision.content_digest,
+            effective_execution_key="a" * 64,
+            receipt=receipt,
+            verified_at=now,
+        )
+    return receipt
+
+
 def test_distribution_reimports_one_build_digest_for_every_mapped_node(
     tmp_path: Path,
 ) -> None:
     sessions, bundles, now, builder, revision = setup(tmp_path)
-    service = RecipeBuildService(sessions, bundles=bundles)
+    service = RecipeBuildService(
+        sessions, bundles=bundles, prepared_builds=lambda *_args, **_kwargs: receipt
+    )
     plan = service.plan(revision.id, builder, now=now)
     service.record_success(
         plan.build_id,
@@ -2275,6 +2320,7 @@ def test_distribution_reimports_one_build_digest_for_every_mapped_node(
         image_bytes=500,
         now=now,
     )
+    receipt = _authorize_distribution_fixture(sessions, plan, revision, now)
     target = "spk_" + "2" * 32
     with sessions.begin() as session:
         session.add(
@@ -2348,7 +2394,9 @@ def test_image_distribution_requires_the_previewed_plan_digest(
     tmp_path: Path,
 ) -> None:
     sessions, bundles, now, builder, revision = setup(tmp_path)
-    builds = RecipeBuildService(sessions, bundles=bundles)
+    builds = RecipeBuildService(
+        sessions, bundles=bundles, prepared_builds=lambda *_args, **_kwargs: receipt
+    )
     build_plan = builds.plan(revision.id, builder, now=now)
     builds.record_success(
         build_plan.build_id,
@@ -2358,6 +2406,7 @@ def test_image_distribution_requires_the_previewed_plan_digest(
         image_bytes=500,
         now=now,
     )
+    receipt = _authorize_distribution_fixture(sessions, build_plan, revision, now)
     target = "spk_" + "2" * 32
     with sessions.begin() as session:
         session.add(

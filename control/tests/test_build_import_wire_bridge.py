@@ -39,7 +39,7 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.run_admission import RunAdmissionService
 
-from .test_recipe_builds import RecordingQueue, setup
+from .test_recipe_builds import RecordingQueue, _authorize_distribution_fixture, setup
 
 
 @pytest.fixture(scope="session")
@@ -77,7 +77,9 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
 
-    builds = RecipeBuildService(sessions, bundles=bundles)
+    builds = RecipeBuildService(
+        sessions, bundles=bundles, prepared_builds=lambda *_args, **_kwargs: receipt
+    )
     plan = builds.plan(revision.id, node_id, now=now)
     operations = RecipeOperationService(
         sessions,
@@ -131,6 +133,7 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
             now=now,
         )
 
+    receipt = _authorize_distribution_fixture(sessions, plan, revision, now)
     with sessions.begin() as session:
         mapping = ClusterMapping(
             recipe_revision_id=revision.id,

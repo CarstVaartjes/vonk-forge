@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .cluster_mappings import validate_mapping_parameters
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
+    CompiledRuntimeImage,
     validate_compiled_launch_payload,
 )
 from .inventory_repository import InventoryRepository, InventorySnapshotView
@@ -40,6 +41,7 @@ from .recipe_runtime_specs import (
     recipe_topology,
     resolve_recipe_entities,
 )
+from .runtime_image_preparation import require_runtime_image_authorization
 from .runtime_preflight import (
     admission_blockers,
     latest_result,
@@ -146,12 +148,14 @@ class InstallAdmissionService:
         disk_floor_bytes: int = 10_000_000_000,
         compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]]
         | None = None,
+        runtime_image_authorizer: Callable[[Session, InstallPlan], None] | None = None,
     ) -> None:
         self._sessions = sessions
         self._inventory = InventoryRepository(sessions)
         self._inventory_max_age = inventory_max_age
         self._disk_floor = disk_floor_bytes
         self._compiled_plan_provider = compiled_plan_provider
+        self._runtime_image_authorizer = runtime_image_authorizer
 
     def plan_install(
         self,
@@ -190,18 +194,11 @@ class InstallAdmissionService:
                     raise ValueError(
                         "successful recipe build does not match the mapping"
                     )
-                canonical_build_revision = session.get(
-                    CatalogDocumentRevision, build.recipe_revision_id
-                )
                 if (
                     build.state != "succeeded"
                     or build.image_digest is None
                     or build.image_bytes is None
-                    or canonical_build_revision is None
-                    or canonical_build_revision.kind != "recipe"
-                    or canonical_build_revision.state != "active"
-                    or canonical_build_revision.content_digest
-                    != revision.content_digest
+                    or build.oci_layout_sha256 is None
                 ):
                     raise ValueError(
                         "successful recipe build does not match the mapping"
@@ -274,6 +271,10 @@ class InstallAdmissionService:
                     "exact model license authority is unavailable"
                 )
             compiled_plan_error: str | None = None
+            # The snapshot is complete. Production compilation consults managed
+            # storage, so release the read transaction before invoking it.
+            if _session is None:
+                session.close()
             if (
                 compiled_execution_plans is None
                 and self._compiled_plan_provider is not None
@@ -307,6 +308,20 @@ class InstallAdmissionService:
                 for node_id, value in (compiled_execution_plans or {}).items()
                 if isinstance(node_id, str) and isinstance(value, Mapping)
             }
+            # Build input identity belongs to build resolution; current-revision
+            # authorization and present verified bytes belong to the compiler's
+            # runtime-image resolver. The recipe that originally produced an
+            # archive is provenance, not the recipe allowed to consume it now.
+            # Bind that authorized receipt back to the exact selected result so
+            # reuse cannot silently select a different build or archive.
+            if build is not None and any(
+                not _compiled_build_matches(value, build, revision.content_digest)
+                for value in compiled_plan_by_node.values()
+            ):
+                compiled_plan_error = (
+                    "compiled runtime image differs from the selected build"
+                )
+                compiled_plan_by_node = {}
             legal_admission = territorial_admission(
                 model_document,
                 operation="install",
@@ -602,8 +617,22 @@ class InstallAdmissionService:
         )
 
     def accept_install(self, plan: InstallPlan, *, actor: str, now: datetime) -> str:
+        self.refresh_install_receipts(plan, now=now)
         with self._sessions.begin() as session:
             return self.accept_install_in_session(session, plan, actor=actor, now=now)
+
+    def refresh_install_receipts(self, plan: InstallPlan, *, now: datetime) -> None:
+        """Recheck managed bytes before entering the acceptance transaction."""
+        if self._compiled_plan_provider is None:
+            return
+        fresh = self.plan_install(plan.mapping_id, plan.recipe_build_id, now=now)
+        if fresh.plan_digest != plan.plan_digest or not fresh.allowed:
+            if (
+                fresh.plan_digest == plan.plan_digest
+                and _refreshable_preflight_is_the_only_blocker(plan, fresh)
+            ):
+                raise InstallPreflightExpired("install.plan_stale_or_blocked")
+            raise InstallPlanConflict("install.plan_stale_or_blocked")
 
     def accept_install_in_session(
         self,
@@ -691,6 +720,13 @@ class InstallAdmissionService:
             != tuple((node.node_id, node.rank, node.role) for node in plan.nodes)
         ):
             raise InstallPlanConflict("install.plan_stale")
+        if self._runtime_image_authorizer is not None:
+            try:
+                self._runtime_image_authorizer(session, plan)
+            except (TypeError, ValueError) as error:
+                raise InstallPlanConflict(
+                    "install.runtime_image_authority_stale"
+                ) from error
         try:
             resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
@@ -918,6 +954,42 @@ def _compiled_image_digest(
 def _compiled_plan_image_matches(plan: InstallPlan) -> bool:
     digest = _compiled_image_digest(plan.compiled_plan_by_node)
     return digest is not None and digest == plan.image_digest
+
+
+def _compiled_build_matches(
+    payload: Mapping[str, object], build: RecipeBuild, recipe_digest: str
+) -> bool:
+    identity = payload.get("identity")
+    image = payload.get("runtime_image")
+    return (
+        isinstance(identity, Mapping)
+        and identity.get("recipe_revision_sha256") == recipe_digest
+        and identity.get("build_input_sha256") == build.build_input_sha256
+        and isinstance(image, Mapping)
+        and image.get("source") == "controller-build"
+        and image.get("build_id") == build.id
+        and image.get("image_digest") == build.image_digest
+        and image.get("oci_layout_sha256") == build.oci_layout_sha256
+        and image.get("image_bytes") == build.image_bytes
+    )
+
+
+def authorize_installation_runtime_images(session: Session, plan: InstallPlan) -> None:
+    """Recheck current SQL grants while acceptance owns its short transaction."""
+    for payload in plan.compiled_plan_by_node.values():
+        identity = payload["identity"]
+        if not isinstance(identity, Mapping):
+            raise TypeError("compiled execution identity is unavailable")
+        execution_key = identity.get("execution_sha256")
+        if not isinstance(execution_key, str):
+            raise TypeError("compiled execution key is unavailable")
+        require_runtime_image_authorization(
+            session,
+            recipe_revision_id=plan.recipe_revision_id,
+            current_content_digest=plan.recipe_content_sha256,
+            effective_execution_key=execution_key,
+            receipt=CompiledRuntimeImage.model_validate(payload["runtime_image"]),
+        )
 
 
 def _node_document(node: InstallNodePlan) -> dict[str, object]:
