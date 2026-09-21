@@ -110,7 +110,7 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         retry = next(row for row in applications if row.id != first.id)
         assert retry.progress["retry_of_application_id"] == first.id
         assert retry.progress["attempt"] == 2
-        assert retry.progress["workload_intent_ordinal"] == original_ordinal + 1
+        assert retry.progress["workload_intent_ordinal"] == original_ordinal
         retry_scope = require_mapping(retry.plan["scope"], "retry scope")
         assert tuple(require_sequence(retry_scope["node_ids"], "retry nodes")) == tuple(
             nodes
@@ -182,10 +182,10 @@ def test_cache_recovery_refuses_access_and_integrity_failures(tmp_path: Path) ->
             assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
 
 
-def test_cache_recovery_replans_an_actually_missing_build_archive(
+def test_cache_recovery_keeps_missing_exact_build_archive_as_a_dependency(
     tmp_path: Path,
 ) -> None:
-    sessions, _lifecycle, service, _profile, _desired, first, child_id, nodes = (
+    sessions, _lifecycle, service, _profile, _desired, first, child_id, _nodes = (
         _failed_profile(tmp_path)
     )
     adapter = cast(RunSwitchFleetProfileAdapter, service._switch_adapter)
@@ -252,29 +252,20 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
     _typed_cache_failure(sessions, first.id, child_id, "runtime_image.cache_missing")
 
     assert service.tick() is True
-    assert service.tick() is True
+    assert service.tick() is False
     with sessions() as session:
-        retry = session.scalar(
-            select(FleetProfileApplication)
-            .where(FleetProfileApplication.id != first.id)
-            .order_by(FleetProfileApplication.created_at.desc())
+        applications = list(session.scalars(select(FleetProfileApplication)))
+        assert len(applications) == 1
+        blocked = applications[0]
+        assert blocked.id == first.id and blocked.state == "failed"
+        assert "profile.recovery_cache_pending" in (blocked.status_reason or "")
+        assert "Prepare cache" in (blocked.status_reason or "")
+        assert archive_digest in (blocked.status_reason or "")
+        assert "Next cache check:" in (blocked.status_reason or "")
+        children = list(
+            session.scalars(select(Job).where(Job.kind == "recipe.run-switch.v2"))
         )
-        assert retry is not None
-        switch_state = require_mapping(
-            retry.progress["switch_adapter"], "profile switch state"
-        )
-        retry_child = session.get(Job, switch_state["active_operation_id"])
-        assert retry_child is not None
-        child_plan = require_mapping(retry_child.payload["plan"], "child plan")
-        child_build = require_mapping(child_plan["build"], "child build")
-        child_phases = require_sequence(child_plan["phases"], "child phases")
-        first_phase = require_mapping(child_phases[0], "first child phase")
-        assert child_build["state"] == "planned"
-        assert first_phase["subphase"] == "container-build"
-        retry_scope = require_mapping(retry.plan["scope"], "retry scope")
-        assert tuple(require_sequence(retry_scope["node_ids"], "retry nodes")) == tuple(
-            nodes
-        )
+        assert len(children) == 1 and children[0].id == child_id
 
 
 def test_malformed_failed_profile_does_not_block_unrelated_queued_work(
