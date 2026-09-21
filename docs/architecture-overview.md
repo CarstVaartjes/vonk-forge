@@ -130,9 +130,10 @@ requires both current authorization and the managed receipt with present bytes.
 identities, coordination, and reported results; they do not independently prove
 that an archive is available.
 
-Recent cache-recovery work already reconciles absent bytes after a NAS restore,
-reuses completed transfers, and rebuilds missing source images. Preserve that
-behavior. The [implementation plan](plans/resilient-artifact-storage.md) records
+Recent cache-recovery work already reconciles absent bytes after a NAS restore
+and reuses completed transfers. The authorized preparation path can rebuild
+missing source images; a changed output digest requires an explicit new workload
+binding. The [implementation plan](plans/resilient-artifact-storage.md) records
 the completed model-availability and image-receipt changes and their repository
 evidence. Deployed recovery and physical Spark acceptance remain separate
 checks. Future ownership changes must update all consumers and retire the old

@@ -47,11 +47,11 @@ boundary, with the exact code and test/deployment evidence.
 
 | Action | Completion condition | Status at this review |
 | --- | --- | --- |
-| Recover accepted intent automatically | A temporary dependency failure resumes the same authorized request after recovery, without retirement, Idle/reapply, or another recipe revision. Waiting exposes its cause, owner, dependency, next attempt, and deadline. Completed assets and effects are reused. | Implementation and failure/recovery verification required. |
-| Make retirement and supersession safe | Observe or clean up the exact old runtime effects before releasing their reservations or admitting conflicting replacement work. Expired leases and terminal database labels alone cannot prove absence. Delayed results cannot revive retired intent. | Implementation and concurrent recovery verification required. |
-| Align build reuse with installation admission | An editorial recipe successor with identical executable inputs can reuse an exact verified build under current revision authorization. Preparation, compilation, and install admission agree. Changed executable inputs or incompatible receipts cannot inherit the old result. | Implementation and connected producer/consumer verification required. |
-| Apply the budget policy below | Estimated demand can produce a useful warning without removing real capacity, isolation, authorization, integrity, or exact-plan checks. Any automated smaller request or alternative runtime is explicitly permitted and bound in the accepted plan. | Audit and focused boundary verification required. |
-| Prove the recovery matrix below | Record failure injection, restart, response loss, cancellation/supersession, storage loss, and eventual recovery through the real owners. Run physical qualification separately after the corresponding deployment. | No new fault injection or physical acceptance established by this review. |
+| Recover accepted intent automatically | A temporary dependency failure resumes the same authorized intent after recovery, without retirement, Idle/reapply, or another recipe revision. Waiting exposes its cause, owner, dependency, next attempt, and deadline. Completed assets and effects are reused. | Implemented in this review branch for classified safe-effect retries and typed pre-effect profile cache loss. Exact identities and current workload priority are retained. Combined verification is recorded below; deployment and physical qualification remain open. |
+| Make retirement and supersession safe | Observe or clean up the exact old runtime effects before releasing their reservations or admitting conflicting replacement work. Expired leases and terminal database labels alone cannot prove absence. Delayed results cannot revive retired intent. | Implemented in this review branch. Retirement retains capacity and schedules normal exact cleanup; temporary cleanup failure retries the same operation. PostgreSQL regressions cover release, late results, launch budgets, and newer intent. |
+| Align build reuse with installation admission | An editorial recipe successor with identical executable inputs can reuse an exact verified build under current revision authorization. Preparation, compilation, and install admission agree. Changed executable inputs or incompatible receipts cannot inherit the old result. | Connected preparation/admission corrections and verification are part of this review branch. Current authorization and present verified bytes remain mandatory. |
+| Apply the budget policy below | Estimated demand can produce a useful warning without removing real capacity, isolation, authorization, integrity, or exact-plan checks. Any automated smaller request or alternative runtime is explicitly permitted and bound in the accepted plan. | The historical blanket warning policy is superseded below. No allocator, kernel, integrity, or authorization check was weakened, and no automatic context/image substitution was introduced. |
+| Prove the recovery matrix below | Record failure injection, restart, response loss, cancellation/supersession, storage loss, and eventual recovery through the real owners. Run physical qualification separately after the corresponding deployment. | Local process-death and PostgreSQL fault/recovery tests are recorded below. Deployment and physical fault injection remain open. |
 | Maintain this handover | Retain one current action list, refresh dated observations, and keep repository, CI/publication, Controller, and physical results separate. | This document replaces the archive's conflicting current instructions. |
 
 Follow the existing [workload recovery path](workload-recovery.md) and expose a
@@ -79,16 +79,24 @@ preserve the real resource and ownership guarantees of that contract. Record
 the measured value and limit when a bound fires so the operator can distinguish
 a forecast from an actual shortage.
 
-A retry uses the existing exact request and accepted inputs. A smaller context,
+Recovery retains the accepted inputs and current workload intent. An agent-effect
+retry retains its operation; profile cache recovery may create a linked
+application receipt without advancing the workload-intent ordinal. Explicit
+operator retry retains its existing cancellation-fencing behavior. A smaller context,
 different memory setting, alternative engine, or replacement image is allowed
 automatically only when the accepted plan explicitly authorizes and identifies
 that alternative. Otherwise it is a new proposed plan for an explicit operator
 decision. A changed rebuilt digest cannot silently replace an image already
 bound to a profile or running workload.
 
+Missing exact cache bytes remain an actionable Prepare cache dependency. A rebuilt
+image with a different image/archive identity requires an explicit new load;
+automatic recovery checks the binding again before child dispatch.
+
 ## Recovery acceptance matrix
 
-These are required acceptance targets, not passing results. For each scenario,
+These remain the acceptance targets; the evidence below identifies the scenarios
+already exercised. For each scenario,
 record the request, parent and child operations, attempt fences, exact artifact
 and plan identities, injected fault, recovery time, configured retry ceiling,
 persisted deadline, and observed outcome. Keep logs redacted and bounded.
@@ -123,6 +131,34 @@ SQLite, or unit status transitions alone do not prove these boundaries.
 Physical GLM loading, NVIDIA behavior, fabric, inference, and recovery on the
 Sparks remain a separate qualification after deployment; a synthetic ARM64 pass
 does not close that step.
+
+## Repository verification for this review
+
+The integrated work is on `codex/resilience-integration`, based on platform
+`4d79def445ce76080927d0871f8d58bd79550e57`, with recipe-library checkout
+`068930061f3b76a519ac3ffcc137ab7a9f067010`. The library checkout was clean.
+This is source and local test evidence; the changes have not been deployed.
+
+Regressions were reproduced before their fixes: permanent retry exhaustion,
+premature retirement capacity release, failed temporary cleanup, successor
+recipe build rejection, changed-image adoption, mixed-profile recovery refusal,
+and starvation of a recovered parked parent.
+
+| Validation boundary | Result |
+| --- | --- |
+| Full Controller hermetic suite (`control/tests`, excluding lane tests) | 2,297 passed, 3 skipped. |
+| Standalone acceptance/contract suite (`tests`, excluding lane tests) | 798 passed, 11 skipped; 45 subtests passed. |
+| PostgreSQL recovery/concurrency selection in OrbStack | 48 passed. Includes real result-worker process death, lost committed responses, old exhausted-row recovery, one-winner claims, stale fences, retirement cleanup, denied cleanup, launch budgets, newer intent, and parked-parent fairness. |
+| Linux ARM64 Controller/Spark wire lane in OrbStack | 676 passed, 19 skipped; separate publication selection: 1 passed. The lane used the exact library checkout above with `--any-recipe-revision`. |
+| Recovery phase suite after integration | 68 passed. Cold compilation and receipt-order disagreement remain faulty for six and four persisted retry cycles respectively before recovery is allowed. |
+| Static and generated contracts | Ruff, touched-file formatting, Python types (one existing reviewed exception), browser type/build gate, generated Rust wire check, coordination scanner (zero exceptions), documentation links, and whitespace checks passed. OpenAPI and Python/TypeScript clients regenerated. |
+| Supply-chain evidence | Manifest regenerated and verified with no errors. |
+
+The process-death test kills independent result-recording workers after their
+PostgreSQL commit; it does not claim to kill a physical Spark or GPU runtime.
+Physical stop/load, route readiness, inference, and recovery under injected
+hardware faults remain unperformed in this review. No database schema change,
+live retirement, cache eviction, profile application, or deployment was made.
 
 ## Evidence record maintenance
 

@@ -11,18 +11,29 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select
-from vonk_control.fleet_profile_contract import FleetProfilePreview
+from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfilePreview
 from vonk_control.fleet_profiles import (
+    FleetProfileConflict,
+    FleetProfileService,
     RunSwitchFleetProfileAdapter,
     build_production_fleet_profile_service,
 )
-from vonk_control.models import AgentNode, FleetProfileApplication, Job, RecipeBuild
+from vonk_control.models import (
+    AgentNode,
+    CatalogDocumentRevision,
+    FleetProfileApplication,
+    Job,
+    RecipeBuild,
+    RecipeInstallation,
+)
 from vonk_control.recipe_operations import _record_build_evidence
+from vonk_control.run_switch_contract import RunSwitchPlan
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
 from .test_fleet_profile_cache_recovery import _typed_cache_failure
 from .test_fleet_profile_recovery_current import _failed_profile
-from .test_fleet_profiles import NOW, _uuid
+from .test_fleet_profiles import NOW, _exact_preparation, _SwitchAdapter, _uuid
+from .test_recipe_operations import installed_recipe, setup_services
 
 
 def _complete_rebuild(sessions, storage, *, archive: bytes, image_digest: str) -> None:
@@ -178,4 +189,97 @@ def test_restored_exact_bytes_recover_only_current_profile_intent(
             )
             assert len(children) == 2
             child = next(row for row in children if row.id != child_id)
-            assert child.payload["plan"]["image_digest"] == image_digest
+            plan = RunSwitchPlan.model_validate_json(json.dumps(child.payload["plan"]))
+            assert plan.image_digest == image_digest
+
+
+@pytest.mark.parametrize("kept_needs_work", [False, True])
+def test_retry_requires_preparation_only_when_an_assignment_needs_work(
+    tmp_path: Path, kept_needs_work: bool
+) -> None:
+    """An unchanged installed assignment cannot block a different assignment's retry."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=_uuid(920)
+    )
+    other_node = "spk_" + "2" * 32
+    with sessions.begin() as session:
+        session.add(AgentNode(node_id=other_node, state="active", last_seen_at=NOW))
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+        assert revision is not None
+        selector = f"{revision.publisher}/{revision.slug}"
+
+    attest_kept = False
+
+    def preparation(_session, _assignment, node_ids):
+        if node_ids == nodes and not attest_kept:
+            raise ValueError("Kept installation has no current cache observation")
+        return _exact_preparation(node_ids)
+
+    service = FleetProfileService(
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=_SwitchAdapter(),
+        preparation_provider=preparation,
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Keep installed and load another Spark",
+                "assignments": [
+                    {
+                        "recipe_selector": selector,
+                        "spark_ids": list(nodes),
+                        "desired_state": "installed",
+                    },
+                    {
+                        "recipe_selector": selector,
+                        "spark_ids": [other_node],
+                        "desired_state": "running",
+                        "assignment_name": "other-chat",
+                    },
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    assert preview.allowed and len(preview.preparations) == 1
+    kept = next(item for item in preview.assignments if tuple(item.node_ids) == nodes)
+    assert kept.actions == ["keep"]
+    first = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(921),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        application = session.get(FleetProfileApplication, first.id)
+        assert application is not None
+        application.state = "failed"
+        application.status_reason = "Worker interrupted before issuing the switch"
+        if kept_needs_work:
+            installation = session.get(RecipeInstallation, installed.owner_id)
+            assert installation is not None
+            installation.state = "failed"
+    if kept_needs_work:
+        attest_kept = True
+        current = service.preview(profile.id)
+        assert current.allowed
+        assert next(
+            item
+            for item in current.assignments
+            if item.assignment_id == kept.assignment_id
+        ).actions == ["switch"]
+        with pytest.raises(FleetProfileConflict, match="recovery_identity_unavailable"):
+            service.retry(first.id, request_key=_uuid(922), actor="admin")
+    else:
+        retried = service.retry(first.id, request_key=_uuid(922), actor="admin")
+        assert retried.retry_of_application_id == first.id
+        assert retried.state == "queued"

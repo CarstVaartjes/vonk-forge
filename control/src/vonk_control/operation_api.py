@@ -1705,7 +1705,7 @@ class _DurableOperationProjection:
             job.updated_at = now
 
     def retire_job(self, job_id: str) -> None:
-        """Fail a parked job whose bounded retry budget is spent.
+        """Retire an exhausted order and retain its effects for exact cleanup.
 
         The refusal is raised inside this transaction and rolls it back, so a
         live or still-recoverable operation is left exactly as it was.

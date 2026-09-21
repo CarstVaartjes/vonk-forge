@@ -1805,15 +1805,19 @@ def test_preflight_refresh_after_repeated_cold_compiles_recovers_exact_plan(
     tmp_path: Path,
 ) -> None:
     """Freshness expiry backs off without abandoning accepted exact intent."""
-    switch = _cold_compile_switch(tmp_path, slow_compiles=6)
+    switch = _cold_compile_switch(tmp_path, slow_compiles=99)
     service, operation = switch.service, switch.operation
     with switch.sessions() as session:
         original = dict(session.get(Job, operation.operation_id).payload)
+    # A phase may compile more than once while refreshing bound build evidence.
+    # Keep the fault present until six durable failures have actually occurred,
+    # independent of the number of compiler calls made by each phase attempt.
     for _ in range(60):
         view = service.get(operation.operation_id)
         assert view.state in {"queued", "running"}, view.status_reason
-        if "runtime-install" in switch.executor.events:
+        if (_result(view).retry_attempt or 1) >= 7:
             break
+        assert "runtime-install" not in switch.executor.events
         switch.drive()
         held = service.get(operation.operation_id)
         if (
@@ -1825,7 +1829,16 @@ def test_preflight_refresh_after_repeated_cold_compiles_recovers_exact_plan(
             )
             if held.result.observation_due_at > switch.clock.now:
                 assert service.tick() is False
-    assert switch.executor.events.count("runtime-plan") == 7
+    else:
+        pytest.fail("cold compilation never exercised six failed recovery cycles")
+    assert _result(view).retry_attempt == 7
+    with switch.sessions() as session:
+        assert list(session.scalars(select(RecipeInstallation))) == []
+    switch.compiler._slow_compiles = 0
+    for _ in range(20):
+        switch.drive()
+        if "runtime-install" in switch.executor.events:
+            break
     assert switch.executor.events.count("runtime-install") == 1
     with switch.sessions() as session:
         assert session.get(Job, operation.operation_id).payload == original
@@ -1898,10 +1911,10 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
                 )
 
     switch.hooks.append(lambda: order_stale_receipts(latest=True))
-    for _ in range(10):
+    for _ in range(40):
         view = switch.service.get(switch.operation.operation_id)
         assert view.state in {"queued", "running"}, view.status_reason
-        if switch.compiler.compiles >= 4:
+        if (_result(view).retry_attempt or 1) >= 5:
             break
         order_stale_receipts(latest=False)
         switch.drive()
@@ -1928,7 +1941,9 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
     assert view.state == "running"
     assert view.result.observation_due_at > switch.clock.now
     assert switch.service.tick() is False
-    assert switch.executor.events.count("runtime-plan") == 4
+    # Count committed failed cycles, not compiler calls: refreshing an exact
+    # build receipt may compile more than once inside one phase attempt.
+    assert _result(view).retry_attempt == 5
     assert "runtime-install" not in switch.executor.events
     with switch.sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []

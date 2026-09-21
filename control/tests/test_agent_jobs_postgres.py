@@ -353,18 +353,17 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
         assert second.operation_id == operation.id
         assert second.attempt == first.attempt + 1
         assert second.payload == first.payload
-        for attempt_number in range(2, 6):
+        for attempt_number in range(2, 7):
             jobs.record_result(restart_receipt(second))
             with sessions() as session:
                 stored = session.get(AgentOperation, operation.id)
                 parent_row = session.get(Job, parent_job.id)
                 assert stored is not None and parent_row is not None
                 assert stored.current_attempt == attempt_number
-                if attempt_number == 5:
-                    assert stored.retry_due_at is None
-                    assert parent_row.state == "waiting-for-operator"
-                    break
                 assert stored.retry_due_at is not None
+                assert (
+                    clock.now < stored.retry_due_at <= clock.now + timedelta(seconds=60)
+                )
                 assert parent_row.state == "queued"
                 due = stored.retry_due_at
             clock.now = due.replace(tzinfo=UTC)
@@ -377,6 +376,9 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
                 capabilities=resume_capabilities,
             )
             assert second is not None and second.attempt == attempt_number + 1
+            assert (
+                second.operation_id == operation.id and second.payload == first.payload
+            )
 
 
 def test_postgres_separate_services_cannot_claim_the_same_operation(service) -> None:
@@ -1062,3 +1064,71 @@ def test_postgres_boolean_cancel_request_is_named(service) -> None:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None and stored.status_reason is not None
         assert "parent-cancel-requested" in stored.status_reason
+
+
+def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(service):
+    sessions, clock = service
+    first = AgentJobService(sessions, clock=clock)
+    operation = first.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    original = claim_agent(first, NODE_A, "serial-a", 30)
+    assert original is not None
+    clock.advance(seconds=31)
+    assert claim_agent(first, NODE_A, "serial-a", 30) is None
+    with sessions.begin() as session:
+        parked = session.get(AgentOperation, operation.id)
+        assert parked is not None
+        parked.current_attempt = 5
+        parked.retry_disposition = None
+        parked.retry_disposition_attempt = None
+        parked.retry_due_at = None
+        previous = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == original.fence
+            )
+        )
+        assert previous is not None and previous.state == "expired"
+        previous.attempt = 5
+        job = session.get(Job, parked.parent_job_id)
+        assert job is not None
+        job.state = "waiting-for-operator"
+    capabilities = [
+        "agent.runtime.rust.v1",
+        "recipe.stop",
+        "agent.lifecycle.resume.exact.v1",
+    ]
+    services = (
+        AgentJobService(sessions, clock=clock),
+        AgentJobService(sessions, clock=clock),
+    )
+    barrier = threading.Barrier(2)
+
+    def claim_from(service):
+        barrier.wait(timeout=5)
+        return claim_agent(
+            service,
+            NODE_A,
+            "serial-a",
+            30,
+            protocol_version=3,
+            capabilities=capabilities,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert list(pool.map(claim_from, services)) == [None, None]
+    with sessions() as session:
+        parked = session.get(AgentOperation, operation.id)
+        assert parked is not None and parked.retry_due_at is not None
+        assert parked.current_attempt == 5
+        due = parked.retry_due_at
+    clock.now = due
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(claim_from, services))
+    resumed = [claim for claim in outcomes if claim is not None]
+    assert len(resumed) == 1 and resumed[0].attempt == 6
+    assert resumed[0].operation_id == operation.id
+    with pytest.raises(StaleAgentAttempt):
+        first.succeed(original, STOP_RESULT)
+    services[0].succeed(resumed[0], STOP_RESULT)
+    assert state(sessions, original.job_id) == "succeeded"

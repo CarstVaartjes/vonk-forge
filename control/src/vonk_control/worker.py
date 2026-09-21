@@ -331,7 +331,10 @@ def assemble_production_worker(
     from .distribution_executor import CompositeDistributionPhaseExecutor
     from .failure_evidence import FailureEvidenceService
     from .fleet_profiles import build_production_fleet_profile_service
-    from .install_admission import InstallAdmissionService
+    from .install_admission import (
+        InstallAdmissionService,
+        authorize_installation_runtime_images,
+    )
     from .recipe_builds import RecipeBuildService
     from .recipe_operation_worker import RecipeOperationWorker
     from .recipe_operations import RecipeOperationService
@@ -402,6 +405,7 @@ def assemble_production_worker(
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=compiled_plan_provider,
+            runtime_image_authorizer=authorize_installation_runtime_images,
         ),
         run_admission=RunAdmissionService(
             sessions,
@@ -428,6 +432,7 @@ def assemble_production_worker(
         recipe_routes,
         clock=clock,
         build_cleanup=lifecycle.reconcile_cancelled_builds,
+        retirement_cleanup=lifecycle.reconcile_retired_operations,
         fleet_profiles=build_production_fleet_profile_service(
             sessions,
             clock=clock,

@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_agent_protocol import canonical_message
 from vonk_control import operation_api
 from vonk_control.agent_jobs import (
     AgentJobService,
@@ -844,8 +844,7 @@ def test_operator_resume_reports_an_exhausted_retry_budget() -> None:
 
     assert response.status_code == 409
     assert response.json()["detail"] == (
-        "operation op-1 (recipe.stop) exhausted its 5-attempt retry budget "
-        "at attempt 5"
+        "operation op-1 (recipe.stop) exhausted its 5-attempt retry budget at attempt 5"
     )
 
 
@@ -1632,57 +1631,28 @@ def _claim_parked(jobs):
     )
 
 
-def _restart_interrupted_result(claim) -> AgentResult:
-    """One canonical result that parks a restart-safe operation for retry."""
+def _exhaust_operator_retry_budget(sessions, jobs, services, operation):
+    """Spend explicit retries on an effect without safe automatic reconciliation.
 
-    return AgentResult.model_validate_json(
-        canonical_message(
-            {
-                **{
-                    key: getattr(claim, key)
-                    for key in (
-                        "schema_version",
-                        "job_id",
-                        "operation_id",
-                        "attempt",
-                        "fence",
-                        "node_id",
-                        "deadline",
-                    )
-                },
-                "state": "waiting-for-operator",
-                "result": {
-                    "error_code": "agent_restart_interrupted",
-                    "failure_kind": "uncertain-effect",
-                    "uncertain": True,
-                    "reason": "agent process restarted",
-                },
-            }
-        )
-    )
-
-
-def _exhaust_parked_retry_budget(clock, sessions, jobs, operation):
-    """Spend one parked operation's budget through the real automatic path.
-
-    The bound the refusals report is therefore the module's own
-    :class:`RecoveryPolicy` budget, not a number this test chose.
+    Exact restart-safe interruption now retries for as long as intent remains
+    current. An unclassified parked effect still needs one operator decision per
+    claim and retains the bounded operator budget tested by resume/retirement.
     """
 
     limit = RecoveryPolicy().max_failures
     for expected_attempt in range(1, limit + 1):
         claim = _claim_parked(jobs)
         assert claim is not None and claim.attempt == expected_attempt
-        jobs.record_result(_restart_interrupted_result(claim))
+        jobs.wait_for_operator(claim, "effect requires operator inspection")
         with sessions() as session:
             stored = session.get(AgentOperation, operation.id)
             assert stored is not None
-            if expected_attempt < limit:
-                assert stored.retry_due_at is not None
-                due = stored.retry_due_at
-                if due.tzinfo is None:
-                    due = due.replace(tzinfo=UTC)
-                clock.now = due + timedelta(seconds=1)
+            assert not (
+                stored.retry_disposition == "retry"
+                and stored.retry_disposition_attempt == stored.current_attempt
+            )
+        if expected_attempt < limit:
+            services.resume_job(claim.job_id)
     return limit
 
 
@@ -1750,25 +1720,28 @@ def test_durable_resume_refuses_a_job_that_is_not_parked(tmp_path) -> None:
         assert stored is not None and stored.state == "queued"
 
 
-def test_durable_resume_refuses_an_exhausted_retry_budget(tmp_path) -> None:
+def test_durable_resume_refuses_an_exhausted_operator_retry_budget(tmp_path) -> None:
     """A spent budget must refuse loudly instead of queueing dead work.
 
-    The attempts are spent through the real automatic retry path, so the bound
-    the refusal reports is the module's own :class:`RecoveryPolicy` budget and
-    not a number this test chose.
+    Each attempt needs an explicit resume because its effect cannot be safely
+    retried automatically. Safe ongoing retries are covered separately; they do
+    not consume this operator-only budget.
     """
 
     clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
     sessions, jobs, services, operation, job_id = _parked_stop_services(
         tmp_path, clock=clock
     )
-    limit = _exhaust_parked_retry_budget(clock, sessions, jobs, operation)
+    limit = _exhaust_operator_retry_budget(sessions, jobs, services, operation)
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         parent = session.get(Job, job_id)
         assert stored is not None and parent is not None
-        assert stored.retry_disposition is None and stored.retry_due_at is None
-        assert "budget exhausted" in (stored.status_reason or "")
+        assert not (
+            stored.retry_disposition == "retry"
+            and stored.retry_disposition_attempt == stored.current_attempt
+        )
+        assert stored.current_attempt == limit
         assert parent.state == "waiting-for-operator"
 
     with pytest.raises(OperatorRetryExhausted) as refusal:
@@ -1857,17 +1830,10 @@ def _retire_parked(services, job_id: str) -> None:
     retire(job_id)
 
 
-def test_durable_retire_fails_the_exhausted_operation_and_releases_its_owner(
+def test_durable_retire_fails_the_order_but_retains_uncertain_capacity(
     tmp_path,
 ) -> None:
-    """Retirement is terminal, auditable and gives the owned capacity back.
-
-    A parked operation whose retry budget is spent can never make progress, so
-    the fleet it holds must not stay wedged.  Retiring it fails both the
-    operation and the parent job with the typed reason, releases the active
-    reservations the job's owner still holds, and leaves the node free for the
-    next admitted intent.
-    """
+    """The retry budget says nothing about an abandoned container's liveness."""
 
     clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
     sessions, jobs, services, operation, job_id = _parked_stop_services(
@@ -1911,7 +1877,7 @@ def test_durable_retire_fails_the_exhausted_operation_and_releases_its_owner(
                 created_at=clock.now,
             )
         )
-    limit = _exhaust_parked_retry_budget(clock, sessions, jobs, operation)
+    limit = _exhaust_operator_retry_budget(sessions, jobs, services, operation)
 
     _retire_parked(services, job_id)
 
@@ -1930,10 +1896,10 @@ def test_durable_retire_fails_the_exhausted_operation_and_releases_its_owner(
         assert "operator retired" in (stored.status_reason or "")
         assert parent.state == "failed"
         assert parent.status_reason == stored.status_reason
-        assert run.state == "failed"
+        assert run.state == "lost"
         assert run.route_state == "withdrawn"
-        assert reservation.state == "released"
-        assert reservation.released_at is not None
+        assert reservation.state == "active"
+        assert reservation.released_at is None
 
 
 def test_durable_retire_refuses_a_parked_operation_with_budget_remaining(

@@ -320,7 +320,17 @@ def _require_recovery_preparations(
 ) -> None:
     expected = {item.assignment_id: item.preparation for item in accepted.preparations}
     observed = {item.assignment_id: item.preparation for item in current.preparations}
+    current_assignments = {item.assignment_id: item for item in current.assignments}
     for assignment in accepted.assignments:
+        current_assignment = current_assignments.get(assignment.assignment_id)
+        if (
+            assignment.actions == ["keep"]
+            and current_assignment is not None
+            and current_assignment.actions == ["keep"]
+        ):
+            # Kept runtime state needs no cache preparation. A later run child
+            # still checks its accepted identity before it can issue any work.
+            continue
         _require_recovery_preparation(
             assignment.assignment_id,
             expected.get(assignment.assignment_id),
@@ -2969,11 +2979,15 @@ class FleetProfileService:
             return self._application_view(row)
 
     def tick(self) -> bool:
-        """Advance at most one profile application step; safe to call repeatedly."""
+        """Observe bounded parked work, then advance at most one runnable step."""
 
         if self._switch_adapter is None:
             return False
         now = _aware(self._clock())
+        # Complete the bounded observation transaction before selecting active
+        # work. An unrelated active application must not starve a recovered
+        # parent, and observing a parent must not consume the active work unit.
+        parked_observed = self._observe_parked_applications(now)
         recovery_deferred = False
         recovery = self._automatic_cache_recovery(now)
         if recovery is not None:
@@ -3023,7 +3037,7 @@ class FleetProfileService:
                 .limit(1)
             )
             if row is None:
-                return self._observe_parked_applications(now) or recovery_deferred
+                return parked_observed or recovery_deferred
             try:
                 plan = _persisted_profile_plan(row)
                 progress = _persisted_profile_progress(row)
@@ -3068,7 +3082,7 @@ class FleetProfileService:
                     row.progress = progress.model_dump(mode="json")
                 if child.state in _CHILD_PENDING_STATES:
                     if row.state == "running" and not session.is_modified(row):
-                        return False
+                        return parked_observed or recovery_deferred
                     row.state = "running"
                     row.updated_at = now
                     return True

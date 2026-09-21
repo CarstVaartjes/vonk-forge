@@ -42,6 +42,7 @@ from .catalog_revision_contract import (
     read_catalog_document,
     read_catalog_projection,
 )
+from .compiled_execution_plan import CompiledRuntimeImage
 from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
 from .runtime_adapters import (
     RuntimeAdapter,
@@ -580,7 +581,9 @@ def prefixed_image_digest(value: str | None) -> str | None:
     return value if value.startswith("sha256:") else f"sha256:{value}"
 
 
-def _receipt_identity(receipt: RuntimeImageReceipt) -> dict[str, object]:
+def _receipt_identity(
+    receipt: RuntimeImageReceipt | CompiledRuntimeImage,
+) -> dict[str, object]:
     """The immutable identity a re-preparation of the same archive must repeat."""
 
     return {
@@ -592,7 +595,11 @@ def _receipt_identity(receipt: RuntimeImageReceipt) -> dict[str, object]:
             receipt.platform_manifest_digest
         ),
         "local_image_config_id": prefixed_image_digest(receipt.local_image_config_id),
-        "oci_archive_sha256": receipt.oci_archive_sha256,
+        "oci_archive_sha256": (
+            receipt.oci_archive_sha256
+            if isinstance(receipt, RuntimeImageReceipt)
+            else receipt.oci_layout_sha256
+        ),
         "image_bytes": receipt.image_bytes,
         "build_id": receipt.build_id,
     }
@@ -675,6 +682,32 @@ def resolve_persisted_runtime_image_receipt(
 ) -> RuntimeImageReceipt:
     """Require current-revision authorization for an immutable storage receipt."""
 
+    require_runtime_image_authorization(
+        session,
+        recipe_revision_id=recipe_revision_id,
+        current_content_digest=current_content_digest,
+        effective_execution_key=effective_execution_key,
+        receipt=receipt,
+    )
+    return receipt
+
+
+def require_runtime_image_authorization(
+    session: Session,
+    *,
+    recipe_revision_id: str,
+    current_content_digest: str,
+    receipt: RuntimeImageReceipt | CompiledRuntimeImage,
+    effective_execution_key: str | None = None,
+) -> None:
+    """Check SQL authority for exact prepared bytes, without accessing storage.
+
+    Launch admission requires its execution key. Distribution copies bytes
+    without launching them, so any current grant for that exact archive suffices.
+    Both consume this predicate; neither an image digest alone nor the build's
+    original recipe revision grants access to a current revision.
+    """
+
     revision = session.get(CatalogDocumentRevision, recipe_revision_id)
     if (
         revision is None
@@ -684,31 +717,28 @@ def resolve_persisted_runtime_image_receipt(
     ):
         raise ValueError("current recipe revision digest is not authorized")
     identity = _receipt_identity(receipt)
-    authorization = session.scalar(
-        select(RuntimeImageAuthorization).where(
-            RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
-            RuntimeImageAuthorization.original_content_digest
-            == receipt.distribution_content_sha256,
-            RuntimeImageAuthorization.effective_execution_key
-            == effective_execution_key,
-            RuntimeImageAuthorization.registry_manifest_digest
-            == identity["registry_manifest_digest"],
-            RuntimeImageAuthorization.platform_manifest_digest
-            == identity["platform_manifest_digest"],
-            RuntimeImageAuthorization.local_image_config_id
-            == identity["local_image_config_id"],
-            RuntimeImageAuthorization.oci_archive_sha256
-            == identity["oci_archive_sha256"],
-            RuntimeImageAuthorization.image_bytes == identity["image_bytes"],
-            RuntimeImageAuthorization.build_id == identity["build_id"],
-            RuntimeImageAuthorization.state == "authorized",
-        )
+    statement = select(RuntimeImageAuthorization).where(
+        RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
+        *(
+            getattr(RuntimeImageAuthorization, name) == value
+            for name, value in identity.items()
+        ),
+        RuntimeImageAuthorization.state == "authorized",
     )
+    if isinstance(receipt, RuntimeImageReceipt):
+        statement = statement.where(
+            RuntimeImageAuthorization.original_content_digest
+            == receipt.distribution_content_sha256
+        )
+    if effective_execution_key is not None:
+        statement = statement.where(
+            RuntimeImageAuthorization.effective_execution_key == effective_execution_key
+        )
+    authorization = session.scalar(statement)
     if authorization is None:
         raise ValueError(
             "current recipe revision is not authorized for runtime image receipt"
         )
-    return receipt
 
 
 def _authorize_current_revision(
@@ -930,6 +960,7 @@ class RuntimeImageStorage(Protocol):
         *,
         expected_architecture: str,
         expected_runtime_interface: str,
+        expected_archive_sha256: str | None = None,
     ) -> RuntimeImageReceipt | None:
         """Find and verify a prepared Controller build by its exact input identity."""
         ...
@@ -1237,6 +1268,7 @@ class FilesystemRuntimeImageStorage:
         *,
         expected_architecture: str,
         expected_runtime_interface: str,
+        expected_archive_sha256: str | None = None,
     ) -> RuntimeImageReceipt | None:
         """Return the prepared Controller build for an exact input identity.
 
@@ -1253,7 +1285,12 @@ class FilesystemRuntimeImageStorage:
             )
         expected_architecture = _wire_architecture(expected_architecture)
         expected_label = _runtime_interface_label(expected_runtime_interface)
-        for receipt in self._iter_receipts():
+        receipts = (
+            self._iter_receipts()
+            if expected_archive_sha256 is None
+            else (self.read_receipt(expected_archive_sha256),)
+        )
+        for receipt in receipts:
             if receipt.source != "controller-build":
                 continue
             if receipt.build_input_sha256 != build_input_sha256:
