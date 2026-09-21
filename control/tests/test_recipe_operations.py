@@ -4647,9 +4647,23 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
         assert worker.endpoint is None
 
 
-def _queued_distributed_recovery_stop(tmp_path: Path, *, engine=None):
+def _recovery_deadline(job: Job) -> datetime:
+    marker = job.payload["recovery"]
+    assert isinstance(marker, dict)
+    deadline = marker["deadline"]
+    assert isinstance(deadline, str)
+    return datetime.fromisoformat(deadline)
+
+
+def _queued_distributed_recovery_stop(
+    tmp_path: Path, *, engine=None, startup_budget=60
+):
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True, engine=engine
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        engine=engine,
+        distributed_start_timeout_seconds=startup_budget,
     )
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="i" * 36
@@ -4683,7 +4697,9 @@ def _queued_distributed_recovery_stop(tmp_path: Path, *, engine=None):
     return sessions, service, routes, publisher, started, stop_job, nodes
 
 
-def _queued_distributed_recovery_restart(tmp_path: Path, *, engine=None):
+def _queued_distributed_recovery_restart(
+    tmp_path: Path, *, engine=None, startup_budget=60
+):
     (
         sessions,
         service,
@@ -4692,7 +4708,9 @@ def _queued_distributed_recovery_restart(tmp_path: Path, *, engine=None):
         started,
         stop_job,
         nodes,
-    ) = _queued_distributed_recovery_stop(tmp_path, engine=engine)
+    ) = _queued_distributed_recovery_stop(
+        tmp_path, engine=engine, startup_budget=startup_budget
+    )
     service.record_node_result(
         stop_job.id, nodes[0], succeeded=True, evidence={"stopped": True}
     )
@@ -4797,7 +4815,7 @@ def test_distributed_recovery_deadline_is_enforced_during_stop_phase_advance(
         stop_job,
         nodes,
     ) = _queued_distributed_recovery_stop(tmp_path)
-    service._clock = lambda: NOW + timedelta(seconds=31)
+    service._clock = lambda: _recovery_deadline(stop_job)
 
     service.record_node_result(
         stop_job.id, nodes[0], succeeded=True, evidence={"stopped": True}
@@ -4831,7 +4849,7 @@ def test_distributed_recovery_deadline_is_enforced_before_phase_advance(
         worker_start,
         nodes,
     ) = _queued_distributed_recovery_restart(tmp_path)
-    service._clock = lambda: NOW + timedelta(seconds=31)
+    service._clock = lambda: _recovery_deadline(restart)
 
     service.record_node_result(
         restart.id,
@@ -4906,7 +4924,7 @@ def test_distributed_recovery_deadline_is_rechecked_before_route_publication(
         evidence=start_evidence(readiness.payload),
     )
     mark_current_exact_observations(sessions, started.owner_id, NOW)
-    routes._clock = lambda: NOW + timedelta(seconds=31)
+    routes._clock = lambda: _recovery_deadline(restart)
     publications_before = list(publisher.aliases)
 
     with pytest.raises(RuntimeError, match="deadline"):
@@ -4963,7 +4981,7 @@ def test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock(
             blocked_pid=worker_pid["value"],
             blocker_pid=blocker_pid,
         )
-        current["now"] = NOW + timedelta(seconds=31)
+        current["now"] = _recovery_deadline(restart)
         transaction.commit()
         result.result(timeout=10)
     finally:
@@ -5026,7 +5044,7 @@ def test_recovery_publication_crossing_deadline_is_immediately_withdrawn(
     class DeadlineCrossingPublisher(ConcurrentPublisher):
         def publish(self, state, policy):
             generation = super().publish(state, policy)
-            current["now"] = NOW + timedelta(seconds=31)
+            current["now"] = _recovery_deadline(restart)
             return generation
 
     publisher = DeadlineCrossingPublisher()
@@ -5102,7 +5120,7 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
 
         def publish_recipe(self, candidate):
             generation = atomic.publish_recipe(candidate)
-            current["now"] = NOW + timedelta(seconds=31)
+            current["now"] = _recovery_deadline(restart)
             return generation
 
         def publish_empty(self, route_digest):
@@ -5139,7 +5157,7 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
         assert publication.state == "withdrawal-pending"
         assert publication.lease_expires_at is not None
         assert publication.lease_expires_at.replace(tzinfo=UTC) == (
-            NOW + timedelta(seconds=30)
+            _recovery_deadline(restart)
         )
     assert failing.withdrawal_attempts == 1
 
@@ -5187,7 +5205,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
     )
     complete_collective_readiness(sessions, service, restart.id, nodes[0])
 
-    current = {"now": NOW + timedelta(seconds=29)}
+    current = {"now": _recovery_deadline(restart) - timedelta(seconds=1)}
     live_root = tmp_path / "ack-routes"
     ack_path = tmp_path / "supervisor/ack.json"
     ack_path.parent.mkdir()
@@ -5209,7 +5227,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
 
         def acknowledge_at_exact_deadline(_seconds: float) -> None:
             ack_path.write_bytes(acknowledgement_bytes)
-            current["now"] = NOW + timedelta(seconds=30)
+            current["now"] = _recovery_deadline(restart)
 
         moments = iter((0.0, 0.1))
         FileSupervisorAcknowledger(
@@ -5270,7 +5288,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
         assert publication.state == "withdrawal-pending"
         assert publication.lease_expires_at is not None
         assert publication.lease_expires_at.replace(tzinfo=UTC) == (
-            NOW + timedelta(seconds=30)
+            _recovery_deadline(restart)
         )
     assert failing.withdrawal_attempts == 1
 

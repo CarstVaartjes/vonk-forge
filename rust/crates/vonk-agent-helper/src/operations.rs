@@ -1499,24 +1499,27 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let semantic_digest = hex_sha256(
             &canonical_json(&validated.arguments).map_err(|_| OperationError::InvalidOperation)?,
         );
-        if validated.detached {
-            let existing = self.run_docker(&[
-                "container".to_owned(),
-                "inspect".to_owned(),
-                "--format".to_owned(),
-                "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
-                format!("vonk-{}", validated.run_id),
-            ])?;
-            if existing.success {
-                let expected = format!("true\t{semantic_digest}\ttrue\t{}", validated.run_id);
-                if std::str::from_utf8(&existing.stdout).ok().map(str::trim)
+        let existing = self.run_docker(&[
+            "container".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
+            format!("vonk-{}", validated.run_id),
+        ])?;
+        if existing.success {
+            let expected = format!("true\t{semantic_digest}\ttrue\t{}", validated.run_id);
+            if !validated.detached
+                || std::str::from_utf8(&existing.stdout).ok().map(str::trim)
                     != Some(expected.as_str())
-                {
-                    return Err(OperationError::InvalidArtifact);
-                }
-                return Ok(None);
+            {
+                return Err(OperationError::InvalidArtifact);
             }
+            return Ok(None);
         }
+        if !self.prove_container_absent(&format!("vonk-{}", validated.run_id), &existing)? {
+            return Err(OperationError::CommandFailed);
+        }
+        self.reset_runtime_tmp_if_requested(&validated.run_id)?;
         self.prepare_runtime_access(&validated)?;
         // The signed wire shape carries the executable once after the image as
         // an explicit marker for validation. Docker already receives that
@@ -1619,6 +1622,92 @@ impl<R: CommandRunner> OperationExecutor<R> {
         run.arguments
             .splice(run.image_index..run.image_index, arguments);
         run.image_index += added;
+        Ok(())
+    }
+
+    /// The agent cannot traverse private directories created by root or the
+    /// workload UID. Reset only this authorized run's disposable tmp tree,
+    /// after exact container absence, without following any path component or
+    /// descendant symlink. Outputs and the installation cache are untouched.
+    fn reset_runtime_tmp_if_requested(&self, run_id: &str) -> Result<(), OperationError> {
+        if uuid::Uuid::parse_str(run_id)
+            .ok()
+            .map(|value| value.to_string())
+            .as_deref()
+            != Some(run_id)
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        let flags = rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC;
+        let root: std::os::fd::OwnedFd = OpenOptions::new()
+            .read(true)
+            .custom_flags(flags.bits() as i32)
+            .open(&self.roots.agent_data)?
+            .into();
+        let metadata_root =
+            rustix::fs::openat(&root, "run-metadata", flags, rustix::fs::Mode::empty())
+                .map_err(errno_io)?;
+        let metadata = rustix::fs::openat(&metadata_root, run_id, flags, rustix::fs::Mode::empty())
+            .map_err(errno_io)?;
+        let marker = match rustix::fs::openat(
+            &metadata,
+            "tmp-reset-required",
+            // Inspect the descriptor before accepting its type. A malformed
+            // FIFO must not block the helper while open waits for a writer.
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::NONBLOCK
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        ) {
+            Ok(marker) => marker,
+            Err(rustix::io::Errno::NOENT) => return Ok(()),
+            Err(error) => return Err(errno_io(error).into()),
+        };
+        let marker_state = rustix::fs::fstat(&marker).map_err(errno_io)?;
+        if rustix::fs::FileType::from_raw_mode(marker_state.st_mode)
+            != rustix::fs::FileType::RegularFile
+            || marker_state.st_mode & 0o777 != 0o600
+            || marker_state.st_size != 0
+            || marker_state.st_nlink != 1
+            || self
+                .runtime_request_owner_uid
+                .is_some_and(|owner| marker_state.st_uid != owner)
+        {
+            return Err(OperationError::UnsafePath);
+        }
+        let device = rustix::fs::fstat(&root).map_err(errno_io)?.st_dev;
+        let mut directory = Some(root);
+        for component in ["runs", run_id, "outputs", "tmp"] {
+            let Some(parent) = directory.take() else {
+                break;
+            };
+            directory =
+                match rustix::fs::openat(&parent, component, flags, rustix::fs::Mode::empty()) {
+                    Ok(directory) => Some(directory),
+                    Err(rustix::io::Errno::NOENT) => None,
+                    Err(error) => return Err(errno_io(error).into()),
+                };
+            if let Some(directory) = &directory
+                && rustix::fs::fstat(directory).map_err(errno_io)?.st_dev != device
+            {
+                return Err(OperationError::UnsafePath);
+            }
+        }
+        if let Some(directory) = &directory {
+            remove_directory_contents(directory, device)?;
+            rustix::fs::fsync(directory).map_err(errno_io)?;
+        }
+        rustix::fs::unlinkat(
+            &metadata,
+            "tmp-reset-required",
+            rustix::fs::AtFlags::empty(),
+        )
+        .map_err(errno_io)?;
+        rustix::fs::fsync(&metadata).map_err(errno_io)?;
         Ok(())
     }
 
@@ -5555,6 +5644,66 @@ mod tests {
             assert!(validate_docker_run(&arguments, &roots, Some(owner)).is_err());
             fs::set_permissions(&path, fs::Permissions::from_mode(0o750)).unwrap();
         }
+    }
+
+    #[test]
+    fn runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer() {
+        use std::os::unix::fs::FileTypeExt;
+        use wait_timeout::ChildExt;
+
+        const CHILD_ROOT: &str = "VONK_TMP_RESET_FIFO_TEST_ROOT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            let roots = ManagedRoots::under(Path::new(&root));
+            let executor =
+                OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+            assert!(matches!(
+                executor.reset_runtime_tmp_if_requested(RUN_ID),
+                Err(OperationError::UnsafePath)
+            ));
+            return;
+        }
+
+        let (_temp, roots) = runtime_fixture();
+        let marker = roots
+            .agent_data
+            .join("run-metadata")
+            .join(RUN_ID)
+            .join("tmp-reset-required");
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            &marker,
+            rustix::fs::FileType::Fifo,
+            rustix::fs::Mode::from_raw_mode(0o600),
+            0,
+        )
+        .unwrap();
+        let temporary = roots
+            .agent_data
+            .join("runs")
+            .join(RUN_ID)
+            .join("outputs/tmp");
+        fs::create_dir(&temporary).unwrap();
+        fs::write(temporary.join("sentinel"), b"keep").unwrap();
+        // Run the real open/fstat boundary in another process so the wrong
+        // blocking open fails this test within a deadline rather than hanging
+        // the suite indefinitely on a FIFO with no writer.
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "operations::tests::runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer",
+            ])
+            .env(CHILD_ROOT, &roots.agent_data)
+            .spawn()
+            .unwrap();
+        let status = child.wait_timeout(Duration::from_secs(5)).unwrap();
+        if status.is_none() {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("runtime tmp cleanup blocked on a FIFO marker with no writer");
+        }
+        assert!(status.unwrap().success());
+        assert!(fs::symlink_metadata(marker).unwrap().file_type().is_fifo());
+        assert_eq!(fs::read(temporary.join("sentinel")).unwrap(), b"keep");
     }
 
     #[test]

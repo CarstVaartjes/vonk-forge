@@ -47,9 +47,10 @@ boundary, with the exact code and test/deployment evidence.
 
 | Action | Completion condition | Status at this review |
 | --- | --- | --- |
-| Recover accepted intent automatically | A temporary dependency failure resumes the same authorized intent after recovery, without retirement, Idle/reapply, or another recipe revision. Waiting exposes its cause, owner, dependency, next attempt, and deadline. Completed assets and effects are reused. | Implemented in this review branch for classified safe-effect retries and typed pre-effect profile cache loss. Exact identities and current workload priority are retained. Combined verification is recorded below; deployment and physical qualification remain open. |
-| Make retirement and supersession safe | Observe or clean up the exact old runtime effects before releasing their reservations or admitting conflicting replacement work. Expired leases and terminal database labels alone cannot prove absence. Delayed results cannot revive retired intent. | Implemented in this review branch. Retirement retains capacity and schedules normal exact cleanup; temporary cleanup failure retries the same operation. PostgreSQL regressions cover release, late results, launch budgets, and newer intent. |
-| Align build reuse with installation admission | An editorial recipe successor with identical executable inputs can reuse an exact verified build under current revision authorization. Preparation, compilation, and install admission agree. Changed executable inputs or incompatible receipts cannot inherit the old result. | Connected preparation/admission corrections and verification are part of this review branch. Current authorization and present verified bytes remain mandatory. |
+| Recover accepted intent automatically | A temporary dependency failure resumes the same authorized intent after recovery, without retirement, Idle/reapply, or another recipe revision. Waiting exposes its cause, owner, dependency, next attempt, and deadline. Completed assets and effects are reused. | Merged in PR #874 and deployed for classified safe-effect retries and typed pre-effect profile cache loss. Exact identities and current workload priority are retained. Combined verification is recorded below; physical qualification remains open. |
+| Make retirement and supersession safe | Observe or clean up the exact old runtime effects before releasing their reservations or admitting conflicting replacement work. Expired leases and terminal database labels alone cannot prove absence. Delayed results cannot revive retired intent. | Merged in PR #874 and deployed. Retirement retains capacity and schedules normal exact cleanup; temporary cleanup failure retries the same operation. PostgreSQL regressions cover release, late results, launch budgets, and newer intent. |
+| Align build reuse with installation admission | An editorial recipe successor with identical executable inputs can reuse an exact verified build under current revision authorization. Preparation, compilation, and install admission agree. Changed executable inputs or incompatible receipts cannot inherit the old result. | Connected preparation/admission corrections were merged in PR #874 and deployed. Current authorization and present verified bytes remain mandatory. |
+| Complete the physical GLM start | Installed bytes are charged once, a stopped workload can restart with its private temporary files present, and exact rank observations reach route publication. | The post-deployment investigation below records the failures, corrections, and passing repository checks. Physical inference remains open until the published fixes are deployed and exercised. |
 | Apply the budget policy below | Estimated demand can produce a useful warning without removing real capacity, isolation, authorization, integrity, or exact-plan checks. Any automated smaller request or alternative runtime is explicitly permitted and bound in the accepted plan. | The historical blanket warning policy is superseded below. No allocator, kernel, integrity, or authorization check was weakened, and no automatic context/image substitution was introduced. |
 | Prove the recovery matrix below | Record failure injection, restart, response loss, cancellation/supersession, storage loss, and eventual recovery through the real owners. Run physical qualification separately after the corresponding deployment. | Local process-death and PostgreSQL fault/recovery tests are recorded below. Deployment and physical fault injection remain open. |
 | Maintain this handover | Retain one current action list, refresh dated observations, and keep repository, CI/publication, Controller, and physical results separate. | This document replaces the archive's conflicting current instructions. |
@@ -137,7 +138,9 @@ does not close that step.
 The integrated work is on `codex/resilience-integration`, based on platform
 `4d79def445ce76080927d0871f8d58bd79550e57`, with recipe-library checkout
 `068930061f3b76a519ac3ffcc137ab7a9f067010`. The library checkout was clean.
-This is source and local test evidence; the changes have not been deployed.
+This original review was merged in [PR #874](https://github.com/CarstVaartjes/vonk-forge/pull/874)
+as `9f0cea2edd48493c295afa5f0816cc6a5dbac85a`. Its deployment was subsequently
+confirmed; the original test results below remain repository evidence.
 
 Regressions were reproduced before their fixes: permanent retry exhaustion,
 premature retirement capacity release, failed temporary cleanup, successor
@@ -158,7 +161,78 @@ The process-death test kills independent result-recording workers after their
 PostgreSQL commit; it does not claim to kill a physical Spark or GPU runtime.
 Physical stop/load, route readiness, inference, and recovery under injected
 hardware faults remain unperformed in this review. No database schema change,
-live retirement, cache eviction, profile application, or deployment was made.
+live retirement, cache eviction, profile application, or deployment was made
+during that original source review.
+
+## GLM start recovery after deployment (2026-09-21)
+
+The authenticated Controller provenance at 12:57 UTC reported the running image
+source `9f0cea2edd48493c295afa5f0816cc6a5dbac85a`. Both Sparks were online, with
+GLM 1.6.6 installed and no loaded workload. The retained recipe binds context
+196608, GPU memory utilization 0.84, recipe digest
+`4e5255a78123f3054a4cbff993996a89262082de5c518c7e02eb906eee3e8665`, and image
+`sha256:fa1868a9403baee4527b113fc84a6cfb89cf227595ced71205d1d5e19f7be950`.
+These settings and artifact identities are unchanged by the recovery corrections.
+
+The previous application `2b5bea43-4682-4cf8-8a0a-f9882f4aa72d` had an initial
+successful start job `f9c6fa06-fd63-4aea-9450-cadc2c360707`: both rank launches
+completed at 11:35:18 UTC and collective readiness completed at 11:39:19 UTC.
+The Controller stopped the run at its initial observation deadline, 11:41:19 UTC.
+Both ranks had unconsumed inspection grants and no accepted observation receipt;
+route publication had not been attempted. The subsequent restart job
+`d439972d-68bc-4015-817a-0a3a00a61db1` failed during local preparation on both
+nodes. Initial readiness alone therefore did not prove published serving.
+
+A fresh profile preview was blocked by `run-switch.insufficient-disk`.
+Read-only inspection of the reservation owners confirmed five completed
+installations reserving 1,320,491,003,815 bytes per node. Their saved plans account
+for 995,491,003,815 bytes of completed downloads, already reflected in the later
+filesystem inventory. The shared admission calculation now discounts only those
+proved completed downloads. It retains 325,000,000,000 bytes of cache/staging
+headroom and fully charges pending or uncertain work. It does not delete any
+reservation or reduce the new request's 299,400,776,148-byte allowance.
+
+The restart failure was reproduced through real Linux process permissions:
+the unprivileged agent attempted to remove private temporary directories created
+by the privileged helper for the runtime user. Cleanup now belongs to the existing
+authorized helper after it proves that the exact old container is absent.
+Retained or uncertain containers keep their temporary files; persistent results
+and runtime caches are preserved. Preparation failures must retain their safe
+stage and error category instead of erasing the cause. A private preparation
+marker makes cleanup happen once, before the first authorized startup hook;
+later hooks and the main process retain files created by earlier hooks.
+
+The recovery start retained the same run ID,
+`d6c52f16-4f9b-4d52-8127-b0a550232cc8`, at generation 2. Its deadline was
+11:42:19 UTC: only one minute after recovery began, despite the accepted initial
+startup budget of 3600 seconds and the observed four-minute successful start.
+Recovery derives its bounded loading allowance from the original successful
+start job's immutable accepted duration. The overall deadline adds the ordered
+stop phases' allowances and remains fixed across stop, start, and route retries.
+Absent or malformed startup authority remains an explicit blocker. A fixed
+readiness poll allowance is not a model-loading budget.
+
+Continuous observation is a separate boundary. Linux HTTP regressions reproduced
+successful exact receipts being discarded when another retained run's inspection
+failed or its receipt expired. Valid nonempty partial reports now proceed while
+the unrelated error remains visible; a failed collection never proves absence.
+Signed-receipt tests through PostgreSQL and the Linux helper also reproduced
+valid renewals being treated as late first observations. The initial cutoff is
+now enforced when the first authenticated receipt arrives; later renewals use
+the continuing freshness checks. First receipts beyond the cutoff still fail.
+The erased agent diagnostics do not establish which observation fault caused
+this particular live stop. Verification of those corrections and physical
+serving must be recorded separately from the reproduced restart failure.
+
+Combined local verification for these corrections: 2,298 Controller fast tests
+passed (3 skipped); 798 standalone acceptance/contract tests passed (11 skipped,
+45 subtests); 149 lifecycle, disk-admission, and route tests passed,
+including real PostgreSQL concurrency and expiry boundaries; 9 signed-observation
+wire tests passed using PostgreSQL and Linux helper/Rust probes. The combined
+Linux agent/helper suite passed 471 tests (2 designated systemd tests ignored).
+The final FIFO-marker rejection and lint follow-up passed 331 affected tests
+(1 designated systemd test ignored) and Clippy. These are repository results;
+accepted publication, deployment, and physical GLM inference are still required.
 
 ## Evidence record maintenance
 

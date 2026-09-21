@@ -260,8 +260,9 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
     }
 }
 
-/// A collection or transport failure is unknown evidence, never proof that no
-/// managed runs exist. Only a successfully collected empty set reports absence.
+/// A collection failure is unknown evidence for its run, not for another
+/// successfully inspected run. Nonempty partial reports preserve omitted ranks
+/// on the Controller. Only a successfully collected empty set reports absence.
 async fn report_complete_recipe_run_observations(
     client: &AgentHttpClient,
     results: Vec<Result<ExactRecipeRunObservation, RecipeObservationError>>,
@@ -281,23 +282,35 @@ async fn report_complete_recipe_run_observations(
             }
         }
     }
-    if let Some(error) = failure {
-        return Err(error);
-    }
-    // Bounded concurrent inspections can finish in different batches. Never
-    // submit an early receipt whose authorization expired while gathering the
-    // rest. The Controller still verifies receipt age and authorization.
+    // Bounded concurrent inspections can finish in different batches. Retain
+    // each still-authorized receipt even when another inspection expired.
+    // The Controller remains the authority for receipt age and authorization.
     let now = Utc::now().timestamp();
-    if observations
-        .iter()
-        .any(|observation| now > observation.grant.claims.expires_at)
-    {
-        return Err(RecipeObservationError::StaleSnapshot);
+    observations.retain(|observation| {
+        if now <= observation.grant.claims.expires_at {
+            return true;
+        }
+        eprintln!(
+            "vonk-agent: exact recipe run {} receipt expired during collection",
+            observation.run_id
+        );
+        if failure
+            .as_ref()
+            .is_none_or(RecipeObservationError::not_ready)
+        {
+            failure = Some(RecipeObservationError::StaleSnapshot);
+        }
+        false
+    });
+    if !observations.is_empty() || failure.is_none() {
+        client
+            .report_exact_recipe_run_observations(&observations)
+            .await?;
     }
-    client
-        .report_exact_recipe_run_observations(&observations)
-        .await?;
-    Ok(observations.len())
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(observations.len()),
+    }
 }
 
 impl<R> RecipeExecutor<'_, R> {
@@ -336,7 +349,21 @@ impl<R> RecipeExecutor<'_, R> {
                 let endpoint = plan.endpoint_address;
                 let outcome = boundary
                     .inspect_recipe_run(plan.binding.clone(), plan.arguments)
-                    .await?;
+                    .await
+                    .inspect_err(|error| {
+                        if !matches!(
+                            error,
+                            crate::host_runtime::HostRuntimeError::Controller(
+                                ClientError::ObservationNotReady
+                            )
+                        ) {
+                            eprintln!(
+                                "vonk-agent: exact recipe run {} inspection failed: {}",
+                                plan.binding.run_id,
+                                error.preflight_code()
+                            );
+                        }
+                    })?;
                 // This timestamp is part of the signed-grant freshness proof.
                 // Capture it immediately after the local privileged inspection;
                 // an owner-only HTTP probe follows and remains independently
@@ -1826,8 +1853,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         },
                     ) {
                         Ok(plan) => plan,
-                        Err(_) => {
-                            return failed("container runtime could not prepare the workload");
+                        Err(error) => {
+                            return runtime_preparation_failure(&error);
                         }
                     }
                 };
@@ -3216,6 +3243,13 @@ fn runtime_failure(reason: &str, error: &crate::host_runtime::HostRuntimeError) 
     result
 }
 
+fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
+    let (stage, category) = error.safe_start_context();
+    failed_owned(format!(
+        "container runtime could not prepare the workload (stage={stage}; category={category})"
+    ))
+}
+
 fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> ExecutionResult {
     if executed.state != "failed" {
         return executed;
@@ -3865,25 +3899,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exact_snapshot_inspection_failure_never_reports_partial_or_empty() {
+    async fn exact_snapshot_inspection_failure_preserves_other_runs_without_reporting_empty() {
+        // Wrong implementation: a denied or unavailable retained run discards
+        // current healthy receipts, eventually expiring that unrelated run.
         for error in [
             crate::host_runtime::HostRuntimeError::HelperProtocol(
                 crate::host_runtime::HelperProtocolCause::ObservationTimestamp,
             ),
             crate::host_runtime::HostRuntimeError::Controller(ClientError::ObservationNotReady),
+            crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(Box::new(
+                crate::client::ControllerError::from_status(403),
+            ))),
         ] {
             let server = ObservationServer::new(Some(204));
+            let current_run = Uuid::new_v4();
             let result = report_complete_recipe_run_observations(
                 &server.client,
                 vec![
-                    Ok(exact_observation(Uuid::new_v4())),
+                    Ok(exact_observation(current_run)),
                     Err(RecipeObservationError::Inspection(error)),
                 ],
             )
             .await;
             assert!(matches!(result, Err(RecipeObservationError::Inspection(_))));
-            assert!(server.finish().is_empty());
+            let reports = server.finish();
+            assert_eq!(reports.len(), 1);
+            let runs = reports[0]["runs"].as_array().unwrap();
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0]["run_id"], current_run.to_string());
         }
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_failed_inspection_is_not_proof_of_an_empty_node() {
+        let server = ObservationServer::new(Some(204));
+        let result = report_complete_recipe_run_observations(
+            &server.client,
+            vec![Err(RecipeObservationError::Inspection(
+                crate::host_runtime::HostRuntimeError::Controller(ClientError::ObservationNotReady),
+            ))],
+        )
+        .await;
+        assert!(matches!(result, Err(RecipeObservationError::Inspection(_))));
+        assert!(server.finish().is_empty());
     }
 
     #[tokio::test]
@@ -3897,6 +3955,22 @@ mod tests {
             .unwrap()
             .into();
         stale.validate().unwrap();
+        let fresh = exact_observation(Uuid::new_v4());
+        assert!(matches!(
+            report_complete_recipe_run_observations(
+                &server.client,
+                vec![Ok(stale.clone()), Ok(fresh.clone())]
+            )
+            .await,
+            Err(RecipeObservationError::StaleSnapshot)
+        ));
+        let reports = server.finish();
+        assert_eq!(reports.len(), 1);
+        let runs = reports[0]["runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0]["run_id"], fresh.run_id.to_string());
+
+        let server = ObservationServer::new(Some(204));
         assert!(matches!(
             report_complete_recipe_run_observations(&server.client, vec![Ok(stale)]).await,
             Err(RecipeObservationError::StaleSnapshot)
@@ -4772,6 +4846,31 @@ mod tests {
         };
         RecipeOperationRequest::parse(&claim).unwrap();
         claim
+    }
+
+    #[test]
+    fn preparation_failure_keeps_safe_stage_and_permission_boundary_in_controller_result() {
+        use crate::oci::OciError;
+
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let error = OciError::Start {
+            stage: "output-storage",
+            source: Box::new(OciError::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "/private/secret-credential-value",
+            ))),
+        };
+        let failure = super::runtime_preparation_failure(&error);
+        let normalized = super::normalize_execution_result(&start_claim, failure);
+        let result: vonk_agent_protocol::generated::AgentFailureResult =
+            serde_json::from_value(normalized.body).unwrap();
+        assert_eq!(
+            result.reason.as_deref(),
+            Some(
+                "container runtime could not prepare the workload (stage=output-storage; category=storage-permission-denied)"
+            )
+        );
     }
 
     #[test]

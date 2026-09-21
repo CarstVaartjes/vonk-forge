@@ -194,6 +194,7 @@ def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
         "control/src/vonk_control/compiled_execution_plan.py",
         "control/src/vonk_control/execution_plan_service.py",
         "control/src/vonk_control/install_admission.py",
+        "control/src/vonk_control/disk_reservations.py",
         "control/src/vonk_control/runtime_preflight.py",
         "control/src/vonk_control/lifecycle_preflight.py",
         "control/src/vonk_control/run_admission.py",

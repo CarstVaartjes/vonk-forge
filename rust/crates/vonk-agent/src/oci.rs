@@ -53,9 +53,30 @@ pub enum OciError {
         #[source]
         source: Box<OciError>,
     },
+    #[error("start {stage} failed: {source}")]
+    Start {
+        stage: &'static str,
+        #[source]
+        source: Box<OciError>,
+    },
 }
 
 impl OciError {
+    pub fn safe_start_context(&self) -> (&'static str, &'static str) {
+        let (stage, source) = match self {
+            Self::Start { stage, source } => (*stage, source.as_ref()),
+            error => ("unknown", error),
+        };
+        let category = match source {
+            Self::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                "storage-permission-denied"
+            }
+            Self::Io(error) if error.kind() == std::io::ErrorKind::NotFound => "storage-not-found",
+            error => error.safe_category(),
+        };
+        (stage, category)
+    }
+
     pub fn safe_install_context(&self) -> (&'static str, &'static str) {
         match self {
             Self::Install { stage, source } => (*stage, source.safe_category()),
@@ -74,7 +95,7 @@ impl OciError {
             Self::Io(_) => "storage",
             Self::Json(_) => "metadata",
             Self::Capacity => "capacity",
-            Self::Install { source, .. } => source.safe_category(),
+            Self::Install { source, .. } | Self::Start { source, .. } => source.safe_category(),
         }
     }
 }
@@ -147,6 +168,16 @@ fn install_error(stage: &'static str, source: OciError) -> OciError {
         stage,
         source: Box::new(source),
     }
+}
+
+fn start_stage<T>(
+    stage: &'static str,
+    work: impl FnOnce() -> Result<T, OciError>,
+) -> Result<T, OciError> {
+    work().map_err(|source| OciError::Start {
+        stage,
+        source: Box::new(source),
+    })
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -649,33 +680,54 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         placement: &CompiledRuntimePlacement,
         identity: Option<&RecipeRunStartIdentity>,
     ) -> Result<RuntimeStartPlan, OciError> {
-        self.verify_image(spec)?;
-        let state = managed_path(self.data_root, "runs", run_id)?;
-        fs::create_dir_all(&state)?;
-        fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
-        let outputs = state.join("outputs");
-        fs::create_dir_all(&outputs)?;
-        fs::set_permissions(&outputs, fs::Permissions::from_mode(0o700))?;
-        reset_runtime_tmp(&outputs)?;
-        self.ensure_runtime_cache(installation_id)?;
-        if spec.job.is_some() {
-            let inputs = state.join("inputs");
-            let metadata = fs::symlink_metadata(&inputs)?;
-            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-                return Err(OciError::Artifact);
+        start_stage("image-verification", || self.verify_image(spec))?;
+        let state = start_stage("run-storage", || {
+            let state = managed_path(self.data_root, "runs", run_id)?;
+            fs::create_dir_all(&state)?;
+            fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
+            Ok(state)
+        })?;
+        start_stage("output-storage", || {
+            let outputs = state.join("outputs");
+            fs::create_dir_all(&outputs)?;
+            fs::set_permissions(&outputs, fs::Permissions::from_mode(0o700))?;
+            ensure_runtime_tmp(&outputs)
+        })?;
+        start_stage("runtime-cache", || {
+            self.ensure_runtime_cache(installation_id)
+        })?;
+        start_stage("job-inputs", || {
+            if spec.job.is_some() {
+                let inputs = state.join("inputs");
+                let metadata = fs::symlink_metadata(&inputs)?;
+                if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                    return Err(OciError::Artifact);
+                }
             }
-        }
-        let metadata = self.ensure_run_metadata(run_id)?;
-        self.write_runtime_contract(spec, run_id)?;
-        let main = self.start_arguments(spec, installation_id, run_id, placement)?;
+            Ok(())
+        })?;
+        let metadata = start_stage("runtime-metadata", || {
+            let metadata = self.ensure_run_metadata(run_id)?;
+            self.write_runtime_contract(spec, run_id)?;
+            // The first authorized helper invocation resets private runtime
+            // tmp. Keep the marker outside writable mounts so later hooks and
+            // the main process preserve temporary work from earlier hooks.
+            atomic_write(&metadata, "tmp-reset-required", b"")?;
+            File::open(&metadata)?.sync_all()?;
+            Ok(metadata)
+        })?;
+        let main = start_stage("runtime-projection", || {
+            self.start_arguments(spec, installation_id, run_id, placement)
+        })?;
         let runtime_image_digest = spec.runtime_image.image_digest.clone();
         let runtime_image_reference = spec.runtime_image.local_image_reference();
-        let pre_start = spec
-            .lifecycle
-            .pre_start
-            .iter()
-            .map(|hook| hook_arguments(&main, &runtime_image_reference, hook))
-            .collect::<Result<Vec<_>, _>>()?;
+        let pre_start = start_stage("start-hooks", || {
+            spec.lifecycle
+                .pre_start
+                .iter()
+                .map(|hook| hook_arguments(&main, &runtime_image_reference, hook))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
         let observation = identity
             .map(|identity| {
                 let (local_address, master_address, master_port) = if placement.world_size == 1 {
@@ -745,16 +797,22 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 binding.validate().map_err(|_| OciError::Artifact)?;
                 Ok(binding)
             })
-            .transpose()?;
-        atomic_write(
-            &metadata,
-            "lifecycle.json",
-            &serde_json::to_vec(&RunLifecycle {
-                installation_id: installation_id.to_owned(),
-                placement: placement.clone(),
-                observation,
-            })?,
-        )?;
+            .transpose()
+            .map_err(|source| OciError::Start {
+                stage: "observation-identity",
+                source: Box::new(source),
+            })?;
+        start_stage("lifecycle-metadata", || {
+            atomic_write(
+                &metadata,
+                "lifecycle.json",
+                &serde_json::to_vec(&RunLifecycle {
+                    installation_id: installation_id.to_owned(),
+                    placement: placement.clone(),
+                    observation,
+                })?,
+            )
+        })?;
         Ok(RuntimeStartPlan {
             image_digest: runtime_image_digest,
             registry_index_digest: spec
@@ -797,7 +855,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Runtime);
         }
         // Retained reconstruction is inspection/collective-readiness only.
-        // Reset writable state only in prepare_start_internal for a real start.
+        // Only the authorized helper may reset runtime-owned temporary files.
         Ok(RuntimeStartPlan {
             image_digest: spec.runtime_image.image_digest.clone(),
             registry_index_digest: spec
@@ -2175,12 +2233,11 @@ fn atomic_write(root: &Path, name: &str, value: &[u8]) -> Result<(), OciError> {
     Ok(())
 }
 
-/// Reset the per-run temporary tree before handing the writable output mount
-/// to the container. The helper grants the compiled runtime UID access to this
-/// tree, while the agent owns its lifecycle and ensures stale temporary files
-/// cannot survive a retained or retried start. The persistent cache remains a
-/// separate bind mount and is deliberately untouched.
-fn reset_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
+/// Prepare the agent-owned temporary mount boundary without traversing its
+/// contents. The helper and workload create private directories below it;
+/// only the authorized helper can remove them after proving the old container
+/// absent. A retained start must never erase a live workload's temporary work.
+fn ensure_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
     let output_metadata = fs::symlink_metadata(outputs)?;
     if output_metadata.file_type().is_symlink() || !output_metadata.is_dir() {
         return Err(OciError::Artifact);
@@ -2191,8 +2248,6 @@ fn reset_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
                 return Err(OciError::Artifact);
             }
-            fs::remove_dir_all(&temporary)?;
-            fs::create_dir(&temporary)?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             fs::create_dir(&temporary)?;
@@ -2233,9 +2288,9 @@ fn canonical_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        OciError, OciRuntime, SHA256_OPEN_FILE_CALLS, materialize_compiled_models,
-        read_installation_metadata, release_page_cache, reset_runtime_tmp, unique_plan_artifacts,
-        write_installation_metadata,
+        OciError, OciRuntime, SHA256_OPEN_FILE_CALLS, ensure_runtime_tmp,
+        materialize_compiled_models, read_installation_metadata, release_page_cache,
+        unique_plan_artifacts, write_installation_metadata,
     };
     use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
     use serde_json::{Value, json};
@@ -2531,6 +2586,14 @@ mod tests {
         first_agent
             .prepare_start(&plan, &installation_id, &run_id, &plan.runtime.placement)
             .unwrap();
+        let reset = data
+            .path()
+            .join("run-metadata")
+            .join(&run_id)
+            .join("tmp-reset-required");
+        // Stand in for the helper's completed cleanup. Retained recovery must
+        // not request a second cleanup after hooks or a workload have run.
+        fs::remove_file(&reset).unwrap();
         let marker = data
             .path()
             .join("runs")
@@ -2553,6 +2616,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(retained.pre_start.is_empty());
+        assert!(!reset.exists());
         assert_eq!(fs::read(marker).unwrap(), b"keep");
         let mut other_placement = plan.runtime.placement.clone();
         other_placement.reserved_memory_bytes += 1;
@@ -2967,16 +3031,89 @@ mod tests {
     }
 
     #[test]
-    fn runtime_tmp_is_reset_and_kept_private_between_starts() {
+    fn restart_preparation_leaves_private_runtime_tmp_for_the_authorized_helper() {
+        use std::os::unix::process::CommandExt;
+
+        const CHILD_ROOT: &str = "VONK_RESTART_TMP_TEST_ROOT";
+        if let Ok(root) = std::env::var(CHILD_ROOT) {
+            let root = Path::new(&root);
+            let installation_id = std::env::var("VONK_RESTART_TMP_INSTALLATION").unwrap();
+            let run_id = std::env::var("VONK_RESTART_TMP_RUN").unwrap();
+            let runner = NoProcess;
+            let runtime = runtime(root, &runner);
+            let plan = runtime.load_spec(&installation_id).unwrap();
+            runtime
+                .prepare_start(&plan, &installation_id, &run_id, &plan.runtime.placement)
+                .unwrap();
+            return;
+        }
+
+        let data = tempdir().unwrap();
+        let (installation_id, _, plan) = persisted_installation(data.path());
+        let run_id = Uuid::new_v4().to_string();
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        runtime
+            .prepare_start(&plan, &installation_id, &run_id, &plan.runtime.placement)
+            .unwrap();
+        runtime.complete_stop(&run_id).unwrap();
+        let private = data
+            .path()
+            .join("runs")
+            .join(&run_id)
+            .join("outputs/tmp")
+            .join(&run_id);
+        fs::create_dir(&private).unwrap();
+        fs::write(private.join("engine-owned"), b"temporary").unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child.args(["--exact", "oci::tests::restart_preparation_leaves_private_runtime_tmp_for_the_authorized_helper", "--nocapture"])
+            .env(CHILD_ROOT, data.path())
+            .env("VONK_RESTART_TMP_INSTALLATION", &installation_id)
+            .env("VONK_RESTART_TMP_RUN", &run_id);
+        if rustix::process::geteuid().is_root() {
+            fn agent_owns(path: &Path) {
+                rustix::fs::chown(path, Some(rustix::process::Uid::from_raw(65534)), None).unwrap();
+                if path.is_dir() {
+                    for entry in fs::read_dir(path).unwrap() {
+                        agent_owns(&entry.unwrap().path());
+                    }
+                }
+            }
+            agent_owns(data.path());
+            // The helper creates this directory as root and grants only the
+            // runtime UID access. The unprivileged agent cannot traverse it.
+            rustix::fs::chown(&private, Some(rustix::process::Uid::ROOT), None).unwrap();
+            child.uid(65534).gid(65534);
+        } else {
+            fs::set_permissions(&private, fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let result = child.output().unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            result.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            fs::read(private.join("engine-owned")).unwrap(),
+            b"temporary"
+        );
+    }
+
+    #[test]
+    fn runtime_tmp_boundary_is_kept_private_without_deleting_runtime_owned_content() {
         let data = tempdir().unwrap();
         let outputs = data.path().join("outputs");
         fs::create_dir_all(outputs.join("tmp")).unwrap();
         fs::write(outputs.join("tmp").join("stale.marker"), b"stale").unwrap();
 
-        reset_runtime_tmp(&outputs).unwrap();
+        ensure_runtime_tmp(&outputs).unwrap();
 
         let temporary = outputs.join("tmp");
-        assert!(!temporary.join("stale.marker").exists());
+        assert!(temporary.join("stale.marker").exists());
         let metadata = fs::symlink_metadata(temporary).unwrap();
         assert!(metadata.is_dir());
         assert!(!metadata.file_type().is_symlink());
@@ -2993,7 +3130,7 @@ mod tests {
         symlink(&target, outputs.join("tmp")).unwrap();
 
         assert!(matches!(
-            reset_runtime_tmp(&outputs),
+            ensure_runtime_tmp(&outputs),
             Err(OciError::Artifact)
         ));
         assert!(target.is_dir());

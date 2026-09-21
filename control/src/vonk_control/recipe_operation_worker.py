@@ -210,20 +210,6 @@ class RecipeOperationWorker:
                     or not isinstance(node.observation_receipt_sha256, str)
                     or re.fullmatch(r"[0-9a-f]{64}", node.observation_receipt_sha256)
                     is None
-                    or (
-                        deadline is not None
-                        and (
-                            node.updated_at.replace(tzinfo=UTC)
-                            if node.updated_at.tzinfo is None
-                            or node.updated_at.utcoffset() is None
-                            else node.updated_at.astimezone(UTC)
-                        )
-                        > (
-                            deadline.replace(tzinfo=UTC)
-                            if deadline.tzinfo is None or deadline.utcoffset() is None
-                            else deadline.astimezone(UTC)
-                        )
-                    )
                 )
                 if not missing:
                     continue

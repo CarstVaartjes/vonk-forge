@@ -1181,37 +1181,7 @@ def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
         assert all(node.state == "failed" for node in nodes)
 
 
-def test_initial_exact_observation_deadline_fails_late_signed_ranks(
-    tmp_path: Path,
-) -> None:
-    service, _publisher, _applied, run_id = setup(tmp_path)
-    deadline = NOW + timedelta(seconds=60)
-    with service.sessions.begin() as session:
-        run = _recipe_run(session, run_id)
-        run.plan = {**run.plan, "observation_schema_version": 2}
-        run.route_state = "pending"
-        run.observation_deadline_at = deadline
-        for node in session.query(RunNode).filter_by(run_id=run_id):
-            node.observed_run_generation = run.run_generation
-            node.observation_receipt_sha256 = "a" * 64
-            node.observation_endpoint_ready = node.role == "entrypoint" or None
-            node.updated_at = deadline + timedelta(microseconds=1)
-
-    worker = RecipeOperationWorker(
-        service.sessions,
-        service,
-        clock=lambda: deadline + timedelta(seconds=1),
-    )
-    assert worker.tick() is True
-    with service.sessions() as session:
-        run = _recipe_run(session, run_id)
-        nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
-        assert run.route_state == "withdrawn"
-        assert run.route_error == "initial exact observation deadline elapsed"
-        assert all(node.state == "failed" for node in nodes)
-
-
-def test_direct_publication_rejects_exact_observation_after_deadline(
+def test_direct_publication_accepts_renewed_exact_observation_after_initial_deadline(
     tmp_path: Path,
 ) -> None:
     service, _publisher, _applied, run_id = setup(tmp_path)
@@ -1227,11 +1197,10 @@ def test_direct_publication_rejects_exact_observation_after_deadline(
             node.observation_endpoint_ready = node.role == "entrypoint" or None
             node.updated_at = deadline + timedelta(microseconds=1)
 
-    with pytest.raises(
-        RecipeRouteError,
-        match="recipe rank exact observation missed its deadline",
-    ):
-        service.publish_run(run_id)
+    # Signed ingress has already enforced the first-receipt deadline. The
+    # latest timestamp is a renewal and must retain its current health meaning.
+    generation = service.publish_run(run_id)
+    assert generation.generation == 1
 
 
 def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(

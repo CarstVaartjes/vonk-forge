@@ -9,7 +9,7 @@ from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .cluster_mappings import validate_mapping_parameters
@@ -18,6 +18,7 @@ from .compiled_execution_plan import (
     CompiledRuntimeImage,
     validate_compiled_launch_payload,
 )
+from .disk_reservations import outstanding_disk_reservation_bytes
 from .inventory_repository import InventoryRepository, InventorySnapshotView
 from .legal_admission import territorial_admission
 from .models import (
@@ -498,17 +499,10 @@ class InstallAdmissionService:
                         )
                     )
                 )
-                reserved = int(
-                    session.scalar(
-                        select(
-                            func.coalesce(func.sum(ResourceReservation.amount_bytes), 0)
-                        ).where(
-                            ResourceReservation.node_id == mapping_node.node_id,
-                            ResourceReservation.kind == "disk",
-                            ResourceReservation.state == "active",
-                        )
-                    )
-                    or 0
+                reserved = outstanding_disk_reservation_bytes(
+                    session,
+                    mapping_node.node_id,
+                    inventory_observed_at=snapshot.observed_at if snapshot else None,
                 )
             raw_image_digest = image_digest.removeprefix("sha256:")
             reused_image = (
@@ -765,7 +759,7 @@ class InstallAdmissionService:
             created_at=now,
             updated_at=now,
         )
-        for node in sorted(plan.nodes, key=lambda item: item.node_id):
+        for node in sorted(fresh.nodes, key=lambda item: item.node_id):
             if (
                 session.scalar(
                     select(AgentNode)
@@ -775,17 +769,8 @@ class InstallAdmissionService:
                 is None
             ):
                 raise InstallPlanConflict("installation node disappeared")
-            active = int(
-                session.scalar(
-                    select(
-                        func.coalesce(func.sum(ResourceReservation.amount_bytes), 0)
-                    ).where(
-                        ResourceReservation.node_id == node.node_id,
-                        ResourceReservation.kind == "disk",
-                        ResourceReservation.state == "active",
-                    )
-                )
-                or 0
+            active = outstanding_disk_reservation_bytes(
+                session, node.node_id, inventory_observed_at=node.inventory_observed_at
             )
             if (
                 node.free_bytes is None

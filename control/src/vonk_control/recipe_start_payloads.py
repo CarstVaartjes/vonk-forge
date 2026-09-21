@@ -13,6 +13,14 @@ class RecipeStartPayloadError(ValueError):
     """A Controller start payload cannot cross the agent wire boundary."""
 
 
+def validate_distributed_start_timeout_seconds(value: object) -> int:
+    """Validate the operator budget shared by initial start and exact recovery."""
+
+    if type(value) is not int or not 60 <= value <= 3600:
+        raise RecipeStartPayloadError("distributed start timeout is invalid")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class RecipeStartPlacement:
     node_id: str

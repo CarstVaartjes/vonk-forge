@@ -8,7 +8,7 @@ import json
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from pydantic import ConfigDict, TypeAdapter
 from sqlalchemy import func, select
@@ -17,6 +17,10 @@ from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.inventory import Capability
 
 from .models import NodeInventorySnapshot
+
+# Agent inventory may lead the Controller clock by this much. Consumers that
+# order it against Controller-owned events must retain the same uncertainty.
+MAX_INVENTORY_FUTURE_SKEW = timedelta(seconds=30)
 
 _CAPABILITIES = TypeAdapter(list[Capability], config=ConfigDict(strict=True))
 
