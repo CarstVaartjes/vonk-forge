@@ -3022,13 +3022,12 @@ class AgentJobService:
             operation.current_attempt,
             _aware(now),
             retry_after=retry_after,
+            ongoing_intent=True,
         )
-        if due is None:
-            operation.retry_disposition = None
-            operation.retry_disposition_attempt = None
-            operation.retry_due_at = None
-            operation.status_reason = f"exact {operation.kind} retry budget exhausted; inspect the last attempt"
-            return
+        # Exact-resume support reconciles the prior effect before any new work.
+        # Bound frequency, not the lifetime of current authorized intent: a long
+        # outage must not require an operator to retire and recreate this job.
+        assert due is not None
         operation.retry_disposition = _RETRY_DISPOSITION
         operation.retry_disposition_attempt = operation.current_attempt
         operation.retry_due_at = due

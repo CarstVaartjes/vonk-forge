@@ -182,11 +182,14 @@ def test_postgres_running_switch_allows_route_publication_and_survives_restart(
     sessions, lifecycle, routes, publisher, _, operation = _awaiting_final_verification(
         tmp_path, migrated_engine
     )
+    now = [NOW]
     restarted = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    restarted._clock = lambda: now[0]
     worker = RecipeOperationWorker(
-        sessions, routes, clock=lambda: NOW, run_switches=restarted
+        sessions, routes, clock=lambda: now[0], run_switches=restarted
     )
     for _ in range(4):
+        now[0] += timedelta(seconds=5)
         worker.tick()
     result = restarted.get(operation.operation_id)
     assert result.state == "succeeded", result.status_reason
@@ -198,7 +201,9 @@ def test_postgres_running_switch_allows_route_publication_and_survives_restart(
     )
 
 
-def test_postgres_final_verification_has_durable_timeout(tmp_path, migrated_engine):
+def test_postgres_final_verification_backs_off_after_durable_deadline(
+    tmp_path, migrated_engine
+):
     sessions, lifecycle, _, _, service, operation = _awaiting_final_verification(
         tmp_path, migrated_engine
     )
@@ -214,9 +219,12 @@ def test_postgres_final_verification_has_durable_timeout(tmp_path, migrated_engi
         sessions, NOW + timedelta(seconds=300), lifecycle, RecordingArtifactExecutor()
     )
     restarted.tick()
-    failed = restarted.get(operation.operation_id)
-    assert failed.state == "failed"
-    assert failed.status_reason == "run-switch.final-verification-timeout"
+    waiting = restarted.get(operation.operation_id)
+    assert waiting.state == "running"
+    assert waiting.result is not None
+    assert waiting.result.final_verify_started_at == before.final_verify_started_at
+    assert waiting.result.observation_due_at == NOW + timedelta(seconds=360)
+    assert restarted.tick() is False
 
 
 def test_postgres_duplicate_apply_converges_under_target_lock(

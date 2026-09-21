@@ -2293,7 +2293,7 @@ def test_late_result_is_retained_under_expired_fence_without_completing_operatio
     assert jobs.record_late_result(late) is True
 
 
-def test_transient_distribution_failure_backs_off_across_restart_then_blocks(
+def test_transient_distribution_failure_recovers_after_repeated_faults_and_restart(
     service,
 ) -> None:
     from vonk_agent_protocol import AgentResult
@@ -2308,7 +2308,7 @@ def test_transient_distribution_failure_backs_off_across_restart_then_blocks(
         {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
     )
     capabilities = ["agent.runtime.rust.v1", kind]
-    for attempt_number in range(1, 6):
+    for attempt_number in range(1, 8):
         claim = claim_agent(
             jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
         )
@@ -2363,18 +2363,36 @@ def test_transient_distribution_failure_backs_off_across_restart_then_blocks(
             )
             is None
         )
-        if attempt_number < 5:
-            assert due is not None
-            if attempt_number == 1:
-                assert due.replace(tzinfo=UTC) >= clock.now + timedelta(seconds=120)
-            clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
+        assert due is not None
+        if attempt_number == 1:
+            assert due.replace(tzinfo=UTC) >= clock.now + timedelta(seconds=120)
         else:
-            assert due is None
-            with sessions() as session:
-                assert (
-                    "budget exhausted"
-                    in session.get(AgentOperation, operation.id).status_reason
-                )
+            assert (
+                clock.now < due.replace(tzinfo=UTC) <= clock.now + timedelta(seconds=60)
+            )
+        clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
+
+    recovered = claim_agent(
+        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+    )
+    assert recovered is not None and recovered.operation_id == operation.id
+    jobs.succeed(
+        recovered,
+        {
+            "assignment_id": "33333333-3333-4333-8333-333333333333",
+            "model_artifact_set_sha256": COMMIT,
+            "verified": True,
+            "verified_digests": [COMMIT],
+            "verified_image_digest": "sha256:" + COMMIT,
+            "imported_image_digest": "sha256:" + COMMIT,
+            "verified_oci_layout_sha256": COMMIT,
+            "oci_image_digest": "sha256:" + COMMIT,
+            "downloaded_bytes": 0,
+            "evidence_digest": COMMIT,
+        },
+    )
+    with sessions() as session:
+        assert session.get(AgentOperation, operation.id).state == "succeeded"
 
 
 def test_successful_distribution_receipt_closes_coalesced_final_counters(

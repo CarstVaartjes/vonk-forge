@@ -77,6 +77,7 @@ from vonk_control.run_switch_operations import (
     ArtifactInspection,
     PhaseExecution,
     RecipeLifecyclePhaseExecutor,
+    RunSwitchIssuedWorkloadPending,
     RunSwitchOperationConflict,
     RunSwitchOperationProvider,
     RunSwitchOperationService,
@@ -1687,13 +1688,24 @@ def _cold_compile_switch(tmp_path: Path, *, seconds: int = 716, slow_compiles: i
     )
 
     def drive() -> None:
-        """Advance one phase, answering any ordinary preflight probe."""
+        """Advance one due phase, answering any ordinary preflight probe."""
+        before = service.get(operation.operation_id)
+        due = before.result.observation_due_at if before.result is not None else None
+        if due is not None and due > clock.now:
+            clock.now = due
         service.tick()
         view = service.get(operation.operation_id)
         assert view.result is not None
         checkpoint = view.result.preflight
         if checkpoint is not None and checkpoint.pending_job_id:
-            _finish(sessions, checkpoint, clock.now)
+            with sessions() as session:
+                pending = session.get(Job, checkpoint.pending_job_id)
+                needs_result = pending is not None and pending.state in {
+                    "queued",
+                    "running",
+                }
+            if needs_result:
+                _finish(sessions, checkpoint, clock.now)
 
     return SimpleNamespace(
         sessions=sessions,
@@ -1789,36 +1801,37 @@ def test_slow_cold_compile_refreshes_preflight_instead_of_failing_the_switch(
     assert installations[0].plan["compiled_execution_plans"]
 
 
-def test_preflight_refresh_after_a_cold_compile_stays_bounded(tmp_path: Path) -> None:
-    """A Controller that never fits the window must exhaust, not loop.
-
-    Every compile here outlives the preflight receipt it was admitted on, so
-    each refreshed probe is stale again by the time acceptance re-plans.  The
-    The compilation retry budget must terminate the phase independently of
-    the ordinary probe budget, with no installation or queued install child.
-    """
-
-    switch = _cold_compile_switch(tmp_path, slow_compiles=99)
+def test_preflight_refresh_after_repeated_cold_compiles_recovers_exact_plan(
+    tmp_path: Path,
+) -> None:
+    """Freshness expiry backs off without abandoning accepted exact intent."""
+    switch = _cold_compile_switch(tmp_path, slow_compiles=6)
     service, operation = switch.service, switch.operation
-
-    for _ in range(40):
-        if service.get(operation.operation_id).state not in {"queued", "running"}:
+    with switch.sessions() as session:
+        original = dict(session.get(Job, operation.operation_id).payload)
+    for _ in range(60):
+        view = service.get(operation.operation_id)
+        assert view.state in {"queued", "running"}, view.status_reason
+        if "runtime-install" in switch.executor.events:
             break
         switch.drive()
-
-    view = service.get(operation.operation_id)
-    assert view.state == "failed"
-    assert view.status_reason == (
-        "run-switch.install-preflight-refresh-exhausted: "
-        "3 install compilation attempts ended with expired preflight"
-    )
-    assert switch.executor.events.count("runtime-plan") == 3
-    assert view.result.retry_attempt == 3
-    assert view.result.operation.completed_items == 3
-    assert "runtime-install" not in switch.executor.events
+        held = service.get(operation.operation_id)
+        if (
+            held.result.retry_reason is not None
+            and held.result.observation_due_at is not None
+        ):
+            assert held.result.observation_due_at <= switch.clock.now + timedelta(
+                seconds=60
+            )
+            if held.result.observation_due_at > switch.clock.now:
+                assert service.tick() is False
+    assert switch.executor.events.count("runtime-plan") == 7
+    assert switch.executor.events.count("runtime-install") == 1
     with switch.sessions() as session:
-        assert list(session.scalars(select(RecipeInstallation))) == []
-        assert list(session.scalars(select(ResourceReservation))) == []
+        assert session.get(Job, operation.operation_id).payload == original
+        installations = list(session.scalars(select(RecipeInstallation)))
+        assert len(installations) == 1
+        assert installations[0].plan_digest == switch.admitted.plan_digest
 
 
 def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
@@ -1858,18 +1871,10 @@ def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
         assert list(session.scalars(select(ResourceReservation))) == []
 
 
-def test_preflight_receipt_disagreement_cannot_bypass_compilation_retry_bound(
+def test_preflight_receipt_disagreement_backs_off_then_recovers(
     tmp_path: Path,
 ) -> None:
-    """Repeated DB ordering races cannot evade the gate's probe counter.
-
-    Preview sees the fresh result cached by the gate.  During each compilation,
-    another writer touches an older operation, so acceptance selects its stale
-    receipt by updated_at.  Before the next tick the fresh row wins again.  A
-    persistently stale DB result would simply block the next preview; this
-    regression exercises the repeated interleaving that can otherwise hold
-    forever without the gate ever requesting a probe.
-    """
+    """Receipt ordering races wait durably without replaying completed phases."""
     switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=99)
     stale_time = switch.clock.now - timedelta(seconds=301)
     record_passing_preflight(switch.sessions, stale_time)
@@ -1893,9 +1898,10 @@ def test_preflight_receipt_disagreement_cannot_bypass_compilation_retry_bound(
                 )
 
     switch.hooks.append(lambda: order_stale_receipts(latest=True))
-    for _ in range(20):
+    for _ in range(10):
         view = switch.service.get(switch.operation.operation_id)
-        if view.state not in {"queued", "running"}:
+        assert view.state in {"queued", "running"}, view.status_reason
+        if switch.compiler.compiles >= 4:
             break
         order_stale_receipts(latest=False)
         switch.drive()
@@ -1919,17 +1925,21 @@ def test_preflight_receipt_disagreement_cannot_bypass_compilation_retry_bound(
                 )
 
     view = switch.service.get(switch.operation.operation_id)
-    assert view.state == "failed"
-    assert view.status_reason.startswith(
-        "run-switch.install-preflight-refresh-exhausted:"
-    )
-    assert switch.executor.events.count("runtime-plan") == 3
-    assert view.result.retry_attempt == 3
-    assert view.result.operation.completed_items == 3
+    assert view.state == "running"
+    assert view.result.observation_due_at > switch.clock.now
+    assert switch.service.tick() is False
+    assert switch.executor.events.count("runtime-plan") == 4
     assert "runtime-install" not in switch.executor.events
     with switch.sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []
         assert list(session.scalars(select(ResourceReservation))) == []
+    switch.hooks.clear()
+    order_stale_receipts(latest=False)
+    for _ in range(10):
+        switch.drive()
+        if "runtime-install" in switch.executor.events:
+            break
+    assert switch.executor.events.count("runtime-install") == 1
 
 
 def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
@@ -3936,8 +3946,10 @@ def test_parked_start_with_an_established_run_completes_without_an_operator(
     assert start_index < len(completed)
 
 
-def test_parked_start_without_an_established_effect_expires(tmp_path: Path) -> None:
-    """Read-only observation has a finite budget and cannot invent success."""
+def test_parked_start_after_observation_deadline_keeps_exact_effect_pending(
+    tmp_path: Path,
+) -> None:
+    """A deadline slows observation but cannot declare an unknown effect failed."""
 
     service, operation, _start_index = _parked_start_switch(tmp_path, healthy=False)
     now = [NOW]
@@ -3947,8 +3959,17 @@ def test_parked_start_without_an_established_effect_expires(tmp_path: Path) -> N
     assert service.tick() is True
 
     view = service.get(operation.operation_id)
-    assert view.state == "failed"
+    assert view.state == "waiting-for-operator"
     assert "start-observation-expired" in (view.status_reason or "")
+    assert view.result is not None and view.result.observation_due_at is not None
+    assert view.result.observation_due_at == now[0] + timedelta(seconds=60)
+    assert service.tick() is False
+    assert isinstance(service._lifecycle, _ObservingLifecycle)
+    service._lifecycle._healthy = True
+    now[0] = view.result.observation_due_at
+    for _ in range(4):
+        service.tick()
+    assert service.get(operation.operation_id).state == "succeeded"
 
 
 def test_parked_start_still_progressing_is_observed_before_final_success(
@@ -4157,9 +4178,7 @@ def _planned_installation(tmp_path: Path, *, nodes: int = 2):
     admission = lifecycle._install_admission
     plan = admission.plan_install(mapping_id, build_id, now=NOW)
     assert plan.allowed, [
-        (node.node_id, reason.code)
-        for node in plan.nodes
-        for reason in node.blockers
+        (node.node_id, reason.code) for node in plan.nodes for reason in node.blockers
     ]
     installation_id = admission.accept_install(plan, actor="admin", now=NOW)
     with sessions() as session:
@@ -4286,3 +4305,186 @@ def test_scoped_cleanup_refuses_a_planned_row_with_install_evidence(
     with sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
         assert installation is not None and installation.state == "planned"
+
+
+def test_parked_switch_observes_recovered_child_after_controller_restart(
+    tmp_path: Path,
+) -> None:
+    """A parked parent must not miss its child's later exact success."""
+    service, operation, _ = _parked_start_switch(tmp_path, healthy=False)
+    now = [NOW]
+    service._clock = lambda: now[0]
+    with service._sessions.begin() as session:
+        row = session.get(Job, operation.operation_id)
+        assert row is not None
+        row.state = "waiting-for-operator"
+    restarted = RunSwitchOperationService(
+        service._sessions,
+        lifecycle=service._lifecycle,
+        clock=lambda: now[0],
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+    )
+    assert isinstance(service._lifecycle, _ObservingLifecycle)
+    service._lifecycle._healthy = True
+    for _ in range(4):
+        restarted.tick()
+    recovered = restarted.get(operation.operation_id)
+    assert recovered.state == "succeeded", recovered.status_reason
+    assert _result(recovered).completed_phases.count("start") == 1
+
+
+@pytest.mark.parametrize("ending", ["recovered", "cancelled", "superseded", "revoked"])
+def test_temporary_phase_failure_preserves_exact_intent_across_restart(
+    tmp_path: Path, ending: str
+) -> None:
+    class InterruptedTransfer(RecordingArtifactExecutor):
+        def __init__(self):
+            super().__init__()
+            self.unavailable = True
+            self.identities = []
+
+        def execute(self, plan, phase, **kwargs):
+            if phase.kind == "transfer":
+                self.identities.append((plan.plan_digest, kwargs["request_key"]))
+                if self.unavailable:
+                    raise httpx.ConnectError("NAS temporarily disconnected")
+            return super().execute(plan, phase, **kwargs)
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    executor = InterruptedTransfer()
+    now = [NOW]
+
+    def restarted():
+        result = _service(
+            sessions,
+            now[0],
+            lifecycle,
+            executor,
+            artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+        )
+        result._clock = lambda: now[0]
+        return result
+
+    service = restarted()
+    request = _request(sessions, nodes[0])
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    with sessions() as session:
+        row = session.get(Job, operation.operation_id)
+        assert row is not None
+        original = dict(row.payload)
+    for _ in range(7):
+        assert service.tick()
+        waiting = service.get(operation.operation_id)
+        assert waiting.state == "running", waiting.status_reason
+        assert (
+            waiting.result is not None and waiting.result.observation_due_at is not None
+        )
+        due = waiting.result.observation_due_at
+        assert now[0] < due <= now[0] + timedelta(seconds=60)
+        service = restarted()
+        assert service.tick() is False
+        now[0] = due
+    if ending == "cancelled":
+        service.cancel(
+            operation.operation_id,
+            actor="admin",
+            request_key=str(uuid.uuid4()),
+            reason="Stop recovery",
+        )
+    elif ending in {"superseded", "revoked"}:
+        with sessions.begin() as session:
+            node = session.get(AgentNode, nodes[0])
+            assert node is not None
+            if ending == "superseded":
+                node.workload_intent_ordinal += 1
+            else:
+                node.revoked_at = now[0]
+    executor.unavailable = False
+    service = restarted()
+    service.tick()
+    current = service.get(operation.operation_id)
+    with sessions() as session:
+        row = session.get(Job, operation.operation_id)
+        assert row is not None and row.payload == original
+    if ending == "recovered":
+        assert current.state == "running"
+        assert current.result is not None
+        assert "transfer" in current.result.completed_phases
+        assert len(executor.identities) == 8
+    else:
+        assert current.state == ("failed" if ending == "revoked" else "cancelled")
+        assert len(executor.identities) == 7
+    assert len(set(executor.identities)) == 1
+
+
+@pytest.mark.parametrize("kind", ["artifact-job-cancellation", "recipe.stop"])
+def test_late_dependency_receipt_resumes_original_checkpoint_after_deadline(
+    tmp_path: Path, kind: str
+) -> None:
+    class PendingDependency(RecordingArtifactExecutor):
+        pending = True
+        calls_while_pending = 0
+
+        def execute(self, plan, phase, **kwargs):
+            if self.pending:
+                self.calls_while_pending += 1
+                raise RunSwitchIssuedWorkloadPending(
+                    kind=kind,
+                    owner_id="exact-old-owner",
+                    job_id=dependency,
+                    observe_due_at=NOW,
+                    observation_deadline=NOW + timedelta(seconds=120),
+                )
+            return super().execute(plan, phase, **kwargs)
+
+    dependency = str(uuid.uuid4())
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    executor = PendingDependency()
+    now = [NOW + timedelta(seconds=121)]
+    service = _service(
+        sessions,
+        now[0],
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    service._clock = lambda: now[0]
+    request = _request(sessions, nodes[0])
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    assert service.tick()
+    held = service.get(operation.operation_id)
+    assert held.state == "running", held.status_reason
+    assert held.result is not None
+    assert held.result.observation_due_at is not None
+    assert held.result.observation_due_at == now[0] + timedelta(seconds=60)
+    assert held.status_reason is not None and dependency in held.status_reason
+    assert service.tick() is False
+    executor.pending = False
+    now[0] = held.result.observation_due_at
+    restarted = _service(
+        sessions,
+        now[0],
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    assert restarted.tick()
+    recovered = restarted.get(operation.operation_id)
+    assert recovered.state == "running"
+    assert (
+        recovered.result is not None and "transfer" in recovered.result.completed_phases
+    )
+    assert executor.calls_while_pending == 1
