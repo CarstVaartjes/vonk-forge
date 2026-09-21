@@ -1454,13 +1454,22 @@ def install_agent_routes(
                             _now(node.updated_at).astimezone(UTC), evidence_observed_at
                         )
                         continue
+                    # The grace period bounds the first authenticated receipt,
+                    # not every later renewal's timestamp. Once this generation
+                    # has a receipt, freshness checks govern continuing service.
+                    initial_observation_late = (
+                        node.observed_run_generation != run.run_generation
+                        and run.observation_deadline_at is not None
+                        and evidence_observed_at > _now(run.observation_deadline_at)
+                    )
                     mapping = session.get(ClusterMapping, run.mapping_id)
                     owner = (
                         mapping is not None
                         and mapping.endpoint_owner_node_id == identity.node_id
                     )
                     if (
-                        observed_identity != evidence.observation_identity_sha256
+                        initial_observation_late
+                        or observed_identity != evidence.observation_identity_sha256
                         or (owner and type(evidence.endpoint_ready) is not bool)
                         or (not owner and evidence.endpoint_ready is not None)
                     ):
