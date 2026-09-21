@@ -110,6 +110,7 @@ from .recipe_start_payloads import (
     RecipeStartPayloadError,
     RecipeStartPlacement,
     build_recipe_start_payload,
+    validate_distributed_start_timeout_seconds,
 )
 from .recovery_policy import FailureKind
 from .run_admission import RunAdmissionService, RunNodePlan, RunPlan
@@ -487,12 +488,11 @@ class RecipeOperationService:
     ) -> None:
         if not 1 <= run_health_maximum_age_seconds <= 300:
             raise ValueError("recipe run health age is invalid")
-        if (
-            type(distributed_start_timeout_seconds) is not int
-            or not 60 <= distributed_start_timeout_seconds <= 3600
-        ):
-            raise ValueError("distributed start timeout is invalid")
-        self._distributed_start_timeout_seconds = distributed_start_timeout_seconds
+        self._distributed_start_timeout_seconds = (
+            validate_distributed_start_timeout_seconds(
+                distributed_start_timeout_seconds
+            )
+        )
         self._sessions = sessions
         self._install_admission = install_admission
         self._run_admission = run_admission
@@ -4579,8 +4579,8 @@ def _distributed_start_deadline(
     readiness = _canonical_distributed_readiness(document)
     if readiness is None:
         raise RecipeOperationConflict("distributed readiness policy is unavailable")
-    # Initial loading/JIT has a separate operator budget from rank-loss recovery.
-    # Persist one immutable deadline; lease renewal must never extend it.
+    # Persist the accepted loading/JIT budget. Exact rank-loss recovery derives
+    # this same duration; neither lease renewal nor retry extends a deadline.
     return (_aware(now) + timedelta(seconds=timeout_seconds)).isoformat()
 
 
