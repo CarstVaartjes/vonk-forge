@@ -50,7 +50,7 @@ boundary, with the exact code and test/deployment evidence.
 | Recover accepted intent automatically | A temporary dependency failure resumes the same authorized intent after recovery, without retirement, Idle/reapply, or another recipe revision. Waiting exposes its cause, owner, dependency, next attempt, and deadline. Completed assets and effects are reused. | Merged in PR #874 and deployed for classified safe-effect retries and typed pre-effect profile cache loss. Exact identities and current workload priority are retained. Combined verification is recorded below; physical qualification remains open. |
 | Make retirement and supersession safe | Observe or clean up the exact old runtime effects before releasing their reservations or admitting conflicting replacement work. Expired leases and terminal database labels alone cannot prove absence. Delayed results cannot revive retired intent. | Merged in PR #874 and deployed. Retirement retains capacity and schedules normal exact cleanup; temporary cleanup failure retries the same operation. PostgreSQL regressions cover release, late results, launch budgets, and newer intent. |
 | Align build reuse with installation admission | An editorial recipe successor with identical executable inputs can reuse an exact verified build under current revision authorization. Preparation, compilation, and install admission agree. Changed executable inputs or incompatible receipts cannot inherit the old result. | Connected preparation/admission corrections were merged in PR #874 and deployed. Current authorization and present verified bytes remain mandatory. |
-| Complete the physical GLM start | Installed bytes are charged once, a stopped workload can restart with its private temporary files present, and exact rank observations reach route publication. | The post-deployment investigation below records the failures, corrections, and passing repository checks. Physical inference remains open until the published fixes are deployed and exercised. |
+| Complete the physical GLM start | Installed bytes are charged once, a stopped workload can restart with its private temporary files present, and exact rank observations reach route publication. | PR #875 is merged, published, and deployed. Profile 3 succeeded on both upgraded Sparks; non-streaming and streaming inference passed, with fresh rank observations six minutes after readiness. The restart fault is covered by real Linux permission tests; physical fault injection remains separate. |
 | Apply the budget policy below | Estimated demand can produce a useful warning without removing real capacity, isolation, authorization, integrity, or exact-plan checks. Any automated smaller request or alternative runtime is explicitly permitted and bound in the accepted plan. | The historical blanket warning policy is superseded below. No allocator, kernel, integrity, or authorization check was weakened, and no automatic context/image substitution was introduced. |
 | Prove the recovery matrix below | Record failure injection, restart, response loss, cancellation/supersession, storage loss, and eventual recovery through the real owners. Run physical qualification separately after the corresponding deployment. | Local process-death and PostgreSQL fault/recovery tests are recorded below. Deployment and physical fault injection remain open. |
 | Maintain this handover | Retain one current action list, refresh dated observations, and keep repository, CI/publication, Controller, and physical results separate. | This document replaces the archive's conflicting current instructions. |
@@ -232,7 +232,60 @@ wire tests passed using PostgreSQL and Linux helper/Rust probes. The combined
 Linux agent/helper suite passed 471 tests (2 designated systemd tests ignored).
 The final FIFO-marker rejection and lint follow-up passed 331 affected tests
 (1 designated systemd test ignored) and Clippy. These are repository results;
-accepted publication, deployment, and physical GLM inference are still required.
+accepted publication, deployment, and physical GLM inference are recorded below.
+
+### Published deployment and physical serving evidence
+
+[PR #875](https://github.com/CarstVaartjes/vonk-forge/pull/875) merged as
+`de5e38fcac01309c64ab3ac2e3ade88601cb722f`. All PR checks passed, including the
+real ARM64 helper/container-start and package recovery proofs.
+[Publication run 35627304450](https://github.com/CarstVaartjes/vonk-forge/actions/runs/35627304450)
+passed both NAS lanes and packaged Spark acceptance, then promoted schema-2
+generation `2793700f9e46f439d7a6f6b73e790163f2d9c3f44d10efbab3896f1749574a6c`.
+Its package version is `0.1.1~dev.609+gde5e38fcac01`; both the build version and
+release source bind the repair commit.
+
+The NAS pulled the accepted API and worker images and recreated those two
+services through its existing Compose project. No Compose, credential, volume,
+or database-schema changes were made. Authenticated Controller provenance at
+**2026-09-21 16:54:57 UTC** reports the running Controller source as
+`de5e38fcac01309c64ab3ac2e3ade88601cb722f`.
+
+Controller upgrade `eaa4f023-b5e1-47b0-8e8a-86ad6e2dd36b` upgraded the Sparks
+one at a time. Both targets succeeded and proved binary
+`4cf60adfb0f34acb402a46026b41ab2ac0a874be96a1c0b3d0a201c3e3624f9f` and build
+`sha256:09ec1c3ea7131d4dce938229ec9d6cfe1cd85c3f864ae5b24a26226329675e77`,
+matching the accepted package's identity. Completion was recorded at
+16:55:35 UTC for spark-3542 and 16:55:41 UTC for spark-2297.
+
+Profile 3 preview then admitted the unchanged exact recipe with no blockers,
+builds, installations, or replacement stops. Application
+`9278ba6a-fa5f-4e59-ac4c-355ffba7c88c` started at 16:56:46 UTC, verified and reused
+the cached artifacts, and succeeded at 17:02:57 UTC. It retained installation
+`503907a4-58e5-4fef-863f-5701f7a08675` and created run
+`c848e6b8-fe97-4fdc-b935-3647c41d16aa`. Start job
+`56dc193e-f7c8-47d4-842d-51aaa6232b65` completed both launches at 17:00:35 UTC
+and collective readiness at 17:02:11 UTC. The published alias is
+`vonk-forge-glm-5-3-flash-exl3-dflash2-vllm-dual`.
+
+Bounded requests through the NAS's Caddy-to-LiteLLM inference route proved:
+
+- Non-streaming: HTTP 200, final content `VONK_READY`, finish reason `stop`,
+  3.287 seconds, 20 prompt tokens and 91 completion tokens.
+- Streaming: HTTP 200, final content `4` for `2 + 2`, finish reason `stop`,
+  18 events and a terminal `[DONE]`, 2.061 seconds.
+
+An earlier 128-token request used its allowance on reasoning and ended without
+final content; the successful completion used a bounded 384-token allowance.
+No model, context, image, or profile setting changed.
+
+At **2026-09-21 17:08:10 UTC**, both Sparks were online with the same run,
+both ranks present and healthy, and the route published. Authenticated rank
+observations were respectively eight and six seconds old. This is almost six
+minutes after collective readiness, beyond the initial two-minute observation
+deadline that stopped the earlier attempt. The successful workload was left
+running. This proves physical loading, ongoing observation, and basic inference;
+it does not claim a model-quality benchmark or physical fault-injection campaign.
 
 ## Evidence record maintenance
 
