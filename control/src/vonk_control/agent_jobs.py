@@ -544,21 +544,60 @@ def _lapsed_renewal_allowed(operation: StoredOperation, now: datetime) -> bool:
     return deadline is not None and _aware(now) < _aware(deadline)
 
 
-def _attempt_is_live(attempt: AgentOperationAttempt | None, now: datetime) -> bool:
-    """Return whether an attempt still holds an unexpired lease.
+def _attempt_holds_open_launch_budget(
+    operation: StoredOperation,
+    attempt: AgentOperationAttempt | None,
+    now: datetime,
+) -> bool:
+    """Return whether this exact attempt still owns an open launch budget.
+
+    Dependency: the attempt is the executor of a start that declared an
+    immutable readiness budget.  Owner: the operation's current attempt, still
+    running.  Deadline: that budget's instant, which derives from the plan's own
+    readiness window and never from the lease being recovered.  Resume
+    condition: the exact fence submits its outcome, or the budget elapses.
+
+    A start may legitimately be silent for the whole budget while its engine
+    loads -- the recipe itself declares that window -- so the budget, not the
+    lease the agent happened to accept, decides whether the attempt is still
+    current.  The ownership facts are named here so every caller agrees on what
+    "still current" means: only the operation's own attempt may use the
+    allowance, so a newer attempt's takeover is never masked.
+    """
+
+    return (
+        attempt is not None
+        and attempt.attempt == operation.current_attempt
+        and attempt.state == "running"
+        and _lapsed_renewal_allowed(operation, now)
+    )
+
+
+def _attempt_is_live(
+    operation: StoredOperation,
+    attempt: AgentOperationAttempt | None,
+    now: datetime,
+) -> bool:
+    """Return whether an attempt still holds the operation's fence.
 
     This is the boundary that decides whether another owner may take the
     operation over, and which attempts count as expired, so a missing attempt, an
     attempt that already stopped, or a lease deadline at or before ``now`` is not
-    live.  It is deliberately not the renewal boundary: ``_active`` additionally
-    lets this exact fence renew inside the operation's own start allowance, which
+    live.  A still-current attempt inside its own launch budget is live as well,
+    because the budget is the plan's declared readiness window and the lease
+    exists to bound takeover latency, not to end a launch the plan permitted.
+    It is deliberately not the renewal boundary: ``_active`` additionally lets
+    this exact fence renew inside the operation's own start allowance, which
     restores a healthy attempt without ever letting a second owner in.
     """
 
     return (
         attempt is not None
         and attempt.state == "running"
-        and _aware(attempt.lease_deadline) > _aware(now)
+        and (
+            _aware(attempt.lease_deadline) > _aware(now)
+            or _attempt_holds_open_launch_budget(operation, attempt, now)
+        )
     )
 
 
@@ -2041,9 +2080,10 @@ class AgentJobService:
                             )
                             .with_for_update(of=AgentOperationAttempt)
                         )
-                        if _attempt_is_live(attempt, now):
-                            # A live lease can still renew and report its exact
-                            # effect; nothing may overlap it.
+                        if _attempt_is_live(old, attempt, now):
+                            # A live lease -- or a still-current attempt inside
+                            # its own launch budget -- can still renew and report
+                            # its exact effect; nothing may overlap it.
                             active_mutations_list.append(old)
                             continue
                         # The order is `running` but its attempt can no longer
@@ -2171,6 +2211,15 @@ class AgentJobService:
                     "running",
                     "waiting-for-operator",
                 }:
+                    if operation.state == "running" and (
+                        _attempt_holds_open_launch_budget(operation, previous, now)
+                    ):
+                        # The attempt is the launch its own immutable budget
+                        # declares live.  A poll for work cannot expire or park
+                        # it, and no new attempt may be issued over it; the exact
+                        # fence keeps the operation until it reports or the
+                        # budget elapses.
+                        return None
                     previous.state = "expired"
             if operation.state == "running":
                 operation.state = "waiting-for-operator"
@@ -2718,9 +2767,9 @@ class AgentJobService:
                 fence,
                 source=source,
                 allow_superseded_cancellation=True,
-                # Only a renewal may re-acquire a lapsed lease.  A late *result*
-                # is a different decision with its own fencing, so it keeps the
-                # unrelaxed boundary.
+                # A heartbeat and the exact attempt's own outcome may both
+                # re-acquire a lapsed lease inside the operation's launch
+                # budget; a different fence or a spent budget may not.
                 allow_lapsed_renewal=True,
             )
             now = self._clock()
@@ -3182,6 +3231,13 @@ class AgentJobService:
                 fence,
                 source=source,
                 allow_superseded_cancellation=state == "cancelled",
+                # An outcome is the same launch decision the heartbeat renewal
+                # already allows: an attempt that is still the operation's own
+                # current attempt inside its declared readiness budget may report
+                # what it observed.  A newer attempt, a stopped attempt, and a
+                # spent budget all still refuse it, so this never re-blesses an
+                # abandoned effect.
+                allow_lapsed_renewal=True,
             )
             if isinstance(fence, AgentResult) and _aware(fence.deadline) != _aware(
                 attempt.lease_deadline
