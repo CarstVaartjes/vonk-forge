@@ -24,6 +24,7 @@ from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentResult,
     ExecuteContainerRuntimeRequestOperation,
     RecipeInstallPayload,
     RecipeRunObservationReceiptClaims,
@@ -114,6 +115,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 
 from .canonical_recipe_fixtures import canonical_example
 from .preflight_fixtures import record_passing_preflight
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
 
@@ -1717,6 +1719,155 @@ def test_distributed_start_launches_all_ranks_then_checks_collective(
             _required(session.get(RecipeRun, start.owner_id)).observation_deadline_at
             is None
         )
+
+
+def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
+    tmp_path: Path,
+) -> None:
+    """A slow engine launch must survive its own declared readiness budget.
+
+    The measured defect: the readiness phase declares an hour of budget, the
+    agent is blocked inside the launch and silent, and the Controller expired
+    the attempt after its short lease and parked the operation, so the eventual
+    success never published the route.  Driving the real agent claim and result
+    boundary, the still-current attempt must stay current inside the budget, its
+    success must complete the start, and the run must reach its published route.
+    """
+
+    now = [NOW]
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        distributed_start_timeout_seconds=3600,
+    )
+    service._clock = lambda: now[0]
+    with sessions.begin() as session:
+        for node in session.scalars(
+            select(AgentNode).where(AgentNode.node_id.in_(nodes))
+        ):
+            node.capabilities = sorted(set(node.capabilities or ()) | {"recipe.start"})
+    jobs = AgentJobService(sessions, clock=lambda: now[0])
+    jobs.set_result_consumer(service.consume_agent_result)
+
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="u" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "slow-launch")
+    start = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="v" * 36,
+    )
+
+    def children(phase: str) -> tuple[AgentOperation, ...]:
+        with sessions() as session:
+            rows = tuple(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == start.id)
+                    .order_by(AgentOperation.created_at, AgentOperation.id)
+                )
+            )
+        return tuple(row for row in rows if row.payload.get("phase") == phase)
+
+    def success(payload: Mapping[str, object]) -> dict[str, object]:
+        evidence = start_evidence(dict(payload))
+        return {"evidence": evidence, "evidence_digest": evidence["evidence_digest"]}
+
+    def claim(node_id: str):
+        with sessions() as session:
+            node = _required(session.get(AgentNode, node_id))
+            receipt_key = node.observation_receipt_public_key
+        runtime_identity = dict(PACKAGED_RUNTIME_IDENTITY)
+        if receipt_key is not None:
+            runtime_identity["observation_receipt_public_key"] = receipt_key
+        return claim_agent(
+            jobs,
+            node_id,
+            f"serial-{nodes.index(node_id)}",
+            30,
+            runtime_identity=runtime_identity,
+        )
+
+    def complete(claim, result: Mapping[str, object]) -> None:
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                canonical_message(
+                    {
+                        "schema_version": 1,
+                        "job_id": claim.job_id,
+                        "operation_id": claim.operation_id,
+                        "attempt": claim.attempt,
+                        "fence": claim.fence,
+                        "node_id": claim.node_id,
+                        "deadline": claim.deadline,
+                        "state": "succeeded",
+                        "result": result,
+                    }
+                )
+            )
+        )
+
+    for launch in children("rank-launch"):
+        launch_claim = claim(launch.node_id)
+        assert launch_claim is not None
+        complete(launch_claim, success(launch_claim.payload))
+
+    readiness = children("collective-readiness")
+    assert len(readiness) == 1
+    target = readiness[0]
+    readiness_claim = claim(target.node_id)
+    assert readiness_claim is not None
+
+    # The agent is blocked inside the launch: four times its accepted lease pass
+    # with no heartbeat, while the plan's own readiness budget stays open.
+    now[0] = NOW + timedelta(seconds=120)
+    complete(readiness_claim, success(readiness_claim.payload))
+
+    view = service.get(start.id)
+    assert view.state == "succeeded", view.status_reason
+    with sessions() as session:
+        run = _required(session.get(RecipeRun, start.owner_id))
+        assert run.state == "running"
+        assert run.route_state == "pending"
+        assert [
+            _required(node).state
+            for node in session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == start.owner_id)
+                .order_by(RunNode.rank)
+            )
+        ] == ["running", "running"]
+
+    publisher = ConcurrentPublisher()
+    _bound, routes = bind_route_publications(sessions, service, publisher)
+    with sessions.begin() as session:
+        owner = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id, RunNode.role == "entrypoint"
+                )
+            )
+        )
+        owner.observed_run_generation = 1
+        owner.observation_receipt_sha256 = "d" * 64
+        owner.observation_endpoint_ready = True
+        owner.updated_at = NOW
+        worker = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id, RunNode.role == "worker"
+                )
+            )
+        )
+        worker.observed_run_generation = 1
+        worker.observation_receipt_sha256 = "e" * 64
+        worker.observation_endpoint_ready = None
+        worker.updated_at = NOW
+    routes.publish_run(start.owner_id)
+    assert publisher.aliases[-1] == ("slow-launch",)
 
 
 def test_distributed_start_rejects_changed_launch_evidence(tmp_path: Path) -> None:

@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,9 +24,15 @@ from vonk_agent_protocol import (
     DistributionAssignment,
     RecipeOperationRequest,
     canonical_message,
+    format_model_identity,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt, _claim_predicate
+from vonk_control.agent_jobs import (
+    AgentJobService,
+    StaleAgentAttempt,
+    _claim_predicate,
+    authorize_operator_resume_in_session,
+)
 from vonk_control.distribution import (
     DistributionError,
     DistributionService,
@@ -71,6 +77,14 @@ STOP_PAYLOAD = {
     "plan_digest": COMMIT,
 }
 STOP_RESULT = {"stopped": True}
+
+#: The capability set a Spark advertises when it can re-acquire one exact fenced
+#: lifecycle attempt after an operator-authorised retry.
+EXACT_LIFECYCLE_CAPABILITIES = [
+    "agent.runtime.rust.v1",
+    "recipe.start",
+    "agent.lifecycle.resume.exact.v1",
+]
 
 
 def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
@@ -143,6 +157,37 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
     }
     RecipeOperationRequest.parse(ProtocolAgentOperation.RECIPE_START, payload)
     return payload
+
+
+def canonical_start_result(payload: Mapping[str, object]) -> dict[str, object]:
+    """One wire-valid rank-launch success receipt for a bound start payload."""
+
+    identity: dict[str, object] = {
+        "phase": "rank-launch",
+        "run_id": payload["run_id"],
+        "recipe_revision_id": payload["recipe_revision_id"],
+        "recipe_content_sha256": payload["recipe_content_sha256"],
+        "image_digest": str(payload["image_digest"]),
+        "artifact_set_digest": "b" * 64,
+        "model_identity": format_model_identity("vonk-forge", "tiny", "d" * 64),
+        "rank": payload["rank"],
+        "role": payload["role"],
+        "world_size": payload["world_size"],
+        "local_address": payload["local_address"],
+        "master_address": payload["master_address"],
+        "master_port": payload["master_port"],
+        "memory_reservation_bytes": payload["reserved_memory_bytes"],
+        "process_running": True,
+        "fabric_projection_bound": True,
+        "launched": True,
+        "run_generation": payload["run_generation"],
+        "runtime_arguments_sha256": "c" * 64,
+    }
+    evidence = {
+        **identity,
+        "evidence_digest": hashlib.sha256(canonical_message(identity)).hexdigest(),
+    }
+    return {"evidence": evidence, "evidence_digest": evidence["evidence_digest"]}
 
 
 def canonical_install_payload() -> dict[str, object]:
@@ -1586,26 +1631,167 @@ def test_a_lapsed_renewal_without_a_start_budget_is_refused(service) -> None:
         jobs.heartbeat(claim, None, 30)
 
 
-def test_a_late_result_is_still_not_applied_to_a_lapsed_attempt(service) -> None:
-    # The allowance is a renewal door, not a result door: a receipt that arrives
-    # after the lease lapsed is still refused as no longer current, because a
-    # late outcome is a different decision with its own fencing.  The payload
-    # binds a start deadline, so the allowance is open and only the result
-    # boundary can be what refuses.
+def test_a_silent_start_inside_its_launch_budget_is_not_parked_and_completes(
+    service,
+) -> None:
+    # Wrong implementation: the attempt's accepted 30-second lease was the only
+    # clock, so a rank launch that legitimately spends longer than that -- the
+    # plan's own readiness budget is what the recipe declares -- was expired and
+    # parked, and the eventual success arrived after the fence had closed.  The
+    # operation's immutable start budget is the deadline that protects the
+    # launch, so the exact attempt stays current, the successful outcome is
+    # applied, and its owner is released.
     jobs, sessions, clock = service
-    jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        "recipe.start",
-        COMMIT,
-        canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30)),
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+
+    # The agent is blocked inside the launch and sends no heartbeat for four
+    # times the lease the agent accepted, while the declared budget is open.
+    clock.advance(seconds=120)
+
+    # A poll for work by the same node must neither expire nor park it.
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    with sessions() as session:
+        running = session.get(AgentOperation, operation.id)
+    assert running is not None and running.state == "running"
+
+    # The launch finally succeeds and the still-current attempt publishes it.
+    jobs.succeed(claim, canonical_start_result(payload))
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+    assert stored is not None and stored.state == "succeeded"
+    assert attempt is not None and attempt.state == "succeeded"
+    assert job_state(sessions, operation.parent_job_id).state == "succeeded"
+
+
+def test_a_start_that_stops_reporting_past_its_budget_is_parked_with_the_reason(
+    service,
+) -> None:
+    # The launch allowance is bounded by the operation's own budget: a node that
+    # never reports again is still parked once that budget is spent, with the
+    # same typed lease-expiry reason an operator reconciles against today.  A
+    # fix that simply made the park unreachable would strand the effect.
+    jobs, sessions, clock = service
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(seconds=40))
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
     )
     claim = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert claim is not None
 
     clock.advance(seconds=60)
-    with pytest.raises(StaleAgentAttempt):
-        jobs.fail(claim, "outcome arrived for an attempt whose lease had lapsed")
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+    assert stored is not None and stored.state == "waiting-for-operator"
+    reason = stored.status_reason
+    assert reason is not None
+    assert "attempt 1 lease expired" in reason
+    assert "the effect is unobserved" in reason
+
+
+def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
+    service,
+) -> None:
+    # The launch budget accepts a slow-but-live result; it never re-blesses an
+    # attempt another executor has replaced.  The positive control first pins
+    # the acceptance the defect lacked, then the same late receipt is refused
+    # once a second attempt owns the operation's fence.
+    jobs, sessions, clock = service
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    accepted = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
+    )
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert first is not None
+    clock.advance(seconds=60)
+    jobs.succeed(first, canonical_start_result(payload))
+    with sessions() as session:
+        accepted_row = session.get(AgentOperation, accepted.id)
+    assert accepted_row is not None and accepted_row.state == "succeeded"
+
+    # The same shape of late receipt cannot cross a newer attempt's ownership.
+    superseded = jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_B,
+        "recipe.start",
+        COMMIT,
+        canonical_start_payload(start_deadline=clock.now + timedelta(seconds=40)),
+    )
+    abandoned = claim_agent(
+        jobs,
+        NODE_B,
+        "serial-b",
+        30,
+        capabilities=EXACT_LIFECYCLE_CAPABILITIES,
+    )
+    assert abandoned is not None
+    clock.advance(seconds=60)
+    assert (
+        claim_agent(
+            jobs,
+            NODE_B,
+            "serial-b",
+            30,
+            capabilities=EXACT_LIFECYCLE_CAPABILITIES,
+        )
+        is None
+    )
+    with sessions.begin() as session:
+        authorize_operator_resume_in_session(
+            session, superseded.parent_job_id, clock.now
+        )
+    # The park already scheduled its bounded safe retry, so let it come due
+    # before the next claim; the retry clock and the operator authorisation are
+    # the same decision and must not be moved earlier by a resume.
+    clock.advance(seconds=3)
+    current = claim_agent(
+        jobs,
+        NODE_B,
+        "serial-b",
+        30,
+        capabilities=EXACT_LIFECYCLE_CAPABILITIES,
+    )
+    assert current is not None and current.attempt == 2
+    late = AgentResult.model_validate_json(
+        canonical_message(
+            {
+                "schema_version": 1,
+                "job_id": abandoned.job_id,
+                "operation_id": abandoned.operation_id,
+                "attempt": abandoned.attempt,
+                "fence": abandoned.fence,
+                "node_id": abandoned.node_id,
+                "deadline": abandoned.deadline,
+                "state": "succeeded",
+                "result": canonical_start_result(payload),
+            }
+        )
+    )
+    jobs.record_late_result(late)
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, superseded.id)
+        current_attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == current.fence
+            )
+        )
+    assert stored is not None
+    assert stored.state == "running" and stored.current_attempt == 2
+    assert current_attempt is not None
+    assert current_attempt.state == "running" and current_attempt.result is None
 
 
 @pytest.mark.parametrize(
