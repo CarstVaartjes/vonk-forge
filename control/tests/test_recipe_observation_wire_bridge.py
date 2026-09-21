@@ -584,7 +584,7 @@ def test_signed_observation_deadline_applies_to_first_receipt_not_renewal(
     if not first_late:
 
         class UnusedRoutes:
-            def publish_run(self, _run_id):
+            def publish_run(self, run_id: str) -> object:
                 raise AssertionError("expiry must not invoke route publication")
 
             def maintain(self, *, renew_before_seconds=10):
