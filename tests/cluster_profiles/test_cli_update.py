@@ -441,7 +441,6 @@ def test_opted_in_interactive_command_schedules_without_blocking_controller(
         lambda command, **kwargs: seen.append(command),
     )
     monkeypatch.setattr(cli, "run_controller", lambda *args: {"state": "ready"})
-    monkeypatch.setattr(cli, "result_exit_code", lambda result: 0)
     monkeypatch.setattr(cli, "_emit", lambda *args: None)
 
     class InteractiveError(StringIO):
@@ -449,6 +448,7 @@ def test_opted_in_interactive_command_schedules_without_blocking_controller(
             return True
 
     monkeypatch.setattr(cli.sys, "stderr", InteractiveError())
+    monkeypatch.setattr(cli.sys, "stdin", InteractiveError())
     assert cli.main(("profile", "list"), control_client=object()) == 0
     assert len(seen) == 1
     assert seen[0][1:4] == ["-m", "cluster_profiles.cli_update", "--background-notice"]
@@ -576,7 +576,6 @@ def test_offline_version_and_json_command_do_not_schedule_notices(
         cli, "begin_interactive_update_check", lambda: pytest.fail("scheduled check")
     )
     monkeypatch.setattr(cli, "run_controller", lambda *args: {"state": "ready"})
-    monkeypatch.setattr(cli, "result_exit_code", lambda result: 0)
     monkeypatch.setattr(cli, "_emit", lambda *args: None)
 
     class InteractiveError(StringIO):

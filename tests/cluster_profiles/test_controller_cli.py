@@ -43,7 +43,16 @@ class FakeClient:
         self.responses = responses
         self.calls: list[tuple[str, str, dict[str, object] | None, object]] = []
 
-    def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+    def request(
+        self,
+        method,
+        path,
+        payload=None,
+        *,
+        extra_headers=None,
+        query=None,
+        timeout_seconds=None,
+    ):
         self._validate_request(method, path, payload, query)
         self.calls.append((method, path, payload, query))
         response = self.responses.get((method, path), {})
@@ -230,6 +239,7 @@ def test_parser_exposes_current_singular_operator_roots_and_update() -> None:
         "recipe",
         "profile",
         "update",
+        "completion",
     }
     for argv in (
         ("models", "list"),
@@ -517,6 +527,8 @@ def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
 
     status, payload = run(
         (
+            "--profile",
+            "1",
             "profile",
             "add",
             "vonk-forge/qwen-code",
@@ -562,7 +574,9 @@ def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
         }
     )
 
-    status, payload = run(("profile", "remove", "Recipe UUID", "--json"), client)
+    status, payload = run(
+        ("--profile", "1", "profile", "remove", "Recipe UUID", "--json"), client
+    )
 
     assert status == 0
     assert payload["revision"] == 4
@@ -597,7 +611,7 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
             },
         }
     )
-    status, payload = run(("profile", "load", "--json"), client)
+    status, payload = run(("--profile", "1", "profile", "load", "--json"), client)
 
     assert status == 0 and payload["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
@@ -616,19 +630,26 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
             ("GET", "/api/profile/1/progress"): {"state": "succeeded"},
         }
     )
-    status, payload = run(("profile", "load", "--json"), client)
+    status, payload = run(("--profile", "1", "profile", "load", "--json"), client)
 
     assert status == 0 and payload["state"] == "queued"
     assert [call[1] for call in client.calls] == ["/api/profile/1/load"]
 
 
 def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
+    identity = "33333333-3333-4333-8333-333333333333"
     client = FakeClient(
         {
-            ("GET", "/api/profile/1/progress"): [
-                {"state": "running", "progress": {"step": 1, "steps": 2}},
-                {"state": "succeeded", "progress": {"step": 2, "steps": 2}},
-            ]
+            ("GET", "/api/profile/1/progress"): {
+                "id": identity,
+                "state": "running",
+                "progress": {"step": 1, "steps": 2},
+            },
+            ("GET", f"/api/profile/applications/{identity}"): {
+                "id": identity,
+                "state": "succeeded",
+                "progress": {"step": 2, "steps": 2},
+            },
         }
     )
     status, payload = run(
@@ -646,14 +667,15 @@ def test_follow_survives_lost_connections_and_reports_the_durable_outcome() -> N
     transport failures, and the durable success is still the reported outcome.
     """
 
+    identity = "33333333-3333-4333-8333-333333333333"
     client = FakeClient(
         {
-            ("GET", "/api/profile/1/progress"): [
-                {"state": "running"},
+            ("GET", "/api/profile/1/progress"): {"id": identity, "state": "running"},
+            ("GET", f"/api/profile/applications/{identity}"): [
                 ControlTransportError("connection reset"),
                 ControlTransportError("connection reset"),
-                {"state": "succeeded"},
-            ]
+                {"id": identity, "state": "succeeded"},
+            ],
         }
     )
     status, payload = run(
@@ -669,12 +691,13 @@ def test_follow_survives_lost_connections_and_reports_the_durable_outcome() -> N
 def test_observation_timeout_names_the_connection_it_lost() -> None:
     """An unreachable Controller is an observation failure, not a run failure."""
 
+    identity = "33333333-3333-4333-8333-333333333333"
     client = FakeClient(
         {
-            ("GET", "/api/profile/1/progress"): [
-                {"state": "running"},
-                ControlUnavailable(503, "control API unavailable"),
-            ]
+            ("GET", "/api/profile/1/progress"): {"id": identity, "state": "running"},
+            ("GET", f"/api/profile/applications/{identity}"): ControlUnavailable(
+                503, "control API unavailable"
+            ),
         }
     )
     status, payload = run(
@@ -692,12 +715,14 @@ def test_observation_timeout_names_the_connection_it_lost() -> None:
     )
 
     assert status == 2
-    assert payload["timed_out"] is True
-    assert payload["reconnecting"] is True
-    assert payload["observation_error"] == "control API reported unavailable"
+    observation = payload["observation"]
+    assert isinstance(observation, dict)
+    assert observation["status"] == "timed_out"
+    assert observation["reconnecting"] is True
+    assert observation["error"] == "control API reported unavailable"
     # The durable operation kept its last observed state; only the observation
     # is reported as incomplete.
-    assert payload["state"] == "running"
+    assert payload["result"] == {"id": identity, "state": "running"}
 
 
 def test_authorization_failure_is_not_retried_as_an_observation() -> None:
@@ -729,7 +754,7 @@ def test_lost_mutation_response_still_names_the_request_key() -> None:
             ("POST", "/api/profile/1/load"): ControlTransportError("connection reset"),
         }
     )
-    status, payload = run(("profile", "load", "--json"), client)
+    status, payload = run(("--profile", "1", "profile", "load", "--json"), client)
 
     assert status != 0
     assert payload["request_key"] == "11111111-1111-4111-8111-111111111111"
@@ -751,7 +776,7 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
         }
     )
 
-    status, payload = run(("profile", "load", "--json"), client)
+    status, payload = run(("--profile", "1", "profile", "load", "--json"), client)
 
     assert status == 0
     assert payload["id"] == operation
@@ -773,7 +798,7 @@ def test_lost_load_response_retries_only_with_original_request_key() -> None:
         }
     )
 
-    status, payload = run(("profile", "load", "--json"), client)
+    status, payload = run(("--profile", "1", "profile", "load", "--json"), client)
 
     assert status == 0
     assert payload["id"] == operation
@@ -911,7 +936,17 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
 
     client = ConflictClient({})
     status, payload = run(
-        ("profile", "add", "vonk-forge/qwen-code", "--spark", "Atlas", "--json"), client
+        (
+            "--profile",
+            "1",
+            "profile",
+            "add",
+            "vonk-forge/qwen-code",
+            "--spark",
+            "Atlas",
+            "--json",
+        ),
+        client,
     )
     assert status == 2
     assert payload["error"] == "profile revision conflict"
@@ -1071,7 +1106,7 @@ def test_detach_returns_acceptance_without_observing_operation() -> None:
     assert [call[1] for call in client.calls] == ["/api/recipe/qwen-code/download"]
 
 
-def test_watch_repaints_detail_and_stops_on_terminal_snapshot() -> None:
+def test_watch_returns_final_detail_after_terminal_snapshot() -> None:
     client = FakeClient(
         {
             ("GET", "/api/model/qwen"): [
@@ -1095,7 +1130,8 @@ def test_watch_repaints_detail_and_stops_on_terminal_snapshot() -> None:
         )
     assert status == 0
     assert len(client.calls) == 2
-    assert output.getvalue().count("state") >= 2
+    assert output.getvalue().count("state") == 1
+    assert "succeeded" in output.getvalue()
 
 
 def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() -> None:

@@ -4,9 +4,21 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
+import unicodedata
 from collections.abc import Mapping
 
 from .cli_select import selector_for
+
+
+def terminal_text(value: str) -> str:
+    """Make untrusted terminal controls visible instead of executing them."""
+    return "".join(
+        (f"\\x{ord(char):02x}" if ord(char) <= 255 else f"\\u{ord(char):04x}")
+        if unicodedata.category(char) in {"Cc", "Cf"}
+        else char
+        for char in value
+    )
 
 
 def _cell(value: object, width: int = 44) -> str:
@@ -168,7 +180,9 @@ def render_payload(
                             print(f"{label}: {_cell(value, 120)}")
     warnings = payload.get("warnings")
     if isinstance(warnings, list) and warnings:
-        print("Info: " + "; ".join(_cell(item, 140) for item in warnings))
+        print(
+            "Info: " + "; ".join(_cell(item, 140) for item in warnings), file=sys.stderr
+        )
     actions = payload.get("next_actions")
     if isinstance(actions, list) and actions:
         print("Next: " + "; ".join(_cell(item, 140) for item in actions))

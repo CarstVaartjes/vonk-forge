@@ -582,6 +582,9 @@ def _safe_job_observation(
 
 def _read_token_file(token_file: Path) -> str:
     flags = os.O_RDONLY
+    # Reject FIFOs/devices after fstat without waiting for another process to
+    # open a pipe. Nonblocking mode has no effect on a regular credential file.
+    flags |= getattr(os, "O_NONBLOCK", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOINHERIT", 0)
     no_follow = getattr(os, "O_NOFOLLOW", None)
@@ -940,7 +943,13 @@ class ControlClient:
         *,
         extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, object]:
+        timeout = self._timeout
+        if timeout_seconds is not None:
+            if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+                raise ControlClientError("request timeout must be finite and positive")
+            timeout = min(timeout, timeout_seconds)
         if not path.startswith("/api/") or ".." in path:
             raise ControlClientError("control API path is invalid")
         route_path = path
@@ -961,7 +970,7 @@ class ControlClient:
             self._base + path, data=data, headers=headers, method=method
         )
         try:
-            with self._opener(request, timeout=self._timeout) as response:
+            with self._opener(request, timeout=timeout) as response:
                 content = response.read(_MAX_RESPONSE + 1)
                 status = response.status
                 response_headers = response.headers

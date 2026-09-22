@@ -21,6 +21,8 @@ vonkctl --help
 
 Use `--json` for one parseable object on stdout. Use `--profile N` to select a
 stable numbered Profile for that invocation; the default is Profile 1.
+Profile edits and loads require an explicit `--profile N`; there is no saved
+selection. Running `vonkctl` without a command shows offline orientation.
 `vonkctl --version` reports the installed build without Controller credentials.
 The [accepted CLI update command](../operators/cli-updates.md) checks the signed
 installer publication and applies an update only when requested.
@@ -50,6 +52,16 @@ The download requires the active browser session and its CSRF protection. The
 administrator bearer token expires after 30 days; download a new file from the
 operator menu when it expires.
 
+`vonkctl --check-connection --json` validates the origin and private regular
+token file, then makes one authenticated Fleet read. It reports the actual
+failed boundary without exposing credentials. Help, version, and completion
+generation work without credentials or a network connection.
+
+Generate completion with `vonkctl completion bash` or `vonkctl completion zsh`.
+Source the generated script from your shell configuration after inspecting it;
+Zsh requires its normal `compinit` setup. Generation never edits shell files or
+queries the Controller.
+
 ## Fleet
 
 ```bash
@@ -64,14 +76,17 @@ vonkctl fleet remove Atlas --yes
 vonkctl fleet upgrade Atlas
 vonkctl fleet upgrade --all
 vonkctl fleet loginfo Atlas --since 15m --lines 100 --follow
+vonkctl fleet progress JOB_ID --follow
 ```
 
 Friendly Spark names and exact stable selectors are accepted. Mutations are
-single-step Controller operations; asynchronous work is followed to a terminal
-response by default. Use `--detach` on an asynchronous Model or Recipe
+single-step Controller operations. Asynchronous Model/Recipe mutations and
+Profile loads follow to a terminal response by default. Use `fleet progress`
+to inspect or follow the job identity returned by a fleet upgrade.
+Use `--detach` on an asynchronous Model or Recipe
 mutation to return the accepted operation immediately. `--yes` is required for
 removals; there is no obsolete `fleet profile` alias. `detail` retains
-stale/unsupported measurements as explicit states, and `--watch` repaints
+stale/unsupported measurements as explicit states, and `--watch` reports
 bounded observations until a terminal state or timeout. `loginfo` reads
 bounded sanitized logs through the authenticated Controller path and never
 falls back to SSH.
@@ -85,6 +100,7 @@ vonkctl model detail qwen-3.8-nvfp4
 vonkctl model detail qwen-3.8-nvfp4 --watch
 vonkctl model download qwen-3.8-nvfp4
 vonkctl model download qwen-3.8-nvfp4 --detach
+vonkctl model progress OPERATION_ID --follow
 vonkctl model download qwen-3.8-nvfp4   # repeat to refresh a completed copy
 vonkctl model remove qwen-3.8-nvfp4 --yes
 ```
@@ -105,6 +121,7 @@ vonkctl recipe detail qwen-code
 vonkctl recipe detail qwen-code --watch
 vonkctl recipe download qwen-code       # repeat to refresh a completed copy
 vonkctl recipe download qwen-code --detach
+vonkctl recipe progress OPERATION_ID --follow
 vonkctl recipe update
 vonkctl recipe update --all
 vonkctl recipe remove qwen-code --keep-model --yes
@@ -147,6 +164,8 @@ vonkctl --profile 2 profile load --dry-run
 vonkctl --profile 2 profile load
 vonkctl --profile 2 profile load --detach
 vonkctl --profile 2 profile progress --follow
+vonkctl --profile 2 profile progress --application APPLICATION_UUID --follow
+vonkctl --profile 2 profile progress --request-key REQUEST_UUID --follow
 ```
 
 Profile authoring stores the canonical recipe identity (`publisher/slug`), sorted
@@ -160,17 +179,32 @@ whole-fleet snapshot, resource fit, and the plan it will bind internally.
 
 ## Output and recovery
 
-Human output is an adaptive plain terminal table. At narrow widths the renderer
+Human results go to stdout; warnings, progress, and errors go to stderr.
+Progress is append-only, preserves scrollback, and emits only changes. At narrow widths the renderer
 keeps identity, state, and the next action first; redirected output contains no
 cursor control. `--wide` requests full columns. `--json` keeps progress and
 errors machine-readable, including `operation_id`, `state`, `phase`, byte
-counts, warnings, and next actions when supplied by the Controller. Completed
-operations exit 0, partial operations exit 1, and failed, blocked, cancelled,
-or timed-out operations exit 2.
+counts, warnings, and next actions when supplied by the Controller. JSON emits
+one result or structured error on stdout and no progress prose. `--no-input`
+suppresses interaction and does not grant consent.
+
+Successful reads exit 0 even when the inspected operation failed. Following
+successful work exits 0; an awaited partial result exits 1; failed, blocked,
+cancelled or timed-out follows exit 2. A blocked dry-run also exits 2. Ctrl-C
+exits 130 and a closed output pipe exits 141; neither cancels Controller work.
 
 Unknown totals are shown as unknown; a build step count is not converted into a
 fake percentage. A failed refresh preserves the last verified cache copy.
 A new profile load reconciles current fleet/cache state and supersedes older
 overlapping requests. Reusing its request key returns the same durable
-operation. Observation can be interrupted without cancelling accepted work;
-use `profile progress --follow` to reconnect to it.
+operation. Observation can be interrupted without cancelling accepted work.
+Profile progress without an explicit selector resolves the latest application
+once, then pins following to that ID. Reconnect to a particular application
+with the exact `--application` or `--request-key` form above.
+
+Observation defaults to 30 seconds (accepted range 0–300), with a one-second
+poll interval (0.01–30). These limits do not alter execution deadlines. At
+timeout or interruption, JSON contains the intact last response under `result`
+and local status under `observation`, including the last observation time,
+age, endpoint path, and reconnect command. A local timeout never rewrites the
+remote operation state as failed.

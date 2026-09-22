@@ -78,6 +78,28 @@ def _token(tmp_path: Path) -> Path:
     return path
 
 
+def test_request_budget_limits_transport_without_changing_client_default(
+    tmp_path: Path,
+) -> None:
+    timeouts: list[float] = []
+
+    def opener(request, *, timeout):
+        timeouts.append(timeout)
+        return _Response(200, _artifact_job_response())
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
+    client.request("GET", path, timeout_seconds=0.025)
+    client.request("GET", path)
+    assert timeouts == [0.025, 15]
+    for invalid in (0, -1, float("nan"), float("inf")):
+        with pytest.raises(ControlClientError, match="finite and positive"):
+            client.request("GET", path, timeout_seconds=invalid)
+    assert len(timeouts) == 2
+
+
 def _artifact_job_response() -> dict[str, object]:
     return {
         "id": "12345678-1234-4123-8123-123456789abc",

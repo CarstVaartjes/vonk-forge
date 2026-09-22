@@ -9,11 +9,14 @@ import re
 import sys
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import redirect_stdout
 from pathlib import Path
-from typing import overload
+from typing import cast, overload
 
 from .build_identity import current_build
-from .cli_render import render_payload
+from .cli_completion import completion_script
+from .cli_outcome import CommandOutcome, Observation
+from .cli_render import progress_line, render_payload, terminal_text
 from .cli_update import (
     CliUpdateError,
     begin_interactive_update_check,
@@ -28,7 +31,7 @@ from .control_client import (
     ControlTransportError,
     ControlUnavailable,
 )
-from .controller_cli import add_controller_commands, result_exit_code, run_controller
+from .controller_cli import ControllerClient, add_controller_commands, run_controller
 
 _MAX_TEXT_CHARS = 1_024
 _MAX_COLLECTION_ITEMS = 1_024
@@ -52,16 +55,32 @@ class _CliParser(argparse.ArgumentParser):
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = _CliParser(prog="vonkctl")
+    parser = _CliParser(
+        prog="vonkctl",
+        description="Inspect Sparks, prepare assets, and manage whole-fleet profiles.",
+        epilog="Start with vonkctl fleet or vonkctl model library. "
+        "Use vonkctl COMMAND --help for details. Connection: VONK_CONTROL_URL "
+        "and VONK_CONTROL_TOKEN_FILE (a private file).",
+    )
     parser.add_argument("--json", dest="global_json", action="store_true")
     parser.add_argument(
         "--version", action="store_true", help="Show the installed CLI build identity"
     )
-    parser.add_argument("--profile", dest="profile_number", type=int, default=1)
+    parser.add_argument("--profile", dest="profile_number", type=int, default=None)
+    parser.add_argument("--no-input", action="store_true", help="Never prompt")
+    parser.add_argument(
+        "--check-connection",
+        action="store_true",
+        help="Validate credentials, TLS, and an authorized Controller read",
+    )
     commands = parser.add_subparsers(
         dest="command", required=False, parser_class=_CliParser
     )
     add_controller_commands(commands)
+    completion = commands.add_parser(
+        "completion", help="Generate offline shell completion"
+    )
+    completion.add_argument("shell", choices=("bash", "zsh"))
     update = commands.add_parser(
         "update", help="Check or install the accepted CLI release"
     )
@@ -87,7 +106,7 @@ def _sanitize_text(value: object) -> str:
         text = text.split("-----BEGIN ", 1)[0] + "<redacted private key>"
     if len(text) > _MAX_TEXT_CHARS:
         text = text[: _MAX_TEXT_CHARS - 15] + "... (truncated)"
-    return text
+    return terminal_text(text)
 
 
 @overload
@@ -155,7 +174,9 @@ def _control_error(
     return result
 
 
-def _emit(payload: Mapping[str, object], args: argparse.Namespace) -> None:
+def _emit(
+    payload: Mapping[str, object], args: argparse.Namespace, *, error: bool = False
+) -> None:
     safe = (
         dict(payload)
         if args.global_json or getattr(args, "json", False)
@@ -164,11 +185,12 @@ def _emit(payload: Mapping[str, object], args: argparse.Namespace) -> None:
     if args.global_json or getattr(args, "json", False):
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
         return
-    render_payload(
-        safe,
-        getattr(args, "command", None) or "profile",
-        wide=getattr(args, "wide", False),
-    )
+    with redirect_stdout(sys.stderr if error else sys.stdout):
+        render_payload(
+            safe,
+            getattr(args, "command", None) or "profile",
+            wide=getattr(args, "wide", False),
+        )
 
 
 def main(
@@ -179,10 +201,45 @@ def main(
     request_id_factory: Callable[[], str] | None = None,
 ) -> int:
     """Run the API-backed CLI."""
+    try:
+        status = _main(
+            argv,
+            root=root,
+            control_client=control_client,
+            request_id_factory=request_id_factory,
+        )
+        sys.stdout.flush()
+        sys.stderr.flush()
+        return status
+    except BrokenPipeError:
+        # Avoid a second flush into the closed pipe during interpreter shutdown.
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                descriptor = stream.fileno()
+            except (AttributeError, OSError, ValueError):
+                continue
+            if descriptor not in (1, 2):
+                continue
+            null = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(null, descriptor)
+            finally:
+                os.close(null)
+        return 141
+
+
+def _main(
+    argv: Sequence[str] | None = None,
+    *,
+    root: Path | None = None,
+    control_client: object | None = None,
+    request_id_factory: Callable[[], str] | None = None,
+) -> int:
     del root
     raw_argv = tuple(argv) if argv is not None else tuple(sys.argv[1:])
     try:
-        args = _parser().parse_args(raw_argv)
+        parser = _parser()
+        args = parser.parse_args(raw_argv)
     except _UsageError as error:
         error_args = argparse.Namespace(
             global_json="--json" in raw_argv, json=False, command="profile"
@@ -197,6 +254,7 @@ def main(
                 "error_type": "arguments",
             },
             error_args,
+            error=True,
         )
         return 2
 
@@ -207,6 +265,15 @@ def main(
         else:
             source = identity["source_sha"] or "unstamped"
             print(f"vonkctl {identity['version']} ({source})")
+        return 0
+    if args.command == "completion":
+        print(completion_script(parser, args.shell), end="")
+        return 0
+    if args.command is None and not args.check_connection:
+        if args.global_json:
+            print(json.dumps({"help": parser.format_help()}))
+        else:
+            parser.print_help()
         return 0
     if args.command == "update":
         key = args.public_key or os.environ.get("VONK_INSTALLER_PUBLIC_KEY_FILE")
@@ -233,11 +300,16 @@ def main(
             print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         else:
             for name, value in result.items():
-                print(f"{name.replace('_', ' ')}: {value}")
+                print(
+                    f"{name.replace('_', ' ')}: {terminal_text(str(value))}",
+                    file=sys.stderr if status else sys.stdout,
+                )
         return status
 
     interactive = (
         sys.stderr.isatty()
+        and sys.stdin.isatty()
+        and not args.no_input
         and not args.global_json
         and not getattr(args, "json", False)
     )
@@ -245,34 +317,69 @@ def main(
         begin_interactive_update_check()
 
     try:
-        client = control_client or ControlClient.from_environment()
-        watch_rendered = False
+        args.invocation = raw_argv
+        if args.profile_number is not None and args.profile_number < 1:
+            raise ValueError("--profile must be a positive stable profile number")
+        if getattr(args, "requires_profile", False) and args.profile_number is None:
+            raise ValueError("this command requires explicit --profile N selection")
+        if args.check_connection and args.command is not None:
+            raise ValueError("--check-connection cannot be combined with a command")
+        client = (
+            cast(ControllerClient, control_client)
+            if control_client is not None
+            else ControlClient.from_environment()
+        )
+        if args.check_connection:
+            client.request("GET", "/api/fleet")
+            _emit(
+                {
+                    "connected": True,
+                    "client": current_build(),
+                    "authorized_read": "/api/fleet",
+                    "origin": os.environ.get("VONK_CONTROL_URL"),
+                },
+                args,
+            )
+            return 0
+        last_progress: str | None = None
 
         def render_watch(observed: Mapping[str, object]) -> None:
-            nonlocal watch_rendered
-            if sys.stdout.isatty():
-                print("\033[2J\033[H", end="")
-            render_payload(
-                _sanitize(observed),
-                getattr(args, "command", None) or "profile",
-                wide=getattr(args, "wide", False),
-            )
-            watch_rendered = True
+            nonlocal last_progress
+            message = _sanitize_text(progress_line(observed))
+            observation = getattr(args, "observation", None)
+            if isinstance(observation, Observation) and observation.error:
+                message = f"Reconnecting: {observation.error}; last confirmed {message}"
+            if message != last_progress:
+                print(message, file=sys.stderr)
+                last_progress = message
 
         if not args.global_json and not getattr(args, "json", False):
             args._watch_callback = render_watch
         result = run_controller(
             args,
-            client,  # type: ignore[arg-type]
+            client,
             request_id_factory or (lambda: str(uuid.uuid4())),
         )
-        if not watch_rendered or args.global_json or getattr(args, "json", False):
+        outcome = CommandOutcome.from_command(args, result)
+        if (
+            outcome.observation
+            and outcome.observation.status == "timed_out"
+            and not (args.global_json or getattr(args, "json", False))
+        ):
+            print(
+                f"Observation deadline reached; accepted work continues.\nReconnect: {outcome.observation.reconnect_command}",
+                file=sys.stderr,
+            )
             _emit(result, args)
+        else:
+            _emit(outcome.output, args)
         if interactive:
             notice = interactive_notice()
             if notice:
                 print(notice, file=sys.stderr)
-        return result_exit_code(result)
+        return outcome.exit_code
+    except BrokenPipeError:
+        raise
     except (
         ControlClientError,
         OSError,
@@ -280,8 +387,20 @@ def main(
         ValueError,
         json.JSONDecodeError,
     ) as error:
-        _emit(_control_error(error, args), args)
+        _emit(_control_error(error, args), args, error=True)
         return 2
     except KeyboardInterrupt:
-        _emit(_control_error(ControlClientError("operation interrupted"), args), args)
+        observation = getattr(args, "observation", None)
+        if isinstance(observation, Observation):
+            observation.status = "interrupted"
+            _emit(observation.document(), args, error=True)
+            return 130
+        _emit(
+            _control_error(
+                ControlClientError("observation interrupted; accepted work continues"),
+                args,
+            ),
+            args,
+            error=True,
+        )
         return 130

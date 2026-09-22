@@ -9,7 +9,9 @@ friendly name accepted by the Controller.
 from __future__ import annotations
 
 import argparse
+import math
 import re
+import shlex
 import time
 import urllib.parse
 import uuid
@@ -17,6 +19,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
+from .cli_outcome import Observation, operation_state
 from .cli_render import progress_line
 from .cli_select import SelectorError
 from .control_client import ControlNotFound, ControlTransportError, ControlUnavailable
@@ -36,6 +39,7 @@ class ControllerClient(Protocol):
         *,
         extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, object]: ...
 
 
@@ -71,6 +75,12 @@ def _log_since(value: str) -> str:
 def _add_output(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     parser.add_argument("--wide", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument(
+        "--no-input",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Never prompt; this does not grant consent",
+    )
 
 
 def _query(**values: object) -> dict[str, object]:
@@ -169,8 +179,40 @@ def _detail_filters(parser: argparse.ArgumentParser) -> None:
 
 
 def _watch_controls(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--timeout-seconds", type=int, default=30)
-    parser.add_argument("--interval-seconds", type=float, default=1.0)
+    parser.add_argument(
+        "--timeout-seconds",
+        type=_timeout_seconds,
+        default=30,
+        help="Observation deadline, 0–300 seconds (default: 30); remote work continues",
+    )
+    parser.add_argument(
+        "--interval-seconds",
+        type=_interval_seconds,
+        default=1.0,
+        help="Poll interval, 0.01–30 seconds (default: 1)",
+    )
+
+
+def _finite_seconds(value: str, *, label: str, minimum: float, maximum: float) -> float:
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{label} requires a number of seconds"
+        ) from None
+    if not math.isfinite(number) or not minimum <= number <= maximum:
+        raise argparse.ArgumentTypeError(
+            f"{label} must be {minimum:g}–{maximum:g} seconds; received {value}"
+        )
+    return number
+
+
+def _timeout_seconds(value: str) -> float:
+    return _finite_seconds(value, label="observation timeout", minimum=0, maximum=300)
+
+
+def _interval_seconds(value: str) -> float:
+    return _finite_seconds(value, label="poll interval", minimum=0.01, maximum=30)
 
 
 def _action_flags(
@@ -180,6 +222,7 @@ def _action_flags(
     recipe_remove: bool = False,
     followable: bool = False,
 ) -> None:
+    parser.set_defaults(outcome_context="mutation")
     parser.add_argument("--request-key")
     if followable:
         parser.add_argument("--detach", action="store_true")
@@ -194,6 +237,7 @@ def _action_flags(
 
 
 def _profile_edit_flags(parser: argparse.ArgumentParser) -> None:
+    parser.set_defaults(outcome_context="mutation", requires_profile=True)
     parser.add_argument("--expected-revision", type=int)
     _add_output(parser)
 
@@ -226,6 +270,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     enroll = fleet_actions.add_parser(
         "enroll", help="Create a one-time enrollment grant"
     )
+    enroll.set_defaults(outcome_context="mutation")
     enroll.add_argument("name")
     enroll.add_argument("--ttl-seconds", type=int, default=900)
     _add_output(enroll)
@@ -234,6 +279,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         ("remove", "Revoke and remove a Spark"),
     ):
         action = fleet_actions.add_parser(action_name, help=help_text)
+        action.set_defaults(outcome_context="mutation")
         _selector(action, "selector", help="Exact Spark selector or friendly name")
         _add_output(action)
         if action_name == "remove":
@@ -241,6 +287,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     upgrade = fleet_actions.add_parser(
         "upgrade", help="Install the latest signed Spark client"
     )
+    upgrade.set_defaults(outcome_context="mutation")
     upgrade.add_argument("selector", nargs="?")
     upgrade.add_argument("--all", action="store_true")
     upgrade.add_argument(
@@ -264,6 +311,14 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     loginfo.add_argument("--follow", action="store_true")
     _watch_controls(loginfo)
     _add_output(loginfo)
+
+    fleet_progress = fleet_actions.add_parser(
+        "progress", help="Inspect or follow one fleet job"
+    )
+    fleet_progress.add_argument("job_id")
+    fleet_progress.add_argument("--follow", action="store_true")
+    _watch_controls(fleet_progress)
+    _add_output(fleet_progress)
 
     model = commands.add_parser("model", help="Browse and manage model cache")
     model.add_argument("--watch", action="store_true")
@@ -338,6 +393,15 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _selector(recipe_remove, "selector", help="Exact recipe selector or friendly name")
     _action_flags(recipe_remove, destructive=True, recipe_remove=True, followable=True)
 
+    for noun, actions in (("model", model_actions), ("recipe", recipe_actions)):
+        progress = actions.add_parser(
+            "progress", help=f"Inspect or follow one {noun} operation"
+        )
+        progress.add_argument("operation_id")
+        progress.add_argument("--follow", action="store_true")
+        _watch_controls(progress)
+        _add_output(progress)
+
     profile = commands.add_parser("profile", help="Edit and load a whole-fleet profile")
     _add_output(profile)
     profile_actions = profile.add_subparsers(
@@ -367,6 +431,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     profile_load = profile_actions.add_parser(
         "load", help="Apply the entire profile to the fleet"
     )
+    profile_load.set_defaults(outcome_context="mutation", requires_profile=True)
     profile_load.add_argument("--dry-run", action="store_true")
     profile_load.add_argument("--request-key")
     profile_load.add_argument("--detach", action="store_true")
@@ -376,13 +441,24 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "progress", help="Show the latest profile load"
     )
     profile_progress.add_argument("--follow", action="store_true")
-    profile_progress.add_argument("--timeout-seconds", type=int, default=30)
-    profile_progress.add_argument("--interval-seconds", type=float, default=1.0)
+    profile_progress_selectors = profile_progress.add_mutually_exclusive_group()
+    profile_progress_selectors.add_argument("--application", type=_uuid_selector)
+    profile_progress_selectors.add_argument("--request-key", type=_uuid_selector)
+    _watch_controls(profile_progress)
     _add_output(profile_progress)
 
 
+def _uuid_selector(value: str) -> str:
+    try:
+        return str(uuid.UUID(value))
+    except ValueError:
+        raise argparse.ArgumentTypeError("operation selector must be a UUID") from None
+
+
 def _profile_number(args: argparse.Namespace) -> int:
-    number = getattr(args, "profile_number", 1)
+    number = getattr(args, "profile_number", None)
+    if number is None:
+        return 1
     if type(number) is not int or number < 1:
         raise ValueError("--profile must be a positive stable profile number")
     return number
@@ -400,14 +476,7 @@ _TERMINAL_STATES = {
 
 
 def _state(value: Mapping[str, object]) -> str:
-    for key in ("state", "status", "outcome"):
-        candidate = value.get(key)
-        if isinstance(candidate, str):
-            return candidate.casefold()
-    operation = value.get("operation")
-    if isinstance(operation, Mapping):
-        return _state(operation)
-    return ""
+    return operation_state(value)
 
 
 def _watch_callback(args: argparse.Namespace) -> _WatchCallback | None:
@@ -416,11 +485,11 @@ def _watch_callback(args: argparse.Namespace) -> _WatchCallback | None:
 
 
 def _bounded_timeout(args: argparse.Namespace) -> float:
-    return max(0.0, min(float(getattr(args, "timeout_seconds", 30)), 300.0))
+    return _timeout_seconds(str(getattr(args, "timeout_seconds", 30)))
 
 
 def _bounded_interval(args: argparse.Namespace) -> float:
-    return max(0.01, min(float(getattr(args, "interval_seconds", 1.0)), 30.0))
+    return _interval_seconds(str(getattr(args, "interval_seconds", 1.0)))
 
 
 def _observation_delay(error: BaseException, fallback: float) -> float:
@@ -445,6 +514,42 @@ def _observation_reason(error: BaseException) -> str:
     return type(error).__name__
 
 
+def _reconnect_command(args: argparse.Namespace, path: str) -> str:
+    parts = path.split("/")
+    if path.startswith("/api/profile/applications/"):
+        command = [
+            "vonkctl",
+            "--profile",
+            str(_profile_number(args)),
+            "profile",
+            "progress",
+            "--application",
+            urllib.parse.unquote(parts[-1]),
+            "--follow",
+        ]
+    elif (
+        len(parts) == 5 and parts[2] in {"model", "recipe"} and parts[3] == "operations"
+    ):
+        command = [
+            "vonkctl",
+            parts[2],
+            "progress",
+            urllib.parse.unquote(parts[-1]),
+            "--follow",
+        ]
+    elif path.startswith("/api/jobs/"):
+        command = [
+            "vonkctl",
+            "fleet",
+            "progress",
+            urllib.parse.unquote(parts[-1]),
+            "--follow",
+        ]
+    else:
+        command = ["vonkctl", *getattr(args, "invocation", ())]
+    return shlex.join(command)
+
+
 def _poll_path(
     client: ControllerClient,
     path: str,
@@ -467,31 +572,45 @@ def _poll_path(
     callback = _watch_callback(args)
     is_terminal = terminal or (lambda observed: _state(observed) in _TERMINAL_STATES)
     current = initial
-    deadline = time.monotonic() + _bounded_timeout(args)
+    started = time.monotonic()
+    timeout = _bounded_timeout(args)
+    observation = Observation(
+        path,
+        _reconnect_command(args, path),
+        current,
+        timeout,
+        started,
+        started,
+        datetime.now(UTC),
+    )
+    args.observation = observation
+    deadline = started + timeout
     interval = _bounded_interval(args)
-    reconnecting: BaseException | None = None
     while True:
         if callback is not None:
             callback(current)
         if is_terminal(current):
+            observation.status = "complete"
             return current
         if time.monotonic() >= deadline:
-            if reconnecting is None:
-                return {**current, "timed_out": True}
-            return {
-                **current,
-                "timed_out": True,
-                "reconnecting": True,
-                "observation_error": _observation_reason(reconnecting),
-            }
-        time.sleep(interval)
+            observation.status = "timed_out"
+            return current
+        time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            observation.status = "timed_out"
+            return current
         try:
-            current = client.request("GET", path, query=query)
+            current = client.request(
+                "GET", path, query=query, timeout_seconds=remaining
+            )
         except (ControlUnavailable, ControlTransportError, OSError) as error:
-            reconnecting = error
+            if isinstance(error, BrokenPipeError):
+                raise
+            observation.error = _observation_reason(error)
             interval = _observation_delay(error, interval)
             continue
-        reconnecting = None
+        observation.update(current)
         interval = _bounded_interval(args)
 
 
@@ -582,18 +701,6 @@ def _follow_loginfo(
     )
 
 
-def result_exit_code(result: Mapping[str, object]) -> int:
-    """Map durable operation outcomes to shell semantics."""
-    if result.get("timed_out") is True:
-        return 2
-    state = _state(result)
-    if state == "partial":
-        return 1
-    if state in {"failed", "blocked", "cancelled", "rejected"}:
-        return 2
-    return 0
-
-
 def _overview(
     client: ControllerClient, noun: str, args: argparse.Namespace
 ) -> dict[str, object]:
@@ -601,19 +708,25 @@ def _overview(
         return client.request(
             "GET",
             "/api/fleet",
-            query=_query(
-                search=args.search,
-                health=args.health,
-                warnings_only=args.warnings_only,
-                sort=args.sort,
-            )
-            or None,
+            query=_fleet_query(args),
         )
     if noun == "model":
         return client.request("GET", "/api/model")
     if noun == "recipe":
         return client.request("GET", "/api/recipe")
     return client.request("GET", f"/api/profile/{_profile_number(args)}")
+
+
+def _fleet_query(args: argparse.Namespace) -> Mapping[str, object] | None:
+    return (
+        _query(
+            search=args.search,
+            health=args.health,
+            warnings_only=args.warnings_only,
+            sort=args.sort,
+        )
+        or None
+    )
 
 
 def _fleet_selector(args: argparse.Namespace) -> str:
@@ -631,16 +744,22 @@ def _fleet(
     factory: Callable[[], str],
 ) -> dict[str, object]:
     action = getattr(args, "fleet_action", None)
+    if action == "progress":
+        path = f"/api/jobs/{_quoted(args.job_id)}"
+        result = client.request("GET", path)
+        return _poll_path(client, path, result, args) if args.follow else result
     if action is None:
         return _watch_resource(
-            client, "/api/fleet", _overview(client, "fleet", args), args
+            client,
+            "/api/fleet",
+            _overview(client, "fleet", args),
+            args,
+            query=_fleet_query(args),
         )
     if action == "detail":
         selector = _fleet_selector(args)
-        result = client.request(
-            "GET",
-            f"/api/fleet/{_quoted(selector)}",
-            query=_query(
+        query = (
+            _query(
                 metrics=args.metrics,
                 range=args.range,
                 device=args.device,
@@ -649,9 +768,16 @@ def _fleet(
                 capabilities=args.capabilities,
                 technical=args.technical,
             )
-            or None,
+            or None
         )
-        return _watch_resource(client, f"/api/fleet/{_quoted(selector)}", result, args)
+        result = client.request(
+            "GET",
+            f"/api/fleet/{_quoted(selector)}",
+            query=query,
+        )
+        return _watch_resource(
+            client, f"/api/fleet/{_quoted(selector)}", result, args, query=query
+        )
     if action == "rename":
         return client.request(
             "POST",
@@ -735,6 +861,10 @@ def _model(
     factory: Callable[[], str],
 ) -> dict[str, object]:
     action = getattr(args, "model_action", None)
+    if action == "progress":
+        path = f"/api/model/operations/{_quoted(args.operation_id)}"
+        result = client.request("GET", path)
+        return _poll_path(client, path, result, args) if args.follow else result
     if action is None:
         return _watch_resource(
             client, "/api/model", _overview(client, "model", args), args
@@ -789,6 +919,10 @@ def _recipe(
     factory: Callable[[], str],
 ) -> dict[str, object]:
     action = getattr(args, "recipe_action", None)
+    if action == "progress":
+        path = f"/api/recipe/operations/{_quoted(args.operation_id)}"
+        result = client.request("GET", path)
+        return _poll_path(client, path, result, args) if args.follow else result
     if action is None:
         return _watch_resource(
             client, "/api/recipe", _overview(client, "recipe", args), args
@@ -1029,10 +1163,25 @@ def _profile(
     if action == "list":
         return client.request("GET", "/api/profile")
     if action == "progress":
-        path = f"/api/profile/{number}/progress"
+        if args.application:
+            path = f"/api/profile/applications/{args.application}"
+        elif args.request_key:
+            path = f"/api/profile/{number}/requests/{args.request_key}"
+        else:
+            path = f"/api/profile/{number}/progress"
         result = client.request("GET", path)
+        if args.application:
+            profile = client.request("GET", f"/api/profile/{number}")
+            if not isinstance(profile.get("id"), str) or profile["id"] != result.get(
+                "profile_id"
+            ):
+                raise ValueError("application does not belong to the selected profile")
         if not args.follow:
             return result
+        application_id = result.get("id")
+        if not isinstance(application_id, str) or not application_id:
+            raise ValueError("profile observation has no durable application identity")
+        path = f"/api/profile/applications/{_quoted(application_id)}"
         return _poll_path(client, path, result, args)
     if action in {"name", "add", "remove"}:
         current = client.request("GET", f"/api/profile/{number}")
