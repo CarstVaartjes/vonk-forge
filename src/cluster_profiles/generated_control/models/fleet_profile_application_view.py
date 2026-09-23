@@ -40,6 +40,7 @@ class FleetProfileApplicationView:
             profile_digest (str):
             profile_id (str):
             progress (FleetProfileApplicationProgress): Typed progress tree persisted with every profile application.
+            request_key (str):
             result (Union['FleetProfileApplicationResult', None]):
             state (FleetProfileApplicationViewState):
             status_reason (Union[None, str]):
@@ -58,6 +59,7 @@ class FleetProfileApplicationView:
     profile_digest: str
     profile_id: str
     progress: 'FleetProfileApplicationProgress'
+    request_key: str
     result: Union['FleetProfileApplicationResult', None]
     state: FleetProfileApplicationViewState
     status_reason: Union[None, str]
@@ -90,6 +92,8 @@ class FleetProfileApplicationView:
         profile_id = self.profile_id
 
         progress = self.progress.to_dict()
+
+        request_key = self.request_key
 
         result: Union[None, dict[str, Any]]
         if isinstance(self.result, FleetProfileApplicationResult):
@@ -128,6 +132,7 @@ class FleetProfileApplicationView:
             "profile_digest": profile_digest,
             "profile_id": profile_id,
             "progress": progress,
+            "request_key": request_key,
             "result": result,
             "state": state,
             "status_reason": status_reason,
@@ -177,6 +182,8 @@ class FleetProfileApplicationView:
 
 
 
+
+        request_key = d.pop("request_key")
 
         def _parse_result(data: object) -> Union['FleetProfileApplicationResult', None]:
             if data is None:
@@ -241,6 +248,7 @@ class FleetProfileApplicationView:
             profile_digest=profile_digest,
             profile_id=profile_id,
             progress=progress,
+            request_key=request_key,
             result=result,
             state=state,
             status_reason=status_reason,

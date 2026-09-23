@@ -233,7 +233,7 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async loadProfile(number: number, input: FleetProfileLoadInput = {dry_run: false}, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+  async loadProfile(number: number, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.POST("/api/profile/{number}/load", {
       params: {path: {number}},
       body: input,
@@ -294,7 +294,7 @@ export class ApiClient implements ControlApi {
   async prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
     return resultData(await this.generated.POST("/api/model/{selector}/download", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2, with_model: false},
+      body: {request_key: requestKey, schema_version: 2},
       signal,
     }));
   }
@@ -304,7 +304,7 @@ export class ApiClient implements ControlApi {
     // cancels any matching transfer and drops the entry when unreferenced.
     return resultData(await this.generated.POST("/api/model/{selector}/remove", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2, with_model: false},
+      body: {request_key: requestKey, schema_version: 2},
       signal,
     }));
   }
@@ -321,7 +321,7 @@ export class ApiClient implements ControlApi {
     // artifacts together, which is what `vonkctl recipe download` documents.
     return resultData(await this.generated.POST("/api/recipe/{selector}/download", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2, with_model: true},
+      body: {request_key: requestKey, schema_version: 2},
       signal,
     }));
   }

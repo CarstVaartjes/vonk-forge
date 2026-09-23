@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, Request, status
@@ -11,13 +10,14 @@ from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
 from .fleet_profile_contract import (
     FleetProfileApplicationView,
+    FleetProfileDefinitionView,
     FleetProfileInput,
     FleetProfileList,
     FleetProfileLoadRequest,
     FleetProfilePreview,
     FleetProfileView,
 )
-from .fleet_profiles import FleetProfileConflict
+from .fleet_profiles import FleetProfileConflict, FleetProfilePermissionDenied
 from .operation_api import bounded_error_responses
 
 #: The canonical lowercase UUID shape every durable identity in this API uses.
@@ -28,6 +28,7 @@ _REQUEST_PATH = "/api/profile/{number}/requests/{request_key}"
 FLEET_PROFILE_OPERATION_IDS = {
     ("get", "/api/profile"): "listProfiles",
     ("get", _PROFILE_PATH): "getProfile",
+    ("get", "/api/profile/{number}/definition"): "getProfileDefinition",
     ("put", _PROFILE_PATH): "autosaveProfile",
     ("post", "/api/profile/{number}/preview"): "previewProfile",
     ("post", "/api/profile/{number}/load"): "loadProfile",
@@ -97,6 +98,24 @@ def install_fleet_profile_routes(
         except (OSError, RuntimeError, TypeError, ValueError):
             raise HTTPException(status_code=503, detail="Profile unavailable") from None
 
+    @app.get(
+        "/api/profile/{number}/definition",
+        response_model=FleetProfileDefinitionView,
+        responses=bounded_error_responses(401, 422, 503),
+        operation_id="getProfileDefinition",
+    )
+    def get_profile_definition(
+        number: Annotated[int, Path(ge=1)], _actor: Actor = authenticated
+    ) -> FleetProfileDefinitionView:
+        try:
+            return service().definition_number(number)
+        except HTTPException:
+            raise
+        except (OSError, RuntimeError, TypeError, ValueError):
+            raise HTTPException(
+                status_code=503, detail="Profile definition unavailable"
+            ) from None
+
     @app.put(
         _PROFILE_PATH,
         response_model=FleetProfileView,
@@ -160,11 +179,15 @@ def install_fleet_profile_routes(
         actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
         require_mutation(actor, "POST", "/api/profile/{number}/load")
-        request_key = body.request_key or str(uuid.uuid4())
         try:
             result = service().load(
-                number, actor=actor.subject, request_key=request_key
+                number,
+                actor=actor.subject,
+                request_key=body.request_key,
+                expected_plan_digest=body.expected_plan_digest,
             )
+        except FleetProfilePermissionDenied as error:
+            raise HTTPException(status_code=403, detail=str(error)) from None
         except KeyError:
             raise HTTPException(status_code=404, detail="Profile not found") from None
         except FleetProfileConflict as error:
@@ -204,20 +227,20 @@ def install_fleet_profile_routes(
     @app.get(
         _REQUEST_PATH,
         response_model=FleetProfileApplicationView,
-        responses=bounded_error_responses(401, 404, 422, 503),
+        responses=bounded_error_responses(401, 403, 404, 422, 503),
         operation_id="getProfileApplicationByRequest",
     )
     def profile_application_by_request(
         number: Annotated[int, Path(ge=1)],
         request_key: str = Path(pattern=_UUID),
-        _actor: Actor = authenticated,
+        actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
         try:
-            profile = service().get_number(number)
-            application = service().application_by_request_key(request_key)
-            if application.profile_id != profile.id:
-                raise KeyError(request_key)
-            return application
+            return service().application_by_request_key(
+                request_key, actor=actor.subject, number=number
+            )
+        except FleetProfilePermissionDenied as error:
+            raise HTTPException(status_code=403, detail=str(error)) from None
         except KeyError:
             raise HTTPException(
                 status_code=404, detail="Profile request not found"

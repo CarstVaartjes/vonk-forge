@@ -434,6 +434,7 @@ def _seed(*, dual: bool = False) -> tuple[sessionmaker[Session], str, str, str]:
                 capabilities=tuple(capabilities),
                 fabric_address=f"192.168.100.{10 + index}" if dual else None,
                 fabric_bandwidth_mbps=200000 if dual else None,
+                memory_pool="shared",
             )
         )
     mapping_service = ClusterMappingService(sessions)

@@ -144,7 +144,7 @@ def test_deleted_rust_file_selects_rust_family(tmp_path: Path) -> None:
         "scripts/generate-agent-wire",
         "control/src/vonk_control/harnesses/canonical_metadata.py",
         "src/cluster_profiles/compiler.py",
-        "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl",
+        "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl",
     ],
 )
 def test_launch_contract_inputs_select_controller_and_wire_checks(path: str) -> None:

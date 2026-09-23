@@ -53,7 +53,7 @@ test("removes a recipe only after an explicit model choice", async () => {
 });
 
 test("refreshes the whole cached recipe set with an explicit scope", async () => {
-  const updateRecipes = vi.fn().mockResolvedValue({action: "update", schema_version: 2, updates: []});
+  const updateRecipes = vi.fn().mockResolvedValue({action: "update", schema_version: 2, children: [], state: "succeeded"});
   const api = {updateRecipes} as unknown as ControlApi;
   const base = libraryViewSnapshot.models.find(entry => entry.recipes.length > 0)!;
   render(<LibraryWorkcell api={api} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: modelKey(base.model)}} snapshot={libraryViewSnapshot}/>);

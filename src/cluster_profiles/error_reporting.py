@@ -16,6 +16,8 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Literal
 
+import httpx
+
 ErrorSource = Literal[
     "remote_rejection", "transport", "local_io", "protocol", "unknown"
 ]
@@ -88,6 +90,22 @@ def classify_transport_error(error: BaseException) -> TransportKind | None:
         return None
     if isinstance(error, http.client.HTTPException):
         return "body"
+    if isinstance(error, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(error, httpx.TransportError):
+        # HTTPX/httpcore preserve system errors as causes or suppressed
+        # contexts. Inspect types only: exception text can contain secrets.
+        cause = error.__cause__
+        seen = {id(error)}
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            if isinstance(cause, (ssl.SSLError, socket.gaierror)):
+                return classify_transport_error(cause)
+            cause = cause.__cause__ or cause.__context__
+        if isinstance(error, (httpx.ReadError, httpx.RemoteProtocolError)):
+            return "body"
+        if isinstance(error, (httpx.ConnectError, httpx.WriteError)):
+            return "connect"
     return None
 
 

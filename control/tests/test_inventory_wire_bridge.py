@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_control.agent_api import InventoryRequest
+from vonk_control.inventory_repository import InventoryRepository
 from vonk_control.models import NodeInventorySnapshot
 
 from .test_agent_api import NODE_A, agent_headers
@@ -74,6 +75,10 @@ def test_rust_inventory_json_crosses_controller_route_and_repository(
     assert snapshot is not None
     assert snapshot.disk_free_bytes == request.disk_free_bytes
     assert snapshot.capabilities == sorted(request.capabilities)
+    stored = InventoryRepository(services.sessions).latest(
+        NODE_A, now=request.observed_at, maximum_age=60
+    )
+    assert stored.memory_pool == request.memory_pool
 
     malformed = dict(payload)
     malformed["gpu_count"] = "1"

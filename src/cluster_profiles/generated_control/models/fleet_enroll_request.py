@@ -23,10 +23,12 @@ class FleetEnrollRequest:
     """
         Attributes:
             name (str):
+            request_key (str):
             ttl_seconds (Union[Unset, int]):  Default: 900.
      """
 
     name: str
+    request_key: str
     ttl_seconds: Union[Unset, int] = 900
 
 
@@ -36,6 +38,8 @@ class FleetEnrollRequest:
     def to_dict(self) -> dict[str, Any]:
         name = self.name
 
+        request_key = self.request_key
+
         ttl_seconds = self.ttl_seconds
 
 
@@ -43,6 +47,7 @@ class FleetEnrollRequest:
 
         field_dict.update({
             "name": name,
+            "request_key": request_key,
         })
         if ttl_seconds is not UNSET:
             field_dict["ttl_seconds"] = ttl_seconds
@@ -56,10 +61,13 @@ class FleetEnrollRequest:
         d = dict(src_dict)
         name = d.pop("name")
 
+        request_key = d.pop("request_key")
+
         ttl_seconds = d.pop("ttl_seconds", UNSET)
 
         fleet_enroll_request = cls(
             name=name,
+            request_key=request_key,
             ttl_seconds=ttl_seconds,
         )
 

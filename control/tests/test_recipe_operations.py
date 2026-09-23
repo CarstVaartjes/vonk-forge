@@ -79,6 +79,7 @@ from vonk_control.models import (
     RoutePublication,
     RoutePublicationOwner,
     RunNode,
+    User,
 )
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
@@ -440,6 +441,7 @@ def setup_services(
     sessions = sessionmaker(engine, expire_on_commit=False)
     node_ids = tuple("spk_" + f"{index + 1:032x}" for index in range(nodes))
     with sessions.begin() as session:
+        session.add(User(subject="admin", role="administrator"))
         for index, node_id in enumerate(node_ids):
             serial = f"serial-{index}"
             session.add(
@@ -511,6 +513,7 @@ def setup_services(
                 capabilities,
                 fabric_address=(f"192.168.100.{index + 2}" if nodes > 1 else None),
                 fabric_bandwidth_mbps=(1000 if nodes > 1 else None),
+                memory_pool="shared",
             )
         )
     document = canonical_example("recipe-source-build.json")
@@ -1184,6 +1187,14 @@ def started_recipe(
         actor="admin",
         request_id=request_id,
     )
+    complete_started_recipe(sessions, service, operation.id)
+    return operation
+
+
+def complete_started_recipe(
+    sessions, service: RecipeOperationService, operation_id: str
+) -> None:
+    operation = service.get(operation_id)
     completed_operations: set[str] = set()
     while service.get(operation.id).state == "running":
         with sessions() as session:
@@ -1207,7 +1218,6 @@ def started_recipe(
             )
             completed_operations.add(child.id)
     mark_current_exact_observations(sessions, operation.owner_id, NOW)
-    return operation
 
 
 def complete_collective_readiness(
@@ -3867,7 +3877,12 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     profile = profiles.create(
         FleetProfileInput(name="Idle", installation_policy="exact"), actor="admin"
     )
-    first = profiles.load(profile.number, request_key=str(uuid.uuid4()), actor="admin")
+    first = profiles.load(
+        profile.number,
+        request_key=str(uuid.uuid4()),
+        actor="admin",
+        expected_plan_digest=profiles.preview(profile.id).plan_digest,
+    )
     assert profiles.tick()
     first_application = profiles.application(first.id)
     assert first_application.current_operation_id == first.id
@@ -3903,7 +3918,13 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
         sessions, clock=lambda: NOW + timedelta(seconds=1), run_switch_operations=switch
     )
     request_key = str(uuid.uuid4())
-    retry = profiles.load(profile.number, request_key=request_key, actor="admin")
+    reviewed_digest = profiles.preview(profile.id).plan_digest
+    retry = profiles.load(
+        profile.number,
+        request_key=request_key,
+        actor="admin",
+        expected_plan_digest=reviewed_digest,
+    )
     assert retry.retry_of_application_id is None
     assert retry.progress.workload_intent_ordinal is not None
     assert first.progress.workload_intent_ordinal is not None
@@ -3945,7 +3966,13 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     final = profiles.application(retry.id)
     assert final.state == "succeeded"
     assert (
-        profiles.load(profile.number, request_key=request_key, actor="admin") == final
+        profiles.load(
+            profile.number,
+            request_key=request_key,
+            actor="admin",
+            expected_plan_digest=reviewed_digest,
+        )
+        == final
     )
     with sessions() as session:
         assert (

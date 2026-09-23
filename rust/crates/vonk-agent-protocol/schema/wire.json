@@ -4051,6 +4051,14 @@
           "title": "Host Memory Total Bytes",
           "type": "integer"
         },
+        "memory_pool": {
+          "enum": [
+            "shared",
+            "separate"
+          ],
+          "title": "Memory Pool",
+          "type": "string"
+        },
         "nvidia_driver_version": {
           "maxLength": 256,
           "minLength": 1,
@@ -4079,6 +4087,7 @@
         "gpu_memory_total_bytes",
         "gpu_memory_free_bytes",
         "gpu_count",
+        "memory_pool",
         "artifact_store_read_only",
         "capabilities",
         "nvidia_driver_version",
@@ -8577,6 +8586,23 @@
     "RequestValidationProblem": {
       "additionalProperties": false,
       "properties": {
+        "candidates": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 127,
+                "pattern": "^(?:spk_[0-9a-f]{32}|[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9][a-z0-9._-]{0,62})$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidates"
+        },
         "context": {
           "anyOf": [
             {

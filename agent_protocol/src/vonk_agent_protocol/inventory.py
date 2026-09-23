@@ -11,6 +11,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 from .wire_model import WireModel
 
 Capability = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,127}$")]
+MemoryPool = Literal["shared", "separate"]
 RuntimeVersion = Annotated[
     str, Field(min_length=1, max_length=256, pattern=r"^[\x00-\x7f]+$")
 ]
@@ -41,6 +42,7 @@ class InventoryRequest(WireModel):
     gpu_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4)
     gpu_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4)
     gpu_count: int = Field(ge=0, le=64)
+    memory_pool: MemoryPool
     artifact_store_read_only: bool
     capabilities: list[Capability] = Field(max_length=64)
     fabric_address: str | None = Field(default=None, max_length=45)
@@ -59,6 +61,7 @@ class InventoryRequest(WireModel):
             self.disk_free_bytes > self.disk_total_bytes
             or self.host_memory_free_bytes > self.host_memory_total_bytes
             or self.gpu_memory_free_bytes > self.gpu_memory_total_bytes
+            or (self.memory_pool == "shared" and self.gpu_count == 0)
             or (self.fabric_address is None) != (self.fabric_bandwidth_mbps is None)
             or len(self.capabilities) != len(set(self.capabilities))
         ):

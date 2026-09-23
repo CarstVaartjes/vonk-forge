@@ -1,10 +1,9 @@
-"""OS-lock contention guarantees, exercised across real processes on Linux.
+"""OS-lock contention guarantees across independent Controller processes.
 
 Each test here holds a kernel ``flock`` from a **separate process** and proves
 that the module under test reports the contention inside a bounded budget
-instead of parking a worker thread. A second descriptor in this process would
-succeed — ``flock`` is per open file description — so the holder must be its own
-process for the contended path to exist at all.
+instead of parking a worker thread. An independent holder exercises the actual
+worker-process boundary, including kernel release when that holder exits.
 
 These belong to the lane tier because ``flock`` semantics are the guarantee
 being tested: the claim, the contention, and the release are all kernel
@@ -16,6 +15,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -80,7 +80,7 @@ def test_reference_fence_claim_is_bounded_when_another_process_holds_it(
 
 
 def test_oci_layer_lock_claim_is_bounded_when_another_writer_holds_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """A contended OCI layer lock fails retryably instead of parking the worker.
 
@@ -90,14 +90,9 @@ def test_oci_layer_lock_claim_is_bounded_when_another_writer_holds_it(
     """
 
     lock_path = tmp_path / "layer.lock"
-    monkeypatch.setattr(
-        runtime_image_preparation, "_REGISTRY_LAYER_LOCK_BUDGET_SECONDS", 0.2
-    )
-    monkeypatch.setattr(
-        runtime_image_preparation, "_REGISTRY_LAYER_LOCK_RETRY_SECONDS", 0.01
-    )
     holder = _hold(lock_path)
     try:
+        started = time.monotonic()
         with (
             lock_path.open("a+b") as lock,
             pytest.raises(
@@ -110,6 +105,9 @@ def test_oci_layer_lock_claim_is_bounded_when_another_writer_holds_it(
             )
         assert failure.value.retryable is True
         assert failure.value.recovery_actions == ("retry",)
+        assert time.monotonic() - started < 0.1, (
+            "OCI contention parked an image slot instead of rescheduling"
+        )
     finally:
         holder.terminate()
         holder.wait(timeout=10)

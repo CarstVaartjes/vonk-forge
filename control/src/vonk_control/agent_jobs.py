@@ -914,7 +914,9 @@ class AgentJobService:
         )
         for parent_id in parent_ids:
             parent = session.scalar(
-                select(Job).where(Job.id == parent_id).with_for_update(of=Job)
+                select(Job)
+                .where(Job.id == parent_id)
+                .with_for_update(of=Job, nowait=True)
             )
             if parent is None or parent.state not in {
                 "queued",
@@ -927,7 +929,7 @@ class AgentJobService:
                     select(StoredOperation)
                     .where(StoredOperation.parent_job_id == parent_id)
                     .order_by(StoredOperation.id)
-                    .with_for_update(of=StoredOperation)
+                    .with_for_update(of=StoredOperation, nowait=True)
                 )
             )
             bound = parent.payload.get("workload_intent_ordinal")

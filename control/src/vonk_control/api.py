@@ -41,6 +41,8 @@ from starlette.responses import FileResponse, StreamingResponse
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
 from .agent_api import (
     MAX_RECIPE_IMAGE_BYTES,
     AgentApiServices,
@@ -79,6 +81,7 @@ from .fleet_projection import (
 )
 from .fleet_stream import parse_last_event_id
 from .fleet_stream_contract import FleetStreamEvent
+from .library_assessment import LibraryAssessment
 from .logging import JobLogCorruptError
 from .metrics import MetricsRegistry, runnable_job_ages
 from .model_cache_api import (
@@ -161,6 +164,7 @@ def _bounded_error_content(
     *,
     validation: bool = False,
     context: ErrorContextResponse | None = None,
+    candidates: list[str] | None = None,
 ) -> bytes:
     """Serialize the documented non-agent HTTP error contract.
 
@@ -175,7 +179,9 @@ def _bounded_error_content(
         detail = "request failed"
     detail = redact_text(detail)[:256]
     response = (
-        RequestValidationProblem(detail=detail, issues=[], context=context)
+        RequestValidationProblem(
+            detail=detail, issues=[], context=context, candidates=candidates
+        )
         if validation
         else BoundedErrorResponse(detail=detail, context=context)
     )
@@ -550,6 +556,8 @@ def create_app(
     async def canonical_agent_http_error(
         request: Request, error: StarletteHTTPException
     ) -> Response:
+        from .library_api import SelectorAmbiguityHTTPError
+
         if request.url.path.startswith("/api/catalog/"):
             return Response(
                 content=_catalog_error_content(request, error),
@@ -561,7 +569,13 @@ def create_app(
             if request.url.path.startswith("/api/"):
                 return Response(
                     content=_bounded_error_content(
-                        error.detail, validation=error.status_code == 422
+                        error.detail,
+                        validation=error.status_code == 422,
+                        candidates=(
+                            error.problem.candidates
+                            if isinstance(error, SelectorAmbiguityHTTPError)
+                            else None
+                        ),
                     ),
                     status_code=error.status_code,
                     headers=error.headers,
@@ -687,7 +701,7 @@ def create_app(
             if artifact_input_upload
             else 1024**3
             if artifact_output_upload
-            else 1_048_576
+            else MAX_CONTROL_DOCUMENT_BYTES
         )
         try:
             if telemetry_ingest:
@@ -1366,16 +1380,6 @@ def production_app() -> FastAPI:
         visual_fleet,
         clock=clock,
     )
-    visual_library = LibraryProjection(
-        sessions,
-        cursors=cursor_codec,
-        clock=clock,
-        inventory_fresh_seconds=300,
-        telemetry_live_seconds=6,
-        telemetry_delayed_seconds=20,
-        disk_floor_bytes=10_000_000_000,
-        runtime_archive_available=runtime_image_storage.build_archive_available,
-    )
     metrics = MetricsRegistry()
     operational_metrics = OperationalMetricsCollector(
         metrics,
@@ -1586,6 +1590,18 @@ def production_app() -> FastAPI:
             clock=clock,
         ),
     )
+    visual_library = LibraryProjection(
+        sessions,
+        cursors=cursor_codec,
+        clock=clock,
+        runtime_archive_available=runtime_image_storage.build_archive_available,
+        assessment=LibraryAssessment(
+            sessions,
+            run_switch=run_switch_operations,
+            model_cache=model_cache,
+            clock=clock,
+        ),
+    )
     artifact_jobs = ArtifactJobService(
         sessions,
         recipe_operations=recipe_operations,
@@ -1765,6 +1781,7 @@ def production_app() -> FastAPI:
                 operation_providers=(
                     fleet_profiles.operation_provider(),
                     run_switch_operations.activity_provider(),
+                    recipe_image_production.service.update_activity_provider(),
                 ),
             ),
             model_cache,

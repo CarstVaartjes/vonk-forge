@@ -20,7 +20,6 @@ import os
 import re
 import stat
 import subprocess
-import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
@@ -90,30 +89,18 @@ class PulledImageEvidence:
     archive_bytes: int
 
 
-# The layer lock covers a network transfer and an export, so its claim is
-# bounded: a preparation worker that cannot take it returns a retryable failure
-# and is rescheduled rather than parked with no deadline.
-_REGISTRY_LAYER_LOCK_BUDGET_SECONDS = 30.0
-_REGISTRY_LAYER_LOCK_RETRY_SECONDS = 0.05
-
-
 def _claim_registry_layer_lock(lock: IO[bytes], *, reference: str) -> None:
-    """Acquire one OCI layer lock nonblockingly inside a bounded budget."""
+    """Release the image slot immediately when another exporter owns the index."""
 
-    deadline = time.monotonic() + _REGISTRY_LAYER_LOCK_BUDGET_SECONDS
-    while True:
-        try:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return
-        except BlockingIOError:
-            if time.monotonic() >= deadline:
-                raise RuntimeImagePreparationError(
-                    "runtime_image.transfer_contended",
-                    "another preparation is exporting the same OCI index",
-                    retryable=True,
-                    recovery_actions=("retry",),
-                ) from None
-            time.sleep(_REGISTRY_LAYER_LOCK_RETRY_SECONDS)
+    try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise RuntimeImagePreparationError(
+            "runtime_image.transfer_contended",
+            "waiting for another image preparation to release the same OCI index lock",
+            retryable=True,
+            recovery_actions=("retry",),
+        ) from None
 
 
 class OCIImageTransport(Protocol):
@@ -709,16 +696,18 @@ def _authorize_current_revision(
                 "current source-build recipe has no matching build receipt",
             )
         build = session.get(RecipeBuild, receipt.build_id)
+        # Execution state may describe a replacement attempt. The caller has
+        # verified managed bytes; bind their exact retained result identity,
+        # rather than making a running replacement invalidate that artifact.
         if (
             build is None
-            or build.state != "succeeded"
             or build.image_digest != receipt.platform_manifest_digest
             or build.oci_layout_sha256 != receipt.oci_archive_sha256
             or build.image_bytes != receipt.image_bytes
         ):
             raise RuntimeImagePreparationError(
                 "runtime_image.authorization_invalid",
-                "source-build receipt is not backed by the exact succeeded build",
+                "source-build receipt is not backed by the exact recorded build result",
             )
         projected = read_catalog_projection(revision)
         if not isinstance(projected, RecipeRevisionProjection):

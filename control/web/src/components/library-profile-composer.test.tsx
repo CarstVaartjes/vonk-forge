@@ -1,4 +1,4 @@
-import {render, screen} from "@testing-library/react";
+import {render, screen, waitFor} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {vi} from "vitest";
 import type {ControlApi, FleetProfile, LibraryViewRecipeDetail} from "../api/types";
@@ -21,4 +21,22 @@ test("autosaves a recipe choice using the shared numbered Profile API", async ()
 
   expect(autosaveProfile).toHaveBeenCalledWith(1, expect.objectContaining({assignments: [expect.objectContaining({recipe_selector: "vonk-forge/qwen-code", model_variant: "nvfp4", spark_ids: [nodeId]})]}));
   expect(await screen.findByText("Qwen Code ready is ready")).toBeVisible();
+});
+
+test("adding a recipe preserves the saved definition of existing assignments", async () => {
+  const user = userEvent.setup();
+  const definition = {name: "Stored", description: "Keep this", favorite: false, installation_policy: "exact", labels: {use: "draft"}, assignments: [{recipe_selector: "vonk-forge/other-recipe", spark_ids: [nodeId], assignment_name: "installed-draft", model_variant: "precise-variant", desired_state: "installed"}]};
+  const existing = {number: 2, revision: 7, name: "Stored", status: "ready", definition, assignments: [{recipe_selector: "vonk-forge/other-recipe", spark_ids: [nodeId], observed_state: "Not loaded"}]} as unknown as FleetProfile;
+  const autosaveProfile = vi.fn(async () => existing);
+  const api = {profiles: vi.fn(async () => ({profiles: [existing]})), autosaveProfile} as unknown as ControlApi;
+  render(<LibraryNodeNamesProvider names={{[nodeId]: "Spark Alpha"}}><LibraryProfileComposer api={api} detail={detail}/></LibraryNodeNamesProvider>);
+  await user.click(screen.getByRole("button", {name: "Add to Fleet Profile"}));
+  await screen.findByRole("option", {name: "Profile 2 · Stored · 1 workloads"});
+  await waitFor(() => expect(screen.getByLabelText("Destination")).toBeEnabled());
+  await user.selectOptions(screen.getByLabelText("Destination"), "2");
+  await user.click(screen.getByRole("button", {name: "Add workload"}));
+  expect(autosaveProfile).toHaveBeenCalledWith(2, {
+    ...definition, expected_revision: 7,
+    assignments: [definition.assignments[0], expect.objectContaining({recipe_selector: "vonk-forge/qwen-code", desired_state: "running"})],
+  });
 });

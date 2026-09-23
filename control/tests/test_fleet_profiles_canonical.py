@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib.resources import files
+from threading import Barrier
 
 import pytest
 from pydantic import ValidationError
@@ -20,6 +22,7 @@ from vonk_control.models import (
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
+    User,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -43,6 +46,8 @@ def _sessions() -> sessionmaker:
 
 
 def _seed(sessions: sessionmaker) -> None:
+    with sessions.begin() as session:
+        session.add(User(subject="test", role="administrator"))
     model_document = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
@@ -177,6 +182,82 @@ def test_profile_uses_canonical_recipe_and_model_revisions() -> None:
     assert preview.assignments[0].recipe_revision_id == RECIPE_REVISION_ID
 
 
+def test_definition_preserves_authoring_fields_without_consulting_cache() -> None:
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    value = FleetProfileInput(
+        name="Installed draft",
+        description="keep",
+        favorite=True,
+        labels={"use": "images"},
+        installation_policy="exact",
+        assignments=[
+            FleetProfileAssignmentInput(
+                recipe_selector="vonk-forge/synthetic-tiny-image",
+                spark_ids=[NODE_1],
+                assignment_name="draft",
+                model_variant="precise-variant",
+                desired_state="installed",
+            )
+        ],
+    )
+    created = service.create(value, actor="test")
+
+    def unavailable(*args, **kwargs):
+        raise AssertionError("definition read consulted cache availability")
+
+    service._cache_resolver = unavailable
+    read = service.definition_number(created.number)
+    assert read.definition.model_dump() == value.model_dump(
+        exclude={"expected_revision"}
+    )
+    assert read.revision == created.revision
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_competing_profile_saves_accept_only_one_observed_revision(
+    postgres_engine, existing
+):
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    if existing:
+        service.update_number(2, FleetProfileInput(name="Original"), actor="test")
+    observed = service.definition_number(2)
+    ready = Barrier(2)
+
+    def save(name):
+        value = FleetProfileInput(name=name, expected_revision=observed.revision)
+        ready.wait(timeout=10)
+        try:
+            return service.update_number(2, value, actor="test")
+        except FleetProfileConflict:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(save, ("First", "Second")))
+    accepted = [result for result in results if result is not None]
+    assert len(accepted) == 1
+    saved = service.definition_number(2)
+    assert saved.revision == observed.revision + 1
+    assert saved.definition == accepted[0].definition
+
+
+def test_definition_read_refuses_malformed_persisted_assignment():
+    from vonk_control.models import FleetProfile
+
+    sessions = _sessions()
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = service.create(FleetProfileInput(name="Damaged"), actor="test")
+    with sessions.begin() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        row.assignments = [{"recipe_selector": "vonk-forge/missing-fields"}]
+    with pytest.raises(ValidationError):
+        service.definition_number(created.number)
+
+
 def test_profile_accepts_the_library_publisher_slug_selector() -> None:
     sessions = _sessions()
     _seed(sessions)
@@ -291,7 +372,10 @@ def test_numbered_autosave_uses_revision_and_load_freezes_whole_roster() -> None
         )
 
     application = service.load(
-        2, actor="test", request_key="00000000-0000-4000-8000-000000000099"
+        2,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000099",
+        expected_plan_digest=service.preview(changed.id).plan_digest,
     )
     assert application.state == "succeeded"
     assert application.progress.intended_profile is not None
@@ -373,6 +457,7 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
         profile.number,
         actor="test",
         request_key="00000000-0000-4000-8000-000000000097",
+        expected_plan_digest=service.preview(profile.id).plan_digest,
     )
     assert application.progress.intended_profile is not None
     assert (

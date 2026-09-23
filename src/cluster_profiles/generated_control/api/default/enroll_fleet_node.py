@@ -64,6 +64,13 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
         return response_403
 
+    if response.status_code == 409:
+        response_409 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_409
+
     if response.status_code == 422:
         response_422 = RequestValidationProblem.from_dict(response.json())
 

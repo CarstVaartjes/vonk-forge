@@ -19,6 +19,7 @@ from .model_cache import (
     ModelCacheService,
 )
 from .model_cache_contract import (
+    UUID_PATTERN,
     ModelCacheOperatorAction,
     ModelCacheOperatorRequest,
     ModelCacheOperatorResponse,
@@ -36,6 +37,7 @@ from .operation_contract import AvailabilityOperationFailure
 
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/model/operations/{operation_id}"): "getModelOperation",
+    ("get", "/api/model/requests/{request_key}"): "getModelRequest",
     ("post", "/api/model/{selector}/download"): "downloadModel",
     ("post", "/api/model/{selector}/remove"): "removeModel",
 }
@@ -131,6 +133,26 @@ def install_model_operator_routes(
         return HTTPException(status_code=503, detail="model cache unavailable")
 
     @app.get(
+        "/api/model/requests/{request_key}",
+        response_model=ModelCacheOperatorResponse,
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        operation_id="getModelRequest",
+    )
+    def get_request(
+        request_key: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        try:
+            operation, action, selector = cache().get_operator_request(
+                request_key, actor=actor.subject
+            )
+            return _model_operator_response(operation, action=action, selector=selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise failure(error) from None
+
+    @app.get(
         "/api/model/operations/{operation_id}",
         response_model=ModelCacheOperatorResponse,
         responses=bounded_error_responses(401, 404, 409, 422, 503),
@@ -152,7 +174,7 @@ def install_model_operator_routes(
             raise failure(error) from None
 
     @app.post(
-        "/api/model/{selector}/download",
+        "/api/model/{selector:path}/download",
         response_model=ModelCacheOperatorResponse,
         status_code=status.HTTP_202_ACCEPTED,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
@@ -164,7 +186,7 @@ def install_model_operator_routes(
         selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Actor = actor_dependency,
     ) -> ModelCacheOperatorResponse:
-        require_operator(actor, "/api/model/{selector}/download")
+        require_operator(actor, "/api/model/{selector:path}/download")
         try:
             operation = cache().download_model_selector(
                 selector,
@@ -182,7 +204,7 @@ def install_model_operator_routes(
             raise failure(error) from None
 
     @app.post(
-        "/api/model/{selector}/remove",
+        "/api/model/{selector:path}/remove",
         response_model=ModelCacheOperatorResponse,
         status_code=status.HTTP_202_ACCEPTED,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
@@ -194,7 +216,7 @@ def install_model_operator_routes(
         selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Actor = actor_dependency,
     ) -> ModelCacheOperatorResponse:
-        require_operator(actor, "/api/model/{selector}/remove")
+        require_operator(actor, "/api/model/{selector:path}/remove")
         try:
             operation = cache().remove_model_selector(
                 selector,

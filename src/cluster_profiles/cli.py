@@ -6,16 +6,23 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sys
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import cast, overload
 
 from .build_identity import current_build
 from .cli_completion import completion_script
-from .cli_outcome import CommandOutcome, Observation
+from .cli_outcome import (
+    CommandOutcome,
+    EnrollmentDeliveryError,
+    Observation,
+    Submission,
+)
 from .cli_render import progress_line, render_payload, terminal_text
 from .cli_update import (
     CliUpdateError,
@@ -34,7 +41,6 @@ from .control_client import (
 from .controller_cli import ControllerClient, add_controller_commands, run_controller
 
 _MAX_TEXT_CHARS = 1_024
-_MAX_COLLECTION_ITEMS = 1_024
 _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?i)\b(authorization|api[_-]?key|password|secret|token)\b"
     r"(\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+"
@@ -96,16 +102,16 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _sanitize_text(value: object) -> str:
-    text = str(value).replace("\x00", "")
+def _sanitize_text(value: object, *, limit: int | None = _MAX_TEXT_CHARS) -> str:
+    text = str(value)
     text = _SENSITIVE_ASSIGNMENT.sub(
         lambda match: f"{match.group(1)}: <redacted>", text
     )
     text = _BEARER.sub("Bearer <redacted>", text)
     if "-----BEGIN " in text:
         text = text.split("-----BEGIN ", 1)[0] + "<redacted private key>"
-    if len(text) > _MAX_TEXT_CHARS:
-        text = text[: _MAX_TEXT_CHARS - 15] + "... (truncated)"
+    if limit is not None and len(text) > limit:
+        text = text[: limit - 15] + "... (truncated)"
     return terminal_text(text)
 
 
@@ -119,11 +125,11 @@ def _sanitize(value: object) -> object: ...
 
 def _sanitize(value: object) -> object:
     if isinstance(value, str):
-        return _sanitize_text(value)
+        return _sanitize_text(value, limit=None)
     if isinstance(value, Mapping):
         return {str(key): _sanitize(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
-        return [_sanitize(item) for item in value[:_MAX_COLLECTION_ITEMS]]
+        return [_sanitize(item) for item in value]
     return value
 
 
@@ -160,15 +166,50 @@ def _control_error(
         "shortfall_bytes": getattr(error, "shortfall_bytes", None),
         "log_excerpt": getattr(error, "log_excerpt", None),
     }
+    candidates = getattr(error, "candidates", ())
+    if candidates:
+        result["candidates"] = list(candidates)
     context = getattr(error, "context", None)
     if context is not None:
         result.update(context.as_dict())
+    submission = getattr(args, "submission", None) if args is not None else None
+    if isinstance(submission, Submission):
+        result["submission"] = submission.document()
+        if submission.acceptance == "unknown":
+            result["error"] = f"{submission.action.capitalize()} acceptance is unknown"
     result = {key: value for key, value in result.items() if value is not None}
     request_key = getattr(args, "request_key", None) if args is not None else None
     if isinstance(request_key, str) and request_key:
         result["request_key"] = request_key
+        noun = getattr(args, "command", None)
         result["reconcile"] = {
-            "operation": "inspect the durable operation with the same request key",
+            "operation": (
+                shlex.join(
+                    [
+                        "vonkctl",
+                        noun,
+                        "progress",
+                        "--request-key",
+                        request_key,
+                        "--follow",
+                    ]
+                )
+                if noun in {"model", "recipe"}
+                else shlex.join(
+                    [
+                        "vonkctl",
+                        "--profile",
+                        str(getattr(args, "profile_number", 1)),
+                        "profile",
+                        "progress",
+                        "--request-key",
+                        request_key,
+                        "--follow",
+                    ]
+                )
+                if noun == "profile"
+                else "inspect the durable operation with the same request key"
+            ),
             "request_key": request_key,
         }
     return result
@@ -177,6 +218,9 @@ def _control_error(
 def _emit(
     payload: Mapping[str, object], args: argparse.Namespace, *, error: bool = False
 ) -> None:
+    if getattr(args, "document_output", False):
+        print(json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False))
+        return
     safe = (
         dict(payload)
         if args.global_json or getattr(args, "json", False)
@@ -190,6 +234,14 @@ def _emit(
             safe,
             getattr(args, "command", None) or "profile",
             wide=getattr(args, "wide", False),
+            action=(
+                "connection"
+                if getattr(args, "check_connection", False)
+                else "preview"
+                if getattr(args, "dry_run", False)
+                else getattr(args, f"{getattr(args, 'command', '')}_action", None)
+            ),
+            technical=getattr(args, "technical", False),
         )
 
 
@@ -345,12 +397,25 @@ def _main(
 
         def render_watch(observed: Mapping[str, object]) -> None:
             nonlocal last_progress
-            message = _sanitize_text(progress_line(observed))
+            if (
+                getattr(args, "watch", False)
+                or getattr(args, "fleet_action", None) == "loginfo"
+            ):
+                buffer = StringIO()
+                with redirect_stderr(buffer):
+                    _emit(observed, args, error=True)
+                message = buffer.getvalue().rstrip()
+            else:
+                message = _sanitize_text(progress_line(observed))
             observation = getattr(args, "observation", None)
             if isinstance(observation, Observation) and observation.error:
                 message = f"Reconnecting: {observation.error}; last confirmed {message}"
             if message != last_progress:
-                print(message, file=sys.stderr)
+                encoding = sys.stderr.encoding or "utf-8"
+                print(
+                    message.encode(encoding, "backslashreplace").decode(encoding),
+                    file=sys.stderr,
+                )
                 last_progress = message
 
         if not args.global_json and not getattr(args, "json", False):
@@ -367,12 +432,21 @@ def _main(
             and not (args.global_json or getattr(args, "json", False))
         ):
             print(
-                f"Observation deadline reached; accepted work continues.\nReconnect: {outcome.observation.reconnect_command}",
+                (
+                    "Observation deadline reached; latest snapshot follows."
+                    if getattr(args, "watch", False)
+                    else "Observation deadline reached; accepted work continues."
+                )
+                + f"\nReconnect: {outcome.observation.reconnect_command}",
                 file=sys.stderr,
             )
             _emit(result, args)
         else:
             _emit(outcome.output, args)
+        if getattr(args, "profile_saved", False) and not (
+            args.global_json or getattr(args, "json", False)
+        ):
+            print("Saved; running fleet unchanged.")
         if interactive:
             notice = interactive_notice()
             if notice:
@@ -380,6 +454,9 @@ def _main(
         return outcome.exit_code
     except BrokenPipeError:
         raise
+    except EnrollmentDeliveryError as error:
+        _emit(error.document, args, error=True)
+        return 130 if error.interrupted else 2
     except (
         ControlClientError,
         OSError,
@@ -397,7 +474,7 @@ def _main(
             return 130
         _emit(
             _control_error(
-                ControlClientError("observation interrupted; accepted work continues"),
+                ControlClientError("command interrupted"),
                 args,
             ),
             args,

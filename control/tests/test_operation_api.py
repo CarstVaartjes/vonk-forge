@@ -20,6 +20,8 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import BoundedJSONError
 from vonk_control.fleet_profile_contract import (
+    FleetProfileDefinition,
+    FleetProfileEffects,
     FleetProfilePlanStep,
     FleetProfilePlanSummary,
     FleetProfilePreview,
@@ -67,6 +69,13 @@ def _profile_operation_plan(
         profile_id=profile_id,
         profile_name="Studio",
         profile_digest=profile_digest,
+        profile_revision=1,
+        profile_definition=FleetProfileDefinition(name="Studio"),
+        resolved_assignments=[],
+        preparation_decisions=[],
+        admission_decisions=[],
+        assessments=[],
+        effects=FleetProfileEffects(runs=[], installations=[], superseded=[]),
         generated_at=now,
         allowed=True,
         scope=FleetProfileScopePreview(node_ids=node_ids, idle_node_ids=node_ids),
@@ -296,9 +305,12 @@ def test_operation_read_surfaces_a_recorded_claim_refusal_reason() -> None:
     assert response.status_reason == reason
     assert response.model_dump()["status_reason"] == reason
     # A claim that was never refused keeps the response shape it always had.
-    assert "status_reason" not in operation_api.operation_detail_response(
-        {**item, "status_reason": None}
-    ).model_dump()
+    assert (
+        "status_reason"
+        not in operation_api.operation_detail_response(
+            {**item, "status_reason": None}
+        ).model_dump()
+    )
 
     operation = SimpleNamespace(
         current_attempt=0,
@@ -311,10 +323,12 @@ def test_operation_read_surfaces_a_recorded_claim_refusal_reason() -> None:
         status_reason=reason,
         updated_at=datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
     )
-    assert operation_api._operation_item(
-        cast(AgentOperation, operation), None
-    )["status_reason"] == reason
-
+    assert (
+        operation_api._operation_item(cast(AgentOperation, operation), None)[
+            "status_reason"
+        ]
+        == reason
+    )
 
 
 def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> None:

@@ -1,4 +1,4 @@
-"""Evidence based memory planning for canonical recipe settings.
+"""Evidence based capacity planning for canonical recipe settings.
 
 The public RecipeDefinition owns settings and topology.  This module consumes
 that typed projection and never invents an engine memory formula.  Context and
@@ -11,11 +11,13 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal, Protocol, TypeGuard, get_args, runtime_checkable
 
+from vonk_agent_protocol.inventory import MemoryPool
+
 from .bounded_json import require_integer
-from .run_switch_contract import RunSwitchChangeEffect
+from .run_switch_contract import MemoryKind, RunSwitchChangeEffect
 
 EvidenceState = Literal["declared", "measured", "fresh", "stale", "unknown"]
 Effect = Literal["reuse", "restart", "reprepare", "reinstall", "rebuild"]
@@ -55,6 +57,51 @@ class ResourceReason:
     detail: str
     severity: Literal["blocker", "warning"] = "blocker"
     node_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InstallationDiskRequirement:
+    required_bytes: int
+    floor_bytes: int
+
+
+def installation_disk_requirement(
+    disk: Mapping[str, object],
+    *,
+    required_download_bytes: int,
+    minimum_floor_bytes: int,
+) -> InstallationDiskRequirement:
+    """One disk envelope for operator review and installation admission.
+
+    The caller supplies exact missing payload bytes, or a full allocation when
+    it cannot yet promise reuse. The reserve remains separate from consumed
+    bytes so installation does not mistake headroom for downloaded data.
+    """
+    staging, cache, rollback, safety = (
+        require_integer(disk.get(name), name)
+        for name in (
+            "staging_bytes",
+            "cache_bytes",
+            "rollback_bytes",
+            "safety_margin_bytes",
+        )
+    )
+    if any(
+        value < 0
+        for value in (
+            staging,
+            cache,
+            rollback,
+            safety,
+            required_download_bytes,
+            minimum_floor_bytes,
+        )
+    ):
+        raise ValueError("installation disk envelope contains negative bytes")
+    return InstallationDiskRequirement(
+        required_download_bytes + staging + cache + rollback,
+        max(minimum_floor_bytes, safety),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +190,149 @@ class ResourceDemand:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryRequirement:
+    """One recipe rank's demand and reserve, shared by review and admission."""
+
+    kind: MemoryKind
+    floor_bytes: int
+    demand: ResourceDemand
+
+    @property
+    def reservation_kind(self) -> str:
+        return memory_reservation_kind(self.kind)
+
+
+def memory_reservation_kind(kind: str) -> str:
+    return {
+        "unified": "unified-memory",
+        "host": "host-memory",
+        "accelerator": "gpu-memory",
+    }[kind]
+
+
+def memory_reservation_kinds(kind: str, pool: MemoryPool) -> tuple[str, ...]:
+    """Declared consumers of one physical pool, independent of owner names."""
+    kinds = ("host-memory", "gpu-memory", "unified-memory")
+    if kind not in kinds:
+        raise ValueError("reservation is not memory")
+    if pool == "shared":
+        return kinds
+    if kind == "unified-memory":
+        # Unified demand is checked against both independent capacities below.
+        return kinds
+    return kind, "unified-memory"
+
+
+def _is_memory_kind(value: object) -> TypeGuard[MemoryKind]:
+    return isinstance(value, str) and value in get_args(MemoryKind)
+
+
+def memory_requirement(
+    recipe_document: Mapping[str, object],
+    memory: Mapping[str, object],
+    role_name: str,
+    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    *,
+    settings: object | None = None,
+    platform_floor_bytes: int = 0,
+) -> MemoryRequirement:
+    kind = memory.get("kind")
+    if not _is_memory_kind(kind):
+        raise ValueError("recipe memory kind is invalid")
+    values = [
+        require_integer(memory.get(name), name)
+        for name in (
+            "startup_peak_bytes",
+            "steady_state_bytes",
+            "runtime_growth_bytes",
+            "system_reserve_bytes",
+        )
+    ]
+    if min(*values, platform_floor_bytes) < 0:
+        raise ValueError("recipe memory envelope is invalid")
+    startup, steady, growth, reserve = values
+    selected = settings if settings is not None else recipe_document
+    resolution = (
+        SettingsResolution(selected)
+        if isinstance(selected, EffectiveResourceSettings)
+        else resolve_effective_settings(selected)
+    )
+    evidence = _resource_evidence(
+        recipe_document,
+        role_name,
+        model_documents,
+        max(startup, steady + growth),
+        resolution.settings,
+    )
+    demand = resource_demand(
+        resolution.settings if resolution.settings is not None else selected,
+        evidence,
+    )
+    return MemoryRequirement(kind, max(platform_floor_bytes, reserve), demand)
+
+
+def memory_capacity_snapshot(
+    node_id: str,
+    kind: MemoryKind,
+    *,
+    host: tuple[int, int] | None,
+    accelerator: tuple[int, int] | None,
+    reservations: Mapping[str, int],
+    memory_pool: MemoryPool | None,
+    evidence_state: EvidenceState,
+    evidence_digest: str | None = None,
+) -> CapacitySnapshot:
+    def component(kind: MemoryKind, values: tuple[int, int] | None) -> CapacitySnapshot:
+        reserved = (
+            sum(
+                reservations.get(item, 0)
+                for item in memory_reservation_kinds(
+                    memory_reservation_kind(kind), memory_pool
+                )
+            )
+            if memory_pool is not None
+            else None
+        )
+        total, free = values if values is not None else (None, None)
+        return CapacitySnapshot(
+            node_id,
+            kind,
+            total,
+            total - free if total is not None and free is not None else None,
+            reserved,
+            evidence_state if total is not None else "unknown",
+            evidence_digest,
+        )
+
+    if memory_pool == "shared":
+        values = (
+            (min(host[0], accelerator[0]), min(host[1], accelerator[1]))
+            if host is not None and accelerator is not None
+            else None
+        )
+        return component(kind, values)
+    if kind == "host":
+        return component("host", host)
+    if kind == "accelerator":
+        return component("accelerator", accelerator)
+    # A unified envelope on separate hardware must fit each pool. Adding their
+    # independent reservations would invent consumption; checking only one pool
+    # would miss a blocker, including a different limiting pool after a stop.
+    components = (component("host", host), component("accelerator", accelerator))
+    limiting = min(
+        components,
+        key=lambda item: (
+            item.available_bytes - item.occupied_bytes - item.reserved_bytes
+            if item.available_bytes is not None
+            and item.occupied_bytes is not None
+            and item.reserved_bytes is not None
+            else -1
+        ),
+    )
+    return replace(limiting, memory_kind="unified", components=components)
+
+
+@dataclass(frozen=True, slots=True)
 class CapacitySnapshot:
     node_id: str
     memory_kind: str
@@ -151,6 +341,7 @@ class CapacitySnapshot:
     reserved_bytes: int | None
     evidence_state: EvidenceState = "unknown"
     evidence_digest: str | None = None
+    components: tuple[CapacitySnapshot, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,6 +603,92 @@ def resolve_effective_settings(
     )
 
 
+def _selected_model_bytes(
+    recipe_document: Mapping[str, object],
+    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    role_name: str,
+) -> int | None:
+    if not model_documents:
+        return None
+    selections = recipe_document.get("models")
+    if not isinstance(selections, Sequence) or isinstance(selections, (str, bytes)):
+        return None
+    total = 0
+    selected_any = False
+    for selection in selections:
+        if not isinstance(selection, Mapping):
+            return None
+        model_ref = selection.get("model")
+        if not isinstance(model_ref, Mapping):
+            return None
+        publisher = model_ref.get("publisher")
+        slug = model_ref.get("slug")
+        content_sha256 = model_ref.get("content_sha256")
+        if (
+            not isinstance(publisher, str)
+            or not publisher
+            or not isinstance(slug, str)
+            or not slug
+            or not isinstance(content_sha256, str)
+            or not content_sha256
+        ):
+            return None
+        model_document = model_documents.get((publisher, slug, content_sha256))
+        if model_document is None:
+            return None
+        files = model_document.get("files")
+        if not isinstance(files, Sequence) or isinstance(files, (str, bytes)):
+            return None
+        by_id = {
+            str(file.get("id")): file
+            for file in files
+            if isinstance(file, Mapping) and isinstance(file.get("id"), str)
+        }
+        raw_files = selection.get("files")
+        if not isinstance(raw_files, Sequence) or isinstance(raw_files, (str, bytes)):
+            return None
+        selected_ids: set[str] = set()
+        for item in raw_files:
+            if not isinstance(item, Mapping):
+                return None
+            roles = item.get("roles", ())
+            if (
+                isinstance(roles, Sequence)
+                and not isinstance(roles, (str, bytes))
+                and role_name in roles
+            ):
+                file_id = item.get("file_id")
+                if not isinstance(file_id, str) or file_id not in by_id:
+                    return None
+                selected_ids.add(file_id)
+        for file_id in selected_ids:
+            size = by_id[file_id].get("size_bytes")
+            if type(size) is not int or size < 0:
+                return None
+            total += size
+            selected_any = True
+    return total if selected_any else None
+
+
+def _resource_evidence(
+    recipe_document: Mapping[str, object],
+    role_name: str,
+    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    declared_total_bytes: int,
+    settings: object | None,
+) -> ResourceEvidence:
+    model_bytes = _selected_model_bytes(recipe_document, model_documents, role_name)
+    return ResourceEvidence(
+        weights_bytes=model_bytes,
+        runtime_overhead_bytes=None,
+        declared_total_bytes=declared_total_bytes if model_bytes is not None else None,
+        baseline_context_tokens=getattr(settings, "context_tokens", None),
+        baseline_concurrency=getattr(settings, "concurrency", None),
+        baseline_batch_tokens=getattr(settings, "batch_tokens", None),
+        evidence_state="declared" if model_bytes is not None else "unknown",
+    )
+
+
 def resource_demand(
     settings: EffectiveResourceSettings | object,
     evidence: ResourceEvidence,
@@ -523,6 +800,12 @@ def resource_demand(
     )
 
 
+def _minimum_known(values: Sequence[int | None]) -> int | None:
+    return (
+        None if None in values else min(value for value in values if value is not None)
+    )
+
+
 def plan_capacity(
     requirements: Mapping[str, ResourceDemand],
     capacities: Sequence[CapacitySnapshot],
@@ -574,6 +857,35 @@ def plan_capacity(
             )
             continue
         available = capacity.available_bytes
+        if capacity.components:
+            parts = [
+                plan_capacity(
+                    {node_id: demand},
+                    [part],
+                    planned_stops,
+                    memory_floor_bytes=memory_floor_bytes,
+                ).nodes[0]
+                for part in capacity.components
+            ]
+            nodes.append(
+                NodeCapacityPlan(
+                    node_id,
+                    demand.total_bytes,
+                    _minimum_known([part.current_free_after_bytes for part in parts]),
+                    _minimum_known(
+                        [part.after_stop_free_after_bytes for part in parts]
+                    ),
+                    _minimum_known([part.selected_free_after_bytes for part in parts]),
+                    any(part.stop_required for part in parts),
+                    all(part.allowed for part in parts),
+                    tuple(
+                        dict.fromkeys(
+                            reason for part in parts for reason in part.reasons
+                        )
+                    ),
+                )
+            )
+            continue
         occupied = capacity.occupied_bytes
         reserved = capacity.reserved_bytes
         for name, value in (

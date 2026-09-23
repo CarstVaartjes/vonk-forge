@@ -23,11 +23,12 @@ def test_profile_edit_supersedes_unissued_assignment_after_failed_load(
     retry = service.retry(original.id, request_key=_uuid(801), actor="admin")
     changed = desired.model_copy(
         update={
+            "expected_revision": profile.revision,
             "assignments": [
                 desired.assignments[0].model_copy(
                     update={"assignment_name": "different-chat"}
                 )
-            ]
+            ],
         }
     )
     service.update(profile.id, changed, actor="admin")

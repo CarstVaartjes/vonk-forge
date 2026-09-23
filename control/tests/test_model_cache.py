@@ -12,11 +12,13 @@ from pathlib import Path
 
 import httpx
 import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_control.auth import TokenCodec
+from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.distribution import (
     CompositeVerifiedObjectSource,
@@ -37,6 +39,7 @@ from vonk_control.model_cache import (
 )
 from vonk_control.model_cache_api import (
     ModelCacheOperationProvider,
+    install_model_operator_routes,
     model_cache_operation_provider,
 )
 from vonk_control.model_cache_contract import (
@@ -310,6 +313,193 @@ def test_cache_manifest_artifact_dto_requires_exact_fields(
 
     with pytest.raises(ModelCacheResolutionError, match="manifest"):
         ArtifactSetManifest.from_document(document)
+
+
+def test_operator_download_replays_original_before_catalog_or_storage_readmission(
+    cache, tmp_path: Path, capsys
+) -> None:
+    _, sessions = cache
+    data = b"abc"
+    model = _canonical_model(
+        publisher="vonk-forge",
+        slug="request-recovery",
+        file_id="weights",
+        file_digest=hashlib.sha256(data).hexdigest(),
+    )
+    digest = content_sha256(model)
+    selector = f"{model.identity.publisher}/{model.identity.slug}"
+    with sessions.begin() as session:
+        document = CatalogDocument(
+            kind="model",
+            publisher=model.identity.publisher,
+            slug=model.identity.slug,
+            title="Request recovery model",
+            created_by="operator",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(document)
+        session.flush()
+        revision = CatalogDocumentRevision(
+            document_id=document.id,
+            kind="model",
+            publisher=model.identity.publisher,
+            slug=model.identity.slug,
+            revision_number=1,
+            schema_version=2,
+            state="active",
+            document=model.model_dump(mode="json"),
+            content_digest=digest,
+            projected={},
+            created_by="operator",
+            created_at=NOW,
+        )
+        session.add(revision)
+        session.flush()
+        document_id = document.id
+    with httpx.Client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, content=data))
+    ) as client:
+        service = ModelCacheService(
+            sessions, tmp_path / "operator-cache", reserve_bytes=0, http_client=client
+        )
+        key = "00000000-0000-4000-8000-000000000097"
+        accepted = service.download_model_selector(
+            selector, actor="operator", request_key=key, force=True
+        )
+        service.run_pending()
+        completed = service.get_operation(accepted.id)
+        assert completed.state == "succeeded"
+        # The actual transfer changes the current remaining-byte preview. The
+        # original public request must still recover its accepted operation.
+        recovered = service.download_model_selector(
+            selector, actor="operator", request_key=key, force=True
+        )
+        assert recovered.id == completed.id
+        assert recovered.progress == completed.progress
+    with sessions.begin() as session:
+        newer = model.model_copy(
+            update={
+                "metadata": model.metadata.model_copy(
+                    update={"description": "New revision"}
+                )
+            }
+        )
+        session.add(
+            CatalogDocumentRevision(
+                document_id=document_id,
+                kind="model",
+                publisher=model.identity.publisher,
+                slug=model.identity.slug,
+                revision_number=2,
+                schema_version=2,
+                state="active",
+                document=newer.model_dump(mode="json"),
+                content_digest=content_sha256(newer),
+                projected={},
+                created_by="operator",
+                created_at=NOW,
+            )
+        )
+    restarted = ModelCacheService(sessions, service.root, reserve_bytes=10**30)
+    assert (
+        restarted.download_model_selector(
+            selector, actor="operator", request_key=key, force=True
+        ).id
+        == accepted.id
+    )
+    actor = Actor("operator", "administrator")
+    app = FastAPI()
+    install_model_operator_routes(
+        app, actor_dependency=Depends(lambda: actor), service=restarted, audits=None
+    )
+    with TestClient(app) as api:
+        observed = api.get(f"/api/model/requests/{key}")
+        assert observed.status_code == 200, observed.text
+        assert observed.json()["operation_id"] == accepted.id
+
+        from email.message import Message
+        from io import BytesIO
+        from urllib.error import URLError
+        from urllib.parse import quote
+
+        from cluster_profiles.cli import main
+        from cluster_profiles.control_client import ControlClient
+
+        token = tmp_path / "recovery-token"
+        token.write_text("fixture-token")
+        token.chmod(0o600)
+        paths = []
+
+        class OpenedResponse(BytesIO):
+            def __init__(self, response):
+                super().__init__(response.content)
+                self.status = response.status_code
+                self.headers = Message()
+                for name, value in response.headers.items():
+                    self.headers[name] = value
+
+            def __exit__(self, *_args: object) -> None:
+                self.close()
+
+        def opener(request, timeout):
+            paths.append((request.get_method(), request.selector))
+            response = api.request(
+                request.get_method(),
+                request.selector,
+                content=request.data,
+                headers=dict(request.header_items()),
+            )
+            if request.get_method() == "POST" and response.status_code == 202:
+                raise URLError(ConnectionResetError())
+            return OpenedResponse(response)
+
+        control = ControlClient("https://forge.example.test", token, opener=opener)
+        assert (
+            main(
+                ("model", "download", selector, "--request-key", key, "--json"),
+                control_client=control,
+            )
+            == 0
+        )
+        assert json.loads(capsys.readouterr().out) == observed.json()
+        assert paths == [
+            ("POST", f"/api/model/{quote(selector, safe='')}/download"),
+            ("GET", f"/api/model/requests/{key}"),
+        ]
+        for unused in (False, True):
+            assert (
+                api.post(
+                    f"/api/model/{digest}/download",
+                    json={"request_key": key, "with_model": unused},
+                ).status_code
+                == 422
+            )
+        actor = Actor("other-operator", "administrator")
+        hidden = api.get(f"/api/model/requests/{key}")
+        missing = api.get("/api/model/requests/00000000-0000-4000-8000-000000000098")
+        assert hidden.status_code == missing.status_code == 404
+        assert hidden.json() == missing.json()
+        assert api.get(f"/api/model/operations/{accepted.id}").status_code == 200
+        assert (
+            api.post(
+                f"/api/model/{digest}/download", json={"request_key": key}
+            ).status_code
+            == 409
+        )
+    for actor, requested in [
+        ("other-operator", selector),
+        ("operator", "absent-model"),
+    ]:
+        with pytest.raises(ModelCacheConflict) as refused:
+            restarted.download_model_selector(
+                requested, actor=actor, request_key=key, force=True
+            )
+        assert refused.value.code == "model_cache.request_key_reused"
+    with sessions() as session:
+        assert (
+            session.scalar(select(func.count()).select_from(ModelCacheOperation)) == 1
+        )
 
 
 def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> None:

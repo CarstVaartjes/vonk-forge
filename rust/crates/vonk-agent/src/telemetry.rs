@@ -12,6 +12,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
+    inventory::shared_memory_pool,
     oci::OciRuntime,
     process::{ProcessRunner, Program},
 };
@@ -2866,10 +2867,6 @@ fn runtime_metric_capabilities() -> Vec<(&'static str, &'static str, &'static st
 
 fn is_missing(value: &str) -> bool {
     value.is_empty() || matches!(value, "N/A" | "[N/A]")
-}
-
-fn shared_memory_pool(name: Option<&str>) -> bool {
-    name.is_some_and(|value| value.to_ascii_lowercase().contains("gb10"))
 }
 
 fn optional_number(value: &str, minimum: f64, maximum: f64) -> Option<Option<f64>> {

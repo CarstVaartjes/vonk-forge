@@ -9,20 +9,42 @@ friendly name accepted by the Controller.
 from __future__ import annotations
 
 import argparse
+import copy
 import math
 import re
 import shlex
+import sys
 import time
 import urllib.parse
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import redirect_stdout
 from datetime import UTC, datetime, timedelta
-from typing import Protocol, runtime_checkable
+from pathlib import Path
+from typing import Protocol, cast, runtime_checkable
 
-from .cli_outcome import Observation, operation_state
-from .cli_render import progress_line
+from .cli_files import PrivateOutput, read_json_document, write_private_document
+from .cli_outcome import (
+    EnrollmentDeliveryError,
+    Observation,
+    Submission,
+    operation_state,
+)
+from .cli_render import render_payload, terminal_text
 from .cli_select import SelectorError
-from .control_client import ControlNotFound, ControlTransportError, ControlUnavailable
+from .control_client import (
+    ControlClientError,
+    ControlForbidden,
+    ControlHTTPError,
+    ControlMalformedResponse,
+    ControlNotFound,
+    ControlResponseTooLarge,
+    ControlTransportError,
+    ControlUnauthorized,
+    ControlUnavailable,
+    validate_control_document,
+)
+from .error_reporting import ErrorContext, protocol_context, transport_context
 
 FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
@@ -31,6 +53,9 @@ MAX_LOG_LINES = 1000
 
 
 class ControllerClient(Protocol):
+    @property
+    def request_timeout_seconds(self) -> float: ...
+
     def request(
         self,
         method: str,
@@ -193,6 +218,15 @@ def _watch_controls(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _selection_controls(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--timeout-seconds",
+        type=_timeout_seconds,
+        default=30,
+        help="Selection deadline across all pages, 0–300 seconds (default: 30)",
+    )
+
+
 def _finite_seconds(value: str, *, label: str, minimum: float, maximum: float) -> float:
     try:
         number = float(value)
@@ -223,7 +257,10 @@ def _action_flags(
     followable: bool = False,
 ) -> None:
     parser.set_defaults(outcome_context="mutation")
-    parser.add_argument("--request-key")
+    parser.add_argument(
+        "--request-key",
+        help="Original request UUID; supply and retain it to reconnect after process death",
+    )
     if followable:
         parser.add_argument("--detach", action="store_true")
         _watch_controls(parser)
@@ -236,10 +273,38 @@ def _action_flags(
     _add_output(parser)
 
 
-def _profile_edit_flags(parser: argparse.ArgumentParser) -> None:
+def _profile_edit_flags(
+    parser: argparse.ArgumentParser, *, require_revision: bool = False
+) -> None:
     parser.set_defaults(outcome_context="mutation", requires_profile=True)
-    parser.add_argument("--expected-revision", type=int)
+    parser.add_argument(
+        "--expected-revision", type=_revision, required=require_revision
+    )
     _add_output(parser)
+
+
+def _revision(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "revision must be a nonnegative integer"
+        ) from None
+    if number < 0:
+        raise argparse.ArgumentTypeError(
+            "revision must be nonnegative; zero means create only"
+        )
+    return number
+
+
+def _uuid_argument(value: str) -> str:
+    try:
+        parsed = uuid.UUID(value)
+    except (ValueError, AttributeError):
+        raise argparse.ArgumentTypeError("grant identity must be a UUID4") from None
+    if parsed.version != 4 or str(parsed) != value:
+        raise argparse.ArgumentTypeError("grant identity must be a canonical UUID4")
+    return value
 
 
 def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
@@ -263,6 +328,12 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _watch_controls(detail)
     detail.add_argument("--technical", action="store_true")
     _add_output(detail)
+    node_profile = fleet_actions.add_parser(
+        "node-profile", help="Show one Spark's identity, labels, and lifecycle"
+    )
+    _selector(node_profile, "selector", help="Exact Spark ID or friendly name")
+    _selection_controls(node_profile)
+    _add_output(node_profile)
     rename = fleet_actions.add_parser("rename", help="Change a Spark friendly name")
     _selector(rename, "selector", help="Exact Spark selector or friendly name")
     rename.add_argument("new_name")
@@ -273,6 +344,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     enroll.set_defaults(outcome_context="mutation")
     enroll.add_argument("name")
     enroll.add_argument("--ttl-seconds", type=int, default=900)
+    enroll.add_argument("--output", type=Path, required=True)
+    enroll.add_argument("--request-key", type=_uuid_argument)
     _add_output(enroll)
     for action_name, help_text in (
         ("re-enroll", "Replace a Spark certificate"),
@@ -283,6 +356,23 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         _selector(action, "selector", help="Exact Spark selector or friendly name")
         _add_output(action)
         if action_name == "remove":
+            action.add_argument("--yes", action="store_true")
+        else:
+            action.add_argument("--output", type=Path, required=True)
+            action.add_argument("--request-key", type=_uuid_argument)
+            action.add_argument("--yes", action="store_true")
+    enrollment = fleet_actions.add_parser(
+        "enrollment", help="Inspect or revoke a bootstrap grant"
+    )
+    enrollment_actions = enrollment.add_subparsers(
+        dest="enrollment_action", required=True, parser_class=type(fleet)
+    )
+    for action_name in ("status", "revoke"):
+        action = enrollment_actions.add_parser(action_name)
+        action.add_argument("grant_id", type=_uuid_argument)
+        _add_output(action)
+        if action_name == "revoke":
+            action.set_defaults(outcome_context="mutation")
             action.add_argument("--yes", action="store_true")
     upgrade = fleet_actions.add_parser(
         "upgrade", help="Install the latest signed Spark client"
@@ -361,6 +451,18 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     recipe_library.add_argument("--model", action="append", default=[])
     recipe_library.add_argument("--all-models", action="store_true")
     recipe_library.add_argument(
+        "--ready",
+        action="store_true",
+        default=None,
+        help="Require exact usable NAS assets and an admissible placement",
+    )
+    recipe_library.add_argument(
+        "--fits-fleet",
+        action="store_true",
+        default=None,
+        help="Require a placement fitting fresh current fleet capacity",
+    )
+    recipe_library.add_argument(
         "--sparks",
         action="append",
         type=int,
@@ -382,7 +484,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _action_flags(recipe_download, followable=True)
     recipe_update = recipe_actions.add_parser(
-        "update", help="List or refresh cached recipe updates"
+        "update", help="Refresh an exact recipe or all currently cached recipes"
     )
     recipe_update.add_argument("selector", nargs="?")
     recipe_update.add_argument("--all", action="store_true")
@@ -397,7 +499,12 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         progress = actions.add_parser(
             "progress", help=f"Inspect or follow one {noun} operation"
         )
-        progress.add_argument("operation_id")
+        target = progress.add_mutually_exclusive_group(required=True)
+        target.add_argument("operation_id", nargs="?")
+        target.add_argument(
+            "--request-key",
+            help="Original request UUID; resolves once before following",
+        )
         progress.add_argument("--follow", action="store_true")
         _watch_controls(progress)
         _add_output(progress)
@@ -421,18 +528,52 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     profile_add.add_argument("--spark", action="append", required=True)
     profile_add.add_argument("--as", dest="assignment_name")
     profile_add.add_argument("--model-variant")
+    profile_add.add_argument(
+        "--state", dest="desired_state", choices=("installed", "running")
+    )
     _profile_edit_flags(profile_add)
+    _selection_controls(profile_add)
     profile_remove = profile_actions.add_parser(
         "remove", help="Remove an assignment or Spark members"
     )
     profile_remove.add_argument("assignment")
     profile_remove.add_argument("--spark", action="append", default=[])
     _profile_edit_flags(profile_remove)
+    _selection_controls(profile_remove)
+    profile_configure = profile_actions.add_parser(
+        "configure", help="Edit saved metadata without loading"
+    )
+    profile_configure.add_argument("--description")
+    profile_configure.add_argument("--retention", choices=("keep-cached", "exact"))
+    profile_configure.add_argument("--favorite", choices=("true", "false"))
+    profile_configure.add_argument(
+        "--label", action="append", default=[], metavar="KEY=VALUE"
+    )
+    profile_configure.add_argument(
+        "--remove-label", action="append", default=[], metavar="KEY"
+    )
+    _profile_edit_flags(profile_configure)
+    profile_export = profile_actions.add_parser(
+        "export", help="Export the canonical saved definition as JSON"
+    )
+    profile_export.add_argument("--output", type=Path)
+    _add_output(profile_export)
+    profile_import = profile_actions.add_parser(
+        "import", help="Save a definition; never load it"
+    )
+    profile_import.add_argument(
+        "--file", required=True, help="JSON file or - for stdin"
+    )
+    _profile_edit_flags(profile_import, require_revision=True)
     profile_load = profile_actions.add_parser(
         "load", help="Apply the entire profile to the fleet"
     )
     profile_load.set_defaults(outcome_context="mutation", requires_profile=True)
     profile_load.add_argument("--dry-run", action="store_true")
+    profile_load.add_argument(
+        "--expected-plan", help="The exact plan digest reviewed before this load"
+    )
+    profile_load.add_argument("--yes", action="store_true")
     profile_load.add_argument("--request-key")
     profile_load.add_argument("--detach", action="store_true")
     _watch_controls(profile_load)
@@ -492,17 +633,18 @@ def _bounded_interval(args: argparse.Namespace) -> float:
     return _interval_seconds(str(getattr(args, "interval_seconds", 1.0)))
 
 
-def _observation_delay(error: BaseException, fallback: float) -> float:
+def _observation_delay(
+    error: BaseException, fallback: float, remaining: float
+) -> float:
     """Return the delay before the next observation attempt.
 
-    A Controller that answers ``Retry-After`` is trusted for the wait, bounded
-    like the ordinary poll interval so a hostile or mistaken header cannot stall
-    the observation past its own deadline.
+    Bound waiting by the observation's remaining time. A server delay beyond
+    that budget ends observation at its deadline, without polling prematurely.
     """
 
     retry_after = getattr(error, "retry_after_seconds", None)
     if type(retry_after) is int and retry_after >= 0:
-        return max(0.01, min(float(retry_after), 30.0))
+        return max(0.01, float(min(retry_after, max(0.0, remaining))))
     return fallback
 
 
@@ -558,6 +700,7 @@ def _poll_path(
     *,
     query: Mapping[str, object] | None = None,
     terminal: Callable[[Mapping[str, object]], bool] | None = None,
+    validate: Callable[[Mapping[str, object]], None] | None = None,
 ) -> dict[str, object]:
     """Observe a bounded durable snapshot, retaining the last truthful value.
 
@@ -572,6 +715,8 @@ def _poll_path(
     callback = _watch_callback(args)
     is_terminal = terminal or (lambda observed: _state(observed) in _TERMINAL_STATES)
     current = initial
+    if validate is not None:
+        validate(current)
     started = time.monotonic()
     timeout = _bounded_timeout(args)
     observation = Observation(
@@ -604,42 +749,340 @@ def _poll_path(
             current = client.request(
                 "GET", path, query=query, timeout_seconds=remaining
             )
+            if validate is not None:
+                validate(current)
         except (ControlUnavailable, ControlTransportError, OSError) as error:
             if isinstance(error, BrokenPipeError):
                 raise
             observation.error = _observation_reason(error)
-            interval = _observation_delay(error, interval)
+            interval = _observation_delay(error, interval, deadline - time.monotonic())
             continue
         observation.update(current)
         interval = _bounded_interval(args)
 
 
 def _submit_profile_load(
-    client: ControllerClient, number: int, request_key: str
+    client: ControllerClient,
+    number: int,
+    expected_digest: str,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
 ) -> dict[str, object]:
-    """Resolve an ambiguous accepted POST under its original identity.
-
-    The request lookup reads the durable application before a second POST.  A
-    404 permits one idempotent replay using the *same* key; an unavailable or
-    unauthorized lookup cannot justify a new submission.
-    """
-
+    key = _request_key(args, factory)
     path = f"/api/profile/{number}/load"
-    payload = {"request_key": request_key}
-    try:
-        return client.request("POST", path, payload)
-    except (ControlTransportError, ControlUnavailable, OSError) as lost:
-        try:
-            observed = client.request(
-                "GET", f"/api/profile/{number}/requests/{_quoted(request_key)}"
+    lookup = f"/api/profile/{number}/requests/{key}"
+    body: dict[str, object] = {
+        "request_key": key,
+        "expected_plan_digest": expected_digest,
+    }
+
+    def validate(result: Mapping[str, object]) -> str:
+        progress = result.get("progress")
+        intended = (
+            progress.get("intended_profile") if isinstance(progress, Mapping) else None
+        )
+        operation_id = result.get("id")
+        if (
+            result.get("request_key") != key
+            or not isinstance(intended, Mapping)
+            or intended.get("reviewed_plan_digest") != expected_digest
+            or not isinstance(operation_id, str)
+            or not operation_id
+        ):
+            raise ControlMalformedResponse(
+                "profile load receipt identifies another request or review"
             )
-        except ControlNotFound:
-            return client.request("POST", path, payload)
-        except (ControlTransportError, ControlUnavailable, OSError):
-            raise lost from None
-        if not isinstance(observed.get("id"), str) or not observed["id"]:
-            raise lost from None
-        return observed
+        return operation_id
+
+    return _submit_idempotent_request(
+        client,
+        args,
+        key=key,
+        path=path,
+        lookup=lookup,
+        body=body,
+        noun="profile",
+        action="load",
+        validate=validate,
+        reconnect=shlex.join(
+            [
+                "vonkctl",
+                "--profile",
+                str(number),
+                "profile",
+                "progress",
+                "--request-key",
+                key,
+                "--follow",
+            ]
+        ),
+    )
+
+
+def _cache_operation_id(noun: str, result: Mapping[str, object]) -> str:
+    if noun == "model":
+        field = "operation_id"
+    elif result.get("kind") in {
+        "recipe.image.availability.v2",
+        "recipe.cache.update.v2",
+    }:
+        field = "id"
+    elif result.get("action") == "remove":
+        field = "operation_id"
+    else:
+        raise ControlMalformedResponse("recipe response does not identify an operation")
+    operation_id = result.get(field)
+    if not isinstance(operation_id, str) or not operation_id:
+        raise ControlMalformedResponse("cache response does not identify an operation")
+    return operation_id
+
+
+def _submit_cache_request(
+    client: ControllerClient,
+    noun: str,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+) -> dict[str, object]:
+    """One POST, one original-key lookup, and at most one identical replay."""
+
+    key = _request_key(args, factory)
+    action = getattr(args, f"{noun}_action")
+    if action == "update":
+        path = "/api/recipe/update"
+    else:
+        path = f"/api/{noun}/{_quoted(args.selector)}/download"
+    lookup = f"/api/{noun}/requests/{key}"
+    body: dict[str, object] = {"schema_version": 2, "request_key": key}
+    if action == "update":
+        body.update(all=args.all, selectors=[args.selector] if args.selector else [])
+
+    def validate(result: Mapping[str, object]) -> str:
+        if action == "update":
+            intent = result.get("request")
+            matches = (
+                result.get("kind") == "recipe.cache.update.v2"
+                and result.get("request_id") == key
+                and isinstance(intent, Mapping)
+                and intent.get("all") is args.all
+                and intent.get("selectors") == body["selectors"]
+            )
+        elif noun == "model":
+            returned_selector = result.get("selector")
+            matches = (
+                result.get("request_key") == key
+                and result.get("action") == "download"
+                and isinstance(returned_selector, str)
+                and returned_selector.strip() == args.selector.strip()
+            )
+        else:
+            intent = result.get("request")
+            matches = (
+                result.get("kind") == "recipe.image.availability.v2"
+                and result.get("request_id") == key
+                and isinstance(intent, Mapping)
+                and intent.get("kind") == "selector"
+                and intent.get("selector") == args.selector
+                and intent.get("force") is True
+            )
+        if not matches:
+            raise ControlMalformedResponse(
+                f"{action} receipt identifies another request or intent"
+            )
+        return _cache_operation_id(noun, result)
+
+    return _submit_idempotent_request(
+        client,
+        args,
+        key=key,
+        path=path,
+        lookup=lookup,
+        body=body,
+        noun=noun,
+        action=action,
+        validate=validate,
+        reconnect=shlex.join(
+            ["vonkctl", noun, "progress", "--request-key", key, "--follow"]
+        ),
+    )
+
+
+def _submit_idempotent_request(
+    client: ControllerClient,
+    args: argparse.Namespace,
+    *,
+    key: str,
+    path: str,
+    lookup: str,
+    body: dict[str, object],
+    noun: str,
+    action: str,
+    validate: Callable[[Mapping[str, object]], str],
+    reconnect: str,
+) -> dict[str, object]:
+    """Bounded submission, original-key lookup, and one identical replay."""
+    normal_timeout = client.request_timeout_seconds
+    if not math.isfinite(normal_timeout) or normal_timeout <= 0:
+        raise ValueError("request timeout must be finite and positive")
+    submission = Submission(key, path, lookup, 3 * normal_timeout, action=action)
+    args.submission = submission
+    deadline = time.monotonic() + submission.timeout_seconds
+    if not (args.global_json or getattr(args, "json", False)):
+        print(
+            f"Request key: {key}\nReconnect: {reconnect}", file=sys.stderr, flush=True
+        )
+
+    def request(method: str, target: str, stage: str) -> dict[str, object]:
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ControlTransportError(
+                    f"{action} submission deadline reached",
+                    context=ErrorContext(
+                        operation=f"{noun}.{action}.{stage}",
+                        endpoint=target,
+                        code="control.submission_timeout",
+                        source="transport",
+                        transport="timeout",
+                        decision="exit",
+                    ),
+                )
+            result = client.request(
+                method,
+                target,
+                body if method == "POST" else None,
+                timeout_seconds=min(normal_timeout, remaining),
+            )
+            operation_id = validate(result)
+        except BrokenPipeError:
+            raise
+        except (ControlClientError, OSError) as error:
+            context = error.context if isinstance(error, ControlClientError) else None
+            if context is None:
+                context = (
+                    transport_context(
+                        operation=f"{noun}.{action}.{stage}",
+                        endpoint=target,
+                        error=error,
+                    )
+                    if isinstance(error, (ControlTransportError, OSError))
+                    else protocol_context(
+                        operation=f"{noun}.{action}.{stage}", endpoint=target
+                    )
+                )
+            submission.failures.append({"stage": stage, **context.as_dict()})
+            raise
+        submission.acceptance = "accepted"
+        submission.operation_id = operation_id
+        return result
+
+    retry_error: ControlHTTPError | ControlTransportError | None = None
+    retry_not_before = 0.0
+    submission.acceptance = "unknown"
+    try:
+        return request("POST", path, "submit")
+    except BrokenPipeError:
+        raise
+    except OSError:
+        may_replay = True
+    except ControlClientError as error:
+        status = (
+            error.status_code
+            if isinstance(error, ControlHTTPError)
+            else (error.context.http_status if error.context else None)
+        )
+        if status is not None and 400 <= status <= 499:
+            submission.acceptance = "refused"
+            raise
+        if isinstance(error, (ControlMalformedResponse, ControlResponseTooLarge)):
+            # Diagnose by read only. An invalid receipt never licenses a replay.
+            may_replay = False
+        elif isinstance(error, ControlTransportError) or (
+            isinstance(error, ControlHTTPError) and 500 <= error.status_code <= 599
+        ):
+            may_replay = True
+            if (
+                isinstance(error, (ControlHTTPError, ControlTransportError))
+                and error.retry_after_seconds is not None
+            ):
+                retry_error = error
+                now = time.monotonic()
+                # A delay beyond this invocation's budget needs no timer and
+                # must not overflow when represented as floating-point time.
+                retry_not_before = (
+                    deadline
+                    if error.retry_after_seconds >= deadline - now
+                    else now + error.retry_after_seconds
+                )
+        else:
+            raise
+
+    try:
+        return request("GET", lookup, "lookup")
+    except ControlNotFound:
+        if not may_replay:
+            raise
+    if retry_error is not None:
+        now = time.monotonic()
+        delay = max(0.0, retry_not_before - now)
+        if delay >= deadline - now:
+            raise retry_error
+        if delay:
+            time.sleep(delay)
+    # Other lookup errors propagate with the original key and both safe
+    # failure contexts. Neither a failed lookup nor a second lost POST loops.
+    return request("POST", path, "replay")
+
+
+def _follow_cache_operation(
+    client: ControllerClient,
+    noun: str,
+    operation_id: str,
+    result: dict[str, object],
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    def same_operation(observed: Mapping[str, object]) -> None:
+        if _cache_operation_id(noun, observed) != operation_id:
+            raise ControlMalformedResponse(
+                "cache observation identifies another operation"
+            )
+
+    return _poll_path(
+        client,
+        f"/api/{noun}/operations/{_quoted(operation_id)}",
+        result,
+        args,
+        validate=same_operation,
+    )
+
+
+def _cache_progress(
+    client: ControllerClient,
+    noun: str,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+) -> dict[str, object]:
+    key = getattr(args, "request_key", None)
+    if key is not None:
+        key = _request_key(args, factory)
+        result = client.request("GET", f"/api/{noun}/requests/{_quoted(key)}")
+        key_field = (
+            "request_id" if noun == "recipe" and "kind" in result else "request_key"
+        )
+        if result.get(key_field) != key:
+            raise ControlMalformedResponse("cache lookup identifies another request")
+        operation_id = _cache_operation_id(noun, result)
+    else:
+        operation_id = args.operation_id
+        result = client.request(
+            "GET", f"/api/{noun}/operations/{_quoted(operation_id)}"
+        )
+        if _cache_operation_id(noun, result) != operation_id:
+            raise ControlMalformedResponse("cache lookup identifies another operation")
+    return (
+        _follow_cache_operation(client, noun, operation_id, result, args)
+        if args.follow
+        else result
+    )
 
 
 def _follow_mutation(
@@ -649,13 +1092,10 @@ def _follow_mutation(
     args: argparse.Namespace,
 ) -> dict[str, object]:
     """Follow a model/recipe mutation through its noun-owned operation view."""
+    operation_id = _cache_operation_id(noun, result)
     if getattr(args, "detach", False):
         return result
-    operation_id = result.get("operation_id")
-    if not isinstance(operation_id, str) or not operation_id:
-        return result
-    path = f"/api/{noun}/operations/{_quoted(operation_id)}"
-    return _poll_path(client, path, result, args)
+    return _follow_cache_operation(client, noun, operation_id, result, args)
 
 
 def _watch_resource(
@@ -738,12 +1178,178 @@ def _fleet_selector(args: argparse.Namespace) -> str:
     return selector
 
 
+def _confirm_action(args: argparse.Namespace, message: str) -> None:
+    if args.yes:
+        if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
+            print(terminal_text(message), file=sys.stderr)
+        return
+    if (
+        getattr(args, "no_input", False)
+        or getattr(args, "global_json", False)
+        or getattr(args, "json", False)
+        or not sys.stdin.isatty()
+        or not sys.stderr.isatty()
+    ):
+        raise ValueError(f"{message} Pass --yes to confirm in noninteractive mode")
+    print(terminal_text(message) + " [y/N] ", end="", file=sys.stderr, flush=True)
+    if sys.stdin.readline(1024).strip().casefold() not in {"y", "yes"}:
+        raise ValueError("action was not confirmed")
+
+
+def _deliver_enrollment(
+    args: argparse.Namespace, client: ControllerClient, factory: Callable[[], str]
+) -> dict[str, object]:
+    identity = _request_key(args, factory)
+    payload: dict[str, object] = {"request_key": identity}
+    target: dict[str, object]
+    if args.fleet_action == "enroll":
+        payload.update(name=args.name, ttl_seconds=args.ttl_seconds)
+        validate_control_document("FleetEnrollRequest", payload)
+        path = "/api/fleet/enroll"
+        target = {"display_name": args.name}
+    else:
+        validate_control_document("FleetReenrollRequest", payload)
+        node = client.request("GET", f"/api/fleet/{_quoted(_fleet_selector(args))}")
+        node_id = node.get("id")
+        if (
+            not isinstance(node_id, str)
+            or re.fullmatch(r"spk_[0-9a-f]{32}", node_id) is None
+        ):
+            raise ValueError("Spark response has no canonical identity")
+        target = {"node_id": node_id, "display_name": node.get("display_name", node_id)}
+        _confirm_action(
+            args,
+            f"Authorize a replacement certificate for {node.get('display_name', node_id)} ({node_id})? "
+            "The one-time grant permits replacing this Spark identity when consumed.",
+        )
+        path = f"/api/fleet/{node_id}/re-enroll"
+    status_path = f"/api/fleet/enrollments/{identity}"
+    receipt: dict[str, object] = {
+        "id": identity,
+        **target,
+        "delivery": {"status": "pending"},
+        "output": str(args.output.absolute()),
+        "recovery": [
+            f"vonkctl fleet enrollment status {identity}",
+            f"vonkctl fleet enrollment revoke {identity} --yes",
+        ],
+    }
+    issued = False
+    submission_started = False
+    try:
+        with PrivateOutput(args.output) as destination:
+            # This durable, nonsecret receipt identifies a request even if the
+            # process dies before the Controller's response reaches it.
+            destination.write(receipt)
+            destination.retain_on_failure = True
+            try:
+                submission_started = True
+                response = validate_control_document(
+                    "FleetActionResponse", client.request("POST", path, payload)
+                )
+                grant = validate_control_document(
+                    "EnrollmentGrantResponse", response.get("grant")
+                )
+                if grant["id"] != identity:
+                    raise ValueError("issued grant identity does not match the request")
+                issued = True
+                destination.write({"id": identity, **grant})
+                # Closing is part of delivery: a failed flush is reconciled here too.
+                destination.stream.close()
+                return {
+                    **receipt,
+                    "delivery": {"status": "delivered"},
+                    "expires_at": grant["expires_at"],
+                    "purpose": grant["purpose"],
+                    "recovery": [f"vonkctl fleet enrollment status {identity}"],
+                }
+            except (
+                ControlClientError,
+                OSError,
+                TypeError,
+                ValueError,
+                KeyboardInterrupt,
+            ) as error:
+                receipt["delivery"] = {
+                    "status": "interrupted"
+                    if isinstance(error, KeyboardInterrupt)
+                    else "failed"
+                }
+                receipt["error"] = (
+                    "Enrollment grant delivery was not confirmed; inspect the original grant before creating another."
+                )
+                receipt["error_type"] = "enrollment_delivery"
+                receipt["cause"] = type(error).__name__
+                if (
+                    isinstance(error, (ControlForbidden, ControlUnauthorized))
+                    and not issued
+                ):
+                    receipt["error"] = "Controller authorization denied enrollment."
+                    receipt["reconciliation"] = "issuance denied"
+                else:
+                    try:
+                        observed = validate_control_document(
+                            "EnrollmentGrantStatus",
+                            client.request("GET", status_path, timeout_seconds=5),
+                        )
+                        receipt["grant_status"] = observed
+                        if issued and observed["state"] == "pending":
+                            receipt["grant_status"] = validate_control_document(
+                                "EnrollmentGrantStatus",
+                                client.request(
+                                    "POST", status_path + "/revoke", timeout_seconds=5
+                                ),
+                            )
+                    except (
+                        ControlClientError,
+                        OSError,
+                        TypeError,
+                        ValueError,
+                        KeyboardInterrupt,
+                    ):
+                        receipt["reconciliation"] = "unconfirmed"
+                try:
+                    destination.write(receipt)
+                except (OSError, TypeError, ValueError):
+                    receipt["output_status"] = "unusable; inspect grant status"
+                raise EnrollmentDeliveryError(
+                    receipt, isinstance(error, KeyboardInterrupt)
+                ) from None
+    except (OSError, KeyboardInterrupt) as error:
+        receipt["delivery"] = {
+            "status": "unconfirmed" if submission_started else "not_issued"
+        }
+        receipt["error_type"] = "enrollment_delivery"
+        receipt["cause"] = type(error).__name__
+        if submission_started:
+            receipt["error"] = (
+                "Enrollment delivery was interrupted; inspect the original grant."
+            )
+            receipt["reconciliation"] = "unconfirmed"
+        else:
+            receipt["error"] = (
+                "Could not prepare the private output file. Choose a new writable "
+                "destination; enrollment was not attempted."
+            )
+            receipt["reconciliation"] = "issuance not attempted"
+            receipt["recovery"] = []
+        raise EnrollmentDeliveryError(
+            receipt, isinstance(error, KeyboardInterrupt)
+        ) from None
+
+
 def _fleet(
     args: argparse.Namespace,
     client: ControllerClient,
     factory: Callable[[], str],
 ) -> dict[str, object]:
     action = getattr(args, "fleet_action", None)
+    if action == "enrollment":
+        path = f"/api/fleet/enrollments/{args.grant_id}"
+        if args.enrollment_action == "revoke":
+            _confirm_action(args, f"Revoke unused enrollment grant {args.grant_id}?")
+            return client.request("POST", path + "/revoke")
+        return client.request("GET", path)
     if action == "progress":
         path = f"/api/jobs/{_quoted(args.job_id)}"
         result = client.request("GET", path)
@@ -756,6 +1362,20 @@ def _fleet(
             args,
             query=_fleet_query(args),
         )
+    if action == "node-profile":
+        deadline = time.monotonic() + args.timeout_seconds
+        node_id = _resolve_spark_selectors(client, [args.selector], deadline=deadline)[
+            0
+        ]
+        result = client.request(
+            "GET",
+            f"/api/fleet/{_quoted(node_id)}",
+            timeout_seconds=_selection_remaining(deadline),
+        )
+        _selection_remaining(deadline)
+        if result.get("id") != node_id:
+            raise ValueError("fleet detail response does not match the selected Spark")
+        return result
     if action == "detail":
         selector = _fleet_selector(args)
         query = (
@@ -784,18 +1404,8 @@ def _fleet(
             f"/api/fleet/{_quoted(_fleet_selector(args))}/rename",
             {"display_name": args.new_name},
         )
-    if action == "enroll":
-        return client.request(
-            "POST",
-            "/api/fleet/enroll",
-            {"name": args.name, "ttl_seconds": args.ttl_seconds},
-        )
-    if action == "re-enroll":
-        return client.request(
-            "POST",
-            f"/api/fleet/{_quoted(_fleet_selector(args))}/re-enroll",
-            None,
-        )
+    if action in {"enroll", "re-enroll"}:
+        return _deliver_enrollment(args, client, factory)
     if action == "remove":
         return client.request(
             "POST",
@@ -850,6 +1460,8 @@ def _library_query(args: argparse.Namespace, *, recipe: bool) -> dict[str, objec
         values.update(
             model=getattr(args, "model", []),
             all_models=args.all_models,
+            ready=getattr(args, "ready", None),
+            fits_fleet=getattr(args, "fits_fleet", None),
             sparks=getattr(args, "sparks", []),
         )
     return _query(**values)
@@ -862,9 +1474,7 @@ def _model(
 ) -> dict[str, object]:
     action = getattr(args, "model_action", None)
     if action == "progress":
-        path = f"/api/model/operations/{_quoted(args.operation_id)}"
-        result = client.request("GET", path)
-        return _poll_path(client, path, result, args) if args.follow else result
+        return _cache_progress(client, "model", args, factory)
     if action is None:
         return _watch_resource(
             client, "/api/model", _overview(client, "model", args), args
@@ -889,14 +1499,7 @@ def _model(
             query=_query(technical=args.technical) or None,
         )
     if action == "download":
-        result = client.request(
-            "POST",
-            f"/api/model/{_quoted(args.selector)}/download",
-            {
-                "schema_version": 2,
-                "request_key": _request_key(args, factory),
-            },
-        )
+        result = _submit_cache_request(client, "model", args, factory)
         return _follow_mutation(client, "model", result, args)
     if action == "remove":
         if not args.yes:
@@ -920,9 +1523,7 @@ def _recipe(
 ) -> dict[str, object]:
     action = getattr(args, "recipe_action", None)
     if action == "progress":
-        path = f"/api/recipe/operations/{_quoted(args.operation_id)}"
-        result = client.request("GET", path)
-        return _poll_path(client, path, result, args) if args.follow else result
+        return _cache_progress(client, "recipe", args, factory)
     if action is None:
         return _watch_resource(
             client, "/api/recipe", _overview(client, "recipe", args), args
@@ -947,26 +1548,12 @@ def _recipe(
             query=_query(technical=args.technical) or None,
         )
     if action == "download":
-        result = client.request(
-            "POST",
-            f"/api/recipe/{_quoted(args.selector)}/download",
-            {
-                "schema_version": 2,
-                "request_key": _request_key(args, factory),
-            },
-        )
+        result = _submit_cache_request(client, "recipe", args, factory)
         return _follow_mutation(client, "recipe", result, args)
     if action == "update":
-        result = client.request(
-            "POST",
-            "/api/recipe/update",
-            {
-                "schema_version": 2,
-                "request_key": _request_key(args, factory),
-                "selectors": [args.selector] if args.selector else [],
-                "all": args.all,
-            },
-        )
+        if args.all == bool(args.selector):
+            raise ValueError("recipe update requires a selector or --all, but not both")
+        result = _submit_cache_request(client, "recipe", args, factory)
         return _follow_mutation(client, "recipe", result, args)
     if action == "remove":
         if not args.yes:
@@ -1001,153 +1588,341 @@ def _spark_id_list(value: object) -> list[str]:
     return identifiers
 
 
-def _authoring_assignments(profile: Mapping[str, object]) -> list[dict[str, object]]:
-    raw = profile.get("assignments", [])
-    if not isinstance(raw, list):
-        return []
-    allowed = {
-        "recipe_selector",
-        "model_variant",
-        "spark_ids",
-        "assignment_name",
-        "desired_state",
-    }
-    assignments: list[dict[str, object]] = []
-    for item in raw:
-        if not isinstance(item, Mapping):
-            continue
-        assignment = {key: item[key] for key in allowed if key in item}
-        sparks = assignment.get("spark_ids")
-        if isinstance(sparks, list):
-            assignment["spark_ids"] = sorted(
-                {spark for spark in sparks if isinstance(spark, str)}
-            )
-        assignments.append(assignment)
-    return assignments
-
-
 def _profile_save(
     args: argparse.Namespace,
     client: ControllerClient,
-    assignments: list[dict[str, object]],
+    definition: Mapping[str, object],
     *,
-    name: str | None = None,
-    current_revision: int | None = None,
+    current_revision: int,
 ) -> dict[str, object]:
-    body: dict[str, object] = {"assignments": assignments}
-    if name is not None:
-        body["name"] = name
-    expected_revision = (
+    expected = (
         args.expected_revision
         if args.expected_revision is not None
         else current_revision
     )
-    if expected_revision is not None:
-        body["expected_revision"] = expected_revision
-    return client.request("PUT", f"/api/profile/{_profile_number(args)}", body)
+    if expected != current_revision:
+        raise ValueError(
+            f"profile revision conflict: expected {expected}, read {current_revision}"
+        )
+    body = validate_control_document(
+        "FleetProfileInput", {**definition, "expected_revision": expected}
+    )
+    result = client.request("PUT", f"/api/profile/{_profile_number(args)}", body)
+    args.profile_saved = True
+    return result
 
 
-def _recipe_rows(client: ControllerClient) -> list[Mapping[str, object]]:
-    """Load the complete recipe library for friendly local resolution."""
+def _profile_authoring(
+    args: argparse.Namespace, client: ControllerClient
+) -> dict[str, object]:
+    action = args.profile_action
+    selection_deadline = (
+        time.monotonic() + args.timeout_seconds if action in {"add", "remove"} else None
+    )
+    if action == "import":
+        definition = validate_control_document(
+            "FleetProfileDefinition", read_json_document(args.file)
+        )
+        return _profile_save(
+            args, client, definition, current_revision=args.expected_revision
+        )
+    current = validate_control_document(
+        "FleetProfileDefinitionView",
+        client.request(
+            "GET",
+            f"/api/profile/{_profile_number(args)}/definition",
+            timeout_seconds=(
+                _selection_remaining(selection_deadline)
+                if selection_deadline is not None
+                else None
+            ),
+        ),
+    )
+    current_revision = current["revision"]
+    if type(current_revision) is not int:
+        raise TypeError("profile revision is invalid")
+    definition = copy.deepcopy(
+        validate_control_document("FleetProfileDefinition", current["definition"])
+    )
+    if action == "export":
+        if args.output is not None:
+            write_private_document(args.output, definition)
+            return {
+                "profile": _profile_number(args),
+                "revision": current_revision,
+                "output": str(args.output),
+            }
+        args.document_output = True
+        return definition
+    assignments = cast(list[dict[str, object]], definition.get("assignments", []))
+    if action == "name":
+        definition["name"] = args.name
+    elif action == "configure":
+        if (
+            not any(
+                value is not None
+                for value in (args.description, args.retention, args.favorite)
+            )
+            and not args.label
+            and not args.remove_label
+        ):
+            raise ValueError("profile configure requires at least one metadata change")
+        if args.description is not None:
+            definition["description"] = args.description
+        if args.retention is not None:
+            definition["installation_policy"] = args.retention
+        if args.favorite is not None:
+            definition["favorite"] = args.favorite == "true"
+        labels = dict(cast(dict[str, str], definition.get("labels", {})))
+        edits: dict[str, str] = {}
+        for edit in args.label:
+            key, separator, value = edit.partition("=")
+            if not separator or not key or key in edits or key in args.remove_label:
+                raise ValueError(
+                    "label edits require unique KEY=VALUE values without conflicting removals"
+                )
+            edits[key] = value
+        if len(set(args.remove_label)) != len(args.remove_label):
+            raise ValueError("label removals must be unique")
+        for key in args.remove_label:
+            if key not in labels:
+                raise ValueError(f"profile has no label named {key}")
+            del labels[key]
+        labels.update(edits)
+        definition["labels"] = labels
+    elif action == "add":
+        recipe_selector = _resolve_recipe_selector(
+            client, args.recipe_selector, deadline=selection_deadline
+        )
+        spark_ids = _resolve_spark_selectors(
+            client, list(args.spark), deadline=selection_deadline
+        )
+        matching = [
+            assignment
+            for assignment in assignments
+            if assignment["recipe_selector"] == recipe_selector
+            and assignment.get("assignment_name") == args.assignment_name
+        ]
+        if len(matching) > 1:
+            raise SelectorError("ambiguous assignment; select a unique assignment name")
+        if matching:
+            assignment = matching[0]
+            assignment["spark_ids"] = sorted(
+                set(_spark_id_list(assignment["spark_ids"])) | set(spark_ids)
+            )
+        else:
+            assignment = {"recipe_selector": recipe_selector, "spark_ids": spark_ids}
+            if args.assignment_name is not None:
+                assignment["assignment_name"] = args.assignment_name
+            assignments.append(assignment)
+        if args.model_variant is not None:
+            assignment["model_variant"] = args.model_variant
+        if args.desired_state is not None:
+            assignment["desired_state"] = args.desired_state
+        definition["assignments"] = assignments
+    elif action == "remove":
+        target = args.assignment.casefold()
+        matching = [
+            assignment
+            for assignment in assignments
+            if str(assignment.get("assignment_name", "")).casefold() == target
+        ]
+        if not matching:
+            recipe = _resolve_recipe_selector(
+                client, args.assignment, deadline=selection_deadline
+            )
+            matching = [
+                assignment
+                for assignment in assignments
+                if assignment["recipe_selector"] == recipe
+            ]
+        spark_ids = _resolve_spark_selectors(
+            client, list(args.spark), deadline=selection_deadline
+        )
+        if spark_ids:
+            matching = [
+                assignment
+                for assignment in matching
+                if set(spark_ids) <= set(_spark_id_list(assignment["spark_ids"]))
+            ]
+        if len(matching) != 1:
+            raise SelectorError(
+                "assignment is absent or ambiguous; choose an exact assignment name or Spark group"
+            )
+        removed = matching[0]
+        remaining = (
+            [
+                spark
+                for spark in _spark_id_list(removed["spark_ids"])
+                if spark not in spark_ids
+            ]
+            if spark_ids
+            else []
+        )
+        if remaining:
+            removed["spark_ids"] = remaining
+        else:
+            assignments.remove(removed)
+        definition["assignments"] = assignments
+    if selection_deadline is not None:
+        _selection_remaining(selection_deadline)
+    return _profile_save(args, client, definition, current_revision=current_revision)
 
-    rows: list[Mapping[str, object]] = []
+
+def _selection_remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SelectorError(
+            "selection deadline expired; nothing was saved. Retry with a larger "
+            "--timeout-seconds value (maximum 300)."
+        )
+    return remaining
+
+
+def _recipe_rows(
+    client: ControllerClient, *, deadline: float
+) -> Iterator[Mapping[str, object]]:
+    """Read every page within one budget, without retaining the full catalog."""
+
     cursor: str | None = None
+    seen_cursors: set[str] = set()
+    seen_selectors: set[str] = set()
     while True:
-        query: dict[str, object] = {"all_models": True, "limit": 512, "sort": "name"}
+        query: dict[str, object] = {
+            "all_models": True,
+            "limit": 512,
+            "sort": "name",
+            "assess": False,
+        }
         if cursor is not None:
             query["cursor"] = cursor
-        payload = client.request("GET", "/api/recipe/library", query=query)
+        payload = client.request(
+            "GET",
+            "/api/recipe/library",
+            query=query,
+            timeout_seconds=_selection_remaining(deadline),
+        )
+        _selection_remaining(deadline)
         raw_recipes = payload.get("recipes")
         if not isinstance(raw_recipes, list):
             raise TypeError("recipe library response does not contain recipes")
-        rows.extend(row for row in raw_recipes if isinstance(row, Mapping))
+        for row in raw_recipes:
+            _selection_remaining(deadline)
+            if not isinstance(row, Mapping) or not isinstance(
+                row.get("identity"), Mapping
+            ):
+                raise TypeError("recipe library response contains an invalid recipe")
+            selector = row.get("selector")
+            if not isinstance(selector, str) or not selector:
+                raise ValueError("recipe library response contains an invalid selector")
+            if selector.casefold() in seen_selectors:
+                raise SelectorError(
+                    "recipe library repeated a selector; retry the complete selection"
+                )
+            seen_selectors.add(selector.casefold())
+            yield row
         next_cursor = payload.get("next_cursor")
         if next_cursor is None:
-            return rows
+            return
         if not isinstance(next_cursor, str) or not next_cursor:
             raise TypeError("recipe library response contains an invalid cursor")
+        if next_cursor in seen_cursors:
+            raise SelectorError(
+                "recipe library cursor repeated; selection stopped without saving"
+            )
+        seen_cursors.add(next_cursor)
         cursor = next_cursor
 
 
-def _resolve_recipe_selector(client: ControllerClient, requested: str) -> str:
-    """Resolve a canonical selector, slug, or title to publisher/slug."""
+def _resolve_recipe_selector(
+    client: ControllerClient, requested: str, *, deadline: float | None = None
+) -> str:
+    """Resolve an accepted identity before considering a friendly slug or title."""
 
     needle = requested.strip().casefold()
     if not needle:
         raise SelectorError("recipe selector cannot be empty")
-    if needle.count("/") == 1 and all(part for part in needle.split("/")):
-        return needle
+    if deadline is None:
+        deadline = time.monotonic() + 30
+    identities: set[str] = set()
     matches: set[str] = set()
-    for row in _recipe_rows(client):
-        identity = row.get("identity")
-        identity_map = identity if isinstance(identity, Mapping) else {}
-        canonical = row.get("selector")
-        if not isinstance(canonical, str) or not canonical:
-            publisher = identity_map.get("publisher")
-            slug = identity_map.get("slug")
-            if isinstance(publisher, str) and isinstance(slug, str):
-                canonical = f"{publisher}/{slug}"
-        if not isinstance(canonical, str) or not canonical:
-            raise ValueError(
-                "recipe library response contains a recipe without a canonical selector"
-            )
-        candidates = [canonical, str(identity_map.get("slug", ""))]
-        title = identity_map.get("title")
-        if isinstance(title, str):
-            candidates.append(title)
-        if any(candidate.casefold() == needle for candidate in candidates if candidate):
+    for row in _recipe_rows(client, deadline=deadline):
+        identity = cast(Mapping[str, object], row["identity"])
+        canonical = cast(str, row["selector"])
+        if any(
+            isinstance(value, str) and value.casefold() == needle
+            for value in (canonical, identity.get("recipe_id"))
+        ):
+            identities.add(canonical)
+        if any(
+            isinstance(value, str) and value.casefold() == needle
+            for value in (identity.get("slug"), identity.get("title"))
+        ):
             matches.add(canonical)
+    _selection_remaining(deadline)
+    matches = identities or matches
     if len(matches) == 1:
         return next(iter(matches))
     if not matches:
         raise SelectorError(f"unknown recipe selector: {requested}")
     candidates = tuple(sorted(matches))
     raise SelectorError(
-        f"ambiguous recipe selector: {requested}; choose one of {', '.join(candidates)}",
+        f"ambiguous recipe selector: {requested}; choose an exact canonical candidate",
         candidates=candidates,
     )
 
 
 def _resolve_spark_selectors(
-    client: ControllerClient, selectors: list[str]
+    client: ControllerClient, selectors: list[str], *, deadline: float | None = None
 ) -> list[str]:
     """Resolve operator-facing Spark names to immutable node IDs."""
 
     if not selectors:
         return []
-    payload = client.request("GET", "/api/fleet")
+    if deadline is None:
+        deadline = time.monotonic() + 30
+    payload = client.request(
+        "GET", "/api/fleet", timeout_seconds=_selection_remaining(deadline)
+    )
+    _selection_remaining(deadline)
     raw_nodes = payload.get("nodes")
     if not isinstance(raw_nodes, list):
         raise TypeError("fleet response does not contain nodes")
-    nodes = [node for node in raw_nodes if isinstance(node, Mapping)]
+    nodes: list[Mapping[str, object]] = []
+    ids: set[str] = set()
+    for node in raw_nodes:
+        if not isinstance(node, Mapping):
+            raise TypeError("fleet response contains an invalid Spark")
+        node_id = node.get("id")
+        if not isinstance(node_id, str) or not node_id or node_id in ids:
+            raise ValueError("fleet response contains an invalid or repeated Spark ID")
+        ids.add(node_id)
+        nodes.append(node)
     resolved: list[str] = []
     for requested in selectors:
         needle = requested.strip().casefold()
         if not needle:
             raise SelectorError("spark selector cannot be empty")
-        matches = [
+        exact = [node for node in nodes if str(node["id"]).casefold() == needle]
+        matches = exact or [
             node
             for node in nodes
             if any(
                 isinstance(value, str) and value.casefold() == needle
-                for key in ("id", "display_name", "hostname")
+                for key in ("display_name", "hostname")
                 for value in (node.get(key),)
             )
         ]
         if not matches:
             raise SelectorError(f"unknown spark selector: {requested}")
         if len(matches) > 1:
-            candidates = tuple(
-                str(node.get("display_name") or node.get("id")) for node in matches
-            )
+            candidates = tuple(sorted(str(node["id"]) for node in matches))
             raise SelectorError(
-                f"ambiguous spark selector: {requested}; choose one of {', '.join(candidates)}",
+                f"ambiguous spark selector: {requested}; choose an exact Spark ID",
                 candidates=candidates,
             )
-        node_id = matches[0].get("id")
-        if not isinstance(node_id, str) or not node_id:
-            raise ValueError("fleet response contains a Spark without an ID")
-        resolved.append(node_id)
+        resolved.append(cast(str, matches[0]["id"]))
+    _selection_remaining(deadline)
     return sorted(set(resolved))
 
 
@@ -1183,112 +1958,76 @@ def _profile(
             raise ValueError("profile observation has no durable application identity")
         path = f"/api/profile/applications/{_quoted(application_id)}"
         return _poll_path(client, path, result, args)
-    if action in {"name", "add", "remove"}:
-        current = client.request("GET", f"/api/profile/{number}")
-        assignments = _authoring_assignments(current)
-        current_revision = current.get("revision")
-        if type(current_revision) is not int:
-            current_revision = None
-        if action == "name":
-            return _profile_save(
-                args,
-                client,
-                assignments,
-                name=args.name,
-                current_revision=current_revision,
-            )
-        if action == "add":
-            recipe_selector = _resolve_recipe_selector(client, args.recipe_selector)
-            spark_ids = _resolve_spark_selectors(client, list(args.spark))
-            new_assignment: dict[str, object] = {
-                "recipe_selector": recipe_selector,
-                "spark_ids": spark_ids,
-                "desired_state": "running",
-            }
-            if args.assignment_name:
-                new_assignment["assignment_name"] = args.assignment_name
-            if args.model_variant:
-                new_assignment["model_variant"] = args.model_variant
-            matching = [
-                assignment
-                for assignment in assignments
-                if assignment.get("recipe_selector") == recipe_selector
-                and assignment.get("assignment_name") == args.assignment_name
-            ]
-            if matching:
-                matching[0]["spark_ids"] = sorted(
-                    set(_spark_id_list(matching[0].get("spark_ids", [])))
-                    | set(spark_ids)
-                )
-            else:
-                assignments.append(new_assignment)
-        else:
-            target = args.assignment.casefold()
-            spark_ids = _resolve_spark_selectors(client, list(args.spark))
-            if not any(
-                str(assignment.get("assignment_name", "")).casefold() == target
-                for assignment in assignments
-            ):
-                try:
-                    target = _resolve_recipe_selector(
-                        client, args.assignment
-                    ).casefold()
-                except SelectorError as error:
-                    if error.candidates:
-                        raise
-            kept: list[dict[str, object]] = []
-            for assignment in assignments:
-                identity = str(
-                    assignment.get("assignment_name")
-                    or assignment.get("recipe_selector", "")
-                )
-                if identity.casefold() != target:
-                    kept.append(assignment)
-                    continue
-                if not args.spark:
-                    continue
-                remaining = [
-                    spark
-                    for spark in _spark_id_list(assignment.get("spark_ids", []))
-                    if spark not in spark_ids
-                ]
-                if remaining:
-                    kept.append({**assignment, "spark_ids": sorted(set(remaining))})
-            assignments = kept
-        current_name = current.get("name")
-        return _profile_save(
-            args,
-            client,
-            assignments,
-            name=current_name if isinstance(current_name, str) else None,
-            current_revision=current_revision,
-        )
+    if action in {"name", "add", "remove", "configure", "export", "import"}:
+        return _profile_authoring(args, client)
     if action == "load":
         if args.dry_run:
+            if args.expected_plan is not None or args.yes or args.detach:
+                raise ValueError(
+                    "--dry-run cannot be combined with --expected-plan, --yes, or --detach"
+                )
             return client.request("POST", f"/api/profile/{number}/preview")
-        result = _submit_profile_load(client, number, _request_key(args, factory))
+        expected_digest = args.expected_plan
+        interactive = (
+            not (
+                args.global_json
+                or getattr(args, "json", False)
+                or getattr(args, "no_input", False)
+            )
+            and sys.stdin.isatty()
+            and sys.stderr.isatty()
+        )
+        if expected_digest is not None:
+            if re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None:
+                raise ValueError(
+                    "--expected-plan requires the complete lowercase plan digest"
+                )
+            _confirm_action(
+                args, f"Load profile {number} with reviewed plan {expected_digest}?"
+            )
+        else:
+            if not interactive or args.yes:
+                raise ValueError(
+                    "profile load requires --expected-plan DIGEST --yes in noninteractive mode; review with profile load --dry-run first"
+                )
+            preview = client.request("POST", f"/api/profile/{number}/preview")
+            if preview.get("allowed") is not True:
+                args.outcome_context = "preview"
+                return preview
+            with redirect_stdout(sys.stderr):
+                render_payload(preview, "profile", action="preview")
+            expected_digest = preview.get("plan_digest")
+            if (
+                not isinstance(expected_digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
+            ):
+                raise ControlMalformedResponse(
+                    "profile preview has no valid reviewed plan digest"
+                )
+            _confirm_action(args, f"Load profile {number} with these effects?")
+        result = _submit_profile_load(client, number, expected_digest, args, factory)
         if args.detach:
             return result
         application_id = result.get("id")
         if not isinstance(application_id, str) or not application_id:
-            # Without the durable application identity there is nothing to
-            # follow: the numbered progress route answers with the profile's
-            # latest application, which is a different operation as soon as
-            # anyone loads the profile again.
-            return result
+            raise ControlMalformedResponse(
+                "profile load has no durable application identity"
+            )
+
+        def same_application(observed: Mapping[str, object]) -> None:
+            if observed.get("id") != application_id:
+                raise ControlMalformedResponse(
+                    "profile observation identifies another application"
+                )
+
         return _poll_path(
             client,
             f"/api/profile/applications/{_quoted(application_id)}",
             result,
             args,
+            validate=same_application,
         )
     raise ValueError(f"unsupported profile action: {action}")
-
-
-def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
-    if not observed:
-        return None
-    return progress_line(observed)
 
 
 def run_controller(

@@ -2826,6 +2826,7 @@ pub struct InventoryRequest {
     pub gpu_memory_total_bytes: u64,
     pub host_memory_free_bytes: u64,
     pub host_memory_total_bytes: u64,
+    pub memory_pool: InventoryRequestMemoryPool,
     pub nvidia_driver_version: ::std::string::String,
     #[serde(
         serialize_with = "crate::wire_datetime::serialize",
@@ -2833,6 +2834,64 @@ pub struct InventoryRequest {
     )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
     pub schema_version: u8,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum InventoryRequestMemoryPool {
+    #[serde(rename = "shared")]
+    Shared,
+    #[serde(rename = "separate")]
+    Separate,
+}
+impl ::std::fmt::Display for InventoryRequestMemoryPool {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Shared => f.write_str("shared"),
+            Self::Separate => f.write_str("separate"),
+        }
+    }
+}
+impl ::std::str::FromStr for InventoryRequestMemoryPool {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "shared" => Ok(Self::Shared),
+            "separate" => Ok(Self::Separate),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for InventoryRequestMemoryPool {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for InventoryRequestMemoryPool {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for InventoryRequestMemoryPool {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -4628,6 +4687,8 @@ pub struct RequestValidationIssue {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RequestValidationProblem {
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub candidates: ::std::option::Option<::std::vec::Vec<::std::string::String>>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub context: ::std::option::Option<ErrorContextResponse>,
     pub detail: ::std::string::String,
@@ -9031,6 +9092,7 @@ impl<'de> ::serde::Deserialize<'de> for InventoryRequest {
             pub gpu_memory_total_bytes: u64,
             pub host_memory_free_bytes: u64,
             pub host_memory_total_bytes: u64,
+            pub memory_pool: InventoryRequestMemoryPool,
             pub nvidia_driver_version: ::std::string::String,
             #[serde(
                 serialize_with = "crate::wire_datetime::serialize",
@@ -9053,10 +9115,35 @@ impl<'de> ::serde::Deserialize<'de> for InventoryRequest {
             gpu_memory_total_bytes: raw.gpu_memory_total_bytes,
             host_memory_free_bytes: raw.host_memory_free_bytes,
             host_memory_total_bytes: raw.host_memory_total_bytes,
+            memory_pool: raw.memory_pool,
             nvidia_driver_version: raw.nvidia_driver_version,
             observed_at: raw.observed_at,
             schema_version: raw.schema_version,
         })
+    }
+}
+impl InventoryRequestMemoryPool {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Shared => "shared",
+            Self::Separate => "separate",
+        }
+    }
+}
+impl ::std::ops::Deref for InventoryRequestMemoryPool {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for InventoryRequestMemoryPool {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for InventoryRequestMemoryPool {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
@@ -11602,12 +11689,15 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
         #[derive(Eq)]
         struct Raw {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub candidates: ::std::option::Option<::std::vec::Vec<::std::string::String>>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub context: ::std::option::Option<ErrorContextResponse>,
             pub detail: ::std::string::String,
             pub issues: ::std::vec::Vec<RequestValidationIssue>,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
+            candidates: raw.candidates,
             context: raw.context,
             detail: raw.detail,
             issues: raw.issues,

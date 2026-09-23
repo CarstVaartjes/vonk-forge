@@ -331,7 +331,9 @@ def test_identity_free_grant_binds_node_from_submitted_csr(service) -> None:
 def test_named_grant_persists_approved_spark_name_on_submit(service) -> None:
     enrollment, sessions, _, _ = service
     request = csr(NODE_ID)
-    grant = enrollment.create_named("Living Spark", "admin", 600)
+    grant = enrollment.create_named(
+        "Living Spark", "admin", 600, request_key=str(uuid.uuid4())
+    )
 
     enrollment.submit(grant.token, request, evidence(request))
 
@@ -359,7 +361,9 @@ def test_enrollment_pins_and_explicit_reenrollment_rotates_receipt_key(service) 
         )
 
     replacement = csr()
-    replacement_grant = enrollment.create_reenrollment(NODE_ID, "admin", 600)
+    replacement_grant = enrollment.create_reenrollment(
+        NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
+    )
     enrollment.submit(
         replacement_grant.token,
         replacement,
@@ -391,7 +395,9 @@ def test_reenrollment_replaces_existing_active_identity_and_replay_is_idempotent
     enrollment, sessions, clock, authority = service
     original = enroll(enrollment)
     request = csr()
-    grant = enrollment.create_reenrollment(NODE_ID, "admin", 600)
+    grant = enrollment.create_reenrollment(
+        NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
+    )
 
     replaced = enrollment.submit(grant.token, request, evidence(request))
     replayed = enrollment.submit(grant.token, request, evidence(request))
@@ -418,7 +424,9 @@ def test_unbound_reenrollment_recreates_identity_after_controller_reset(
 ) -> None:
     enrollment, sessions, _, _ = service
     request = csr()
-    grant = enrollment.create_reenrollment(None, "admin", 600)
+    grant = enrollment.create_reenrollment(
+        None, "admin", 600, request_key=str(uuid.uuid4())
+    )
 
     issued = enrollment.submit(grant.token, request, evidence(request))
 
@@ -449,7 +457,9 @@ def test_reenrollment_refuses_intentionally_retired_identity(service) -> None:
         assert node is not None
         node.state = "retired"
     request = csr()
-    grant = enrollment.create_reenrollment(NODE_ID, "admin", 600)
+    grant = enrollment.create_reenrollment(
+        NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
+    )
 
     with pytest.raises(EnrollmentDenied, match="retired or revoked"):
         enrollment.submit(grant.token, request, evidence(request))
@@ -473,7 +483,9 @@ def test_reenrollment_refuses_to_race_an_in_progress_rotation(service) -> None:
             )
         )
     request = csr()
-    grant = enrollment.create_reenrollment(NODE_ID, "admin", 600)
+    grant = enrollment.create_reenrollment(
+        NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
+    )
 
     with pytest.raises(EnrollmentDenied, match="rotation is in progress"):
         enrollment.submit(grant.token, request, evidence(request))
@@ -1636,3 +1648,93 @@ def test_provider_failure_logs_the_cause_with_the_node_identity(
     # Neither the grant token nor the CSR may reach the log.
     assert grant.token not in caplog.text
     assert request.decode() not in caplog.text
+
+
+def test_grant_identity_is_recoverable_without_reissuing_its_secret(service):
+    enrollment, sessions, _clock, _authority = service
+    identity = str(uuid.uuid4())
+    grant = enrollment.create_named("Atlas", "admin", 600, request_key=identity)
+    assert grant.id == identity
+    status = enrollment.grant_status(identity, actor="admin")
+    assert status.state == "pending"
+    assert status.display_name == "Atlas"
+    assert grant.token not in status.model_dump_json()
+    with pytest.raises(EnrollmentDenied, match="already exists"):
+        enrollment.create_named("Atlas", "admin", 600, request_key=identity)
+    with sessions() as session:
+        assert (
+            session.scalar(select(func.count()).select_from(AgentEnrollmentGrant)) == 1
+        )
+    with pytest.raises(KeyError):
+        enrollment.grant_status(identity, actor="another-admin")
+
+
+def test_revoking_an_undelivered_grant_prevents_certificate_issuance(service):
+    enrollment, _sessions, _clock, authority = service
+    identity = str(uuid.uuid4())
+    request = csr()
+    grant = enrollment.create_named("Atlas", "admin", 600, request_key=identity)
+    with pytest.raises(KeyError):
+        enrollment.revoke_grant(identity, actor="another-admin")
+    revoked = enrollment.revoke_grant(identity, actor="admin")
+    assert revoked.state == "revoked"
+    assert enrollment.revoke_grant(identity, actor="admin") == revoked
+    with pytest.raises(EnrollmentDenied, match="revoked"):
+        enrollment.submit(grant.token, request, evidence(request))
+    assert authority.calls == []
+
+
+def test_expired_and_consumed_grants_have_distinct_recovery_outcomes(service):
+    enrollment, _sessions, clock, authority = service
+    request = csr()
+    expired = enrollment.create_named("Old", "admin", 1, request_key=str(uuid.uuid4()))
+    clock.advance(seconds=2)
+    with pytest.raises(EnrollmentDenied, match="expired"):
+        enrollment.submit(expired.token, request, evidence(request))
+    assert enrollment.grant_status(expired.id, actor="admin").state == "expired"
+    assert enrollment.revoke_grant(expired.id, actor="admin").state == "expired"
+    consumed = enrollment.create_named(
+        "Current", "admin", 600, request_key=str(uuid.uuid4())
+    )
+    enrollment.submit(consumed.token, request, evidence(request))
+    assert enrollment.grant_status(consumed.id, actor="admin").state == "consumed"
+    with pytest.raises(EnrollmentDenied, match="consumed"):
+        enrollment.revoke_grant(consumed.id, actor="admin")
+    assert authority.revocations == []
+
+
+def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine):
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    authority = RecordingAuthority()
+    clock = Clock()
+    submitter = EnrollmentService(sessions, authority, clock=clock)
+    revoker = EnrollmentService(sessions, authority, clock=clock)
+    grant = submitter.create_named(
+        "Concurrent", "admin", 600, request_key=str(uuid.uuid4())
+    )
+    request = csr()
+    ready = threading.Barrier(2)
+
+    def submit():
+        ready.wait(timeout=10)
+        try:
+            submitter.submit(grant.token, request, evidence(request))
+            return "consumed"
+        except EnrollmentDenied:
+            return "refused"
+
+    def revoke():
+        ready.wait(timeout=10)
+        try:
+            return revoker.revoke_grant(grant.id, actor="admin").state
+        except EnrollmentDenied:
+            return "refused"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        submitted = pool.submit(submit)
+        revoked = pool.submit(revoke)
+        outcomes = (submitted.result(timeout=15), revoked.result(timeout=15))
+    assert outcomes in (("consumed", "refused"), ("refused", "revoked"))
+    final = submitter.grant_status(grant.id, actor="admin")
+    assert final.state == ("consumed" if authority.calls else "revoked")

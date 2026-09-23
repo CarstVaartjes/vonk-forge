@@ -8,7 +8,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, Union, cast
 from typing import Union
 
@@ -28,13 +27,13 @@ class RecipeUpdateRequest:
             request_key (str):
             all_ (Union[Unset, bool]):  Default: False.
             schema_version (Union[Literal[2], Unset]):  Default: 2.
-            selectors (Union[None, Unset, list[str]]):
+            selectors (Union[Unset, list[str]]):
      """
 
     request_key: str
     all_: Union[Unset, bool] = False
     schema_version: Union[Literal[2], Unset] = 2
-    selectors: Union[None, Unset, list[str]] = UNSET
+    selectors: Union[Unset, list[str]] = UNSET
 
 
 
@@ -47,15 +46,11 @@ class RecipeUpdateRequest:
 
         schema_version = self.schema_version
 
-        selectors: Union[None, Unset, list[str]]
-        if isinstance(self.selectors, Unset):
-            selectors = UNSET
-        elif isinstance(self.selectors, list):
+        selectors: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.selectors, Unset):
             selectors = self.selectors
 
 
-        else:
-            selectors = self.selectors
 
 
         field_dict: dict[str, Any] = {}
@@ -85,22 +80,7 @@ class RecipeUpdateRequest:
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
-        def _parse_selectors(data: object) -> Union[None, Unset, list[str]]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, list):
-                    raise TypeError()
-                selectors_type_0 = cast(list[str], data)
-
-                return selectors_type_0
-            except: # noqa: E722
-                pass
-            return cast(Union[None, Unset, list[str]], data)
-
-        selectors = _parse_selectors(d.pop("selectors", UNSET))
+        selectors = cast(list[str], d.pop("selectors", UNSET))
 
 
         recipe_update_request = cls(

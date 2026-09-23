@@ -15,6 +15,7 @@ from typing import Union
 import datetime
 
 if TYPE_CHECKING:
+  from ..models.recipe_readiness import RecipeReadiness
   from ..models.library_recipe_identity import LibraryRecipeIdentity
   from ..models.library_recipe_model import LibraryRecipeModel
   from ..models.library_resource_projection import LibraryResourceProjection
@@ -44,6 +45,7 @@ class RecipeDetailResponse:
             updated_at (datetime.datetime):
             usage (list[str]):
             alignment (Union[None, Unset, str]):
+            assessment (Union['RecipeReadiness', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
@@ -58,6 +60,7 @@ class RecipeDetailResponse:
     updated_at: datetime.datetime
     usage: list[str]
     alignment: Union[None, Unset, str] = UNSET
+    assessment: Union['RecipeReadiness', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
 
@@ -65,6 +68,7 @@ class RecipeDetailResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.recipe_readiness import RecipeReadiness
         from ..models.library_recipe_identity import LibraryRecipeIdentity
         from ..models.library_recipe_model import LibraryRecipeModel
         from ..models.library_resource_projection import LibraryResourceProjection
@@ -105,6 +109,14 @@ class RecipeDetailResponse:
         else:
             alignment = self.alignment
 
+        assessment: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.assessment, Unset):
+            assessment = UNSET
+        elif isinstance(self.assessment, RecipeReadiness):
+            assessment = self.assessment.to_dict()
+        else:
+            assessment = self.assessment
+
         schema_version = self.schema_version
 
 
@@ -124,6 +136,8 @@ class RecipeDetailResponse:
         })
         if alignment is not UNSET:
             field_dict["alignment"] = alignment
+        if assessment is not UNSET:
+            field_dict["assessment"] = assessment
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -133,6 +147,7 @@ class RecipeDetailResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.recipe_readiness import RecipeReadiness
         from ..models.library_recipe_identity import LibraryRecipeIdentity
         from ..models.library_recipe_model import LibraryRecipeModel
         from ..models.library_resource_projection import LibraryResourceProjection
@@ -194,6 +209,26 @@ class RecipeDetailResponse:
         alignment = _parse_alignment(d.pop("alignment", UNSET))
 
 
+        def _parse_assessment(data: object) -> Union['RecipeReadiness', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                assessment_type_0 = RecipeReadiness.from_dict(data)
+
+
+
+                return assessment_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['RecipeReadiness', None, Unset], data)
+
+        assessment = _parse_assessment(d.pop("assessment", UNSET))
+
+
         schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
@@ -210,6 +245,7 @@ class RecipeDetailResponse:
             updated_at=updated_at,
             usage=usage,
             alignment=alignment,
+            assessment=assessment,
             schema_version=schema_version,
         )
 

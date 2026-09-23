@@ -15,6 +15,8 @@ from cluster_profiles.cli_completion import completion_script
 
 
 class Observations:
+    request_timeout_seconds = 15.0
+
     def __init__(self, *documents: dict[str, object]) -> None:
         self.documents = list(documents)
         self.calls: list[tuple[str, str]] = []
@@ -94,12 +96,12 @@ def test_profile_edit_requires_explicit_selection_before_read(capsys) -> None:
 
 def test_watch_progress_preserves_stdout_for_final_result(capsys) -> None:
     client = Observations(
-        {"state": "running", "phase": "copying"},
-        {"state": "succeeded", "phase": "ready"},
+        {"operation_id": "model-1", "state": "running", "phase": "copying"},
+        {"operation_id": "model-1", "state": "succeeded", "phase": "ready"},
     )
     assert (
         cli.main(
-            ("model", "detail", "model-1", "--watch", "--interval-seconds", "0.01"),
+            ("model", "progress", "model-1", "--follow", "--interval-seconds", "0.01"),
             control_client=client,
         )
         == 0
@@ -121,11 +123,21 @@ def test_broken_output_pipe_does_not_cancel_work_or_write_again(monkeypatch) -> 
 
     output = ClosedPipe()
     monkeypatch.setattr(cli.sys, "stdout", output)
-    client = Observations({"operation_id": "download-1", "state": "accepted"})
+    key = "11111111-1111-4111-8111-111111111111"
+    client = Observations(
+        {
+            "operation_id": "download-1",
+            "state": "queued",
+            "action": "download",
+            "selector": "model-1",
+            "request_key": key,
+        }
+    )
     assert (
         cli.main(
             ("model", "download", "model-1", "--detach", "--json"),
             control_client=client,
+            request_id_factory=lambda: key,
         )
         == 141
     )
@@ -155,7 +167,14 @@ def test_completion_is_offline_and_contains_nested_commands(shell, monkeypatch, 
 
 
 def test_human_terminal_text_cannot_inject_cursor_or_hyperlink_controls(capsys):
-    client = Observations({"name": "Atlas\x1b[2J\x1b]8;;https://bad.test\x07Link"})
+    client = Observations(
+        {
+            "display_name": "Atlas\x1b[2J\x1b]8;;https://bad.test\x07Link",
+            "connection": {"online_state": "offline"},
+            "loaded": [],
+            "installed": [],
+        }
+    )
     assert cli.main(("fleet", "detail", "Atlas"), control_client=client) == 0
     captured = capsys.readouterr()
     assert "\x1b" not in captured.out + captured.err
@@ -390,8 +409,13 @@ def test_connection_check_rejects_a_fifo_without_waiting_for_a_writer(tmp_path):
     ],
 )
 def test_progress_uses_its_owner_and_distinguishes_read_from_await(noun, path, capsys):
+    identity: dict[str, object] = (
+        {"operation_id": "work-1"} if noun == "model" else {"id": "work-1"}
+    )
+    if noun == "recipe":
+        identity["kind"] = "recipe.image.availability.v2"
     for flags, expected in (((), 0), (("--follow",), 2)):
-        client = Observations({"id": "work-1", "state": "failed"})
+        client = Observations(identity | {"state": "failed"})
         assert (
             cli.main(
                 (noun, "progress", "work-1", *flags, "--json"), control_client=client

@@ -10,17 +10,17 @@ pub use generated::{
     AgentUpgradePayload as AgentUpgradeRequest,
     ArtifactDistributionPayload as ArtifactDistributionRequest, DistributionAssignment,
     DistributionObject, EnrollmentEvidence, EnrollmentSubmitRequest as EnrollmentRequest,
-    InventoryRequest, RecipeBuildAdapter, RecipeBuildAdapterDefinition,
-    RecipeBuildAdditionalContext, RecipeBuildArgument, RecipeBuildBaseImage,
-    RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence, RecipeBuildLimits,
-    RecipeBuildMetadata, RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildPolicy,
-    RecipeBuildPolicyFinding, RecipeBuildRequest, RecipeImageImportEvidence,
-    RecipeImageImportRequest, RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence,
-    RecipeJobFile, RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest,
-    RecipeJobOutputMapping, RecipeJobRunRequest, RecipeJobRunResult,
-    RecipeStartPayload as RecipeStartRequest, RecipeStartPayloadPhase as RecipeStartPhase,
-    RecipeStopPayload as RecipeStopRequest, RecipeStopResult,
-    RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
+    InventoryRequest, InventoryRequestMemoryPool as MemoryPool, RecipeBuildAdapter,
+    RecipeBuildAdapterDefinition, RecipeBuildAdditionalContext, RecipeBuildArgument,
+    RecipeBuildBaseImage, RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest,
+    RecipeBuildEvidence, RecipeBuildLimits, RecipeBuildMetadata, RecipeBuildNetwork,
+    RecipeBuildOptions, RecipeBuildPolicy, RecipeBuildPolicyFinding, RecipeBuildRequest,
+    RecipeImageImportEvidence, RecipeImageImportRequest,
+    RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence, RecipeJobFile,
+    RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
+    RecipeJobRunRequest, RecipeJobRunResult, RecipeStartPayload as RecipeStartRequest,
+    RecipeStartPayloadPhase as RecipeStartPhase, RecipeStopPayload as RecipeStopRequest,
+    RecipeStopResult, RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
 };
 pub use generated::{
     ExecuteContainerRuntimeRequestOperationAction as HostHelperContainerRuntimeAction,
@@ -552,6 +552,7 @@ impl InventoryRequest {
             || self.disk_free_bytes > self.disk_total_bytes
             || self.host_memory_free_bytes > self.host_memory_total_bytes
             || self.gpu_memory_free_bytes > self.gpu_memory_total_bytes
+            || (self.memory_pool == MemoryPool::Shared && self.gpu_count == 0)
             || self.capabilities.len() > 64
             || self
                 .capabilities
@@ -1222,6 +1223,7 @@ mod inventory_tests {
             gpu_memory_total_bytes: 100_000,
             gpu_memory_free_bytes: 80_000,
             gpu_count: 1,
+            memory_pool: MemoryPool::Separate,
             artifact_store_read_only: false,
             capabilities: vec!["recipe.build.v1".to_owned()],
             fabric_address: None,

@@ -34,10 +34,12 @@ class LibraryFilterValues:
             alignment (Union[Unset, list[str]]):
             all_models (Union[None, Unset, bool]):
             family (Union[Unset, list[str]]):
+            fits_fleet (Union[None, Unset, bool]):
             local_only (Union[None, Unset, bool]):
             model (Union[Unset, list[str]]):
             publisher (Union[Unset, list[str]]):
             quantization (Union[Unset, list[str]]):
+            ready (Union[None, Unset, bool]):
             search (Union[None, Unset, str]):
             sort (Union[LibraryFilterValuesSortType0, None, Unset]):
             sparks (Union[Unset, list[int]]):
@@ -49,10 +51,12 @@ class LibraryFilterValues:
     alignment: Union[Unset, list[str]] = UNSET
     all_models: Union[None, Unset, bool] = UNSET
     family: Union[Unset, list[str]] = UNSET
+    fits_fleet: Union[None, Unset, bool] = UNSET
     local_only: Union[None, Unset, bool] = UNSET
     model: Union[Unset, list[str]] = UNSET
     publisher: Union[Unset, list[str]] = UNSET
     quantization: Union[Unset, list[str]] = UNSET
+    ready: Union[None, Unset, bool] = UNSET
     search: Union[None, Unset, str] = UNSET
     sort: Union[LibraryFilterValuesSortType0, None, Unset] = UNSET
     sparks: Union[Unset, list[int]] = UNSET
@@ -83,6 +87,12 @@ class LibraryFilterValues:
 
 
 
+        fits_fleet: Union[None, Unset, bool]
+        if isinstance(self.fits_fleet, Unset):
+            fits_fleet = UNSET
+        else:
+            fits_fleet = self.fits_fleet
+
         local_only: Union[None, Unset, bool]
         if isinstance(self.local_only, Unset):
             local_only = UNSET
@@ -106,6 +116,12 @@ class LibraryFilterValues:
             quantization = self.quantization
 
 
+
+        ready: Union[None, Unset, bool]
+        if isinstance(self.ready, Unset):
+            ready = UNSET
+        else:
+            ready = self.ready
 
         search: Union[None, Unset, str]
         if isinstance(self.search, Unset):
@@ -156,6 +172,8 @@ class LibraryFilterValues:
             field_dict["all_models"] = all_models
         if family is not UNSET:
             field_dict["family"] = family
+        if fits_fleet is not UNSET:
+            field_dict["fits_fleet"] = fits_fleet
         if local_only is not UNSET:
             field_dict["local_only"] = local_only
         if model is not UNSET:
@@ -164,6 +182,8 @@ class LibraryFilterValues:
             field_dict["publisher"] = publisher
         if quantization is not UNSET:
             field_dict["quantization"] = quantization
+        if ready is not UNSET:
+            field_dict["ready"] = ready
         if search is not UNSET:
             field_dict["search"] = search
         if sort is not UNSET:
@@ -200,6 +220,16 @@ class LibraryFilterValues:
         family = cast(list[str], d.pop("family", UNSET))
 
 
+        def _parse_fits_fleet(data: object) -> Union[None, Unset, bool]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, bool], data)
+
+        fits_fleet = _parse_fits_fleet(d.pop("fits_fleet", UNSET))
+
+
         def _parse_local_only(data: object) -> Union[None, Unset, bool]:
             if data is None:
                 return data
@@ -217,6 +247,16 @@ class LibraryFilterValues:
 
 
         quantization = cast(list[str], d.pop("quantization", UNSET))
+
+
+        def _parse_ready(data: object) -> Union[None, Unset, bool]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, bool], data)
+
+        ready = _parse_ready(d.pop("ready", UNSET))
 
 
         def _parse_search(data: object) -> Union[None, Unset, str]:
@@ -272,10 +312,12 @@ class LibraryFilterValues:
             alignment=alignment,
             all_models=all_models,
             family=family,
+            fits_fleet=fits_fleet,
             local_only=local_only,
             model=model,
             publisher=publisher,
             quantization=quantization,
+            ready=ready,
             search=search,
             sort=sort,
             sparks=sparks,

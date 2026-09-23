@@ -13,6 +13,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_agent_protocol import DistributionAssignment, OperationProgress
+from vonk_agent_protocol.inventory import MemoryPool
 
 from .lifecycle_preflight import LifecyclePreflightCheckpoint
 from .model_cache_contract import ModelCacheDownloadResult
@@ -30,6 +31,8 @@ _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 Digest = Annotated[str, StringConstraints(pattern=_DIGEST_PATTERN)]
+PortNumber = Annotated[int, Field(ge=1, le=65535)]
+MemoryKind = Literal["unified", "host", "accelerator"]
 Alias = Annotated[
     str,
     StringConstraints(
@@ -43,7 +46,8 @@ Alias = Annotated[
 # annotations and by the Run/Switch operation helpers that build those fields.
 # A shared alias is what keeps a helper signature from drifting away from the
 # set the model will accept, so the two cannot disagree without a type error.
-RunSwitchAction = Literal["run", "switch", "stop", "cleanup"]
+RunSwitchPlacementAction = Literal["install", "run", "switch"]
+RunSwitchAction = Literal[RunSwitchPlacementAction, "stop", "cleanup"]
 RunSwitchRetention = Literal["retain-cached", "reclaim-unreferenced"]
 RunSwitchReasonSeverity = Literal["blocker", "warning", "info"]
 RunSwitchReasonScope = Literal[
@@ -155,7 +159,7 @@ class RunSwitchPreviewRequest(_StrictModel):
     recipe_revision_id: UuidId
     spark_group: SparkGroup
     alias: Alias
-    action: Literal["run", "switch"] = "run"
+    action: RunSwitchPlacementAction = "run"
     retention: RunSwitchRetention = "retain-cached"
     invocation: InvocationMetadata = Field(default_factory=InvocationMetadata)
 
@@ -274,10 +278,14 @@ class SparkFitNode(_StrictModel):
     rank: int = Field(ge=0, le=31)
     role: Annotated[str, StringConstraints(min_length=1, max_length=64)]
     allowed: bool
+    ports_required: list[PortNumber]
     disk_required_bytes: int | None = Field(default=None, ge=0)
     disk_free_bytes: int | None = Field(default=None, ge=0)
     disk_free_after_bytes: int | None = None
     memory_required_bytes: int | None = Field(default=None, ge=0)
+    memory_kind: MemoryKind | None = None
+    memory_pool: MemoryPool | None = None
+    memory_floor_bytes: int | None = Field(default=None, ge=0)
     memory_available_bytes: int | None = Field(default=None, ge=0)
     memory_free_after_bytes: int | None = None
     resource_demand: ResourceDemandEvidence | None = None
@@ -383,6 +391,7 @@ class MappingSelection(_StrictModel):
 
 class StopImpact(_StrictModel):
     run_id: UuidId
+    run_plan_digest: Digest
     alias: Alias
     state: Annotated[str, StringConstraints(min_length=1, max_length=24)]
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
@@ -403,14 +412,46 @@ class RunSwitchPhase(_StrictModel):
     detail: Annotated[str, StringConstraints(min_length=1, max_length=256)]
 
 
-class RunSwitchPlan(_StrictModel):
+class RunSwitchAssessment(_StrictModel):
+    """Planner-owned admission and observations shared by operator reviews."""
+
+    alias: Alias | None
+    fit_current: SparkFit
+    fit_after_stop: SparkFit | None
+    effective_settings: EffectiveSettingsSelection | None = None
+    preparation: RolloutPreparation | None = None
+    stops: list[StopImpact] = Field(max_length=128)
+    allowed: bool
+    blockers: list[RunSwitchReason] = Field(max_length=128)
+    warnings: list[RunSwitchReason] = Field(max_length=128)
+    stop_before_prepare: bool = False
+    stop_before_transfer: bool = False
+
+    @model_validator(mode="after")
+    def admission_matches_reasons(self) -> RunSwitchAssessment:
+        if self.allowed != (not self.blockers):
+            raise ValueError("admission verdict must agree with its named blockers")
+        named = {
+            (reason.code, reason.detail, tuple(sorted(reason.node_ids)))
+            for reason in self.blockers
+        }
+        if self.preparation is not None and any(
+            reason.severity == "blocker"
+            and (reason.code, reason.detail, tuple(sorted(reason.node_ids)))
+            not in named
+            for reason in self.preparation.reasons
+        ):
+            raise ValueError("preparation blockers must be named by admission")
+        return self
+
+
+class RunSwitchPlan(RunSwitchAssessment):
     schema_version: Literal[2] = 2
     generated_at: datetime
     action: RunSwitchAction
     model_content_sha256: Digest | None
     recipe_revision_id: UuidId | None
     recipe_content_sha256: Digest | None
-    alias: Alias | None
     run_id: UuidId | None
     spark_group: SparkGroup
     mapping: MappingSelection | None
@@ -426,9 +467,6 @@ class RunSwitchPlan(_StrictModel):
     model_capabilities: list[CapabilityEvidence] = Field(max_length=128)
     recipe_capabilities: list[CapabilityEvidence] = Field(max_length=128)
     freshness: list[FreshnessEvidence] = Field(max_length=128)
-    fit_current: SparkFit
-    fit_after_stop: SparkFit | None
-    effective_settings: EffectiveSettingsSelection | None = None
     # ``fit`` is the current admission view retained as a compact client
     # affordance; the two named views above make stop-before-prepare decisions
     # explicit for reviewers and profile callers.
@@ -436,18 +474,16 @@ class RunSwitchPlan(_StrictModel):
     storage: ArtifactStorageImpact
     runtime_storage: RuntimeImageStorageImpact
     build: RunSwitchBuildEvidence
-    preparation: RolloutPreparation | None = None
     conflicts: list[RunSwitchReason] = Field(max_length=128)
-    stops: list[StopImpact] = Field(max_length=128)
     reclaimed_bytes: int = Field(ge=0)
     phases: list[RunSwitchPhase] = Field(min_length=1, max_length=16)
-    allowed: bool
-    blockers: list[RunSwitchReason] = Field(max_length=128)
-    warnings: list[RunSwitchReason] = Field(max_length=128)
     invocation: InvocationMetadata
     plan_digest: Digest
-    stop_before_prepare: bool = False
-    stop_before_transfer: bool = False
+
+    def assessment(self) -> RunSwitchAssessment:
+        return RunSwitchAssessment.model_validate(
+            {name: getattr(self, name) for name in RunSwitchAssessment.model_fields}
+        )
 
 
 class RunSwitchMemberProgress(_StrictModel):
@@ -791,6 +827,19 @@ class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):
     ranks: list[RunSwitchRankReceipt] = Field(max_length=32)
 
 
+class RunSwitchInstallationVerifyResult(_RunSwitchPhaseBase):
+    """Exact installed membership observed without a serving workload."""
+
+    phase: Literal["final_verify"]
+    subphase: RunSwitchSubphase | None = None
+    final_verified: bool
+    installation_id: UuidId
+    installation_state: Annotated[str, StringConstraints(min_length=1, max_length=24)]
+    active_runs: int = Field(ge=0)
+    unwithdrawn_routes: int = Field(ge=0)
+    ranks: list[RunSwitchRankReceipt] = Field(min_length=1, max_length=32)
+
+
 class RunSwitchDistributionChildResult(_StrictModel):
     """Durable projection of one target-copy child operation.
 
@@ -826,6 +875,7 @@ RunSwitchPhaseResult = (
     | RunSwitchUninstallResult
     | RunSwitchFinalVerifyResult
     | RunSwitchCleanupVerifyResult
+    | RunSwitchInstallationVerifyResult
 )
 
 
@@ -841,6 +891,7 @@ class RunSwitchOperationResult(_StrictModel):
 
     phase_index: int = Field(default=0, ge=0, le=31)
     workload_intent_ordinal: int | None = Field(default=None, ge=1)
+    profile_application_id: UuidId | None = None
     item_index: int = Field(default=0, ge=0, le=31)
     phase: RunSwitchPhaseKind | None = None
     subphase: RunSwitchSubphase | None = None
@@ -939,6 +990,7 @@ __all__ = [
     "MappingSelection",
     "RunSwitchAction",
     "RunSwitchApplyRequest",
+    "RunSwitchAssessment",
     "RunSwitchBuildEvidence",
     "RunSwitchBuildEvidenceState",
     "RunSwitchCachedTransferResult",
@@ -950,6 +1002,7 @@ __all__ = [
     "RunSwitchCoverage",
     "RunSwitchDistributionChildResult",
     "RunSwitchFinalVerifyResult",
+    "RunSwitchInstallationVerifyResult",
     "RunSwitchMemberProgress",
     "RunSwitchMemberState",
     "RunSwitchModelDownloadPendingResult",
@@ -960,6 +1013,7 @@ __all__ = [
     "RunSwitchPhase",
     "RunSwitchPhaseKind",
     "RunSwitchPhaseResult",
+    "RunSwitchPlacementAction",
     "RunSwitchPlan",
     "RunSwitchPreparedResult",
     "RunSwitchPreviewRequest",

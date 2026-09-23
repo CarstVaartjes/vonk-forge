@@ -86,7 +86,7 @@ COPY control/src ./src
 COPY control/alembic.ini ./alembic.ini
 COPY control/migrations ./migrations
 COPY --from=web /web/dist ./src/vonk_control/web
-COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/
+COPY inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl /wheels/
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends git \
     && public_contracts_revision="$(sed -n 's/^revision = "//p' packaging/public-contracts.lock | tr -d '"')" \
@@ -96,11 +96,11 @@ RUN apt-get update \
     && git -C /public-contracts checkout --detach "$public_contracts_revision" \
     && python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels \
         /public-contracts/contracts \
-    && python -c 'import hashlib, pathlib, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl").read_bytes()).hexdigest()' \
+    && python -c 'import hashlib, pathlib, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl").read_bytes()).hexdigest()' \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /public-contracts /var/lib/apt/lists/*
 RUN python -m pip install --no-cache-dir --prefix=/install \
-    /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl \
+    /wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl \
     /wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl \
     /vonk-cluster-profiles .
 

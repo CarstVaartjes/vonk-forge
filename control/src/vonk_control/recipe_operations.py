@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
@@ -34,7 +34,11 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
-from .agent_jobs import AgentJobService, superseded_cancellation_deadline
+from .agent_jobs import (
+    AgentJobService,
+    _JsonFlagIsTrue,
+    superseded_cancellation_deadline,
+)
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
 from .compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -47,6 +51,7 @@ from .distributed_lifecycle import (
 )
 from .distributed_recovery import enforce_recovery_deadline, recovery_start_plan
 from .install_admission import (
+    InstallAdmissionBusy,
     InstallAdmissionService,
     InstallPlan,
     InstallPreflightExpired,
@@ -77,7 +82,15 @@ from .recipe_action_plans import (
     stop_plan,
     uninstall_plan,
 )
-from .recipe_builds import RecipeBuildPlan, RecipeBuildService
+from .recipe_build_cancellation import (
+    BuildConsumerError,
+    RecipeBuildIntent,
+    build_cancellation,
+    current_build_consumers,
+    read_build_intent,
+    request_build_cancellation,
+)
+from .recipe_builds import RecipeBuildAdmissionBusy, RecipeBuildPlan, RecipeBuildService
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
@@ -102,7 +115,7 @@ from .recipe_start_payloads import (
     build_recipe_start_payload,
 )
 from .recovery_policy import FailureKind
-from .run_admission import RunAdmissionService, RunNodePlan, RunPlan
+from .run_admission import RunAdmissionBusy, RunAdmissionService, RunNodePlan, RunPlan
 from .source_policy import SourcePolicyReport
 
 # Longest rendered blocker reason kept in an install refusal.  Each reason names
@@ -125,7 +138,7 @@ def _bounded_blocker_reason(code: str, detail: str) -> str:
         return rendered
     keep = _BLOCKER_REASON_CHARS - 3
     head = keep // 2
-    return f"{rendered[:head]}...{rendered[-(keep - head):]}"
+    return f"{rendered[:head]}...{rendered[-(keep - head) :]}"
 
 
 def _active_recipe_revision(
@@ -492,6 +505,7 @@ class RecipeOperationService:
         self._route_publications = route_publications
         self._builds = builds
         self._mappings = mappings
+        self._build_cleanup_cursor: str | None = None
         self._run_health_maximum_age = timedelta(seconds=run_health_maximum_age_seconds)
 
     def preview_mapping(
@@ -534,11 +548,22 @@ class RecipeOperationService:
         actor: str,
         request_id: str,
         force: bool = False,
+        admission_guard: Callable[[Session], None] | None = None,
     ) -> RecipeOperationView:
+        intent = RecipeBuildIntent(
+            kind="dependency" if admission_guard is not None else "independent"
+        )
         # Force bypasses cached images, not the identity of an accepted request.
         existing = self._idempotent(request_id, "recipe.build.v1", build_input_sha256)
         if existing is not None:
-            if existing.state != "succeeded" and not force:
+            if (
+                existing.state not in {"succeeded", "cancelled"}
+                and not force
+                and not (
+                    isinstance(existing.result, Mapping)
+                    and existing.result.get("cancel_requested") is True
+                )
+            ):
                 with self._sessions() as session:
                     succeeded = self._successful_build_job_in_session(
                         session, existing.owner_id, build_input_sha256
@@ -552,6 +577,11 @@ class RecipeOperationService:
             )
         now = self._clock()
         with self._sessions.begin() as session:
+            # A parent-owned build must revalidate its exact execution claim
+            # in the same transaction that accepts the child. The guard does
+            # SQL work only and retains its parent fence through this commit.
+            if admission_guard is not None:
+                admission_guard(session)
             build = session.get(RecipeBuild, plan.build_id, with_for_update=True)
             if (
                 build is not None
@@ -574,7 +604,8 @@ class RecipeOperationService:
                     authority_revision=succeeded.authority_revision,
                     targets=list(succeeded.targets),
                     payload_digest=succeeded.payload_digest,
-                    payload=dict(succeeded.payload),
+                    payload=dict(succeeded.payload)
+                    | {"build_intent": intent.model_dump(mode="json")},
                     result=_validated_result("recipe.build.v1", succeeded.result),
                     created_at=now,
                     updated_at=now,
@@ -582,6 +613,21 @@ class RecipeOperationService:
                 session.add(replay)
                 session.flush()
                 return self._view(replay)
+            # Reusing a verified receipt above needs no new execution capacity.
+            # A new attempt must wait for the cancelled executor's cleanup.
+            cancelling = session.scalar(
+                select(Job).where(
+                    Job.kind == "recipe.build.v1",
+                    Job.payload["owner_id"].as_string() == plan.build_id,
+                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
+                )
+            )
+            if cancelling is not None:
+                build_cancellation(cancelling)
+                raise RecipeOperationConflict(
+                    "recipe build cancellation is awaiting cleanup"
+                )
             if (
                 build is None
                 or build.build_input_sha256 != plan.build_input_sha256
@@ -602,33 +648,33 @@ class RecipeOperationService:
                     .limit(1)
                 )
                 if active is not None:
+                    if (
+                        intent.kind == "independent"
+                        and read_build_intent(active).kind == "dependency"
+                    ):
+                        # A distinct independent request cannot acquire intent
+                        # by silently borrowing a parent's pending execution.
+                        raise RecipeBuildAdmissionBusy()
                     return self._view(active)
-                if self._builds is None:
-                    raise RecipeOperationConflict("recipe build service is unavailable")
                 self._release(session, "recipe-build", build.id, now)
-                self._builds.reserve_in_session(session, plan, now=now)
-                build.state = "building"
-                build.error = None
-                build.updated_at = now
-                job = self._queue_in_session(
+                job = self._start_build_in_session(
                     session,
-                    kind="recipe.build.v1",
-                    owner_kind="recipe-build",
-                    owner_id=build.id,
-                    plan_digest=plan.build_input_sha256,
+                    build,
+                    plan,
                     actor=actor,
                     request_id=request_id,
-                    node_payloads=((plan.builder_node_id, plan.agent_payload),),
-                    authority_digest=plan.build_input_sha256,
                     now=now,
-                    job_context={"force_rebuild": True},
+                    force=True,
+                    intent=intent,
                 )
             elif build.state == "failed":
                 previous = session.scalar(
                     select(Job)
                     .where(
                         Job.kind == "recipe.build.v1",
-                        Job.state.in_(("failed", "waiting-for-operator", "expired")),
+                        Job.state.in_(
+                            ("failed", "waiting-for-operator", "expired", "cancelled")
+                        ),
                         Job.payload["owner_id"].as_string() == build.id,
                         Job.payload["plan_digest"].as_string()
                         == build.build_input_sha256,
@@ -640,37 +686,79 @@ class RecipeOperationService:
                     raise RecipeOperationConflict(
                         "failed recipe build receipt is unavailable"
                     )
-                job = self._retry_build_in_session(
-                    session,
-                    previous,
-                    actor=actor,
-                    request_id=request_id,
-                    now=now,
-                )
+                if previous.state == "cancelled":
+                    cancellation = build_cancellation(previous)
+                    if cancellation is None or cancellation.cancelled is not True:
+                        raise RecipeOperationConflict(
+                            "recipe build cancellation is awaiting cleanup"
+                        )
+                    job = self._start_build_in_session(
+                        session,
+                        build,
+                        plan,
+                        actor=actor,
+                        request_id=request_id,
+                        now=now,
+                        intent=intent,
+                    )
+                else:
+                    job = self._retry_build_in_session(
+                        session,
+                        previous,
+                        actor=actor,
+                        request_id=request_id,
+                        now=now,
+                        intent=intent,
+                    )
             elif build.state == "planned":
-                if build.state != "planned":
-                    raise RecipeOperationConflict("recipe build preview is stale")
-                if self._builds is None:
-                    raise RecipeOperationConflict("recipe build service is unavailable")
-                self._builds.reserve_in_session(session, plan, now=now)
-                build.state = "building"
-                build.updated_at = now
-                job = self._queue_in_session(
+                job = self._start_build_in_session(
                     session,
-                    kind="recipe.build.v1",
-                    owner_kind="recipe-build",
-                    owner_id=build.id,
-                    plan_digest=plan.build_input_sha256,
+                    build,
+                    plan,
                     actor=actor,
                     request_id=request_id,
-                    node_payloads=((plan.builder_node_id, plan.agent_payload),),
-                    authority_digest=plan.build_input_sha256,
                     now=now,
+                    intent=intent,
                 )
             else:
                 raise RecipeOperationConflict("recipe build preview is stale")
         self._agent_jobs.notify_available()
         return self.get(job.id)
+
+    def _start_build_in_session(
+        self,
+        session: Session,
+        build: RecipeBuild,
+        plan: RecipeBuildPlan,
+        *,
+        actor: str,
+        request_id: str,
+        now: datetime,
+        intent: RecipeBuildIntent,
+        force: bool = False,
+    ) -> Job:
+        if self._builds is None:
+            raise RecipeOperationConflict("recipe build service is unavailable")
+        self._builds.reserve_in_session(session, plan, now=now, request_id=request_id)
+        build.state = "building"
+        build.error = None
+        build.updated_at = now
+        return self._queue_in_session(
+            session,
+            kind="recipe.build.v1",
+            owner_kind="recipe-build",
+            owner_id=build.id,
+            plan_digest=plan.build_input_sha256,
+            actor=actor,
+            request_id=request_id,
+            node_payloads=((plan.builder_node_id, plan.agent_payload),),
+            authority_digest=plan.build_input_sha256,
+            now=now,
+            job_context={
+                "build_intent": intent.model_dump(mode="json"),
+                **({"force_rebuild": True} if force else {}),
+            },
+        )
 
     @staticmethod
     def _successful_build_job_in_session(
@@ -690,10 +778,17 @@ class RecipeOperationService:
         return job if job is not None and isinstance(job.result, Mapping) else None
 
     def preview_install(
-        self, mapping_id: str, recipe_build_id: str | None
+        self,
+        mapping_id: str,
+        recipe_build_id: str | None,
+        *,
+        profile_application_id: str | None = None,
     ) -> InstallPlan:
         return self._install_admission.plan_install(
-            mapping_id, recipe_build_id, now=self._clock()
+            mapping_id,
+            recipe_build_id,
+            now=self._clock(),
+            profile_application_id=profile_application_id,
         )
 
     def prepare_installation(
@@ -701,6 +796,8 @@ class RecipeOperationService:
         plan: InstallPlan,
         *,
         actor: str,
+        profile_application_id: str | None = None,
+        workload_intent_ordinal: int | None = None,
     ) -> str:
         """Persist an admitted installation without starting Spark work.
 
@@ -765,12 +862,19 @@ class RecipeOperationService:
                 return existing.id
             try:
                 installation_id = self._install_admission.accept_install_in_session(
-                    session, plan, actor=actor, now=now
+                    session,
+                    plan,
+                    actor=actor,
+                    now=now,
+                    profile_application_id=profile_application_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
                 )
             except InstallPreflightExpired as error:
                 # Nothing is persisted: the surrounding transaction rolls back.
                 # Only the caller's own bounded preflight gate may act on this.
                 raise RecipeInstallPreflightExpired(str(error)) from error
+            except InstallAdmissionBusy:
+                raise
             except (RuntimeError, ValueError) as error:
                 raise RecipeOperationConflict(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
@@ -998,8 +1102,21 @@ class RecipeOperationService:
             workload_intent_ordinal=workload_intent_ordinal,
         )
 
-    def preview_run(self, installation_id: str, alias: str) -> RunPlan:
-        return self._run_admission.plan_run(installation_id, alias, now=self._clock())
+    def preview_run(
+        self,
+        installation_id: str,
+        alias: str,
+        *,
+        profile_application_id: str | None = None,
+        excluded_profile_application_ids: Sequence[str] = (),
+    ) -> RunPlan:
+        return self._run_admission.plan_run(
+            installation_id,
+            alias,
+            now=self._clock(),
+            profile_application_id=profile_application_id,
+            excluded_profile_application_ids=excluded_profile_application_ids,
+        )
 
     def _adopt_start_in_session(
         self,
@@ -1238,6 +1355,7 @@ class RecipeOperationService:
         actor: str,
         request_id: str,
         workload_intent_ordinal: int | None = None,
+        profile_application_id: str | None = None,
     ) -> RecipeOperationView:
         if plan_digest != plan.plan_digest:
             raise RecipeOperationConflict(
@@ -1291,8 +1409,15 @@ class RecipeOperationService:
                 raise RecipeOperationConflict("recipe installation is not runnable")
             try:
                 run_id = self._run_admission.accept_run_in_session(
-                    session, plan, actor=actor, now=now
+                    session,
+                    plan,
+                    actor=actor,
+                    now=now,
+                    profile_application_id=profile_application_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
                 )
+            except RunAdmissionBusy:
+                raise
             except (RuntimeError, ValueError) as error:
                 raise RecipeOperationConflict(str(error)) from error
             run = session.get(RecipeRun, run_id)
@@ -2041,7 +2166,12 @@ class RecipeOperationService:
                 return self._view(existing)
             if previous.kind == "recipe.build.v1":
                 job = self._retry_build_in_session(
-                    session, previous, actor=actor, request_id=request_id, now=now
+                    session,
+                    previous,
+                    actor=actor,
+                    request_id=request_id,
+                    now=now,
+                    intent=RecipeBuildIntent(kind="independent"),
                 )
             elif previous.kind == "recipe.image.import.v1":
                 job = self._retry_image_distribution_in_session(
@@ -2217,9 +2347,14 @@ class RecipeOperationService:
         actor: str,
         request_id: str,
         now: datetime,
+        intent: RecipeBuildIntent,
     ) -> Job:
         if previous.state not in {"failed", "waiting-for-operator", "expired"}:
             raise RecipeOperationConflict("recipe build is not retryable")
+        if build_cancellation(previous) is not None:
+            raise RecipeOperationConflict(
+                "cancelled recipe build intent is not retryable"
+            )
         if self._builds is None:
             raise RecipeOperationConflict("recipe build service is unavailable")
         owner_id = _required_string(previous.payload, "owner_id")
@@ -2257,21 +2392,14 @@ class RecipeOperationService:
         ):
             raise RecipeOperationConflict("stored recipe build plan is invalid")
         self._release(session, "recipe-build", owner_id, now)
-        self._builds.reserve_in_session(session, plan, now=now)
-        build.state = "building"
-        build.error = None
-        build.updated_at = now
-        return self._queue_in_session(
+        return self._start_build_in_session(
             session,
-            kind="recipe.build.v1",
-            owner_kind="recipe-build",
-            owner_id=owner_id,
-            plan_digest=build.build_input_sha256,
+            build,
+            plan,
             actor=actor,
             request_id=request_id,
-            node_payloads=((build.builder_node_id, payload),),
-            authority_digest=build.build_input_sha256,
             now=now,
+            intent=intent,
         )
 
     def record_node_result(
@@ -2497,7 +2625,20 @@ class RecipeOperationService:
                     or original_job is None
                     or original_job.payload.get("owner_id") != owner_id
                     or build is None
-                    or build.plan.get("cancelled") is not True
+                ):
+                    raise RecipeOperationConflict(
+                        "recipe build cleanup authority changed"
+                    )
+                cancellation = build_cancellation(original_job)
+                requested = RecipeOperationCancellationResult.model_validate_json(
+                    canonical_message(job.payload["build_cancellation"])
+                )
+                if (
+                    cancellation is None
+                    or cancellation.cancel_request_id != requested.cancel_request_id
+                    or cancellation.cancel_actor != requested.cancel_actor
+                    or cancellation.cancel_requested_at != requested.cancel_requested_at
+                    or cancellation.reason != requested.reason
                 ):
                     raise RecipeOperationConflict(
                         "recipe build cleanup authority changed"
@@ -2505,9 +2646,6 @@ class RecipeOperationService:
                 original.state = "cancelled"
                 original.updated_at = now
                 original_job.state = "cancelled"
-                cancellation = RecipeOperationCancellationResult.model_validate_json(
-                    canonical_message(job.payload["build_cancellation"])
-                )
                 original_job.result = cancellation.model_copy(
                     update={"cancelled": True}
                 ).model_dump(mode="json", exclude_none=True)
@@ -2517,28 +2655,16 @@ class RecipeOperationService:
             build = session.get(RecipeBuild, owner_id, with_for_update=True)
             if build is None or build.builder_node_id != node_id:
                 raise RecipeOperationConflict("recipe build authority is invalid")
-            if build.plan.get("cancelled") is True:
+            cancellation = build_cancellation(job)
+            if cancellation is not None:
                 # Completion can race cancellation. Retain the authenticated
-                # attempt's outcome, but never republish its removed image or
-                # release capacity before the separate stop receipt arrives.
-                previous = _validated_result(job.kind, job.result) or {}
-                if previous.get("cancel_requested") is not True:
-                    job.result = _validated_result(
-                        job.kind,
-                        {
-                            "cancel_requested": True,
-                            "cancel_request_id": str(
-                                uuid.uuid5(
-                                    uuid.NAMESPACE_URL, f"vonk:cancel-build:{job.id}"
-                                )
-                            ),
-                            "cancel_actor": job.actor,
-                            "cancel_requested_at": _aware(now).isoformat(),
-                            "reason": "recipe Controller cache removal cancelled the build",
-                        },
-                    )
-                job.state = "waiting-for-operator"
-                build.state = "failed"
+                # attempt's outcome, but only its own cancellation governs it.
+                # A later attempt may already own this build and its capacity.
+                if cancellation.cancelled is True:
+                    operation.state = "cancelled"
+                    job.state = "cancelled"
+                else:
+                    job.state = "waiting-for-operator"
                 return False
             force_rebuild = job.payload.get("force_rebuild") is True
             if succeeded:
@@ -2795,9 +2921,8 @@ class RecipeOperationService:
                     },
                 )
             if job.kind == "recipe.build.v1":
-                build = session.get(RecipeBuild, owner_id)
-                if build is None or build.plan.get("cancelled") is not True:
-                    self._release(session, "recipe-build", owner_id, now)
+                # Cancelled attempts returned before terminal aggregation.
+                self._release(session, "recipe-build", owner_id, now)
             elif job.kind == "recipe.install":
                 installation = session.get(RecipeInstallation, owner_id)
                 assert installation is not None
@@ -3148,42 +3273,112 @@ class RecipeOperationService:
         return self.get(operation_id)
 
     def reconcile_cancelled_builds(self) -> bool:
-        """Resume cleanup after cache removal or a Controller restart."""
+        """Cancel unneeded dependent builds and resume exact issued cleanup."""
         with self._sessions() as session:
-            candidates = tuple(
-                session.execute(
-                    select(Job.id, Job.actor)
-                    .join(
-                        RecipeBuild,
-                        Job.payload["owner_id"].as_string() == RecipeBuild.id,
-                    )
-                    .where(
-                        Job.kind == "recipe.build.v1",
-                        Job.state.in_(("queued", "running", "waiting-for-operator")),
-                        RecipeBuild.state == "failed",
-                        RecipeBuild.plan["cancelled"].as_boolean().is_(True),
-                    )
-                    .order_by(Job.created_at, Job.id)
-                    .limit(32)
-                )
-            )
-        progressed = False
-        for job_id, actor in candidates:
-            progressed = (
-                self._cancel_build(
-                    job_id,
-                    actor=actor,
-                    request_id=str(
-                        uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:cancel-build:{job_id}")
+            eligible = (
+                select(Job)
+                .where(
+                    Job.kind == "recipe.build.v1",
+                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    or_(
+                        _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
+                        Job.payload["build_intent"]["kind"].as_string() == "dependency",
                     ),
-                    reason="recipe Controller cache removal cancelled the build",
                 )
-                or progressed
+                .order_by(Job.id)
+                .limit(32)
             )
+            if self._build_cleanup_cursor is None:
+                candidates = tuple(session.scalars(eligible))
+            else:
+                following = tuple(
+                    session.scalars(eligible.where(Job.id > self._build_cleanup_cursor))
+                )
+                candidates = following + tuple(
+                    session.scalars(
+                        eligible.where(Job.id <= self._build_cleanup_cursor).limit(
+                            32 - len(following)
+                        )
+                    )
+                )
+        if candidates:
+            self._build_cleanup_cursor = candidates[-1].id
+        progressed = False
+        for job in candidates:
+            try:
+                cancellation = build_cancellation(job)
+                progressed = (
+                    self._cancel_build(
+                        job.id,
+                        actor=cancellation.cancel_actor
+                        if cancellation
+                        else "controller:build-dependency",
+                        request_id=cancellation.cancel_request_id
+                        if cancellation
+                        else str(
+                            uuid.uuid5(
+                                uuid.NAMESPACE_URL, f"vonk:unused-build:{job.id}"
+                            )
+                        ),
+                        reason=cancellation.reason
+                        if cancellation
+                        else "No current accepted consumer needs this build",
+                        only_if_unneeded=True,
+                    )
+                    or progressed
+                )
+            except (
+                BuildConsumerError,
+                RecipeOperationConflict,
+                KeyError,
+                TypeError,
+                ValueError,
+            ) as error:
+                # Contention/malformed ownership on one execution cannot starve
+                # other eligible cleanup. Every decision is rechecked in its
+                # own short transaction on the next fair scheduler pass.
+                logging.getLogger(__name__).info(
+                    "build cleanup deferred for %s: %s", job.id, str(error)
+                )
         return progressed
 
     def _cancel_build(
-        self, job_id: str, *, actor: str, request_id: str, reason: str
+        self,
+        job_id: str,
+        *,
+        actor: str,
+        request_id: str,
+        reason: str,
+        only_if_unneeded: bool = False,
+    ) -> bool:
+        try:
+            return self._cancel_current_build(
+                job_id,
+                actor=actor,
+                request_id=request_id,
+                reason=reason,
+                only_if_unneeded=only_if_unneeded,
+            )
+        except DBAPIError as error:
+            if getattr(error.orig, "sqlstate", None) not in {
+                "55P03",
+                "40P01",
+                "40001",
+                "57014",
+            }:
+                raise
+            raise RecipeOperationConflict(
+                "build.consumer_busy: build ownership is changing; retry cancellation"
+            ) from error
+
+    def _cancel_current_build(
+        self,
+        job_id: str,
+        *,
+        actor: str,
+        request_id: str,
+        reason: str,
+        only_if_unneeded: bool,
     ) -> bool:
         # Use the claim/result lock order: node, parent job, operation, build.
         with self._sessions() as session:
@@ -3197,8 +3392,8 @@ class RecipeOperationService:
             node_id = hinted.targets[0]
         now = self._clock()
         with self._sessions.begin() as session:
-            node = session.get(AgentNode, node_id, with_for_update=True)
-            job = session.get(Job, job_id, with_for_update=True)
+            node = session.get(AgentNode, node_id, with_for_update={"nowait": True})
+            job = session.get(Job, job_id, with_for_update={"nowait": True})
             if node is None or job is None or job.targets != [node_id]:
                 raise RecipeOperationConflict("recipe build authority changed")
             if job.state == "cancelled":
@@ -3209,7 +3404,8 @@ class RecipeOperationService:
                 session.scalars(
                     select(AgentOperation)
                     .where(AgentOperation.parent_job_id == job.id)
-                    .with_for_update(of=AgentOperation)
+                    .order_by(AgentOperation.id)
+                    .with_for_update(of=AgentOperation, nowait=True)
                 )
             )
             if len(children) != 1 or children[0].node_id != node_id:
@@ -3217,34 +3413,47 @@ class RecipeOperationService:
                     "recipe build operation authority changed"
                 )
             child = children[0]
-            build = session.get(
-                RecipeBuild,
-                _required_string(job.payload, "owner_id"),
-                with_for_update=True,
-            )
+            try:
+                build = session.get(
+                    RecipeBuild,
+                    _required_string(job.payload, "owner_id"),
+                    with_for_update={"nowait": True},
+                )
+            except DBAPIError as error:
+                if getattr(error.orig, "sqlstate", None) != "55P03":
+                    raise
+                raise RecipeOperationConflict(
+                    "build.consumer_busy: build ownership is changing; retry cancellation"
+                ) from error
             if build is None or build.builder_node_id != node_id:
                 raise RecipeOperationConflict("recipe build authority changed")
-            previous = _validated_result(job.kind, job.result) or {}
-            if previous.get("cancel_requested") is not True:
-                job.result = _validated_result(
-                    job.kind,
-                    {
-                        "cancel_requested": True,
-                        "cancel_request_id": request_id,
-                        "cancel_actor": actor,
-                        "cancel_requested_at": _aware(now).isoformat(),
-                        "reason": reason,
-                    },
-                )
-                job.status_reason = reason
-                job.updated_at = now
-            build.plan = {**build.plan, "cancelled": True}
-            build.state = "failed"
-            build.error = reason
-            build.updated_at = now
-            cancellation = RecipeOperationCancellationResult.model_validate_json(
-                canonical_message(job.result)
+            if build_cancellation(job) is None:
+                if only_if_unneeded and read_build_intent(job).kind == "independent":
+                    return False
+                try:
+                    consumers = current_build_consumers(session, build)
+                except BuildConsumerError as error:
+                    raise RecipeOperationConflict(f"{error.code}: {error}") from error
+                if consumers:
+                    if only_if_unneeded:
+                        return False
+                    raise RecipeOperationConflict(
+                        "build.shared_consumers: accepted preparation still needs this build; "
+                        "cancel its parent intent first"
+                    )
+            cancellation = request_build_cancellation(
+                job, actor=actor, request_id=request_id, reason=reason, now=_aware(now)
             )
+            # As with a failed replacement, cancellation keeps the last verified
+            # image. Explicit cache removal independently invalidates its bytes.
+            if build.state == "building":
+                build.state = (
+                    "succeeded"
+                    if job.payload.get("force_rebuild") is True
+                    else "failed"
+                )
+            build.error = cancellation.reason
+            build.updated_at = now
             if child.current_attempt == 0:
                 child.state = "cancelled"
                 child.updated_at = now

@@ -38,6 +38,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql.functions import FunctionElement
+from vonk_agent_protocol.inventory import MemoryPool
 
 
 class Base(DeclarativeBase):
@@ -714,6 +715,7 @@ class AgentEnrollmentGrant(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AgentEnrollment(Base):
@@ -1667,6 +1669,10 @@ class NodeInventorySnapshot(Base):
             name="ck_inventory_fabric",
         ),
         CheckConstraint(_lower_hex("evidence_digest", 64), name="ck_inventory_digest"),
+        CheckConstraint(
+            "memory_pool IN ('shared','separate') AND (memory_pool!='shared' OR gpu_count>0)",
+            name="ck_inventory_memory_pool",
+        ),
         Index("ix_inventory_node_observed", "node_id", "observed_at"),
     )
     id: Mapped[str] = mapped_column(
@@ -1688,6 +1694,7 @@ class NodeInventorySnapshot(Base):
     gpu_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     gpu_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    memory_pool: Mapped[MemoryPool] = mapped_column(String(16), nullable=False)
     fabric_address: Mapped[str | None] = mapped_column(String(45))
     fabric_bandwidth_mbps: Mapped[int | None] = mapped_column(BigInteger)
     nvidia_driver_version: Mapped[str] = mapped_column(
@@ -2468,8 +2475,14 @@ class ResourceReservation(Base):
             name="ck_reservations_kind",
         ),
         CheckConstraint(
-            "state IN ('active','released','expired') AND amount_bytes>=0",
+            "state IN ('active','promised','released','expired') AND amount_bytes>=0",
             name="ck_reservations_state",
+        ),
+        CheckConstraint(
+            "state!='promised' OR (kind IN "
+            "('port','unified-memory','host-memory','gpu-memory') "
+            "AND owner_kind='fleet-profile')",
+            name="ck_reservations_promised_owner",
         ),
         CheckConstraint(_lower_hex("plan_digest", 64), name="ck_reservations_digest"),
         Index("ix_reservations_node_state", "node_id", "state"),
@@ -2481,6 +2494,15 @@ class ResourceReservation(Base):
             unique=True,
             postgresql_where=text("state='active' AND kind='port'"),
             sqlite_where=text("state='active' AND kind='port'"),
+        ),
+        Index(
+            "uq_promised_node_port",
+            "node_id",
+            "kind",
+            "resource_key",
+            unique=True,
+            postgresql_where=text("state='promised' AND kind='port'"),
+            sqlite_where=text("state='promised' AND kind='port'"),
         ),
     )
     id: Mapped[str] = mapped_column(

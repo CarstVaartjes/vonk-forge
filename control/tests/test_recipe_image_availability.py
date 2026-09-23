@@ -31,6 +31,7 @@ from vonk_control.models import (
     RecipeBuild,
     RuntimeImageAuthorization,
 )
+from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
@@ -140,18 +141,19 @@ def _add_revision(
 def _add_head(
     session: Session, revision: CatalogDocumentRevision
 ) -> CatalogDocumentHead:
-    session.add(
-        CatalogDocument(
-            id=revision.document_id,
-            kind="recipe",
-            publisher=revision.publisher,
-            slug=revision.slug,
-            title="Recipe",
-            created_by="test",
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        )
+    document = CatalogDocument(
+        id=revision.document_id,
+        kind="recipe",
+        publisher=revision.publisher,
+        slug=revision.slug,
+        title="Recipe",
+        created_by="test",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
+    session.add(document)
+    session.flush([document])
+    session.flush([revision])
     head = CatalogDocumentHead(
         kind="recipe",
         publisher=revision.publisher,
@@ -231,6 +233,79 @@ def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions
     with pytest.raises(RecipeImageAvailabilityError) as missing:
         service.start_selector(qualified, actor="operator", request_id="missing-head")
     assert missing.value.code == "recipe_image.selector_missing"
+
+
+def test_selector_replay_keeps_original_revision_and_issuer(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    newer = recipe.model_copy(
+        update={
+            "metadata": recipe.metadata.model_copy(update={"description": "New head"})
+        }
+    )
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        original = _add_revision(session, "original-head", recipe)
+        _add_head(session, original)
+    calls = []
+
+    def authority(recipe_revision_id: str, *, force: bool = False):
+        calls.append(recipe_revision_id)
+        return (recipe if recipe_revision_id == "original-head" else newer), _runtime()
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        transport=Transport(),
+        authority=authority,
+        clock=lambda: datetime.now(UTC),
+    )
+    selector = f"{recipe.identity.publisher}/{recipe.identity.slug}"
+    accepted = service.start_selector(
+        selector, actor="operator", request_id="original-request", force=True
+    )
+    with sessions.begin() as session:
+        current = _add_revision(session, "new-head", newer)
+        head = session.scalar(select(CatalogDocumentHead))
+        assert head is not None
+        head.active_revision_id = current.id
+    recovered = service.start_selector(
+        selector, actor="operator", request_id="original-request", force=True
+    )
+    assert recovered.id == accepted.id
+    assert recovered.recipe_revision_id == "original-head"
+    assert calls == ["original-head"]
+    for actor, requested in [("other-operator", selector), ("operator", "missing")]:
+        with pytest.raises(RecipeImageAvailabilityError) as refused:
+            service.start_selector(
+                requested, actor=actor, request_id="original-request", force=True
+            )
+        assert refused.value.code == "recipe_image.request_key_reused"
+
+
+def test_replay_does_not_collapse_different_image_actions(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "image-actions", recipe)
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        transport=Transport(),
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: datetime.now(UTC),
+    )
+    service.start(
+        "image-actions", actor="operator", request_id="action", force_download=True
+    )
+    with pytest.raises(RecipeImageAvailabilityError) as refused:
+        service.start(
+            "image-actions", actor="operator", request_id="action", force_rebuild=True
+        )
+    assert refused.value.code == "recipe_image.request_key_reused"
 
 
 def test_force_download_skips_verified_cache_but_preserves_archive(
@@ -740,8 +815,17 @@ def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(
         assert session.scalars(select(RuntimeImageAuthorization)).all() == []
 
 
-def test_builder_capacity_wait_remains_durable_queue_after_automatic_limit(
+@pytest.mark.parametrize(
+    "wait_code",
+    [
+        "recipe_image.build_capacity_wait",
+        "build.consumer_busy",
+        "build.cancellation_pending",
+    ],
+)
+def test_builder_dependency_wait_remains_durable_queue_after_automatic_limit(
     tmp_path: Path,
+    wait_code: str,
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
@@ -752,8 +836,8 @@ def test_builder_capacity_wait_remains_durable_queue_after_automatic_limit(
 
     def builder(*_: object, **__: object) -> dict[str, object]:
         raise RecipeImageAvailabilityError(
-            "recipe_image.build_capacity_wait",
-            "all compatible builders are currently occupied",
+            wait_code,
+            "build dependency has not settled",
             retryable=True,
             retry_after_seconds=1,
             recovery_actions=("resume", "retry"),
@@ -775,7 +859,7 @@ def test_builder_capacity_wait_remains_durable_queue_after_automatic_limit(
     waiting = service.get(queued.id)
     assert waiting.state == "queued"
     assert waiting.failure is not None
-    assert waiting.failure["code"] == "recipe_image.build_capacity_wait"
+    assert waiting.failure["code"] == wait_code
 
     with sessions.begin() as session:
         operation = session.get(Job, queued.id)
@@ -789,7 +873,14 @@ def test_builder_capacity_wait_remains_durable_queue_after_automatic_limit(
     assert still_waiting.state == "queued"
     assert still_waiting.attempt == 2
     assert still_waiting.failure is not None
-    assert still_waiting.failure["code"] == "recipe_image.build_capacity_wait"
+    assert still_waiting.failure["code"] == wait_code
+    with sessions() as session:
+        operation = session.get(Job, queued.id)
+        assert operation is not None
+        retry = operation.payload["retry"]
+        assert isinstance(retry, dict) and retry["automatic_attempts"] == 0
+        assert operation.payload["claim_owner"] is None
+        assert operation.payload["claim_until"] is None
 
 
 def test_failure_without_step_keeps_structured_retry_fields(tmp_path: Path) -> None:
@@ -893,7 +984,7 @@ def test_claim_skips_backoff_and_renews_live_lease(tmp_path: Path) -> None:
         operation = session.get(Job, queued.id)
         assert operation is not None
         before = operation.payload["claim_until"]
-    assert service._renew_claim(queued.id, "worker-a") is True
+    assert service._renew_claim(claim[0]) is True
     with sessions.begin() as session:
         operation = session.get(Job, queued.id)
         assert operation is not None
@@ -1195,22 +1286,23 @@ def test_model_child_and_image_complete_through_one_sql_operation(
     queued = service.start(
         "revision-model-image", actor="operator", request_id="m" * 36
     )
-    assert queued.model_child is not None
-    assert queued.model_child["id"] == child.id
-    assert model_cache.start_calls == 1
-    second = service.start(
-        "revision-model-image", actor="operator-2", request_id="n" * 36
-    )
-    assert second.model_child is not None
-    assert second.model_child["id"] == child.id
-    assert model_cache.start_calls == 1
-    forced = service.start(
-        "revision-model-image", actor="operator-3", request_id="f" * 36, force=True
-    )
-    assert forced.model_child is not None
-    assert forced.model_child["id"] == child.id
-    assert model_cache.start_calls == 1
+    assert queued.model_child is None
+    assert model_cache.start_calls == 0
+    # Only the worker can issue children, after the parent is durable.
     assert service.run_pending() == 1
+    for actor, key, force in [
+        ("operator-2", "n" * 36, False),
+        ("operator-3", "f" * 36, True),
+    ]:
+        later = service.start(
+            "revision-model-image", actor=actor, request_id=key, force=force
+        )
+        assert later.model_child is None
+        assert service.run_pending() == 1
+        observed_child = service.get(later.id).model_child
+        assert observed_child is not None
+        assert observed_child["id"] == child.id
+    assert model_cache.start_calls == 1
     completed = service.get(queued.id)
     assert completed.state == "succeeded"
     assert completed.result is not None
@@ -1534,12 +1626,13 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
 
     resumed = service.retry(parent.id, actor="operator", request_id="j" * 36)
     assert resumed.model_child is not None
-    assert resumed.model_child["id"] == repaired.id
+    assert resumed.model_child["id"] == failed.id
+    assert model_cache.repair_calls == []
+    assert service.run_pending() == 1
     assert len(model_cache.repair_calls) == 1
     assert model_cache.repair_calls[0]["artifact_set_sha256"] == "c" * 64
     assert model_cache.repair_calls[0]["plan_digest"] == "e" * 64
 
-    assert service.run_pending() == 1
     completed = service.get(resumed.id)
     assert completed.state == "succeeded"
     assert completed.result is not None
@@ -1596,6 +1689,9 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
         clock=lambda: now,
     )
     payload = {
+        "request": RecipeRevisionIntent(
+            recipe_revision_id="revision-progress"
+        ).model_dump(mode="json"),
         "recipe_revision_id": "revision-progress",
         "recipe_content_sha256": content_sha256(recipe),
         "progress": {

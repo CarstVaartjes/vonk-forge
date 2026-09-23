@@ -239,6 +239,7 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
             gpu_count=0,
             artifact_store_read_only=False,
             capabilities=("recipe.build.v1",),
+            memory_pool="separate",
         )
     )
     builder = RecipeBuildService(sessions, bundles=bundles)

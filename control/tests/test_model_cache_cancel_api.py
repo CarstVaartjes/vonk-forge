@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
-from vonk_control.auth import MUTATION_ROLES, Actor
+from vonk_control.auth import Actor
 from vonk_control.model_cache import CacheOperationView
 from vonk_control.model_cache_api import install_model_operator_routes
 from vonk_control.model_cache_contract import (
@@ -20,10 +20,6 @@ REQUEST_KEY = "00000000-0000-4000-8000-000000000002"
 
 def _client(service, role="administrator"):
     app = FastAPI()
-    MUTATION_ROLES.setdefault(
-        ("POST", "/api/model/{selector}/remove"),
-        frozenset({"operator", "administrator"}),
-    )
 
     @app.middleware("http")
     async def request_id(request: Request, call_next):

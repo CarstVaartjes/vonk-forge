@@ -18,6 +18,7 @@ EXTENSION_OBJECTS = {
     "ArtifactJobCreate.properties.parameters": "Engine-defined parameter values",
     "ArtifactJobResultEvidence": "Engine-specific output measurements",
     "CompiledArtifactContract.properties.engine.anyOf.0": "Engine keyword arguments",
+    "EffectiveSettingsSelection.properties.knobs": "Canonical recipe engine tuning values",
     "FleetProfileAssignmentView.properties.model": "Current model projection",
     "FleetProfileAssignmentView.properties.recipe": "Current recipe projection",
     "FleetProfileAssignmentView.properties.resources": "Current resource projection",

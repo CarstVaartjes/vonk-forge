@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from vonk_control.auth import Actor
+from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityView,
 )
@@ -61,6 +62,7 @@ def test_optional_missing_image_progress_does_not_create_a_fake_child() -> None:
     view = RecipeImageAvailabilityView(
         id="operation",
         request_id="r" * 36,
+        request=RecipeRevisionIntent(recipe_revision_id="revision"),
         kind="recipe.image.availability.v2",
         state="queued",
         attempt=1,
@@ -84,6 +86,7 @@ def test_completed_result_projection_is_strict_and_exposes_both_children() -> No
     view = RecipeImageAvailabilityView(
         id="operation",
         request_id="r" * 36,
+        request=RecipeRevisionIntent(recipe_revision_id="revision"),
         kind="recipe.image.availability.v2",
         state="succeeded",
         attempt=1,
@@ -149,7 +152,7 @@ def test_openapi_uses_typed_recipe_models_and_conflict_schema() -> None:
     schema = app.openapi()
     assert schema["paths"]["/api/recipe/{selector}/download"]["post"]["requestBody"][
         "content"
-    ]["application/json"]["schema"]["$ref"].endswith("RecipeOperatorRequest")
+    ]["application/json"]["schema"]["$ref"].endswith("RecipeDownloadRequest")
     assert schema["paths"]["/api/recipe/{selector}/download"]["post"]["responses"][
         "202"
     ]["content"]["application/json"]["schema"]["$ref"].endswith(
@@ -177,6 +180,7 @@ def test_recipe_operation_observation_is_readable_by_any_authenticated_actor() -
     view = RecipeImageAvailabilityView(
         id="00000000-0000-4000-8000-000000000201",
         request_id="r" * 36,
+        request=RecipeRevisionIntent(recipe_revision_id="revision"),
         kind="recipe.image.availability.v2",
         state="queued",
         attempt=1,

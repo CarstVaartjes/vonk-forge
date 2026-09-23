@@ -168,6 +168,18 @@ class RequestValidationIssue(StrictModel):
 
 class RequestValidationProblem(BoundedErrorResponse):
     issues: list[RequestValidationIssue]
+    candidates: (
+        list[
+            Annotated[
+                str,
+                Field(
+                    pattern=r"^(?:spk_[0-9a-f]{32}|[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9][a-z0-9._-]{0,62})$",
+                    max_length=127,
+                ),
+            ]
+        ]
+        | None
+    ) = None
 
 
 class HealthzResponse(StrictModel):
@@ -820,7 +832,7 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
         if value is None:
             return None
         kind = _required_text(item["kind"], "operation kind is invalid")
-        if kind.startswith("model-cache."):
+        if kind.startswith("model-cache.") or kind == "recipe.cache.update.v2":
             return AvailabilityOperationFailure.model_validate(value)
         return OperationFailureEvidence.model_validate(value, strict=True)
     kind = _required_text(item["kind"], "operation kind is invalid")

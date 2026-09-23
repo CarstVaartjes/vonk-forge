@@ -5,11 +5,45 @@ from __future__ import annotations
 import argparse
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, cast
 
 OutcomeContext = Literal["read", "preview", "mutation", "await"]
+
+
+@dataclass
+class EnrollmentDeliveryError(Exception):
+    document: Mapping[str, object]
+    interrupted: bool = False
+
+
+@dataclass
+class Submission:
+    """What this process knows about acceptance, not remote execution state."""
+
+    request_key: str
+    path: str
+    lookup_path: str
+    timeout_seconds: float
+    action: str = "download"
+    acceptance: Literal["not_submitted", "unknown", "accepted", "refused"] = (
+        "not_submitted"
+    )
+    operation_id: str | None = None
+    failures: list[dict[str, object]] = field(default_factory=list)
+
+    def document(self) -> dict[str, object]:
+        return {
+            "request_key": self.request_key,
+            "path": self.path,
+            "lookup_path": self.lookup_path,
+            "timeout_seconds": self.timeout_seconds,
+            "action": self.action,
+            "acceptance": self.acceptance,
+            **({"operation_id": self.operation_id} if self.operation_id else {}),
+            "failures": self.failures,
+        }
 
 
 def operation_state(result: Mapping[str, object]) -> str:

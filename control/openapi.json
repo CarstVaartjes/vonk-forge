@@ -2374,6 +2374,139 @@
         "title": "DistributionObject",
         "type": "object"
       },
+      "EffectiveParallelism": {
+        "additionalProperties": false,
+        "description": "Derived from topology; never an editable settings field.",
+        "properties": {
+          "backend": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Backend",
+            "type": "string"
+          },
+          "data": {
+            "maximum": 31.0,
+            "minimum": 1.0,
+            "title": "Data",
+            "type": "integer"
+          },
+          "pipeline": {
+            "maximum": 31.0,
+            "minimum": 1.0,
+            "title": "Pipeline",
+            "type": "integer"
+          },
+          "tensor": {
+            "maximum": 31.0,
+            "minimum": 1.0,
+            "title": "Tensor",
+            "type": "integer"
+          },
+          "world_size": {
+            "maximum": 31.0,
+            "minimum": 1.0,
+            "title": "World Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "world_size",
+          "tensor",
+          "pipeline",
+          "data",
+          "backend"
+        ],
+        "title": "EffectiveParallelism",
+        "type": "object"
+      },
+      "EffectiveSettingsSelection": {
+        "additionalProperties": false,
+        "description": "Canonical effective settings bound into the Run/Switch plan digest.",
+        "properties": {
+          "change_effects": {
+            "additionalProperties": {
+              "enum": [
+                "none",
+                "restart",
+                "reprepare",
+                "rebuild",
+                "reinstall"
+              ],
+              "type": "string"
+            },
+            "maxProperties": 64,
+            "title": "Change Effects",
+            "type": "object"
+          },
+          "concurrency": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency"
+          },
+          "context_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Tokens"
+          },
+          "identity_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Identity Sha256",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "generation",
+              "embedding",
+              "job"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "knobs": {
+            "additionalProperties": true,
+            "maxProperties": 64,
+            "title": "Knobs",
+            "type": "object"
+          },
+          "max_batch_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Batch Tokens"
+          },
+          "parallelism": {
+            "$ref": "#/components/schemas/EffectiveParallelism"
+          }
+        },
+        "required": [
+          "kind",
+          "parallelism",
+          "change_effects",
+          "identity_sha256"
+        ],
+        "title": "EffectiveSettingsSelection",
+        "type": "object"
+      },
       "EndpointResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2473,8 +2606,7 @@
             "type": "string"
           },
           "id": {
-            "maxLength": 128,
-            "minLength": 1,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Id",
             "type": "string"
           },
@@ -2520,6 +2652,104 @@
           "installer_url"
         ],
         "title": "EnrollmentGrantResponse",
+        "type": "object"
+      },
+      "EnrollmentGrantStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "consumed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumed At"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "purpose": {
+            "enum": [
+              "new-node",
+              "re-enroll"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "expired",
+              "consumed",
+              "revoked"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "purpose",
+          "node_id",
+          "display_name",
+          "expires_at",
+          "consumed_at",
+          "revoked_at"
+        ],
+        "title": "EnrollmentGrantStatus",
         "type": "object"
       },
       "EnumParameter": {
@@ -3220,6 +3450,11 @@
             "title": "Name",
             "type": "string"
           },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
           "ttl_seconds": {
             "default": 900,
             "maximum": 900.0,
@@ -3229,7 +3464,8 @@
           }
         },
         "required": [
-          "name"
+          "name",
+          "request_key"
         ],
         "title": "FleetEnrollRequest",
         "type": "object"
@@ -3633,6 +3869,89 @@
         "title": "FleetNodeIdentity",
         "type": "object"
       },
+      "FleetProfileAdmissionDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z0-9](?:[a-z0-9_.-]{0,126}[a-z0-9])?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alias"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "assignment_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "maxItems": 128,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "effective_settings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveSettingsSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requirements": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileResourceRequirement"
+            },
+            "maxItems": 32,
+            "title": "Requirements",
+            "type": "array"
+          },
+          "stop_before_prepare": {
+            "title": "Stop Before Prepare",
+            "type": "boolean"
+          },
+          "stop_before_transfer": {
+            "title": "Stop Before Transfer",
+            "type": "boolean"
+          },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/StopImpact"
+            },
+            "maxItems": 128,
+            "title": "Stops",
+            "type": "array"
+          }
+        },
+        "required": [
+          "assignment_id",
+          "alias",
+          "allowed",
+          "blockers",
+          "requirements",
+          "effective_settings",
+          "stops",
+          "stop_before_prepare",
+          "stop_before_transfer"
+        ],
+        "title": "FleetProfileAdmissionDecision",
+        "type": "object"
+      },
       "FleetProfileApplicationProgress": {
         "additionalProperties": false,
         "description": "Typed progress tree persisted with every profile application.",
@@ -3835,6 +4154,11 @@
           "progress": {
             "$ref": "#/components/schemas/FleetProfileApplicationProgress"
           },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
           "result": {
             "anyOf": [
               {
@@ -3901,6 +4225,7 @@
         },
         "required": [
           "id",
+          "request_key",
           "profile_id",
           "profile_digest",
           "plan_digest",
@@ -4002,6 +4327,25 @@
           "recipe_title"
         ],
         "title": "FleetProfileAssignment",
+        "type": "object"
+      },
+      "FleetProfileAssignmentAssessment": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment": {
+            "$ref": "#/components/schemas/RunSwitchAssessment"
+          },
+          "assignment_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Assignment Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assignment_id",
+          "assessment"
+        ],
+        "title": "FleetProfileAssignmentAssessment",
         "type": "object"
       },
       "FleetProfileAssignmentInput": {
@@ -4365,6 +4709,204 @@
         "title": "FleetProfileChildProgress",
         "type": "object"
       },
+      "FleetProfileCompatibilityDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Sha256"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/CompatibilityIdentity"
+          },
+          "kind": {
+            "enum": [
+              "engine-generation",
+              "jit",
+              "tuning"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "stage": {
+            "enum": [
+              "controller-prepare",
+              "target-prepare"
+            ],
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "stage",
+          "compatibility",
+          "node_ids",
+          "artifact_sha256",
+          "ready"
+        ],
+        "title": "FleetProfileCompatibilityDecision",
+        "type": "object"
+      },
+      "FleetProfileDefinition": {
+        "additionalProperties": false,
+        "description": "Saved authoring intent, independent of execution and cache projections.",
+        "properties": {
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileAssignmentInput"
+            },
+            "maxItems": 64,
+            "title": "Assignments",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Description",
+            "type": "string"
+          },
+          "favorite": {
+            "default": false,
+            "title": "Favorite",
+            "type": "boolean"
+          },
+          "installation_policy": {
+            "default": "keep-cached",
+            "enum": [
+              "keep-cached",
+              "exact"
+            ],
+            "title": "Installation Policy",
+            "type": "string"
+          },
+          "labels": {
+            "maxProperties": 16,
+            "patternProperties": {
+              "^[a-z0-9](?:[a-z0-9_.-]{0,61}[a-z0-9])?$": {
+                "maxLength": 63,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 63,
+              "minLength": 1
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "name": {
+            "default": "Default",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "FleetProfileDefinition",
+        "type": "object"
+      },
+      "FleetProfileDefinitionView": {
+        "additionalProperties": false,
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/FleetProfileDefinition"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "number": {
+            "minimum": 1.0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "revision",
+          "definition"
+        ],
+        "title": "FleetProfileDefinitionView",
+        "type": "object"
+      },
+      "FleetProfileEffects": {
+        "additionalProperties": false,
+        "description": "Identified live effects, including complete distributed membership.",
+        "properties": {
+          "installations": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileInstallationEffect"
+            },
+            "title": "Installations",
+            "type": "array"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileRunEffect"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "superseded": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfilePendingEffect"
+            },
+            "title": "Superseded",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "installations",
+          "superseded"
+        ],
+        "title": "FleetProfileEffects",
+        "type": "object"
+      },
       "FleetProfileInput": {
         "additionalProperties": false,
         "properties": {
@@ -4383,16 +4925,10 @@
             "type": "string"
           },
           "expected_revision": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expected Revision"
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
           },
           "favorite": {
             "default": false,
@@ -4435,6 +4971,41 @@
         "title": "FleetProfileInput",
         "type": "object"
       },
+      "FleetProfileInstallationEffect": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "keep",
+              "remove"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "installation_id",
+          "node_ids",
+          "action"
+        ],
+        "title": "FleetProfileInstallationEffect",
+        "type": "object"
+      },
       "FleetProfileIntendedConfiguration": {
         "additionalProperties": false,
         "description": "Immutable desired configuration captured when execution is admitted.",
@@ -4460,12 +5031,24 @@
             "title": "Profile Digest",
             "type": "string"
           },
+          "reviewed_application_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Reviewed Application Id",
+            "type": "string"
+          },
+          "reviewed_plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Reviewed Plan Digest",
+            "type": "string"
+          },
           "scope": {
             "$ref": "#/components/schemas/FleetProfileScope"
           }
         },
         "required": [
           "profile_digest",
+          "reviewed_plan_digest",
+          "reviewed_application_id",
           "installation_policy",
           "scope",
           "assignments"
@@ -4506,24 +5089,21 @@
       "FleetProfileLoadRequest": {
         "additionalProperties": false,
         "properties": {
-          "dry_run": {
-            "default": false,
-            "title": "Dry Run",
-            "type": "boolean"
+          "expected_plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Plan Digest",
+            "type": "string"
           },
           "request_key": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Request Key"
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
           }
         },
+        "required": [
+          "expected_plan_digest",
+          "request_key"
+        ],
         "title": "FleetProfileLoadRequest",
         "type": "object"
       },
@@ -4559,6 +5139,41 @@
           "role"
         ],
         "title": "FleetProfileNode",
+        "type": "object"
+      },
+      "FleetProfilePendingEffect": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "job",
+              "profile-application"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "node_ids"
+        ],
+        "title": "FleetProfilePendingEffect",
         "type": "object"
       },
       "FleetProfilePlanStep": {
@@ -4671,12 +5286,105 @@
         "title": "FleetProfilePlanSummary",
         "type": "object"
       },
+      "FleetProfilePreparationDecision": {
+        "additionalProperties": false,
+        "description": "Exact assets and reuse decisions; byte counters are observations only.",
+        "properties": {
+          "assignment_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/PreparationReason"
+            },
+            "maxItems": 128,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "exceptions": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileCompatibilityDecision"
+            },
+            "maxItems": 64,
+            "title": "Exceptions",
+            "type": "array"
+          },
+          "image_controller_ready": {
+            "title": "Image Controller Ready",
+            "type": "boolean"
+          },
+          "image_reuse_node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Image Reuse Node Ids",
+            "type": "array"
+          },
+          "model": {
+            "$ref": "#/components/schemas/ModelArtifactIdentity"
+          },
+          "model_complete": {
+            "title": "Model Complete",
+            "type": "boolean"
+          },
+          "model_controller_ready": {
+            "title": "Model Controller Ready",
+            "type": "boolean"
+          },
+          "model_reuse_node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Model Reuse Node Ids",
+            "type": "array"
+          },
+          "runtime_image": {
+            "$ref": "#/components/schemas/RuntimeImageIdentity"
+          }
+        },
+        "required": [
+          "assignment_id",
+          "model",
+          "runtime_image",
+          "model_complete",
+          "model_controller_ready",
+          "image_controller_ready",
+          "model_reuse_node_ids",
+          "image_reuse_node_ids",
+          "exceptions",
+          "blockers"
+        ],
+        "title": "FleetProfilePreparationDecision",
+        "type": "object"
+      },
       "FleetProfilePreview": {
         "additionalProperties": false,
         "properties": {
+          "admission_decisions": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileAdmissionDecision"
+            },
+            "maxItems": 64,
+            "title": "Admission Decisions",
+            "type": "array"
+          },
           "allowed": {
             "title": "Allowed",
             "type": "boolean"
+          },
+          "assessments": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileAssignmentAssessment"
+            },
+            "maxItems": 64,
+            "title": "Assessments",
+            "type": "array"
           },
           "assignments": {
             "items": {
@@ -4685,6 +5393,9 @@
             "maxItems": 64,
             "title": "Assignments",
             "type": "array"
+          },
+          "effects": {
+            "$ref": "#/components/schemas/FleetProfileEffects"
           },
           "generated_at": {
             "format": "date-time",
@@ -4696,6 +5407,14 @@
             "title": "Plan Digest",
             "type": "string"
           },
+          "preparation_decisions": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfilePreparationDecision"
+            },
+            "maxItems": 64,
+            "title": "Preparation Decisions",
+            "type": "array"
+          },
           "preparations": {
             "items": {
               "$ref": "#/components/schemas/FleetProfileAssignmentPreparation"
@@ -4703,6 +5422,16 @@
             "maxItems": 64,
             "title": "Preparations",
             "type": "array"
+          },
+          "profile_definition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetProfileDefinition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "profile_digest": {
             "pattern": "^[0-9a-f]{64}$",
@@ -4720,12 +5449,32 @@
             "title": "Profile Name",
             "type": "string"
           },
+          "profile_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Revision"
+          },
           "reasons": {
             "items": {
               "$ref": "#/components/schemas/FleetProfileReason"
             },
             "maxItems": 128,
             "title": "Reasons",
+            "type": "array"
+          },
+          "resolved_assignments": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileAssignment"
+            },
+            "maxItems": 64,
+            "title": "Resolved Assignments",
             "type": "array"
           },
           "schema_version": {
@@ -4753,13 +5502,20 @@
           "profile_id",
           "profile_name",
           "profile_digest",
-          "generated_at",
+          "profile_revision",
+          "profile_definition",
           "allowed",
           "scope",
           "summary",
           "assignments",
+          "resolved_assignments",
+          "admission_decisions",
+          "preparation_decisions",
+          "effects",
           "steps",
           "reasons",
+          "generated_at",
+          "assessments",
           "plan_digest"
         ],
         "title": "FleetProfilePreview",
@@ -4796,6 +5552,169 @@
           "severity"
         ],
         "title": "FleetProfileReason",
+        "type": "object"
+      },
+      "FleetProfileResourceRequirement": {
+        "additionalProperties": false,
+        "description": "Stable demand and eligibility, separate from observed free capacity.",
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "disk_required_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Required Bytes"
+          },
+          "memory_floor_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Floor Bytes"
+          },
+          "memory_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unified",
+                  "host",
+                  "accelerator"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Kind"
+          },
+          "memory_pool": {
+            "anyOf": [
+              {
+                "enum": [
+                  "shared",
+                  "separate"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Pool"
+          },
+          "memory_required_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Required Bytes"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "ports_required": {
+            "items": {
+              "maximum": 65535.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "title": "Ports Required",
+            "type": "array"
+          },
+          "resource_demand": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceDemandEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "node_id",
+          "allowed",
+          "ports_required",
+          "disk_required_bytes",
+          "memory_required_bytes",
+          "memory_kind",
+          "memory_pool",
+          "memory_floor_bytes",
+          "resource_demand"
+        ],
+        "title": "FleetProfileResourceRequirement",
+        "type": "object"
+      },
+      "FleetProfileRunEffect": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "keep",
+              "stop"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "alias": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9](?:[a-z0-9_.-]{0,126}[a-z0-9])?$",
+            "title": "Alias",
+            "type": "string"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "installation_id",
+          "alias",
+          "node_ids",
+          "action"
+        ],
+        "title": "FleetProfileRunEffect",
         "type": "object"
       },
       "FleetProfileScope": {
@@ -4923,6 +5842,7 @@
             "anyOf": [
               {
                 "enum": [
+                  "install",
                   "run",
                   "stop",
                   "cleanup"
@@ -5135,6 +6055,7 @@
         "properties": {
           "kind": {
             "enum": [
+              "install",
               "run",
               "stop",
               "cleanup"
@@ -5186,6 +6107,7 @@
           },
           "kind": {
             "enum": [
+              "install",
               "run",
               "stop",
               "cleanup"
@@ -5241,6 +6163,9 @@
             "minLength": 1,
             "title": "Created By",
             "type": "string"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/FleetProfileDefinition"
           },
           "description": {
             "maxLength": 1000,
@@ -5362,6 +6287,7 @@
           "installation_policy",
           "labels",
           "favorite",
+          "definition",
           "assignments",
           "profile_digest",
           "created_by",
@@ -5369,6 +6295,21 @@
           "updated_at"
         ],
         "title": "FleetProfileView",
+        "type": "object"
+      },
+      "FleetReenrollRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_key"
+        ],
+        "title": "FleetReenrollRequest",
         "type": "object"
       },
       "FleetRenameRequest": {
@@ -6690,6 +7631,17 @@
             "title": "Family",
             "type": "array"
           },
+          "fits_fleet": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fits Fleet"
+          },
           "local_only": {
             "anyOf": [
               {
@@ -6730,6 +7682,17 @@
             "maxItems": 64,
             "title": "Quantization",
             "type": "array"
+          },
+          "ready": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready"
           },
           "search": {
             "anyOf": [
@@ -7129,6 +8092,16 @@
               }
             ],
             "title": "Alignment"
+          },
+          "assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeReadiness"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "document": {
             "$ref": "#/components/schemas/RecipeDefinition"
@@ -7684,6 +8657,62 @@
         "title": "ModelAccess",
         "type": "object"
       },
+      "ModelArtifactIdentity": {
+        "additionalProperties": false,
+        "description": "Exact model set, independent of transfer progress and verification time.",
+        "properties": {
+          "artifact_count": {
+            "maximum": 1024.0,
+            "minimum": 1.0,
+            "title": "Artifact Count",
+            "type": "integer"
+          },
+          "artifact_set_bytes": {
+            "minimum": 1.0,
+            "title": "Artifact Set Bytes",
+            "type": "integer"
+          },
+          "artifact_set_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Artifact Set Sha256",
+            "type": "string"
+          },
+          "dependency_model_content_sha256": {
+            "items": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "maxItems": 128,
+            "title": "Dependency Model Content Sha256",
+            "type": "array"
+          },
+          "model_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Content Sha256",
+            "type": "string"
+          },
+          "recipe_revision_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Revision Sha256"
+          }
+        },
+        "required": [
+          "artifact_set_sha256",
+          "model_content_sha256",
+          "artifact_count",
+          "artifact_set_bytes"
+        ],
+        "title": "ModelArtifactIdentity",
+        "type": "object"
+      },
       "ModelArtifactPreparation": {
         "additionalProperties": false,
         "description": "Complete exact model set, including auxiliary and dependency files.",
@@ -7804,11 +8833,6 @@
             "default": 2,
             "title": "Schema Version",
             "type": "integer"
-          },
-          "with_model": {
-            "default": false,
-            "title": "With Model",
-            "type": "boolean"
           }
         },
         "required": [
@@ -10688,6 +11712,16 @@
             ],
             "title": "Alignment"
           },
+          "assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeReadiness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "document": {
             "$ref": "#/components/schemas/RecipeDefinition"
           },
@@ -10810,6 +11844,27 @@
           "safety_margin_bytes"
         ],
         "title": "RecipeDiskResources",
+        "type": "object"
+      },
+      "RecipeDownloadRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_key"
+        ],
+        "title": "RecipeDownloadRequest",
         "type": "object"
       },
       "RecipeEmbeddingSettings": {
@@ -11338,6 +12393,28 @@
             "title": "Recipe Revision Id",
             "type": "string"
           },
+          "request": {
+            "discriminator": {
+              "mapping": {
+                "retry": "#/components/schemas/RecipeRetryIntent",
+                "revision": "#/components/schemas/RecipeRevisionIntent",
+                "selector": "#/components/schemas/RecipeSelectorIntent"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeSelectorIntent"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeRevisionIntent"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeRetryIntent"
+              }
+            ],
+            "title": "Request"
+          },
           "request_id": {
             "maxLength": 128,
             "minLength": 1,
@@ -11380,6 +12457,7 @@
         "required": [
           "id",
           "request_id",
+          "request",
           "kind",
           "state",
           "attempt",
@@ -12786,6 +13864,79 @@
         "title": "RecipeProvenance",
         "type": "object"
       },
+      "RecipeReadiness": {
+        "additionalProperties": false,
+        "properties": {
+          "cache": {
+            "$ref": "#/components/schemas/RecipeReadinessCheck"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SparkFit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fleet_fit": {
+            "$ref": "#/components/schemas/RecipeReadinessCheck"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SparkGroup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/RecipeReadinessCheck"
+          }
+        },
+        "required": [
+          "observed_at",
+          "fleet_fit",
+          "cache",
+          "readiness"
+        ],
+        "title": "RecipeReadiness",
+        "type": "object"
+      },
+      "RecipeReadinessCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "blocked",
+              "unavailable"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "RecipeReadinessCheck",
+        "type": "object"
+      },
       "RecipeRelease": {
         "additionalProperties": false,
         "properties": {
@@ -12928,6 +14079,101 @@
           "changes"
         ],
         "title": "RecipeReleaseHistoryEntry",
+        "type": "object"
+      },
+      "RecipeRetryIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "retry",
+            "default": "retry",
+            "title": "Kind",
+            "type": "string"
+          },
+          "operation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id"
+        ],
+        "title": "RecipeRetryIntent",
+        "type": "object"
+      },
+      "RecipeRevisionIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "build_input_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Input Sha256"
+          },
+          "effective_execution_key": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Execution Key"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "force_download": {
+            "default": false,
+            "title": "Force Download",
+            "type": "boolean"
+          },
+          "force_rebuild": {
+            "default": false,
+            "title": "Force Rebuild",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "revision",
+            "default": "revision",
+            "title": "Kind",
+            "type": "string"
+          },
+          "model_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Digest"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_revision_id"
+        ],
+        "title": "RecipeRevisionIntent",
         "type": "object"
       },
       "RecipeRoleResources": {
@@ -13187,6 +14433,33 @@
         "title": "RecipeRuntimeEnvironment",
         "type": "object"
       },
+      "RecipeSelectorIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "selector",
+            "default": "selector",
+            "title": "Kind",
+            "type": "string"
+          },
+          "selector": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "title": "RecipeSelectorIntent",
+        "type": "object"
+      },
       "RecipeServingValidation": {
         "additionalProperties": false,
         "properties": {
@@ -13363,6 +14636,134 @@
         "title": "RecipeTopologyRole",
         "type": "object"
       },
+      "RecipeUpdateChild": {
+        "description": "Frozen identity plus a rebuildable observation; child jobs own execution.",
+        "properties": {
+          "effective_execution_key": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Effective Execution Key",
+            "type": "string"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeUpdateFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "recipe_name": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Recipe Name",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "state": {
+            "default": "pending",
+            "enum": [
+              "pending",
+              "queued",
+              "running",
+              "succeeded",
+              "partial",
+              "failed",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_revision_id",
+          "recipe_content_sha256",
+          "effective_execution_key",
+          "recipe_name",
+          "request_key"
+        ],
+        "title": "RecipeUpdateChild",
+        "type": "object"
+      },
+      "RecipeUpdateFailure": {
+        "description": "Bounded admission failure or observation of the referenced child's failure.",
+        "properties": {
+          "code": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,95}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "title": "Detail",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "retryable"
+        ],
+        "title": "RecipeUpdateFailure",
+        "type": "object"
+      },
       "RecipeUpdateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -13383,19 +14784,13 @@
             "type": "integer"
           },
           "selectors": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Selectors"
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Selectors",
+            "type": "array"
           }
         },
         "required": [
@@ -13405,7 +14800,6 @@
         "type": "object"
       },
       "RecipeUpdateResponse": {
-        "additionalProperties": false,
         "properties": {
           "action": {
             "const": "update",
@@ -13413,25 +14807,151 @@
             "title": "Action",
             "type": "string"
           },
+          "attempt": {
+            "minimum": 0.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeUpdateChild"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "recipe.cache.update.v2",
+            "default": "recipe.cache.update.v2",
+            "title": "Kind",
+            "type": "string"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/OperationProgress"
+          },
+          "request": {
+            "$ref": "#/components/schemas/RecipeUpdateScope"
+          },
+          "request_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "resume_condition": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume Condition"
+          },
           "schema_version": {
             "const": 2,
             "default": 2,
             "title": "Schema Version",
             "type": "integer"
           },
-          "updates": {
-            "items": {
-              "$ref": "#/components/schemas/RecipeImageAvailabilityResponse"
-            },
-            "maxItems": 100,
-            "title": "Updates",
-            "type": "array"
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "partial",
+              "failed",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "wait_owner": {
+            "anyOf": [
+              {
+                "const": "recipe-image-availability",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait Owner"
+          },
+          "waiting_on": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting On"
           }
         },
         "required": [
-          "updates"
+          "id",
+          "request_id",
+          "request",
+          "state",
+          "attempt",
+          "children",
+          "progress",
+          "created_at",
+          "updated_at"
         ],
         "title": "RecipeUpdateResponse",
+        "type": "object"
+      },
+      "RecipeUpdateScope": {
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "default": false,
+            "title": "All",
+            "type": "boolean"
+          },
+          "selectors": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Selectors",
+            "type": "array"
+          }
+        },
+        "title": "RecipeUpdateScope",
         "type": "object"
       },
       "RecipeValidation": {
@@ -13569,6 +15089,22 @@
       "RequestValidationProblem": {
         "additionalProperties": false,
         "properties": {
+          "candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 127,
+                  "pattern": "^(?:spk_[0-9a-f]{32}|[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9][a-z0-9._-]{0,62})$",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidates"
+          },
           "context": {
             "anyOf": [
               {
@@ -13598,6 +15134,112 @@
           "issues"
         ],
         "title": "RequestValidationProblem",
+        "type": "object"
+      },
+      "ResourceDemandEvidence": {
+        "additionalProperties": false,
+        "description": "The evidence terms used for one selected rank's memory fit.",
+        "properties": {
+          "batch_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Bytes"
+          },
+          "concurrency_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency Bytes"
+          },
+          "context_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Bytes"
+          },
+          "evidence_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Digest"
+          },
+          "evidence_state": {
+            "enum": [
+              "declared",
+              "measured",
+              "fresh",
+              "stale",
+              "unknown"
+            ],
+            "title": "Evidence State",
+            "type": "string"
+          },
+          "runtime_overhead_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Overhead Bytes"
+          },
+          "total_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Bytes"
+          },
+          "weights_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weights Bytes"
+          }
+        },
+        "required": [
+          "evidence_state"
+        ],
+        "title": "ResourceDemandEvidence",
         "type": "object"
       },
       "RolloutPreparation": {
@@ -13960,6 +15602,108 @@
           "healthy"
         ],
         "title": "RunPresence",
+        "type": "object"
+      },
+      "RunSwitchAssessment": {
+        "additionalProperties": false,
+        "description": "Planner-owned admission and observations shared by operator reviews.",
+        "properties": {
+          "alias": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alias"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "maxItems": 128,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "effective_settings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveSettingsSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fit_after_stop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SparkFit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fit_current": {
+            "$ref": "#/components/schemas/SparkFit"
+          },
+          "preparation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RolloutPreparation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stop_before_prepare": {
+            "default": false,
+            "title": "Stop Before Prepare",
+            "type": "boolean"
+          },
+          "stop_before_transfer": {
+            "default": false,
+            "title": "Stop Before Transfer",
+            "type": "boolean"
+          },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/StopImpact"
+            },
+            "maxItems": 128,
+            "title": "Stops",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "maxItems": 128,
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "alias",
+          "fit_current",
+          "fit_after_stop",
+          "stops",
+          "allowed",
+          "blockers",
+          "warnings"
+        ],
+        "title": "RunSwitchAssessment",
         "type": "object"
       },
       "RunSwitchCachedTransferResult": {
@@ -14458,6 +16202,81 @@
         "title": "RunSwitchFinalVerifyResult",
         "type": "object"
       },
+      "RunSwitchInstallationVerifyResult": {
+        "additionalProperties": false,
+        "description": "Exact installed membership observed without a serving workload.",
+        "properties": {
+          "active_runs": {
+            "minimum": 0.0,
+            "title": "Active Runs",
+            "type": "integer"
+          },
+          "final_verified": {
+            "title": "Final Verified",
+            "type": "boolean"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "installation_state": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "Installation State",
+            "type": "string"
+          },
+          "phase": {
+            "const": "final_verify",
+            "title": "Phase",
+            "type": "string"
+          },
+          "ranks": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchRankReceipt"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Ranks",
+            "type": "array"
+          },
+          "subphase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "container-build",
+                  "model-download",
+                  "runtime-image",
+                  "runtime-plan",
+                  "target-copy",
+                  "runtime-install"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subphase"
+          },
+          "unwithdrawn_routes": {
+            "minimum": 0.0,
+            "title": "Unwithdrawn Routes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "phase",
+          "final_verified",
+          "installation_id",
+          "installation_state",
+          "active_runs",
+          "unwithdrawn_routes",
+          "ranks"
+        ],
+        "title": "RunSwitchInstallationVerifyResult",
+        "type": "object"
+      },
       "RunSwitchMemberReceipt": {
         "additionalProperties": false,
         "description": "Durable member projection emitted by a child distribution operation.",
@@ -14835,6 +16654,9 @@
                 "$ref": "#/components/schemas/RunSwitchCleanupVerifyResult"
               },
               {
+                "$ref": "#/components/schemas/RunSwitchInstallationVerifyResult"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -14995,6 +16817,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/RunSwitchCleanupVerifyResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchInstallationVerifyResult"
                 }
               ]
             },
@@ -15010,6 +16835,18 @@
                 "type": "null"
               }
             ]
+          },
+          "profile_application_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Application Id"
           },
           "retry_attempt": {
             "anyOf": [
@@ -15188,6 +17025,69 @@
           "state"
         ],
         "title": "RunSwitchRankReceipt",
+        "type": "object"
+      },
+      "RunSwitchReason": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 96,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "scope": {
+            "enum": [
+              "model",
+              "recipe",
+              "mapping",
+              "group",
+              "node",
+              "artifact",
+              "freshness",
+              "conflict",
+              "operation"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "blocker",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "severity",
+          "scope"
+        ],
+        "title": "RunSwitchReason",
         "type": "object"
       },
       "RunSwitchRuntimeImageResult": {
@@ -15733,6 +17633,60 @@
           }
         ]
       },
+      "RuntimeImageIdentity": {
+        "additionalProperties": false,
+        "description": "Executable OCI identity, independent of its transfer observations.",
+        "properties": {
+          "architecture": {
+            "const": "linux-arm64",
+            "title": "Architecture",
+            "type": "string"
+          },
+          "build_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Id"
+          },
+          "image_bytes": {
+            "minimum": 0.0,
+            "title": "Image Bytes",
+            "type": "integer"
+          },
+          "image_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "oci_layout_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Oci Layout Sha256",
+            "type": "string"
+          },
+          "runtime_interface": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Runtime Interface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_digest",
+          "oci_layout_sha256",
+          "image_bytes",
+          "architecture",
+          "runtime_interface"
+        ],
+        "title": "RuntimeImageIdentity",
+        "type": "object"
+      },
       "RuntimeImagePreparation": {
         "additionalProperties": false,
         "description": "Exact executable OCI image kept separate from model payloads.",
@@ -16121,6 +18075,342 @@
           "files"
         ],
         "title": "SourceBundleResponse",
+        "type": "object"
+      },
+      "SparkFit": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "maxItems": 64,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SparkFitNode"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Nodes",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "maxItems": 64,
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "allowed",
+          "nodes"
+        ],
+        "title": "SparkFit",
+        "type": "object"
+      },
+      "SparkFitNode": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "maxItems": 32,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "disk_free_after_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Free After Bytes"
+          },
+          "disk_free_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Free Bytes"
+          },
+          "disk_required_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Required Bytes"
+          },
+          "memory_available_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Available Bytes"
+          },
+          "memory_floor_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Floor Bytes"
+          },
+          "memory_free_after_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Free After Bytes"
+          },
+          "memory_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unified",
+                  "host",
+                  "accelerator"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Kind"
+          },
+          "memory_pool": {
+            "anyOf": [
+              {
+                "enum": [
+                  "shared",
+                  "separate"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Pool"
+          },
+          "memory_required_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Required Bytes"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "ports_required": {
+            "items": {
+              "maximum": 65535.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "title": "Ports Required",
+            "type": "array"
+          },
+          "rank": {
+            "maximum": 31.0,
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "resource_demand": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceDemandEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "maxItems": 32,
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "allowed",
+          "ports_required"
+        ],
+        "title": "SparkFitNode",
+        "type": "object"
+      },
+      "SparkGroup": {
+        "additionalProperties": false,
+        "description": "A complete, rank-labelled Spark group selected by the operator.",
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SparkGroupNode"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes"
+        ],
+        "title": "SparkGroup",
+        "type": "object"
+      },
+      "SparkGroupNode": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint_owner": {
+            "default": false,
+            "title": "Endpoint Owner",
+            "type": "boolean"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "rank": {
+            "maximum": 31.0,
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role"
+        ],
+        "title": "SparkGroupNode",
+        "type": "object"
+      },
+      "StopImpact": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+            "title": "Alias",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "reserved_bytes": {
+            "minimum": 0.0,
+            "title": "Reserved Bytes",
+            "type": "integer"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Run Plan Digest",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_plan_digest",
+          "alias",
+          "state",
+          "node_ids",
+          "reserved_bytes",
+          "plan_digest"
+        ],
+        "title": "StopImpact",
         "type": "object"
       },
       "StringParameter": {
@@ -19784,6 +22074,16 @@
             },
             "description": "Forbidden"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -19814,6 +22114,193 @@
           }
         ],
         "summary": "Fleet Enroll"
+      }
+    },
+    "/api/fleet/enrollments/{grant_id}": {
+      "get": {
+        "operationId": "getFleetEnrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "grant_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Grant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentGrantStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Get Enrollment"
+      }
+    },
+    "/api/fleet/enrollments/{grant_id}/revoke": {
+      "post": {
+        "operationId": "revokeFleetEnrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "grant_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Grant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentGrantStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Revoke Enrollment",
+        "x-vonk-request-body": "none"
       }
     },
     "/api/fleet/stream": {
@@ -20860,6 +23347,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetReenrollRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -20901,6 +23398,16 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -20930,8 +23437,7 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Fleet Reenroll",
-        "x-vonk-request-body": "none"
+        "summary": "Fleet Reenroll"
       }
     },
     "/api/fleet/{selector}/remove": {
@@ -22104,6 +24610,94 @@
         "summary": "Get Operation"
       }
     },
+    "/api/model/requests/{request_key}": {
+      "get": {
+        "operationId": "getModelRequest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_key",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Request Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCacheOperatorResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Get Request"
+      }
+    },
     "/api/model/{selector}": {
       "get": {
         "operationId": "getModel",
@@ -22985,6 +25579,74 @@
         "summary": "Autosave Profile"
       }
     },
+    "/api/profile/{number}/definition": {
+      "get": {
+        "operationId": "getProfileDefinition",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetProfileDefinitionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Get Profile Definition"
+      }
+    },
     "/api/profile/{number}/load": {
       "post": {
         "operationId": "loadProfile",
@@ -23305,6 +25967,16 @@
             },
             "description": "Unauthorized"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -23463,6 +26135,48 @@
             "schema": {
               "default": false,
               "title": "All Models",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ready",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ready"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fits_fleet",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fits Fleet"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assess",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Assess",
               "type": "boolean"
             }
           },
@@ -23676,6 +26390,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/RecipeOperatorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RecipeUpdateResponse"
                     }
                   ],
                   "title": "Response Getrecipeoperation"
@@ -23734,6 +26451,95 @@
           }
         ],
         "summary": "Get Operation"
+      }
+    },
+    "/api/recipe/requests/{request_key}": {
+      "get": {
+        "operationId": "getRecipeRequest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_key",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Request Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RecipeImageAvailabilityResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RecipeOperatorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RecipeUpdateResponse"
+                    }
+                  ],
+                  "title": "Response Getreciperequest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Get Request"
       }
     },
     "/api/recipe/runs/{run_id}/artifact-jobs": {
@@ -24104,7 +26910,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RecipeOperatorRequest"
+                "$ref": "#/components/schemas/RecipeDownloadRequest"
               }
             }
           },

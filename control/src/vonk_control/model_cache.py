@@ -27,11 +27,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import BufferedReader
 from pathlib import Path
+from typing import cast
 from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
 from pydantic import ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import OperationMemberProgress, canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
@@ -136,6 +138,18 @@ class ModelCacheResolutionError(ModelCacheError):
 
 class ModelCacheStorageError(ModelCacheError):
     pass
+
+
+class _ArtifactWriterBusy(ModelCacheError):
+    """A dependency wait, not a failed transfer or consumed retry."""
+
+    def __init__(self, digest: str) -> None:
+        super().__init__(
+            "model_cache.object_busy",
+            f"waiting for the managed-cache writer of object {digest}; resumes after that writer releases its lock",
+            retry_after_seconds=_RETRY_BASE_SECONDS,
+            recovery="resume",
+        )
 
 
 _TERMINAL_FAILURE_MARKERS = (
@@ -1072,7 +1086,7 @@ class ModelCacheService:
         )
         self._upstream_slots = threading.BoundedSemaphore(_UPSTREAM_CHECK_WORKERS)
         self._background_operations: dict[str, dict[str, object]] = {}
-        self._digest_events: dict[str, threading.Event] = {}
+        self._active_digests: set[str] = set()
         self._hf_cooldown_until: datetime | None = None
         self._progress_checkpoint_at: dict[str, datetime] = {}
         self._cancel_events: dict[str, threading.Event] = {}
@@ -1237,11 +1251,7 @@ class ModelCacheService:
         catalog UUIDs, ``publisher/slug`` and an exact slug are accepted.
         """
 
-        if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
-            raise ModelCacheResolutionError(
-                "model_cache.selector_invalid", "model selector is required"
-            )
-        selector = selector.strip().casefold()
+        selector = _model_selector(selector).casefold()
         with self._session() as session:
             if re.fullmatch(_DIGEST_PATTERN, selector):
                 rows = list(
@@ -1656,6 +1666,14 @@ class ModelCacheService:
     ) -> CacheOperationView:
         """Plan and queue a model download from the operator selector."""
 
+        request_key = _request_key(request_key)
+        selector = _model_selector(selector)
+        with self._session() as session:
+            replay = self._download_replay(
+                session, request_key, actor=actor, selector=selector, force=force
+            )
+            if replay is not None:
+                return replay
         digest = self._resolve_model_selector(selector)
         manifest = self.resolve_artifact_set(model_content_sha256=digest)
         preview = self._download_preview_for_manifest(manifest)
@@ -1674,9 +1692,9 @@ class ModelCacheService:
             request_key=request_key,
             plan_digest=str(preview["plan_digest"]),
             artifact_set_sha256=manifest.digest,
+            model_content_sha256=digest,
             selector=selector,
-            force=force
-            or preview.get("already_cached_bytes", 0) == manifest.expected_bytes,
+            force=force,
         )
 
     def remove_model_selector(
@@ -2063,6 +2081,14 @@ class ModelCacheService:
         interrupt_after_bytes: int | None = None,
     ) -> CacheOperationView:
         request_key = _request_key(request_key)
+        if selector is not None:
+            selector = _model_selector(selector)
+            with self._session() as session:
+                replay = self._download_replay(
+                    session, request_key, actor=actor, selector=selector, force=force
+                )
+                if replay is not None:
+                    return replay
         requested_plan = _optional_digest(plan_digest)
         if requested_plan is None:
             raise ModelCacheConflict(
@@ -2080,23 +2106,17 @@ class ModelCacheService:
         # operation even when its partial checkpoint has changed the current
         # preview's remaining-byte estimate.
         with self._lock, self._session() as session:
-            existing = session.scalar(
-                select(ModelCacheOperation).where(
-                    ModelCacheOperation.request_key == request_key
-                )
+            replay = self._download_replay(
+                session,
+                request_key,
+                actor=actor,
+                selector=selector,
+                force=force,
+                artifact_set_sha256=set_digest,
+                plan_digest=requested_plan,
             )
-            if existing is not None:
-                existing_payload = _validated_operation_payload(existing)
-                if (
-                    existing.kind != "download"
-                    or existing_payload.get("artifact_set_sha256") != set_digest
-                    or existing.plan_digest != requested_plan
-                ):
-                    raise ModelCacheConflict(
-                        "model_cache.request_key_reused",
-                        "request key was already used for another cache operation",
-                    )
-                return self._operation_view(existing)
+            if replay is not None:
+                return replay
         preview = self._download_preview_for_manifest(manifest)
         if preview["plan_digest"] != requested_plan:
             raise ModelCacheConflict(
@@ -2123,56 +2143,69 @@ class ModelCacheService:
             "plan_digest": requested_plan,
             "transfer": dict(transfer),
             "retry": {"automatic_attempts": 1, "operator_retries": 0},
-            "force_refresh": bool(force),
+            "force_refresh": force,
         }
         if selector is not None:
             payload["selector"] = selector
             payload["operator_action"] = "download-model"
         payload = _write_operation_payload("download", payload)
-        with self._lock, self._session(write=True) as session:
-            existing = session.scalar(
-                select(ModelCacheOperation).where(
-                    ModelCacheOperation.request_key == request_key
-                )
-            )
-            if existing is not None:
-                existing_payload = _validated_operation_payload(existing)
-                if (
-                    existing.kind != "download"
-                    or existing_payload.get("artifact_set_sha256") != set_digest
-                    or existing.plan_digest != requested_plan
-                ):
-                    raise ModelCacheConflict(
-                        "model_cache.request_key_reused",
-                        "request key was already used for another cache operation",
-                    )
-                operation_id = existing.id
-            else:
-                self._ensure_set(session, manifest)
-                now = self._clock()
-                operation = ModelCacheOperation(
-                    request_key=request_key,
-                    schema_version=SCHEMA_VERSION,
-                    kind="download",
-                    state="queued",
-                    attempt=1,
+        try:
+            with self._lock, self._session(write=True) as session:
+                replay = self._download_replay(
+                    session,
+                    request_key,
+                    actor=actor,
+                    selector=selector,
+                    force=force,
                     artifact_set_sha256=set_digest,
                     plan_digest=requested_plan,
-                    payload=payload,
-                    progress=self._progress(
-                        manifest,
-                        phase="queued",
-                        expected_bytes=require_integer(
-                            transfer["total_bytes"], "transfer total bytes"
-                        ),
-                    ),
-                    actor=actor,
-                    created_at=now,
-                    updated_at=now,
                 )
-                session.add(operation)
-                session.flush()
-                operation_id = operation.id
+                if replay is not None:
+                    return replay
+                else:
+                    self._ensure_set(session, manifest)
+                    now = self._clock()
+                    operation = ModelCacheOperation(
+                        request_key=request_key,
+                        schema_version=SCHEMA_VERSION,
+                        kind="download",
+                        state="queued",
+                        attempt=1,
+                        artifact_set_sha256=set_digest,
+                        plan_digest=requested_plan,
+                        payload=payload,
+                        progress=self._progress(
+                            manifest,
+                            phase="queued",
+                            expected_bytes=require_integer(
+                                transfer["total_bytes"], "transfer total bytes"
+                            ),
+                        ),
+                        actor=actor,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    session.add(operation)
+                    session.flush()
+                    operation_id = operation.id
+        except IntegrityError:
+            # A borrowed transaction belongs to its caller. Only recover here
+            # after our own transaction has rolled back and released its locks.
+            if isinstance(self._sessions, Session):
+                raise
+            with self._session() as session:
+                replay = self._download_replay(
+                    session,
+                    request_key,
+                    actor=actor,
+                    selector=selector,
+                    force=force,
+                    artifact_set_sha256=set_digest,
+                    plan_digest=requested_plan,
+                )
+                if replay is None:
+                    raise
+                return replay
         if interrupt_after_bytes is not None:
             self._run_download(
                 operation_id,
@@ -2180,6 +2213,52 @@ class ModelCacheService:
                 interrupt_after_bytes=interrupt_after_bytes,
             )
         return self.get_operation(operation_id)
+
+    def _download_replay(
+        self,
+        session: Session,
+        request_key: str,
+        *,
+        actor: str,
+        selector: str | None,
+        force: bool,
+        artifact_set_sha256: str | None = None,
+        plan_digest: str | None = None,
+    ) -> CacheOperationView | None:
+        """Compare original intent, never a refreshed operator preview."""
+
+        existing = session.scalar(
+            select(ModelCacheOperation).where(
+                ModelCacheOperation.request_key == request_key
+            )
+        )
+        if existing is None:
+            return None
+        if existing.kind != "download" or existing.actor != actor:
+            raise ModelCacheConflict(
+                "model_cache.request_key_reused",
+                "request key was already used for another cache operation",
+            )
+        payload = _validated_operation_payload(existing)
+        matches = {
+            "selector": payload.get("selector") == selector,
+            "refresh": payload.get("force_refresh") is force,
+        }
+        if selector is None:
+            matches.update(
+                artifact_set=payload.get("artifact_set_sha256") == artifact_set_sha256,
+                plan=existing.plan_digest == plan_digest,
+            )
+        else:
+            matches["operator_action"] = (
+                payload.get("operator_action") == "download-model"
+            )
+        if not all(matches.values()):
+            raise ModelCacheConflict(
+                "model_cache.request_key_reused",
+                "request key was already used for another cache operation",
+            )
+        return self._operation_view(existing)
 
     def _resolve_requested_manifest(
         self,
@@ -2625,46 +2704,18 @@ class ModelCacheService:
         force: bool,
         interrupt_after_bytes: int | None,
     ) -> None:
-        while True:
-            with self._lock:
-                event = self._digest_events.get(spec.sha256)
-                owner = event is None
-                if event is None:
-                    event = threading.Event()
-                    self._digest_events[spec.sha256] = event
-            if owner:
-                break
-            # A second selected Model/Recipe waits for the first immutable
-            # digest transfer, then reuses its verified object. This prevents
-            # concurrent writers from sharing a partial path or replacing a
-            # valid object out of order.
-            event.wait(timeout=0.25)
-            if self._closed.is_set() or self._transfer_stop(operation_id).is_set():
-                raise InterruptedError(
-                    "model download cancelled while waiting for shared bytes"
-                )
-            if not force and self._object_is_verified(spec):
-                self._mark_artifact_verified(spec, set_digest)
-                return
-            with self._lock:
-                if self._digest_events.get(spec.sha256) is event and event.is_set():
-                    self._digest_events.pop(spec.sha256, None)
+        with self._lock:
+            if spec.sha256 in self._active_digests:
+                raise _ArtifactWriterBusy(spec.sha256)
+            self._active_digests.add(spec.sha256)
         try:
-            # The shared NAS lock also covers overlapping Controller worker
-            # processes; an in-process Event alone cannot deduplicate them.
+            # Neither local nor cross-process contention can park a transfer
+            # slot. The durable operation is rescheduled after releasing it.
             with (self._root / "locks" / spec.sha256).open("a+b") as lock_file:
-                while True:
-                    try:
-                        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        break
-                    except BlockingIOError:
-                        if (
-                            self._transfer_stop(operation_id).wait(0.25)
-                            or self._closed.is_set()
-                        ):
-                            raise InterruptedError(
-                                "model download cancelled while waiting for cache lock"
-                            )
+                try:
+                    fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise _ArtifactWriterBusy(spec.sha256) from None
                 self._download_locked(
                     spec,
                     set_digest,
@@ -2674,9 +2725,7 @@ class ModelCacheService:
                 )
         finally:
             with self._lock:
-                current = self._digest_events.pop(spec.sha256, None)
-                if current is not None:
-                    current.set()
+                self._active_digests.discard(spec.sha256)
 
     def _download_locked(
         self,
@@ -3623,6 +3672,56 @@ class ModelCacheService:
                 )
                 operation.updated_at = now
 
+    def _defer_artifact_writer(
+        self,
+        operation_id: str,
+        error: _ArtifactWriterBusy,
+        artifact_key: str | None,
+    ) -> None:
+        now = self._clock()
+        next_retry = now + timedelta(seconds=_RETRY_BASE_SECONDS)
+        with self._session(write=True) as session:
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update={"nowait": True}
+            )
+            if operation is None or operation.state != "running":
+                return
+            payload = _validated_operation_payload(operation)
+            claim = payload.get("claim")
+            if isinstance(claim, Mapping) and (
+                claim.get("owner") != self._claim_owner
+                or _parse_iso(cast(str, claim["expires_at"])) <= now
+            ):
+                return
+            retry = dict(require_mapping(payload["retry"], "cache retry"))
+            retry.update(
+                next_retry_at=_iso(next_retry), retry_after_seconds=_RETRY_BASE_SECONDS
+            )
+            payload.update(
+                retry=retry,
+                failure=_cache_failure(
+                    error.code,
+                    error.detail,
+                    retryable=True,
+                    recovery="resume",
+                    retry_time=_iso(next_retry),
+                    retry_after_seconds=_RETRY_BASE_SECONDS,
+                    artifact_key=artifact_key,
+                ),
+            )
+            payload.pop("claim", None)
+            operation.payload = _write_operation_payload(operation.kind, payload)
+            operation.state = "queued"
+            operation.completed_at = None
+            operation.last_error = error.detail
+            operation.progress = cache_phase(
+                _validated_operation_progress(operation).model_dump(mode="json"),
+                "queued",
+                now,
+                waiting=True,
+            )
+            operation.updated_at = now
+
     def _finish_failed(
         self,
         operation_id: str,
@@ -3631,6 +3730,9 @@ class ModelCacheService:
         error: BaseException,
         failed_artifact_key: str | None = None,
     ) -> None:
+        if isinstance(error, _ArtifactWriterBusy):
+            self._defer_artifact_writer(operation_id, error, failed_artifact_key)
+            return
         detail = (
             error.detail
             if isinstance(error, ModelCacheError)
@@ -4271,6 +4373,30 @@ class ModelCacheService:
             )
             return self._operation_view(operation), action, selector
 
+    def get_operator_request(
+        self, request_key: str, *, actor: str
+    ) -> tuple[CacheOperationView, ModelCacheOperatorAction, str]:
+        """Resolve an operator key without exposing another issuer's binding."""
+
+        request_key = _request_key(request_key)
+        with self._session() as session:
+            operation = session.scalar(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == request_key,
+                    ModelCacheOperation.actor == actor,
+                )
+            )
+            if (
+                operation is None
+                or operation.kind not in {"download", "remove"}
+                or _validated_operation_payload(operation).get("selector") is None
+            ):
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
+            operation_id = operation.id
+        return self.get_operator_operation(operation_id)
+
     def list_operations(self, *, limit: int = 100) -> tuple[CacheOperationView, ...]:
         if not 1 <= limit <= 100:
             raise ValueError("cache operation limit is invalid")
@@ -4801,7 +4927,6 @@ class ModelCacheService:
                         ModelCacheOperation.state.in_(["queued", "running", "partial"])
                     )
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
-                    .limit(max(limit * 4, limit))
                 )
             )
             for operation_id in candidate_ids:
@@ -6163,6 +6288,14 @@ class ModelCacheService:
 
     def _partial_path(self, set_digest: str, digest: str) -> Path:
         return self._root / "partials" / set_digest / f"{digest}.part"
+
+
+def _model_selector(value: str) -> str:
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= 256:
+        raise ModelCacheResolutionError(
+            "model_cache.selector_invalid", "model selector is required"
+        )
+    return value.strip()
 
 
 def _request_key(value: str) -> str:

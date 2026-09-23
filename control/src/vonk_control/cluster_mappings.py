@@ -88,6 +88,40 @@ class ClusterMappingPlan:
     placement_digest: str
 
 
+def candidate_placements(
+    topology: Mapping[str, object], node_ids: tuple[str, ...]
+) -> tuple[ClusterMappingPlacement, ...]:
+    """Use the mapping authority's deterministic rank and role assignment."""
+    if topology.get("node_count") != len(node_ids) or len(set(node_ids)) != len(
+        node_ids
+    ):
+        raise ClusterMappingError(
+            "mapping.node_count",
+            "selected GPU node count does not match the exact topology",
+        )
+    roles = topology.get("roles")
+    if not isinstance(roles, list):
+        raise ClusterMappingError(
+            "mapping.topology_invalid", "topology roles are invalid"
+        )
+    expanded: list[tuple[str, bool]] = []
+    for role in roles:
+        if not isinstance(role, Mapping):
+            raise ClusterMappingError(
+                "mapping.topology_invalid", "topology role is invalid"
+            )
+        expanded.extend(
+            (str(role["name"]), bool(role["endpoint_owner"]))
+            for _ in range(int(role["count"]))
+        )
+    return tuple(
+        ClusterMappingPlacement(node_id, rank, role, endpoint_owner)
+        for rank, (node_id, (role, endpoint_owner)) in enumerate(
+            zip(sorted(node_ids), expanded, strict=True)
+        )
+    )
+
+
 class ClusterMappingService:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
@@ -115,34 +149,9 @@ class ClusterMappingService:
             topology = recipe_topology(document)
         except RecipeRuntimeSpecError as error:
             raise ClusterMappingError("mapping.topology_invalid", str(error)) from error
-        expected_count = topology.get("node_count")
-        if expected_count != len(nodes):
-            raise ClusterMappingError(
-                "mapping.node_count",
-                "selected GPU node count does not match the exact topology",
-            )
         effective = _effective_parameters(document, parameters)
-        roles = topology.get("roles")
-        if not isinstance(roles, list):
-            raise ClusterMappingError(
-                "mapping.topology_invalid", "topology roles are invalid"
-            )
-        expanded: list[tuple[str, bool]] = []
-        for raw_role in roles:
-            if not isinstance(raw_role, Mapping):
-                raise ClusterMappingError(
-                    "mapping.topology_invalid", "topology role is invalid"
-                )
-            expanded.extend(
-                (str(raw_role["name"]), bool(raw_role["endpoint_owner"]))
-                for _ in range(int(raw_role["count"]))
-            )
-        ordered_nodes = sorted(node.node_id for node in nodes)
-        placements = tuple(
-            ClusterMappingPlacement(node_id, rank, role, endpoint_owner)
-            for rank, (node_id, (role, endpoint_owner)) in enumerate(
-                zip(ordered_nodes, expanded, strict=True)
-            )
+        placements = candidate_placements(
+            topology, tuple(node.node_id for node in nodes)
         )
         try:
             validate_topology(

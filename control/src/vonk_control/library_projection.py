@@ -15,6 +15,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 
 from .auth import CursorCodec, CursorError
 from .catalog_queries import active_head_revision
+from .library_assessment import unassessed
 from .library_contract import (
     _MAX_PAGE_RECIPES,
     FreshnessPolicy,
@@ -54,6 +55,10 @@ from .request_fault import RequestFault
 
 class LibraryProjectionError(RuntimeError):
     """The active catalog contains a document outside the public authority."""
+
+
+class LibraryAssessmentUnavailable(RuntimeError):
+    """A requested readiness filter could hide candidates with unknown evidence."""
 
 
 class LibrarySelectorAmbiguous(ValueError):
@@ -179,7 +184,10 @@ class LibraryProjection:
         telemetry_delayed_seconds: int = 20,
         local_state: Callable[[], Mapping[str, Mapping[str, object]]] | None = None,
         runtime_archive_available: Callable[[str, int], bool] | None = None,
-        **_: object,
+        assessment: Callable[
+            [Sequence[LibraryRecipeProjection]], list[LibraryRecipeProjection]
+        ]
+        | None = None,
     ) -> None:
         if any(
             type(value) is not int or value <= 0
@@ -202,6 +210,24 @@ class LibraryProjection:
         )
         self._local_state = local_state or self._database_local_state
         self._runtime_archive_available = runtime_archive_available
+        self._assessment = assessment
+
+    def _assessed(
+        self, recipes: Sequence[LibraryRecipeProjection]
+    ) -> list[LibraryRecipeProjection]:
+        if self._assessment is not None:
+            return self._assessment(recipes)
+        return [
+            item.model_copy(
+                update={
+                    "assessment": unassessed(
+                        self._clock,
+                        "The Controller placement and cache assessment is unavailable.",
+                    )
+                }
+            )
+            for item in recipes
+        ]
 
     @staticmethod
     def selector(publisher: str, slug: str) -> str:
@@ -825,13 +851,29 @@ class LibraryProjection:
                     if updated_since is None
                     else _utc(updated_since).isoformat(),
                     "local_only": local_only,
+                    # Bind a continuation to the same matching identities and
+                    # immutable documents. A changed catalog restarts the read;
+                    # the Controller does not retain another snapshot store.
+                    "collection": [
+                        (
+                            item.selector,
+                            item.identity.content_sha256,
+                            item.updated_at.isoformat(),
+                        )
+                        for item in filtered
+                    ],
                 }
             ),
         }
         if cursor is not None:
-            boundary = self._cursors.decode(
-                cursor, resource="models", order=_LIBRARY_ORDER, context=context
-            )
+            try:
+                boundary = self._cursors.decode(
+                    cursor, resource="models", order=_LIBRARY_ORDER, context=context
+                )
+            except CursorError:
+                raise CursorError(
+                    "library cursor is invalid or the selection changed; restart without a cursor"
+                ) from None
             expected_length = 3 if sort == "updated" else 2
             if not isinstance(boundary, list) or len(boundary) != expected_length:
                 raise CursorError("model library cursor is invalid")
@@ -915,6 +957,9 @@ class LibraryProjection:
         cursor: str | None = None,
         model_selectors: Sequence[str] = (),
         all_models: bool = False,
+        ready: bool | None = None,
+        fits_fleet: bool | None = None,
+        assess: bool = True,
         usage: Sequence[str] = (),
         publisher: Sequence[str] = (),
         alignment: Sequence[str] = (),
@@ -927,6 +972,8 @@ class LibraryProjection:
             raise RequestFault("recipe library limit is invalid")
         if sort not in {"updated", "name"}:
             raise RequestFault("recipe library sort is invalid")
+        if not assess and (ready is not None or fits_fleet is not None):
+            raise RequestFault("readiness filters require assessment")
         snapshot = self._local_state_snapshot()
         model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
         models = [_canonical_model(row) for row in model_rows]
@@ -1014,6 +1061,33 @@ class LibraryProjection:
         ]
         key = self._recipe_sort_key(sort)
         filtered.sort(key=key, reverse=sort == "updated")
+        readiness_filters = {"readiness": ready, "fleet_fit": fits_fleet}
+        filtering_assessment = any(
+            value is not None for value in readiness_filters.values()
+        )
+        if filtering_assessment:
+            filtered = self._assessed(filtered)
+            for item in filtered:
+                for name, expected in readiness_filters.items():
+                    if expected is None:
+                        continue
+                    if (
+                        item.assessment is None
+                        or getattr(item.assessment, name).state == "unavailable"
+                    ):
+                        raise LibraryAssessmentUnavailable(
+                            "Readiness filtering is unavailable for some candidates; narrow the library filters or remove the readiness filter to inspect their reasons."
+                        )
+            filtered = [
+                item
+                for item in filtered
+                if item.assessment is not None
+                and all(
+                    expected is None
+                    or (getattr(item.assessment, name).state == "ready") == expected
+                    for name, expected in readiness_filters.items()
+                )
+            ]
         context = {
             "l": limit,
             "s": sort,
@@ -1021,10 +1095,22 @@ class LibraryProjection:
                 {
                     "model": list(model_selectors),
                     "all_models": all_models,
+                    "ready": ready,
+                    "fits_fleet": fits_fleet,
+                    "assess": assess,
                     "usage": list(usage),
                     "publisher": list(publisher),
                     "alignment": list(alignment),
                     "sparks": list(sparks),
+                    "collection": [
+                        (
+                            item.selector,
+                            item.identity.recipe_revision_id,
+                            item.identity.content_sha256,
+                            item.updated_at.isoformat(),
+                        )
+                        for item in filtered
+                    ],
                     "search": search,
                     "updated_since": None
                     if updated_since is None
@@ -1033,9 +1119,14 @@ class LibraryProjection:
             ),
         }
         if cursor is not None:
-            boundary = self._cursors.decode(
-                cursor, resource="recipes", order=_LIBRARY_ORDER, context=context
-            )
+            try:
+                boundary = self._cursors.decode(
+                    cursor, resource="recipes", order=_LIBRARY_ORDER, context=context
+                )
+            except CursorError:
+                raise CursorError(
+                    "library cursor is invalid or the selection changed; restart without a cursor"
+                ) from None
             if not isinstance(boundary, list) or len(boundary) != 3:
                 raise CursorError("recipe library cursor is invalid")
             boundary_key = tuple(str(value) for value in boundary)
@@ -1059,12 +1150,16 @@ class LibraryProjection:
             )
         return RecipeLibraryResponse(
             generated_at=_utc(self._clock()),
-            recipes=page,
+            recipes=self._assessed(page)
+            if assess and not filtering_assessment
+            else page,
             facets=self._recipe_facet_values(model_entries, entries),
             next_cursor=next_cursor,
             filters=LibraryFilterValues(
                 model=list(model_selectors),
                 all_models=all_models,
+                ready=ready,
+                fits_fleet=fits_fleet,
                 usage=list(usage),
                 publisher=list(publisher),
                 alignment=list(alignment),
@@ -1108,6 +1203,7 @@ class LibraryProjection:
             lambda item: (item.identity.publisher, item.identity.slug),
         )
         assert isinstance(entry, LibraryRecipeProjection)
+        entry = self._assessed([entry])[0]
         recipe_row = next(
             row
             for row in recipe_rows

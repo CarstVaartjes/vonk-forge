@@ -36,25 +36,26 @@ function stringField(value: unknown, key: string): string {
 }
 
 function profileAssignments(profile: FleetProfile): AssignmentDraft[] {
-  return profile.assignments.map((assignment, index) => ({
-    key: `${assignment.selector}-${index}`,
+  return (profile.definition.assignments ?? []).map((assignment, index) => ({
+    key: `${assignment.recipe_selector}-${index}`,
     recipeSelector: assignment.recipe_selector,
-    assignmentName: assignment.selector,
-    modelVariant: stringField(assignment.model, "variant"),
-    desiredState: assignment.observed_state.toLocaleLowerCase().includes("installed") ? "installed" : "running",
+    assignmentName: assignment.assignment_name ?? "",
+    modelVariant: assignment.model_variant ?? "",
+    desiredState: assignment.desired_state,
     sparkIds: [...assignment.spark_ids].sort(),
   }));
 }
 
 function draftFromProfile(profile: FleetProfile): ProfileDraft {
+  const definition = profile.definition;
   return {
     number: profile.number,
-    revision: profile.revision,
-    name: profile.name,
-    description: profile.description,
-    favorite: profile.favorite,
-    installationPolicy: profile.installation_policy,
-    labels: profile.labels,
+    revision: profile.status === "not-created" ? 0 : profile.revision,
+    name: definition.name,
+    description: definition.description,
+    favorite: definition.favorite,
+    installationPolicy: definition.installation_policy,
+    labels: definition.labels,
     assignments: profileAssignments(profile),
   };
 }
@@ -74,8 +75,9 @@ function fleetEntries(profile: FleetProfile | undefined, fleet: VisualFleetSnaps
 
 function inputFromDraft(draft: ProfileDraft): FleetProfileInput {
   const input: FleetProfileInput = {
-    name: draft.name.trim(),
-    description: draft.description.trim(),
+    name: draft.name,
+    description: draft.description,
+    expected_revision: draft.revision ?? 0,
     installation_policy: draft.installationPolicy,
     labels: draft.labels,
     favorite: draft.favorite,
@@ -87,7 +89,6 @@ function inputFromDraft(draft: ProfileDraft): FleetProfileInput {
       desired_state: assignment.desiredState,
     })),
   };
-  if (draft.revision !== undefined) input.expected_revision = draft.revision;
   return input;
 }
 
@@ -218,7 +219,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
   async function load() {
     if (selectedNumber === undefined || !preview?.allowed || loadingProfile) return;
     setLoadingProfile(true); setError("");
-    try { setApplication(await api.loadProfile(selectedNumber, {dry_run: false, request_key: crypto.randomUUID()})); }
+    try { setApplication(await api.loadProfile(selectedNumber, {expected_plan_digest: preview.plan_digest, request_key: crypto.randomUUID()})); }
     catch (value) { setError(value instanceof Error ? value.message : "The profile could not be loaded."); }
     finally { setLoadingProfile(false); }
   }

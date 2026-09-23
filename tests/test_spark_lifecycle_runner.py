@@ -1258,6 +1258,7 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
     )
     lifecycle = _module()
     from vonk_agent_protocol import OperationProgress
+    from vonk_control.recipe_availability_intent import RecipeSelectorIntent
     from vonk_control.recipe_image_availability_api import (
         RecipeImageAvailabilityResponse,
         RecipeImageAvailabilityResult,
@@ -1270,6 +1271,9 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
     terminal = RecipeImageAvailabilityResponse(
         id="11111111-1111-4111-8111-111111111111",
         request_id="22222222-2222-4222-8222-222222222222",
+        request=RecipeSelectorIntent(
+            selector="acceptance/synthetic-canary", force=True
+        ),
         kind="recipe.image.availability.v2",
         state="succeeded",
         attempt=1,

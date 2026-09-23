@@ -22,6 +22,12 @@ from cluster_profiles.control_client import (
     ControlUnauthorized,
     _RecordingTransport,
 )
+from cluster_profiles.generated_control.models.fleet_profile_definition import (
+    FleetProfileDefinition,
+)
+from cluster_profiles.generated_control.models.fleet_profile_effects import (
+    FleetProfileEffects,
+)
 from cluster_profiles.generated_control.models.fleet_profile_plan_summary import (
     FleetProfilePlanSummary,
 )
@@ -171,6 +177,13 @@ def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
         profile_digest="b" * 64,
         profile_id="12345678-1234-4123-8123-123456789abc",
         profile_name="Empty profile",
+        profile_revision=1,
+        profile_definition=FleetProfileDefinition(name="Empty profile"),
+        resolved_assignments=[],
+        admission_decisions=[],
+        assessments=[],
+        preparation_decisions=[],
+        effects=FleetProfileEffects(runs=[], installations=[], superseded=[]),
         reasons=[],
         scope=FleetProfileScopePreview(node_ids=[]),
         steps=[],
@@ -233,10 +246,13 @@ def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
     assert request.get_header("Authorization") == "Bearer private-token"
 
 
-def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:
+@pytest.mark.parametrize("retry_seconds", [7, 120])
+def test_raw_request_preserves_typed_bounded_api_errors(
+    tmp_path: Path, retry_seconds: int
+) -> None:
     headers = Message()
     headers["Content-Type"] = "application/json"
-    headers["Retry-After"] = "7"
+    headers["Retry-After"] = str(retry_seconds)
     body = io.BytesIO(json.dumps({"detail": "bad token private-token"}).encode())
 
     def opener(*_args, **_kwargs):
@@ -256,7 +272,7 @@ def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:
         client.request("GET", "/api/jobs")
 
     assert raised.value.detail == "bad token <redacted>"
-    assert raised.value.retry_after_seconds == 7
+    assert raised.value.retry_after_seconds == retry_seconds
 
 
 @pytest.mark.parametrize(

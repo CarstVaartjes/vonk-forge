@@ -30,13 +30,16 @@ _MAX_CURSOR_LENGTH = 512
 MUTATION_ROLES = {
     ("POST", "/api/fleet/enroll"): frozenset({"administrator"}),
     ("POST", "/api/fleet/{selector}/re-enroll"): frozenset({"administrator"}),
+    ("POST", "/api/fleet/enrollments/{grant_id}/revoke"): frozenset({"administrator"}),
     ("POST", "/api/fleet/{selector}/remove"): frozenset({"administrator"}),
     ("POST", "/api/fleet/{selector}/rename"): frozenset({"administrator", "operator"}),
     ("POST", "/api/fleet/upgrade"): frozenset({"administrator"}),
-    ("POST", "/api/model/{selector}/download"): frozenset(
+    ("POST", "/api/model/{selector:path}/download"): frozenset(
         {"administrator", "operator"}
     ),
-    ("POST", "/api/model/{selector}/remove"): frozenset({"administrator", "operator"}),
+    ("POST", "/api/model/{selector:path}/remove"): frozenset(
+        {"administrator", "operator"}
+    ),
     ("POST", "/api/recipe/{selector:path}/download"): frozenset(
         {"administrator", "operator"}
     ),

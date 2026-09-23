@@ -21,10 +21,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
+from pydantic import ValidationError
 from sqlalchemy import func, or_, select
-from sqlalchemy.exc import DBAPIError, SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import OperationMemberProgress, OperationProgress
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -41,13 +42,32 @@ from .models import (
 )
 from .operation_contract import normalize_operation_progress, sanitize_failure_evidence
 from .operation_progress import aggregate_progress
+from .recipe_availability_intent import (
+    RecipeAvailabilityIntent,
+    RecipeRetryIntent,
+    RecipeRevisionIntent,
+    RecipeSelectorIntent,
+    read_availability_intent,
+)
+from .recipe_build_cancellation import (
+    BuildConsumerError,
+    current_build_consumers,
+    lock_availability_build_dependency,
+    request_build_cancellation,
+)
+from .recipe_update_contract import UPDATE_KIND, RecipeUpdateResponse
 from .runtime_image_preparation import (
     OCIImageTransport,
+    RuntimeImagePreparationError,
     RuntimeImageReceipt,
     RuntimeImageStorage,
     persist_runtime_image_receipt,
     prepare_runtime_image,
 )
+from .strict_json import serialize_json_value
+
+if TYPE_CHECKING:
+    from .recipe_update_batches import RecipeUpdateClaim
 
 SCHEMA_VERSION = 2
 OPERATION_KIND = "recipe.image.availability.v2"
@@ -88,7 +108,15 @@ _INTEGRITY_FAILURE_CODES = frozenset(
         "runtime_image.evidence_invalid",
     }
 )
-_ADMISSION_WAIT_CODES = frozenset({"recipe_image.build_capacity_wait"})
+_DEPENDENCY_WAIT_CODES = frozenset(
+    {
+        "recipe_image.build_capacity_wait",
+        "runtime_image.transfer_contended",
+        "build.consumer_busy",
+        "build.cancellation_pending",
+        "recipe_image.build_wait",
+    }
+)
 # Verified cache bytes can disappear (NAS restore, eviction, partial cleanup).
 # That is ordinary cache loss, not corruption: it must re-prepare, never ask an
 # operator to inspect a terminal failure.
@@ -143,7 +171,7 @@ class RecipeImageBuilder(Protocol):
         recipe: RecipeDefinition,
         runtime: Mapping[str, object],
         *,
-        operation_id: str,
+        claim: RecipeImageAvailabilityClaim,
         build_input_sha256: str,
         force: bool,
         progress: Callable[[Mapping[str, object]], None],
@@ -181,6 +209,7 @@ class ModelCacheOperationHandle(Protocol):
 class RecipeImageAvailabilityView:
     id: str
     request_id: str
+    request: RecipeAvailabilityIntent
     kind: str
     state: str
     attempt: int
@@ -204,6 +233,7 @@ class RecipeImageAvailabilityView:
             "schema_version": SCHEMA_VERSION,
             "id": self.id,
             "request_id": self.request_id,
+            "request": serialize_json_value(self.request),
             "kind": self.kind,
             "state": self.state,
             "attempt": self.attempt,
@@ -233,6 +263,18 @@ class RecipeImageAvailabilityClaim:
     image_identity: str | None
     build_input_sha256: str | None
     claim_owner: str
+    execution_attempt: int
+
+
+class _AvailabilityClaimLost(RuntimeImagePreparationError):
+    """Stop an executor whose durable attempt can no longer accept writes."""
+
+    def __init__(self) -> None:
+        # Preserve this control outcome through image preparation's typed
+        # exception boundary; contention must not become a transfer failure.
+        super().__init__(
+            "recipe_image.claim_lost", "availability execution claim is unavailable"
+        )
 
 
 def _iso(value: datetime) -> str:
@@ -475,6 +517,9 @@ class RecipeImageAvailabilityService:
         self._identity_locks: dict[str, threading.Lock] = {}
         self._identity_locks_guard = threading.Lock()
         self._removal_lock = threading.RLock()
+        from .recipe_update_batches import RecipeUpdateBatches
+
+        self._updates = RecipeUpdateBatches(self, sessions)
 
     def _resolve_recipe_selector(self, selector: str) -> str:
         """Resolve logical selectors to the current head, retaining exact pins."""
@@ -547,46 +592,10 @@ class RecipeImageAvailabilityService:
         request_id: str,
         force: bool = False,
     ) -> RecipeImageAvailabilityView:
-        """Attach/resume/refresh one selected recipe without duplicate jobs."""
+        """Bind a selected recipe once under the caller's request identity."""
 
-        revision_id = self._resolve_recipe_selector(selector)
-        with self._sessions() as session:
-            current = session.scalar(
-                select(Job)
-                .where(
-                    Job.kind == OPERATION_KIND,
-                    Job.authority_revision == revision_id,
-                    Job.state.in_(("queued", "running", "partial")),
-                )
-                .order_by(Job.created_at.desc(), Job.id.desc())
-            )
-            if current is not None and not force:
-                return self._view(current)
-            completed = session.scalar(
-                select(Job)
-                .where(
-                    Job.kind == OPERATION_KIND,
-                    Job.authority_revision == revision_id,
-                    Job.state == "succeeded",
-                )
-                .order_by(Job.created_at.desc(), Job.id.desc())
-            )
-        if completed is not None and not force:
-            force = True
-        if not force:
-            with self._sessions() as session:
-                failed = session.scalar(
-                    select(Job)
-                    .where(
-                        Job.kind == OPERATION_KIND,
-                        Job.authority_revision == revision_id,
-                        Job.state == "failed",
-                    )
-                    .order_by(Job.created_at.desc(), Job.id.desc())
-                )
-            if failed is not None:
-                return self.retry(failed.id, actor=actor, request_id=request_id)
-        return self.start(revision_id, actor=actor, request_id=request_id, force=force)
+        intent = RecipeSelectorIntent(selector=selector, force=force)
+        return self._start_request(intent, actor=actor, request_id=request_id)
 
     def remove_selector(
         self,
@@ -648,18 +657,70 @@ class RecipeImageAvailabilityService:
                 job.status_reason = "recipe Controller cache removed"
                 job.updated_at = now
                 cancelled.append(job.id)
-            builds = list(
-                session.scalars(
-                    select(RecipeBuild).where(
-                        RecipeBuild.recipe_revision_id == revision_id,
-                        RecipeBuild.state.in_(("planned", "building")),
+            try:
+                builds = list(
+                    session.scalars(
+                        select(RecipeBuild)
+                        .where(
+                            RecipeBuild.recipe_revision_id == revision_id,
+                            RecipeBuild.state.in_(("planned", "building")),
+                        )
+                        .order_by(RecipeBuild.id)
+                        .with_for_update(of=RecipeBuild, nowait=True)
                     )
                 )
-            )
+                for build in builds:
+                    try:
+                        consumers = current_build_consumers(session, build)
+                    except BuildConsumerError as error:
+                        raise RecipeImageAvailabilityError(
+                            error.code, str(error)
+                        ) from error
+                    if consumers:
+                        raise RecipeImageAvailabilityError(
+                            "build.shared_consumers",
+                            "accepted preparation still needs this build; cancel its parent intent first",
+                        )
+                build_jobs = tuple(
+                    session.scalars(
+                        select(Job)
+                        .where(
+                            Job.kind == "recipe.build.v1",
+                            Job.payload["owner_id"]
+                            .as_string()
+                            .in_([build.id for build in builds]),
+                            Job.state.in_(
+                                ("queued", "running", "waiting-for-operator")
+                            ),
+                        )
+                        .order_by(Job.id)
+                        .with_for_update(of=Job, nowait=True)
+                    )
+                )
+            except DBAPIError as error:
+                if getattr(error.orig, "sqlstate", None) != "55P03":
+                    raise
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.removal_busy",
+                    "build ownership is changing; retry recipe cache removal",
+                    retryable=True,
+                    recovery_actions=("retry",),
+                ) from error
+            for job in build_jobs:
+                request_build_cancellation(
+                    job,
+                    actor=actor,
+                    request_id=str(
+                        uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:cancel-build:{job.id}")
+                    ),
+                    reason="recipe Controller cache removal cancelled the build",
+                    now=now,
+                )
             for build in builds:
-                plan = dict(build.plan) if isinstance(build.plan, Mapping) else {}
-                build.plan = plan | {"removal_fence": fence, "cancelled": True}
-                build.state = "failed"
+                # A plan with no issued operation has no execution to cancel.
+                # Keep the canonical request valid for a later explicit request.
+                if build.state == "building":
+                    build.state = "failed"
                 build.error = "recipe Controller cache removal cancelled the build"
                 build.updated_at = now
             # The result is written after this session commits, so the exact
@@ -819,45 +880,20 @@ class RecipeImageAvailabilityService:
         request_id: str,
         selectors: list[str] | None,
         all: bool,
-    ) -> tuple[RecipeImageAvailabilityView, ...]:
-        """Refresh a bounded set of cached recipes independently."""
+    ) -> RecipeUpdateResponse:
+        """Accept one durable exact update scope before issuing child work."""
+        return self._updates.start(
+            actor=actor, request_id=request_id, selectors=selectors, all=all
+        )
 
-        if all and selectors:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.update_scope_invalid",
-                "selectors and all cannot be combined",
-            )
-        if not all and not selectors:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.update_scope_invalid", "one selector or all is required"
-            )
-        if all:
-            with self._sessions() as session:
-                revision_ids = list(
-                    session.scalars(
-                        select(Job.authority_revision)
-                        .where(
-                            Job.kind == OPERATION_KIND,
-                            Job.state == "succeeded",
-                        )
-                        .distinct()
-                        .limit(100)
-                    )
-                )
-            selectors = revision_ids
-        assert selectors is not None
-        views = []
-        for index, selector in enumerate(selectors):
-            key = str(
-                uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    f"vonk:recipe-update:{request_id}:{index}:{selector}",
-                )
-            )
-            views.append(
-                self.start_selector(selector, actor=actor, request_id=key, force=True)
-            )
-        return tuple(views)
+    def claim_update(self, owner: str) -> RecipeUpdateClaim | None:
+        return self._updates.claim(owner)
+
+    def run_update_claim(self, claim: RecipeUpdateClaim) -> None:
+        self._updates.run(claim)
+
+    def update_activity_provider(self):
+        return self._updates.activity_provider()
 
     def start(
         self,
@@ -895,16 +931,40 @@ class RecipeImageAvailabilityService:
         effective_execution_key = _optional_digest(
             effective_execution_key, field="effective_execution_key"
         )
-        existing = self._request_replay(
-            request_id,
+        intent = RecipeRevisionIntent(
             recipe_revision_id=recipe_revision_id,
-            force=force or force_download or force_rebuild,
+            force=force,
+            force_download=force_download,
+            force_rebuild=force_rebuild,
             model_digest=model_digest,
             build_input_sha256=build_input_sha256,
             effective_execution_key=effective_execution_key,
         )
+        return self._start_request(intent, actor=actor, request_id=request_id)
+
+    def _start_request(
+        self,
+        intent: RecipeSelectorIntent | RecipeRevisionIntent,
+        *,
+        actor: str,
+        request_id: str,
+        update_claim: RecipeUpdateClaim | None = None,
+    ) -> RecipeImageAvailabilityView:
+        existing = self._request_replay(request_id, actor=actor, intent=intent)
         if existing is not None:
             return existing
+        if isinstance(intent, RecipeSelectorIntent):
+            recipe_revision_id = self._resolve_recipe_selector(intent.selector)
+            model_digest = build_input_sha256 = effective_execution_key = None
+            force_download = force_rebuild = False
+        else:
+            recipe_revision_id = intent.recipe_revision_id
+            model_digest = intent.model_digest
+            build_input_sha256 = intent.build_input_sha256
+            effective_execution_key = intent.effective_execution_key
+            force_download = intent.force_download
+            force_rebuild = intent.force_rebuild
+        force = intent.force
         if self._authority is None:
             raise RecipeImageAvailabilityError(
                 "recipe_image.metadata_refresh_unavailable",
@@ -929,139 +989,143 @@ class RecipeImageAvailabilityService:
                 "recipe_image.runtime_invalid",
                 "selected recipe runtime projection is unavailable",
             )
-        with self._sessions.begin() as session:
-            revision = session.get(CatalogDocumentRevision, recipe_revision_id)
-            if (
-                revision is None
-                or revision.kind != "recipe"
-                or revision.state != "active"
-            ):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.recipe_unavailable",
-                    "selected recipe revision is unavailable or inactive",
-                )
-            if revision.content_digest != computed_digest:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.metadata_stale",
-                    "refreshed recipe does not match the selected revision",
-                )
-            if effective_execution_key is None:
-                effective_execution_key = revision.execution_key
-            if effective_execution_key != revision.execution_key:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.identity_conflict",
-                    "selected recipe execution identity changed",
-                )
-            if recipe.execution.mode == "image" and force_rebuild:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.action_invalid",
-                    "rebuild is supported only for source-build recipes",
-                )
-            if recipe.execution.mode == "build" and force_download:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.action_invalid",
-                    "download again is supported only for published images",
-                )
-            if force:
-                if recipe.execution.mode == "image":
-                    force_download = True
-                else:
-                    force_rebuild = True
-            runtime_build_input = runtime.get("build_input_sha256")
-            if recipe.execution.mode == "build":
-                provisional_intent = runtime.get("input_intent_sha256")
-                if not isinstance(runtime_build_input, str) and not isinstance(
-                    provisional_intent, str
-                ):
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.build_input_missing",
-                        "authoritative runtime projection lacks the exact build input digest",
-                    )
-                if isinstance(runtime_build_input, str):
-                    runtime_build_input = _digest(
-                        runtime_build_input, field="build_input_sha256"
-                    )
-                    if build_input_sha256 is None:
-                        build_input_sha256 = runtime_build_input
-                    elif build_input_sha256 != runtime_build_input:
+        try:
+            with self._sessions.begin() as session:
+                if update_claim is not None:
+                    if not isinstance(intent, RecipeRevisionIntent):
                         raise RecipeImageAvailabilityError(
-                            "recipe_image.identity_conflict",
-                            "submitted build input does not match authoritative runtime metadata",
+                            "recipe_update.operation_invalid",
+                            "update child requires an exact revision",
                         )
-            else:
-                build_input_sha256 = None
-            model_child = (
-                self._ensure_model_child(
-                    recipe_revision_id,
-                    actor=actor,
-                    parent_request_key=request_id,
-                )
-                if recipe.models
-                else None
-            )
-            image_identity = _image_identity(recipe)
-            identity_key = image_identity or build_input_sha256
-            payload: dict[str, object] = {
-                "schema_version": SCHEMA_VERSION,
-                "kind": OPERATION_KIND,
-                "recipe_revision_id": recipe_revision_id,
-                "recipe_content_sha256": computed_digest,
-                "effective_execution_key": effective_execution_key,
-                "model_digest": model_digest,
-                "build_input_sha256": build_input_sha256,
-                "image_identity": image_identity,
-                "identity_key": identity_key,
-                "execution_mode": recipe.execution.mode,
-                "recipe": recipe.model_dump(mode="json"),
-                "runtime": dict(runtime),
-                "force_download": force_download,
-                "force_rebuild": force_rebuild,
-                "progress": _progress("prepare", total_bytes=_known_total(runtime)),
-                "retry": {"automatic_attempts": 0, "operator_retries": 0},
-            }
-            if model_child is not None:
-                payload["model_child"] = model_child
-            encoded = json.dumps(
-                payload, sort_keys=True, separators=(",", ":")
-            ).encode()
-            existing = session.scalar(select(Job).where(Job.request_id == request_id))
-            if existing is not None:
-                existing_payload = (
-                    existing.payload if isinstance(existing.payload, Mapping) else {}
-                )
-                existing_force = bool(
-                    existing_payload.get("force_download") is True
-                    or existing_payload.get("force_rebuild") is True
-                )
+                    self._updates.authorize_child(
+                        session, update_claim, actor, request_id, intent
+                    )
+                revision = session.get(CatalogDocumentRevision, recipe_revision_id)
                 if (
-                    existing.kind != OPERATION_KIND
-                    or existing_payload.get("recipe_revision_id") != recipe_revision_id
-                    or existing_force != bool(force_download or force_rebuild)
+                    revision is None
+                    or revision.kind != "recipe"
+                    or revision.state != "active"
                 ):
                     raise RecipeImageAvailabilityError(
-                        "recipe_image.request_key_reused",
-                        "request key was already used for another operation",
+                        "recipe_image.recipe_unavailable",
+                        "selected recipe revision is unavailable or inactive",
                     )
-                return self._view(existing)
-            now = self._clock()
-            operation = Job(
-                id=str(uuid.uuid4()),
-                request_id=request_id,
-                kind=OPERATION_KIND,
-                state="queued",
-                actor=actor,
-                authority_revision=recipe_revision_id,
-                targets=[recipe_revision_id],
-                payload_digest=hashlib.sha256(encoded).hexdigest(),
-                payload=payload,
-                result=None,
-                current_attempt=0,
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(operation)
-            session.flush()
-            return self._view(operation)
+                if revision.content_digest != computed_digest:
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.metadata_stale",
+                        "refreshed recipe does not match the selected revision",
+                    )
+                if effective_execution_key is None:
+                    effective_execution_key = revision.execution_key
+                if effective_execution_key != revision.execution_key:
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.identity_conflict",
+                        "selected recipe execution identity changed",
+                    )
+                if recipe.execution.mode == "image" and force_rebuild:
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.action_invalid",
+                        "rebuild is supported only for source-build recipes",
+                    )
+                if recipe.execution.mode == "build" and force_download:
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.action_invalid",
+                        "download again is supported only for published images",
+                    )
+                if force:
+                    if recipe.execution.mode == "image":
+                        force_download = True
+                    else:
+                        force_rebuild = True
+                runtime_build_input = runtime.get("build_input_sha256")
+                if recipe.execution.mode == "build":
+                    provisional_intent = runtime.get("input_intent_sha256")
+                    if not isinstance(runtime_build_input, str) and not isinstance(
+                        provisional_intent, str
+                    ):
+                        raise RecipeImageAvailabilityError(
+                            "recipe_image.build_input_missing",
+                            "authoritative runtime projection lacks the exact build input digest",
+                        )
+                    if isinstance(runtime_build_input, str):
+                        runtime_build_input = _digest(
+                            runtime_build_input, field="build_input_sha256"
+                        )
+                        if build_input_sha256 is None:
+                            build_input_sha256 = runtime_build_input
+                        elif build_input_sha256 != runtime_build_input:
+                            raise RecipeImageAvailabilityError(
+                                "recipe_image.identity_conflict",
+                                "submitted build input does not match authoritative runtime metadata",
+                            )
+                else:
+                    build_input_sha256 = None
+                image_identity = _image_identity(recipe)
+                identity_key = image_identity or build_input_sha256
+                payload: dict[str, object] = {
+                    "schema_version": SCHEMA_VERSION,
+                    "kind": OPERATION_KIND,
+                    "request": serialize_json_value(intent),
+                    "recipe_revision_id": recipe_revision_id,
+                    "recipe_content_sha256": computed_digest,
+                    "effective_execution_key": effective_execution_key,
+                    "model_digest": model_digest,
+                    "build_input_sha256": build_input_sha256,
+                    "image_identity": image_identity,
+                    "identity_key": identity_key,
+                    "execution_mode": recipe.execution.mode,
+                    "recipe": recipe.model_dump(mode="json"),
+                    "runtime": dict(runtime),
+                    "force_download": force_download,
+                    "force_rebuild": force_rebuild,
+                    "progress": _progress("prepare", total_bytes=_known_total(runtime)),
+                    "retry": {"automatic_attempts": 0, "operator_retries": 0},
+                }
+                encoded = json.dumps(
+                    payload, sort_keys=True, separators=(",", ":")
+                ).encode()
+                existing = session.scalar(
+                    select(Job).where(Job.request_id == request_id)
+                )
+                if existing is not None:
+                    return self._matching_request(existing, actor=actor, intent=intent)
+                self._lock_build_consumer(session, payload)
+                now = self._clock()
+                operation = Job(
+                    id=str(uuid.uuid4()),
+                    request_id=request_id,
+                    kind=OPERATION_KIND,
+                    state="queued",
+                    actor=actor,
+                    authority_revision=recipe_revision_id,
+                    targets=[recipe_revision_id],
+                    payload_digest=hashlib.sha256(encoded).hexdigest(),
+                    payload=payload,
+                    result=None,
+                    current_attempt=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(operation)
+                session.flush()
+                return self._view(operation)
+        except IntegrityError:
+            replay = self._request_replay(request_id, actor=actor, intent=intent)
+            if replay is None:
+                raise
+            return replay
+
+    @staticmethod
+    def _lock_build_consumer(session: Session, payload: Mapping[str, object]) -> None:
+        try:
+            lock_availability_build_dependency(session, payload)
+        except BuildConsumerError as error:
+            raise RecipeImageAvailabilityError(
+                error.code,
+                str(error),
+                retryable=error.retryable,
+                recovery_actions=("retry",) if error.retryable else (),
+            ) from error
 
     def _ensure_model_child(
         self,
@@ -1341,48 +1405,45 @@ class RecipeImageAvailabilityService:
                 recovery_actions=("retry",),
             ) from error
 
+    def _matching_request(
+        self,
+        existing: Job,
+        *,
+        actor: str,
+        intent: RecipeAvailabilityIntent,
+    ) -> RecipeImageAvailabilityView:
+        if existing.kind != OPERATION_KIND or existing.actor != actor:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.request_key_reused",
+                "request key was already used for another operation",
+            )
+        try:
+            payload = require_mapping(existing.payload, "availability payload")
+            stored = read_availability_intent(payload.get("request"))
+        except (TypeError, ValueError, ValidationError) as error:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.operation_invalid",
+                "stored preparation request is malformed",
+            ) from error
+        if stored != intent:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.request_key_reused",
+                "request key was already used for another operation",
+            )
+        return self._view(existing)
+
     def _request_replay(
         self,
         request_id: str,
         *,
-        recipe_revision_id: str,
-        force: bool,
-        model_digest: str | None,
-        build_input_sha256: str | None,
-        effective_execution_key: str | None,
+        actor: str,
+        intent: RecipeAvailabilityIntent,
     ) -> RecipeImageAvailabilityView | None:
         with self._sessions() as session:
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if existing is None:
                 return None
-            payload = existing.payload if isinstance(existing.payload, Mapping) else {}
-            existing_force = bool(
-                payload.get("force_download") is True
-                or payload.get("force_rebuild") is True
-            )
-            if (
-                existing.kind != OPERATION_KIND
-                or payload.get("recipe_revision_id") != recipe_revision_id
-                or existing_force != force
-                or (
-                    model_digest is not None
-                    and payload.get("model_digest") != model_digest
-                )
-                or (
-                    build_input_sha256 is not None
-                    and payload.get("build_input_sha256") != build_input_sha256
-                )
-                or (
-                    effective_execution_key is not None
-                    and payload.get("effective_execution_key")
-                    != effective_execution_key
-                )
-            ):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.request_key_reused",
-                    "request key was already used for another operation",
-                )
-            return self._view(existing)
+            return self._matching_request(existing, actor=actor, intent=intent)
 
     def get(self, operation_id: str) -> RecipeImageAvailabilityView:
         with self._sessions() as session:
@@ -1393,7 +1454,7 @@ class RecipeImageAvailabilityService:
 
     def get_operator_operation(
         self, operation_id: str
-    ) -> RecipeImageAvailabilityView | dict[str, object]:
+    ) -> RecipeImageAvailabilityView | RecipeUpdateResponse | dict[str, object]:
         """Observe either current recipe preparation or durable cache removal."""
 
         with self._sessions() as session:
@@ -1409,7 +1470,27 @@ class RecipeImageAvailabilityService:
                         "stored removal operation is malformed",
                     )
                 return dict(operation.result)
-            raise KeyError(operation_id)
+            if operation.kind != UPDATE_KIND:
+                raise KeyError(operation_id)
+        return self._updates.get(operation_id)
+
+    def get_operator_request(
+        self, request_key: str, *, actor: str
+    ) -> RecipeImageAvailabilityView | RecipeUpdateResponse | dict[str, object]:
+        """Correlate only this issuer's request within the recipe family."""
+
+        with self._sessions() as session:
+            operation = session.scalar(
+                select(Job).where(Job.request_id == request_key, Job.actor == actor)
+            )
+            if operation is None or operation.kind not in {
+                OPERATION_KIND,
+                REMOVE_OPERATION_KIND,
+                UPDATE_KIND,
+            }:
+                raise KeyError(request_key)
+            operation_id = operation.id
+        return self.get_operator_operation(operation_id)
 
     def list_page(
         self,
@@ -1461,6 +1542,10 @@ class RecipeImageAvailabilityService:
     def retry(
         self, operation_id: str, *, actor: str, request_id: str
     ) -> RecipeImageAvailabilityView:
+        intent = RecipeRetryIntent(operation_id=operation_id)
+        existing = self._request_replay(request_id, actor=actor, intent=intent)
+        if existing is not None:
+            return existing
         with self._sessions() as session:
             previous = session.get(Job, operation_id)
             if previous is None or previous.kind != OPERATION_KIND:
@@ -1496,23 +1581,19 @@ class RecipeImageAvailabilityService:
             previous_authority = previous.authority_revision
             previous_targets = list(previous.targets)
             payload = dict(previous_payload)
-        model_child = self._resume_model_child(
-            mapping(payload.get("model_child")),
-            actor=actor,
-            parent_request_key=request_id,
-        )
-        if model_child is not None:
-            payload["model_child"] = model_child
+        payload["request"] = serialize_json_value(intent)
         with self._sessions.begin() as session:
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if existing is not None:
-                return self._view(existing)
+                return self._matching_request(existing, actor=actor, intent=intent)
             payload["retry"] = {
                 "automatic_attempts": 0,
                 "operator_retries": retry_count + 1,
             }
             payload.pop("retry_after_at", None)
             payload.pop("failure", None)
+            payload.pop("build_dependency", None)
+            self._lock_build_consumer(session, payload)
             now = self._clock()
             encoded = json.dumps(
                 payload, sort_keys=True, separators=(",", ":")
@@ -1558,10 +1639,13 @@ class RecipeImageAvailabilityService:
     def run_pending(self, *, limit: int = 1) -> int:
         if not 1 <= limit <= 16:
             raise ValueError("availability worker batch limit is invalid")
+        update_claim = self.claim_update(f"update-{uuid.uuid4().hex}")
+        if update_claim is not None:
+            self.run_update_claim(update_claim)
         claims = self.claim_pending(limit=min(limit, self._max_parallel))
         for claim in claims:
             self.run_claim(claim)
-        return len(claims)
+        return len(claims) + int(update_claim is not None)
 
     def claim_pending(
         self, *, limit: int = 4, owner_id: str | None = None
@@ -1696,6 +1780,7 @@ class RecipeImageAvailabilityService:
                             else None
                         ),
                         claim_owner=owner_id,
+                        execution_attempt=operation.current_attempt,
                     )
                 )
                 if not coordination_only and mode == "build":
@@ -1709,7 +1794,7 @@ class RecipeImageAvailabilityService:
     def run_claim(self, claim: RecipeImageAvailabilityClaim) -> None:
         """Execute one claim; callers may run claims in their own bounded pool."""
 
-        self._run(claim.operation_id, owner_id=claim.claim_owner)
+        self._run(claim)
 
     def _identity_lock(self, identity_key: str | None) -> threading.Lock:
         if not identity_key:
@@ -1758,25 +1843,59 @@ class RecipeImageAvailabilityService:
         )
         return now >= eligible_at
 
-    def _run(self, operation_id: str, *, owner_id: str | None = None) -> None:
+    def _claim_operation(
+        self, session: Session, claim: RecipeImageAvailabilityClaim
+    ) -> Job | None:
+        # Progress can arrive under the managed artifact lock. Never wait for
+        # SQL ownership there. A contended claim remains visible until its
+        # existing lease expires; the scheduler can then resume its exact work.
+        operation = session.scalar(
+            select(Job)
+            .where(Job.id == claim.operation_id)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+        if (
+            operation is None
+            or operation.kind != OPERATION_KIND
+            or operation.state != "running"
+            or operation.current_attempt != claim.execution_attempt
+            or not isinstance(operation.payload, Mapping)
+            or operation.payload.get("claim_owner") != claim.claim_owner
+            or operation.payload.get("removal_fence") is not None
+        ):
+            return None
+        raw_until = operation.payload.get("claim_until")
+        if not isinstance(raw_until, str):
+            return None
+        try:
+            until = datetime.fromisoformat(raw_until)
+        except ValueError:
+            return None
+        until = until if until.tzinfo is not None else until.replace(tzinfo=UTC)
+        now = self._clock()
+        now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        if now >= until:
+            return None
+        return operation
+
+    def _require_claim(
+        self, session: Session, claim: RecipeImageAvailabilityClaim
+    ) -> Job:
+        operation = self._claim_operation(session, claim)
+        if operation is None:
+            raise _AvailabilityClaimLost
+        return operation
+
+    def _run(self, claim: RecipeImageAvailabilityClaim) -> None:
+        operation_id = claim.operation_id
         with self._sessions.begin() as session:
-            operation = session.get(Job, operation_id, with_for_update=True)
-            if operation is None or operation.kind != OPERATION_KIND:
+            operation = self._claim_operation(session, claim)
+            if operation is None:
                 return
             payload = dict(operation.payload)
-            if owner_id is not None and payload.get("claim_owner") != owner_id:
-                return
-            if (
-                operation.state == "cancelled"
-                or payload.get("removal_fence") is not None
-            ):
-                return
             operation_actor = operation.actor
             operation_request_id = operation.request_id
-            was_running = operation.state == "running"
-            operation.state = "running"
-            if not was_running:
-                operation.current_attempt = int(operation.current_attempt) + 1
             operation.updated_at = self._clock()
             self._set_progress(
                 operation,
@@ -1786,15 +1905,13 @@ class RecipeImageAvailabilityService:
                 ),
             )
         heartbeat_stop = threading.Event()
-        heartbeat = None
-        if owner_id is not None:
-            heartbeat = threading.Thread(
-                target=self._renew_claim_loop,
-                args=(operation_id, owner_id, heartbeat_stop),
-                name=f"recipe-image-lease-{operation_id[:8]}",
-                daemon=True,
-            )
-            heartbeat.start()
+        heartbeat = threading.Thread(
+            target=self._renew_claim_loop,
+            args=(claim, heartbeat_stop),
+            name=f"recipe-image-lease-{operation_id[:8]}",
+            daemon=True,
+        )
+        heartbeat.start()
         try:
             recipe = _canonical_recipe(payload["recipe"])
             runtime = payload["runtime"]
@@ -1802,16 +1919,26 @@ class RecipeImageAvailabilityService:
                 raise RecipeImageAvailabilityError(
                     "recipe_image.runtime_invalid", "runtime projection is invalid"
                 )
-            model_child = self._current_model_child(
-                payload,
-                actor=operation_actor,
-                parent_request_key=operation_request_id,
-            )
+            request_intent = read_availability_intent(payload.get("request"))
+            if isinstance(request_intent, RecipeRetryIntent) and isinstance(
+                payload.get("model_child"), Mapping
+            ):
+                model_child = self._resume_model_child(
+                    mapping(payload["model_child"]),
+                    actor=operation_actor,
+                    parent_request_key=operation_request_id,
+                )
+            else:
+                model_child = self._current_model_child(
+                    payload,
+                    actor=operation_actor,
+                    parent_request_key=operation_request_id,
+                )
             model_pending = False
             model_failure: Mapping[str, object] | None = None
             if model_child is not None:
                 child_state = model_child.get("state")
-                self._update_model_progress(operation_id, model_child)
+                self._update_model_progress(claim, model_child)
                 if child_state in {"queued", "running", "partial"}:
                     model_pending = True
                 elif child_state != "succeeded":
@@ -1839,46 +1966,20 @@ class RecipeImageAvailabilityService:
                         else payload
                     )
                     receipt = self._prepare_claimed_image(
-                        operation_id, repair_payload, recipe, runtime
+                        claim, repair_payload, recipe, runtime
                     )
                     # Removal holds the same lock and commits a durable fence
-                    # before deleting Controller image bytes.  A builder may
-                    # finish after that point, but it cannot republish SQL or
-                    # a filesystem receipt.
+                    # before deleting Controller image bytes. Late verified
+                    # bytes may remain reusable, but stale work cannot accept
+                    # a current authorization or operation result.
                     with self._removal_lock:
-                        if self._is_removed(operation_id):
-                            return
-                        self._persist_receipt(operation_id, payload, receipt)
-                    with self._sessions.begin() as session:
-                        operation = session.get(Job, operation_id)
-                        if operation is not None:
-                            operation.payload = dict(operation.payload) | {
-                                "image_result": receipt.to_mapping()
-                            }
-                            self._set_progress(
-                                operation,
-                                "available",
-                                total_bytes=receipt.image_bytes,
-                                completed_bytes=receipt.image_bytes,
-                            )
-                            operation.updated_at = self._clock()
+                        self._persist_receipt(claim, payload, receipt)
             with self._sessions() as session:
                 latest = session.get(Job, operation_id)
                 if latest is not None and isinstance(latest.payload, Mapping):
                     payload = dict(latest.payload)
             if model_pending:
-                with self._sessions.begin() as session:
-                    operation = session.get(Job, operation_id)
-                    if operation is not None:
-                        operation.state = "partial"
-                        operation.payload = dict(operation.payload) | {
-                            "claim_owner": None,
-                            "claim_until": None,
-                            "retry_after_at": _iso(
-                                self._clock() + timedelta(seconds=1)
-                            ),
-                        }
-                        operation.updated_at = self._clock()
+                self._defer_for_model(claim)
                 return
             if model_failure is not None:
                 child_failure = model_failure
@@ -1945,34 +2046,32 @@ class RecipeImageAvailabilityService:
                 "model_child": (None if model_child is None else dict(model_child)),
             }
             with self._removal_lock, self._sessions.begin() as session:
-                operation = session.get(Job, operation_id)
-                if operation is not None:
-                    if self._is_removed(operation_id):
-                        return
-                    operation.state = "succeeded"
-                    operation.result = result
-                    operation.updated_at = self._clock()
-                    completed_payload = dict(operation.payload)
-                    completed_payload.pop("failure", None)
-                    completed_payload.pop("retry_after_at", None)
-                    operation.payload = completed_payload | {
-                        "stage": "available",
-                        "claim_owner": None,
-                        "claim_until": None,
-                    }
-                    operation.current_attempt = int(operation.current_attempt)
-                    self._set_progress(
-                        operation,
-                        "available",
-                        total_bytes=receipt.image_bytes,
-                        completed_bytes=receipt.image_bytes,
-                    )
+                operation = self._require_claim(session, claim)
+                operation.state = "succeeded"
+                operation.result = result
+                operation.updated_at = self._clock()
+                completed_payload = dict(operation.payload)
+                completed_payload.pop("failure", None)
+                completed_payload.pop("retry_after_at", None)
+                operation.payload = completed_payload | {
+                    "stage": "available",
+                    "claim_owner": None,
+                    "claim_until": None,
+                }
+                operation.current_attempt = int(operation.current_attempt)
+                self._set_progress(
+                    operation,
+                    "available",
+                    total_bytes=receipt.image_bytes,
+                    completed_bytes=receipt.image_bytes,
+                )
+        except _AvailabilityClaimLost:
+            return
         except Exception as error:  # noqa: BLE001 - persist failures at the background job boundary
-            self._fail(operation_id, error)
+            self._fail(claim, error)
         finally:
-            if heartbeat is not None:
-                heartbeat_stop.set()
-                heartbeat.join(timeout=max(1.0, self._claim_lease_seconds / 2))
+            heartbeat_stop.set()
+            heartbeat.join(timeout=max(1.0, self._claim_lease_seconds / 2))
 
     def _current_model_child(
         self,
@@ -1983,6 +2082,18 @@ class RecipeImageAvailabilityService:
     ) -> Mapping[str, object] | None:
         child = payload.get("model_child")
         if not isinstance(child, Mapping) or self._model_cache is None:
+            if (
+                child is None
+                and self._model_cache is not None
+                and actor is not None
+                and parent_request_key is not None
+                and _canonical_recipe(payload["recipe"]).models
+            ):
+                return self._ensure_model_child(
+                    str(payload["recipe_revision_id"]),
+                    actor=actor,
+                    parent_request_key=parent_request_key,
+                )
             return child if isinstance(child, Mapping) else None
         child_id = child.get("id")
         if not isinstance(child_id, str):
@@ -2048,27 +2159,11 @@ class RecipeImageAvailabilityService:
             "failure": (dict(failure) if isinstance(failure, Mapping) else None),
         }
 
-    def _is_removed(self, operation_id: str) -> bool:
-        with self._sessions() as session:
-            operation = session.get(Job, operation_id)
-            payload = (
-                operation.payload
-                if operation is not None and isinstance(operation.payload, Mapping)
-                else {}
-            )
-            return (
-                operation is None
-                or operation.state == "cancelled"
-                or payload.get("removal_fence") is not None
-            )
-
     def _update_model_progress(
-        self, operation_id: str, child: Mapping[str, object]
+        self, claim: RecipeImageAvailabilityClaim, child: Mapping[str, object]
     ) -> None:
         with self._sessions.begin() as session:
-            operation = session.get(Job, operation_id)
-            if operation is None:
-                return
+            operation = self._require_claim(session, claim)
             payload = dict(operation.payload)
             payload["model_child"] = dict(child)
             operation.payload = payload
@@ -2076,11 +2171,9 @@ class RecipeImageAvailabilityService:
             # Keep image progress separate. The view aggregates the two
             # durable members exactly once.
 
-    def _defer_for_model(self, operation_id: str) -> None:
+    def _defer_for_model(self, claim: RecipeImageAvailabilityClaim) -> None:
         with self._sessions.begin() as session:
-            operation = session.get(Job, operation_id)
-            if operation is None:
-                return
+            operation = self._require_claim(session, claim)
             now = self._clock()
             operation.state = "partial"
             operation.updated_at = now
@@ -2092,7 +2185,7 @@ class RecipeImageAvailabilityService:
 
     def _prepare_claimed_image(
         self,
-        operation_id: str,
+        claim: RecipeImageAvailabilityClaim,
         payload: Mapping[str, object],
         recipe: RecipeDefinition,
         runtime: Mapping[str, object],
@@ -2111,11 +2204,11 @@ class RecipeImageAvailabilityService:
                 build_input_sha256 = ""
             if self._builder_admission is not None:
                 self._builder_admission(recipe, runtime)
-            self._update_progress(operation_id, "build", total_bytes=None)
+            self._update_progress(claim, "build", total_bytes=None)
 
             def report(value: Mapping[str, object]) -> None:
                 phase = value.get("phase", "build")
-                self._update_progress(operation_id, str(phase), detail=value)
+                self._update_progress(claim, str(phase), detail=value)
 
             # The builder re-resolves the exact executable identity and reuses
             # a verified filesystem receipt itself, so queue-time and
@@ -2123,7 +2216,7 @@ class RecipeImageAvailabilityService:
             build_receipt = self._builder(
                 recipe,
                 runtime,
-                operation_id=operation_id,
+                claim=claim,
                 build_input_sha256=build_input_sha256,
                 force=force_rebuild,
                 progress=report,
@@ -2142,25 +2235,24 @@ class RecipeImageAvailabilityService:
                         recovery_actions=("retry",),
                     )
                 with self._sessions.begin() as session:
-                    operation = session.get(Job, operation_id)
-                    if operation is not None:
-                        assigned_runtime = dict(
-                            mapping(operation.payload.get("runtime", {})) or {}
-                        )
-                        if isinstance(build_receipt.get("builder_node_id"), str):
-                            assigned_runtime["builder_node_id"] = build_receipt[
-                                "builder_node_id"
-                            ]
-                        if isinstance(build_receipt.get("build_input_sha256"), str):
-                            assigned_runtime["build_input_sha256"] = build_receipt[
-                                "build_input_sha256"
-                            ]
-                        operation.payload = dict(operation.payload) | {
-                            "build_input_sha256": resolved_input,
-                            "identity_key": resolved_input,
-                            "runtime": assigned_runtime,
-                        }
-            self._update_progress(operation_id, "verify")
+                    operation = self._require_claim(session, claim)
+                    assigned_runtime = dict(
+                        require_mapping(operation.payload["runtime"], "runtime")
+                    )
+                    if isinstance(build_receipt.get("builder_node_id"), str):
+                        assigned_runtime["builder_node_id"] = build_receipt[
+                            "builder_node_id"
+                        ]
+                    if isinstance(build_receipt.get("build_input_sha256"), str):
+                        assigned_runtime["build_input_sha256"] = build_receipt[
+                            "build_input_sha256"
+                        ]
+                    operation.payload = dict(operation.payload) | {
+                        "build_input_sha256": resolved_input,
+                        "identity_key": resolved_input,
+                        "runtime": assigned_runtime,
+                    }
+            self._update_progress(claim, "verify")
             return prepare_runtime_image(
                 recipe,
                 runtime=runtime,
@@ -2171,7 +2263,7 @@ class RecipeImageAvailabilityService:
                 force=False,
             )
         total = _known_total(runtime)
-        self._update_progress(operation_id, "download", total_bytes=total)
+        self._update_progress(claim, "download", total_bytes=total)
         receipt = prepare_runtime_image(
             recipe,
             runtime=runtime,
@@ -2180,14 +2272,14 @@ class RecipeImageAvailabilityService:
             now=self._clock(),
             force=force_download,
             progress=lambda phase, completed, total: self._update_progress(
-                operation_id,
+                claim,
                 phase,
                 completed_bytes=completed,
                 total_bytes=total,
             ),
         )
         self._update_progress(
-            operation_id,
+            claim,
             "verify",
             total_bytes=receipt.image_bytes,
             completed_bytes=receipt.image_bytes,
@@ -2195,26 +2287,21 @@ class RecipeImageAvailabilityService:
         return receipt
 
     def _renew_claim_loop(
-        self, operation_id: str, owner_id: str, stop: threading.Event
+        self, claim: RecipeImageAvailabilityClaim, stop: threading.Event
     ) -> None:
         interval = max(1.0, self._claim_lease_seconds / 3)
         while not stop.wait(interval):
-            if not self._renew_claim(operation_id, owner_id):
+            if not self._renew_claim(claim):
                 return
 
-    def _renew_claim(self, operation_id: str, owner_id: str) -> bool:
+    def _renew_claim(self, claim: RecipeImageAvailabilityClaim) -> bool:
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         with self._sessions.begin() as session:
-            operation = session.get(Job, operation_id, with_for_update=True)
-            if operation is None or operation.state != "running":
+            operation = self._claim_operation(session, claim)
+            if operation is None:
                 return False
-            payload = (
-                operation.payload if isinstance(operation.payload, Mapping) else {}
-            )
-            if payload.get("claim_owner") != owner_id:
-                return False
-            operation.payload = dict(payload) | {
+            operation.payload = dict(operation.payload) | {
                 "claim_until": _iso(now + timedelta(seconds=self._claim_lease_seconds)),
             }
             operation.updated_at = now
@@ -2222,7 +2309,7 @@ class RecipeImageAvailabilityService:
 
     def _persist_receipt(
         self,
-        operation_id: str,
+        claim: RecipeImageAvailabilityClaim,
         payload: Mapping[str, object],
         receipt: RuntimeImageReceipt,
     ) -> None:
@@ -2233,6 +2320,7 @@ class RecipeImageAvailabilityService:
                 "effective execution identity is missing",
             )
         with self._sessions.begin() as session:
+            operation = self._require_claim(session, claim)
             if self._receipt_writer is None:
                 persist_runtime_image_receipt(
                     session,
@@ -2250,6 +2338,16 @@ class RecipeImageAvailabilityService:
                     execution_key,
                     receipt,
                 )
+            operation.payload = dict(operation.payload) | {
+                "image_result": receipt.to_mapping()
+            }
+            self._set_progress(
+                operation,
+                "available",
+                total_bytes=receipt.image_bytes,
+                completed_bytes=receipt.image_bytes,
+            )
+            operation.updated_at = self._clock()
 
     def _set_progress(
         self,
@@ -2279,7 +2377,7 @@ class RecipeImageAvailabilityService:
 
     def _update_progress(
         self,
-        operation_id: str,
+        claim: RecipeImageAvailabilityClaim,
         phase: str,
         *,
         total_bytes: int | None = None,
@@ -2287,9 +2385,7 @@ class RecipeImageAvailabilityService:
         detail: Mapping[str, object] | None = None,
     ) -> None:
         with self._sessions.begin() as session:
-            operation = session.get(Job, operation_id)
-            if operation is None:
-                return
+            operation = self._require_claim(session, claim)
             if detail is not None:
                 raw_completed = detail.get(
                     "completed_bytes", detail.get("downloaded_bytes")
@@ -2338,7 +2434,11 @@ class RecipeImageAvailabilityService:
             )
             operation.updated_at = self._clock()
 
-    def _fail(self, operation_id: str, error: BaseException) -> None:
+    def _fail(
+        self,
+        claim: RecipeImageAvailabilityClaim,
+        error: BaseException,
+    ) -> None:
         retryable = _retryable(error)
         code = _failure_code(error)
         detail = _failure_detail(error)
@@ -2349,24 +2449,20 @@ class RecipeImageAvailabilityService:
             detail = f"{step.strip()}: {detail}"
         excerpt = _log_excerpt(error)
         with self._sessions.begin() as session:
-            operation = session.get(Job, operation_id)
+            operation = self._claim_operation(session, claim)
             if operation is None:
-                return
-            if operation.state == "cancelled" or (
-                isinstance(operation.payload, Mapping)
-                and operation.payload.get("removal_fence") is not None
-            ):
                 return
             retry = operation.payload.get("retry", {})
             retry = dict(retry) if isinstance(retry, Mapping) else {}
             automatic_attempts = int(retry.get("automatic_attempts", 0))
+            dependency_wait = str(code) in _DEPENDENCY_WAIT_CODES
             if retryable and retry_after is None:
-                retry_after = min(60, 2**automatic_attempts)
+                retry_after = 5 if dependency_wait else min(60, 2**automatic_attempts)
             bounded = retryable and (
-                str(code) in _ADMISSION_WAIT_CODES
+                dependency_wait
                 or automatic_attempts + 1 < self._automatic_attempt_limit
             )
-            retry["automatic_attempts"] = automatic_attempts + 1
+            retry["automatic_attempts"] = automatic_attempts + int(not dependency_wait)
             now = self._clock()
             now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
             required_bytes = getattr(error, "required_bytes", None)
@@ -2410,6 +2506,13 @@ class RecipeImageAvailabilityService:
             failure = sanitize_failure_evidence(failure)
             operation.result = None
             payload = dict(operation.payload) | {"retry": retry, "failure": failure}
+            if str(code) in {
+                "recipe_image.build_failed",
+                "runtime_image.cache_missing",
+            }:
+                # The failed effect is settled; a later execution claim may
+                # create a new child. Observation waits retain the exact child.
+                payload.pop("build_dependency", None)
             if isinstance(preserved_retry_time, str):
                 try:
                     parsed_retry_time = datetime.fromisoformat(preserved_retry_time)
@@ -2518,6 +2621,7 @@ class RecipeImageAvailabilityService:
         return RecipeImageAvailabilityView(
             id=operation.id,
             request_id=operation.request_id,
+            request=read_availability_intent(payload.get("request")),
             kind=operation.kind,
             state=operation.state,
             attempt=int(operation.current_attempt),

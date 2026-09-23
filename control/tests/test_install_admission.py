@@ -464,6 +464,7 @@ def setup(
             1,
             read_only,
             ("runtime.vonk.v1",),
+            memory_pool="shared",
         )
     )
     resolved = _seed_canonical_catalog(
@@ -766,6 +767,7 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
             1,
             False,
             ("runtime.vonk.v1",),
+            memory_pool="shared",
         )
     )
 
@@ -838,6 +840,7 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
             1,
             False,
             (),
+            memory_pool="shared",
         )
     )
 
@@ -886,6 +889,7 @@ def _record_inventory(sessions, node_id, at, *, free=200) -> None:
             1,
             False,
             ("runtime.vonk.v1",),
+            memory_pool="shared",
         )
     )
 

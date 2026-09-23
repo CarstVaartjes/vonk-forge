@@ -39,6 +39,7 @@ def _run_plan() -> dict[str, object]:
         allowed=True,
         inventory_observed_at="2026-09-08T10:11:12Z",
         memory_kind="unified",
+        memory_pool="shared",
         required_memory_bytes=1,
         available_memory_bytes=None,
         active_reserved_bytes=0,

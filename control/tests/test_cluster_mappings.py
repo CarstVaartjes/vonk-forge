@@ -208,6 +208,7 @@ def setup(tmp_path: Path):
                 ),
                 fabric_address=f"192.168.100.{index}",
                 fabric_bandwidth_mbps=10_000,
+                memory_pool="shared",
             )
         )
     revision = _seed_canonical_catalog(sessions, now)
@@ -308,6 +309,7 @@ def test_mapping_rejects_wrong_node_count_and_missing_required_fabric(
             gpu_count=1,
             artifact_store_read_only=False,
             capabilities=("runtime.vonk.v1",),
+            memory_pool="shared",
         )
     )
 
@@ -338,6 +340,7 @@ def test_mapping_does_not_trust_fabric_from_claim_capabilities(tmp_path: Path) -
             gpu_count=1,
             artifact_store_read_only=False,
             capabilities=("runtime.vonk.v1",),
+            memory_pool="shared",
         )
     )
 

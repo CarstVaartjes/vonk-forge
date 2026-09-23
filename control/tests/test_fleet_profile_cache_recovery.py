@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+import pytest
 from sqlalchemy import select
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.fleet_profile_contract import FleetProfileInput
@@ -182,10 +183,12 @@ def test_cache_recovery_refuses_access_and_integrity_failures(tmp_path: Path) ->
             assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
 
 
+@pytest.mark.parametrize("recovery_blocker", [None, "contract", "capacity"])
 def test_cache_recovery_replans_an_actually_missing_build_archive(
     tmp_path: Path,
+    recovery_blocker: str | None,
 ) -> None:
-    sessions, _lifecycle, service, _profile, _desired, first, child_id, nodes = (
+    sessions, _lifecycle, service, profile, _desired, first, child_id, nodes = (
         _failed_profile(tmp_path)
     )
     adapter = cast(RunSwitchFleetProfileAdapter, service._switch_adapter)
@@ -249,9 +252,55 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
         return build_plan
 
     lifecycle.preview_build = replan_build
+    # Ordinary review can report cache loss, but only recovery of the accepted
+    # request may create a replacement build plan. Exercise the real profile
+    # and Run/Switch planners with a builder seam that persists its SQL effect.
+    with sessions() as session:
+        before_build = session.get(RecipeBuild, build_plan.build_id)
+        assert before_build is not None
+        before = (
+            before_build.state,
+            before_build.image_digest,
+            before_build.oci_layout_sha256,
+            before_build.image_bytes,
+        )
+    review = service.preview(profile.id)
+    assert not review.allowed
+    with sessions() as session:
+        after_build = session.get(RecipeBuild, build_plan.build_id)
+        assert after_build is not None
+        assert (
+            after_build.state,
+            after_build.image_digest,
+            after_build.oci_layout_sha256,
+            after_build.image_bytes,
+        ) == before
     _typed_cache_failure(sessions, first.id, child_id, "runtime_image.cache_missing")
 
+    if recovery_blocker is not None:
+        with sessions.begin() as session:
+            if recovery_blocker == "contract":
+                build = session.get(RecipeBuild, build_plan.build_id)
+                assert build is not None
+                build.plan = {}
+            else:
+                inventory = session.scalar(select(NodeInventorySnapshot))
+                assert inventory is not None
+                inventory.host_memory_free_bytes = 0
+                inventory.gpu_memory_free_bytes = 0
+        recovery_review = service.preview(profile.id, allow_pending_cache_rebuild=True)
+        assert not recovery_review.allowed
+        assert recovery_review.assessments[0].assessment.blockers
+        assert service.tick() is False
+        with sessions() as session:
+            assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
+            build = session.get(RecipeBuild, build_plan.build_id)
+            assert build is not None and build.state == before[0]
+        return
+
     assert service.tick() is True
+    recovery_review = service.preview(profile.id, allow_pending_cache_rebuild=True)
+    assert recovery_review.allowed and recovery_review.assessments
     assert service.tick() is True
     with sessions() as session:
         retry = session.scalar(

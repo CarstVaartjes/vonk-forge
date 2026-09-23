@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor, CursorError, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_projection import LibraryProjection, LibraryProjectionError
@@ -643,3 +643,72 @@ def test_cached_download_progress_preserves_zero_and_rejects_negative_totals(
         progress = response.json()["models"][0]["local"]["preparation"]
         assert progress["state"] == "succeeded"
         assert progress["total_bytes"] == 0
+
+
+@pytest.mark.parametrize("kind", ["model", "recipe"])
+def test_library_cursor_refuses_a_changed_accepted_catalog(tmp_path: Path, kind: str):
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    engine = create_engine(f"sqlite:///{tmp_path / 'changing-library.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    template = index["catalog_entities" if kind == "model" else "recipes"][0][
+        "document"
+    ]
+    _insert_canonical_rows(sessions, kind=kind, template=template, count=2)
+    projection = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        clock=lambda: datetime(2026, 9, 6, tzinfo=UTC),
+    )
+
+    def read(cursor: str | None = None):
+        if kind == "model":
+            return projection.models(limit=1, sort="name", cursor=cursor)
+        return projection.recipe_library(
+            limit=1, sort="name", cursor=cursor, all_models=True
+        )
+
+    first = read()
+    assert first.next_cursor is not None
+    # A later-page accepted revision is replaced during the scan. An old
+    # boundary alone would silently mix the old and new library in one choice.
+    with sessions.begin() as session:
+        old = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == kind,
+                CatalogDocumentRevision.slug == f"{kind}-0001",
+            )
+        )
+        assert old is not None
+        document = copy.deepcopy(old.document)
+        metadata = _document_section(document, "metadata")
+        metadata["description"] = "Changed after the first page"
+        canonical_type = ModelDefinition if kind == "model" else RecipeDefinition
+        canonical = canonical_type.model_validate(document)
+        new = CatalogDocumentRevision(
+            id=str(uuid.uuid4()),
+            document_id=old.document_id,
+            kind=kind,
+            publisher=old.publisher,
+            slug=old.slug,
+            revision_number=2,
+            state="active",
+            document=canonical.model_dump(mode="json"),
+            content_digest=content_sha256(canonical),
+            schema_version=2,
+            projected={},
+            created_by="test",
+            created_at=old.created_at,
+        )
+        session.add(new)
+        head = session.scalar(
+            select(CatalogDocumentHead).where(
+                CatalogDocumentHead.kind == kind,
+                CatalogDocumentHead.publisher == old.publisher,
+                CatalogDocumentHead.slug == old.slug,
+            )
+        )
+        assert head is not None
+        head.active_revision_id = new.id
+    with pytest.raises(CursorError):
+        read(first.next_cursor)

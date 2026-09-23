@@ -27,6 +27,9 @@ def _get_kwargs(
     cursor: Union[None, Unset, str] = UNSET,
     model: Union[None, Unset, list[str]] = UNSET,
     all_models: Union[Unset, bool] = False,
+    ready: Union[None, Unset, bool] = UNSET,
+    fits_fleet: Union[None, Unset, bool] = UNSET,
+    assess: Union[Unset, bool] = True,
     usage: Union[None, Unset, list[str]] = UNSET,
     publisher: Union[None, Unset, list[str]] = UNSET,
     alignment: Union[None, Unset, list[str]] = UNSET,
@@ -63,6 +66,22 @@ def _get_kwargs(
     params["model"] = json_model
 
     params["all_models"] = all_models
+
+    json_ready: Union[None, Unset, bool]
+    if isinstance(ready, Unset):
+        json_ready = UNSET
+    else:
+        json_ready = ready
+    params["ready"] = json_ready
+
+    json_fits_fleet: Union[None, Unset, bool]
+    if isinstance(fits_fleet, Unset):
+        json_fits_fleet = UNSET
+    else:
+        json_fits_fleet = fits_fleet
+    params["fits_fleet"] = json_fits_fleet
+
+    params["assess"] = assess
 
     json_usage: Union[None, Unset, list[str]]
     if isinstance(usage, Unset):
@@ -196,6 +215,9 @@ def sync_detailed(
     cursor: Union[None, Unset, str] = UNSET,
     model: Union[None, Unset, list[str]] = UNSET,
     all_models: Union[Unset, bool] = False,
+    ready: Union[None, Unset, bool] = UNSET,
+    fits_fleet: Union[None, Unset, bool] = UNSET,
+    assess: Union[Unset, bool] = True,
     usage: Union[None, Unset, list[str]] = UNSET,
     publisher: Union[None, Unset, list[str]] = UNSET,
     alignment: Union[None, Unset, list[str]] = UNSET,
@@ -212,6 +234,9 @@ def sync_detailed(
         cursor (Union[None, Unset, str]):
         model (Union[None, Unset, list[str]]):
         all_models (Union[Unset, bool]):  Default: False.
+        ready (Union[None, Unset, bool]):
+        fits_fleet (Union[None, Unset, bool]):
+        assess (Union[Unset, bool]):  Default: True.
         usage (Union[None, Unset, list[str]]):
         publisher (Union[None, Unset, list[str]]):
         alignment (Union[None, Unset, list[str]]):
@@ -234,6 +259,9 @@ def sync_detailed(
 cursor=cursor,
 model=model,
 all_models=all_models,
+ready=ready,
+fits_fleet=fits_fleet,
+assess=assess,
 usage=usage,
 publisher=publisher,
 alignment=alignment,
@@ -257,6 +285,9 @@ def sync(
     cursor: Union[None, Unset, str] = UNSET,
     model: Union[None, Unset, list[str]] = UNSET,
     all_models: Union[Unset, bool] = False,
+    ready: Union[None, Unset, bool] = UNSET,
+    fits_fleet: Union[None, Unset, bool] = UNSET,
+    assess: Union[Unset, bool] = True,
     usage: Union[None, Unset, list[str]] = UNSET,
     publisher: Union[None, Unset, list[str]] = UNSET,
     alignment: Union[None, Unset, list[str]] = UNSET,
@@ -273,6 +304,9 @@ def sync(
         cursor (Union[None, Unset, str]):
         model (Union[None, Unset, list[str]]):
         all_models (Union[Unset, bool]):  Default: False.
+        ready (Union[None, Unset, bool]):
+        fits_fleet (Union[None, Unset, bool]):
+        assess (Union[Unset, bool]):  Default: True.
         usage (Union[None, Unset, list[str]]):
         publisher (Union[None, Unset, list[str]]):
         alignment (Union[None, Unset, list[str]]):
@@ -296,6 +330,9 @@ limit=limit,
 cursor=cursor,
 model=model,
 all_models=all_models,
+ready=ready,
+fits_fleet=fits_fleet,
+assess=assess,
 usage=usage,
 publisher=publisher,
 alignment=alignment,
@@ -313,6 +350,9 @@ async def asyncio_detailed(
     cursor: Union[None, Unset, str] = UNSET,
     model: Union[None, Unset, list[str]] = UNSET,
     all_models: Union[Unset, bool] = False,
+    ready: Union[None, Unset, bool] = UNSET,
+    fits_fleet: Union[None, Unset, bool] = UNSET,
+    assess: Union[Unset, bool] = True,
     usage: Union[None, Unset, list[str]] = UNSET,
     publisher: Union[None, Unset, list[str]] = UNSET,
     alignment: Union[None, Unset, list[str]] = UNSET,
@@ -329,6 +369,9 @@ async def asyncio_detailed(
         cursor (Union[None, Unset, str]):
         model (Union[None, Unset, list[str]]):
         all_models (Union[Unset, bool]):  Default: False.
+        ready (Union[None, Unset, bool]):
+        fits_fleet (Union[None, Unset, bool]):
+        assess (Union[Unset, bool]):  Default: True.
         usage (Union[None, Unset, list[str]]):
         publisher (Union[None, Unset, list[str]]):
         alignment (Union[None, Unset, list[str]]):
@@ -351,6 +394,9 @@ async def asyncio_detailed(
 cursor=cursor,
 model=model,
 all_models=all_models,
+ready=ready,
+fits_fleet=fits_fleet,
+assess=assess,
 usage=usage,
 publisher=publisher,
 alignment=alignment,
@@ -374,6 +420,9 @@ async def asyncio(
     cursor: Union[None, Unset, str] = UNSET,
     model: Union[None, Unset, list[str]] = UNSET,
     all_models: Union[Unset, bool] = False,
+    ready: Union[None, Unset, bool] = UNSET,
+    fits_fleet: Union[None, Unset, bool] = UNSET,
+    assess: Union[Unset, bool] = True,
     usage: Union[None, Unset, list[str]] = UNSET,
     publisher: Union[None, Unset, list[str]] = UNSET,
     alignment: Union[None, Unset, list[str]] = UNSET,
@@ -390,6 +439,9 @@ async def asyncio(
         cursor (Union[None, Unset, str]):
         model (Union[None, Unset, list[str]]):
         all_models (Union[Unset, bool]):  Default: False.
+        ready (Union[None, Unset, bool]):
+        fits_fleet (Union[None, Unset, bool]):
+        assess (Union[Unset, bool]):  Default: True.
         usage (Union[None, Unset, list[str]]):
         publisher (Union[None, Unset, list[str]]):
         alignment (Union[None, Unset, list[str]]):
@@ -413,6 +465,9 @@ limit=limit,
 cursor=cursor,
 model=model,
 all_models=all_models,
+ready=ready,
+fits_fleet=fits_fleet,
+assess=assess,
 usage=usage,
 publisher=publisher,
 alignment=alignment,

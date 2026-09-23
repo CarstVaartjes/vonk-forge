@@ -1214,7 +1214,7 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
         # authority before any authorization is written.
         with pytest.raises(
             RuntimeImagePreparationError,
-            match="not backed by the exact succeeded build",
+            match="not backed by the exact recorded build result",
         ):
             persist_runtime_image_receipt(
                 session,

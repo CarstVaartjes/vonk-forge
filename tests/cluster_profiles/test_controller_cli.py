@@ -11,15 +11,16 @@ from io import StringIO
 import pytest
 
 from cluster_profiles import cli
-from cluster_profiles.cli_render import render_payload
-from cluster_profiles.cli_select import SelectorError, select_exact
+from cluster_profiles.cli_render import progress_line, render_payload
 from cluster_profiles.control_client import (
     ControlForbidden,
+    ControlHTTPError,
     ControlNotFound,
     ControlTransportError,
     ControlUnavailable,
+    _operation,
+    validate_control_document,
 )
-from cluster_profiles.controller_cli import _operation_progress_line
 
 
 def _subparser_choices(
@@ -38,6 +39,8 @@ def _subparser_choices(
 
 class FakeClient:
     """Strict in-process adapter for the current operator wire contracts."""
+
+    request_timeout_seconds = 15.0
 
     def __init__(self, responses: dict[tuple[str, str], object]):
         self.responses = responses
@@ -67,7 +70,7 @@ class FakeClient:
 
     def _validate_request(self, method, path, payload, query):
         profile_path = re.fullmatch(
-            r"/api/profile/(\d+)(?:/(preview|load|progress))?", path
+            r"/api/profile/(\d+)(?:/(definition|preview|load|progress))?", path
         )
         application_path = re.fullmatch(
             r"/api/profile/applications/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -82,7 +85,9 @@ class FakeClient:
         selector_path = re.fullmatch(
             r"/api/(model|recipe)/[^/]+(?:/(download|remove))?", path
         )
-        operation_path = re.fullmatch(r"/api/(model|recipe)/operations/[^/]+", path)
+        operation_path = re.fullmatch(
+            r"/api/(model|recipe)/(operations|requests)/[^/]+", path
+        )
         known_get = {
             "/api/fleet",
             "/api/model",
@@ -119,18 +124,10 @@ class FakeClient:
 
         if method == "GET":
             if path.endswith("/library"):
+                parameters = _operation(path, method)["parameters"]
+                assert isinstance(parameters, list)
                 assert query is None or set(query) <= {
-                    "search",
-                    "usage",
-                    "family",
-                    "version",
-                    "quantization",
-                    "updated_since",
-                    "sort",
-                    "limit",
-                    "cursor",
-                    "model",
-                    "all_models",
+                    item["name"] for item in parameters if item["in"] == "query"
                 }
             elif path.startswith("/api/fleet/") and not path.endswith("/loginfo"):
                 assert query is None or set(query) <= {
@@ -160,20 +157,7 @@ class FakeClient:
 
         if method == "PUT":
             assert profile_path is not None and profile_path.group(2) is None
-            assert isinstance(payload, dict)
-            assert set(payload) <= {"assignments", "name", "expected_revision"}
-            assert isinstance(payload.get("assignments"), list)
-            for assignment in payload["assignments"]:
-                assert set(assignment) <= {
-                    "recipe_selector",
-                    "spark_ids",
-                    "assignment_name",
-                    "model_variant",
-                    "desired_state",
-                }
-                assert isinstance(assignment["recipe_selector"], str)
-                assert isinstance(assignment["spark_ids"], list)
-                assert "model_content_sha256" not in assignment
+            validate_control_document("FleetProfileInput", payload)
             return
 
         if method != "POST":
@@ -182,9 +166,7 @@ class FakeClient:
             assert profile_path is not None and payload is None
         elif path.endswith("/load"):
             assert profile_path is not None
-            assert set(payload) <= {"request_key", "dry_run"}
-            assert "request_key" in payload
-            uuid.UUID(payload["request_key"])
+            validate_control_document("FleetProfileLoadRequest", payload)
         elif selector_path is not None and selector_path.group(2) in {
             "download",
             "remove",
@@ -315,19 +297,28 @@ def test_download_is_one_step_and_repeated_calls_keep_server_operation_states() 
         {
             ("POST", "/api/model/qwen/download"): {
                 "state": "accepted",
-                "action": "Following",
+                "action": "download",
+                "operation_id": "model-download",
+                "request_key": "11111111-1111-4111-8111-111111111111",
+                "selector": "qwen",
             },
             ("POST", "/api/recipe/qwen-code/download"): {
                 "state": "running",
-                "action": "Resuming",
+                "kind": "recipe.image.availability.v2",
+                "id": "recipe-download",
+                "request_id": "11111111-1111-4111-8111-111111111111",
+                "request": {"kind": "selector", "selector": "qwen-code", "force": True},
             },
         }
     )
     assert (
-        run(("model", "download", "qwen", "--json"), client)[1]["action"] == "Following"
+        run(("model", "download", "qwen", "--detach", "--json"), client)[1]["action"]
+        == "download"
     )
-    assert run(("model", "download", "qwen", "--json"), client)[0] == 0
-    assert run(("recipe", "download", "qwen-code", "--json"), client)[0] == 0
+    assert run(("model", "download", "qwen", "--detach", "--json"), client)[0] == 0
+    assert (
+        run(("recipe", "download", "qwen-code", "--detach", "--json"), client)[0] == 0
+    )
     assert (
         client.calls[0][2]
         == client.calls[1][2]
@@ -347,34 +338,33 @@ def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None
         {
             ("GET", "/api/model/qwen"): {
                 "selector": "qwen",
-                "name": "Qwen 3.8",
-                "cache": {"state": "Not cached"},
-                "technical": {"artifact_set_sha256": "digest"},
+                "identity": {"slug": "Qwen 3.8", "content_sha256": "digest"},
+                "local": {"controller": "not_cached", "running_on": []},
+                "resources": {},
+                "document": {},
             },
             ("GET", "/api/model"): {
-                "title": "Models",
                 "models": [
                     {
                         "selector": "qwen",
-                        "name": "Qwen 3.8",
-                        "cache": {"state": "Cached"},
-                        "running": {"spark_ids": ["Atlas"]},
-                        "artifact": {"size_bytes": 42},
+                        "identity": {"slug": "Qwen 3.8"},
+                        "local": {"controller": "cached", "running_on": ["Atlas"]},
+                        "resources": {"disk_bytes": 42},
                     }
                 ],
             },
         }
     )
     status, payload = run(("model", "detail", "qwen", "--technical", "--json"), detail)
-    technical = payload["technical"]
+    technical = payload["identity"]
     assert isinstance(technical, dict)
-    assert status == 0 and technical["artifact_set_sha256"] == "digest"
+    assert status == 0 and technical["content_sha256"] == "digest"
     assert detail.calls[0][3] == {"technical": True}
     output = StringIO()
     with redirect_stdout(output):
         assert cli.main(("model",), control_client=detail) == 0
     text = output.getvalue()
-    assert "Cached" in text and "Atlas" in text and "42" in text
+    assert "cached" in text and "Atlas" in text and "42 B" in text
 
 
 def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
@@ -387,10 +377,12 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
             ("POST", "/api/recipe/vision/remove"): {
                 "state": "accepted",
                 "operation_id": "op-2",
+                "action": "remove",
             },
             ("GET", "/api/recipe/operations/op-2"): {
                 "state": "succeeded",
                 "operation_id": "op-2",
+                "action": "remove",
             },
         }
     )
@@ -414,11 +406,11 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
 def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> None:
     client = FakeClient(
         {
-            ("GET", "/api/profile/2"): {
+            ("GET", "/api/profile/2/definition"): {
+                "id": "11111111-1111-4111-8111-111111111111",
                 "number": 2,
-                "name": "Coding",
                 "revision": 7,
-                "assignments": [],
+                "definition": {"name": "Coding", "assignments": []},
             },
             ("GET", "/api/recipe/library"): {
                 "recipes": [
@@ -465,6 +457,8 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             "Boreal",
             "--spark",
             "Atlas",
+            "--state",
+            "running",
             "--json",
         ),
         client,
@@ -472,12 +466,12 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
     assert status == 0
     assert payload["revision"] == 8
     assert client.calls == [
-        ("GET", "/api/profile/2", None, None),
+        ("GET", "/api/profile/2/definition", None, None),
         (
             "GET",
             "/api/recipe/library",
             None,
-            {"all_models": True, "limit": 512, "sort": "name"},
+            {"all_models": True, "limit": 512, "sort": "name", "assess": False},
         ),
         ("GET", "/api/fleet", None, None),
         (
@@ -502,11 +496,24 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
 def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
     client = FakeClient(
         {
-            ("GET", "/api/profile/1"): {
+            ("GET", "/api/profile/1/definition"): {
+                "id": "11111111-1111-4111-8111-111111111111",
                 "number": 1,
-                "name": "Default",
                 "revision": 1,
-                "assignments": [],
+                "definition": {"name": "Default", "assignments": []},
+            },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    {
+                        "selector": "vonk-forge/qwen-code",
+                        "identity": {
+                            "publisher": "vonk-forge",
+                            "slug": "qwen-code",
+                            "title": "Qwen Code",
+                        },
+                    }
+                ],
+                "next_cursor": None,
             },
             ("GET", "/api/fleet"): {
                 "nodes": [
@@ -543,23 +550,30 @@ def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
     ambiguous_error = payload["error"]
     assert isinstance(ambiguous_error, str)
     assert "ambiguous spark selector" in ambiguous_error
-    assert [call[1] for call in client.calls] == ["/api/profile/1", "/api/fleet"]
+    assert [call[1] for call in client.calls] == [
+        "/api/profile/1/definition",
+        "/api/recipe/library",
+        "/api/fleet",
+    ]
 
 
 def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
     client = FakeClient(
         {
-            ("GET", "/api/profile/1"): {
+            ("GET", "/api/profile/1/definition"): {
+                "id": "11111111-1111-4111-8111-111111111111",
                 "number": 1,
-                "name": "Default",
                 "revision": 3,
-                "assignments": [
-                    {
-                        "recipe_selector": "vonk-forge/recipe-uuid",
-                        "assignment_name": None,
-                        "spark_ids": ["spk_" + "a" * 32],
-                    }
-                ],
+                "definition": {
+                    "name": "Default",
+                    "assignments": [
+                        {
+                            "recipe_selector": "vonk-forge/recipe-uuid",
+                            "assignment_name": None,
+                            "spark_ids": ["spk_" + "a" * 32],
+                        }
+                    ],
+                },
             },
             ("GET", "/api/recipe/library"): {
                 "recipes": [
@@ -585,6 +599,15 @@ def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
     assert profile_write["assignments"] == []
 
 
+def _accepted_profile_load(identity: str, state: str) -> dict[str, object]:
+    return {
+        "id": identity,
+        "state": state,
+        "request_key": "11111111-1111-4111-8111-111111111111",
+        "progress": {"intended_profile": {"reviewed_plan_digest": "c" * 64}},
+    }
+
+
 def test_profile_load_follows_the_application_it_submitted() -> None:
     """A load is followed by its own durable application identity.
 
@@ -597,28 +620,41 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
     other_application = "44444444-4444-4444-8444-444444444444"
     client = FakeClient(
         {
-            ("POST", "/api/profile/1/load"): {
-                "id": application_id,
-                "state": "queued",
-            },
-            ("GET", f"/api/profile/applications/{application_id}"): {
-                "id": application_id,
-                "state": "succeeded",
-            },
-            ("GET", "/api/profile/1/progress"): {
-                "id": other_application,
-                "state": "failed",
-            },
+            ("POST", "/api/profile/1/load"): _accepted_profile_load(
+                application_id, "queued"
+            ),
+            (
+                "GET",
+                f"/api/profile/applications/{application_id}",
+            ): _accepted_profile_load(application_id, "succeeded"),
+            ("GET", "/api/profile/1/progress"): _accepted_profile_load(
+                other_application, "failed"
+            ),
         }
     )
-    status, payload = run(("--profile", "1", "profile", "load", "--json"), client)
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--expected-plan",
+            "c" * 64,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
 
     assert status == 0 and payload["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
         "/api/profile/1/load",
         f"/api/profile/applications/{application_id}",
     ]
-    assert client.calls[0][2] == {"request_key": "11111111-1111-4111-8111-111111111111"}
+    assert client.calls[0][2] == {
+        "request_key": "11111111-1111-4111-8111-111111111111",
+        "expected_plan_digest": "c" * 64,
+    }
 
 
 def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route() -> (
@@ -630,10 +666,23 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
             ("GET", "/api/profile/1/progress"): {"state": "succeeded"},
         }
     )
-    status, payload = run(("--profile", "1", "profile", "load", "--json"), client)
+    status, _payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--expected-plan",
+            "c" * 64,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
 
-    assert status == 0 and payload["state"] == "queued"
-    assert [call[1] for call in client.calls] == ["/api/profile/1/load"]
+    assert status != 0
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert not any(call[1].endswith("/progress") for call in client.calls)
 
 
 def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
@@ -754,7 +803,19 @@ def test_lost_mutation_response_still_names_the_request_key() -> None:
             ("POST", "/api/profile/1/load"): ControlTransportError("connection reset"),
         }
     )
-    status, payload = run(("--profile", "1", "profile", "load", "--json"), client)
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--expected-plan",
+            "c" * 64,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
 
     assert status != 0
     assert payload["request_key"] == "11111111-1111-4111-8111-111111111111"
@@ -769,14 +830,25 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
     client = FakeClient(
         {
             ("POST", "/api/profile/1/load"): ControlTransportError("connection reset"),
-            ("GET", f"/api/profile/1/requests/{key}"): {
-                "id": operation,
-                "state": "succeeded",
-            },
+            ("GET", f"/api/profile/1/requests/{key}"): _accepted_profile_load(
+                operation, "succeeded"
+            ),
         }
     )
 
-    status, payload = run(("--profile", "1", "profile", "load", "--json"), client)
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--expected-plan",
+            "c" * 64,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
 
     assert status == 0
     assert payload["id"] == operation
@@ -790,7 +862,7 @@ def test_lost_load_response_retries_only_with_original_request_key() -> None:
         {
             ("POST", "/api/profile/1/load"): [
                 ControlTransportError("connection reset"),
-                {"id": operation, "state": "succeeded"},
+                _accepted_profile_load(operation, "succeeded"),
             ],
             ("GET", f"/api/profile/1/requests/{key}"): ControlNotFound(
                 404, "not committed"
@@ -798,7 +870,19 @@ def test_lost_load_response_retries_only_with_original_request_key() -> None:
         }
     )
 
-    status, payload = run(("--profile", "1", "profile", "load", "--json"), client)
+    status, payload = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--expected-plan",
+            "c" * 64,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
 
     assert status == 0
     assert payload["id"] == operation
@@ -812,16 +896,30 @@ def test_lost_load_response_retries_only_with_original_request_key() -> None:
 
 def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
     assert (
-        _operation_progress_line(
-            {"state": "building", "progress": {"step": 4, "steps": 7}}
+        progress_line(
+            {
+                "state": "running",
+                "progress": {
+                    "phase": "building",
+                    "completed_items": 4,
+                    "total_items": 7,
+                },
+            }
         )
-        == "building · step 4/7"
+        == "building | items 4 / 7"
     )
     assert (
-        _operation_progress_line(
-            {"state": "copying", "progress": {"completed_bytes": 20}}
+        progress_line(
+            {
+                "state": "running",
+                "progress": {
+                    "phase": "copying",
+                    "completed_bytes": 20,
+                    "total_bytes_known": False,
+                },
+            }
         )
-        == "copying · progress unavailable"
+        == "copying | 20 B; total unknown"
     )
 
 
@@ -844,26 +942,13 @@ def test_profile_terminal_render_shows_effective_initial_budget_and_runtime_phas
                 },
             },
             "profile",
+            action="progress",
         )
     rendered = output.getvalue()
     assert "start Mia" in rendered
     assert "load/JIT phase: jit" in rendered
     assert "initial start budget: 1800 seconds" in rendered
     assert "initial start deadline: 2026-09-14T20:00:00Z" in rendered
-
-
-def test_selector_requires_exact_unique_match_for_local_selection() -> None:
-    rows = [
-        {"selector": "qwen-code", "name": "Qwen Code"},
-        {"selector": "qwen-chat", "name": "Qwen Chat"},
-    ]
-    assert select_exact(rows, "QWEN-CODE", noun="recipe")["selector"] == "qwen-code"
-    try:
-        select_exact(rows, "qwen", noun="recipe")
-    except SelectorError as error:
-        assert "unknown recipe selector" in str(error)
-    else:
-        raise AssertionError("partial selector was silently accepted")
 
 
 def test_removal_flags_are_scoped_to_recipe_model_dependency() -> None:
@@ -895,7 +980,17 @@ def test_removal_flags_are_scoped_to_recipe_model_dependency() -> None:
 
 
 def test_explicit_request_key_is_forwarded_for_retry_reconciliation() -> None:
-    client = FakeClient({("POST", "/api/model/qwen/download"): {"state": "running"}})
+    client = FakeClient(
+        {
+            ("POST", "/api/model/qwen/download"): {
+                "state": "running",
+                "operation_id": "download",
+                "request_key": "22222222-2222-4222-8222-222222222222",
+                "action": "download",
+                "selector": "qwen",
+            }
+        }
+    )
     status, _ = run(
         (
             "model",
@@ -903,6 +998,7 @@ def test_explicit_request_key_is_forwarded_for_retry_reconciliation() -> None:
             "qwen",
             "--request-key",
             "22222222-2222-4222-8222-222222222222",
+            "--detach",
             "--json",
         ),
         client,
@@ -916,12 +1012,33 @@ def test_explicit_request_key_is_forwarded_for_retry_reconciliation() -> None:
 def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
     class ConflictClient(FakeClient):
         def request(
-            self, method, path, payload=None, *, extra_headers=None, query=None
+            self,
+            method,
+            path,
+            payload=None,
+            *,
+            extra_headers=None,
+            query=None,
+            timeout_seconds=None,
         ):
             self._validate_request(method, path, payload, query)
             self.calls.append((method, path, payload, query))
             if method == "PUT":
                 raise ValueError("profile revision conflict")
+            if path == "/api/recipe/library":
+                return {
+                    "recipes": [
+                        {
+                            "selector": "vonk-forge/qwen-code",
+                            "identity": {
+                                "publisher": "vonk-forge",
+                                "slug": "qwen-code",
+                                "title": "Qwen Code",
+                            },
+                        }
+                    ],
+                    "next_cursor": None,
+                }
             if path == "/api/fleet":
                 return {
                     "nodes": [
@@ -932,7 +1049,12 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
                         }
                     ]
                 }
-            return {"number": 1, "revision": 4, "assignments": []}
+            return {
+                "id": "11111111-1111-4111-8111-111111111111",
+                "number": 1,
+                "revision": 4,
+                "definition": {"assignments": []},
+            }
 
     client = ConflictClient({})
     status, payload = run(
@@ -950,17 +1072,26 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
     )
     assert status == 2
     assert payload["error"] == "profile revision conflict"
-    assert [call[0] for call in client.calls] == ["GET", "GET", "PUT"]
+    assert [call[0] for call in client.calls] == ["GET", "GET", "GET", "PUT"]
 
 
 def test_ambiguous_mutation_error_is_not_retried_or_fuzzily_resolved() -> None:
     class AmbiguousClient(FakeClient):
         def request(
-            self, method, path, payload=None, *, extra_headers=None, query=None
+            self,
+            method,
+            path,
+            payload=None,
+            *,
+            extra_headers=None,
+            query=None,
+            timeout_seconds=None,
         ):
             self._validate_request(method, path, payload, query)
             self.calls.append((method, path, payload, query))
-            raise ValueError("ambiguous model selector; choose an exact selector")
+            raise ControlHTTPError(
+                422, "ambiguous model selector; choose an exact selector"
+            )
 
     client = AmbiguousClient({})
     status, payload = run(("model", "download", "qwen", "--json"), client)
@@ -1045,13 +1176,13 @@ def test_plain_output_is_adaptive_and_keeps_identity_before_optional_columns() -
     client = FakeClient(
         {
             ("GET", "/api/model"): {
-                "title": "Models",
                 "models": [
                     {
-                        "name": "Qwen 3.8",
                         "selector": "qwen-3.8-nvfp4",
                         "usage": ["code"],
-                        "cache_state": "Cached",
+                        "identity": {"slug": "Qwen 3.8"},
+                        "local": {"controller": "cached", "running_on": []},
+                        "resources": {},
                     }
                 ],
             }
@@ -1071,6 +1202,9 @@ def test_async_mutations_follow_the_noun_operation_until_terminal() -> None:
             ("POST", "/api/model/qwen/download"): {
                 "state": "accepted",
                 "operation_id": "download-1",
+                "request_key": "11111111-1111-4111-8111-111111111111",
+                "action": "download",
+                "selector": "qwen",
             },
             ("GET", "/api/model/operations/download-1"): [
                 {"state": "running", "operation_id": "download-1"},
@@ -1090,48 +1224,178 @@ def test_async_mutations_follow_the_noun_operation_until_terminal() -> None:
     ]
 
 
+@pytest.mark.parametrize("noun", ["model", "recipe"])
+def test_cache_request_lookup_pins_following_to_its_original_operation(
+    noun: str,
+) -> None:
+    key = "11111111-1111-4111-8111-111111111111"
+    identity = (
+        {"operation_id": "original", "request_key": key, "action": "download"}
+        if noun == "model"
+        else {
+            "id": "original",
+            "request_id": key,
+            "kind": "recipe.image.availability.v2",
+        }
+    )
+    lookup = f"/api/{noun}/requests/{key}"
+    target = f"/api/{noun}/operations/original"
+    client = FakeClient(
+        {
+            ("GET", lookup): identity | {"state": "running"},
+            ("GET", target): identity | {"state": "succeeded"},
+        }
+    )
+    status, result = run(
+        (
+            noun,
+            "progress",
+            "--request-key",
+            key,
+            "--follow",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["state"] == "succeeded"
+    assert [(call[0], call[1]) for call in client.calls] == [
+        ("GET", lookup),
+        ("GET", target),
+    ]
+
+
+def test_recipe_download_follows_its_canonical_receipt_id() -> None:
+    receipt = {
+        "id": "recipe-download",
+        "request_id": "11111111-1111-4111-8111-111111111111",
+        "kind": "recipe.image.availability.v2",
+        "state": "queued",
+        "request": {"kind": "selector", "selector": "qwen-code", "force": True},
+    }
+    client = FakeClient(
+        {
+            ("POST", "/api/recipe/qwen-code/download"): receipt,
+            ("GET", "/api/recipe/operations/recipe-download"): receipt
+            | {"state": "succeeded"},
+        }
+    )
+    status, result = run(
+        (
+            "recipe",
+            "download",
+            "qwen-code",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["state"] == "succeeded"
+    assert [call[1] for call in client.calls] == [
+        "/api/recipe/qwen-code/download",
+        "/api/recipe/operations/recipe-download",
+    ]
+
+
+def test_interrupted_submission_retains_reconnect_without_claiming_acceptance() -> None:
+    client = FakeClient({("POST", "/api/model/qwen/download"): KeyboardInterrupt()})
+    status, result = run(("model", "download", "qwen", "--json"), client)
+    assert status == 130
+    assert isinstance(result["error"], str)
+    assert isinstance(result["reconcile"], dict)
+    assert "accepted work continues" not in result["error"]
+    assert result["reconcile"]["operation"] == (
+        "vonkctl model progress --request-key 11111111-1111-4111-8111-111111111111 --follow"
+    )
+    assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize("changed_binding", ["request", "operation"])
+def test_cache_reconnection_rejects_a_different_binding(changed_binding: str) -> None:
+    key = "11111111-1111-4111-8111-111111111111"
+    initial = {"operation_id": "original", "request_key": key, "state": "running"}
+    if changed_binding == "request":
+        initial["request_key"] = "22222222-2222-4222-8222-222222222222"
+    client = FakeClient(
+        {
+            ("GET", f"/api/model/requests/{key}"): initial,
+            ("GET", "/api/model/operations/original"): initial
+            | {"operation_id": "different", "state": "succeeded"},
+        }
+    )
+    status, result = run(
+        (
+            "model",
+            "progress",
+            "--request-key",
+            key,
+            "--follow",
+            "--interval-seconds",
+            "0.01",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 2
+    assert isinstance(result["error"], str) and "another" in result["error"]
+    assert len(client.calls) == (1 if changed_binding == "request" else 2)
+
+
 def test_detach_returns_acceptance_without_observing_operation() -> None:
     client = FakeClient(
         {
             ("POST", "/api/recipe/qwen-code/download"): {
-                "state": "accepted",
-                "operation_id": "download-2",
+                "state": "queued",
+                "id": "download-2",
+                "kind": "recipe.image.availability.v2",
+                "request_id": "11111111-1111-4111-8111-111111111111",
+                "request": {"kind": "selector", "selector": "qwen-code", "force": True},
             }
         }
     )
     status, payload = run(
         ("recipe", "download", "qwen-code", "--detach", "--json"), client
     )
-    assert status == 0 and payload["state"] == "accepted"
+    assert status == 0 and payload["state"] == "queued"
     assert [call[1] for call in client.calls] == ["/api/recipe/qwen-code/download"]
 
 
-def test_watch_returns_final_detail_after_terminal_snapshot() -> None:
+def test_watch_shows_updated_resource_and_retains_final_snapshot(capsys) -> None:
+    common = {
+        "identity": {"slug": "Qwen"},
+        "selector": "qwen",
+        "usage": [],
+        "resources": {"disk_bytes": 42},
+    }
     client = FakeClient(
         {
             ("GET", "/api/model/qwen"): [
-                {"state": "running", "phase": "copying"},
-                {"state": "succeeded", "phase": "ready"},
+                {**common, "local": {"controller": "preparing", "running_on": []}},
+                {**common, "local": {"controller": "cached", "running_on": []}},
             ]
         }
     )
-    output = StringIO()
-    with redirect_stdout(output):
-        status = cli.main(
-            (
-                "model",
-                "detail",
-                "qwen",
-                "--watch",
-                "--interval-seconds",
-                "0.01",
-            ),
-            control_client=client,
-        )
-    assert status == 0
-    assert len(client.calls) == 2
-    assert output.getvalue().count("state") == 1
-    assert "succeeded" in output.getvalue()
+    status = cli.main(
+        (
+            "model",
+            "detail",
+            "qwen",
+            "--watch",
+            "--interval-seconds",
+            "0.01",
+            "--timeout-seconds",
+            "0.04",
+        ),
+        control_client=client,
+    )
+    captured = capsys.readouterr()
+    assert status == 2  # A resource watch has a deadline, not an execution outcome.
+    assert len(client.calls) >= 2
+    assert "preparing" in captured.err and "cached" in captured.err
+    assert "preparing" not in captured.out and "cached" in captured.out
+    assert "accepted work" not in captured.err
 
 
 def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() -> None:
@@ -1151,8 +1415,28 @@ def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() 
 
 
 def test_terminal_partial_and_failure_states_have_nonzero_exit_codes() -> None:
-    partial = FakeClient({("POST", "/api/model/qwen/download"): {"state": "partial"}})
-    failed = FakeClient({("POST", "/api/model/qwen/download"): {"state": "failed"}})
+    partial = FakeClient(
+        {
+            ("POST", "/api/model/qwen/download"): {
+                "state": "partial",
+                "operation_id": "download",
+                "request_key": "11111111-1111-4111-8111-111111111111",
+                "action": "download",
+                "selector": "qwen",
+            }
+        }
+    )
+    failed = FakeClient(
+        {
+            ("POST", "/api/model/qwen/download"): {
+                "state": "failed",
+                "operation_id": "download",
+                "request_key": "11111111-1111-4111-8111-111111111111",
+                "action": "download",
+                "selector": "qwen",
+            }
+        }
+    )
     assert run(("model", "download", "qwen", "--json"), partial)[0] == 1
     assert run(("model", "download", "qwen", "--json"), failed)[0] == 2
 
