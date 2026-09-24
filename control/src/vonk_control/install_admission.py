@@ -10,8 +10,17 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    acquire_admission_keys,
+    is_admission_contention,
+    lock_admission_rows,
+    node_admission_key,
+)
 from .cluster_mappings import validate_mapping_parameters
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
@@ -33,6 +42,7 @@ from .models import (
     RecipeInstallation,
     ResourceReservation,
 )
+from .profile_capacity import inherited_profile_disk
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     installation_plan_document,
@@ -42,6 +52,7 @@ from .recipe_runtime_specs import (
     recipe_topology,
     resolve_recipe_entities,
 )
+from .resource_planning import installation_disk_requirement
 from .runtime_image_preparation import require_runtime_image_authorization
 from .runtime_preflight import (
     admission_blockers,
@@ -108,6 +119,12 @@ class InstallPlanConflict(RuntimeError):
     pass
 
 
+class InstallAdmissionBusy(InstallPlanConflict):
+    """A capacity writer owns the row; retry only after releasing this transaction."""
+
+    code = "install.capacity_busy"
+
+
 class InstallPreflightExpired(InstallPlanConflict):
     """Only runtime preflight evidence needs a fresh probe; nothing else changed.
 
@@ -136,7 +153,7 @@ def _active_recipe_revision(
         CatalogDocumentRevision.state == "active",
     )
     if for_update:
-        statement = statement.with_for_update(of=CatalogDocumentRevision)
+        statement = statement.with_for_update(of=CatalogDocumentRevision, nowait=True)
     return session.scalar(statement)
 
 
@@ -166,6 +183,7 @@ class InstallAdmissionService:
         now: datetime,
         _session: Session | None = None,
         compiled_execution_plans: Mapping[str, Mapping[str, object]] | None = None,
+        profile_application_id: str | None = None,
     ) -> InstallPlan:
         with (
             nullcontext(_session) if _session is not None else self._sessions()
@@ -503,6 +521,9 @@ class InstallAdmissionService:
                     session,
                     mapping_node.node_id,
                     inventory_observed_at=snapshot.observed_at if snapshot else None,
+                    excluded_profile_application_ids=(profile_application_id,)
+                    if profile_application_id is not None
+                    else (),
                 )
             raw_image_digest = image_digest.removeprefix("sha256:")
             reused_image = (
@@ -542,13 +563,13 @@ class InstallAdmissionService:
             required_download = max(0, actual_artifact_bytes - reused_artifacts) + max(
                 0, (image_bytes or 0) - reused_image
             )
-            required = (
-                required_download
-                + int(disk["staging_bytes"])
-                + int(disk["cache_bytes"])
-                + int(disk["rollback_bytes"])
+            disk_need = installation_disk_requirement(
+                disk,
+                required_download_bytes=required_download,
+                minimum_floor_bytes=self._disk_floor,
             )
-            floor = max(self._disk_floor, int(disk["safety_margin_bytes"]))
+            required = disk_need.required_bytes
+            floor = disk_need.floor_bytes
             free = snapshot.disk_free_bytes if snapshot else None
             free_after = None if free is None else free - reserved - required
             if free_after is not None and free_after < floor:
@@ -615,11 +636,22 @@ class InstallAdmissionService:
         with self._sessions.begin() as session:
             return self.accept_install_in_session(session, plan, actor=actor, now=now)
 
-    def refresh_install_receipts(self, plan: InstallPlan, *, now: datetime) -> None:
+    def refresh_install_receipts(
+        self,
+        plan: InstallPlan,
+        *,
+        now: datetime,
+        profile_application_id: str | None = None,
+    ) -> None:
         """Recheck managed bytes before entering the acceptance transaction."""
         if self._compiled_plan_provider is None:
             return
-        fresh = self.plan_install(plan.mapping_id, plan.recipe_build_id, now=now)
+        fresh = self.plan_install(
+            plan.mapping_id,
+            plan.recipe_build_id,
+            now=now,
+            profile_application_id=profile_application_id,
+        )
         if fresh.plan_digest != plan.plan_digest or not fresh.allowed:
             if (
                 fresh.plan_digest == plan.plan_digest
@@ -635,16 +667,105 @@ class InstallAdmissionService:
         *,
         actor: str,
         now: datetime,
+        profile_application_id: str | None = None,
+        workload_intent_ordinal: int | None = None,
     ) -> str:
-        mapping = session.get(ClusterMapping, plan.mapping_id, with_for_update=True)
+        try:
+            acquire_admission_keys(
+                session,
+                tuple(node_admission_key(node.node_id) for node in plan.nodes),
+            )
+            return self._accept_install_in_session(
+                session,
+                plan,
+                actor=actor,
+                now=now,
+                profile_application_id=profile_application_id,
+                workload_intent_ordinal=workload_intent_ordinal,
+            )
+        except AdmissionLockBusy as error:
+            raise InstallAdmissionBusy("install.capacity_busy") from error
+        except OperationalError as error:
+            if is_admission_contention(error):
+                raise InstallAdmissionBusy("install.capacity_busy") from error
+            raise
+
+    def _accept_install_in_session(
+        self,
+        session: Session,
+        plan: InstallPlan,
+        *,
+        actor: str,
+        now: datetime,
+        profile_application_id: str | None = None,
+        workload_intent_ordinal: int | None = None,
+    ) -> str:
+        node_ids = tuple(node.node_id for node in plan.nodes)
+        requests = [
+            AdmissionRowLock(
+                "target-agent-nodes",
+                AgentNode,
+                select(AgentNode).where(AgentNode.node_id.in_(node_ids)),
+            ),
+            AdmissionRowLock(
+                "reviewed-catalog-revision",
+                CatalogDocumentRevision,
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.id == plan.recipe_revision_id
+                ),
+            ),
+            AdmissionRowLock(
+                "reviewed-mapping",
+                ClusterMapping,
+                select(ClusterMapping).where(ClusterMapping.id == plan.mapping_id),
+            ),
+            AdmissionRowLock(
+                "reviewed-mapping-nodes",
+                ClusterMappingNode,
+                select(ClusterMappingNode).where(
+                    ClusterMappingNode.mapping_id == plan.mapping_id
+                ),
+            ),
+        ]
+        if plan.recipe_build_id is not None:
+            requests.append(
+                AdmissionRowLock(
+                    "reviewed-recipe-build",
+                    RecipeBuild,
+                    select(RecipeBuild).where(RecipeBuild.id == plan.recipe_build_id),
+                )
+            )
+        requests.extend(
+            (
+                AdmissionRowLock(
+                    "node-artifacts",
+                    NodeArtifact,
+                    select(NodeArtifact).where(NodeArtifact.node_id.in_(node_ids)),
+                ),
+                AdmissionRowLock(
+                    "node-inventory-snapshots",
+                    NodeInventorySnapshot,
+                    select(NodeInventorySnapshot).where(
+                        NodeInventorySnapshot.node_id.in_(node_ids)
+                    ),
+                ),
+                AdmissionRowLock(
+                    "node-resource-reservations",
+                    ResourceReservation,
+                    select(ResourceReservation).where(
+                        ResourceReservation.node_id.in_(node_ids)
+                    ),
+                ),
+            )
+        )
+        lock_admission_rows(session, requests)
+        mapping = session.get(ClusterMapping, plan.mapping_id)
         build = (
-            session.get(RecipeBuild, plan.recipe_build_id, with_for_update=True)
+            session.get(RecipeBuild, plan.recipe_build_id)
             if plan.recipe_build_id is not None
             else None
         )
-        revision = _active_recipe_revision(
-            session, plan.recipe_revision_id, for_update=True
-        )
+        revision = _active_recipe_revision(session, plan.recipe_revision_id)
         source_build = revision is not None and _is_source_build(revision.document)
         if (
             mapping is None
@@ -669,34 +790,26 @@ class InstallAdmissionService:
                 select(ClusterMappingNode)
                 .where(ClusterMappingNode.mapping_id == plan.mapping_id)
                 .order_by(ClusterMappingNode.rank)
-                .with_for_update()
             )
         )
-        node_ids = tuple(node.node_id for node in mapping_nodes)
-        session.scalars(
-            select(AgentNode).where(AgentNode.node_id.in_(node_ids)).with_for_update()
-        ).all()
-        session.scalars(
-            select(NodeArtifact)
-            .where(NodeArtifact.node_id.in_(node_ids))
-            .with_for_update()
-        ).all()
-        session.scalars(
-            select(ResourceReservation)
-            .where(ResourceReservation.node_id.in_(node_ids))
-            .with_for_update()
-        ).all()
-        session.scalars(
-            select(NodeInventorySnapshot)
-            .where(NodeInventorySnapshot.node_id.in_(node_ids))
-            .with_for_update()
-        ).all()
+        claims = (
+            inherited_profile_disk(
+                session,
+                profile_application_id,
+                plan.recipe_revision_id,
+                node_ids,
+                workload_intent_ordinal=workload_intent_ordinal,
+            )
+            if profile_application_id is not None
+            else {}
+        )
         fresh = self.plan_install(
             plan.mapping_id,
             plan.recipe_build_id,
             now=now,
             _session=session,
             compiled_execution_plans=plan.compiled_plan_by_node,
+            profile_application_id=profile_application_id,
         )
         identical = (
             fresh.plan_digest == plan.plan_digest
@@ -760,17 +873,15 @@ class InstallAdmissionService:
             updated_at=now,
         )
         for node in sorted(fresh.nodes, key=lambda item: item.node_id):
-            if (
-                session.scalar(
-                    select(AgentNode)
-                    .where(AgentNode.node_id == node.node_id)
-                    .with_for_update()
-                )
-                is None
-            ):
+            if session.get(AgentNode, node.node_id) is None:
                 raise InstallPlanConflict("installation node disappeared")
             active = outstanding_disk_reservation_bytes(
-                session, node.node_id, inventory_observed_at=node.inventory_observed_at
+                session,
+                node.node_id,
+                inventory_observed_at=node.inventory_observed_at,
+                excluded_profile_application_ids=(profile_application_id,)
+                if profile_application_id is not None
+                else (),
             )
             if (
                 node.free_bytes is None
@@ -781,6 +892,10 @@ class InstallAdmissionService:
         session.add(installation)
         session.flush()
         for node in plan.nodes:
+            if claims and node.required_bytes > claims[node.node_id].amount_bytes:
+                raise InstallPlanConflict(
+                    "installation exceeds its reviewed disk claim"
+                )
             session.add(
                 InstallationNode(
                     installation_id=installation.id,
@@ -793,19 +908,27 @@ class InstallAdmissionService:
                     updated_at=now,
                 )
             )
-            session.add(
-                ResourceReservation(
-                    node_id=node.node_id,
-                    kind="disk",
-                    resource_key=plan.plan_digest,
-                    amount_bytes=node.required_bytes,
-                    owner_kind="installation",
-                    owner_id=installation.id,
-                    state="active",
-                    plan_digest=plan.plan_digest,
-                    created_at=now,
+            if claims:
+                claim = claims[node.node_id]
+                claim.owner_kind = "installation"
+                claim.owner_id = installation.id
+                claim.resource_key = plan.plan_digest
+                claim.plan_digest = plan.plan_digest
+                claim.amount_bytes = node.required_bytes
+            else:
+                session.add(
+                    ResourceReservation(
+                        node_id=node.node_id,
+                        kind="disk",
+                        resource_key=plan.plan_digest,
+                        amount_bytes=node.required_bytes,
+                        owner_kind="installation",
+                        owner_id=installation.id,
+                        state="active",
+                        plan_digest=plan.plan_digest,
+                        created_at=now,
+                    )
                 )
-            )
         return installation.id
 
 

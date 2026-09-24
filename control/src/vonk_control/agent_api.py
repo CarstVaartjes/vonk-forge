@@ -89,6 +89,7 @@ from .enrollment import (
     RenewalInProgress,
 )
 from .enrollment_bootstrap import EnrollmentBootstrapConfig, InstallerUrl
+from .enrollment_contract import EnrollmentId
 from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
@@ -327,7 +328,7 @@ class EnrollmentRateLimiter:
 
 class EnrollmentGrantResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    id: str = Field(min_length=1, max_length=128)
+    id: EnrollmentId
     expires_at: str = Field(min_length=1, max_length=64)
     purpose: Literal["new-node", "re-enroll"]
     token: str = Field(min_length=43, max_length=64)
@@ -1320,6 +1321,7 @@ def install_agent_routes(
                     gpu_memory_total_bytes=body.gpu_memory_total_bytes,
                     gpu_memory_free_bytes=body.gpu_memory_free_bytes,
                     gpu_count=body.gpu_count,
+                    memory_pool=body.memory_pool,
                     artifact_store_read_only=body.artifact_store_read_only,
                     capabilities=tuple(body.capabilities),
                     fabric_address=body.fabric_address,

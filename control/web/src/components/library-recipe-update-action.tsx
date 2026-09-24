@@ -27,8 +27,8 @@ export function LibraryRecipeUpdateAction({api, onUpdated}: {api: ControlApi; on
       const result = await api.updateRecipes(true, [], crypto.randomUUID(), controller.signal);
       if (controller.signal.aborted) return;
       setBusy(false);
-      const count = result.updates.length;
-      setMessage(`Refreshing ${count} cached recipe${count === 1 ? "" : "s"}`);
+      const count = result.children.length;
+      setMessage(count === 0 ? "No cached recipes to update" : `Refreshing ${count} cached recipe${count === 1 ? "" : "s"}. Track progress in Activity.`);
       onUpdated();
     } catch (value) {
       if (controller.signal.aborted) return;

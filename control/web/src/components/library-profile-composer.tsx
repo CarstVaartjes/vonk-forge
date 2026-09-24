@@ -8,22 +8,7 @@ function nextProfileNumber(profiles: FleetProfile[]): number {
 }
 
 function inputFromProfile(profile: FleetProfile): FleetProfileInput {
-  const input: FleetProfileInput = {
-    name: profile.name,
-    description: profile.description,
-    installation_policy: profile.installation_policy,
-    labels: profile.labels,
-    favorite: profile.favorite,
-    assignments: profile.assignments.map(assignment => ({
-      recipe_selector: assignment.recipe_selector,
-      spark_ids: [...assignment.spark_ids].sort(),
-      assignment_name: assignment.selector,
-      model_variant: typeof assignment.model?.variant === "string" ? assignment.model.variant : undefined,
-      desired_state: assignment.observed_state.toLocaleLowerCase().includes("installed") ? "installed" : "running",
-    })),
-  };
-  if (profile.revision > 0) input.expected_revision = profile.revision;
-  return input;
+  return {...profile.definition, expected_revision: profile.status === "not-created" ? 0 : profile.revision};
 }
 
 export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: ControlApi; detail: LibraryViewRecipeDetail; preferredNodeId?: string}) {
@@ -50,7 +35,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
   const recipeSelector = canonicalRecipeSelector(detail.recipe);
 
   useEffect(() => {
-    if (!open || profiles.length > 0 || loadingProfiles) return;
+    if (!open) return;
     const controller = new AbortController();
     setLoadingProfiles(true);
     void api.profiles(controller.signal).then(result => {
@@ -60,7 +45,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
       if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Saved profiles are unavailable.");
     }).finally(() => { if (!controller.signal.aborted) setLoadingProfiles(false); });
     return () => controller.abort();
-  }, [api, loadingProfiles, open, profiles.length]);
+  }, [api, open]);
 
   const topology = detail.definition.topology;
   if (!topology) return null;
@@ -82,6 +67,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
         throw new Error("This recipe and Spark group are already part of the selected profile.");
       }
       const input = existing ? inputFromProfile(existing) : {
+        expected_revision: 0,
         name,
         description,
         installation_policy: "keep-cached" as const,

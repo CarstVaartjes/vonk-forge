@@ -9,6 +9,7 @@ from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.fleet_action_response import FleetActionResponse
+from ...models.fleet_reenroll_request import FleetReenrollRequest
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
@@ -16,8 +17,11 @@ from typing import cast
 
 def _get_kwargs(
     selector: str,
+    *,
+    body: FleetReenrollRequest,
 
 ) -> dict[str, Any]:
+    headers: dict[str, Any] = {}
 
 
 
@@ -29,7 +33,12 @@ def _get_kwargs(
         "url": "/api/fleet/{selector}/re-enroll".format(selector=selector,),
     }
 
+    _kwargs["json"] = body.to_dict()
 
+
+    headers["Content-Type"] = "application/json"
+
+    _kwargs["headers"] = headers
     return _kwargs
 
 
@@ -62,6 +71,13 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
 
         return response_404
+
+    if response.status_code == 409:
+        response_409 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_409
 
     if response.status_code == 422:
         response_422 = RequestValidationProblem.from_dict(response.json())
@@ -96,12 +112,14 @@ def sync_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
+    body: FleetReenrollRequest,
 
 ) -> Response[Union[BoundedErrorResponse, FleetActionResponse, RequestValidationProblem]]:
     """ Fleet Reenroll
 
     Args:
         selector (str):
+        body (FleetReenrollRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -114,6 +132,7 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         selector=selector,
+body=body,
 
     )
 
@@ -127,12 +146,14 @@ def sync(
     selector: str,
     *,
     client: AuthenticatedClient,
+    body: FleetReenrollRequest,
 
 ) -> Optional[Union[BoundedErrorResponse, FleetActionResponse, RequestValidationProblem]]:
     """ Fleet Reenroll
 
     Args:
         selector (str):
+        body (FleetReenrollRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -146,6 +167,7 @@ def sync(
     return sync_detailed(
         selector=selector,
 client=client,
+body=body,
 
     ).parsed
 
@@ -153,12 +175,14 @@ async def asyncio_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
+    body: FleetReenrollRequest,
 
 ) -> Response[Union[BoundedErrorResponse, FleetActionResponse, RequestValidationProblem]]:
     """ Fleet Reenroll
 
     Args:
         selector (str):
+        body (FleetReenrollRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -171,6 +195,7 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         selector=selector,
+body=body,
 
     )
 
@@ -184,12 +209,14 @@ async def asyncio(
     selector: str,
     *,
     client: AuthenticatedClient,
+    body: FleetReenrollRequest,
 
 ) -> Optional[Union[BoundedErrorResponse, FleetActionResponse, RequestValidationProblem]]:
     """ Fleet Reenroll
 
     Args:
         selector (str):
+        body (FleetReenrollRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -203,5 +230,6 @@ async def asyncio(
     return (await asyncio_detailed(
         selector=selector,
 client=client,
+body=body,
 
     )).parsed

@@ -4,9 +4,11 @@ import copy
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+import vonk_control.failure_evidence as failure_evidence_module
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
@@ -225,7 +227,14 @@ def test_corrupt_stored_evidence_fails_operation_detail_and_evidence_route_alike
         record.content = b"corrupt"
 
     assert client.get(url, headers=headers).status_code == 503
-    assert client.get("/api/operations", headers=headers).status_code == 503
+    history = client.get("/api/operations", headers=headers)
+    assert history.status_code == 200
+    unreadable = next(
+        row for row in history.json()["operations"] if row["id"] == value["id"]
+    )
+    assert unreadable["state"] == "unavailable"
+    assert unreadable["failure"]["error_code"] == "operation_history_unreadable"
+    assert "resume" not in unreadable.get("recovery", {}).get("actions", [])
     assert client.get(f"{url}/evidence?attempt=1", headers=headers).status_code == 503
 
 
@@ -436,7 +445,13 @@ def test_retention_caps_count_and_age_and_does_not_recapture(service):
         service.read(ids[-1], 1)
 
 
-def test_worker_cursor_survives_restart_and_retention(service):
+def test_worker_cursor_survives_restart_and_retention(service, monkeypatch):
+    # This test checks durable cursor/retention semantics, not whether the CI
+    # host can scan SQLite within one 250 ms worker slice. Budget yielding has
+    # its own controlled-clock test below.
+    monkeypatch.setattr(
+        failure_evidence_module, "time", SimpleNamespace(monotonic=lambda: 1.0)
+    )
     identity = str(uuid4())
     with service.sessions.begin() as session:
         session.add(
@@ -721,7 +736,7 @@ def _enqueue_distribution(jobs, sessions, clock):
 
 
 def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
-    durable_evidence,
+    durable_evidence, monkeypatch
 ):
     """A lapse's own late receipt survives the attempt that supersedes it.
 
@@ -734,6 +749,15 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
     """
 
     jobs, sessions, clock, evidence = durable_evidence
+    # Collection is intentionally time-sliced. Make this behavior boundary
+    # deterministic: the first worker slice expires before scanning, then a
+    # later slice has enough budget to collect the durable attempt receipt.
+    monotonic_values = iter((0.0, 0.3))
+    monkeypatch.setattr(
+        failure_evidence_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(monotonic_values, 1.0)),
+    )
     operation = _enqueue_distribution(jobs, sessions, clock)
     capabilities = [
         "agent.runtime.rust.v1",
@@ -776,6 +800,13 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
     assert second is not None and second.attempt == 2
     jobs.succeed(second, DISTRIBUTION_SUCCESS)
 
+    assert not evidence.tick()
+    assert evidence.last_collection_error is None
+    monkeypatch.setattr(
+        failure_evidence_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: 1.0),
+    )
     assert evidence.tick()
     content, digest, bundle = evidence.read(operation.id, 1)
     assert bundle.context.attempt == 1

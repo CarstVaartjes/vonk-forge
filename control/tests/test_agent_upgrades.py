@@ -2,6 +2,7 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -202,20 +203,11 @@ def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_
         }
 
 
-@pytest.mark.parametrize(
-    ("node_ids", "strategy"),
-    [
-        (None, "one-at-a-time"),
-        ([NODE_A, NODE_B], "one-at-a-time"),
-        ([NODE_A], "all-at-once"),
-    ],
-)
-def test_repair_plan_requires_one_explicit_bound_spark(
-    tmp_path, node_ids, strategy
-) -> None:
+@pytest.mark.parametrize("node_ids", [None, [NODE_A, NODE_B]])
+def test_repair_plan_requires_one_explicit_bound_spark(tmp_path, node_ids) -> None:
     now = datetime(2026, 8, 29, tzinfo=UTC)
     engine = create_engine(
-        f"sqlite:///{tmp_path / f'repair-{strategy}-{len(node_ids or [])}.sqlite'}"
+        f"sqlite:///{tmp_path / f'repair-{len(node_ids or [])}.sqlite'}"
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -231,7 +223,6 @@ def test_repair_plan_requires_one_explicit_bound_spark(
             node_ids,
             REPAIR_PACKAGE,
             repair_manifest=REPAIR_MANIFEST,
-            strategy=strategy,
         )
 
 
@@ -1108,24 +1099,16 @@ def test_waiting_upgrade_resume_expires_worker_fence_without_shortening_helper_f
         assert worker_attempt is not None and worker_attempt.state == "expired"
 
 
-def test_resume_rejects_all_at_once_subset_topology(tmp_path) -> None:
-    sessions, _operations, upgrades, job = _rollout(
-        tmp_path, "topology-all-subset", strategy="all-at-once"
-    )
+def test_resume_rejects_retired_rollout_strategy_before_requeue(tmp_path) -> None:
+    sessions, _operations, upgrades, job = _rollout(tmp_path, "retired-strategy")
     with sessions.begin() as session:
         parent = session.get(Job, job.id)
-        operation_b = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == job.id,
-                AgentOperation.node_id == NODE_B,
-            )
-        )
-        assert parent is not None and operation_b is not None
+        assert parent is not None
         parent.state = "waiting-for-operator"
         parent.status_reason = "operator review"
-        session.delete(operation_b)
+        parent.payload = {**parent.payload, "strategy": "all-at-once"}
 
-    with pytest.raises(ValueError, match="topology"):
+    with pytest.raises(ValueError, match="stored agent upgrade plan is invalid"):
         upgrades.resume(job.id)
     with sessions() as session:
         parent = session.get(Job, job.id)
@@ -1177,9 +1160,7 @@ def test_resume_rejects_unsucceeded_earlier_sequential_child(tmp_path) -> None:
 def test_resume_restores_success_after_late_legacy_failure_of_completed_rollout(
     tmp_path,
 ) -> None:
-    sessions, operations, upgrades, job = _rollout(
-        tmp_path, "late-worker-completed", strategy="all-at-once"
-    )
+    sessions, operations, upgrades, job = _rollout(tmp_path, "late-worker-completed")
     _upgrade_node(operations, NODE_A, "serial-a")
     _upgrade_node(operations, NODE_B, "serial-b")
     _record_delayed_worker_dispatch_failure(
@@ -1473,103 +1454,24 @@ def test_sequential_rollout_preserves_first_success_when_next_target_drifted(
     assert first.attempt == 1
 
 
-def test_all_at_once_rollout_dispatches_every_selected_spark(tmp_path) -> None:
-    now = datetime(2026, 8, 27, tzinfo=UTC)
-    engine = create_engine(f"sqlite:///{tmp_path / 'parallel-upgrades.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    with sessions.begin() as session:
-        for node_id in (NODE_A, NODE_B):
-            session.add(
-                AgentNode(
-                    node_id=node_id,
-                    state="active",
-                    capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-                    architecture="linux-arm64",
-                    semantic_version="0.1.0",
-                    build_digest=OLD_IDENTITY["build_digest"],
-                    binary_digest=OLD_IDENTITY["binary_digest"],
-                    self_test_passed=True,
-                    last_seen_at=now,
-                )
-            )
-    operations = AgentJobService(sessions, clock=lambda: now)
-    upgrades = AgentUpgradeService(
-        sessions,
-        operations,
-        clock=lambda: now,
-        current_revision=lambda: REVISION,
-    )
-    plan = upgrades.preview(None, PACKAGE, strategy="all-at-once")
+def test_sequential_upgrade_failure_blocks_the_next_spark(tmp_path) -> None:
+    sessions, operations, _upgrades, job = _rollout(tmp_path, "failure-stops-rollout")
+    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
 
-    job = upgrades.apply(
-        None,
-        PACKAGE,
-        plan_digest=plan.plan_digest,
-        actor="admin",
-        request_id=str(uuid.uuid4()),
-        strategy="all-at-once",
-    )
+    operations.fail(first, "agent upgrade request is invalid")
 
-    assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
-
-
-def test_all_at_once_bridge_retries_are_delayed_bounded_and_independent(
-    tmp_path,
-) -> None:
-    clock = Clock()
-    sessions, operations, _upgrades, job = _rollout(
-        tmp_path,
-        "all-at-once-recovery",
-        clock=clock,
-        strategy="all-at-once",
-    )
-    first_a = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    first_b = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
-    operations.fail(first_a, "agent upgrade request is invalid")
-    operations.fail(first_b, "agent upgrade request is invalid")
-
-    for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
-        assert (
-            operations.claim(
-                node_id,
-                serial,
-                30,
-                capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-                runtime_identity=OLD_IDENTITY,
-            )
-            is None
-        )
     with sessions() as session:
-        stored = session.get(Job, job.id)
-        attempts = list(
+        children = list(
             session.scalars(
-                select(AgentOperation.current_attempt).where(
-                    AgentOperation.parent_job_id == job.id
-                )
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == job.id)
+                .order_by(AgentOperation.created_at, AgentOperation.id)
             )
         )
-        assert stored is not None and stored.state == "waiting-for-operator"
-        assert attempts == [1, 1]
-
-    clock.advance(seconds=960)
-    second_a = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    second_b = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
-    assert second_a.attempt == second_b.attempt == 2
-
-    # Spark A restarts during its retry. Spark B independently reports the
-    # helper race and later reconciles without becoming claimable a third time.
-    assert (
-        operations.claim(
-            NODE_A,
-            "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-            runtime_identity=NEW_IDENTITY,
-        )
-        is None
-    )
-    operations.fail(second_b, "agent upgrade helper is unavailable")
+        parent = session.get(Job, job.id)
+        assert [child.node_id for child in children] == [NODE_A]
+        assert children[0].state == "waiting-for-operator"
+        assert parent is not None and parent.state == "waiting-for-operator"
     assert (
         operations.claim(
             NODE_B,
@@ -1580,22 +1482,56 @@ def test_all_at_once_bridge_retries_are_delayed_bounded_and_independent(
         )
         is None
     )
-    assert (
-        operations.claim(
-            NODE_B,
-            "serial-b",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-            runtime_identity={
-                **NEW_IDENTITY,
-                "package_activation": {**ACTIVATION_RECEIPT, "node_id": NODE_B},
-            },
-        )
-        is None
+
+
+def test_replay_returns_original_job_before_replanning_and_checks_actor_and_scope(
+    tmp_path,
+) -> None:
+    sessions, operations, upgrades, job = _rollout(tmp_path, "upgrade-replay")
+    _upgrade_node(operations, NODE_A, "serial-a")
+
+    replay = upgrades.apply(
+        None,
+        PACKAGE,
+        plan_digest="0" * 64,
+        actor="admin",
+        request_id=job.request_id,
     )
-    with sessions() as session:
-        stored = session.get(Job, job.id)
-        assert stored is not None and stored.state == "succeeded"
+
+    assert replay.id == job.id
+    operation_nodes = _operation_nodes(sessions, job.id)
+    assert len(operation_nodes) == 2
+    assert set(operation_nodes) == {NODE_A, NODE_B}
+    with pytest.raises(AgentUpgradeConflict, match="request key was already used"):
+        upgrades.get_request(
+            job.request_id,
+            actor="another-admin",
+            request_intent={"all": True, "selectors": None},
+        )
+    with pytest.raises(
+        AgentUpgradeConflict, match="request key was already used differently"
+    ):
+        upgrades.get_request(
+            job.request_id,
+            actor="admin",
+            request_intent={"all": False, "selectors": [NODE_A, NODE_B]},
+        )
+
+
+def test_service_rejects_retired_rollout_strategy_even_on_replay(tmp_path) -> None:
+    _sessions, _operations, upgrades, job = _rollout(tmp_path, "retired-strategy-api")
+
+    with pytest.raises(AgentUpgradeConflict, match="rollout strategy is invalid"):
+        upgrades.preview(None, PACKAGE, strategy=cast(Any, "all-at-once"))
+    with pytest.raises(AgentUpgradeConflict, match="rollout strategy is invalid"):
+        upgrades.apply(
+            None,
+            PACKAGE,
+            plan_digest="0" * 64,
+            actor="admin",
+            request_id=job.request_id,
+            strategy=cast(Any, "all-at-once"),
+        )
 
 
 def test_controller_selection_excludes_offline_sparks_and_individual_preview_explains(
@@ -1784,7 +1720,6 @@ def _rollout(
     database_name: str,
     *,
     clock=None,
-    strategy: str = "one-at-a-time",
 ):
     now = datetime(2026, 8, 27, tzinfo=UTC) if clock is None else clock()
     service_clock = (lambda: now) if clock is None else clock
@@ -1823,14 +1758,13 @@ def _rollout(
         current_revision=lambda: REVISION,
     )
     operations.set_result_consumer(upgrades.consume_agent_result)
-    plan = upgrades.preview(None, PACKAGE, strategy=strategy)
+    plan = upgrades.preview(None, PACKAGE)
     job = upgrades.apply(
         None,
         PACKAGE,
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
-        strategy=strategy,
     )
     return sessions, operations, upgrades, job
 

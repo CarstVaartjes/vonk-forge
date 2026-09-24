@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -14,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from email.message import Message
 from functools import lru_cache
 from importlib.resources import files
@@ -24,6 +26,8 @@ import httpx
 from jsonschema import Draft202012Validator, FormatChecker, validators
 from jsonschema.exceptions import SchemaError
 
+from .control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from .control_transport import open_https
 from .error_reporting import (
     ErrorContext,
     decision_for,
@@ -37,15 +41,18 @@ from .error_reporting import (
 from .generated_control.api.default import (
     get_fleet_status,
     get_job,
+    get_profile_endpoints,
     get_published_endpoint,
 )
 from .generated_control.client import AuthenticatedClient
 from .generated_control.models.endpoint_response import EndpointResponse
+from .generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
+)
 from .generated_control.models.fleet_snapshot import FleetSnapshot
 from .generated_control.models.job_detail_response import JobDetailResponse
 from .generated_control.types import Response as GeneratedResponse
 
-_MAX_RESPONSE = 1_048_576
 _MAX_ARTIFACT_INPUT = 512 * 1024**2
 _MAX_ARTIFACT_OUTPUT = 1024**3
 _MAX_TOKEN = 8192
@@ -77,7 +84,7 @@ _ControlValidator = validators.extend(
 
 
 class _OpenedResponse(Protocol):
-    """The bounded surface this client uses from a urllib response object."""
+    """The bounded surface used from the HTTPS transport or an injected peer."""
 
     @property
     def status(self) -> int: ...
@@ -104,6 +111,7 @@ class _HTTPErrorFields(TypedDict, total=False):
     free_bytes: int | None
     shortfall_bytes: int | None
     log_excerpt: str | None
+    candidates: tuple[str, ...]
 
 
 def _nonnegative_integer(value: object) -> int | None:
@@ -150,7 +158,9 @@ class ControlTransportError(ControlClientError):
         message: str = "control API request failed",
         *,
         context: ErrorContext | None = None,
+        retry_after_seconds: int | None = None,
     ) -> None:
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(message, context=context)
 
 
@@ -209,6 +219,7 @@ class ControlHTTPError(ControlClientError):
         free_bytes: int | None = None,
         shortfall_bytes: int | None = None,
         log_excerpt: str | None = None,
+        candidates: tuple[str, ...] = (),
         sensitive_values: tuple[str, ...] = (),
         operation: str | None = None,
         endpoint: str | None = None,
@@ -223,6 +234,10 @@ class ControlHTTPError(ControlClientError):
         self.required_bytes = required_bytes
         self.free_bytes = free_bytes
         self.shortfall_bytes = shortfall_bytes
+        self.candidates = tuple(
+            _sanitize_remote_text(value, "", sensitive_values=sensitive_values)
+            for value in candidates
+        )
         self.log_excerpt = (
             _sanitize_remote_text(log_excerpt, "", sensitive_values=sensitive_values)
             if log_excerpt
@@ -282,7 +297,7 @@ _STATUS_ERRORS: dict[int, type[ControlHTTPError]] = {
 }
 
 
-def _bounded_retry_after(value: str | None) -> int | None:
+def _retry_after_seconds(value: str | None) -> int | None:
     if value is None:
         return None
     try:
@@ -291,7 +306,9 @@ def _bounded_retry_after(value: str | None) -> int | None:
         return None
     if seconds < 0:
         return None
-    return max(1, min(30, seconds))
+    # The caller bounds its own waiting budget; shortening a server delay
+    # would authorize a retry before the dependency is willing to accept it.
+    return max(1, seconds)
 
 
 def _sanitize_remote_text(
@@ -394,6 +411,18 @@ def _validate_schema(value: object, schema: object, *, message: str) -> None:
     )
     if error is not None:
         raise ControlClientError(message) from None
+
+
+def validate_control_document(name: str, document: object) -> dict[str, object]:
+    """Validate a CLI-authored document with the generated canonical schema."""
+    if not isinstance(document, dict):
+        raise ControlClientError(f"{name} must be a JSON object")
+    _validate_schema(
+        document,
+        {"$ref": f"#/components/schemas/{name}"},
+        message=f"document does not match the canonical {name} contract",
+    )
+    return document
 
 
 def _request_contract(
@@ -549,6 +578,7 @@ def _structured_http_error_fields(
     retryable = problem.get("retryable") is True
     preserved = problem.get("preserved")
     log_excerpt = problem.get("log_excerpt")
+    candidates = problem.get("candidates")
     fields: _HTTPErrorFields = {
         "code": code if isinstance(code, str) and code else None,
         "recovery": recovery,
@@ -559,6 +589,10 @@ def _structured_http_error_fields(
         "free_bytes": _nonnegative_integer(problem.get("free_bytes")),
         "shortfall_bytes": _nonnegative_integer(problem.get("shortfall_bytes")),
         "log_excerpt": log_excerpt if isinstance(log_excerpt, str) else None,
+        "candidates": tuple(candidates)
+        if isinstance(candidates, list)
+        and all(isinstance(value, str) for value in candidates)
+        else (),
     }
     return fields, retry_after_seconds
 
@@ -582,6 +616,9 @@ def _safe_job_observation(
 
 def _read_token_file(token_file: Path) -> str:
     flags = os.O_RDONLY
+    # Reject FIFOs/devices after fstat without waiting for another process to
+    # open a pipe. Nonblocking mode has no effect on a regular credential file.
+    flags |= getattr(os, "O_NONBLOCK", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOINHERIT", 0)
     no_follow = getattr(os, "O_NOFOLLOW", None)
@@ -636,6 +673,50 @@ def _read_token_file(token_file: Path) -> str:
     return token
 
 
+def _read_control_response(
+    opener: Callable[..., _OpenedResponse],
+    request: urllib.request.Request,
+    timeout: float,
+) -> tuple[int, bytes, Message]:
+    """Read a bounded document, preserving headers even when its body is lost."""
+
+    endpoint = safe_endpoint(request.full_url)
+    operation = f"{request.get_method()} {endpoint or '/'}"[:160]
+    received_status: int | None = None
+    received_request_id: str | None = None
+    received_retry_after: int | None = None
+    try:
+        try:
+            response = opener(request, timeout=timeout)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            status = (
+                response.code
+                if isinstance(response, urllib.error.HTTPError)
+                else response.status
+            )
+            response_headers = response.headers
+            received_status = status
+            received_request_id = safe_request_id(response_headers.get("x-request-id"))
+            received_retry_after = _retry_after_seconds(
+                response_headers.get("retry-after")
+            )
+            content = response.read(MAX_CONTROL_DOCUMENT_BYTES + 1)
+    except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
+        context = replace(
+            transport_context(operation=operation, endpoint=endpoint, error=error),
+            http_status=received_status,
+            request_id=received_request_id,
+        )
+        raise ControlTransportError(
+            context.render("control API request failed"),
+            context=context,
+            retry_after_seconds=received_retry_after,
+        ) from None
+    return status, content, response_headers
+
+
 class _OpenerTransport(httpx.BaseTransport):
     def __init__(self, opener: Callable[..., _OpenedResponse], timeout: float) -> None:
         self._opener = opener
@@ -648,35 +729,17 @@ class _OpenerTransport(httpx.BaseTransport):
             headers=dict(request.headers),
             method=request.method,
         )
-        try:
-            response_context = self._opener(outgoing, timeout=self._timeout)
-        except urllib.error.HTTPError as error:
-            response_context = error
-        except (OSError, urllib.error.URLError) as error:
-            context = transport_context(
-                operation=f"{request.method} {safe_endpoint(str(request.url)) or '/'}",
-                endpoint=str(request.url),
-                error=error,
-            )
-            raise ControlTransportError(
-                context.render("control API request failed"), context=context
-            ) from None
-        with response_context as response:
-            content = response.read(_MAX_RESPONSE + 1)
-            if len(content) > _MAX_RESPONSE:
-                raise ControlResponseTooLarge(
-                    "control API response exceeds safety limit"
-                )
-            response_headers = httpx.Headers(response.headers.items())
-            status = response.status
-            if status is None:
-                raise ControlTransportError("control API response has no HTTP status")
-            return httpx.Response(
-                status,
-                content=content,
-                headers=response_headers,
-                request=request,
-            )
+        status, content, headers = _read_control_response(
+            self._opener, outgoing, self._timeout
+        )
+        if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
+            raise ControlResponseTooLarge("control API response exceeds safety limit")
+        return httpx.Response(
+            status,
+            content=content,
+            headers=httpx.Headers(headers.items()),
+            request=request,
+        )
 
 
 class _RecordingTransport(httpx.BaseTransport):
@@ -690,19 +753,10 @@ class _RecordingTransport(httpx.BaseTransport):
         _validate_generated_request(request)
         response = self._transport.handle_request(request)
         self.response = response
-        if len(response.content) > _MAX_RESPONSE:
+        if len(response.content) > MAX_CONTROL_DOCUMENT_BYTES:
             raise ControlResponseTooLarge("control API response exceeds safety limit")
         _validate_generated_response(request, response)
         return response
-
-
-class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-def _redirect_denied_opener() -> Callable[..., _OpenedResponse]:
-    return urllib.request.build_opener(_RejectRedirectHandler()).open
 
 
 class ControlClient:
@@ -729,16 +783,24 @@ class ControlClient:
                 "control URL must be an HTTPS origin without credentials"
             )
         token = _read_token_file(token_file)
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ControlClientError("request timeout must be finite and positive")
         if not 1 <= artifact_transfer_timeout_seconds <= 3_600:
             raise ControlClientError(
                 "artifact transfer timeout must be between 1 and 3600 seconds"
             )
         self._base = base_url.rstrip("/")
         self._token = token
-        self._opener = opener if opener is not None else _redirect_denied_opener()
+        self._opener = opener if opener is not None else open_https
         self._transport = _OpenerTransport(self._opener, timeout_seconds)
         self._timeout = timeout_seconds
         self._artifact_transfer_timeout = artifact_transfer_timeout_seconds
+
+    @property
+    def request_timeout_seconds(self) -> float:
+        """The per-request budget used to bound multi-call CLI submissions."""
+
+        return self._timeout
 
     def _generated_client(
         self,
@@ -807,7 +869,8 @@ class ControlClient:
         if not isinstance(log_excerpt, str):
             log_excerpt = None
         retryable = getattr(parsed, "retryable", False) is True
-        retry_after = _bounded_retry_after(headers.get("retry-after"))
+        candidates = getattr(parsed, "candidates", None)
+        retry_after = _retry_after_seconds(headers.get("retry-after"))
         if retry_after is None:
             parsed_retry_after = getattr(parsed, "retry_after_seconds", None)
             if type(parsed_retry_after) is int and parsed_retry_after >= 0:
@@ -818,6 +881,7 @@ class ControlClient:
             retry_after,
             code=code,
             recovery=recovery,
+            candidates=tuple(candidates) if isinstance(candidates, list) else (),
             retryable=retryable,
             retry_time=retry_time,
             preserved=preserved,
@@ -940,7 +1004,13 @@ class ControlClient:
         *,
         extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, object]:
+        timeout = self._timeout
+        if timeout_seconds is not None:
+            if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+                raise ControlClientError("request timeout must be finite and positive")
+            timeout = min(timeout, timeout_seconds)
         if not path.startswith("/api/") or ".." in path:
             raise ControlClientError("control API path is invalid")
         route_path = path
@@ -960,23 +1030,34 @@ class ControlClient:
         request = urllib.request.Request(
             self._base + path, data=data, headers=headers, method=method
         )
+        operation = f"{method} {route_path}"[:160]
+        status, content, response_headers = _read_control_response(
+            self._opener, request, timeout
+        )
         try:
-            with self._opener(request, timeout=self._timeout) as response:
-                content = response.read(_MAX_RESPONSE + 1)
-                status = response.status
-                response_headers = response.headers
-        except urllib.error.HTTPError as error:
-            content = error.read(_MAX_RESPONSE + 1)
-            status = error.code
-            response_headers = error.headers
-        except (OSError, urllib.error.URLError) as error:
-            context = transport_context(
-                operation=f"{method} {route_path}", endpoint=route_path, error=error
+            return self._request_response(
+                method, route_path, status, content, response_headers
             )
-            raise ControlTransportError(
-                context.render("control API request failed"), context=context
-            ) from None
-        if len(content) > _MAX_RESPONSE:
+        except (ControlMalformedResponse, ControlResponseTooLarge) as error:
+            if error.context is None:
+                error.context = replace(
+                    protocol_context(operation=operation, endpoint=route_path),
+                    http_status=status,
+                    request_id=safe_request_id(response_headers.get("x-request-id")),
+                )
+            raise
+
+    def _request_response(
+        self,
+        method: str,
+        route_path: str,
+        status: int,
+        content: bytes,
+        response_headers: Message,
+    ) -> dict[str, object]:
+        """Interpret the bounded body while the caller retains HTTP evidence."""
+
+        if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
             raise ControlResponseTooLarge("control API response exceeds safety limit")
         if not 200 <= status < 300:
             error_media_type = response_headers.get("content-type", "").split(";", 1)[0]
@@ -1009,7 +1090,7 @@ class ControlClient:
             fields, body_retry_after = _structured_http_error_fields(problem)
             if fields.get("code") is None:
                 fields["code"] = response_headers.get("x-vonk-error-code")
-            retry_after = _bounded_retry_after(response_headers.get("retry-after"))
+            retry_after = _retry_after_seconds(response_headers.get("retry-after"))
             if retry_after is None and type(body_retry_after) is int:
                 retry_after = body_retry_after
             raise error_type(
@@ -1018,7 +1099,7 @@ class ControlClient:
                 retry_after,
                 **fields,
                 sensitive_values=(self._token,),
-                operation=f"{method} {route_path}",
+                operation=f"{method} {route_path}"[:160],
                 endpoint=route_path,
                 request_id=response_headers.get("x-request-id")
                 or (
@@ -1041,9 +1122,11 @@ class ControlClient:
         try:
             decoded = json.loads(content)
         except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ControlClientError("control API returned invalid JSON") from None
+            raise ControlMalformedResponse(
+                "control API returned invalid JSON"
+            ) from None
         if not isinstance(decoded, dict):
-            raise ControlClientError("control API response must be an object")
+            raise ControlMalformedResponse("control API response must be an object")
         _response_contract(route_path, method, status, decoded)
         return decoded
 
@@ -1065,7 +1148,10 @@ class ControlClient:
         if not 0 <= expected_size <= _MAX_ARTIFACT_INPUT:
             raise ControlClientError("artifact input size is invalid")
         flags = (
-            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOINHERIT", 0)
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOINHERIT", 0)
+            | getattr(os, "O_NONBLOCK", 0)
         )
         no_follow = getattr(os, "O_NOFOLLOW", None)
         if no_follow is None:
@@ -1106,11 +1192,12 @@ class ControlClient:
                     with self._opener(
                         request, timeout=self._artifact_transfer_timeout
                     ) as response:
-                        content = response.read(_MAX_RESPONSE + 1)
+                        content = response.read(MAX_CONTROL_DOCUMENT_BYTES + 1)
                         status = response.status
                         response_headers = response.headers
                 except urllib.error.HTTPError as error:
-                    content = error.read(_MAX_RESPONSE + 1)
+                    with error:
+                        content = error.read(MAX_CONTROL_DOCUMENT_BYTES + 1)
                     status = error.code
                     response_headers = error.headers
                 except (OSError, urllib.error.URLError) as error:
@@ -1135,65 +1222,82 @@ class ControlClient:
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
-        if len(content) > _MAX_RESPONSE:
-            raise ControlResponseTooLarge("control API response exceeds safety limit")
-        if not 200 <= status < 300:
-            error_media_type = response_headers.get("content-type", "").split(";", 1)[0]
+        try:
+            if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
+                raise ControlResponseTooLarge(
+                    "control API response exceeds safety limit"
+                )
+            if not 200 <= status < 300:
+                error_media_type = response_headers.get("content-type", "").split(
+                    ";", 1
+                )[0]
+                _response_media_contract(
+                    path,
+                    "PUT",
+                    status,
+                    error_media_type.strip().lower(),
+                    has_content=bool(content),
+                )
+                try:
+                    problem = json.loads(content)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    if error_media_type.strip().lower() == "application/json":
+                        raise ControlMalformedResponse(
+                            "control API returned invalid JSON error"
+                        ) from None
+                    problem = None
+                if error_media_type.strip().lower() == "application/json":
+                    if not isinstance(problem, dict):
+                        raise ControlMalformedResponse(
+                            "control API error does not match the OpenAPI schema"
+                        )
+                    _response_contract(path, "PUT", status, problem)
+                detail = problem.get("detail") if isinstance(problem, dict) else None
+                error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
+                fields, body_retry_after = _structured_http_error_fields(problem)
+                if fields.get("code") is None:
+                    fields["code"] = response_headers.get("x-vonk-error-code")
+                retry_after = _retry_after_seconds(response_headers.get("retry-after"))
+                if retry_after is None and type(body_retry_after) is int:
+                    retry_after = body_retry_after
+                raise error_type(
+                    status,
+                    detail if isinstance(detail, str) else "control API request failed",
+                    retry_after,
+                    **fields,
+                    sensitive_values=(self._token,),
+                    operation=f"PUT {path}",
+                    endpoint=path,
+                    request_id=response_headers.get("x-request-id"),
+                )
+            try:
+                decoded = json.loads(content)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise ControlMalformedResponse(
+                    "control API returned invalid JSON"
+                ) from None
+            if not isinstance(decoded, dict):
+                raise ControlMalformedResponse("control API response must be an object")
+            response_media_type = response_headers.get("content-type", "").split(
+                ";", 1
+            )[0]
             _response_media_contract(
                 path,
                 "PUT",
                 status,
-                error_media_type.strip().lower(),
-                has_content=bool(content),
+                response_media_type.strip().lower(),
+                has_content=True,
             )
-            try:
-                problem = json.loads(content)
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                if error_media_type.strip().lower() == "application/json":
-                    raise ControlMalformedResponse(
-                        "control API returned invalid JSON error"
-                    ) from None
-                problem = None
-            if error_media_type.strip().lower() == "application/json":
-                if not isinstance(problem, dict):
-                    raise ControlMalformedResponse(
-                        "control API error does not match the OpenAPI schema"
-                    )
-                _response_contract(path, "PUT", status, problem)
-            detail = problem.get("detail") if isinstance(problem, dict) else None
-            error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
-            fields, body_retry_after = _structured_http_error_fields(problem)
-            if fields.get("code") is None:
-                fields["code"] = response_headers.get("x-vonk-error-code")
-            retry_after = _bounded_retry_after(response_headers.get("retry-after"))
-            if retry_after is None and type(body_retry_after) is int:
-                retry_after = body_retry_after
-            raise error_type(
-                status,
-                detail if isinstance(detail, str) else "control API request failed",
-                retry_after,
-                **fields,
-                sensitive_values=(self._token,),
-                operation=f"PUT {path}",
-                endpoint=path,
-                request_id=response_headers.get("x-request-id"),
-            )
-        try:
-            decoded = json.loads(content)
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ControlClientError("control API returned invalid JSON") from None
-        if not isinstance(decoded, dict):
-            raise ControlClientError("control API response must be an object")
-        response_media_type = response_headers.get("content-type", "").split(";", 1)[0]
-        _response_media_contract(
-            path,
-            "PUT",
-            status,
-            response_media_type.strip().lower(),
-            has_content=True,
-        )
-        _response_contract(path, "PUT", status, decoded)
-        return decoded
+            _response_contract(path, "PUT", status, decoded)
+            return decoded
+        except (ControlMalformedResponse, ControlResponseTooLarge) as error:
+            if error.context is None:
+                error.context = replace(
+                    protocol_context(operation=f"PUT {path}", endpoint=path),
+                    http_status=status,
+                    request_id=safe_request_id(response_headers.get("x-request-id")),
+                )
+            raise
 
     def download_file(
         self,
@@ -1233,8 +1337,9 @@ class ControlClient:
                     request, timeout=self._artifact_transfer_timeout
                 )
             except urllib.error.HTTPError as error:
-                content = error.read(_MAX_RESPONSE + 1)
-                if len(content) > _MAX_RESPONSE:
+                with error:
+                    content = error.read(MAX_CONTROL_DOCUMENT_BYTES + 1)
+                if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
                     raise ControlResponseTooLarge(
                         "control API response exceeds safety limit"
                     )
@@ -1267,7 +1372,7 @@ class ControlClient:
                 fields, body_retry_after = _structured_http_error_fields(problem)
                 if fields.get("code") is None:
                     fields["code"] = error.headers.get("x-vonk-error-code")
-                retry_after = _bounded_retry_after(error.headers.get("retry-after"))
+                retry_after = _retry_after_seconds(error.headers.get("retry-after"))
                 if retry_after is None and type(body_retry_after) is int:
                     retry_after = body_retry_after
                 raise error_type(
@@ -1430,3 +1535,10 @@ class ControlClient:
 
     def endpoint(self, alias: str) -> EndpointResponse:
         return self._call_generated(get_published_endpoint.sync_detailed, alias)  # type: ignore[return-value]
+
+    def profile_endpoints(
+        self, number: int, alias: str | None = None
+    ) -> FleetProfileEndpointsView:
+        return self._call_generated(
+            get_profile_endpoints.sync_detailed, number, alias=alias
+        )  # type: ignore[return-value]

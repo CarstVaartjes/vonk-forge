@@ -8,17 +8,25 @@ import json
 import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from typing import Protocol
 
 from pydantic import TypeAdapter
-from sqlalchemy import func, select
+from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
+from .admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    acquire_admission_keys,
+    lock_admission_rows,
+    node_admission_key,
+)
 from .catalog_revision_contract import (
     BuildModelArtifactProjection,
     BuildResourcesProjection,
@@ -28,7 +36,8 @@ from .catalog_revision_contract import (
     read_catalog_projection,
 )
 from .disk_reservations import outstanding_disk_reservation_bytes
-from .inventory_repository import InventoryRepository
+from .inventory_repository import InventoryRepository, InventorySnapshotView
+from .memory_reservations import memory_reservations, memory_reserve_floor
 from .models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -38,6 +47,7 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
 )
+from .profile_capacity import profile_build_memory_claims
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
@@ -46,6 +56,7 @@ from .recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
+from .resource_planning import memory_capacity_snapshot
 from .runtime_adapters import (
     RuntimeAdapter,
     RuntimeAdapterError,
@@ -362,6 +373,13 @@ class RecipeBuildError(ValueError):
         super().__init__(detail)
 
 
+class RecipeBuildAdmissionBusy(RecipeBuildError):
+    code = "build.capacity_busy"
+
+    def __init__(self) -> None:
+        super().__init__(self.code, "builder capacity writer is busy")
+
+
 def _read_recipe_projection(
     revision: CatalogDocumentRevision,
 ) -> RecipeRevisionProjection:
@@ -427,6 +445,14 @@ class RecipeBuildResolution:
     @property
     def cached(self) -> bool:
         return self.build_id is not None
+
+    def build_input_for_builder(self, binary_digest: str) -> str:
+        """Bind canonical executable intent to an accepted builder identity."""
+        if _SHA256.fullmatch(binary_digest) is None:
+            raise RecipeBuildError(
+                "build.plan_invalid", "recorded builder identity is invalid"
+            )
+        return _digest(self.input_intent | {"builder_binary_digest": binary_digest})
 
 
 @dataclass(frozen=True, slots=True)
@@ -621,6 +647,13 @@ class RecipeBuildService:
             runtime_adapter=adapter.document(),
         )
         intent_sha256 = _digest(intent)
+        resolution = RecipeBuildResolution(
+            recipe_revision_id=revision.id,
+            recipe_content_sha256=revision.content_digest,
+            source_bundle_sha256=source_sha256,
+            input_intent_sha256=intent_sha256,
+            input_intent=copy.deepcopy(intent),
+        )
 
         # Read a bounded snapshot and commit before touching managed storage:
         # a database transaction contains database work only.
@@ -630,12 +663,15 @@ class RecipeBuildService:
                 select(RecipeBuild)
                 .where(
                     RecipeBuild.source_bundle_sha256 == source_sha256,
-                    RecipeBuild.state == "succeeded",
+                    RecipeBuild.image_digest.is_not(None),
                 )
                 .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
             )
             for candidate in rows:
-                if not _valid_succeeded_receipt(candidate):
+                # A replacement attempt changes execution state, not the last
+                # verified artifact. Managed storage below decides whether
+                # that exact receipt is still usable.
+                if not _has_build_receipt(candidate):
                     continue
                 try:
                     report = parse_stored_build_policy(candidate.policy_report)
@@ -650,18 +686,9 @@ class RecipeBuildService:
                     or report.source_bundle_sha256 != source_sha256
                 ):
                     continue
-                exact = derive_build_input_identity(
-                    build,
-                    source_bundle_sha256=source_sha256,
-                    builder_binary_digest=builder_digest,
-                    artifact_format=BUILD_ARTIFACT_FORMAT,
-                    base_images=base_images,
-                    effective_settings=document["settings"],
-                    topology_inputs=topology,
-                    model_artifacts=model_artifacts,
-                    runtime_adapter=adapter.document(),
-                )
-                if candidate.build_input_sha256 != _digest(exact):
+                if candidate.build_input_sha256 != resolution.build_input_for_builder(
+                    builder_digest
+                ):
                     continue
                 assert candidate.image_digest is not None
                 assert candidate.oci_layout_sha256 is not None
@@ -708,14 +735,7 @@ class RecipeBuildService:
             break
 
         if cached is None:
-            return RecipeBuildResolution(
-                recipe_revision_id=revision.id,
-                recipe_content_sha256=revision.content_digest,
-                source_bundle_sha256=source_sha256,
-                input_intent_sha256=intent_sha256,
-                input_intent=copy.deepcopy(intent),
-                stale_receipt=stale_receipt,
-            )
+            return replace(resolution, stale_receipt=stale_receipt)
         if prepared is not None:
             build_id = prepared.build_id or cached.build_id
             build_input_sha256 = prepared.build_input_sha256
@@ -738,12 +758,8 @@ class RecipeBuildService:
             raise RecipeBuildError(
                 "build.plan_invalid", "cached source build receipt is incomplete"
             )
-        return RecipeBuildResolution(
-            recipe_revision_id=revision.id,
-            recipe_content_sha256=revision.content_digest,
-            source_bundle_sha256=source_sha256,
-            input_intent_sha256=intent_sha256,
-            input_intent=copy.deepcopy(intent),
+        return replace(
+            resolution,
             build_input_sha256=build_input_sha256,
             build_id=build_id,
             builder_node_id=cached.builder_node_id,
@@ -847,7 +863,7 @@ class RecipeBuildService:
             disk_reserved = outstanding_disk_reservation_bytes(
                 session, builder_node_id, inventory_observed_at=snapshot.observed_at
             )
-            memory_reserved = _reserved(session, builder_node_id, "host-memory")
+            memory_available = _available_build_memory(session, snapshot)
         # The rootless builder retains inputs while exporting the image. Treat
         # recipe storage as a generous peak envelope, not an exact quota over
         # Podman's implementation-specific graph. Preserve a separate host
@@ -867,7 +883,7 @@ class RecipeBuildService:
             raise RecipeBuildError(
                 "build.insufficient_disk", "builder lacks temporary disk capacity"
             )
-        if snapshot.host_memory_free_bytes - memory_reserved < memory_bytes:
+        if memory_available < memory_bytes:
             raise RecipeBuildError(
                 "build.insufficient_memory", "builder lacks build memory capacity"
             )
@@ -997,7 +1013,25 @@ class RecipeBuildService:
         This helper intentionally never opens another transaction.  It may be
         called while the availability parent and builder rows are locked.
         """
-        node = session.get(AgentNode, plan.builder_node_id, with_for_update=True)
+        try:
+            acquire_admission_keys(
+                session, (node_admission_key(plan.builder_node_id),)
+            )
+            locked = lock_admission_rows(
+                session,
+                (
+                    AdmissionRowLock(
+                        "build-builder-node",
+                        AgentNode,
+                        select(AgentNode).where(
+                            AgentNode.node_id == plan.builder_node_id
+                        ),
+                    ),
+                ),
+            )
+            node = next(iter(locked["build-builder-node"]), None)
+        except AdmissionLockBusy as error:
+            raise RecipeBuildAdmissionBusy() from error
         if node is None:
             raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
         _validate_builder(node)
@@ -1176,16 +1210,69 @@ class RecipeBuildService:
         )
 
     def reserve_in_session(
-        self, session: Session, plan: RecipeBuildPlan, *, now: datetime
+        self,
+        session: Session,
+        plan: RecipeBuildPlan,
+        *,
+        now: datetime,
+        request_id: str | None = None,
     ) -> None:
-        build = session.get(RecipeBuild, plan.build_id, with_for_update=True)
-        revision = (
-            session.get(
-                CatalogDocumentRevision, plan.recipe_revision_id, with_for_update=True
+        try:
+            acquire_admission_keys(
+                session, (node_admission_key(plan.builder_node_id),)
             )
-            if build is not None
-            else None
+            self._reserve_in_session(session, plan, now=now, request_id=request_id)
+        except AdmissionLockBusy as error:
+            raise RecipeBuildAdmissionBusy() from error
+        except RecipeBuildError:
+            raise
+        except ValueError as error:
+            raise RecipeBuildError(
+                "build.capacity_contract_invalid", str(error)
+            ) from error
+        except OperationalError as error:
+            code = getattr(error.orig, "sqlstate", None) or getattr(
+                error.orig, "pgcode", None
+            )
+            if code in {"55P03", "40P01", "40001", "57014"}:
+                raise RecipeBuildAdmissionBusy() from error
+            raise
+
+    def _reserve_in_session(
+        self,
+        session: Session,
+        plan: RecipeBuildPlan,
+        *,
+        now: datetime,
+        request_id: str | None,
+    ) -> None:
+        locked = lock_admission_rows(
+            session,
+            (
+                AdmissionRowLock(
+                    "build-builder-node",
+                    AgentNode,
+                    select(AgentNode).where(
+                        AgentNode.node_id == plan.builder_node_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "build-recipe-revision",
+                    CatalogDocumentRevision,
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.id == plan.recipe_revision_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "build-recipe-build",
+                    RecipeBuild,
+                    select(RecipeBuild).where(RecipeBuild.id == plan.build_id),
+                ),
+            ),
         )
+        node = next(iter(locked["build-builder-node"]), None)
+        revision = next(iter(locked["build-recipe-revision"]), None)
+        build = next(iter(locked["build-recipe-build"]), None)
         if (
             revision is None
             or revision.kind != "recipe"
@@ -1228,7 +1315,6 @@ class RecipeBuildService:
             raise RecipeBuildError(
                 "build.inventory_missing", "fresh builder inventory is unavailable"
             ) from error
-        node = session.get(AgentNode, plan.builder_node_id, with_for_update=True)
         if node is None:
             raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
         _validate_builder(node)
@@ -1269,8 +1355,9 @@ class RecipeBuildService:
                 "build.insufficient_disk", "builder disk capacity changed"
             )
         if (
-            snapshot.host_memory_free_bytes
-            - _reserved(session, plan.builder_node_id, "host-memory")
+            _available_build_memory(
+                session, snapshot, build=build, request_id=request_id, lock=True
+            )
             < memory_bytes
         ):
             raise RecipeBuildError(
@@ -1469,24 +1556,81 @@ def _declared_image_bytes(document: dict[str, object]) -> int:
     return max(values)
 
 
-def _reserved(session: Session, node_id: str, kind: str) -> int:
-    return int(
-        session.scalar(
-            select(func.coalesce(func.sum(ResourceReservation.amount_bytes), 0)).where(
-                ResourceReservation.node_id == node_id,
-                ResourceReservation.kind == kind,
-                ResourceReservation.state == "active",
-            )
+def _available_build_memory(
+    session: Session,
+    snapshot: InventorySnapshotView,
+    *,
+    build: RecipeBuild | None = None,
+    request_id: str | None = None,
+    lock: bool = False,
+) -> int:
+    inherited = (
+        profile_build_memory_claims(
+            session,
+            build,
+            memory_pool=snapshot.memory_pool,
+            request_id=request_id,
+            lock=lock,
         )
-        or 0
+        if build is not None and request_id is not None
+        else ()
+    )
+    if lock:
+        session.scalars(
+            select(ResourceReservation)
+            .where(
+                ResourceReservation.node_id == snapshot.node_id,
+                ResourceReservation.state.in_(("active", "promised")),
+            )
+            .order_by(ResourceReservation.id)
+            .with_for_update(nowait=True)
+        ).all()
+    floor = memory_reserve_floor(
+        session, snapshot.node_id, memory_pool=snapshot.memory_pool, kind="host-memory"
+    )
+    capacity = memory_capacity_snapshot(
+        snapshot.node_id,
+        "host",
+        host=(snapshot.host_memory_total_bytes, snapshot.host_memory_free_bytes),
+        accelerator=(snapshot.gpu_memory_total_bytes, snapshot.gpu_memory_free_bytes),
+        reservations=memory_reservations(
+            session,
+            snapshot.node_id,
+            memory_pool=snapshot.memory_pool,
+            excluded_profile_claim_ids=tuple(claim.id for claim in inherited),
+        ),
+        memory_pool=snapshot.memory_pool,
+        evidence_state="fresh" if not snapshot.stale else "stale",
+        evidence_observed_at=snapshot.observed_at,
+    )
+    assert capacity.available_bytes is not None
+    assert capacity.occupied_bytes is not None
+    assert capacity.reserved_bytes is not None
+    assert capacity.unmaterialized_bytes is not None
+    return (
+        min(
+            capacity.available_bytes - capacity.reserved_bytes,
+            capacity.available_bytes
+            - capacity.occupied_bytes
+            - capacity.unmaterialized_bytes
+            - sum(
+                residual.maximum_bytes
+                for residual in capacity.unknown_run_residuals
+            ),
+        )
+        - floor
     )
 
 
 def _valid_succeeded_receipt(build: RecipeBuild) -> bool:
     """Require complete immutable evidence before considering a cache hit."""
+    return build.state == "succeeded" and _has_build_receipt(build)
+
+
+def _has_build_receipt(build: RecipeBuild) -> bool:
+    """Recorded result identity may survive a running or failed replacement."""
     return (
-        build.state == "succeeded"
-        and _OCI_DIGEST.fullmatch(build.image_digest or "") is not None
+        _OCI_DIGEST.fullmatch(build.image_digest or "") is not None
         and _SHA256.fullmatch(build.oci_layout_sha256 or "") is not None
         and isinstance(build.image_bytes, int)
         and not isinstance(build.image_bytes, bool)

@@ -14,11 +14,14 @@ from typing import Annotated, Any, Literal, Protocol
 from pydantic import (
     ConfigDict,
     Field,
+    StrictStr,
+    TypeAdapter,
     ValidationError,
     model_serializer,
 )
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import String, and_, cast, false, func, or_, select, true, update
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
     OperationMemberProgress,
@@ -31,7 +34,9 @@ from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 
 from .agent_jobs import (
+    AgentJobService,
     authorize_operator_resume_in_session,
+    operator_resume_eligible_operations_in_session,
     retire_exhausted_operations_in_session,
 )
 from .agent_upgrade_status import (
@@ -42,13 +47,25 @@ from .agent_upgrade_status import (
 )
 from .auth import CursorCodec, CursorError
 from .bounded_json import BoundedJSONError, mapping, require_integer, require_sequence
+from .endpoint_contract import EndpointResponse
+from .fleet_profile_contract import (
+    FleetProfileApplicationCancellationView,
+    FleetProfileEndpointAssignmentView,
+    FleetProfileEndpointIntent,
+    FleetProfileEndpointState,
+    FleetProfileEndpointsView,
+)
 from .logging import redact_text
 from .models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
+    AuditEvent,
+    FleetProfileApplication,
     Job,
+    ModelCacheOperation,
+    RecipeLibrarySyncRun,
     RecipeRouteAuthority,
     RoutePublication,
     RoutePublicationOwner,
@@ -86,6 +103,7 @@ _ADMIN_OPERATION_IDS = {
         "/api/recipe/runs/{run_id}/artifact-jobs",
     ): "createArtifactJob",
     ("get", "/api/artifact-jobs/capabilities"): "getArtifactJobCapabilities",
+    ("get", "/api/artifact-jobs/requests/{request_id}"): "getArtifactJobByRequestId",
     ("get", "/api/artifact-jobs/{job_id}"): "getArtifactJobStatus",
     ("put", "/api/artifact-jobs/{job_id}/inputs/{name}"): "uploadArtifactJobInput",
     ("post", "/api/artifact-jobs/{job_id}/finalize"): "finalizeArtifactJob",
@@ -94,7 +112,7 @@ _ADMIN_OPERATION_IDS = {
     ("get", "/api/artifact-jobs/{job_id}/result"): "getArtifactJobResult",
     (
         "get",
-        "/api/artifact-jobs/{job_id}/results/{sha256}",
+        "/api/artifact-jobs/{job_id}/results/{name}/{sha256}",
     ): "downloadArtifactJobResult",
     ("get", "/api/endpoints/{alias}"): "getPublishedEndpoint",
     ("get", "/api/jobs"): "listJobs",
@@ -128,6 +146,26 @@ DigestIdentifier = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
 class OperationProjectionError(RuntimeError):
     """Durable operation state cannot be safely projected."""
+
+
+class EndpointPublicationExpired(RuntimeError):
+    """The last durable route publication has reached its lease expiry."""
+
+
+@dataclass(frozen=True)
+class _ActiveRouteSnapshot:
+    marker: Mapping[str, object]
+    marker_digest: str
+    route_digest: str
+    evidence_digest: str | None
+    litellm_digest: str | None
+    bundle_digest: str
+    lease_issued_at: datetime
+    lease_expires_at: datetime
+    authority_id: str
+    owner_generation: int
+    publication_generation: int
+    plan_digest: str
 
 
 class StrictModel(StrictJSONModel):
@@ -172,6 +210,18 @@ class RequestValidationIssue(StrictModel):
 
 class RequestValidationProblem(BoundedErrorResponse):
     issues: list[RequestValidationIssue]
+    candidates: (
+        list[
+            Annotated[
+                str,
+                Field(
+                    pattern=r"^(?:spk_[0-9a-f]{32}|[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9][a-z0-9._-]{0,62})$",
+                    max_length=127,
+                ),
+            ]
+        ]
+        | None
+    ) = None
 
 
 class HealthzResponse(StrictModel):
@@ -227,17 +277,6 @@ def bounded_error_responses(*status_codes: int) -> dict[int | str, dict[str, Any
     }
 
 
-class EndpointResponse(StrictModel):
-    alias: str = Field(pattern=IDENTIFIER_PATTERN, max_length=63)
-    api_base: str = Field(min_length=1, max_length=512)
-    expires_at: str = Field(min_length=1, max_length=64)
-    generation: int = Field(ge=1)
-    node_id: str = Field(pattern=NODE_PATTERN)
-    observed_at: str = Field(min_length=1, max_length=64)
-    plan_digest: str = Field(pattern=DIGEST_PATTERN)
-    state: str = Field(pattern=r"^published$")
-
-
 class AgentSummary(StrictModel):
     node_id: str = Field(pattern=NODE_PATTERN)
     state: str = Field(min_length=1, max_length=80)
@@ -284,6 +323,21 @@ class JobOperationResponse(StrictModel):
         return document
 
 
+class OperationOwnerReference(StrictModel):
+    """Exact durable owner and original request identity for Activity."""
+
+    kind: str = Field(pattern=r"^[a-z][a-z0-9-]{0,63}$")
+    id: str = Field(min_length=1, max_length=128)
+    request_id: str | None = Field(
+        default=None,
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        ),
+        max_length=36,
+    )
+
+
 class OperationDetailResponse(StrictModel):
     schema_version: Literal[2] = 2
     id: str = Field(min_length=1, max_length=128)
@@ -298,7 +352,9 @@ class OperationDetailResponse(StrictModel):
     failure: OperationFailure | None = None
     provenance: OperationEvidenceProvenance | None = None
     evidence_download: OperationEvidenceDownload | None = None
+    cancellation: FleetProfileApplicationCancellationView | None = None
     recovery: OperationRecovery | None = None
+    owner: OperationOwnerReference | None = None
     #: Why this operation is not currently progressing.  A refused claim
     #: records the refusing check here so an operator can tell "no work" apart
     #: from "work this node may not execute, and why".
@@ -311,7 +367,9 @@ class OperationDetailResponse(StrictModel):
             "failure",
             "provenance",
             "evidence_download",
+            "cancellation",
             "recovery",
+            "owner",
             "status_reason",
         ):
             if document.get(key) is None:
@@ -374,6 +432,7 @@ class JobDetailResponse(StrictModel):
     operation_total: int = Field(ge=0)
     progress: JobProgress
     agent_upgrade_diagnostics: AgentUpgradeDiagnosticsResponse | None = None
+    recovery: OperationRecovery | None = None
 
 
 class JobResumeRequest(StrictModel):
@@ -419,12 +478,19 @@ class OperationApiServices:
     job_operations: Callable[[str, str | None, int], OperationPage]
     resume_job: Callable[[str], None]
     list_operations: (
-        Callable[[str | None, int, str | None, str | None], OperationListPage] | None
+        Callable[
+            [str | None, int, str | None, str | None, str | None],
+            OperationListPage,
+        ]
+        | None
     ) = None
     get_operation: Callable[[str], Mapping[str, object]] | None = None
     operation_providers: tuple[OperationProviderProtocol, ...] = ()
     cursor_codec: CursorCodec | None = None
     retire_job: Callable[[str], None] | None = None
+    profile_endpoint: Callable[[int, str | None], FleetProfileEndpointsView] | None = (
+        None
+    )
 
 
 @dataclass(frozen=True)
@@ -433,6 +499,7 @@ class OperationPage:
     next_cursor: str | None
     progress: JobProgress
     agent_upgrade_diagnostics: Mapping[str, object] | None = None
+    recovery_actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -450,6 +517,7 @@ class OperationQuery:
     limit: int
     state: str | None
     node_id: str | None
+    request_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -459,6 +527,7 @@ class OperationProvider:
     family: str
     list_operations: Callable[[OperationQuery], OperationListPage]
     get_operation: Callable[[str], Mapping[str, object]]
+    represented_job_kinds: frozenset[str] = frozenset()
 
 
 class OperationProviderProtocol(Protocol):
@@ -478,6 +547,9 @@ class OperationProviderProtocol(Protocol):
 
     @property
     def get_operation(self) -> Callable[[str], Mapping[str, object]]: ...
+
+    @property
+    def represented_job_kinds(self) -> frozenset[str]: ...
 
 
 def _operation_boundary(item: Mapping[str, object]) -> tuple[datetime, str]:
@@ -501,13 +573,14 @@ def merge_operation_providers(
     limit: int,
     state: str | None,
     node_id: str | None,
+    request_id: str | None = None,
     cursors: CursorCodec,
 ) -> OperationListPage:
     """Merge provider rows using one deterministic newest-first cursor."""
 
     if not 1 <= limit <= 100:
         raise ValueError("operation page limit is invalid")
-    context = {"state": state, "node_id": node_id}
+    context = {"state": state, "node_id": node_id, "request_id": request_id}
     after: tuple[datetime, str] | None = None
     if cursor is not None:
         try:
@@ -526,7 +599,13 @@ def merge_operation_providers(
             after = (_aware(datetime.fromisoformat(decoded[0])), decoded[1])
         except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
             raise CursorError("operation cursor is invalid") from None
-    query = OperationQuery(after=after, limit=limit + 1, state=state, node_id=node_id)
+    query = OperationQuery(
+        after=after,
+        limit=limit + 1,
+        state=state,
+        node_id=node_id,
+        request_id=request_id,
+    )
     rows: list[Mapping[str, object]] = []
     total = 0
     seen: set[str] = set()
@@ -589,12 +668,380 @@ def get_operation_from_providers(
     return match
 
 
+_ACTIVITY_REQUEST_ID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+_ACTIVITY_TARGET = re.compile(
+    r"^(?:[a-z0-9][a-z0-9._-]{0,62}|"
+    r"[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9][a-z0-9._-]{0,62})$"
+)
+_ACTIVITY_STRINGS = TypeAdapter(list[StrictStr], config=ConfigDict(strict=True))
+_JOB_ACTIVITY_PREFIX = "job:"
+_AUDIT_ACTIVITY_PREFIX = "audit:"
+
+
+def _activity_keyset_filter(
+    created_at_column: SQLColumnExpression[datetime],
+    id_column: SQLColumnExpression[str],
+    id_prefix: str,
+    after: tuple[datetime, str] | None,
+) -> ColumnElement[bool] | None:
+    """Build the provider-local half of the shared prefixed ID boundary."""
+
+    if after is None:
+        return None
+    created_at, activity_id = after
+    if activity_id.startswith(id_prefix):
+        same_time_ids = id_column < activity_id[len(id_prefix) :]
+    elif id_prefix < activity_id:
+        same_time_ids = true()
+    else:
+        same_time_ids = false()
+    return or_(
+        created_at_column < created_at,
+        and_(created_at_column == created_at, same_time_ids),
+    )
+
+
+def _activity_node_ids(value: object, *, limit: int) -> list[str]:
+    """Validate decoded JSON like stored JSON, then select exact Spark targets."""
+
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) > limit
+        or any(not isinstance(target, str) or len(target) > 127 for target in value)
+    ):
+        raise ValueError("stored activity targets are malformed")
+    try:
+        values = _ACTIVITY_STRINGS.validate_json(canonical_message(value))
+    except (TypeError, ValueError) as error:
+        raise ValueError("stored activity targets are malformed") from error
+    if len(values) > limit or any(
+        len(target) > 127 or _ACTIVITY_TARGET.fullmatch(target) is None
+        for target in values
+    ):
+        raise ValueError("stored activity targets are malformed")
+    return [
+        target for target in values if re.fullmatch(NODE_PATTERN, target) is not None
+    ]
+
+
+def _activity_owner_request_id(value: object) -> str | None:
+    if isinstance(value, str) and _ACTIVITY_REQUEST_ID.fullmatch(value) is not None:
+        return value
+    return None
+
+
+class _StandaloneJobActivityProjection:
+    """Project Jobs not already represented by an exact operation owner."""
+
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        providers: Sequence[OperationProviderProtocol],
+    ) -> None:
+        self._sessions = sessions
+        self._represented_job_kinds = frozenset(
+            kind
+            for provider in providers
+            for kind in getattr(provider, "represented_job_kinds", frozenset())
+        )
+
+    def _base_filters(self, query: OperationQuery) -> list[ColumnElement[bool]]:
+        filters: list[ColumnElement[bool]] = []
+        if self._represented_job_kinds:
+            filters.append(Job.kind.not_in(self._represented_job_kinds))
+        filters.append(
+            ~select(AgentOperation.id)
+            .where(AgentOperation.parent_job_id == Job.id)
+            .exists()
+        )
+        if query.state is not None:
+            filters.append(Job.state == query.state)
+        if query.request_id is not None:
+            filters.append(Job.request_id == query.request_id)
+        if query.node_id is not None:
+            filters.append(cast(Job.targets, String).contains(f'"{query.node_id}"'))
+        return filters
+
+    def list_operations(self, query: OperationQuery) -> OperationListPage:
+        if not 1 <= query.limit <= 101:
+            raise ValueError("operation provider page limit is invalid")
+        base_filters = self._base_filters(query)
+        page_filters = list(base_filters)
+        boundary = _activity_keyset_filter(
+            Job.created_at, Job.id, _JOB_ACTIVITY_PREFIX, query.after
+        )
+        if boundary is not None:
+            page_filters.append(boundary)
+        with self._sessions() as session:
+            total = int(
+                session.scalar(
+                    select(func.count()).select_from(Job).where(*base_filters)
+                )
+                or 0
+            )
+            jobs = session.scalars(
+                select(Job)
+                .where(*page_filters)
+                .order_by(Job.created_at.desc(), Job.id.desc())
+                .limit(query.limit)
+            )
+            return OperationListPage(
+                tuple(self._item(job) for job in jobs), None, total
+            )
+
+    def get_operation(self, operation_id: str) -> Mapping[str, object]:
+        if not operation_id.startswith(_JOB_ACTIVITY_PREFIX):
+            raise KeyError(operation_id)
+        owner_id = operation_id[len(_JOB_ACTIVITY_PREFIX) :]
+        with self._sessions() as session:
+            job = session.get(Job, owner_id)
+            if job is None or not self._is_standalone(session, job):
+                raise KeyError(operation_id)
+            return self._item(job)
+
+    def _is_standalone(self, session: Session, job: Job) -> bool:
+        if job.kind in self._represented_job_kinds:
+            return False
+        return (
+            session.scalar(
+                select(AgentOperation.id)
+                .where(AgentOperation.parent_job_id == job.id)
+                .limit(1)
+            )
+            is None
+        )
+
+    def _item(self, job: Job) -> Mapping[str, object]:
+        activity_id = f"{_JOB_ACTIVITY_PREFIX}{job.id}"
+        request_id = _activity_owner_request_id(job.request_id)
+        try:
+            if (
+                not isinstance(job.id, str)
+                or not 1 <= len(activity_id) <= 128
+                or request_id is None
+                or not isinstance(job.kind, str)
+                or not 1 <= len(job.kind) <= 80
+                or not isinstance(job.state, str)
+                or not 1 <= len(job.state) <= 80
+                or type(job.current_attempt) is not int
+                or job.current_attempt < 0
+                or not isinstance(job.created_at, datetime)
+                or not isinstance(job.updated_at, datetime)
+            ):
+                raise ValueError("stored job activity is malformed")
+            node_ids = _activity_node_ids(job.targets, limit=100)
+            status_reason = job.status_reason
+            if status_reason is not None and (
+                not isinstance(status_reason, str) or len(status_reason) > 1024
+            ):
+                raise ValueError("stored job status reason is malformed")
+        except (AttributeError, TypeError, ValueError, ValidationError):
+            return self._unreadable_item(job, activity_id, request_id)
+        return {
+            "id": activity_id,
+            "job_id": job.id,
+            "parent_id": None,
+            "owner": {"kind": "job", "id": job.id, "request_id": request_id},
+            "node_ids": node_ids,
+            "kind": job.kind,
+            "state": job.state,
+            "attempt": job.current_attempt,
+            "progress": None,
+            "created_at": _aware(job.created_at).isoformat(),
+            "updated_at": _aware(job.updated_at).isoformat(),
+            "supported_actions": [],
+            "status_reason": status_reason,
+        }
+
+    def _unreadable_item(
+        self, job: Job, activity_id: str, request_id: str | None
+    ) -> Mapping[str, object]:
+        return {
+            "id": activity_id,
+            "job_id": job.id,
+            "parent_id": None,
+            "owner": {"kind": "job", "id": job.id, "request_id": request_id},
+            "node_ids": [],
+            "kind": "job-history-unreadable",
+            "state": "unavailable",
+            "attempt": 0,
+            "progress": None,
+            "created_at": _aware(job.created_at).isoformat(),
+            "updated_at": _aware(job.updated_at).isoformat(),
+            "supported_actions": [],
+            "failure": {
+                "error_code": "operation_history_unreadable",
+                "summary": "Stored job history is malformed",
+                "retryable": False,
+            },
+            "status_reason": "Stored job history is malformed.",
+        }
+
+
+class _AuditActivityProjection:
+    """Project orphan audit records without duplicating a durable owner."""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    @staticmethod
+    def _unowned_request_filter() -> ColumnElement[bool]:
+        return ~or_(
+            select(Job.id).where(Job.request_id == AuditEvent.request_id).exists(),
+            select(FleetProfileApplication.id)
+            .where(FleetProfileApplication.request_key == AuditEvent.request_id)
+            .exists(),
+            select(ModelCacheOperation.id)
+            .where(ModelCacheOperation.request_key == AuditEvent.request_id)
+            .exists(),
+            select(RecipeLibrarySyncRun.id)
+            .where(RecipeLibrarySyncRun.request_key == AuditEvent.request_id)
+            .exists(),
+        )
+
+    def _base_filters(self, query: OperationQuery) -> list[ColumnElement[bool]]:
+        filters: list[ColumnElement[bool]] = [self._unowned_request_filter()]
+        # Audit references describe completed recorded actions.
+        if query.state is not None and query.state != "completed":
+            filters.append(false())
+        if query.request_id is not None:
+            filters.append(AuditEvent.request_id == query.request_id)
+        if query.node_id is not None:
+            filters.append(
+                cast(AuditEvent.targets, String).contains(f'"{query.node_id}"')
+            )
+        return filters
+
+    def list_operations(self, query: OperationQuery) -> OperationListPage:
+        if not 1 <= query.limit <= 101:
+            raise ValueError("operation provider page limit is invalid")
+        base_filters = self._base_filters(query)
+        page_filters = list(base_filters)
+        boundary = _activity_keyset_filter(
+            AuditEvent.occurred_at, AuditEvent.id, _AUDIT_ACTIVITY_PREFIX, query.after
+        )
+        if boundary is not None:
+            page_filters.append(boundary)
+        with self._sessions() as session:
+            total = int(
+                session.scalar(
+                    select(func.count()).select_from(AuditEvent).where(*base_filters)
+                )
+                or 0
+            )
+            events = session.scalars(
+                select(AuditEvent)
+                .where(*page_filters)
+                .order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc())
+                .limit(query.limit)
+            )
+            return OperationListPage(
+                tuple(self._item(event) for event in events), None, total
+            )
+
+    def get_operation(self, operation_id: str) -> Mapping[str, object]:
+        if not operation_id.startswith(_AUDIT_ACTIVITY_PREFIX):
+            raise KeyError(operation_id)
+        event_id = operation_id[len(_AUDIT_ACTIVITY_PREFIX) :]
+        with self._sessions() as session:
+            event = session.get(AuditEvent, event_id)
+            if event is None:
+                raise KeyError(operation_id)
+            # A request with a durable operation owner is shown through that
+            # exact owner and is not repeated as an audit-only Activity row.
+            if not session.scalar(
+                select(AuditEvent.id)
+                .where(
+                    AuditEvent.id == event_id,
+                    self._unowned_request_filter(),
+                )
+                .limit(1)
+            ):
+                raise KeyError(operation_id)
+            return self._item(event)
+
+    def _item(self, event: AuditEvent) -> Mapping[str, object]:
+        activity_id = f"{_AUDIT_ACTIVITY_PREFIX}{event.id}"
+        request_id = _activity_owner_request_id(event.request_id)
+        try:
+            if (
+                not isinstance(event.id, str)
+                or not 1 <= len(activity_id) <= 128
+                or request_id is None
+                or not isinstance(event.actor, str)
+                or not 1 <= len(event.actor) <= 200
+                or not isinstance(event.action, str)
+                or not 1 <= len(event.action) <= 120
+                or not isinstance(event.occurred_at, datetime)
+            ):
+                raise ValueError("stored audit activity is malformed")
+            node_ids = _activity_node_ids(event.targets, limit=64)
+        except (AttributeError, TypeError, ValueError, ValidationError):
+            return self._unreadable_item(event, activity_id, request_id)
+        action = (
+            event.action
+            if re.fullmatch(r"[a-z][a-z0-9._-]{0,73}", event.action)
+            else "event"
+        )
+        return {
+            "id": activity_id,
+            "job_id": None,
+            "parent_id": None,
+            "owner": {
+                "kind": "audit-event",
+                "id": event.id,
+                "request_id": request_id,
+            },
+            "node_ids": node_ids,
+            "kind": f"audit.{action}",
+            "state": "completed",
+            "attempt": 0,
+            "progress": None,
+            "created_at": _aware(event.occurred_at).isoformat(),
+            "updated_at": _aware(event.occurred_at).isoformat(),
+            "supported_actions": [],
+            "status_reason": f"Audited request {request_id}",
+        }
+
+    def _unreadable_item(
+        self, event: AuditEvent, activity_id: str, request_id: str | None
+    ) -> Mapping[str, object]:
+        return {
+            "id": activity_id,
+            "job_id": None,
+            "parent_id": None,
+            "owner": {
+                "kind": "audit-event",
+                "id": event.id,
+                "request_id": request_id,
+            },
+            "node_ids": [],
+            "kind": "audit-history-unreadable",
+            "state": "unavailable",
+            "attempt": 0,
+            "progress": None,
+            "created_at": _aware(event.occurred_at).isoformat(),
+            "updated_at": _aware(event.occurred_at).isoformat(),
+            "supported_actions": [],
+            "failure": {
+                "error_code": "operation_history_unreadable",
+                "summary": "Stored audit history is malformed",
+                "retryable": False,
+            },
+            "status_reason": "Stored audit history is malformed.",
+        }
+
+
 def _global_list_operations(
     services: OperationApiServices,
     cursor: str | None,
     limit: int,
     state: str | None,
     node_id: str | None,
+    request_id: str | None,
 ) -> OperationListPage:
     if services.operation_providers:
         if services.cursor_codec is None:
@@ -605,11 +1052,12 @@ def _global_list_operations(
             limit=limit,
             state=state,
             node_id=node_id,
+            request_id=request_id,
             cursors=services.cursor_codec,
         )
     if services.list_operations is None:
         raise OperationProjectionError("operation projection unavailable")
-    return services.list_operations(cursor, limit, state, node_id)
+    return services.list_operations(cursor, limit, state, node_id, request_id)
 
 
 def _global_get_operation(
@@ -735,6 +1183,11 @@ def job_response(
             if diagnostics is None
             else AgentUpgradeDiagnosticsResponse.model_validate(diagnostics)
         ),
+        recovery=recovery_for_operation(
+            job.state,
+            supported_actions=operation_page.recovery_actions,
+            available_actions=(OperationRecoveryAction.RESUME,),
+        ),
     )
 
 
@@ -836,7 +1289,7 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
         if value is None:
             return None
         kind = _required_text(item["kind"], "operation kind is invalid")
-        if kind.startswith("model-cache."):
+        if kind.startswith("model-cache.") or kind == "recipe.cache.update.v2":
             return AvailabilityOperationFailure.model_validate(value)
         return OperationFailureEvidence.model_validate(value, strict=True)
     kind = _required_text(item["kind"], "operation kind is invalid")
@@ -960,6 +1413,26 @@ def operation_detail_response(
     state = _required_text(item["state"], "operation state is invalid")
     result = item.get("result")
     operation_id = _required_text(item["id"], "operation id is invalid")
+    cancellation = None
+    raw_cancellation = item.get("cancellation")
+    if raw_cancellation is not None:
+        try:
+            cancellation = FleetProfileApplicationCancellationView.model_validate_json(
+                canonical_message(raw_cancellation), strict=True
+            )
+        except (TypeError, ValueError, ValidationError) as error:
+            raise BoundedJSONError(
+                f"profile cancellation receipt for operation {operation_id} is invalid"
+            ) from error
+    owner: OperationOwnerReference | None = None
+    raw_owner = item.get("owner")
+    if isinstance(raw_owner, Mapping):
+        try:
+            owner = OperationOwnerReference.model_validate(raw_owner)
+        except ValidationError:
+            # Keep one damaged historical owner visible without turning the
+            # rest of the canonical page into an unavailable response.
+            owner = None
     return OperationDetailResponse(
         id=operation_id,
         parent_id=_optional_text(
@@ -979,6 +1452,7 @@ def operation_detail_response(
         failure=failure,
         provenance=_provenance_projection(result, operation_id),
         evidence_download=_evidence_download_projection(result, operation_id),
+        cancellation=cancellation,
         status_reason=_optional_text(
             item.get("status_reason"), "operation status reason is invalid"
         ),
@@ -989,6 +1463,7 @@ def operation_detail_response(
             uncertain=bool(failure is not None and getattr(failure, "uncertain", False))
             or bool(isinstance(result, Mapping) and result.get("uncertain") is True),
         ),
+        owner=owner,
     )
 
 
@@ -1149,6 +1624,9 @@ class _DurableOperationProjection:
         clock: Callable[[], datetime],
         stale_after_seconds: int,
         cursors: CursorCodec,
+        profile_endpoint_intent: (
+            Callable[[Session, int], FleetProfileEndpointIntent] | None
+        ) = None,
     ) -> None:
         if route_root.is_symlink() or stale_after_seconds <= 0:
             raise ValueError("operation projection configuration is invalid")
@@ -1157,86 +1635,100 @@ class _DurableOperationProjection:
         self._clock = clock
         self._stale_after_seconds = stale_after_seconds
         self._cursors = cursors
+        self._profile_endpoint_intent = profile_endpoint_intent
 
-    def endpoint(self, alias: str) -> Mapping[str, object]:
-        with self._sessions() as session:
-            owner = session.get(RoutePublicationOwner, 1)
-            publication = (
-                None
-                if owner is None or owner.authority_id is None
-                else session.get(RoutePublication, owner.authority_id)
-            )
-            authority = (
-                None
-                if owner is None or owner.authority_id is None
-                else session.get(RecipeRouteAuthority, owner.authority_id)
-            )
-            if (
-                owner is None
-                or publication is None
-                or authority is None
-                or publication.state not in _ACTIVE_PUBLICATION_STATES
-                or publication.generation != owner.owner_generation
-                or publication.activation_marker is None
-                or publication.activation_marker_digest is None
-                or publication.route_digest is None
-                or publication.lease_expires_at is None
-                or _aware(publication.lease_expires_at) <= _aware(self._clock())
-            ):
-                raise RuntimeError("active publication is unavailable")
-            marker = _stored_activation_marker(
-                publication.activation_marker
-            ).model_dump()
-            marker_digest = publication.activation_marker_digest
-            route_digest = publication.route_digest
-            evidence_digest = publication.evidence_digest
-            litellm_digest = publication.litellm_digest
-            bundle_digest = publication.bundle_digest
-            lease_issued_at = publication.lease_issued_at
-            lease_expires_at = publication.lease_expires_at
-            owner_authority_id = owner.authority_id
-            owner_generation = owner.owner_generation
-            publication_generation = publication.generation
-            publication_plan_digest = publication.plan_digest
-
-        bundle = verify_active_route_bundle(
-            self._route_root,
-            clock=self._clock,
+    def _publication_snapshot(self, session: Session) -> _ActiveRouteSnapshot:
+        owner = session.get(RoutePublicationOwner, 1)
+        publication = (
+            None
+            if owner is None or owner.authority_id is None
+            else session.get(RoutePublication, owner.authority_id)
         )
+        authority = (
+            None
+            if owner is None or owner.authority_id is None
+            else session.get(RecipeRouteAuthority, owner.authority_id)
+        )
+        if (
+            owner is not None
+            and publication is not None
+            and publication.lease_expires_at is not None
+            and _aware(publication.lease_expires_at) <= _aware(self._clock())
+        ):
+            raise EndpointPublicationExpired("active route lease expired")
+        if (
+            owner is None
+            or publication is None
+            or authority is None
+            or owner.authority_id is None
+            or publication.generation is None
+            or publication.state not in _ACTIVE_PUBLICATION_STATES
+            or publication.generation != owner.owner_generation
+            or publication.activation_marker is None
+            or publication.activation_marker_digest is None
+            or publication.route_digest is None
+            or publication.lease_issued_at is None
+            or publication.lease_expires_at is None
+            or publication.evidence_digest is None
+            or publication.litellm_digest is None
+            or publication.bundle_digest is None
+        ):
+            raise RuntimeError("active publication is unavailable")
+        marker = _stored_activation_marker(publication.activation_marker).model_dump()
+        return _ActiveRouteSnapshot(
+            marker=marker,
+            marker_digest=publication.activation_marker_digest,
+            route_digest=publication.route_digest,
+            evidence_digest=publication.evidence_digest,
+            litellm_digest=publication.litellm_digest,
+            bundle_digest=publication.bundle_digest,
+            lease_issued_at=_aware(publication.lease_issued_at),
+            lease_expires_at=_aware(publication.lease_expires_at),
+            authority_id=owner.authority_id,
+            owner_generation=owner.owner_generation,
+            publication_generation=publication.generation,
+            plan_digest=publication.plan_digest,
+        )
+
+    def _verified_routes(
+        self, snapshot: _ActiveRouteSnapshot
+    ) -> tuple[Mapping[str, object], Mapping[str, object]]:
+        bundle = verify_active_route_bundle(self._route_root, clock=self._clock)
         active_marker = bundle.marker
         if (
-            active_marker.model_dump() != marker
-            or active_marker.digest != marker_digest
+            active_marker.model_dump() != snapshot.marker
+            or active_marker.digest != snapshot.marker_digest
             or active_marker.state != "published"
-            or active_marker.authority_id != owner_authority_id
-            or active_marker.plan_digest != publication_plan_digest
-            or active_marker.generation != publication_generation
-            or active_marker.generation != owner_generation
-            or active_marker.evidence_set_digest != evidence_digest
-            or active_marker.routes_sha256 != route_digest
-            or active_marker.litellm_sha256 != litellm_digest
-            or active_marker.manifest_sha256 != bundle_digest
-            or lease_issued_at is None
-            or lease_expires_at is None
-            or _aware(lease_issued_at)
+            or active_marker.authority_id != snapshot.authority_id
+            or active_marker.plan_digest != snapshot.plan_digest
+            or active_marker.generation != snapshot.publication_generation
+            or active_marker.generation != snapshot.owner_generation
+            or active_marker.evidence_set_digest != snapshot.evidence_digest
+            or active_marker.routes_sha256 != snapshot.route_digest
+            or active_marker.litellm_sha256 != snapshot.litellm_digest
+            or active_marker.manifest_sha256 != snapshot.bundle_digest
+            or _aware(snapshot.lease_issued_at)
             != _aware(datetime.fromisoformat(active_marker.issued_at))
-            or _aware(lease_expires_at)
+            or _aware(snapshot.lease_expires_at)
             != _aware(datetime.fromisoformat(active_marker.expires_at))
         ):
             raise RuntimeError("activation marker does not match durable state")
         routes = bundle.routes
         route_document = routes.get("routes")
         if (
-            routes.get("generation") != publication_generation
+            routes.get("generation") != snapshot.publication_generation
             or routes.get("state") != "published"
             or not isinstance(route_document, Mapping)
         ):
             raise RuntimeError("active route state does not match publication")
-        raw = route_document.get(alias)
-        if raw is None:
-            raise KeyError(alias)
-        if not isinstance(raw, Mapping):
-            raise OperationProjectionError("active endpoint is invalid")
+        return active_marker.model_dump(), route_document
+
+    @staticmethod
+    def _endpoint_payload(
+        alias: str,
+        raw: Mapping[str, object],
+        active_marker: Mapping[str, object],
+    ) -> EndpointResponse:
         scheme = raw.get("scheme")
         address = raw.get("address")
         port = raw.get("port")
@@ -1256,16 +1748,149 @@ class _DurableOperationProjection:
             or not isinstance(observed_at, str)
         ):
             raise RuntimeError("active endpoint is invalid")
-        return {
-            "alias": alias,
-            "api_base": f"{scheme}://{address}:{port}{path.rstrip('/')}",
-            "expires_at": active_marker.expires_at,
-            "generation": active_marker.generation,
-            "node_id": node_id,
-            "observed_at": observed_at,
-            "plan_digest": active_marker.plan_digest,
-            "state": "published",
+        expires_at = active_marker.get("expires_at")
+        generation = active_marker.get("generation")
+        plan_digest = active_marker.get("plan_digest")
+        if (
+            not isinstance(expires_at, str)
+            or not isinstance(generation, int)
+            or not isinstance(plan_digest, str)
+        ):
+            raise TypeError("active endpoint marker is invalid")
+        return EndpointResponse(
+            alias=alias,
+            api_base=f"{scheme}://{address}:{port}{path.rstrip('/')}",
+            expires_at=expires_at,
+            generation=generation,
+            node_id=node_id,
+            observed_at=observed_at,
+            plan_digest=plan_digest,
+            state="published",
+        )
+
+    @staticmethod
+    def _route_run_id(raw: Mapping[str, object]) -> str | None:
+        operation_id = raw.get("operation_id")
+        if not isinstance(operation_id, str):
+            return None
+        match = re.fullmatch(
+            r"recipe:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}):rank:(?:0|[1-9][0-9]*)",
+            operation_id,
+        )
+        return None if match is None else match.group(1)
+
+    def endpoint(self, alias: str) -> Mapping[str, object]:
+        with self._sessions() as session:
+            snapshot = self._publication_snapshot(session)
+        active_marker, route_document = self._verified_routes(snapshot)
+        raw = route_document.get(alias)
+        if raw is None:
+            raise KeyError(alias)
+        if not isinstance(raw, Mapping):
+            raise OperationProjectionError("active endpoint is invalid")
+        return self._endpoint_payload(alias, raw, active_marker).model_dump(mode="json")
+
+    def profile_endpoint(
+        self, number: int, alias: str | None
+    ) -> FleetProfileEndpointsView:
+        if self._profile_endpoint_intent is None:
+            raise RuntimeError("profile endpoint ownership is unavailable")
+        with self._sessions() as session:
+            intent = self._profile_endpoint_intent(session, number)
+            assignments = intent.assignments
+            if alias is not None:
+                assignments = tuple(item for item in assignments if item.alias == alias)
+                if not assignments:
+                    raise KeyError(alias)
+            snapshot: _ActiveRouteSnapshot | None = None
+            expired = False
+            unavailable = False
+            if any(item.expected_run_id is not None for item in assignments):
+                try:
+                    snapshot = self._publication_snapshot(session)
+                except EndpointPublicationExpired:
+                    expired = True
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    unavailable = True
+
+        endpoints: dict[str, EndpointResponse] = {}
+        states: dict[str, FleetProfileEndpointState] = {
+            item.assignment_id: item.state for item in assignments
         }
+        if expired:
+            for item in assignments:
+                if item.expected_run_id is not None:
+                    states[item.assignment_id] = "expired"
+        elif unavailable:
+            for item in assignments:
+                if item.expected_run_id is not None:
+                    states[item.assignment_id] = "unavailable"
+        elif snapshot is not None:
+            try:
+                active_marker, route_document = self._verified_routes(snapshot)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                for item in assignments:
+                    if item.expected_run_id is not None:
+                        states[item.assignment_id] = "unavailable"
+            else:
+                for item in assignments:
+                    if item.expected_run_id is None or item.alias is None:
+                        continue
+                    raw = route_document.get(item.alias)
+                    if not isinstance(raw, Mapping):
+                        states[item.assignment_id] = "withdrawn"
+                        continue
+                    route_run_id = self._route_run_id(raw)
+                    if route_run_id is None:
+                        states[item.assignment_id] = "unavailable"
+                        continue
+                    if route_run_id != item.expected_run_id:
+                        states[item.assignment_id] = "withdrawn"
+                        continue
+                    try:
+                        endpoints[item.assignment_id] = self._endpoint_payload(
+                            item.alias, raw, active_marker
+                        )
+                    except (RuntimeError, TypeError, ValueError):
+                        states[item.assignment_id] = "unavailable"
+                    else:
+                        states[item.assignment_id] = "published"
+
+                # A new application or route generation between membership
+                # lookup and bundle verification must never authorize a stale
+                # endpoint. Fence the projection with a fresh SQL read.
+                with self._sessions() as session:
+                    current = self._profile_endpoint_intent(session, number)
+                    current_snapshot = self._publication_snapshot(session)
+                    if (
+                        current.profile_id != intent.profile_id
+                        or current.application_id != intent.application_id
+                        or current.assignments != intent.assignments
+                        or current_snapshot != snapshot
+                    ):
+                        raise RuntimeError(
+                            "profile endpoint ownership changed during projection"
+                        )
+
+        return FleetProfileEndpointsView(
+            number=intent.number,
+            profile_id=intent.profile_id,
+            application_id=intent.application_id,
+            application_state=intent.application_state,
+            observed_at=_aware(self._clock()),
+            assignments=[
+                FleetProfileEndpointAssignmentView(
+                    assignment_id=item.assignment_id,
+                    recipe_title=item.recipe_title,
+                    desired_state=item.desired_state,
+                    alias=item.alias,
+                    state=states[item.assignment_id],
+                    endpoint=endpoints.get(item.assignment_id),
+                )
+                for item in assignments
+            ],
+        )
 
     def agents(self) -> Sequence[Mapping[str, object]]:
         now = _aware(self._clock())
@@ -1352,6 +1977,12 @@ class _DurableOperationProjection:
                 raise CursorError("operation cursor is invalid") from None
         with self._sessions() as session:
             agent_upgrade_diagnostics = _agent_upgrade_diagnostics(session, job_id)
+            resume_operation_ids = {
+                operation.id
+                for operation in operator_resume_eligible_operations_in_session(
+                    session, job_id, self._clock()
+                )
+            }
             statement = select(AgentOperation).where(
                 AgentOperation.parent_job_id == job_id
             )
@@ -1448,10 +2079,10 @@ class _DurableOperationProjection:
                     if attempts.get(operation.id) is None
                     else attempts[operation.id].result
                 ),
-                "supported_actions": (
-                    operation.payload.get("supported_actions")
-                    if isinstance(operation.payload, Mapping)
-                    else None
+                "supported_actions": self._activity_actions(
+                    operation,
+                    attempts.get(operation.id),
+                    resume=operation.id in resume_operation_ids,
                 ),
                 "state": operation.state,
                 "updated_at": _aware(operation.updated_at).isoformat(),
@@ -1481,6 +2112,7 @@ class _DurableOperationProjection:
                 total=sum(state_counts.values()),
             ),
             agent_upgrade_diagnostics=agent_upgrade_diagnostics,
+            recovery_actions=("resume",) if resume_operation_ids else (),
         )
 
     def list_operations(
@@ -1489,12 +2121,13 @@ class _DurableOperationProjection:
         limit: int,
         state: str | None,
         node_id: str | None,
+        request_id: str | None,
     ) -> OperationListPage:
         """List the same durable AgentOperation authority globally."""
 
         if not 1 <= limit <= 100:
             raise ValueError("operation page limit is invalid")
-        context = {"state": state, "node_id": node_id}
+        context = {"state": state, "node_id": node_id, "request_id": request_id}
         boundary: tuple[datetime, str] | None = None
         if cursor is not None:
             try:
@@ -1519,18 +2152,17 @@ class _DurableOperationProjection:
                 filters.append(AgentOperation.state == state)
             if node_id is not None:
                 filters.append(AgentOperation.node_id == node_id)
-            if boundary is not None:
-                created_at, operation_id = boundary
-                filters.append(
-                    or_(
-                        AgentOperation.created_at < created_at,
-                        (AgentOperation.created_at == created_at)
-                        & (AgentOperation.id < operation_id),
-                    )
-                )
+            if request_id is not None:
+                filters.append(Job.request_id == request_id)
+            keyset = _activity_keyset_filter(
+                AgentOperation.created_at, AgentOperation.id, "", boundary
+            )
+            if keyset is not None:
+                filters.append(keyset)
             rows = list(
                 session.scalars(
                     select(AgentOperation)
+                    .join(Job, AgentOperation.parent_job_id == Job.id)
                     .where(*filters)
                     .order_by(
                         AgentOperation.created_at.desc(), AgentOperation.id.desc()
@@ -1545,10 +2177,13 @@ class _DurableOperationProjection:
                 total_filters.append(AgentOperation.state == state)
             if node_id is not None:
                 total_filters.append(AgentOperation.node_id == node_id)
+            if request_id is not None:
+                total_filters.append(Job.request_id == request_id)
             total = int(
                 session.scalar(
                     select(func.count())
                     .select_from(AgentOperation)
+                    .join(Job, AgentOperation.parent_job_id == Job.id)
                     .where(*total_filters)
                 )
                 or 0
@@ -1566,11 +2201,34 @@ class _DurableOperationProjection:
                     for row in rows
                 )
             }
+            owners = {
+                job.id: job.request_id
+                for job in session.scalars(
+                    select(Job).where(Job.id.in_([row.parent_job_id for row in rows]))
+                )
+            }
+            resume_operation_ids = {
+                operation.id
+                for parent_job_id in {row.parent_job_id for row in rows}
+                for operation in operator_resume_eligible_operations_in_session(
+                    session, parent_job_id, self._clock()
+                )
+            }
         items = [
             {
                 **_operation_item(row, attempts.get(row.id)),
                 "created_at": _aware(row.created_at).isoformat(),
                 "job_id": row.parent_job_id,
+                "supported_actions": self._activity_actions(
+                    row,
+                    attempts.get(row.id),
+                    resume=row.id in resume_operation_ids,
+                ),
+                "owner": {
+                    "kind": "job",
+                    "id": row.parent_job_id,
+                    "request_id": owners.get(row.parent_job_id),
+                },
             }
             for row in rows
         ]
@@ -1595,19 +2253,18 @@ class _DurableOperationProjection:
             filters.append(AgentOperation.state == query.state)
         if query.node_id is not None:
             filters.append(AgentOperation.node_id == query.node_id)
-        if query.after is not None:
-            created_at, operation_id = query.after
-            filters.append(
-                or_(
-                    AgentOperation.created_at < created_at,
-                    (AgentOperation.created_at == created_at)
-                    & (AgentOperation.id < operation_id),
-                )
-            )
+        if query.request_id is not None:
+            filters.append(Job.request_id == query.request_id)
+        keyset = _activity_keyset_filter(
+            AgentOperation.created_at, AgentOperation.id, "", query.after
+        )
+        if keyset is not None:
+            filters.append(keyset)
         with self._sessions() as session:
             rows = list(
                 session.scalars(
                     select(AgentOperation)
+                    .join(Job, AgentOperation.parent_job_id == Job.id)
                     .where(*filters)
                     .order_by(
                         AgentOperation.created_at.desc(), AgentOperation.id.desc()
@@ -1620,10 +2277,13 @@ class _DurableOperationProjection:
                 total_filters.append(AgentOperation.state == query.state)
             if query.node_id is not None:
                 total_filters.append(AgentOperation.node_id == query.node_id)
+            if query.request_id is not None:
+                total_filters.append(Job.request_id == query.request_id)
             total = int(
                 session.scalar(
                     select(func.count())
                     .select_from(AgentOperation)
+                    .join(Job, AgentOperation.parent_job_id == Job.id)
                     .where(*total_filters)
                 )
                 or 0
@@ -1641,12 +2301,35 @@ class _DurableOperationProjection:
                     for row in rows
                 )
             }
+            owners = {
+                job.id: job.request_id
+                for job in session.scalars(
+                    select(Job).where(Job.id.in_([row.parent_job_id for row in rows]))
+                )
+            }
+            resume_operation_ids = {
+                operation.id
+                for parent_job_id in {row.parent_job_id for row in rows}
+                for operation in operator_resume_eligible_operations_in_session(
+                    session, parent_job_id, self._clock()
+                )
+            }
         return OperationListPage(
             items=[
                 {
                     **_operation_item(row, attempts.get(row.id)),
                     "created_at": _aware(row.created_at).isoformat(),
                     "job_id": row.parent_job_id,
+                    "supported_actions": self._activity_actions(
+                        row,
+                        attempts.get(row.id),
+                        resume=row.id in resume_operation_ids,
+                    ),
+                    "owner": {
+                        "kind": "job",
+                        "id": row.parent_job_id,
+                        "request_id": owners.get(row.parent_job_id),
+                    },
                 }
                 for row in rows
             ],
@@ -1665,17 +2348,59 @@ class _DurableOperationProjection:
                     AgentOperationAttempt.attempt == operation.current_attempt,
                 )
             )
+            resume = operation.id in {
+                eligible.id
+                for eligible in operator_resume_eligible_operations_in_session(
+                    session, operation.parent_job_id, self._clock()
+                )
+            }
             return {
                 **_operation_item(operation, attempt),
                 "created_at": _aware(operation.created_at).isoformat(),
                 "job_id": operation.parent_job_id,
+                "supported_actions": self._activity_actions(
+                    operation, attempt, resume=resume
+                ),
+                "owner": {
+                    "kind": "job",
+                    "id": operation.parent_job_id,
+                    "request_id": (
+                        None
+                        if (job := session.get(Job, operation.parent_job_id)) is None
+                        else job.request_id
+                    ),
+                },
             }
+
+    @staticmethod
+    def _activity_actions(
+        operation: AgentOperation,
+        attempt: AgentOperationAttempt | None,
+        *,
+        resume: bool,
+    ) -> list[str] | None:
+        raw = _operation_item(operation, attempt).get("supported_actions")
+        actions = (
+            [action for action in raw if isinstance(action, str) and action != "resume"]
+            if isinstance(raw, list)
+            else []
+        )
+        if resume:
+            actions.append("resume")
+        return list(dict.fromkeys(actions)) or None
 
     def resume_job(self, job_id: str) -> None:
         with self._sessions.begin() as session:
             job = session.get(Job, job_id)
             if job is None:
                 raise KeyError(job_id)
+            if job.state != "waiting-for-operator":
+                raise ValueError("job is not waiting for operator")
+            scope = AgentJobService._target_scope(job.targets)
+            if scope is None or not AgentJobService._lock_target_scopes(
+                session, {"resume": (job_id, scope)}, scope[0]
+            ):
+                raise ValueError("job target scope changed")
             if job.state != "waiting-for-operator":
                 raise ValueError("job is not waiting for operator")
             now = self._clock()
@@ -1725,6 +2450,9 @@ def durable_operation_services(
     stale_after_seconds: int = 150,
     resume_agent_upgrade: Callable[[str], None] | None = None,
     operation_providers: Sequence[OperationProviderProtocol] = (),
+    profile_endpoint_intent: (
+        Callable[[Session, int], FleetProfileEndpointIntent] | None
+    ) = None,
 ) -> OperationApiServices:
     """Build bounded projections over database state and the active route bundle."""
 
@@ -1734,7 +2462,10 @@ def durable_operation_services(
         clock=clock,
         stale_after_seconds=stale_after_seconds,
         cursors=cursors,
+        profile_endpoint_intent=profile_endpoint_intent,
     )
+    standalone_jobs = _StandaloneJobActivityProjection(sessions, operation_providers)
+    audit_events = _AuditActivityProjection(sessions)
 
     def resume_job(job_id: str) -> None:
         with sessions() as session:
@@ -1761,6 +2492,16 @@ def durable_operation_services(
         get_operation=projection.get_operation,
         operation_providers=(
             OperationProvider(
+                family="job",
+                list_operations=standalone_jobs.list_operations,
+                get_operation=standalone_jobs.get_operation,
+            ),
+            OperationProvider(
+                family="audit-event",
+                list_operations=audit_events.list_operations,
+                get_operation=audit_events.get_operation,
+            ),
+            OperationProvider(
                 family="agent",
                 list_operations=projection.list_operation_provider,
                 get_operation=projection.get_operation,
@@ -1769,6 +2510,9 @@ def durable_operation_services(
         ),
         cursor_codec=cursors,
         retire_job=retire_job,
+        profile_endpoint=(
+            projection.profile_endpoint if profile_endpoint_intent is not None else None
+        ),
     )
 
 

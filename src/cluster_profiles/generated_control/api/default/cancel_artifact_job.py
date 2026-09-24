@@ -19,9 +19,12 @@ def _get_kwargs(
     job_id: str,
     *,
     body: CancelRequest,
+    x_request_id: str,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
+    headers["X-Request-ID"] = x_request_id
+
 
 
 
@@ -113,12 +116,14 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
     body: CancelRequest,
+    x_request_id: str,
 
 ) -> Response[Union[ArtifactJobResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Cancel Job
 
     Args:
         job_id (str):
+        x_request_id (str):
         body (CancelRequest):
 
     Raises:
@@ -133,6 +138,7 @@ def sync_detailed(
     kwargs = _get_kwargs(
         job_id=job_id,
 body=body,
+x_request_id=x_request_id,
 
     )
 
@@ -147,12 +153,14 @@ def sync(
     *,
     client: AuthenticatedClient,
     body: CancelRequest,
+    x_request_id: str,
 
 ) -> Optional[Union[ArtifactJobResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Cancel Job
 
     Args:
         job_id (str):
+        x_request_id (str):
         body (CancelRequest):
 
     Raises:
@@ -168,6 +176,7 @@ def sync(
         job_id=job_id,
 client=client,
 body=body,
+x_request_id=x_request_id,
 
     ).parsed
 
@@ -176,12 +185,14 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
     body: CancelRequest,
+    x_request_id: str,
 
 ) -> Response[Union[ArtifactJobResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Cancel Job
 
     Args:
         job_id (str):
+        x_request_id (str):
         body (CancelRequest):
 
     Raises:
@@ -196,6 +207,7 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         job_id=job_id,
 body=body,
+x_request_id=x_request_id,
 
     )
 
@@ -210,12 +222,14 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
     body: CancelRequest,
+    x_request_id: str,
 
 ) -> Optional[Union[ArtifactJobResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Cancel Job
 
     Args:
         job_id (str):
+        x_request_id (str):
         body (CancelRequest):
 
     Raises:
@@ -231,5 +245,6 @@ async def asyncio(
         job_id=job_id,
 client=client,
 body=body,
+x_request_id=x_request_id,
 
     )).parsed

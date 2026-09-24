@@ -13,6 +13,7 @@ import json
 import os
 import re
 from contextlib import redirect_stdout
+from datetime import datetime
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator, RefResolver
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
+from vonk_control.auth import TokenCodec
+from vonk_control.fleet_profile_contract import (
+    FleetProfileDefinition,
+    FleetProfileInput,
+)
+from vonk_control.library_projection import LibraryProjection
+from vonk_control.models import CatalogDocumentHead, CatalogDocumentRevision
 
 from cluster_profiles import cli
 
@@ -42,6 +51,7 @@ OPERATION_ID = "00000000-0000-4000-8000-000000000100"
 PROFILE_ID = "00000000-0000-4000-8000-000000000101"
 NOW = "2026-09-10T10:00:00+00:00"
 SPARK = "spk_" + "1" * 32
+RECIPE_SELECTOR = "vonk-forge/synthetic-tiny-image"
 
 
 class ModelRequest(BaseModel):
@@ -49,14 +59,6 @@ class ModelRequest(BaseModel):
 
     schema_version: int = Field(default=2)
     request_key: str
-
-
-class ProfileInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    name: str | None = None
-    expected_revision: int | None = None
-    assignments: list[dict[str, Any]] | None = None
 
 
 def _profile() -> dict[str, Any]:
@@ -71,6 +73,7 @@ def _profile() -> dict[str, Any]:
         "labels": {},
         "favorite": False,
         "assignments": [],
+        "definition": FleetProfileDefinition().model_dump(mode="json"),
         "profile_digest": "a" * 64,
         "created_by": "operator",
         "created_at": NOW,
@@ -152,9 +155,16 @@ def _fleet() -> dict[str, Any]:
 
 def _route_template(path: str) -> str:
     for pattern, template in (
+        (
+            r"^/api/model/operations/[^/]+/cancel$",
+            "/api/model/operations/{operation_id}/cancel",
+        ),
         (r"^/api/model/operations/[^/]+$", "/api/model/operations/{operation_id}"),
         (r"^/api/model/[^/]+/(download|remove)$", "/api/model/{selector}/\\1"),
-        (r"^/api/profile/[0-9]+/(load|preview|progress)$", "/api/profile/{number}/\\1"),
+        (
+            r"^/api/profile/[0-9]+/(definition|load|preview|progress)$",
+            "/api/profile/{number}/\\1",
+        ),
         (r"^/api/profile/[0-9]+$", "/api/profile/{number}"),
     ):
         match = re.match(pattern, path)
@@ -200,6 +210,7 @@ def _profile_application() -> dict[str, Any]:
     return {
         "schema_version": 2,
         "id": OPERATION_ID,
+        "request_key": REQUEST_KEY,
         "profile_id": PROFILE_ID,
         "profile_digest": "a" * 64,
         "plan_digest": "b" * 64,
@@ -208,7 +219,16 @@ def _profile_application() -> dict[str, Any]:
         "total_steps": 1,
         "current_operation_id": OPERATION_ID,
         "status_reason": None,
-        "progress": {},
+        "progress": {
+            "intended_profile": {
+                "profile_digest": "a" * 64,
+                "reviewed_plan_digest": "c" * 64,
+                "reviewed_application_id": OPERATION_ID,
+                "installation_policy": "keep-cached",
+                "scope": {"node_ids": [SPARK]},
+                "assignments": [],
+            }
+        },
         "result": {"changed": True, "completed_steps": 1},
         "created_at": NOW,
         "updated_at": NOW,
@@ -216,8 +236,27 @@ def _profile_application() -> dict[str, Any]:
 
 
 def _app() -> FastAPI:
+    from .test_fleet_profiles_canonical import _seed, _sessions
+
     app = FastAPI()
     profile = _profile()
+    sessions = _sessions()
+    _seed(sessions)
+    with sessions.begin() as session:
+        for revision in session.scalars(select(CatalogDocumentRevision)):
+            session.add(
+                CatalogDocumentHead(
+                    kind=revision.kind,
+                    publisher=revision.publisher,
+                    slug=revision.slug,
+                    active_revision_id=revision.id,
+                )
+            )
+    library = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"p" * 32).cursor_codec(),
+        clock=lambda: datetime.fromisoformat(NOW),
+    )
 
     @app.get("/api/model/library")
     def model_library(request: Request) -> dict[str, Any]:
@@ -227,7 +266,7 @@ def _app() -> FastAPI:
     @app.get("/api/recipe/library")
     def recipe_library(request: Request) -> dict[str, Any]:
         _auth(request)
-        return _library("recipes")
+        return library.recipe_library(all_models=True).model_dump(mode="json")
 
     @app.get("/api/fleet")
     def fleet(request: Request) -> dict[str, Any]:
@@ -259,25 +298,33 @@ def _app() -> FastAPI:
 
     @app.put("/api/profile/{number}")
     def save_profile(
-        number: int, body: ProfileInput, request: Request
+        number: int, body: FleetProfileInput, request: Request
     ) -> dict[str, Any]:
         _auth(request, mutation=True)
         if number != 1:
             raise HTTPException(status_code=404, detail="profile not found")
-        if body.name is not None:
-            profile["name"] = body.name
-        if body.assignments is not None:
-            profile["assignments"] = [
-                {
-                    "selector": item["recipe_selector"].replace("/", "-"),
-                    "display_name": item["recipe_selector"],
-                    "recipe_selector": item["recipe_selector"],
-                    "spark_ids": item["spark_ids"],
-                    "assigned_sparks": len(item["spark_ids"]),
-                }
-                for item in body.assignments
-            ]
+        profile["name"] = body.name
+        profile["definition"] = body.model_dump(
+            mode="json", exclude={"expected_revision"}
+        )
+        profile["assignments"] = [
+            {
+                "selector": item.recipe_selector.replace("/", "-"),
+                "display_name": item.recipe_selector,
+                "recipe_selector": item.recipe_selector,
+                "spark_ids": list(item.spark_ids),
+                "assigned_sparks": len(item.spark_ids),
+            }
+            for item in body.assignments
+        ]
         return profile
+
+    @app.get("/api/profile/{number}/definition")
+    def get_definition(number: int, request: Request) -> dict[str, Any]:
+        _auth(request)
+        if number != 1:
+            raise HTTPException(status_code=404, detail="profile not found")
+        return {key: profile[key] for key in ("id", "number", "revision", "definition")}
 
     @app.post("/api/profile/{number}/load", status_code=202)
     def load_profile(number: int, request: Request) -> dict[str, Any]:
@@ -285,37 +332,6 @@ def _app() -> FastAPI:
         if number != 1:
             raise HTTPException(status_code=404, detail="profile not found")
         return _profile_application()
-
-    @app.post("/api/profile/{number}/preview")
-    def preview_profile(number: int, request: Request) -> dict[str, Any]:
-        _auth(request)
-        if number != 1:
-            raise HTTPException(status_code=404, detail="profile not found")
-        return {
-            "schema_version": 2,
-            "profile_id": PROFILE_ID,
-            "profile_name": profile["name"],
-            "profile_digest": "a" * 64,
-            "generated_at": NOW,
-            "allowed": True,
-            "scope": {"node_ids": [SPARK], "idle_node_ids": []},
-            "summary": {
-                "already_correct": 0,
-                "placements": 1,
-                "builds": 0,
-                "distributions": 0,
-                "installs": 0,
-                "starts": 1,
-                "stops": 0,
-                "uninstalls": 0,
-                "blockers": 0,
-            },
-            "assignments": [],
-            "preparations": [],
-            "steps": [],
-            "reasons": [],
-            "plan_digest": "b" * 64,
-        }
 
     @app.get("/api/profile/{number}/progress")
     def profile_progress(number: int, request: Request) -> dict[str, Any]:
@@ -328,6 +344,8 @@ def _app() -> FastAPI:
 
 
 class HTTPTransport:
+    request_timeout_seconds = 15.0
+
     def __init__(self, client: TestClient, *, browser: bool = False) -> None:
         self.client = client
         self.browser = browser
@@ -340,6 +358,7 @@ class HTTPTransport:
         *,
         extra_headers: dict[str, str] | None = None,
         query: dict[str, str] | None = None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, object]:
         _validate_request(path, method, payload)
         headers = dict(extra_headers or {})
@@ -392,7 +411,7 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
     ) == browser_transport.request("POST", "/api/model/qwen-code/download", request)
 
     assignment = {
-        "recipe_selector": "vonk-forge/qwen-code",
+        "recipe_selector": RECIPE_SELECTOR,
         "spark_ids": [SPARK],
         "desired_state": "running",
     }
@@ -407,7 +426,7 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
         "1",
         "profile",
         "add",
-        "vonk-forge/qwen-code",
+        RECIPE_SELECTOR,
         "--spark",
         SPARK,
         "--json",
@@ -415,10 +434,18 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
 
     load_request: dict[str, object] = {
         "request_key": REQUEST_KEY,
-        "plan_digest": "b" * 64,
+        "plan_digest": "c" * 64,
     }
     assert _cli(
-        cli_transport, "--profile", "1", "profile", "load", "--json"
+        cli_transport,
+        "--profile",
+        "1",
+        "profile",
+        "load",
+        "--expected-plan",
+        "c" * 64,
+        "--yes",
+        "--json",
     ) == browser_transport.request("POST", "/api/profile/1/load", load_request)
     assert _cli(
         cli_transport, "--profile", "1", "profile", "progress", "--json"

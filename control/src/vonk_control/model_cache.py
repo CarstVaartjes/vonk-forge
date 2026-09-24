@@ -13,6 +13,7 @@ import fcntl
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 import re
 import shutil
@@ -27,25 +28,58 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import BufferedReader
 from pathlib import Path
+from typing import cast
 from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import OperationMemberProgress, canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
+from .artifact_lifecycle import (
+    ArtifactIdentity,
+    ArtifactKind,
+    ArtifactLifecycleError,
+    RemovalOwnerKind,
+    check_removal_fence_nowait,
+    clear_removal,
+    lock_removal_fences,
+    reference_gate_is_open_nowait,
+    removal_fences_match,
+    reserve_removal,
+    retryable_artifact_database_error,
+)
+from .artifact_reference_scan import (
+    model_set_objects,
+    model_set_reference_findings,
+    model_set_reference_reasons,
+    require_model_sets_open,
+)
 from .bounded_json import mapping, require_integer, require_mapping, require_sequence
+from .cache_removal_review import (
+    AssetAvailability,
+    AssetDisposition,
+    CacheRemovalAsset,
+    CacheRemovalBlocker,
+    CacheRemovalFinding,
+    CacheRemovalReview,
+    CacheRemovalReviewContent,
+    seal_cache_removal_review,
+)
 from .cached_file_verification import verified_files
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
-from .logging import redact_text
+from .logging import log_event, redact_text
 from .model_cache_contract import (
     UUID_PATTERN,
     CacheManifest,
     CacheManifestArtifact,
+    ModelCacheCancellation,
+    ModelCacheCancellationRequest,
     ModelCacheDownloadPayload,
     ModelCacheObjectReceipt,
     ModelCacheOperationPhase,
@@ -53,6 +87,8 @@ from .model_cache_contract import (
     ModelCacheOperationResponse,
     ModelCacheOperationResult,
     ModelCacheOperatorAction,
+    ModelCacheRemovalPayload,
+    ModelCacheRemovalResult,
     ModelCacheRepairCheckpoint,
     ModelCacheRepairPayload,
     ModelCacheTransfer,
@@ -62,6 +98,7 @@ from .model_cache_contract import (
 from .model_cache_progress import cache_phase, cache_progress
 from .model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
 from .models import (
+    ArtifactLifecycleGate,
     CatalogDocumentRevision,
     FleetProfile,
     ModelCacheOperation,
@@ -98,6 +135,7 @@ _UPSTREAM_CHECK_WORKERS = 4
 _HF_CANONICAL_HOST = "huggingface.co"
 _USE_MANIFEST_BYTES = object()
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+_LOGGER = logging.getLogger(__name__)
 _WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 
 
@@ -136,6 +174,18 @@ class ModelCacheResolutionError(ModelCacheError):
 
 class ModelCacheStorageError(ModelCacheError):
     pass
+
+
+class _ArtifactWriterBusy(ModelCacheError):
+    """A dependency wait, not a failed transfer or consumed retry."""
+
+    def __init__(self, digest: str) -> None:
+        super().__init__(
+            "model_cache.object_busy",
+            f"waiting for the managed-cache writer of object {digest}; resumes after that writer releases its lock",
+            retry_after_seconds=_RETRY_BASE_SECONDS,
+            recovery="resume",
+        )
 
 
 _TERMINAL_FAILURE_MARKERS = (
@@ -333,6 +383,42 @@ class ArtifactSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelCacheRemovalScope:
+    """Exact SQL membership and unshared bytes for one accepted removal."""
+
+    selected_sets: tuple[str, ...]
+    memberships: tuple[tuple[str, tuple[str, ...]], ...]
+    selected_objects: tuple[str, ...]
+    delete_objects: tuple[str, ...]
+    shared_memberships: tuple[tuple[str, str, str], ...]
+
+
+def _scope_matches_review(
+    scope: ModelCacheRemovalScope, review: CacheRemovalReview
+) -> bool:
+    """Compare the reviewed artifact identities with the current SQL scope."""
+
+    sets = {asset.sha256 for asset in review.assets if asset.kind == "model-set"}
+    objects = {asset.sha256 for asset in review.assets if asset.kind == "model-object"}
+    delete_objects = {
+        asset.sha256
+        for asset in review.assets
+        if asset.kind == "model-object" and asset.disposition == "remove"
+    }
+    shared_memberships = {
+        (item.asset_sha256, item.owner_id, item.state)
+        for item in review.references
+        if item.owner_kind == "model-cache-set-membership"
+    }
+    return (
+        sets == set(scope.selected_sets)
+        and objects == set(scope.selected_objects)
+        and delete_objects == set(scope.delete_objects)
+        and shared_memberships == set(scope.shared_memberships)
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class ArtifactSetManifest:
     model_content_sha256: str | None
     recipe_revision_sha256: str | None
@@ -424,6 +510,25 @@ def _reject_non_json_containers(value: object) -> None:
             _reject_non_json_containers(item)
 
 
+def _model_removal_intent_digest(
+    payload: ModelCacheRemovalPayload, *, actor: str, request_key: str
+) -> str:
+    """Bind immutable effects and authority, excluding advancing checkpoints."""
+    return _sha256_json(
+        {
+            "action": "remove-model",
+            "actor": actor,
+            "request_key": request_key,
+            "selector": payload.selector,
+            "model_content_sha256": payload.model_content_sha256,
+            "removal_fence": payload.removal_fence,
+            "selected": payload.selected,
+            "selected_objects": payload.selected_objects,
+            "delete_objects": payload.delete_objects,
+        }
+    )
+
+
 def _validated_operation_payload(
     operation: ModelCacheOperation,
 ) -> dict[str, object]:
@@ -431,6 +536,15 @@ def _validated_operation_payload(
 
     try:
         parsed = parse_model_cache_payload(operation.kind, operation.payload)
+        if isinstance(
+            parsed, ModelCacheRemovalPayload
+        ) and operation.plan_digest != _model_removal_intent_digest(
+            parsed, actor=operation.actor, request_key=operation.request_key
+        ):
+            raise ModelCacheStorageError(
+                "model_cache.removal_plan_changed",
+                "persisted model removal intent no longer matches its accepted plan",
+            )
         if isinstance(parsed, (ModelCacheDownloadPayload, ModelCacheRepairPayload)):
             ArtifactSetManifest.from_document(serialize_json_value(parsed.manifest))
         return dict(
@@ -440,6 +554,30 @@ def _validated_operation_payload(
         raise ModelCacheStorageError(
             "model_cache.payload_invalid",
             "persisted cache operation payload is invalid",
+        ) from error
+
+
+def _removal_document(payload: Mapping[str, object]) -> ModelCacheRemovalPayload:
+    parsed = parse_model_cache_payload("remove", payload)
+    if not isinstance(parsed, ModelCacheRemovalPayload):
+        raise ModelCacheStorageError(
+            "model_cache.payload_invalid", "model removal payload is invalid"
+        )
+    return parsed
+
+
+def _operation_cancellation(
+    operation: ModelCacheOperation,
+) -> dict[str, object] | None:
+    raw = _validated_operation_payload(operation).get("cancellation")
+    if raw is None:
+        return None
+    try:
+        return ModelCacheCancellation.model_validate(raw).model_dump(mode="json")
+    except (TypeError, ValueError, ValidationError) as error:
+        raise ModelCacheStorageError(
+            "model_cache.payload_invalid",
+            "persisted model cancellation intent is invalid",
         ) from error
 
 
@@ -510,8 +648,10 @@ class CacheOperationView:
     kind: str
     state: str
     attempt: int
+    model_content_sha256: str | None
     artifact_set_sha256: str | None
     plan_digest: str | None
+    review_digest: str | None
     progress: Mapping[str, object]
     result: ModelCacheOperationResult | None
     last_error: str | None
@@ -520,6 +660,7 @@ class CacheOperationView:
     completed_at: str | None
     retryable: bool = False
     failure: Mapping[str, object] | None = None
+    cancellation: Mapping[str, object] | None = None
 
 
 def _cache_failure(
@@ -1072,7 +1213,7 @@ class ModelCacheService:
         )
         self._upstream_slots = threading.BoundedSemaphore(_UPSTREAM_CHECK_WORKERS)
         self._background_operations: dict[str, dict[str, object]] = {}
-        self._digest_events: dict[str, threading.Event] = {}
+        self._active_digests: set[str] = set()
         self._hf_cooldown_until: datetime | None = None
         self._progress_checkpoint_at: dict[str, datetime] = {}
         self._cancel_events: dict[str, threading.Event] = {}
@@ -1237,76 +1378,78 @@ class ModelCacheService:
         catalog UUIDs, ``publisher/slug`` and an exact slug are accepted.
         """
 
-        if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
-            raise ModelCacheResolutionError(
-                "model_cache.selector_invalid", "model selector is required"
-            )
-        selector = selector.strip().casefold()
+        selector = _model_selector(selector).casefold()
         with self._session() as session:
-            if re.fullmatch(_DIGEST_PATTERN, selector):
-                rows = list(
+            return self._resolve_model_selector_in_session(session, selector)
+
+    @staticmethod
+    def _resolve_model_selector_in_session(session: Session, selector: str) -> str:
+        """Resolve one current model selector inside its caller's snapshot."""
+
+        if re.fullmatch(_DIGEST_PATTERN, selector):
+            rows = list(
+                session.scalars(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "model",
+                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.content_digest == selector,
+                    )
+                )
+            )
+            if not rows:
+                cached_digests = list(
                     session.scalars(
-                        select(CatalogDocumentRevision).where(
-                            CatalogDocumentRevision.kind == "model",
-                            CatalogDocumentRevision.state == "active",
-                            CatalogDocumentRevision.content_digest == selector,
+                        select(ModelCacheSet.model_content_sha256).where(
+                            ModelCacheSet.model_content_sha256 == selector
                         )
                     )
                 )
-                if not rows:
-                    cached_digests = list(
-                        session.scalars(
-                            select(ModelCacheSet.model_content_sha256).where(
-                                ModelCacheSet.model_content_sha256 == selector
-                            )
-                        )
-                    )
-                    if cached_digests:
-                        return selector
-                if rows:
+                if cached_digests:
                     return selector
-            elif re.fullmatch(UUID_PATTERN, selector):
-                rows = list(
-                    session.scalars(
-                        select(CatalogDocumentRevision).where(
-                            CatalogDocumentRevision.kind == "model",
-                            CatalogDocumentRevision.state == "active",
-                            (CatalogDocumentRevision.id == selector)
-                            | (CatalogDocumentRevision.document_id == selector),
-                        )
+            if rows:
+                return selector
+        elif re.fullmatch(UUID_PATTERN, selector):
+            rows = list(
+                session.scalars(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "model",
+                        CatalogDocumentRevision.state == "active",
+                        (CatalogDocumentRevision.id == selector)
+                        | (CatalogDocumentRevision.document_id == selector),
                     )
                 )
+            )
+        else:
+            publisher = slug = None
+            if "/" in selector:
+                publisher, slug = selector.split("/", 1)
+            conditions = [
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.state == "active",
+            ]
+            if publisher is not None:
+                conditions.append(CatalogDocumentRevision.publisher == publisher)
+                conditions.append(CatalogDocumentRevision.slug == slug)
             else:
-                publisher = slug = None
-                if "/" in selector:
-                    publisher, slug = selector.split("/", 1)
-                conditions = [
-                    CatalogDocumentRevision.kind == "model",
-                    CatalogDocumentRevision.state == "active",
-                ]
-                if publisher is not None:
-                    conditions.append(CatalogDocumentRevision.publisher == publisher)
-                    conditions.append(CatalogDocumentRevision.slug == slug)
-                else:
-                    conditions.append(CatalogDocumentRevision.slug == selector)
-                rows = list(
-                    session.scalars(select(CatalogDocumentRevision).where(*conditions))
+                conditions.append(CatalogDocumentRevision.slug == selector)
+            rows = list(
+                session.scalars(select(CatalogDocumentRevision).where(*conditions))
+            )
+        if len(rows) != 1:
+            if not rows:
+                raise ModelCacheNotFound(
+                    "model_cache.selector_missing", "model selector was not found"
                 )
-            if len(rows) != 1:
-                if not rows:
-                    raise ModelCacheNotFound(
-                        "model_cache.selector_missing", "model selector was not found"
-                    )
-                raise ModelCacheConflict(
-                    "model_cache.selector_ambiguous",
-                    "model selector matches multiple models",
-                )
-            digest = rows[0].content_digest
-            if not isinstance(digest, str) or _optional_digest(digest) is None:
-                raise ModelCacheResolutionError(
-                    "model_cache.identity_invalid", "model catalog identity is invalid"
-                )
-            return digest
+            raise ModelCacheConflict(
+                "model_cache.selector_ambiguous",
+                "model selector matches multiple models",
+            )
+        digest = rows[0].content_digest
+        if not isinstance(digest, str) or _optional_digest(digest) is None:
+            raise ModelCacheResolutionError(
+                "model_cache.identity_invalid", "model catalog identity is invalid"
+            )
+        return digest
 
     def resolve_latest_cached(
         self,
@@ -1656,6 +1799,14 @@ class ModelCacheService:
     ) -> CacheOperationView:
         """Plan and queue a model download from the operator selector."""
 
+        request_key = _request_key(request_key)
+        selector = _model_selector(selector)
+        with self._session() as session:
+            replay = self._download_replay(
+                session, request_key, actor=actor, selector=selector, force=force
+            )
+            if replay is not None:
+                return replay
         digest = self._resolve_model_selector(selector)
         manifest = self.resolve_artifact_set(model_content_sha256=digest)
         preview = self._download_preview_for_manifest(manifest)
@@ -1674,9 +1825,9 @@ class ModelCacheService:
             request_key=request_key,
             plan_digest=str(preview["plan_digest"]),
             artifact_set_sha256=manifest.digest,
+            model_content_sha256=digest,
             selector=selector,
-            force=force
-            or preview.get("already_cached_bytes", 0) == manifest.expected_bytes,
+            force=force,
         )
 
     def remove_model_selector(
@@ -1685,109 +1836,1564 @@ class ModelCacheService:
         *,
         actor: str,
         request_key: str,
+        model_content_sha256: str,
+        review_digest: str,
     ) -> CacheOperationView:
-        """Cancel preparation and remove Controller bytes for one model.
+        """Accept one exact durable removal without cancelling active work."""
 
-        The removal fence is written to every active transfer before any set,
-        membership, partial file, or unreferenced object is deleted.  Profile
-        rows and Spark-local copies are intentionally not consulted.
-        """
-
-        digest = self._resolve_model_selector(selector)
-        return self._remove_model_content(
-            digest, actor=actor, request_key=request_key, selector=selector
-        )
-
-    def _remove_model_content(
-        self,
-        digest: str,
-        *,
-        actor: str,
-        request_key: str,
-        selector: str,
-    ) -> CacheOperationView:
         request_key = _request_key(request_key)
-        fence = str(uuid.uuid4())
-        with self._lock, self._session(write=True) as session:
+        normalized_selector = _model_selector(selector).casefold()
+        digest = _optional_digest(model_content_sha256)
+        if digest is None:
+            raise ModelCacheResolutionError(
+                "model_cache.digest_invalid",
+                "model removal requires an exact model content SHA-256",
+            )
+        supplied_review_digest = _optional_digest(review_digest)
+        if supplied_review_digest is None:
+            raise ModelCacheResolutionError(
+                "model_cache.review_digest_invalid",
+                "model removal requires the exact current review digest",
+            )
+        with self._session() as session:
             existing = session.scalar(
                 select(ModelCacheOperation).where(
                     ModelCacheOperation.request_key == request_key
                 )
             )
             if existing is not None:
-                return self._operation_view(existing)
-            rows = list(
-                session.scalars(
-                    select(ModelCacheSet).where(
-                        ModelCacheSet.model_content_sha256 == digest
-                    )
+                return self._replay_model_removal(
+                    existing,
+                    actor=actor,
+                    selector=normalized_selector,
+                    model_content_sha256=digest,
+                    selected_sets=None,
+                    review_digest=supplied_review_digest,
                 )
-            )
-            selected = [row.artifact_set_sha256 for row in rows]
-            active = list(
-                session.scalars(
-                    select(ModelCacheOperation).where(
-                        ModelCacheOperation.artifact_set_sha256.in_(selected or ["0"]),
-                        ModelCacheOperation.state.in_(("queued", "running", "partial")),
-                        ModelCacheOperation.kind.in_(("download", "repair")),
-                    )
-                )
-            )
-            cancelled = []
-            now = self._clock()
-            for operation in active:
-                payload = _validated_operation_payload(operation)
-                payload["removal_fence"] = fence
-                payload["operator_action"] = "remove-model"
-                payload["selector"] = selector
-                payload.pop("claim", None)
-                operation.payload = _write_operation_payload(operation.kind, payload)
-                operation.state = "cancelled"
-                operation.completed_at = operation.updated_at = now
-                operation.progress = cache_phase(
-                    _validated_operation_progress(operation).model_dump(mode="json"),
-                    "failed",
-                    now,
-                )
-                cancelled.append(operation.id)
-                self._transfer_stop(operation.id).set()
 
-            memberships = list(session.scalars(select(ModelCacheSetArtifact)))
-            by_set: dict[str, list[ModelCacheSetArtifact]] = {}
-            for membership in memberships:
-                by_set.setdefault(membership.artifact_set_sha256, []).append(membership)
-            object_digests = {
-                membership.artifact_sha256
-                for set_digest in selected
-                for membership in by_set.get(set_digest, ())
-            }
-        # Managed storage is removed outside every transaction. The durable
-        # fence and the cancelled operation states committed above are what
-        # stop a late producer; the unlinks themselves are not SQL work.
-        for set_digest in selected:
-            shutil.rmtree(self._root / "partials" / set_digest, ignore_errors=True)
-        with self._lock, self._session() as session:
-            referenced = {
-                membership.artifact_sha256
-                for membership in session.scalars(select(ModelCacheSetArtifact))
-            }
-        removals = [
-            member for member in sorted(object_digests) if member not in referenced
-        ]
-        reclaimed = 0
-        for member in removals:
-            path = self._object_path(member)
+        reviewed = self.review_model_removal(normalized_selector)
+        if reviewed.target_identity != digest:
+            raise ModelCacheConflict(
+                "model_cache.removal_identity_mismatch",
+                "model selector no longer resolves to the reviewed content digest",
+            )
+        if reviewed.review_digest != supplied_review_digest:
+            raise ModelCacheConflict(
+                "model_cache.removal_review_stale",
+                "model cache removal effects changed after review; review them again",
+            )
+        if reviewed.blockers:
+            first = reviewed.blockers[0]
+            raise ModelCacheConflict(first.code, first.detail)
+
+        try:
+            with self._lock, self._session(write=True) as session:
+                existing = session.scalar(
+                    select(ModelCacheOperation).where(
+                        ModelCacheOperation.request_key == request_key
+                    )
+                )
+                if existing is not None:
+                    return self._replay_model_removal(
+                        existing,
+                        actor=actor,
+                        selector=normalized_selector,
+                        model_content_sha256=digest,
+                        selected_sets=None,
+                        review_digest=supplied_review_digest,
+                    )
+                resolved_digest = self._resolve_model_selector_in_session(
+                    session, normalized_selector
+                )
+                if resolved_digest != digest:
+                    raise ModelCacheConflict(
+                        "model_cache.removal_identity_mismatch",
+                        "model selector no longer resolves to the reviewed content digest",
+                    )
+                selected_sets = tuple(
+                    session.scalars(
+                        select(ModelCacheSet.artifact_set_sha256)
+                        .where(ModelCacheSet.model_content_sha256 == digest)
+                        .order_by(ModelCacheSet.artifact_set_sha256)
+                    )
+                )
+                expected_scope = self._model_removal_scope_for_sets(
+                    session, selected_sets
+                )
+                if not _scope_matches_review(expected_scope, reviewed):
+                    raise ModelCacheConflict(
+                        "model_cache.removal_review_stale",
+                        "model cache removal effects changed after review; review them again",
+                    )
+                operation = self._accept_model_removal(
+                    session,
+                    actor=actor,
+                    request_key=request_key,
+                    selector=normalized_selector,
+                    model_content_sha256=digest,
+                    selected_sets=None,
+                    review_digest=supplied_review_digest,
+                    expected_scope=expected_scope,
+                )
+                operation_id = operation.id
+        except IntegrityError:
+            # The unique request key arbitrates first submission across
+            # Controller processes.  Resolve the winner only after rollback.
+            replay = self._model_removal_by_request(
+                request_key,
+                actor=actor,
+                selector=normalized_selector,
+                model_content_sha256=digest,
+                selected_sets=None,
+                review_digest=supplied_review_digest,
+            )
+            if replay is None:
+                raise
+            return replay
+        return self.get_operation(operation_id)
+
+    def review_model_removal(self, selector: str) -> CacheRemovalReview:
+        """Return the current owner-derived model removal impact without writes."""
+
+        normalized_selector = _model_selector(selector).casefold()
+        with self._session() as session:
+            digest = self._resolve_model_selector_in_session(
+                session, normalized_selector
+            )
+            selected_sets = tuple(
+                session.scalars(
+                    select(ModelCacheSet.artifact_set_sha256)
+                    .where(ModelCacheSet.model_content_sha256 == digest)
+                    .order_by(ModelCacheSet.artifact_set_sha256)
+                )
+            )
+            scope = self._model_removal_scope_for_sets(session, selected_sets)
+            findings: list[CacheRemovalFinding] = []
+            blockers: list[CacheRemovalBlocker] = []
             try:
-                metadata = path.lstat()
+                with session.begin_nested():
+                    by_set = model_set_reference_findings(session, scope.selected_sets)
+            except ArtifactLifecycleError as error:
+                by_set = {}
+                blockers.append(
+                    CacheRemovalBlocker(
+                        code=error.code,
+                        detail=error.detail,
+                        retryable=error.retryable,
+                        recovery_actions=["retry"] if error.retryable else [],
+                    )
+                )
+            try:
+                with session.begin_nested():
+                    active_removals = self.removal_owner_findings_in_session(
+                        session, scope
+                    )
+            except ArtifactLifecycleError as error:
+                active_removals = ()
+                blockers.append(
+                    CacheRemovalBlocker(
+                        code=error.code,
+                        detail=error.detail,
+                        retryable=error.retryable,
+                        recovery_actions=["retry"] if error.retryable else [],
+                    )
+                )
+            for entries in by_set.values():
+                for entry in entries:
+                    finding = CacheRemovalFinding(
+                        classification=entry.classification,
+                        asset_kind=entry.asset.kind,
+                        asset_sha256=entry.asset.sha256,
+                        owner_kind=entry.owner_kind,
+                        owner_id=entry.owner_id,
+                        state=entry.state,
+                        detail=entry.detail,
+                        reason=entry.reason,
+                    )
+                    findings.append(finding)
+                    blockers.append(
+                        CacheRemovalBlocker(
+                            code="model_cache.removal_referenced",
+                            detail=entry.reason,
+                            retryable=False,
+                            recovery_actions=["resolve_reference"],
+                        )
+                    )
+            findings.extend(active_removals)
+            findings.extend(self.retained_model_object_findings(scope))
+            blockers.extend(
+                CacheRemovalBlocker(
+                    code="artifact.deletion_in_progress",
+                    detail=finding.reason,
+                    retryable=True,
+                    recovery_actions=["observe_removal_operation"],
+                )
+                for finding in active_removals
+            )
+
+        assets = self.removal_asset_status(scope)
+        content = CacheRemovalReviewContent(
+            resource_kind="model",
+            selector=normalized_selector,
+            target_identity=digest,
+            with_model=None,
+            assets=list(assets),
+            references=[
+                item for item in findings if item.classification == "saved-reference"
+            ],
+            active_work=[
+                item for item in findings if item.classification == "active-work"
+            ],
+            blockers=blockers,
+            observed_at=self._clock().isoformat(),
+        )
+        review = seal_cache_removal_review(content)
+        return review
+
+    def removal_owner_findings_in_session(
+        self, session: Session, scope: ModelCacheRemovalScope
+    ) -> tuple[CacheRemovalFinding, ...]:
+        """Project the exact accepted removal owners fencing this model scope.
+
+        The lifecycle gate is the authority for a live deletion fence. Each
+        owner is then validated against its durable typed operation intent so
+        stale or malformed gate rows fail closed instead of disappearing from
+        review output.
+        """
+
+        identities = {("model-set", digest) for digest in scope.selected_sets} | {
+            ("model-object", digest) for digest in scope.delete_objects
+        }
+        if not identities:
+            return ()
+        digests = {digest for _kind, digest in identities}
+        gates = tuple(
+            session.scalars(
+                select(ArtifactLifecycleGate)
+                .where(
+                    ArtifactLifecycleGate.artifact_kind.in_(
+                        ("model-set", "model-object")
+                    ),
+                    ArtifactLifecycleGate.artifact_sha256.in_(digests),
+                    ArtifactLifecycleGate.removal_owner_id.is_not(None),
+                )
+                .order_by(
+                    ArtifactLifecycleGate.artifact_kind,
+                    ArtifactLifecycleGate.artifact_sha256,
+                )
+            )
+        )
+        selected_gates = [
+            gate
+            for gate in gates
+            if (gate.artifact_kind, gate.artifact_sha256) in identities
+        ]
+        findings: list[CacheRemovalFinding] = []
+        owners: dict[str, tuple[ModelCacheOperation, dict[str, object]]] = {}
+        for gate in selected_gates:
+            owner_id = gate.removal_owner_id
+            if (
+                gate.removal_owner_kind != "model-cache-operation"
+                or not isinstance(owner_id, str)
+                or not owner_id
+                or not isinstance(gate.removal_fence, str)
+                or not gate.removal_fence
+            ):
+                raise ArtifactLifecycleError(
+                    "artifact.removal_owner_unresolved",
+                    "a selected cache identity has an unreadable removal owner; retry after the owner is reconciled",
+                    retryable=True,
+                )
+            cached = owners.get(owner_id)
+            if cached is None:
+                operation = session.get(ModelCacheOperation, owner_id)
+                if operation is None or operation.kind != "remove":
+                    raise ArtifactLifecycleError(
+                        "artifact.removal_owner_unresolved",
+                        "a selected cache identity has no readable removal operation owner",
+                        retryable=True,
+                    )
+                try:
+                    payload = _validated_operation_payload(operation)
+                except (ModelCacheError, TypeError, ValueError) as error:
+                    raise ArtifactLifecycleError(
+                        "artifact.removal_owner_invalid",
+                        "a selected cache identity has a malformed removal owner",
+                        retryable=True,
+                    ) from error
+                if payload.get("removal_fence") != gate.removal_fence:
+                    raise ArtifactLifecycleError(
+                        "artifact.removal_owner_invalid",
+                        "a selected cache identity removal fence disagrees with its owner",
+                        retryable=True,
+                    )
+                cached = (operation, payload)
+                owners[owner_id] = cached
+            operation, payload = cached
+            selected = payload.get("selected")
+            delete_objects = payload.get("delete_objects")
+            expected_target = (
+                selected if gate.artifact_kind == "model-set" else delete_objects
+            )
+            if (
+                not isinstance(expected_target, list)
+                or gate.artifact_sha256 not in expected_target
+            ):
+                raise ArtifactLifecycleError(
+                    "artifact.removal_owner_invalid",
+                    "a selected cache identity is not covered by its stored removal plan",
+                    retryable=True,
+                )
+            if operation.state not in {"queued", "running", "partial"}:
+                raise ArtifactLifecycleError(
+                    "artifact.removal_owner_unresolved",
+                    "a selected cache identity remains fenced by a non-active removal owner",
+                    retryable=True,
+                )
+            try:
+                identity = ArtifactIdentity(
+                    kind=cast(ArtifactKind, gate.artifact_kind),
+                    sha256=gate.artifact_sha256,
+                )
+            except ValueError as error:
+                raise ArtifactLifecycleError(
+                    "artifact.removal_owner_invalid",
+                    "a selected cache identity has an invalid removal gate",
+                    retryable=True,
+                ) from error
+            identity_kind = identity.kind
+            identity_digest = identity.sha256
+            reason = (
+                f"removal operation {operation.id} is {operation.state} and owns "
+                f"{identity_kind} {identity_digest}"
+            )
+            findings.append(
+                CacheRemovalFinding(
+                    classification="active-work",
+                    asset_kind=identity_kind,
+                    asset_sha256=identity_digest,
+                    owner_kind="model-cache-operation",
+                    owner_id=operation.id,
+                    state=operation.state,
+                    detail="accepted model removal retains this deletion fence",
+                    reason=reason,
+                )
+            )
+        return tuple(findings)
+
+    @staticmethod
+    def retained_model_object_findings(
+        scope: ModelCacheRemovalScope,
+    ) -> tuple[CacheRemovalFinding, ...]:
+        """Explain retained objects through their exact sibling-set owners."""
+
+        selected_objects = set(scope.selected_objects)
+        return tuple(
+            CacheRemovalFinding(
+                classification="saved-reference",
+                asset_kind="model-object",
+                asset_sha256=object_digest,
+                owner_kind="model-cache-set-membership",
+                owner_id=set_digest,
+                state=state,
+                detail="another cached model set shares this object; removal will retain it",
+                reason=f"shared object is retained by model set {set_digest}",
+            )
+            for object_digest, set_digest, state in scope.shared_memberships
+            if object_digest in selected_objects
+        )
+
+    def accept_removal_for_sets_in_session(
+        self,
+        session: Session,
+        *,
+        actor: str,
+        request_key: str,
+        selector: str,
+        selected_sets: Sequence[str],
+    ) -> CacheOperationView:
+        """Accept an exact child removal in its recipe parent's transaction."""
+
+        supplied_sets = tuple(selected_sets)
+        if not supplied_sets:
+            raise ValueError("model removal child requires an exact non-empty scope")
+        if len(supplied_sets) != len(set(supplied_sets)):
+            raise ValueError("model removal child scope contains duplicate sets")
+        normalized_sets = tuple(sorted(supplied_sets))
+        for digest in normalized_sets:
+            ArtifactIdentity("model-set", digest)
+        operation = self._accept_model_removal(
+            session,
+            actor=actor,
+            request_key=_request_key(request_key),
+            selector=_model_selector(selector),
+            model_content_sha256=None,
+            selected_sets=normalized_sets,
+        )
+        return self._operation_view(operation)
+
+    def accept_recipe_removal_child_in_session(
+        self,
+        session: Session,
+        *,
+        actor: str,
+        request_key: str,
+        recipe_revision_id: str,
+        operation_id: str,
+        removal_fence: str,
+        scope: ModelCacheRemovalScope,
+    ) -> tuple[str, str, tuple[str, ...], str] | None:
+        """Accept one exact child under gates already reserved by its parent.
+
+        The parent reserves this child's complete identity scope together
+        with its own image gates in common kind/digest order. This method
+        revalidates that scope and scans protective references in the same
+        transaction before it writes the child operation owner.
+        """
+        if not scope.selected_sets:
+            return None
+        normalized_key = _request_key(request_key)
+        operation = self._accept_model_removal(
+            session,
+            actor=actor,
+            request_key=normalized_key,
+            selector=recipe_revision_id,
+            model_content_sha256=None,
+            selected_sets=scope.selected_sets,
+            operation_id=operation_id,
+            removal_fence=removal_fence,
+            gates_reserved=True,
+            expected_scope=scope,
+        )
+        payload = _validated_operation_payload(operation)
+        accepted_sets = tuple(
+            str(item)
+            for item in require_sequence(payload["selected"], "selected model sets")
+        )
+        if not isinstance(operation.plan_digest, str):
+            raise ModelCacheStorageError(
+                "model_cache.removal_plan_invalid",
+                "model removal child has no immutable plan digest",
+            )
+        return operation.id, operation.request_key, accepted_sets, operation.plan_digest
+
+    def recipe_removal_scope_in_session(
+        self, session: Session, *, recipe_revision_id: str
+    ) -> ModelCacheRemovalScope | None:
+        """Resolve the exact currently cached model scope for a recipe revision."""
+
+        recipe, _resolved_id, _recipe_digest = self._recipe_document(
+            session, None, recipe_revision_id
+        )
+        dependency_digests: set[str] = set()
+        rows: dict[str, CatalogDocumentRevision] = {}
+        for digest in _recipe_model_content_digests(recipe):
+            self._collect_model_definitions(session, digest, rows)
+        dependency_digests.update(rows)
+        if not dependency_digests:
+            return None
+        selected_sets = tuple(
+            session.scalars(
+                select(ModelCacheSet.artifact_set_sha256)
+                .where(ModelCacheSet.model_content_sha256.in_(dependency_digests))
+                .order_by(ModelCacheSet.artifact_set_sha256)
+            )
+        )
+        if not selected_sets:
+            return None
+        return self._model_removal_scope_for_sets(session, selected_sets)
+
+    @staticmethod
+    def _model_removal_scope_for_sets(
+        session: Session, selected_sets: Sequence[str]
+    ) -> ModelCacheRemovalScope:
+        normalized_sets = tuple(sorted(set(selected_sets)))
+        objects_by_set = model_set_objects(session, normalized_sets)
+        selected_objects = tuple(
+            sorted({digest for values in objects_by_set.values() for digest in values})
+        )
+        shared_memberships = tuple(
+            session.execute(
+                select(
+                    ModelCacheSetArtifact.artifact_sha256,
+                    ModelCacheSetArtifact.artifact_set_sha256,
+                    ModelCacheSet.state,
+                )
+                .join(
+                    ModelCacheSet,
+                    ModelCacheSet.artifact_set_sha256
+                    == ModelCacheSetArtifact.artifact_set_sha256,
+                )
+                .where(
+                    ModelCacheSetArtifact.artifact_sha256.in_(selected_objects),
+                    ModelCacheSetArtifact.artifact_set_sha256.not_in(normalized_sets),
+                )
+                .order_by(
+                    ModelCacheSetArtifact.artifact_sha256,
+                    ModelCacheSetArtifact.artifact_set_sha256,
+                )
+            )
+        )
+        external_memberships = {row[0] for row in shared_memberships}
+        return ModelCacheRemovalScope(
+            selected_sets=normalized_sets,
+            memberships=tuple(sorted(objects_by_set.items())),
+            selected_objects=selected_objects,
+            delete_objects=tuple(
+                digest
+                for digest in selected_objects
+                if digest not in external_memberships
+            ),
+            shared_memberships=tuple(
+                (object_digest, set_digest, state)
+                for object_digest, set_digest, state in shared_memberships
+            ),
+        )
+
+    def removal_asset_status(
+        self, scope: ModelCacheRemovalScope
+    ) -> tuple[CacheRemovalAsset, ...]:
+        """Project exact model removal identities and managed-storage status.
+
+        Manifest and membership reads happen in a short SQL context. That
+        context closes before receipt or filesystem observations begin.
+        """
+
+        expected_by_set: dict[str, dict[str, int]] = {}
+        expected_by_object: dict[str, int] = {}
+        memberships_by_set = dict(scope.memberships)
+        with self._session() as session:
+            for set_digest in scope.selected_sets:
+                row = session.get(ModelCacheSet, set_digest)
+                if row is None:
+                    raise ModelCacheStorageError(
+                        "model_cache.removal_scope_unavailable",
+                        f"selected model set {set_digest} is no longer available",
+                    )
+                manifest = ArtifactSetManifest.from_document(row.manifest)
+                specs = _unique_artifacts(manifest.artifacts)
+                expected = {
+                    digest: spec.expected_bytes for digest, spec in specs.items()
+                }
+                if set(expected) != set(memberships_by_set.get(set_digest, ())):
+                    raise ModelCacheStorageError(
+                        "model_cache.removal_scope_invalid",
+                        f"model set {set_digest} membership disagrees with its manifest",
+                    )
+                for digest, expected_bytes in expected.items():
+                    previous = expected_by_object.setdefault(digest, expected_bytes)
+                    if previous != expected_bytes:
+                        raise ModelCacheStorageError(
+                            "model_cache.removal_scope_invalid",
+                            f"model object {digest} has inconsistent expected lengths",
+                        )
+                expected_by_set[set_digest] = expected
+
+        object_status: dict[str, tuple[AssetAvailability, int | None]] = {}
+        for digest, expected_bytes in sorted(expected_by_object.items()):
+            try:
+                verified_bytes = self._stored_object(digest, expected_bytes)
+            except OSError:
+                object_status[digest] = ("unknown", None)
+                continue
+            if verified_bytes is not None:
+                object_status[digest] = ("verified", verified_bytes)
+                continue
+            try:
+                metadata = self._object_path(digest).lstat()
+            except (FileNotFoundError, NotADirectoryError):
+                object_status[digest] = ("missing", 0)
+                continue
+            except OSError:
+                object_status[digest] = ("unknown", None)
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
+                object_status[digest] = ("unknown", None)
+                continue
+            observed_bytes = metadata.st_size
+            if observed_bytes < expected_bytes:
+                availability: AssetAvailability = "partial"
+            else:
+                # Includes an exact-size file without its verified receipt
+                # and a file larger than the expected length. Neither is ready.
+                availability = "unknown"
+            object_status[digest] = (availability, observed_bytes)
+
+        def partial_status(
+            set_digest: str, digest: str, expected_bytes: int
+        ) -> tuple[AssetAvailability, int | None]:
+            partial = self._partial_path(set_digest, digest)
+            if expected_bytes >= _PARALLEL_RANGE_MIN_BYTES:
+                try:
+                    available = range_partial_bytes(
+                        partial,
+                        expected_bytes,
+                        workers=_PARALLEL_RANGE_WORKERS,
+                    )
+                except (OSError, ValueError):
+                    return "unknown", None
+                if available == 0:
+                    return "missing", 0
+                return (
+                    "partial" if available < expected_bytes else "unknown",
+                    available,
+                )
+            try:
+                metadata = partial.lstat()
+            except (FileNotFoundError, NotADirectoryError):
+                return "missing", 0
+            except OSError:
+                return "unknown", None
+            if not stat.S_ISREG(metadata.st_mode):
+                return "unknown", None
+            observed = metadata.st_size
+            if observed < expected_bytes:
+                return "partial", observed
+            return "unknown", observed
+
+        assets: list[CacheRemovalAsset] = []
+        delete_objects = set(scope.delete_objects)
+        for set_digest, expected in sorted(expected_by_set.items()):
+            statuses = []
+            for digest, expected_bytes in expected.items():
+                final_status = object_status[digest]
+                statuses.append(
+                    partial_status(set_digest, digest, expected_bytes)
+                    if final_status[0] == "missing"
+                    else final_status
+                )
+            expected_bytes = sum(expected.values())
+            observed_counts = [count for _availability, count in statuses]
+            available_bytes = (
+                None
+                if any(count is None for count in observed_counts)
+                else sum(count for count in observed_counts if count is not None)
+            )
+            if statuses and all(item[0] == "verified" for item in statuses):
+                availability: AssetAvailability = "verified"
+            elif statuses and all(item[0] == "missing" for item in statuses):
+                availability = "missing"
+            elif any(item[0] == "unknown" for item in statuses):
+                availability = "unknown"
+            elif statuses:
+                availability = "partial"
+            else:
+                availability = "unknown"
+            assets.append(
+                CacheRemovalAsset(
+                    kind="model-set",
+                    sha256=set_digest,
+                    expected_bytes=expected_bytes,
+                    availability=availability,
+                    available_bytes=available_bytes,
+                    disposition="remove",
+                )
+            )
+
+        for digest in scope.selected_objects:
+            expected_bytes = expected_by_object.get(digest)
+            if expected_bytes is None:
+                raise ModelCacheStorageError(
+                    "model_cache.removal_scope_invalid",
+                    f"model object {digest} has no validated manifest length",
+                )
+            availability, available_bytes = object_status[digest]
+            disposition: AssetDisposition = (
+                "remove" if digest in delete_objects else "retain-shared"
+            )
+            assets.append(
+                CacheRemovalAsset(
+                    kind="model-object",
+                    sha256=digest,
+                    expected_bytes=expected_bytes,
+                    availability=availability,
+                    available_bytes=available_bytes,
+                    disposition=disposition,
+                )
+            )
+        return tuple(assets)
+
+    def _model_removal_by_request(
+        self,
+        request_key: str,
+        *,
+        actor: str,
+        selector: str,
+        model_content_sha256: str | None,
+        review_digest: str | None,
+        selected_sets: Sequence[str] | None,
+    ) -> CacheOperationView | None:
+        with self._session() as session:
+            operation = session.scalar(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == request_key
+                )
+            )
+            if operation is None:
+                return None
+            return self._replay_model_removal(
+                operation,
+                actor=actor,
+                selector=selector,
+                model_content_sha256=model_content_sha256,
+                review_digest=review_digest,
+                selected_sets=selected_sets,
+            )
+
+    def _replay_model_removal(
+        self,
+        operation: ModelCacheOperation,
+        *,
+        actor: str,
+        selector: str,
+        model_content_sha256: str | None,
+        review_digest: str | None,
+        selected_sets: Sequence[str] | None,
+    ) -> CacheOperationView:
+        if operation.kind != "remove" or operation.actor != actor:
+            raise ModelCacheConflict(
+                "model_cache.request_key_reused",
+                "request key was already used for another cache operation",
+            )
+        payload = _validated_operation_payload(operation)
+        if (
+            payload.get("selector") != selector
+            or payload.get("model_content_sha256") != model_content_sha256
+            or payload.get("review_digest") != review_digest
+            or (
+                selected_sets is not None
+                and payload.get("selected") != list(selected_sets)
+            )
+        ):
+            raise ModelCacheConflict(
+                "model_cache.request_key_reused",
+                "request key was already used for another model removal intent",
+            )
+        return self._operation_view(operation)
+
+    def _accept_model_removal(
+        self,
+        session: Session,
+        *,
+        actor: str,
+        request_key: str,
+        selector: str,
+        model_content_sha256: str | None,
+        selected_sets: Sequence[str] | None,
+        review_digest: str | None = None,
+        operation_id: str | None = None,
+        removal_fence: str | None = None,
+        gates_reserved: bool = False,
+        expected_scope: ModelCacheRemovalScope | None = None,
+    ) -> ModelCacheOperation:
+        existing = session.scalar(
+            select(ModelCacheOperation).where(
+                ModelCacheOperation.request_key == request_key
+            )
+        )
+        if existing is not None:
+            self._replay_model_removal(
+                existing,
+                actor=actor,
+                selector=selector,
+                model_content_sha256=model_content_sha256,
+                review_digest=review_digest,
+                selected_sets=selected_sets,
+            )
+            return existing
+
+        if selected_sets is None:
+            if review_digest is None:
+                raise ModelCacheResolutionError(
+                    "model_cache.review_digest_invalid",
+                    "direct model removal requires its reviewed effect digest",
+                )
+            selected = tuple(
+                session.scalars(
+                    select(ModelCacheSet.artifact_set_sha256)
+                    .where(ModelCacheSet.model_content_sha256 == model_content_sha256)
+                    .order_by(ModelCacheSet.artifact_set_sha256)
+                )
+            )
+        else:
+            supplied = tuple(selected_sets)
+            if len(supplied) != len(set(supplied)):
+                raise ValueError("model removal scope contains duplicate sets")
+            selected = tuple(sorted(supplied))
+        # Read and validate exact SQL membership before the ordered gate
+        # acquisition, then re-read it after the fences are held.
+        scope = self._model_removal_scope_for_sets(session, selected)
+        if expected_scope is not None and scope != expected_scope:
+            raise ModelCacheConflict(
+                "artifact.reference_identity_mismatch",
+                "model removal scope changed before parent acceptance",
+            )
+        operation_id = operation_id or str(uuid.uuid4())
+        fence = removal_fence or str(uuid.uuid4())
+        now = self._clock()
+        identities = (
+            *(ArtifactIdentity("model-set", digest) for digest in scope.selected_sets),
+            *(
+                ArtifactIdentity("model-object", digest)
+                for digest in scope.delete_objects
+            ),
+        )
+        assignments: tuple[tuple[ArtifactIdentity, RemovalOwnerKind, str, str], ...] = (
+            tuple(
+                (
+                    identity,
+                    "model-cache-operation",
+                    operation_id,
+                    fence,
+                )
+                for identity in identities
+            )
+        )
+        try:
+            if gates_reserved:
+                if not removal_fences_match(session, assignments, now=now):
+                    raise ArtifactLifecycleError(
+                        "artifact.deletion_fence_lost",
+                        "parent did not reserve every model identity for this child",
+                    )
+            else:
+                reserve_removal(
+                    session,
+                    (identity for identity, _kind, _owner, _fence in assignments),
+                    owner_kind="model-cache-operation",
+                    owner_id=operation_id,
+                    fence=fence,
+                    now=now,
+                )
+            locked_scope = self._model_removal_scope_for_sets(session, selected)
+            if locked_scope != scope:
+                raise ModelCacheConflict(
+                    "artifact.reference_identity_mismatch",
+                    "model-set membership changed while removal ownership was reserved",
+                )
+            reasons = model_set_reference_reasons(session, scope.selected_sets)
+            blocked = {digest: owners for digest, owners in reasons.items() if owners}
+            if blocked:
+                first_digest = min(blocked)
+                raise ModelCacheConflict(
+                    "model_cache.removal_referenced",
+                    f"model cache set {first_digest} is still referenced: "
+                    + ", ".join(blocked[first_digest][:4]),
+                    recovery="retry",
+                )
+        except ArtifactLifecycleError as error:
+            raise ModelCacheConflict(
+                error.code,
+                error.detail,
+                recovery="retry" if error.retryable else None,
+            ) from error
+
+        external_memberships = set(
+            session.scalars(
+                select(ModelCacheSetArtifact.artifact_sha256).where(
+                    ModelCacheSetArtifact.artifact_set_sha256.not_in(
+                        scope.selected_sets
+                    )
+                    if scope.selected_sets
+                    else ModelCacheSetArtifact.artifact_set_sha256.is_not(None)
+                )
+            )
+        )
+        delete_objects = tuple(
+            digest
+            for digest in scope.selected_objects
+            if digest not in external_memberships
+        )
+        if delete_objects != scope.delete_objects:
+            raise ModelCacheConflict(
+                "artifact.reference_identity_mismatch",
+                "model object sharing changed while removal ownership was reserved",
+            )
+        plan = {
+            "schema_version": SCHEMA_VERSION,
+            "source_policy": SOURCE_POLICY,
+            "selector": selector,
+            "model_content_sha256": model_content_sha256,
+            "operator_action": "remove-model",
+            "review_digest": review_digest,
+            "removal_fence": fence,
+            "selected": list(scope.selected_sets),
+            "selected_objects": list(scope.selected_objects),
+            "delete_objects": list(delete_objects),
+            "object_index": 0,
+            "object_pending_bytes": None,
+            "reclaimed_bytes": 0,
+            "set_index": 0,
+            "retry": {"automatic_attempts": 1, "operator_retries": 0},
+            "result": None,
+        }
+        total_items = len(delete_objects) + len(selected)
+        progress = self._model_removal_progress(
+            phase="queued",
+            total_items=total_items,
+            completed_items=0,
+            reclaimed_bytes=0,
+            current_key=None,
+            previous=None,
+            now=now,
+        )
+        operation = ModelCacheOperation(
+            id=operation_id,
+            request_key=request_key,
+            schema_version=SCHEMA_VERSION,
+            kind="remove",
+            state="queued",
+            attempt=1,
+            artifact_set_sha256=None,
+            plan_digest=_model_removal_intent_digest(
+                _removal_document(plan), actor=actor, request_key=request_key
+            ),
+            payload=_write_operation_payload("remove", plan),
+            progress=progress,
+            actor=actor,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(operation)
+        session.flush()
+        if not selected:
+            self._finish_model_removal_in_session(session, operation, now=now)
+        return operation
+
+    def _model_removal_progress(
+        self,
+        *,
+        phase: ModelCacheOperationPhase,
+        total_items: int,
+        completed_items: int,
+        reclaimed_bytes: int,
+        current_key: str | None,
+        previous: Mapping[str, object] | None,
+        now: datetime,
+    ) -> dict[str, object]:
+        return cache_progress(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "phase": phase,
+                "completed_artifacts": completed_items,
+                "total_artifacts": total_items,
+                "downloaded_bytes": reclaimed_bytes,
+                "expected_bytes": None,
+                "current_artifact_key": current_key,
+            },
+            previous=previous,
+            now=now,
+        )
+
+    @contextmanager
+    def _model_storage_lock(
+        self, digest: str, *, model_set: bool = False
+    ) -> Iterator[None]:
+        """Take one stable managed-storage lock without waiting for its owner."""
+
+        ArtifactIdentity("model-set" if model_set else "model-object", digest)
+        lock_root = self._root / "locks"
+        directory_fd = os.open(
+            lock_root,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+        )
+        filename = f"model-set-{digest}" if model_set else digest
+        try:
+            descriptor = os.open(
+                filename,
+                os.O_CREAT
+                | os.O_RDWR
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=directory_fd,
+            )
+        finally:
+            os.close(directory_fd)
+        with os.fdopen(descriptor, "a+b") as lock_file:
+            if not stat.S_ISREG(os.fstat(lock_file.fileno()).st_mode):
+                raise ModelCacheStorageError(
+                    "model_cache.lock_unavailable",
+                    "managed-cache lock is not a regular file",
+                )
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise _ArtifactWriterBusy(digest) from None
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def _model_object_size(self, digest: str) -> int:
+        objects_fd = os.open(
+            self._root / "objects",
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            try:
+                shard_fd = os.open(
+                    digest[:2],
+                    os.O_RDONLY
+                    | getattr(os, "O_DIRECTORY", 0)
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0),
+                    dir_fd=objects_fd,
+                )
             except FileNotFoundError:
-                metadata = None
-            if metadata is not None and stat.S_ISREG(metadata.st_mode):
-                reclaimed += metadata.st_size
-                path.unlink(missing_ok=True)
-            # The receipt is the availability fact, so it is removed with the
-            # bytes; a caller that still wants them prepares them again.
-            self._receipt_path(member).unlink(missing_ok=True)
-        with self._lock, self._session(write=True) as session:
+                return 0
+            try:
+                try:
+                    metadata = os.stat(digest, dir_fd=shard_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    return 0
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ModelCacheStorageError(
+                        "model_cache.removal_path_unsafe",
+                        "managed model object is not a regular file",
+                    )
+                return metadata.st_size
+            finally:
+                os.close(shard_fd)
+        finally:
+            os.close(objects_fd)
+
+    def _remove_model_object_files(self, digest: str) -> None:
+        """Unlink one exact object and its managed receipt, then fsync its shard."""
+
+        objects_fd = os.open(
+            self._root / "objects",
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            try:
+                shard_fd = os.open(
+                    digest[:2],
+                    os.O_RDONLY
+                    | getattr(os, "O_DIRECTORY", 0)
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0),
+                    dir_fd=objects_fd,
+                )
+            except FileNotFoundError:
+                return
+            try:
+                for filename in (digest, f"{digest}.receipt.json"):
+                    try:
+                        metadata = os.stat(
+                            filename, dir_fd=shard_fd, follow_symlinks=False
+                        )
+                    except FileNotFoundError:
+                        continue
+                    if not stat.S_ISREG(metadata.st_mode):
+                        raise ModelCacheStorageError(
+                            "model_cache.removal_path_unsafe",
+                            "managed model object or receipt is not a regular file",
+                        )
+                    os.unlink(filename, dir_fd=shard_fd)
+                os.fsync(shard_fd)
+            finally:
+                os.close(shard_fd)
+        finally:
+            os.close(objects_fd)
+
+    def _remove_model_partial_set(self, set_digest: str) -> None:
+        """Remove one inactive transfer checkpoint through its opened parent."""
+
+        partials_fd = os.open(
+            self._root / "partials",
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            try:
+                metadata = os.stat(
+                    set_digest, dir_fd=partials_fd, follow_symlinks=False
+                )
+            except FileNotFoundError:
+                return
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise ModelCacheStorageError(
+                    "model_cache.removal_path_unsafe",
+                    "managed model partial checkpoint is not a directory",
+                )
+            shutil.rmtree(set_digest, dir_fd=partials_fd)
+            os.fsync(partials_fd)
+        finally:
+            os.close(partials_fd)
+
+    def _model_removal_owner_snapshot(
+        self,
+        operation_id: str,
+        *,
+        fence: str,
+        identity: ArtifactIdentity,
+    ) -> dict[str, object] | None:
+        with self._session() as session:
+            if not check_removal_fence_nowait(
+                session,
+                identity,
+                owner_kind="model-cache-operation",
+                owner_id=operation_id,
+                fence=fence,
+            ):
+                return None
+            operation = session.scalar(
+                select(ModelCacheOperation)
+                .where(ModelCacheOperation.id == operation_id)
+                .execution_options(populate_existing=True)
+                .with_for_update(nowait=True)
+            )
+            if (
+                operation is None
+                or operation.kind != "remove"
+                or operation.state not in {"queued", "running", "partial"}
+            ):
+                return None
+            payload = _validated_operation_payload(operation)
+            if payload.get("removal_fence") != fence:
+                return None
+            return payload
+
+    def _persist_model_removal_checkpoint(
+        self,
+        operation_id: str,
+        *,
+        fence: str,
+        identity: ArtifactIdentity,
+        expected_index: int,
+        object_step: bool,
+        pending_bytes: int | None,
+        complete_step: bool,
+    ) -> bool:
+        now = self._clock()
+        with self._session(write=True) as session:
+            if not check_removal_fence_nowait(
+                session,
+                identity,
+                owner_kind="model-cache-operation",
+                owner_id=operation_id,
+                fence=fence,
+            ):
+                return False
+            operation = session.scalar(
+                select(ModelCacheOperation)
+                .where(ModelCacheOperation.id == operation_id)
+                .execution_options(populate_existing=True)
+                .with_for_update(nowait=True)
+            )
+            if (
+                operation is None
+                or operation.kind != "remove"
+                or operation.state not in {"queued", "running", "partial"}
+            ):
+                return False
+            payload = _validated_operation_payload(operation)
+            if payload.get("removal_fence") != fence:
+                return False
+            index_field = "object_index" if object_step else "set_index"
+            if payload.get(index_field) != expected_index:
+                return False
+            if object_step:
+                if pending_bytes is None:
+                    raise ModelCacheStorageError(
+                        "model_cache.removal_checkpoint_invalid",
+                        "model object byte checkpoint is missing",
+                    )
+                if complete_step:
+                    previous_pending = payload.get("object_pending_bytes")
+                    if previous_pending != pending_bytes:
+                        return False
+                    payload["object_index"] = expected_index + 1
+                    payload["object_pending_bytes"] = None
+                    payload["reclaimed_bytes"] = (
+                        require_integer(payload["reclaimed_bytes"], "reclaimed bytes")
+                        + pending_bytes
+                    )
+                else:
+                    payload["object_pending_bytes"] = pending_bytes
+            elif complete_step:
+                payload["set_index"] = expected_index + 1
+
+            payload["retry"] = {"automatic_attempts": 1, "operator_retries": 0}
+            payload.pop("failure", None)
+            previous = _validated_operation_progress(operation).model_dump(mode="json")
+            checkpoint = _removal_document(payload)
+            object_index = checkpoint.object_index
+            set_index = checkpoint.set_index
+            total_items = len(checkpoint.delete_objects) + len(checkpoint.selected)
+            completed_items = object_index + set_index
+            current_key: str | None = None
+            if object_index < len(checkpoint.delete_objects):
+                current_key = f"object:{checkpoint.delete_objects[object_index]}"
+            elif set_index < len(checkpoint.selected):
+                current_key = f"set:{checkpoint.selected[set_index]}"
+            operation.progress = self._model_removal_progress(
+                phase="reclaiming",
+                total_items=total_items,
+                completed_items=completed_items,
+                reclaimed_bytes=checkpoint.reclaimed_bytes,
+                current_key=current_key,
+                previous=previous,
+                now=now,
+            )
+            operation.state = "running"
+            operation.last_error = None
+            operation.updated_at = now
+            operation.payload = _write_operation_payload("remove", payload)
+        return True
+
+    def _defer_model_removal(
+        self, operation_id: str, *, detail: str, retry_after_seconds: int = 5
+    ) -> None:
+        now = self._clock()
+        with self._session(write=True) as session:
+            operation = session.scalar(
+                select(ModelCacheOperation)
+                .where(
+                    ModelCacheOperation.id == operation_id,
+                    ModelCacheOperation.kind == "remove",
+                    ModelCacheOperation.state.in_(("queued", "running", "partial")),
+                )
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            )
+            if operation is None:
+                return
+            payload = _validated_operation_payload(operation)
+            retry = payload["retry"]
+            if not isinstance(retry, Mapping):
+                raise ModelCacheStorageError(
+                    "model_cache.payload_invalid",
+                    "model removal retry state is missing",
+                )
+            attempts = int(retry["automatic_attempts"]) + 1
+            delay = min(60, max(retry_after_seconds, 2 ** min(attempts, 6)))
+            retry_document = dict(retry)
+            retry_document.update(
+                automatic_attempts=attempts,
+                next_retry_at=_iso(now + timedelta(seconds=delay)),
+                retry_after_seconds=delay,
+            )
+            payload["retry"] = retry_document
+            checkpoint = _removal_document(payload)
+            artifact_key = (
+                f"object:{checkpoint.delete_objects[checkpoint.object_index]}"
+                if checkpoint.object_index < len(checkpoint.delete_objects)
+                else f"set:{checkpoint.selected[checkpoint.set_index]}"
+                if checkpoint.set_index < len(checkpoint.selected)
+                else "removal-finalization"
+            )
+            payload["failure"] = _cache_failure(
+                "model_cache.removal_wait",
+                "Automatic retry resumes this exact checkpoint when its storage or "
+                "ownership dependency clears. " + detail,
+                retryable=True,
+                recovery="inspect",
+                retry_time=_iso(now + timedelta(seconds=delay)),
+                retry_after_seconds=delay,
+                artifact_key=artifact_key,
+            )
+            previous = _validated_operation_progress(operation).model_dump(mode="json")
+            operation.progress = cache_phase(previous, "reclaiming", now, waiting=True)
+            operation.state = "partial"
+            operation.last_error = redact_text(detail)[:512]
+            operation.updated_at = now
+            operation.payload = _write_operation_payload("remove", payload)
+
+    def advance_removals(self, *, limit: int = 1) -> int:
+        """Advance bounded durable model removals without holding transfer slots."""
+
+        if not 1 <= limit <= 100:
+            raise ValueError("model removal batch limit is invalid")
+        now = self._clock()
+        with self._session() as session:
+            operation_ids = tuple(
+                session.scalars(
+                    select(ModelCacheOperation.id)
+                    .where(
+                        ModelCacheOperation.kind == "remove",
+                        ModelCacheOperation.state.in_(("queued", "running", "partial")),
+                    )
+                    .where(
+                        or_(
+                            ModelCacheOperation.payload["retry"]["next_retry_at"]
+                            .as_string()
+                            .is_(None),
+                            ModelCacheOperation.payload["retry"][
+                                "next_retry_at"
+                            ].as_string()
+                            <= _iso(now),
+                        )
+                    )
+                    .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
+                    .with_for_update(skip_locked=True)
+                    .limit(limit)
+                )
+            )
+        advanced = 0
+        for operation_id in operation_ids:
+            if advanced >= limit:
+                break
+            try:
+                advanced += int(self._advance_model_removal(operation_id, now=now))
+            except ModelCacheStorageError as error:
+                if error.code not in {
+                    "model_cache.payload_invalid",
+                    "model_cache.progress_invalid",
+                    "model_cache.removal_plan_changed",
+                }:
+                    self._defer_model_removal(operation_id, detail=error.detail)
+                    continue
+                # A corrupt owner's document cannot be rewritten into a valid
+                # default. Preserve it and its fences for inspection, isolate
+                # its failure, and allow unrelated eligible work to continue.
+                with self._session(write=True) as session:
+                    row = session.scalar(
+                        select(ModelCacheOperation)
+                        .where(
+                            ModelCacheOperation.id == operation_id,
+                            ModelCacheOperation.kind == "remove",
+                        )
+                        .with_for_update(skip_locked=True)
+                    )
+                    if row is not None:
+                        row.state = "failed"
+                        row.last_error = f"{error.code}: {error.detail}"[:512]
+                        row.updated_at = now
+                log_event(
+                    _LOGGER,
+                    "model_cache.removal_invalid",
+                    service="controller",
+                    operation_id=operation_id,
+                    code=error.code,
+                    detail=error.detail,
+                )
+        return advanced
+
+    def _advance_model_removal(
+        self, operation_id: str, *, now: datetime | None = None
+    ) -> bool:
+        try:
+            return self._advance_model_removal_step(operation_id, now=now)
+        except (DBAPIError, ArtifactLifecycleError) as error:
+            translated = (
+                retryable_artifact_database_error(error)
+                if isinstance(error, DBAPIError)
+                else error
+                if error.retryable
+                else None
+            )
+            if translated is None:
+                raise
+            # The failed transaction and any artifact lock have unwound before
+            # recording a retry. A held owner row is skipped, never waited on.
+            try:
+                self._defer_model_removal(operation_id, detail=translated.detail)
+            except DBAPIError as retry_error:
+                if retryable_artifact_database_error(retry_error) is None:
+                    raise
+            return False
+
+    def _advance_model_removal_step(
+        self, operation_id: str, *, now: datetime | None = None
+    ) -> bool:
+        now = now or self._clock()
+        with self._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            if operation is None or operation.kind != "remove":
+                return False
+            if operation.state not in {"queued", "running", "partial"}:
+                return False
+            payload = _validated_operation_payload(operation)
+            retry = payload["retry"]
+            if not isinstance(retry, Mapping):
+                raise ModelCacheStorageError(
+                    "model_cache.payload_invalid",
+                    "model removal retry state is missing",
+                )
+            retry_at = retry.get("next_retry_at")
+            if isinstance(retry_at, str) and datetime.fromisoformat(retry_at) > now:
+                return False
+            checkpoint = _removal_document(payload)
+            fence = checkpoint.removal_fence
+            object_index = checkpoint.object_index
+            set_index = checkpoint.set_index
+            delete_objects = checkpoint.delete_objects
+            selected_sets = checkpoint.selected
+        if object_index < len(delete_objects):
+            digest = str(delete_objects[object_index])
+            identity = ArtifactIdentity("model-object", digest)
+            try:
+                with self._model_storage_lock(digest):
+                    current = self._model_removal_owner_snapshot(
+                        operation_id, fence=fence, identity=identity
+                    )
+                    if current is None:
+                        return False
+                    if current["object_index"] != object_index:
+                        return False
+                    pending_bytes = _removal_document(current).object_pending_bytes
+                    if pending_bytes is None:
+                        pending_bytes = self._model_object_size(digest)
+                    if not self._persist_model_removal_checkpoint(
+                        operation_id,
+                        fence=fence,
+                        identity=identity,
+                        expected_index=object_index,
+                        object_step=True,
+                        pending_bytes=pending_bytes,
+                        complete_step=False,
+                    ):
+                        return False
+                    self._remove_model_object_files(digest)
+                    return self._persist_model_removal_checkpoint(
+                        operation_id,
+                        fence=fence,
+                        identity=identity,
+                        expected_index=object_index,
+                        object_step=True,
+                        pending_bytes=pending_bytes,
+                        complete_step=True,
+                    )
+            except _ArtifactWriterBusy as error:
+                self._defer_model_removal(
+                    operation_id,
+                    detail=error.detail,
+                    retry_after_seconds=error.retry_after_seconds or 5,
+                )
+                return False
+            except ArtifactLifecycleError as error:
+                if error.retryable:
+                    self._defer_model_removal(
+                        operation_id, detail=error.detail, retry_after_seconds=5
+                    )
+                    return False
+                raise
+            except OSError as error:
+                self._defer_model_removal(
+                    operation_id, detail=f"{type(error).__name__}: {error}"
+                )
+                return False
+        if set_index < len(selected_sets):
+            set_digest = str(selected_sets[set_index])
+            identity = ArtifactIdentity("model-set", set_digest)
+            try:
+                with self._model_storage_lock(set_digest, model_set=True):
+                    current = self._model_removal_owner_snapshot(
+                        operation_id, fence=fence, identity=identity
+                    )
+                    if current is None or current["set_index"] != set_index:
+                        return False
+                    self._remove_model_partial_set(set_digest)
+                    return self._persist_model_removal_checkpoint(
+                        operation_id,
+                        fence=fence,
+                        identity=identity,
+                        expected_index=set_index,
+                        object_step=False,
+                        pending_bytes=None,
+                        complete_step=True,
+                    )
+            except _ArtifactWriterBusy as error:
+                self._defer_model_removal(
+                    operation_id,
+                    detail=error.detail,
+                    retry_after_seconds=error.retry_after_seconds or 5,
+                )
+                return False
+            except ArtifactLifecycleError as error:
+                if error.retryable:
+                    self._defer_model_removal(
+                        operation_id, detail=error.detail, retry_after_seconds=5
+                    )
+                    return False
+                raise
+            except OSError as error:
+                self._defer_model_removal(
+                    operation_id, detail=f"{type(error).__name__}: {error}"
+                )
+                return False
+        with self._session(write=True) as session:
+            identities = (
+                *(ArtifactIdentity("model-set", str(item)) for item in selected_sets),
+                *(
+                    ArtifactIdentity("model-object", str(item))
+                    for item in delete_objects
+                ),
+            )
+            if not lock_removal_fences(
+                session,
+                identities,
+                owner_kind="model-cache-operation",
+                owner_id=operation_id,
+                fence=fence,
+                now=now,
+            ):
+                return False
+            operation = session.scalar(
+                select(ModelCacheOperation)
+                .where(ModelCacheOperation.id == operation_id)
+                .with_for_update(nowait=True)
+                .execution_options(populate_existing=True)
+            )
+            if operation is None or operation.kind != "remove":
+                return False
+            payload = _validated_operation_payload(operation)
+            if payload.get("removal_fence") != fence:
+                return False
+            if operation.state not in {"queued", "running", "partial"}:
+                return False
+            self._finish_model_removal_in_session(session, operation, now=now)
+        return True
+
+    def _finish_model_removal_in_session(
+        self, session: Session, operation: ModelCacheOperation, *, now: datetime
+    ) -> None:
+        payload = _validated_operation_payload(operation)
+        checkpoint = _removal_document(payload)
+        selected = checkpoint.selected
+        delete_objects = checkpoint.delete_objects
+        if checkpoint.object_index != len(
+            delete_objects
+        ) or checkpoint.set_index != len(selected):
+            raise ModelCacheStorageError(
+                "model_cache.removal_checkpoint_invalid",
+                "model removal cannot finish before every target is reconciled",
+            )
+        fence = str(payload["removal_fence"])
+        identities = (
+            *(ArtifactIdentity("model-set", str(item)) for item in selected),
+            *(ArtifactIdentity("model-object", str(item)) for item in delete_objects),
+        )
+        try:
+            for digest in delete_objects:
+                external = session.scalar(
+                    select(ModelCacheSetArtifact.artifact_set_sha256)
+                    .where(
+                        ModelCacheSetArtifact.artifact_sha256 == digest,
+                        ModelCacheSetArtifact.artifact_set_sha256.not_in(selected)
+                        if selected
+                        else ModelCacheSetArtifact.artifact_set_sha256.is_not(None),
+                    )
+                    .limit(1)
+                )
+                if external is not None:
+                    raise ArtifactLifecycleError(
+                        "artifact.reference_scan_failed",
+                        "a new model set references a removal target; removal remains fenced",
+                    )
             for set_digest in selected:
                 session.query(ModelCacheSetArtifact).filter(
                     ModelCacheSetArtifact.artifact_set_sha256 == set_digest
@@ -1795,57 +3401,31 @@ class ModelCacheService:
                 row = session.get(ModelCacheSet, set_digest)
                 if row is not None:
                     session.delete(row)
-            result = {
-                "schema_version": SCHEMA_VERSION,
-                "removed_entries": selected,
-                "reclaimed_bytes": reclaimed,
-                "cancelled_operations": cancelled,
-            }
-            operation = ModelCacheOperation(
-                request_key=request_key,
-                schema_version=SCHEMA_VERSION,
-                kind="remove",
-                state="succeeded",
-                attempt=1,
-                artifact_set_sha256=None,
-                plan_digest=_sha256_json(
-                    {"action": "remove-model", "selector": selector, "fence": fence}
-                ),
-                payload=_write_operation_payload(
-                    "remove",
-                    {
-                        "schema_version": SCHEMA_VERSION,
-                        "source_policy": SOURCE_POLICY,
-                        "selected": selected,
-                        "selected_objects": sorted(object_digests),
-                        "reclaimed_bytes": reclaimed,
-                        "operator_action": "remove-model",
-                        "selector": selector,
-                        "removal_fence": fence,
-                        "result": result,
-                    },
-                ),
-                progress=cache_progress(
-                    {
-                        "schema_version": SCHEMA_VERSION,
-                        "phase": "completed",
-                        "completed_artifacts": len(selected),
-                        "total_artifacts": len(selected),
-                        "downloaded_bytes": reclaimed,
-                        "expected_bytes": reclaimed,
-                        "current_artifact_key": None,
-                    },
-                    previous=None,
-                    now=now,
-                ),
-                actor=actor,
-                created_at=now,
-                updated_at=now,
-                completed_at=now,
+            clear_removal(
+                session,
+                identities,
+                owner_kind="model-cache-operation",
+                owner_id=operation.id,
+                fence=fence,
+                now=now,
             )
-            session.add(operation)
-            session.flush()
-            return self._operation_view(operation)
+        except ArtifactLifecycleError as error:
+            raise ModelCacheConflict(error.code, error.detail) from error
+        result = ModelCacheRemovalResult(
+            schema_version=SCHEMA_VERSION,
+            removed_entries=list(selected),
+            reclaimed_bytes=checkpoint.reclaimed_bytes,
+            cancelled_operations=[],
+        )
+        payload["result"] = result.model_dump(mode="json")
+        payload.pop("failure", None)
+        previous = _validated_operation_progress(operation).model_dump(mode="json")
+        operation.progress = cache_phase(previous, "completed", now)
+        operation.payload = _write_operation_payload("remove", payload)
+        operation.state = "succeeded"
+        operation.last_error = None
+        operation.updated_at = now
+        operation.completed_at = now
 
     def _recipe_document(
         self,
@@ -2063,6 +3643,14 @@ class ModelCacheService:
         interrupt_after_bytes: int | None = None,
     ) -> CacheOperationView:
         request_key = _request_key(request_key)
+        if selector is not None:
+            selector = _model_selector(selector)
+            with self._session() as session:
+                replay = self._download_replay(
+                    session, request_key, actor=actor, selector=selector, force=force
+                )
+                if replay is not None:
+                    return replay
         requested_plan = _optional_digest(plan_digest)
         if requested_plan is None:
             raise ModelCacheConflict(
@@ -2080,23 +3668,17 @@ class ModelCacheService:
         # operation even when its partial checkpoint has changed the current
         # preview's remaining-byte estimate.
         with self._lock, self._session() as session:
-            existing = session.scalar(
-                select(ModelCacheOperation).where(
-                    ModelCacheOperation.request_key == request_key
-                )
+            replay = self._download_replay(
+                session,
+                request_key,
+                actor=actor,
+                selector=selector,
+                force=force,
+                artifact_set_sha256=set_digest,
+                plan_digest=requested_plan,
             )
-            if existing is not None:
-                existing_payload = _validated_operation_payload(existing)
-                if (
-                    existing.kind != "download"
-                    or existing_payload.get("artifact_set_sha256") != set_digest
-                    or existing.plan_digest != requested_plan
-                ):
-                    raise ModelCacheConflict(
-                        "model_cache.request_key_reused",
-                        "request key was already used for another cache operation",
-                    )
-                return self._operation_view(existing)
+            if replay is not None:
+                return replay
         preview = self._download_preview_for_manifest(manifest)
         if preview["plan_digest"] != requested_plan:
             raise ModelCacheConflict(
@@ -2123,56 +3705,77 @@ class ModelCacheService:
             "plan_digest": requested_plan,
             "transfer": dict(transfer),
             "retry": {"automatic_attempts": 1, "operator_retries": 0},
-            "force_refresh": bool(force),
+            "force_refresh": force,
         }
         if selector is not None:
             payload["selector"] = selector
             payload["operator_action"] = "download-model"
         payload = _write_operation_payload("download", payload)
-        with self._lock, self._session(write=True) as session:
-            existing = session.scalar(
-                select(ModelCacheOperation).where(
-                    ModelCacheOperation.request_key == request_key
-                )
-            )
-            if existing is not None:
-                existing_payload = _validated_operation_payload(existing)
-                if (
-                    existing.kind != "download"
-                    or existing_payload.get("artifact_set_sha256") != set_digest
-                    or existing.plan_digest != requested_plan
-                ):
-                    raise ModelCacheConflict(
-                        "model_cache.request_key_reused",
-                        "request key was already used for another cache operation",
-                    )
-                operation_id = existing.id
-            else:
-                self._ensure_set(session, manifest)
-                now = self._clock()
-                operation = ModelCacheOperation(
-                    request_key=request_key,
-                    schema_version=SCHEMA_VERSION,
-                    kind="download",
-                    state="queued",
-                    attempt=1,
+        try:
+            with self._lock, self._session(write=True) as session:
+                replay = self._download_replay(
+                    session,
+                    request_key,
+                    actor=actor,
+                    selector=selector,
+                    force=force,
                     artifact_set_sha256=set_digest,
                     plan_digest=requested_plan,
-                    payload=payload,
-                    progress=self._progress(
-                        manifest,
-                        phase="queued",
-                        expected_bytes=require_integer(
-                            transfer["total_bytes"], "transfer total bytes"
-                        ),
-                    ),
-                    actor=actor,
-                    created_at=now,
-                    updated_at=now,
                 )
-                session.add(operation)
-                session.flush()
-                operation_id = operation.id
+                if replay is not None:
+                    return replay
+                else:
+                    now = self._clock()
+                    self._require_model_sets_open(
+                        session,
+                        (set_digest,),
+                        now=now,
+                        object_digests=tuple(
+                            item.sha256 for item in manifest.artifacts
+                        ),
+                    )
+                    self._ensure_set(session, manifest)
+                    operation = ModelCacheOperation(
+                        request_key=request_key,
+                        schema_version=SCHEMA_VERSION,
+                        kind="download",
+                        state="queued",
+                        attempt=1,
+                        artifact_set_sha256=set_digest,
+                        plan_digest=requested_plan,
+                        payload=payload,
+                        progress=self._progress(
+                            manifest,
+                            phase="queued",
+                            expected_bytes=require_integer(
+                                transfer["total_bytes"], "transfer total bytes"
+                            ),
+                        ),
+                        actor=actor,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    session.add(operation)
+                    session.flush()
+                    operation_id = operation.id
+        except IntegrityError:
+            # A borrowed transaction belongs to its caller. Only recover here
+            # after our own transaction has rolled back and released its locks.
+            if isinstance(self._sessions, Session):
+                raise
+            with self._session() as session:
+                replay = self._download_replay(
+                    session,
+                    request_key,
+                    actor=actor,
+                    selector=selector,
+                    force=force,
+                    artifact_set_sha256=set_digest,
+                    plan_digest=requested_plan,
+                )
+                if replay is None:
+                    raise
+                return replay
         if interrupt_after_bytes is not None:
             self._run_download(
                 operation_id,
@@ -2180,6 +3783,52 @@ class ModelCacheService:
                 interrupt_after_bytes=interrupt_after_bytes,
             )
         return self.get_operation(operation_id)
+
+    def _download_replay(
+        self,
+        session: Session,
+        request_key: str,
+        *,
+        actor: str,
+        selector: str | None,
+        force: bool,
+        artifact_set_sha256: str | None = None,
+        plan_digest: str | None = None,
+    ) -> CacheOperationView | None:
+        """Compare original intent, never a refreshed operator preview."""
+
+        existing = session.scalar(
+            select(ModelCacheOperation).where(
+                ModelCacheOperation.request_key == request_key
+            )
+        )
+        if existing is None:
+            return None
+        if existing.kind != "download" or existing.actor != actor:
+            raise ModelCacheConflict(
+                "model_cache.request_key_reused",
+                "request key was already used for another cache operation",
+            )
+        payload = _validated_operation_payload(existing)
+        matches = {
+            "selector": payload.get("selector") == selector,
+            "refresh": payload.get("force_refresh") is force,
+        }
+        if selector is None:
+            matches.update(
+                artifact_set=payload.get("artifact_set_sha256") == artifact_set_sha256,
+                plan=existing.plan_digest == plan_digest,
+            )
+        else:
+            matches["operator_action"] = (
+                payload.get("operator_action") == "download-model"
+            )
+        if not all(matches.values()):
+            raise ModelCacheConflict(
+                "model_cache.request_key_reused",
+                "request key was already used for another cache operation",
+            )
+        return self._operation_view(existing)
 
     def _resolve_requested_manifest(
         self,
@@ -2625,46 +4274,26 @@ class ModelCacheService:
         force: bool,
         interrupt_after_bytes: int | None,
     ) -> None:
-        while True:
-            with self._lock:
-                event = self._digest_events.get(spec.sha256)
-                owner = event is None
-                if event is None:
-                    event = threading.Event()
-                    self._digest_events[spec.sha256] = event
-            if owner:
-                break
-            # A second selected Model/Recipe waits for the first immutable
-            # digest transfer, then reuses its verified object. This prevents
-            # concurrent writers from sharing a partial path or replacing a
-            # valid object out of order.
-            event.wait(timeout=0.25)
-            if self._closed.is_set() or self._transfer_stop(operation_id).is_set():
-                raise InterruptedError(
-                    "model download cancelled while waiting for shared bytes"
-                )
-            if not force and self._object_is_verified(spec):
-                self._mark_artifact_verified(spec, set_digest)
-                return
-            with self._lock:
-                if self._digest_events.get(spec.sha256) is event and event.is_set():
-                    self._digest_events.pop(spec.sha256, None)
+        with self._lock:
+            if spec.sha256 in self._active_digests:
+                raise _ArtifactWriterBusy(spec.sha256)
+            self._active_digests.add(spec.sha256)
         try:
-            # The shared NAS lock also covers overlapping Controller worker
-            # processes; an in-process Event alone cannot deduplicate them.
+            # Neither local nor cross-process contention can park a transfer
+            # slot. The durable operation is rescheduled after releasing it.
             with (self._root / "locks" / spec.sha256).open("a+b") as lock_file:
-                while True:
-                    try:
-                        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        break
-                    except BlockingIOError:
-                        if (
-                            self._transfer_stop(operation_id).wait(0.25)
-                            or self._closed.is_set()
-                        ):
-                            raise InterruptedError(
-                                "model download cancelled while waiting for cache lock"
-                            )
+                try:
+                    fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise _ArtifactWriterBusy(spec.sha256) from None
+                # This small owner hint lets cancellation distinguish this
+                # operation's issued effects from another consumer sharing
+                # the same artifact lock. The flock remains the authority;
+                # the bytes are consulted only while that flock is busy.
+                lock_file.seek(0)
+                lock_file.truncate()
+                lock_file.write(operation_id.encode("ascii"))
+                lock_file.flush()
                 self._download_locked(
                     spec,
                     set_digest,
@@ -2674,9 +4303,7 @@ class ModelCacheService:
                 )
         finally:
             with self._lock:
-                current = self._digest_events.pop(spec.sha256, None)
-                if current is not None:
-                    current.set()
+                self._active_digests.discard(spec.sha256)
 
     def _download_locked(
         self,
@@ -2690,6 +4317,11 @@ class ModelCacheService:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             assert operation is not None
+            if operation.state == "cancelled" or _operation_cancellation(operation):
+                self._transfer_stop(operation_id).set()
+                raise InterruptedError(
+                    "model download cancellation was accepted; partial files preserved"
+                )
             is_repair = operation.kind == "repair"
             checkpoint = (
                 ModelCacheRepairCheckpoint.model_validate(
@@ -2731,6 +4363,15 @@ class ModelCacheService:
     def _transfer_stop(self, operation_id: str) -> threading.Event:
         with self._lock:
             return self._cancel_events.setdefault(operation_id, threading.Event())
+
+    def _operation_cancellation_pending(self, operation_id: str) -> bool:
+        with self._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            return bool(
+                operation is not None
+                and operation.state != "cancelled"
+                and _operation_cancellation(operation) is not None
+            )
 
     @contextmanager
     def _sample_transfer(
@@ -2827,7 +4468,7 @@ class ModelCacheService:
         received = offset
         if offset == spec.expected_bytes and self._verify_file(part, spec):
             with self._lock:
-                if not self._publication_allowed(operation_id, set_digest):
+                if not self._publication_allowed(operation_id, set_digest, spec.sha256):
                     raise InterruptedError(
                         "model download was removed during verification"
                     )
@@ -2976,29 +4617,66 @@ class ModelCacheService:
         if (
             self._transfer_stop(operation_id).is_set()
             or self._closed.is_set()
-            or self.get_operation(operation_id).state == "cancelled"
+            or self._operation_cancellation_pending(operation_id)
         ):
             raise InterruptedError("model download cancelled during verification")
         # Removal and publication share this process lock.  The durable
         # operation state is checked while holding it, closing the race where
         # a worker verifies an object just as an operator removes its set.
         with self._lock:
-            if not self._publication_allowed(operation_id, set_digest):
+            if not self._publication_allowed(operation_id, set_digest, spec.sha256):
                 raise InterruptedError("model download was removed during verification")
             self._publish_object(spec, part)
             self._mark_artifact_verified(spec, set_digest)
 
-    def _publication_allowed(self, operation_id: str, set_digest: str) -> bool:
-        with self._session() as session:
-            operation = session.get(ModelCacheOperation, operation_id)
-            if operation is None or operation.state == "cancelled":
-                return False
-            payload = (
-                operation.payload if isinstance(operation.payload, Mapping) else {}
+    def _publication_allowed(
+        self, operation_id: str, set_digest: str, object_digest: str | None = None
+    ) -> bool:
+        try:
+            with self._session() as session:
+                operation = session.get(ModelCacheOperation, operation_id)
+                if operation is None or operation.state == "cancelled":
+                    return False
+                payload = _validated_operation_payload(operation)
+                if payload.get("cancellation") is not None:
+                    return False
+                if payload.get("removal_fence") is not None:
+                    return False
+                if session.get(ModelCacheSet, set_digest) is None:
+                    return False
+                if not reference_gate_is_open_nowait(
+                    session, ArtifactIdentity("model-set", set_digest)
+                ):
+                    return False
+                return object_digest is None or reference_gate_is_open_nowait(
+                    session, ArtifactIdentity("model-object", object_digest)
+                )
+        except ArtifactLifecycleError as error:
+            if isinstance(self._sessions, Session) or not error.retryable:
+                raise
+            raise _ArtifactWriterBusy(object_digest or set_digest) from error
+
+    @staticmethod
+    def _require_model_sets_open(
+        session: Session,
+        set_digests: Sequence[str],
+        *,
+        now: datetime,
+        object_digests: Sequence[str] = (),
+    ) -> dict[str, tuple[str, ...]]:
+        try:
+            return require_model_sets_open(
+                session,
+                set_digests,
+                now=now,
+                object_digests=object_digests,
             )
-            if payload.get("removal_fence") is not None:
-                return False
-            return session.get(ModelCacheSet, set_digest) is not None
+        except ArtifactLifecycleError as error:
+            raise ModelCacheConflict(
+                error.code,
+                error.detail,
+                recovery="retry" if error.retryable else None,
+            ) from error
 
     def _validate_http_download(self, spec: ArtifactSpec) -> None:
         try:
@@ -3413,7 +5091,10 @@ class ModelCacheService:
                 operation = session.get(
                     ModelCacheOperation, operation_id, with_for_update=True
                 )
-                if operation is not None and operation.state == "cancelled":
+                if operation is not None and (
+                    operation.state == "cancelled"
+                    or _operation_cancellation(operation) is not None
+                ):
                     self._transfer_stop(operation_id).set()
                     return
                 if operation is not None and operation.state in {"succeeded", "failed"}:
@@ -3580,48 +5261,109 @@ class ModelCacheService:
         detail: str,
     ) -> None:
         now = self._clock()
+        cancellation_pending = False
         with self._session(write=True) as session:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
             if operation is not None and operation.state == "cancelled":
                 return
-            row = session.get(ModelCacheSet, set_digest)
-            if row is not None:
-                row.state = "incomplete"
-                row.verified_bytes = self._verified_bytes(session, set_digest)
-                row.updated_at = now
-                row.last_error = detail[:512]
-            operation = session.get(ModelCacheOperation, operation_id)
-            if operation is not None:
-                operation.state = "partial"
-                operation.last_error = detail[:512]
-                payload = _validated_operation_payload(operation) | {
-                    "failure": _cache_failure(
-                        "model_cache.interrupted",
-                        f"{detail[:480]}; preserved bytes remain available to resume",
-                        retryable=True,
-                        recovery="resume",
+            cancellation_pending = (
+                operation is not None and _operation_cancellation(operation) is not None
+            )
+            if not cancellation_pending:
+                row = session.get(ModelCacheSet, set_digest)
+                if row is not None:
+                    row.state = "incomplete"
+                    row.verified_bytes = self._verified_bytes(session, set_digest)
+                    row.updated_at = now
+                    row.last_error = detail[:512]
+                if operation is not None:
+                    operation.state = "partial"
+                    operation.last_error = detail[:512]
+                    payload = _validated_operation_payload(operation) | {
+                        "failure": _cache_failure(
+                            "model_cache.interrupted",
+                            f"{detail[:480]}; preserved bytes remain available to resume",
+                            retryable=True,
+                            recovery="resume",
+                        )
+                    }
+                    payload.pop("claim", None)
+                    operation.payload = _write_operation_payload(
+                        operation.kind, payload
                     )
-                }
-                payload.pop("claim", None)
-                operation.payload = _write_operation_payload(operation.kind, payload)
-                _total, received = self._transfer_totals(payload)
-                previous_progress = _validated_operation_progress(operation)
-                operation.progress = self._progress(
-                    manifest,
-                    previous=previous_progress.model_dump(mode="json"),
-                    phase="downloading",
-                    completed_artifacts=previous_progress.completed_artifacts,
-                    downloaded_bytes=received,
-                    expected_bytes=_total,
-                    current_artifact_key=operation.current_artifact_key,
-                    transfer=mapping(payload.get("transfer")),
-                )
-                operation.progress = cache_phase(
-                    operation.progress, "downloading", now, waiting=True
-                )
-                operation.updated_at = now
+                    _total, received = self._transfer_totals(payload)
+                    previous_progress = _validated_operation_progress(operation)
+                    operation.progress = self._progress(
+                        manifest,
+                        previous=previous_progress.model_dump(mode="json"),
+                        phase="downloading",
+                        completed_artifacts=previous_progress.completed_artifacts,
+                        downloaded_bytes=received,
+                        expected_bytes=_total,
+                        current_artifact_key=operation.current_artifact_key,
+                        transfer=mapping(payload.get("transfer")),
+                    )
+                    operation.progress = cache_phase(
+                        operation.progress, "downloading", now, waiting=True
+                    )
+                    operation.updated_at = now
+        if cancellation_pending:
+            self._try_settle_cancellation(operation_id)
+
+    def _defer_artifact_writer(
+        self,
+        operation_id: str,
+        error: _ArtifactWriterBusy,
+        artifact_key: str | None,
+    ) -> None:
+        now = self._clock()
+        next_retry = now + timedelta(seconds=_RETRY_BASE_SECONDS)
+        with self._session(write=True) as session:
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update={"nowait": True}
+            )
+            if operation is None or operation.state != "running":
+                return
+            payload = _validated_operation_payload(operation)
+            if payload.get("cancellation") is not None:
+                self._transfer_stop(operation_id).set()
+                return
+            claim = payload.get("claim")
+            if isinstance(claim, Mapping) and (
+                claim.get("owner") != self._claim_owner
+                or _parse_iso(cast(str, claim["expires_at"])) <= now
+            ):
+                return
+            retry = dict(require_mapping(payload["retry"], "cache retry"))
+            retry.update(
+                next_retry_at=_iso(next_retry), retry_after_seconds=_RETRY_BASE_SECONDS
+            )
+            payload.update(
+                retry=retry,
+                failure=_cache_failure(
+                    error.code,
+                    error.detail,
+                    retryable=True,
+                    recovery="resume",
+                    retry_time=_iso(next_retry),
+                    retry_after_seconds=_RETRY_BASE_SECONDS,
+                    artifact_key=artifact_key,
+                ),
+            )
+            payload.pop("claim", None)
+            operation.payload = _write_operation_payload(operation.kind, payload)
+            operation.state = "queued"
+            operation.completed_at = None
+            operation.last_error = error.detail
+            operation.progress = cache_phase(
+                _validated_operation_progress(operation).model_dump(mode="json"),
+                "queued",
+                now,
+                waiting=True,
+            )
+            operation.updated_at = now
 
     def _finish_failed(
         self,
@@ -3631,6 +5373,9 @@ class ModelCacheService:
         error: BaseException,
         failed_artifact_key: str | None = None,
     ) -> None:
+        if isinstance(error, _ArtifactWriterBusy):
+            self._defer_artifact_writer(operation_id, error, failed_artifact_key)
+            return
         detail = (
             error.detail
             if isinstance(error, ModelCacheError)
@@ -3658,13 +5403,19 @@ class ModelCacheService:
             or re.fullmatch(r"[a-z][a-z0-9_.:-]{0,95}", failure_code) is None
         ):
             failure_code = "model_cache.operation_failed"
+        cancellation_pending = False
         with self._session(write=True) as session:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
             if operation is not None and operation.state == "cancelled":
                 return
-            row = session.get(ModelCacheSet, set_digest)
+            cancellation_pending = (
+                operation is not None and _operation_cancellation(operation) is not None
+            )
+            row = (
+                None if cancellation_pending else session.get(ModelCacheSet, set_digest)
+            )
             if row is not None:
                 row.verified_bytes = self._verified_bytes(session, set_digest)
                 manifest_document = manifest.document()
@@ -3681,7 +5432,11 @@ class ModelCacheService:
                 row.state = "cached" if all_valid else "needs-repair"
                 row.updated_at = now
                 row.last_error = detail[:512]
-            operation = session.get(ModelCacheOperation, operation_id)
+            operation = (
+                None
+                if cancellation_pending
+                else session.get(ModelCacheOperation, operation_id)
+            )
             if operation is not None:
                 retryable = _retryable_failure(error)
                 operation_payload = _validated_operation_payload(operation)
@@ -3765,6 +5520,8 @@ class ModelCacheService:
                     now,
                 )
                 operation.updated_at = now
+        if cancellation_pending:
+            self._try_settle_cancellation(operation_id)
 
     def retry(
         self,
@@ -3824,6 +5581,13 @@ class ModelCacheService:
                     "cache operation is not retryable",
                 )
             now = self._clock()
+            if previous.artifact_set_sha256 is None:
+                raise ModelCacheConflict(
+                    "model_cache.set_missing", "cache operation has no artifact set"
+                )
+            self._require_model_sets_open(
+                session, (previous.artifact_set_sha256,), now=now
+            )
             retry.update(automatic_attempts=1, operator_retries=operator_retries + 1)
             payload = previous_payload | {"retry": retry, "retry_of": previous.id}
             previous_progress = _validated_operation_progress(previous)
@@ -4022,6 +5786,13 @@ class ModelCacheService:
             }
             total, received = self._transfer_totals(payload)
             prior_progress = _validated_operation_progress(previous)
+            if previous.artifact_set_sha256 is None:
+                raise ModelCacheConflict(
+                    "model_cache.set_missing", "cache operation has no artifact set"
+                )
+            self._require_model_sets_open(
+                session, (previous.artifact_set_sha256,), now=now
+            )
             progress = self._progress(
                 manifest,
                 phase="queued",
@@ -4125,6 +5896,9 @@ class ModelCacheService:
                 )
             if operation.state == "cancelled":
                 return
+            payload = _validated_operation_payload(operation)
+            if payload.get("cancellation") is not None and state != "cancelled":
+                return
             if state == "running":
                 if operation.state in {"partial", "failed"}:
                     operation.attempt = int(operation.attempt) + 1
@@ -4138,7 +5912,6 @@ class ModelCacheService:
                     now,
                 )
             operation.updated_at = now
-            payload = _validated_operation_payload(operation)
             if state == "running":
                 payload.pop("failure", None)
             if result is not None:
@@ -4174,6 +5947,10 @@ class ModelCacheService:
                 )
             if operation.state == "cancelled":
                 return
+            payload = _validated_operation_payload(operation)
+            if payload.get("cancellation") is not None:
+                self._transfer_stop(operation_id).set()
+                return
             old_progress = _validated_operation_progress(operation)
             old_downloaded = old_progress.downloaded_bytes
             old_completed = old_progress.completed_artifacts
@@ -4188,18 +5965,80 @@ class ModelCacheService:
                 transfer=(
                     transfer
                     if transfer is not None
-                    else mapping(
-                        _validated_operation_payload(operation).get("transfer")
-                    )
+                    else mapping(payload.get("transfer"))
                 ),
             )
             operation.current_artifact_key = current_artifact_key
             operation.state = "running"
             operation.updated_at = now
 
-    def cancel_operation(self, operation_id: str) -> CacheOperationView:
-        """Stop queued/running transfers without deleting resumable cache files."""
-        with self._lock, self._session(write=True) as session:
+    def _artifact_effects_settled(
+        self, operation_id: str, manifest: ArtifactSetManifest
+    ) -> bool:
+        """Check this operation's issued object writers without blocking.
+
+        A lock holder writes its operation ID while holding the flock. A busy
+        lock owned by another operation is shared work and does not delay this
+        cancellation. Missing or malformed owner bytes are treated
+        conservatively because an older or interrupted worker may still hold
+        the lock.
+        """
+
+        for spec in _unique_artifacts(manifest.artifacts).values():
+            try:
+                descriptor = (self._root / "locks" / spec.sha256).open("a+b")
+            except OSError:
+                return False
+            with descriptor:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    descriptor.seek(0)
+                    owner = descriptor.read(36).decode("ascii", errors="ignore")
+                    if not owner or owner == operation_id:
+                        return False
+                    continue
+                # Acquiring the nonblocking lock proves no writer is
+                # currently effecting this object. A stale worker that
+                # starts later must read the durable cancellation fence.
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        return True
+
+    def _try_settle_cancellation(self, operation_id: str) -> bool:
+        """Finalize a durable cancel intent only after its effects are idle."""
+
+        with self._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            if operation is None:
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
+            if operation.state == "cancelled":
+                return True
+            cancellation = _operation_cancellation(operation)
+            if cancellation is None:
+                return False
+            if operation.kind != "download" or operation.artifact_set_sha256 is None:
+                return False
+            payload = _validated_operation_payload(operation)
+            manifest = ArtifactSetManifest.from_document(payload["manifest"])
+            set_digest = operation.artifact_set_sha256
+
+        if not self._artifact_effects_settled(operation_id, manifest):
+            return False
+
+        unique_specs = _unique_artifacts(manifest.artifacts)
+        stored_bytes = {
+            digest: self._stored_object(digest, spec.expected_bytes)
+            for digest, spec in unique_specs.items()
+        }
+        verified_bytes = sum(value or 0 for value in stored_bytes.values())
+        coverage_complete = all(
+            stored_bytes[digest] == spec.expected_bytes
+            for digest, spec in unique_specs.items()
+        )
+        now = self._clock()
+        with self._session(write=True) as session:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
@@ -4208,31 +6047,196 @@ class ModelCacheService:
                     "model_cache.operation_missing", "cache operation was not found"
                 )
             if operation.state == "cancelled":
-                return self._operation_view(operation)
-            if operation.kind not in {"download", "repair"} or operation.state not in {
-                "queued",
-                "running",
-                "partial",
-            }:
-                raise ModelCacheConflict(
-                    "model_cache.not_cancellable", "cache transfer is not active"
-                )
-            operation.state = "cancelled"
-            operation.completed_at = operation.updated_at = self._clock()
+                return True
+            current_cancellation = _operation_cancellation(operation)
+            if current_cancellation != cancellation:
+                return False
             payload = _validated_operation_payload(operation)
             payload.pop("claim", None)
+            payload.pop("failure", None)
             operation.payload = _write_operation_payload(operation.kind, payload)
+            operation.state = "cancelled"
+            operation.completed_at = now
+            operation.updated_at = now
             operation.progress = cache_phase(
                 _validated_operation_progress(operation).model_dump(mode="json"),
-                "failed",
-                self._clock(),
+                "completed",
+                now,
             )
-            row = session.get(ModelCacheSet, operation.artifact_set_sha256)
-            if row is not None and row.state != "cached":
-                row.state = "incomplete"
-                row.updated_at = self._clock()
-            self._transfer_stop(operation_id).set()
-            return self._operation_view(operation)
+            operation.current_artifact_key = None
+            sibling_work = session.scalar(
+                select(func.count())
+                .select_from(ModelCacheOperation)
+                .where(
+                    ModelCacheOperation.artifact_set_sha256 == set_digest,
+                    ModelCacheOperation.id != operation_id,
+                    ModelCacheOperation.kind.in_(["download", "repair"]),
+                    ModelCacheOperation.state.in_(["queued", "running", "partial"]),
+                )
+            )
+            row = session.get(ModelCacheSet, set_digest)
+            if row is not None and not sibling_work:
+                row.state = "cached" if coverage_complete else "incomplete"
+                row.verified_bytes = verified_bytes
+                row.updated_at = now
+                if coverage_complete:
+                    row.verified_at = now
+                    row.last_error = None
+        return True
+
+    def _reconcile_pending_cancellations(self) -> int:
+        """Resume cancellation settlement after a Controller process restart."""
+
+        with self._session() as session:
+            operation_ids = list(
+                session.scalars(
+                    select(ModelCacheOperation.id)
+                    .where(
+                        ModelCacheOperation.kind == "download",
+                        ModelCacheOperation.state.in_(["queued", "running", "partial"]),
+                    )
+                    .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
+                )
+            )
+        settled = 0
+        for operation_id in operation_ids:
+            if self._operation_cancellation_pending(operation_id):
+                settled += int(self._try_settle_cancellation(operation_id))
+        return settled
+
+    def _cancellation_intent(
+        self, *, actor: str, request_key: str, reason: str
+    ) -> ModelCacheCancellation:
+        try:
+            request = ModelCacheCancellationRequest.model_validate(
+                {"request_key": request_key, "reason": reason}
+            )
+            return ModelCacheCancellation(
+                request_key=request.request_key,
+                actor=actor,
+                reason=request.reason,
+                requested_at=_iso(self._clock()) or "",
+            )
+        except (TypeError, ValueError, ValidationError) as error:
+            raise ModelCacheConflict(
+                "model_cache.cancellation_invalid",
+                "cancellation identity, actor, or reason is invalid",
+            ) from error
+
+    def _persist_cancellation(
+        self,
+        session: Session,
+        operation_id: str,
+        cancellation: ModelCacheCancellation,
+        *,
+        preserve_existing_owner: bool,
+    ) -> bool:
+        operation = session.scalar(
+            select(ModelCacheOperation)
+            .where(ModelCacheOperation.id == operation_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if operation is None:
+            raise ModelCacheNotFound(
+                "model_cache.operation_missing", "cache operation was not found"
+            )
+        payload = _validated_operation_payload(operation)
+        existing = _operation_cancellation(operation)
+        if existing is not None:
+            stable_fields = ("request_key", "actor", "reason")
+            if any(
+                existing[field] != getattr(cancellation, field)
+                for field in stable_fields
+            ):
+                if preserve_existing_owner:
+                    return False
+                raise ModelCacheConflict(
+                    "model_cache.cancellation_key_reused",
+                    "operation already has a different cancellation request",
+                )
+            return False
+        if (
+            operation.kind != "download"
+            or operation.state not in {"queued", "running", "partial"}
+            or operation.request_key == cancellation.request_key
+        ):
+            raise ModelCacheConflict(
+                "model_cache.not_cancellable",
+                "model download is not active or cancellation key conflicts",
+            )
+        payload["cancellation"] = cancellation.model_dump(mode="json")
+        payload.pop("failure", None)
+        payload.pop("result", None)
+        operation.payload = _write_operation_payload(operation.kind, payload)
+        now = self._clock()
+        operation.progress = cache_phase(
+            _validated_operation_progress(operation).model_dump(mode="json"),
+            "cancelling",
+            now,
+            waiting=True,
+        )
+        operation.completed_at = None
+        operation.updated_at = now
+        return True
+
+    def cancel_operation_in_session(
+        self,
+        session: Session,
+        operation_id: str,
+        *,
+        actor: str,
+        request_key: str,
+        reason: str,
+    ) -> bool:
+        """Persist a parent-owned cancel intent in its consumer transaction.
+
+        A pre-existing cancellation remains owned by its original actor and
+        request. The parent waits for that exact child to settle instead of
+        replacing its durable intent.
+        """
+
+        cancellation = self._cancellation_intent(
+            actor=actor, request_key=request_key, reason=reason
+        )
+        return self._persist_cancellation(
+            session,
+            operation_id,
+            cancellation,
+            preserve_existing_owner=True,
+        )
+
+    def signal_cancelled_operation(self, operation_id: str) -> None:
+        """Signal and attempt settlement only after the caller's commit."""
+
+        self._transfer_stop(operation_id).set()
+        self._try_settle_cancellation(operation_id)
+
+    def cancel_operation(
+        self,
+        operation_id: str,
+        *,
+        actor: str,
+        request_key: str,
+        reason: str,
+    ) -> CacheOperationView:
+        """Persist cancellation intent before signalling local transfer workers."""
+
+        cancellation = self._cancellation_intent(
+            actor=actor, request_key=request_key, reason=reason
+        )
+        with self._session(write=True) as session:
+            self._persist_cancellation(
+                session,
+                operation_id,
+                cancellation,
+                preserve_existing_owner=False,
+            )
+
+        # The committed payload is the authority. This process-local event is
+        # only a prompt to workers already sampling or reading a source.
+        self.signal_cancelled_operation(operation_id)
+        return self.get_operation(operation_id)
 
     def get_operation(self, operation_id: str) -> CacheOperationView:
         with self._session() as session:
@@ -4270,6 +6274,30 @@ class ModelCacheService:
                 "remove" if operation.kind == "remove" else "download"
             )
             return self._operation_view(operation), action, selector
+
+    def get_operator_request(
+        self, request_key: str, *, actor: str
+    ) -> tuple[CacheOperationView, ModelCacheOperatorAction, str]:
+        """Resolve an operator key without exposing another issuer's binding."""
+
+        request_key = _request_key(request_key)
+        with self._session() as session:
+            operation = session.scalar(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == request_key,
+                    ModelCacheOperation.actor == actor,
+                )
+            )
+            if (
+                operation is None
+                or operation.kind not in {"download", "remove"}
+                or _validated_operation_payload(operation).get("selector") is None
+            ):
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
+            operation_id = operation.id
+        return self.get_operator_operation(operation_id)
 
     def list_operations(self, *, limit: int = 100) -> tuple[CacheOperationView, ...]:
         if not 1 <= limit <= 100:
@@ -4330,16 +6358,29 @@ class ModelCacheService:
     def _operation_view(operation: ModelCacheOperation) -> CacheOperationView:
         payload = _validated_operation_payload(operation)
         progress = _validated_operation_progress(operation)
+        cancellation = _operation_cancellation(operation)
         result = payload.get("result")
         failure = ModelCacheService._canonical_failure(operation)
+        model_digest = payload.get("model_content_sha256")
+        stored_review_digest = payload.get("review_digest")
         view = CacheOperationView(
             id=operation.id,
             request_key=operation.request_key,
             kind=operation.kind,
-            state=operation.state,
+            state=(
+                "cancelling"
+                if cancellation is not None and operation.state != "cancelled"
+                else operation.state
+            ),
             attempt=int(operation.attempt),
+            model_content_sha256=(
+                model_digest if isinstance(model_digest, str) else None
+            ),
             artifact_set_sha256=operation.artifact_set_sha256,
             plan_digest=operation.plan_digest,
+            review_digest=(
+                stored_review_digest if isinstance(stored_review_digest, str) else None
+            ),
             progress=serialize_json_value(progress),  # type: ignore[arg-type]
             result=(
                 parse_model_cache_result(operation.kind, result)
@@ -4352,6 +6393,7 @@ class ModelCacheService:
             completed_at=_iso(operation.completed_at),
             retryable=(failure is not None and failure["retryable"] is True),
             failure=failure,
+            cancellation=cancellation,
         )
         ModelCacheOperationResponse.model_validate(view, from_attributes=True)
         return view
@@ -4384,7 +6426,9 @@ class ModelCacheService:
                 session.scalar(
                     select(func.count())
                     .select_from(ModelCacheOperation)
-                    .where(ModelCacheOperation.kind.in_(["download", "repair"]))
+                    .where(
+                        ModelCacheOperation.kind.in_(["download", "repair", "remove"])
+                    )
                     .where(
                         ModelCacheOperation.state.in_(["queued", "running", "partial"])
                     )
@@ -4403,6 +6447,7 @@ class ModelCacheService:
         """
         if not 1 <= limit <= 16:
             raise ValueError("cache worker batch limit is invalid")
+        self._reconcile_pending_cancellations()
         rows = self._claim_operations(limit=limit, respect_backoff=False)
         for operation_id, kind in rows:
             with self._session() as session:
@@ -4413,7 +6458,7 @@ class ModelCacheService:
                     and operation.payload.get("force_refresh") is True
                 )
             self._run_download(operation_id, force=kind == "repair" or refresh)
-        return len(rows)
+        return len(rows) + self.advance_removals(limit=limit)
 
     def tick(self, *, limit: int | None = None) -> int:
         """Claim and submit due operations without blocking the worker loop."""
@@ -4429,6 +6474,14 @@ class ModelCacheService:
         requested = self._max_parallel_downloads if limit is None else limit
         if not 1 <= requested <= _MAX_PARALLEL_DOWNLOADS:
             raise ValueError("cache worker batch limit is invalid")
+        self._reconcile_pending_cancellations()
+        # Removal steps use the same Controller model-cache worker boundary,
+        # but never occupy a transfer slot while waiting: each artifact lock
+        # and SQL ownership check is nonblocking and a contended step is
+        # durably deferred before this bounded local filesystem action returns.
+        removal_steps = self.advance_removals(
+            limit=min(requested, self._max_parallel_downloads)
+        )
         with self._lock:
             completed = self._advance_background_operations()
             capacity = max(
@@ -4448,7 +6501,7 @@ class ModelCacheService:
                 ),
             )
             if not capacity:
-                return completed
+                return completed + removal_steps
             claimed = self._claim_operations(
                 limit=min(requested, capacity), respect_backoff=True
             )
@@ -4493,7 +6546,7 @@ class ModelCacheService:
                         break
                 if not progressed:
                     break
-            return completed + len(claimed)
+            return completed + len(claimed) + removal_steps
 
     def _available_transfer_slots(self) -> int:
         return max(
@@ -4711,12 +6764,17 @@ class ModelCacheService:
                 operation = session.get(ModelCacheOperation, operation_id)
                 if operation is None:
                     continue
-                if operation.state == "cancelled":
+                operation_payload = _validated_operation_payload(operation)
+                if (
+                    operation.state == "cancelled"
+                    or operation_payload.get("cancellation") is not None
+                ):
                     self._transfer_stop(operation_id).set()
                     record = self._background_operations[operation_id]
-                    record["failure"] = InterruptedError("download cancelled")
+                    record["failure"] = InterruptedError(
+                        "model download cancellation was accepted"
+                    )
                     continue
-                operation_payload = _validated_operation_payload(operation)
                 claim = operation_payload.get("claim")
                 if (
                     isinstance(claim, Mapping)
@@ -4750,18 +6808,28 @@ class ModelCacheService:
             transfer=self._transfer_state_for_operation(operation_id),
         )
         now = self._clock()
+        publication_allowed = False
         with self._lock:
-            if not self._publication_allowed(operation_id, set_digest):
+            try:
+                publication_allowed = self._publication_allowed(
+                    operation_id, set_digest
+                )
+            except _ArtifactWriterBusy as error:
+                self._defer_artifact_writer(operation_id, error, None)
                 return
-            with self._session(write=True) as session:
-                row = session.get(ModelCacheSet, set_digest)
-                if row is not None:
-                    row.state = "cached"
-                    row.verified_bytes = manifest.expected_bytes
-                    row.verified_at = now
-                    row.updated_at = now
-                    row.last_accessed_at = now
-                    row.last_error = None
+            if publication_allowed:
+                with self._session(write=True) as session:
+                    row = session.get(ModelCacheSet, set_digest)
+                    if row is not None:
+                        row.state = "cached"
+                        row.verified_bytes = manifest.expected_bytes
+                        row.verified_at = now
+                        row.updated_at = now
+                        row.last_accessed_at = now
+                        row.last_error = None
+        if not publication_allowed:
+            self._try_settle_cancellation(operation_id)
+            return
         self._set_operation_state(
             operation_id,
             "succeeded",
@@ -4801,7 +6869,6 @@ class ModelCacheService:
                         ModelCacheOperation.state.in_(["queued", "running", "partial"])
                     )
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
-                    .limit(max(limit * 4, limit))
                 )
             )
             for operation_id in candidate_ids:
@@ -4822,6 +6889,8 @@ class ModelCacheService:
                 if operation is None:
                     continue
                 payload = _validated_operation_payload(operation)
+                if payload.get("cancellation") is not None:
+                    continue
                 retry = payload.get("retry")
                 retry = dict(retry) if isinstance(retry, Mapping) else None
                 if retry is None and operation.kind in {"download", "repair"}:
@@ -5020,6 +7089,8 @@ class ModelCacheService:
                     )
                 operation_id = existing.id
             else:
+                now = self._clock()
+                self._require_model_sets_open(session, (digest,), now=now)
                 operation = ModelCacheOperation(
                     request_key=request_key,
                     schema_version=SCHEMA_VERSION,
@@ -5037,8 +7108,8 @@ class ModelCacheService:
                         ),
                     ),
                     actor=actor,
-                    created_at=self._clock(),
-                    updated_at=self._clock(),
+                    created_at=now,
+                    updated_at=now,
                 )
                 session.add(operation)
                 session.flush()
@@ -5138,6 +7209,7 @@ class ModelCacheService:
         limit: int = 101,
         state: str | None = None,
         node_id: str | None = None,
+        request_id: str | None = None,
     ) -> dict[str, object]:
         """Return cache operations for the global Activity provider seam.
 
@@ -5146,6 +7218,8 @@ class ModelCacheService:
         reporting the unfiltered-by-cursor total for the requested state.
         ``after`` is the already authenticated global activity boundary.
         """
+        from .operation_api import _activity_keyset_filter
+
         if not 1 <= limit <= 101:
             raise ValueError("operation provider page limit is invalid")
         if state is not None and (not isinstance(state, str) or not state.strip()):
@@ -5166,16 +7240,14 @@ class ModelCacheService:
             filters = []
             if state is not None:
                 filters.append(ModelCacheOperation.state == state)
-            if after is not None:
-                boundary_time, boundary_id = after
-                boundary_time = _datetime(boundary_time)
-                filters.append(
-                    (ModelCacheOperation.created_at < boundary_time)
-                    | (
-                        (ModelCacheOperation.created_at == boundary_time)
-                        & (ModelCacheOperation.id < boundary_id)
-                    )
-                )
+            if request_id is not None:
+                filters.append(ModelCacheOperation.request_key == request_id)
+            boundary = None if after is None else (_datetime(after[0]), after[1])
+            keyset = _activity_keyset_filter(
+                ModelCacheOperation.created_at, ModelCacheOperation.id, "", boundary
+            )
+            if keyset is not None:
+                filters.append(keyset)
             rows = list(
                 session.scalars(
                     select(ModelCacheOperation)
@@ -5194,6 +7266,8 @@ class ModelCacheService:
             total_filters = []
             if state is not None:
                 total_filters.append(ModelCacheOperation.state == state)
+            if request_id is not None:
+                total_filters.append(ModelCacheOperation.request_key == request_id)
             total = int(
                 session.scalar(
                     select(func.count())
@@ -6163,6 +8237,14 @@ class ModelCacheService:
 
     def _partial_path(self, set_digest: str, digest: str) -> Path:
         return self._root / "partials" / set_digest / f"{digest}.part"
+
+
+def _model_selector(value: str) -> str:
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= 256:
+        raise ModelCacheResolutionError(
+            "model_cache.selector_invalid", "model selector is required"
+        )
+    return value.strip()
 
 
 def _request_key(value: str) -> str:

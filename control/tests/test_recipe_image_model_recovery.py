@@ -171,13 +171,18 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         model_cache=cache,
         clock=lambda: datetime.now(UTC),
     )
-    resumed_parent = service.start(
+    seeded_parent = service.start(
         recipe_revision_id,
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000802",
     )
-    assert resumed_parent.model_child is not None
-    assert resumed_parent.model_child["id"] == seeded.id
+    # Admission queues intent; the worker resolves/adopts its model child.
+    assert service.run_pending(limit=1) == 1
+    seeded_parent = service.get(seeded_parent.id)
+    assert seeded_parent.state == "succeeded"
+    assert seeded_parent.model_child is not None
+    assert seeded_parent.model_child["id"] == seeded.id
+    assert image_transport.calls == 1
 
     missing_digest = hashlib.sha256(b"weights-a").hexdigest()
     retained_digest = hashlib.sha256(b"weights-b").hexdigest()
@@ -192,10 +197,16 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000803",
     )
-    assert new_parent.model_child is not None
-    assert new_parent.model_child["id"] != seeded.id
+    resumed_parent = service.start(
+        recipe_revision_id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000804",
+    )
 
     assert service.run_pending(limit=2) == 2
+    new_parent = service.get(new_parent.id)
+    assert new_parent.model_child is not None
+    assert new_parent.model_child["id"] != seeded.id
     resumed_waiting = service.get(resumed_parent.id)
     assert resumed_waiting.state == "partial"
     assert resumed_waiting.model_child is not None

@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DistributionObject
@@ -38,6 +38,7 @@ from vonk_control.models import (
     AgentPresence,
     Base,
     Job,
+    NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
     RuntimeImageAuthorization,
@@ -47,6 +48,8 @@ from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
+    RunSwitchPhase,
+    RunSwitchPlan,
     RunSwitchPreviewRequest,
     SparkGroup,
     SparkGroupNode,
@@ -59,6 +62,7 @@ from vonk_control.run_switch_operations import (
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
+    RuntimeImageReceipt,
     persist_runtime_image_receipt,
     prepare_runtime_image,
 )
@@ -340,8 +344,10 @@ class _TargetExecutor(CompositeDistributionPhaseExecutor):
         )
 
 
-def _seed(*, dual: bool = False) -> tuple[sessionmaker[Session], str, str, str]:
-    engine = create_engine(
+def _seed(
+    *, dual: bool = False, engine: Engine | None = None
+) -> tuple[sessionmaker[Session], str, str, str]:
+    engine = engine or create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
@@ -394,29 +400,33 @@ def _seed(*, dual: bool = False) -> tuple[sessionmaker[Session], str, str, str]:
             fingerprint = (
                 "fingerprint-direct" if index == 0 else f"fingerprint-direct-{index}"
             )
-            session.add_all(
-                [
-                    AgentNode(
-                        node_id=node_id,
-                        state="active",
-                        architecture="linux-arm64",
-                        capabilities=capabilities,
-                    ),
-                    AgentCertificate(
-                        serial=serial,
-                        node_id=node_id,
-                        fingerprint=fingerprint,
-                        not_before=NOW,
-                        not_after=NOW.replace(year=2027),
-                    ),
-                    AgentPresence(
-                        node_id=node_id,
-                        certificate_serial=serial,
-                        certificate_fingerprint=fingerprint,
-                        management_address=f"10.0.0.{42 + index}",
-                        observed_at=NOW,
-                    ),
-                ]
+            session.add(
+                AgentNode(
+                    node_id=node_id,
+                    state="active",
+                    architecture="linux-arm64",
+                    capabilities=capabilities,
+                )
+            )
+            session.flush()
+            session.add(
+                AgentCertificate(
+                    serial=serial,
+                    node_id=node_id,
+                    fingerprint=fingerprint,
+                    not_before=NOW,
+                    not_after=NOW.replace(year=2027),
+                )
+            )
+            session.flush()
+            session.add(
+                AgentPresence(
+                    node_id=node_id,
+                    certificate_serial=serial,
+                    certificate_fingerprint=fingerprint,
+                    management_address=f"10.0.0.{42 + index}",
+                    observed_at=NOW,
+                )
             )
     for index, node_id in enumerate(node_ids):
         InventoryRepository(sessions, clock=lambda: NOW).record(
@@ -434,6 +444,7 @@ def _seed(*, dual: bool = False) -> tuple[sessionmaker[Session], str, str, str]:
                 capabilities=tuple(capabilities),
                 fabric_address=f"192.168.100.{10 + index}" if dual else None,
                 fabric_bandwidth_mbps=200000 if dual else None,
+                memory_pool="shared",
             )
         )
     mapping_service = ClusterMappingService(sessions)
@@ -450,8 +461,9 @@ def _make_service(
     tamper_db: str | None = None,
     availability_key: str | None = None,
     dual: bool = False,
+    engine: Engine | None = None,
 ):
-    sessions, revision_id, recipe_digest, mapping_id = _seed(dual=dual)
+    sessions, revision_id, recipe_digest, mapping_id = _seed(dual=dual, engine=engine)
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime")
     events: list[str] = []
     if availability_key is not None:
@@ -477,7 +489,13 @@ def _make_service(
             )
         events.append("availability-receipt-recorded")
 
-    def prepare_and_persist(document, runtime_spec, build):
+    def prepare_and_persist(
+        document,
+        runtime_spec,
+        build,
+        *,
+        before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
+    ):
         assert build is None
         receipt = prepare_runtime_image(
             RecipeDefinition.model_validate(document),
@@ -485,6 +503,7 @@ def _make_service(
             storage=storage,
             transport=_Transport(events),
             now=NOW,
+            before_publish=before_publish,
         )
         if persist_db:
             with sessions.begin() as session:
@@ -566,9 +585,66 @@ def _make_service(
         mappings=ClusterMappingService(sessions),
         artifacts=_Inspector(),
         artifact_phase_executor=executor,
+        published_image_receipt=storage.find_published,
         memory_floor_bytes=50,
     )
     return service, sessions, revision_id, recipe_digest, mapping_id, executor, events
+
+
+def _seed_runtime_image_owner(
+    sessions: sessionmaker[Session],
+    plan: RunSwitchPlan,
+    phase: RunSwitchPhase,
+    *,
+    actor: str = "test",
+) -> tuple[str, str, dict[str, object]]:
+    """Create one current RunSwitch checkpoint for the isolated callback tests."""
+
+    operation_id = str(uuid.uuid4())
+    request_key = str(uuid.uuid4())
+    ordinal = 1
+    target_ids = [node.node_id for node in plan.spark_group.nodes]
+    progress: dict[str, object] = {
+        "phase_index": phase.index,
+        "item_index": 0,
+        "phase": phase.kind,
+        "subphase": phase.subphase,
+        "completed_phases": [],
+        "workload_intent_ordinal": ordinal,
+    }
+    payload = {
+        "schema_version": 2,
+        "operation_kind": "recipe.run-switch.v2",
+        "action": plan.action,
+        "plan_digest": plan.plan_digest,
+        "plan": plan.model_dump(mode="json"),
+        "workload_intent_ordinal": ordinal,
+    }
+    with sessions.begin() as session:
+        for node_id in target_ids:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.workload_intent_ordinal = ordinal
+        session.add(
+            Job(
+                id=operation_id,
+                request_id=request_key,
+                kind="recipe.run-switch.v2",
+                state="running",
+                actor=actor,
+                authority_revision=plan.recipe_content_sha256 or plan.plan_digest,
+                targets=target_ids,
+                payload_digest=hashlib.sha256(
+                    json.dumps(payload, sort_keys=True).encode()
+                ).hexdigest(),
+                payload=payload,
+                result=progress,
+                current_attempt=1,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    return operation_id, request_key, progress
 
 
 def test_dual_spark_preparation_authorizes_both_execution_roles_for_one_image(
@@ -626,6 +702,141 @@ def test_dual_spark_preparation_authorizes_both_execution_roles_for_one_image(
         assert len({receipt.effective_execution_key for receipt in receipts}) == 2
         assert {receipt.oci_archive_sha256 for receipt in receipts} == {ARCHIVE_DIGEST}
     assert events.count("runtime-image-pulled") == 1
+
+
+def test_published_authorization_does_not_make_missing_archive_ready(
+    tmp_path: Path,
+) -> None:
+    service, sessions, revision_id, _digest, _mapping, executor, events = _make_service(
+        tmp_path, availability_key="a" * 64
+    )
+    storage = FilesystemRuntimeImageStorage(tmp_path / "runtime")
+    with sessions() as session:
+        authorization = session.scalar(select(RuntimeImageAuthorization))
+        assert authorization is not None
+        archive_digest = authorization.oci_archive_sha256
+        image_bytes = authorization.image_bytes
+        approved_identity = (
+            authorization.original_content_digest,
+            authorization.registry_manifest_digest,
+            authorization.platform_manifest_digest,
+            authorization.local_image_config_id,
+            authorization.oci_archive_sha256,
+            authorization.image_bytes,
+            authorization.build_id,
+        )
+    approved_receipt = storage.read_receipt(archive_digest)
+    # Keep the SQL authorization and receipt index, but remove the actual
+    # archive. A Spark-local copy must not make the Controller cache look ready:
+    # compile/install still needs the exact Controller receipt.
+    (storage.root / archive_digest).unlink()
+    with sessions.begin() as session:
+        session.add(
+            NodeArtifact(
+                node_id=NODE_ID,
+                kind="image",
+                digest=PLATFORM_DIGEST.removeprefix("sha256:"),
+                source="test-spark-cache",
+                size_bytes=image_bytes,
+                state="verified",
+                ref_count=1,
+                verified_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    request = _direct_request(revision_id)
+    plan = service.preview(request, actor="test")
+
+    assert plan.runtime_storage.image_digest == PLATFORM_DIGEST
+    assert plan.runtime_storage.oci_layout_sha256 == ARCHIVE_DIGEST
+    assert plan.runtime_storage.image_bytes == image_bytes
+    assert plan.runtime_storage.missing_nas_bytes == image_bytes
+    assert plan.runtime_storage.nas_coverage == "partial"
+    assert plan.preparation is not None
+    assert plan.preparation.runtime_image.controller.state == "missing"
+    assert plan.preparation.runtime_image.controller.verified_bytes == 0
+    assert plan.preparation.runtime_image.controller.missing_bytes == image_bytes
+    assert plan.preparation.ready is False
+    assert any(
+        phase.kind == "prepare" and phase.subphase == "runtime-image"
+        for phase in plan.phases
+    )
+
+    # The durable worker preparer reuses the same pinned registry digest and
+    # writes its complete managed receipt and SQL authorization before the
+    # restored bytes can be admitted for compilation.
+    phase = next(
+        phase
+        for phase in plan.phases
+        if phase.kind == "prepare" and phase.subphase == "runtime-image"
+    )
+    operation_id, request_key, progress = _seed_runtime_image_owner(
+        sessions, plan, phase
+    )
+    del operation_id
+    recovered = executor._prepare_runtime_image(
+        plan,
+        phase,
+        item_index=0,
+        actor="test",
+        request_key=request_key,
+        progress=progress,
+    )
+    assert recovered is not None
+    assert events.count("runtime-image-pulled") == 2
+    assert "runtime-image-db-committed" in events
+    recovered_receipt = require_mapping(
+        recovered["runtime_image"], "recovered runtime image receipt"
+    )
+    assert recovered_receipt == approved_receipt.to_mapping()
+    actual_receipt = storage.find_published(
+        REGISTRY_DIGEST,
+        expected_architecture="linux/arm64",
+        expected_runtime_interface="vonk.runtime.v1",
+    )
+    assert actual_receipt is not None
+    assert actual_receipt.to_mapping() == approved_receipt.to_mapping()
+    with sessions() as session:
+        authorizations = list(
+            session.scalars(
+                select(RuntimeImageAuthorization).where(
+                    RuntimeImageAuthorization.recipe_revision_id == revision_id,
+                    RuntimeImageAuthorization.registry_manifest_digest
+                    == REGISTRY_DIGEST,
+                )
+            )
+        )
+        assert authorizations
+        assert {
+            (
+                row.original_content_digest,
+                row.registry_manifest_digest,
+                row.platform_manifest_digest,
+                row.local_image_config_id,
+                row.oci_archive_sha256,
+                row.image_bytes,
+                row.build_id,
+            )
+            for row in authorizations
+        } == {approved_identity}
+
+    restored = service.preview(request, actor="test")
+    assert restored.allowed is True
+    assert restored.runtime_storage.image_digest == plan.runtime_storage.image_digest
+    assert (
+        restored.runtime_storage.oci_layout_sha256
+        == plan.runtime_storage.oci_layout_sha256
+    )
+    assert restored.runtime_storage.image_bytes == plan.runtime_storage.image_bytes
+    assert restored.runtime_storage.missing_nas_bytes == 0
+    assert restored.runtime_storage.nas_coverage == "complete"
+    assert restored.preparation is not None
+    assert restored.preparation.runtime_image.controller.state == "ready"
+    # This fixture deliberately does not back the model bytes with managed
+    # storage, so image recovery must not overstate the whole rollout.
+    assert restored.preparation.ready is False
+    assert all(phase.subphase != "runtime-image" for phase in restored.phases)
 
 
 def test_direct_published_image_real_run_switch_path_persists_receipt_before_compile_and_uses_platform_identity(

@@ -30,6 +30,8 @@ class FleetProfileIntendedConfiguration:
             assignments (list['FleetProfileAssignment']):
             installation_policy (FleetProfileIntendedConfigurationInstallationPolicy):
             profile_digest (str):
+            reviewed_application_id (str):
+            reviewed_plan_digest (str):
             scope (FleetProfileScope): Frozen complete fleet boundary for a single execution plan.
 
                 User profiles do not author this field.  It is captured from the enrolled
@@ -40,6 +42,8 @@ class FleetProfileIntendedConfiguration:
     assignments: list['FleetProfileAssignment']
     installation_policy: FleetProfileIntendedConfigurationInstallationPolicy
     profile_digest: str
+    reviewed_application_id: str
+    reviewed_plan_digest: str
     scope: 'FleetProfileScope'
 
 
@@ -60,6 +64,10 @@ class FleetProfileIntendedConfiguration:
 
         profile_digest = self.profile_digest
 
+        reviewed_application_id = self.reviewed_application_id
+
+        reviewed_plan_digest = self.reviewed_plan_digest
+
         scope = self.scope.to_dict()
 
 
@@ -69,6 +77,8 @@ class FleetProfileIntendedConfiguration:
             "assignments": assignments,
             "installation_policy": installation_policy,
             "profile_digest": profile_digest,
+            "reviewed_application_id": reviewed_application_id,
+            "reviewed_plan_digest": reviewed_plan_digest,
             "scope": scope,
         })
 
@@ -98,6 +108,10 @@ class FleetProfileIntendedConfiguration:
 
         profile_digest = d.pop("profile_digest")
 
+        reviewed_application_id = d.pop("reviewed_application_id")
+
+        reviewed_plan_digest = d.pop("reviewed_plan_digest")
+
         scope = FleetProfileScope.from_dict(d.pop("scope"))
 
 
@@ -107,6 +121,8 @@ class FleetProfileIntendedConfiguration:
             assignments=assignments,
             installation_policy=installation_policy,
             profile_digest=profile_digest,
+            reviewed_application_id=reviewed_application_id,
+            reviewed_plan_digest=reviewed_plan_digest,
             scope=scope,
         )
 

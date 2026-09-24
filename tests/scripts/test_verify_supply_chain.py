@@ -43,7 +43,7 @@ def _copy(tmp_path: Path) -> Path:
         "control/uv.lock",
         "control/packaging/public-contracts.lock",
         "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
-        "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl",
+        "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl",
         ".github/workflows/validate-recipe-library.yml",
         "control/src/vonk_control/catalog_entities.py",
         "control/src/vonk_control/catalog_service.py",
@@ -86,6 +86,8 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/source_bundles.py",
         "control/src/vonk_control/strict_json.py",
         "src/cluster_profiles/control_client.py",
+        "src/cluster_profiles/control_transport.py",
+        "src/cluster_profiles/control_limits.py",
         "src/cluster_profiles/schemas/control-openapi.json",
         "scripts/generate-control-clients",
         "control/src/vonk_control/compiled_execution_plan.py",
@@ -104,8 +106,12 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/model_cache_api.py",
         "control/src/vonk_control/model_cache_contract.py",
         "control/src/vonk_control/recipe_builds.py",
+        "control/src/vonk_control/recipe_build_cancellation.py",
         "control/src/vonk_control/recipe_operations.py",
         "control/src/vonk_control/recipe_image_availability.py",
+        "control/src/vonk_control/recipe_update_batches.py",
+        "control/src/vonk_control/recipe_update_contract.py",
+        "control/src/vonk_control/recipe_availability_intent.py",
         "control/src/vonk_control/recipe_image_availability_api.py",
         "control/src/vonk_control/operation_contract.py",
         "control/src/vonk_control/operation_api.py",
@@ -206,7 +212,7 @@ def _copy(tmp_path: Path) -> Path:
 def _rewrite_installed_protocol_wheel(dockerfile: Path, replacement: str) -> None:
     """Mutate the wheel argument in the pip step, independent of other inputs."""
 
-    wheel = "/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
+    wheel = "/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
     lines = dockerfile.read_text().splitlines(keepends=True)
     candidates = [
         index
@@ -502,6 +508,8 @@ def test_supply_chain_manifest_binds_canonical_recipe_execution_supply_chain(
         "control/src/vonk_control/fleet_projection.py",
         "control/src/vonk_control/strict_json.py",
         "src/cluster_profiles/control_client.py",
+        "src/cluster_profiles/control_transport.py",
+        "src/cluster_profiles/control_limits.py",
         "src/cluster_profiles/schemas/control-openapi.json",
         "scripts/generate-control-clients",
         "control/src/vonk_control/compiled_execution_plan.py",
@@ -509,6 +517,9 @@ def test_supply_chain_manifest_binds_canonical_recipe_execution_supply_chain(
         "control/src/vonk_control/availability_production.py",
         "control/src/vonk_control/model_cache.py",
         "control/src/vonk_control/recipe_image_availability.py",
+        "control/src/vonk_control/recipe_update_batches.py",
+        "control/src/vonk_control/recipe_update_contract.py",
+        "control/src/vonk_control/recipe_availability_intent.py",
         "control/src/vonk_control/recipe_image_availability_api.py",
         "control/src/vonk_control/install_admission.py",
         "control/src/vonk_control/run_admission.py",
@@ -772,7 +783,7 @@ def test_verifier_rejects_protocol_version_drift(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
     project = repository / "agent_protocol/pyproject.toml"
     project.write_text(
-        project.read_text().replace('version = "2.2.0"', 'version = "2.2.1"', 1)
+        project.read_text().replace('version = "3.0.0"', 'version = "3.0.1"', 1)
     )
 
     result = subprocess.run(
@@ -785,7 +796,7 @@ def test_verifier_rejects_protocol_version_drift(tmp_path: Path) -> None:
 
 def test_verifier_rejects_a_missing_protocol_wheel_artifact(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
-    wheel = repository / "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
+    wheel = repository / "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
     assert wheel.is_file()
     wheel.unlink()
 
@@ -801,7 +812,7 @@ def test_verifier_accepts_a_same_version_protocol_wheel_rebuild(
     tmp_path: Path,
 ) -> None:
     repository = _copy(tmp_path)
-    wheel = repository / "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
+    wheel = repository / "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
     wheel.write_bytes(wheel.read_bytes() + b"different bytes")
 
     # A same-version rebuild makes the recorded evidence stale, so verification
@@ -823,7 +834,7 @@ def test_verifier_accepts_a_same_version_protocol_wheel_rebuild(
 
 def test_protocol_spdx_records_the_verified_wheel_checksum(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
-    wheel = repository / "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
+    wheel = repository / "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
     document = json.loads(
         (repository / "inventory/sbom/agent-protocol.spdx.json").read_text()
     )
@@ -839,7 +850,7 @@ def test_protocol_spdx_records_the_verified_wheel_checksum(tmp_path: Path) -> No
         file
         for file in document["files"]
         if file["fileName"]
-        == "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
+        == "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
     )
     assert wheel_file["checksums"] == [
         {"algorithm": "SHA256", "checksumValue": checksum}
@@ -911,7 +922,7 @@ def test_verifier_rejects_a_protocol_wheel_mentioned_only_after_a_shell_operator
 ) -> None:
     repository = _copy(tmp_path)
     dockerfile = repository / "control/Dockerfile"
-    wheel = "/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
+    wheel = "/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
     _rewrite_installed_protocol_wheel(
         dockerfile,
         f"/vonk-cluster-profiles . {operator} test -f {wheel} #",

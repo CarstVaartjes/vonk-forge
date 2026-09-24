@@ -8,8 +8,12 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import canonical_message
 from vonk_control.agent_jobs import retire_exhausted_operations_in_session
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileInput,
+)
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
     build_production_fleet_profile_service,
@@ -18,6 +22,7 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     CatalogDocumentRevision,
+    FleetProfile,
     FleetProfileApplication,
     Job,
 )
@@ -96,7 +101,7 @@ def _failed_profile(tmp_path: Path):
 def test_explicit_retry_preserves_failed_child_recovery_and_replay(
     tmp_path: Path,
 ) -> None:
-    sessions, _lifecycle, service, profile, _desired, first, first_child, _nodes = (
+    sessions, _lifecycle, service, _profile, _desired, first, first_child, _nodes = (
         _failed_profile(tmp_path)
     )
     failed = service.application(first.id)
@@ -105,7 +110,8 @@ def test_explicit_retry_preserves_failed_child_recovery_and_replay(
     second = service.retry(first.id, request_key=_uuid(801), actor="admin")
     assert second.retry_of_application_id == first.id
     assert second.attempt == 2
-    assert service.load(profile.number, request_key=_uuid(801), actor="admin") == second
+    assert service.application_by_request_key(_uuid(801), actor="admin") == second
+
     assert not service.retry_eligible(first.id)
     with pytest.raises(FleetProfileConflict, match="superseded"):
         service.retry(first.id, request_key=_uuid(802), actor="admin")
@@ -177,7 +183,12 @@ def test_retry_rejects_revoked_scope_and_changed_profile_intent(tmp_path: Path) 
     )
     service.update(
         profile.id,
-        desired.model_copy(update={"assignments": [changed_assignment]}),
+        desired.model_copy(
+            update={
+                "assignments": [changed_assignment],
+                "expected_revision": profile.revision,
+            }
+        ),
         actor="admin",
     )
     assert not service.retry_eligible(first.id)
@@ -193,16 +204,61 @@ def test_repeated_idle_loads_preserve_distinct_noop_receipts(tmp_path: Path) -> 
         FleetProfileInput(name="Keep cached", installation_policy="keep-cached"),
         actor="admin",
     )
-    first = service.load(idle.number, request_key=_uuid(805), actor="admin")
-    second = service.load(idle.number, request_key=_uuid(806), actor="admin")
+    first = service.load(
+        idle.number,
+        request_key=_uuid(805),
+        actor="admin",
+        expected_plan_digest=service.preview(idle.id).plan_digest,
+    )
+    second = service.load(
+        idle.number,
+        request_key=_uuid(806),
+        actor="admin",
+        expected_plan_digest=service.preview(idle.id).plan_digest,
+    )
     assert first.state == second.state == "succeeded"
     assert first.id != second.id
     assert first.result is not None and first.result.changed is False
     assert second.result is not None and second.result.changed is False
-    assert service.load(idle.number, request_key=_uuid(806), actor="admin") == second
+    assert (
+        service.load(
+            idle.number,
+            request_key=_uuid(806),
+            actor="admin",
+            expected_plan_digest=service.preview(idle.id).plan_digest,
+        )
+        == second
+    )
 
 
-def _park_exhausted_application(sessions, application, child_id, nodes, *, attempt: int):
+def test_intent_checks_do_not_resolve_storage_inside_coordination(tmp_path: Path):
+    sessions, _lifecycle, service, profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+
+    def unavailable_cache(**_kwargs):
+        raise AssertionError("intent coordination must not consult artifact storage")
+
+    service._cache_resolver = unavailable_cache
+    with sessions.begin() as session:
+        application = session.get(FleetProfileApplication, first.id)
+        assert application is not None
+        progress = FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(application.progress), strict=True
+        )
+        assert not service._superseding_intent(session, application, progress)
+        assert service._retry_eligible(session, application)
+        saved = session.get(FleetProfile, profile.id)
+        assert saved is not None
+        saved.name = "New saved intent"
+        saved.revision += 1
+        assert service._superseding_intent(session, application, progress)
+        assert not service._retry_eligible(session, application)
+
+
+def _park_exhausted_application(
+    sessions, application, child_id, nodes, *, attempt: int
+):
     """Re-park a real Run/Switch child with one bounded exhausted operation.
 
     The child and its application are left exactly as a spent retry budget
@@ -255,7 +311,12 @@ def test_new_intent_supersedes_a_parked_exhausted_application(tmp_path: Path) ->
         attempt=RecoveryPolicy().max_failures,
     )
 
-    second = service.load(profile.number, request_key=_uuid(810), actor="admin")
+    second = service.load(
+        profile.number,
+        request_key=_uuid(810),
+        actor="admin",
+        expected_plan_digest=service.preview(profile.id).plan_digest,
+    )
 
     assert second.id != first.id
     assert second.state == "queued"
@@ -289,7 +350,9 @@ def test_a_changed_profile_cancels_its_own_parked_application_on_tick(
     )
     service.update(
         profile.id,
-        desired.model_copy(update={"assignments": [changed]}),
+        desired.model_copy(
+            update={"assignments": [changed], "expected_revision": profile.revision}
+        ),
         actor="admin",
     )
 
@@ -339,6 +402,11 @@ def test_explicit_retirement_ends_the_parked_operation_and_admits_a_new_intent(
     assert ended.state == "failed"
     assert "operator retired" in (ended.status_reason or "")
 
-    second = service.load(profile.number, request_key=_uuid(811), actor="admin")
+    second = service.load(
+        profile.number,
+        request_key=_uuid(811),
+        actor="admin",
+        expected_plan_digest=service.preview(profile.id).plan_digest,
+    )
     assert second.id != first.id
     assert second.state == "queued"

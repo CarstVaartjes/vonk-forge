@@ -29,6 +29,14 @@ safe operation/path and errno when available. A path is included only after
 the caller has validated it as an operational path and never includes secret
 file contents.
 
+Ambiguous Fleet/Library selections carry exact canonical candidates in the
+typed validation problem's optional `candidates` list. Each value is a node ID
+or `publisher/slug`, validated by that contract; it is not arbitrary diagnostic
+text. The short error detail stays bounded while the candidate list survives
+the central HTTP boundary and generated clients. Human errors print complete
+choices on stderr; CLI JSON retains them as an array. Do not squeeze the choices
+into the bounded detail or silently truncate them to a fixed number.
+
 Controller responses carry `X-Request-ID` on every response and
 `X-Vonk-Error-Code` on failures. The client reads both headers in addition to
 the typed JSON problem fields. This keeps early middleware failures
@@ -42,6 +50,21 @@ canonical code. These responses remain terminal for the existing retry policy
 and carry a safe code and request ID. Controller middleware must return the
 typed error envelope for all API errors, including early authentication
 failures and body-limit responses; no blank response is a diagnostic contract.
+
+Cache submission errors also carry a CLI-owned `submission` observation:
+original request key, request/lookup paths, intended time budget, acceptance
+knowledge, and safe contexts for each failed submission/reconciliation stage.
+It does not replace the Controller's operation state. A transport or malformed
+receipt failure leaves acceptance unknown unless an authorized lookup returns
+the expected binding. A received authorization refusal stays a refusal even
+when its body cannot be read or parsed. Preserve received status, request ID,
+and retry delay across those body failures; never log partial response bytes.
+The current HTTPS transport shares this evidence handling with generated-client
+reads. Total network deadline expiry is a typed transport timeout. Received
+refusals remain refusals even when their bodies expire. TLS/DNS classification
+uses exception types, including wrapped causes or contexts, never raw exception
+text. Local Ctrl-C closes the connection and keeps submission acceptance
+unknown when no valid receipt was received; it sends no remote cancellation.
 
 ## Current implementation and ownership boundaries
 

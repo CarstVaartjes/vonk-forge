@@ -61,7 +61,9 @@ _SECRET_LINE = re.compile(
 # An opaque value is a whole token.  Matching a run inside a longer word cut the
 # module out of every Python frame path, so a traceback arrived as
 # ``python3.[redacted opaque value].py`` and named no frame at all.
-_OPAQUE_SECRET = re.compile(r"(?<![A-Za-z0-9/.])([A-Za-z0-9+/=_-]{40,})(?![A-Za-z0-9/.])")
+_OPAQUE_SECRET = re.compile(
+    r"(?<![A-Za-z0-9/.])([A-Za-z0-9+/=_-]{40,})(?![A-Za-z0-9/.])"
+)
 
 # The failure-evidence closed sets are named once here so the bundle fields and
 # the helpers that build them cannot disagree. ``FailureCategory`` mirrors the

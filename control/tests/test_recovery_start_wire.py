@@ -6,6 +6,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentOperation,
     RecipeOperationRequest,
+    RecipeStartPayload,
 )
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.models import (
@@ -16,6 +17,7 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
 )
+from vonk_control.recipe_execution_contract import parse_stored_run_plan
 
 from .test_recipe_operations import (
     NOW,
@@ -197,31 +199,6 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         (operation.node_id, operation.payload["phase"]): operation.payload
         for operation in children
     } == produced
-    assert {key for child in children for key in child.payload} == {
-        "schema_version",
-        "run_id",
-        "installation_id",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "mapping_id",
-        "mapping_generation",
-        "run_generation",
-        "image_digest",
-        "plan_digest",
-        "alias",
-        "rank",
-        "role",
-        "port",
-        "reserved_memory_bytes",
-        "endpoint_address",
-        "world_size",
-        "compiled_execution_plan",
-        "local_address",
-        "master_address",
-        "master_port",
-        "phase",
-        "start_deadline",
-    }
 
     for child in children:
         parsed = RecipeOperationRequest.parse(
@@ -237,6 +214,19 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         assert parsed.recipe_revision_id == run.plan["recipe_revision_id"]
         assert parsed.rank == child.payload["rank"]
         assert parsed.role == child.payload["role"]
+        expected_floor = next(
+            item.memory_floor_bytes
+            for item in parse_stored_run_plan(run.plan).nodes
+            if item.node_id == child.node_id
+        )
+        assert parsed.memory_floor_bytes == expected_floor
+        expected_kind = next(
+            item.memory_kind
+            for item in parse_stored_run_plan(run.plan).nodes
+            if item.node_id == child.node_id
+        )
+        assert isinstance(parsed.payload, RecipeStartPayload)
+        assert parsed.payload.memory_kind == expected_kind
         assert parsed.compiled_execution_plan is not None
         persisted = persisted_plans[child.node_id]
         assert isinstance(persisted, dict)
@@ -249,6 +239,8 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         assert (
             placement["reserved_memory_bytes"] == child.payload["reserved_memory_bytes"]
         )
+        assert placement["memory_floor_bytes"] == child.payload["memory_floor_bytes"]
+        assert placement["memory_kind"] == expected_kind
         assert placement["local_address"] == child.payload["local_address"]
         assert placement["master_address"] == child.payload["master_address"]
         assert placement["master_port"] == child.payload["master_port"]

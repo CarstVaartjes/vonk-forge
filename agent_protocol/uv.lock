@@ -266,7 +266,7 @@ wheels = [
 
 [[package]]
 name = "vonk-agent-protocol"
-version = "2.2.0"
+version = "3.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },

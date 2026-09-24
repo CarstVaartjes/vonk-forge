@@ -38,6 +38,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql.functions import FunctionElement
+from vonk_agent_protocol.inventory import MemoryPool
 
 
 class Base(DeclarativeBase):
@@ -714,6 +715,7 @@ class AgentEnrollmentGrant(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AgentEnrollment(Base):
@@ -1320,6 +1322,51 @@ class ModelCacheOperation(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ArtifactLifecycleGate(Base):
+    """SQL deletion fence for one exact managed model or image object.
+
+    This row coordinates reference acquisition with managed-storage deletion.
+    It records neither byte availability nor a duplicate list of references;
+    existing request, profile, workload, and distribution owners remain the
+    authorities for those facts.
+    """
+
+    __tablename__ = "artifact_lifecycle_gates"
+    __table_args__ = (
+        CheckConstraint(
+            "artifact_kind IN ('model-set','model-object','runtime-image')",
+            name="ck_artifact_lifecycle_gates_kind",
+        ),
+        CheckConstraint(
+            _lower_hex("artifact_sha256", 64),
+            name="ck_artifact_lifecycle_gates_digest",
+        ),
+        CheckConstraint(
+            "(removal_owner_kind IS NULL AND removal_owner_id IS NULL "
+            "AND removal_fence IS NULL) OR "
+            "(removal_owner_kind IN ('model-cache-operation','recipe-image-job') "
+            "AND removal_owner_id IS NOT NULL AND removal_fence IS NOT NULL)",
+            name="ck_artifact_lifecycle_gates_removal_owner",
+        ),
+        CheckConstraint(
+            "removal_owner_id IS NULL OR (" + _uuid_shape("removal_owner_id") + ")",
+            name="ck_artifact_lifecycle_gates_removal_owner_id",
+        ),
+        CheckConstraint(
+            "removal_fence IS NULL OR (" + _uuid_shape("removal_fence") + ")",
+            name="ck_artifact_lifecycle_gates_removal_fence",
+        ),
+    )
+    artifact_kind: Mapped[str] = mapped_column(String(24), primary_key=True)
+    artifact_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    removal_owner_kind: Mapped[str | None] = mapped_column(String(32))
+    removal_owner_id: Mapped[str | None] = mapped_column(String(36))
+    removal_fence: Mapped[str | None] = mapped_column(String(36))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class RecipeLibrarySyncRun(Base):
     """Durable, idempotent evidence for one managed recipe-library refresh."""
 
@@ -1667,6 +1714,10 @@ class NodeInventorySnapshot(Base):
             name="ck_inventory_fabric",
         ),
         CheckConstraint(_lower_hex("evidence_digest", 64), name="ck_inventory_digest"),
+        CheckConstraint(
+            "memory_pool IN ('shared','separate') AND (memory_pool!='shared' OR gpu_count>0)",
+            name="ck_inventory_memory_pool",
+        ),
         Index("ix_inventory_node_observed", "node_id", "observed_at"),
     )
     id: Mapped[str] = mapped_column(
@@ -1688,6 +1739,7 @@ class NodeInventorySnapshot(Base):
     gpu_memory_total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     gpu_memory_free_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    memory_pool: Mapped[MemoryPool] = mapped_column(String(16), nullable=False)
     fabric_address: Mapped[str | None] = mapped_column(String(45))
     fabric_bandwidth_mbps: Mapped[int | None] = mapped_column(BigInteger)
     nvidia_driver_version: Mapped[str] = mapped_column(
@@ -2468,8 +2520,14 @@ class ResourceReservation(Base):
             name="ck_reservations_kind",
         ),
         CheckConstraint(
-            "state IN ('active','released','expired') AND amount_bytes>=0",
+            "state IN ('active','promised','released','expired') AND amount_bytes>=0",
             name="ck_reservations_state",
+        ),
+        CheckConstraint(
+            "state!='promised' OR (kind IN "
+            "('port','unified-memory','host-memory','gpu-memory') "
+            "AND owner_kind='fleet-profile')",
+            name="ck_reservations_promised_owner",
         ),
         CheckConstraint(_lower_hex("plan_digest", 64), name="ck_reservations_digest"),
         Index("ix_reservations_node_state", "node_id", "state"),
@@ -2481,6 +2539,15 @@ class ResourceReservation(Base):
             unique=True,
             postgresql_where=text("state='active' AND kind='port'"),
             sqlite_where=text("state='active' AND kind='port'"),
+        ),
+        Index(
+            "uq_promised_node_port",
+            "node_id",
+            "kind",
+            "resource_key",
+            unique=True,
+            postgresql_where=text("state='promised' AND kind='port'"),
+            sqlite_where=text("state='promised' AND kind='port'"),
         ),
     )
     id: Mapped[str] = mapped_column(

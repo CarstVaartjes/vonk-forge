@@ -32,7 +32,13 @@ from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
 from .test_fleet_profile_cache_recovery import _typed_cache_failure
 from .test_fleet_profile_recovery_current import _failed_profile
-from .test_fleet_profiles import NOW, _exact_preparation, _SwitchAdapter, _uuid
+from .test_fleet_profiles import (
+    NOW,
+    _assessment,
+    _exact_preparation,
+    _SwitchAdapter,
+    _uuid,
+)
 from .test_recipe_operations import installed_recipe, setup_services
 
 
@@ -117,8 +123,12 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
             (row for row in applications if row.id != first.id), applications[0]
         )
         assert blocked.state == "failed"
-        assert "profile.recovery_artifact_changed" in (blocked.status_reason or "")
-        assert "explicit new load" in (blocked.status_reason or "")
+        if after_retry_admission:
+            assert "profile.runtime-image-changed" in (blocked.status_reason or "")
+            assert "review and load" in (blocked.status_reason or "")
+        else:
+            assert "profile.recovery_artifact_changed" in (blocked.status_reason or "")
+            assert "explicit new load" in (blocked.status_reason or "")
         assert (
             len(
                 list(
@@ -164,7 +174,12 @@ def test_restored_exact_bytes_recover_only_current_profile_intent(
     adapter._run_switch._build_archive_available = storage.build_archive_available
     _complete_rebuild(sessions, storage, archive=archive, image_digest=image_digest)
     if supersede:
-        service.load(profile.number, request_key=_uuid(911), actor="admin")
+        service.load(
+            profile.number,
+            request_key=_uuid(911),
+            actor="admin",
+            expected_plan_digest=service.preview(profile.id).plan_digest,
+        )
 
     def recovered_clock():
         return lifecycle._clock() + timedelta(seconds=20)
@@ -217,16 +232,16 @@ def test_retry_requires_preparation_only_when_an_assignment_needs_work(
 
     attest_kept = False
 
-    def preparation(_session, _assignment, node_ids):
+    def preparation(_session, _assignment, node_ids, **_kwargs):
         if node_ids == nodes and not attest_kept:
             raise ValueError("Kept installation has no current cache observation")
-        return _exact_preparation(node_ids)
+        return _assessment(_exact_preparation(node_ids))
 
     service = FleetProfileService(
         sessions,
         clock=lifecycle._clock,
         switch_adapter=_SwitchAdapter(),
-        preparation_provider=preparation,
+        assessment_provider=preparation,
     )
     profile = service.create(
         FleetProfileInput.model_validate(

@@ -6,11 +6,12 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, StringConstraints
+from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
 from .cursor_contract import MAX_CURSOR_LENGTH
+from .run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
 from .strict_json import StrictJSONModel
 
 _UUID_PATTERN = (
@@ -244,6 +245,8 @@ class LibraryFilterValues(_StrictModel):
     sort: Literal["updated", "name"] | None = None
     local_only: bool | None = None
     all_models: bool | None = None
+    ready: bool | None = None
+    fits_fleet: bool | None = None
 
 
 class ModelLibraryResponse(_StrictModel):
@@ -260,6 +263,30 @@ class ModelDetailResponse(LibraryModelProjection):
     pass
 
 
+class RecipeReadinessCheck(_StrictModel):
+    state: Literal["ready", "blocked", "unavailable"]
+    reasons: list[RunSwitchReason] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def explain_refusal(self) -> RecipeReadinessCheck:
+        if self.state != "ready" and not self.reasons:
+            raise ValueError("a blocked or unavailable assessment requires its reason")
+        if self.state == "ready" and any(
+            reason.severity == "blocker" for reason in self.reasons
+        ):
+            raise ValueError("a ready assessment cannot have blockers")
+        return self
+
+
+class RecipeReadiness(_StrictModel):
+    observed_at: datetime
+    fleet_fit: RecipeReadinessCheck
+    cache: RecipeReadinessCheck
+    readiness: RecipeReadinessCheck
+    group: SparkGroup | None = None
+    fit: SparkFit | None = None
+
+
 class LibraryRecipeProjection(_StrictModel):
     """One exact canonical recipe and its model/resource/local projections."""
 
@@ -274,6 +301,7 @@ class LibraryRecipeProjection(_StrictModel):
     updated_at: datetime
     alignment: Text64 | None = None
     node_count: int = Field(ge=1)
+    assessment: RecipeReadiness | None = None
 
 
 class RecipeLibraryResponse(_StrictModel):

@@ -25,6 +25,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES, EnrollmentEvidence
 
+from .enrollment_contract import ENROLLMENT_ID_PATTERN, EnrollmentGrantStatus
 from .models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -145,7 +146,12 @@ class EnrollmentService:
         self, node_id: str | None, actor: str, ttl_seconds: int
     ) -> EnrollmentGrant:
         return self._create(
-            node_id, actor, ttl_seconds, purpose="new-node", requested_display_name=None
+            node_id,
+            actor,
+            ttl_seconds,
+            purpose="new-node",
+            requested_display_name=None,
+            request_key=str(uuid.uuid4()),
         )
 
     def create_named(
@@ -153,6 +159,8 @@ class EnrollmentService:
         display_name: str,
         actor: str,
         ttl_seconds: int,
+        *,
+        request_key: str,
     ) -> EnrollmentGrant:
         """Create a one-time grant whose approved name is bound on enrollment."""
         normalized = " ".join(display_name.split())
@@ -166,10 +174,11 @@ class EnrollmentService:
             ttl_seconds,
             purpose="new-node",
             requested_display_name=normalized,
+            request_key=request_key,
         )
 
     def create_reenrollment(
-        self, node_id: str | None, actor: str, ttl_seconds: int
+        self, node_id: str | None, actor: str, ttl_seconds: int, *, request_key: str
     ) -> EnrollmentGrant:
         """Authorize an explicit replacement of a Spark identity.
 
@@ -183,6 +192,7 @@ class EnrollmentService:
             ttl_seconds,
             purpose="re-enroll",
             requested_display_name=None,
+            request_key=request_key,
         )
 
     def _create(
@@ -193,10 +203,13 @@ class EnrollmentService:
         *,
         purpose: str,
         requested_display_name: str | None,
+        request_key: str,
     ) -> EnrollmentGrant:
         if node_id is not None:
             _validate_node_id(node_id)
         _validate_actor(actor)
+        if re.fullmatch(ENROLLMENT_ID_PATTERN, request_key) is None:
+            raise ValueError("enrollment request key must be a canonical UUID4")
         if not 0 < ttl_seconds <= MAX_ENROLLMENT_GRANT_TTL_SECONDS:
             raise ValueError(
                 "enrollment grant TTL must be between one and "
@@ -206,7 +219,7 @@ class EnrollmentService:
         token_bytes = secrets.token_bytes(32)
         token = base64.urlsafe_b64encode(token_bytes).rstrip(b"=").decode("ascii")
         grant = AgentEnrollmentGrant(
-            id=str(uuid.uuid4()),
+            id=request_key,
             node_id=node_id,
             purpose=purpose,
             requested_display_name=requested_display_name,
@@ -215,8 +228,17 @@ class EnrollmentService:
             created_at=now,
             expires_at=now + timedelta(seconds=ttl_seconds),
         )
-        with self._sessions.begin() as session:
-            session.add(grant)
+        try:
+            with self._sessions.begin() as session:
+                session.add(grant)
+        except IntegrityError as error:
+            with self._sessions() as session:
+                existing = session.get(AgentEnrollmentGrant, request_key)
+            if existing is None:
+                raise
+            raise EnrollmentDenied(
+                "enrollment grant identity already exists; inspect its status"
+            ) from error
         return EnrollmentGrant(
             id=grant.id,
             node_id=node_id,
@@ -224,6 +246,57 @@ class EnrollmentService:
             purpose=purpose,
             token=token,
         )
+
+    def _grant_status(self, grant: AgentEnrollmentGrant) -> EnrollmentGrantStatus:
+        now = _utc(self._clock())
+        return EnrollmentGrantStatus.model_validate(
+            {
+                "id": grant.id,
+                "state": (
+                    "revoked"
+                    if grant.revoked_at is not None
+                    else "consumed"
+                    if grant.consumed_at is not None
+                    else "expired"
+                    if _stored_utc(grant.expires_at) <= now
+                    else "pending"
+                ),
+                "purpose": grant.purpose,
+                "node_id": grant.node_id,
+                "display_name": grant.requested_display_name,
+                "expires_at": _stored_utc(grant.expires_at),
+                "consumed_at": _stored_utc(grant.consumed_at)
+                if grant.consumed_at is not None
+                else None,
+                "revoked_at": _stored_utc(grant.revoked_at)
+                if grant.revoked_at is not None
+                else None,
+            }
+        )
+
+    def grant_status(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus:
+        with self._sessions() as session:
+            grant = session.get(AgentEnrollmentGrant, grant_id)
+            if grant is None or grant.created_by != actor:
+                raise KeyError(grant_id)
+            return self._grant_status(grant)
+
+    def revoke_grant(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus:
+        # Submit takes this same row first. Revocation either wins before
+        # consumption, or refuses without undoing an issued certificate.
+        with self._submit_lock, self._sessions.begin() as session:
+            grant = session.get(AgentEnrollmentGrant, grant_id, with_for_update=True)
+            if grant is None or grant.created_by != actor:
+                raise KeyError(grant_id)
+            current = self._grant_status(grant)
+            if current.state == "consumed":
+                raise EnrollmentDenied(
+                    "enrollment grant is consumed; inspect the enrolled Spark"
+                )
+            if current.state == "pending":
+                grant.revoked_at = _utc(self._clock())
+                session.flush()
+            return self._grant_status(grant)
 
     def submit(
         self, token: str, csr: bytes, evidence: Mapping[str, object]
@@ -242,6 +315,8 @@ class EnrollmentService:
             )
             if grant is None:
                 failure = "invalid enrollment grant"
+            elif grant.revoked_at is not None:
+                failure = "enrollment grant is revoked"
             elif grant.consumed_at is not None:
                 enrollment = session.scalar(
                     select(AgentEnrollment)
@@ -259,7 +334,6 @@ class EnrollmentService:
                 else:
                     failure = "enrollment state is invalid"
             elif _stored_utc(grant.expires_at) <= now:
-                grant.consumed_at = now
                 failure = "enrollment grant is expired"
             else:
                 try:

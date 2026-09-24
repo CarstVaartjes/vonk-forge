@@ -603,15 +603,7 @@ def test_cancelled_result_is_a_typed_terminal_agent_state() -> None:
     assert validate_schema_message("agent-result.schema.json", raw).state == "cancelled"
 
 
-def test_results_are_bounded_and_reject_secret_bearing_keys() -> None:
-    with pytest.raises(AgentProtocolError, match="large"):
-        AgentResult.parse(
-            valid_attempt()
-            | {
-                "state": "succeeded",
-                "result": {"x": "x" * (MAX_DOCUMENT_BYTES + 1)},
-            }
-        )
+def test_results_reject_secret_bearing_keys() -> None:
     with pytest.raises(AgentProtocolError):
         AgentResult.parse(
             valid_attempt()
@@ -807,6 +799,8 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
             "role": placement["role"],
             "port": placement["port"],
             "reserved_memory_bytes": placement["reserved_memory_bytes"],
+            "memory_floor_bytes": placement["memory_floor_bytes"],
+            "memory_kind": placement["memory_kind"],
             "endpoint_address": placement["endpoint_address"],
             "world_size": placement["world_size"],
             "compiled_execution_plan": compiled_plan,

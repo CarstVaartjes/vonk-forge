@@ -10,7 +10,6 @@ from ..models.fleet_profile_input_installation_policy import check_fleet_profile
 from ..models.fleet_profile_input_installation_policy import FleetProfileInputInstallationPolicy
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
@@ -31,7 +30,7 @@ class FleetProfileInput:
         Attributes:
             assignments (Union[Unset, list['FleetProfileAssignmentInput']]):
             description (Union[Unset, str]):  Default: ''.
-            expected_revision (Union[None, Unset, int]):
+            expected_revision (Union[Unset, int]):  Default: 0.
             favorite (Union[Unset, bool]):  Default: False.
             installation_policy (Union[Unset, FleetProfileInputInstallationPolicy]):  Default: 'keep-cached'.
             labels (Union[Unset, FleetProfileInputLabels]):
@@ -40,7 +39,7 @@ class FleetProfileInput:
 
     assignments: Union[Unset, list['FleetProfileAssignmentInput']] = UNSET
     description: Union[Unset, str] = ''
-    expected_revision: Union[None, Unset, int] = UNSET
+    expected_revision: Union[Unset, int] = 0
     favorite: Union[Unset, bool] = False
     installation_policy: Union[Unset, FleetProfileInputInstallationPolicy] = 'keep-cached'
     labels: Union[Unset, 'FleetProfileInputLabels'] = UNSET
@@ -64,11 +63,7 @@ class FleetProfileInput:
 
         description = self.description
 
-        expected_revision: Union[None, Unset, int]
-        if isinstance(self.expected_revision, Unset):
-            expected_revision = UNSET
-        else:
-            expected_revision = self.expected_revision
+        expected_revision = self.expected_revision
 
         favorite = self.favorite
 
@@ -124,15 +119,7 @@ class FleetProfileInput:
 
         description = d.pop("description", UNSET)
 
-        def _parse_expected_revision(data: object) -> Union[None, Unset, int]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, int], data)
-
-        expected_revision = _parse_expected_revision(d.pop("expected_revision", UNSET))
-
+        expected_revision = d.pop("expected_revision", UNSET)
 
         favorite = d.pop("favorite", UNSET)
 

@@ -951,6 +951,9 @@ def test_two_controller_services_share_one_upstream_object_transfer(
         left.result(timeout=10)
         right.result(timeout=10)
     assert first.get_operation(one.id).state == "succeeded"
+    # A contended attempt releases its slot; the normal scheduler subsequently
+    # reuses the first writer's verified object without another transfer.
+    _drain(second, two.id)
     assert second.get_operation(two.id).state == "succeeded"
     assert len(calls) == 1
     artifact_set_sha256 = one.artifact_set_sha256

@@ -325,10 +325,15 @@ class CurrentAgentClient(TestClient):
 
 @pytest.fixture
 def agent_system(tmp_path):
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'agent-api.sqlite'}",
-        connect_args={"check_same_thread": False},
-    )
+    return make_agent_system(tmp_path)
+
+
+def make_agent_system(tmp_path, *, engine=None):
+    if engine is None:
+        engine = create_engine(
+            f"sqlite:///{tmp_path / 'agent-api.sqlite'}",
+            connect_args={"check_same_thread": False},
+        )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = Clock()
@@ -342,6 +347,7 @@ def agent_system(tmp_path):
                     workload_intent_ordinal=1,
                 )
             )
+            session.flush()
             session.add(
                 AgentCertificate(
                     serial=serial,
@@ -777,6 +783,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         "gpu_memory_total_bytes": 1000,
         "gpu_memory_free_bytes": 800,
         "gpu_count": 1,
+        "memory_pool": "separate",
         "artifact_store_read_only": False,
         "capabilities": ["runtime.vonk.v1", "fabric.connected.mbps.200000"],
         "fabric_address": "192.168.100.2",
@@ -4437,3 +4444,128 @@ def test_renewal_recovery_openapi_exposes_the_canonical_runtime_contract(
             ref_template="#/components/schemas/{model}"
         )
     )
+
+
+@pytest.mark.parametrize("lose_response", [False, True])
+def test_cli_enrollment_file_and_recovery_use_the_actual_authority(
+    agent_system, tmp_path, capsys, lose_response
+):
+    from email.message import Message as EmailMessage
+    from urllib.error import URLError
+
+    from vonk_control.operator_projection_api import build_fleet_operator_services
+
+    from cluster_profiles import cli
+    from cluster_profiles.control_client import ControlClient
+
+    from .test_enrollment import csr, evidence
+
+    _agent_api, services, codec, _clock = agent_system
+    api = TestClient(
+        create_app(
+            jobs=Jobs(),
+            tokens=codec,
+            audits=MemoryAuditStore(),
+            now=lambda: 0,
+            fleet_services=build_fleet_operator_services(
+                agent_services=services, upgrades=None
+            ),
+        )
+    )
+    identity = str(uuid.uuid4())
+    actor = Actor("admin", "administrator")
+    token_file = tmp_path / "cli-token"
+    token_file.touch(mode=0o600)
+    token_file.write_text(codec.issue(actor, ttl_seconds=3600, now=0))
+    issued_secrets = []
+    posts = []
+
+    class OpenedResponse(io.BytesIO):
+        def __init__(self, response):
+            super().__init__(response.content)
+            self.status = response.status_code
+            self.headers = EmailMessage()
+            for key, value in response.headers.items():
+                self.headers[key] = value
+
+        def __exit__(self, *args: object) -> None:
+            self.close()
+
+    def opener(request, *, timeout):
+        response = api.request(
+            request.get_method(),
+            request.full_url,
+            headers=dict(request.header_items()),
+            content=request.data,
+        )
+        if request.get_method() == "POST":
+            posts.append(request.full_url)
+        if (
+            request.full_url.endswith("/api/fleet/enroll")
+            and response.status_code == 201
+        ):
+            issued_secrets.append(response.json()["grant"]["token"])
+            if lose_response:
+                raise URLError("response lost after acceptance")
+        return OpenedResponse(response)
+
+    client = ControlClient("https://forge.example.test", token_file, opener=opener)
+    destination = tmp_path / "grant.json"
+    code = cli.main(
+        ("fleet", "enroll", "New Spark", "--output", str(destination), "--json"),
+        control_client=client,
+        request_id_factory=lambda: identity,
+    )
+    assert code == (2 if lose_response else 0), capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert len(issued_secrets) == 1
+    assert issued_secrets[0] not in captured.out + captured.err
+    assert len(posts) == 1
+    status_path = f"/api/fleet/enrollments/{identity}"
+    assert client.request("GET", status_path)["state"] == "pending"
+    assert api.get(status_path).status_code == 401
+    for subject, role, expected in (
+        ("viewer", "viewer", 403),
+        ("other-admin", "administrator", 404),
+    ):
+        headers = {
+            "Authorization": "Bearer "
+            + codec.issue(Actor(subject, role), ttl_seconds=3600, now=0)
+        }
+        assert api.get(status_path, headers=headers).status_code == expected
+        assert (
+            api.post(status_path + "/revoke", headers=headers).status_code == expected
+        )
+    if lose_response:
+        receipt = json.loads(destination.read_text())
+        assert receipt["id"] == identity
+        assert receipt["grant_status"]["state"] == "pending"
+        assert (
+            cli.main(
+                ("fleet", "enrollment", "revoke", identity, "--yes", "--json"),
+                control_client=client,
+            )
+            == 0
+        )
+        assert client.request("GET", status_path)["state"] == "revoked"
+    else:
+        grant = json.loads(destination.read_text())
+        request = csr()
+        assert services.enrollment is not None
+        services.enrollment.submit(grant["token"], request, evidence(request))
+        assert client.request("GET", status_path)["state"] == "consumed"
+    assert destination.stat().st_mode & 0o777 == 0o600
+
+
+def test_reenrollment_refuses_an_unprivileged_actor_before_node_lookup(agent_system):
+    api, _services, codec, _clock = agent_system
+    headers = {
+        "Authorization": "Bearer "
+        + codec.issue(Actor("operator", "operator"), ttl_seconds=3600, now=0)
+    }
+    response = api.post(
+        f"/api/fleet/{NODE_A}/re-enroll",
+        headers=headers,
+        json={"request_key": str(uuid.uuid4())},
+    )
+    assert response.status_code == 403

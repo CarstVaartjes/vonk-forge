@@ -17,6 +17,8 @@ does not require routine SSH.
 | Implement resilient artifact storage | [Storage and coordination plan](plans/resilient-artifact-storage.md) |
 | Follow the current fault-resilience review | [Resilience handover and acceptance criteria](operations/resilience-handover.md) |
 | Use the complete terminal interface | [`vonkctl` guide](runbooks/vonkctl.md) |
+| Improve and qualify the terminal interface | [CLI operator experience plan](plans/cli-operator-experience.md) |
+| Implement the terminal interface improvements | [Detailed CLI implementation plan](plans/cli-operator-implementation.md) |
 | Use unattended credentials and redeploy NAS Compose | [Operator CLI access](runbooks/operator-cli-access.md) |
 | Deploy or upgrade the Docker Compose project | [Controller-host deployment](../deploy/compose/README.md) |
 | Configure Tailscale before first install | [Tailscale fresh-install preflight](runbooks/tailscale.md#fresh-install-preflight) |
@@ -85,7 +87,8 @@ flowchart LR
 - [Platform release publication](runbooks/platform-release-publication.md)
 - [Agent package release](operations/agent-package-release.md)
 
-Commands in these pages are plan-first: they expose revisions, placement,
-resource checks, and affected nodes before mutation. State-changing CLI
-operations require `--apply`. Credentials and private keys never belong in Git,
-recipes, command arguments, or captured diagnostics.
+Use each command's documented review and confirmation options. For example,
+`profile load --dry-run` reviews a fleet load, while `update --apply` installs
+a signed CLI update. Controller mutations do not have a universal `--apply`
+flag. Credentials and private keys never belong in Git, recipes, command
+arguments, or captured diagnostics.

@@ -1196,17 +1196,20 @@ class SparkLifecycle:
     _DIAGNOSTIC_BUDGET = 8_400
 
     def _bounded_diagnostics(self, sections: Sequence[tuple[str, str]]) -> str:
-        """Join labelled diagnostics inside one total budget, most useful first."""
+        """Keep each prioritized diagnostic visible within one total budget."""
 
         rendered: list[str] = []
         remaining = self._DIAGNOSTIC_BUDGET
-        for title, body in sections:
-            allowance = remaining - len(title) - 2
+        for index, (title, body) in enumerate(sections):
+            unrendered = sections[index:]
+            heading_cost = sum(len(item_title) + 2 for item_title, _ in unrendered)
+            heading_cost += max(0, len(unrendered) - 1)
+            allowance = (remaining - heading_cost) // len(unrendered)
             if allowance <= 0:
                 break
             entry = f"{title}:\n" + self._redact_diagnostics(body, limit=allowance)
             rendered.append(entry)
-            remaining -= len(entry) + 1
+            remaining -= len(entry) + (1 if index < len(sections) - 1 else 0)
         return "\n".join(rendered)
 
     def _installation_failure(self, stage: str, error: Exception) -> LifecycleError:
@@ -2608,7 +2611,7 @@ class SparkLifecycle:
     def _await_profile_application(
         self, operation: dict[str, object], *, label: str, node_id: str
     ) -> dict[str, object]:
-        """Consume the typed numbered-profile application until it is terminal."""
+        """Consume the submitted profile application until it is terminal."""
         assert self.control is not None
         control_src = REPOSITORY_ROOT / "control/src"
         if os.fspath(control_src) not in sys.path:
@@ -2621,6 +2624,7 @@ class SparkLifecycle:
             )
         except (TypeError, ValueError) as error:
             raise LifecycleError(f"{label} response is invalid") from error
+        application_id = typed.id
         deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
         while typed.state in {"queued", "running"}:
             if time.monotonic() >= deadline:
@@ -2714,13 +2718,20 @@ class SparkLifecycle:
                     f"reason={typed.status_reason or 'none'}"
                 )
             time.sleep(1)
-            _, payload = self.control.request("GET", "/api/profile/1/progress")
+            _, payload = self.control.request(
+                "GET", f"/api/profile/applications/{application_id}"
+            )
             try:
-                typed = FleetProfileApplicationView.model_validate_json(
+                observed = FleetProfileApplicationView.model_validate_json(
                     _canonical(require_object(payload, label))
                 )
             except (TypeError, ValueError) as error:
                 raise LifecycleError(f"{label} response is invalid") from error
+            if observed.id != application_id:
+                raise LifecycleError(
+                    f"{label} response identifies a different application"
+                )
+            typed = observed
         if typed.state != "succeeded":
             preflight = (
                 self._preflight_failure_evidence(typed.id)

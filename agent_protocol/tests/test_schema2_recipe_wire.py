@@ -63,6 +63,8 @@ def _start() -> dict[str, object]:
         "role": "entrypoint",
         "port": 8000,
         "reserved_memory_bytes": 67108864,
+        "memory_floor_bytes": plan["runtime"]["placement"]["memory_floor_bytes"],
+        "memory_kind": plan["runtime"]["placement"]["memory_kind"],
         "endpoint_address": "100.100.20.30",
         "world_size": 1,
         "compiled_execution_plan": plan,

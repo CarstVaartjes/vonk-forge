@@ -72,7 +72,7 @@ class Jobs:
         return [], None, 0
 
 
-def _client(role: str, *, agent_upgrades=None):
+def _client(role: str, *, agent_upgrades=None, fleet_projection=None):
     codec = TokenCodec(b"k" * 32)
     audits = MemoryAuditStore()
     jobs = Jobs()
@@ -82,6 +82,7 @@ def _client(role: str, *, agent_upgrades=None):
         audits=audits,
         now=lambda: 10,
         agent_upgrades=agent_upgrades,
+        fleet_projection=fleet_projection,
     )
     client = TestClient(app)
     token = codec.issue(Actor(role, role), ttl_seconds=1000, now=0)
@@ -159,13 +160,77 @@ def test_central_api_http_errors_are_serialized_by_the_declared_models() -> None
     assert response.headers["x-vonk-error-code"] == "controller.authentication_required"
 
 
+def test_fleet_ambiguity_preserves_every_candidate_through_the_cli(tmp_path, capsys):
+    import json
+
+    from cluster_profiles import cli
+    from cluster_profiles.control_client import ControlClient
+
+    from .test_metrics import _fleet_snapshot
+
+    snapshot = _fleet_snapshot()
+    template = snapshot.nodes[0]
+    snapshot.nodes = [
+        template.model_copy(
+            update={
+                "id": "spk_" + f"{index:032x}",
+                "display_name": "Atlas",
+            }
+        )
+        for index in range(40)
+    ]
+
+    class Projection:
+        def read(self):
+            return snapshot
+
+    server, headers, _, _ = _client("viewer", fleet_projection=Projection())
+    token_file = tmp_path / "token"
+    token_file.write_text(headers["Authorization"].removeprefix("Bearer "))
+    token_file.chmod(0o600)
+
+    class Response:
+        def __init__(self, response):
+            self.status = response.status_code
+            self.headers = response.headers
+            self.content = response.content
+
+        def read(self, maximum):
+            return self.content[:maximum]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    def opener(request, timeout):
+        return Response(
+            server.get(request.selector, headers=dict(request.header_items()))
+        )
+
+    client = ControlClient("https://forge.example.test", token_file, opener=opener)
+    assert cli.main(("fleet", "detail", "Atlas", "--json"), control_client=client) == 2
+    problem = json.loads(capsys.readouterr().out)
+    assert problem["candidates"] == [node.id for node in snapshot.nodes]
+    assert problem["http_status"] == 422 and problem["request_id"]
+    assert cli.main(("fleet", "detail", "Atlas"), control_client=client) == 2
+    output = capsys.readouterr()
+    assert all(node.id in output.err for node in snapshot.nodes)
+    assert output.out == ""
+
+
 def test_central_api_forbidden_error_has_distinct_safe_code() -> None:
     client, headers, _, _ = _client("viewer")
 
     response = client.post(
         "/api/model/qwen-code/remove",
         headers=headers,
-        json={"request_key": "00000000-0000-4000-8000-000000000001"},
+        json={
+            "request_key": "00000000-0000-4000-8000-000000000001",
+            "model_content_sha256": "a" * 64,
+            "review_digest": "b" * 64,
+        },
     )
 
     assert response.status_code == 403

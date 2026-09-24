@@ -67,6 +67,8 @@ def _start(plan: dict[str, Any] | None = None) -> dict[str, Any]:
         "role": "entrypoint",
         "port": 8000,
         "reserved_memory_bytes": 67108864,
+        "memory_floor_bytes": plan["runtime"]["placement"]["memory_floor_bytes"],
+        "memory_kind": plan["runtime"]["placement"]["memory_kind"],
         "endpoint_address": "100.100.20.30",
         "world_size": 1,
         "compiled_execution_plan": plan,
@@ -663,19 +665,70 @@ def test_every_canonical_enum_value_is_accepted_by_both_models(
 def test_required_nullable_fields_cannot_be_omitted_on_either_wire(
     wire_probe: Path,
 ) -> None:
-    for field in ("local_address", "master_address", "master_port"):
+    for field in (
+        "local_address",
+        "master_address",
+        "master_port",
+        "memory_floor_bytes",
+        "memory_kind",
+    ):
         payload = _start()
         del payload[field]
         with pytest.raises(ValueError):
             RecipeStartPayload.model_validate(payload)
         assert not _rust_accepts(wire_probe, AgentOperation.RECIPE_START, payload)
 
-    for field in ("endpoint_address", "local_address", "master_address", "master_port"):
+    for field in (
+        "endpoint_address",
+        "local_address",
+        "master_address",
+        "master_port",
+        "memory_floor_bytes",
+        "memory_kind",
+    ):
         payload = _install(PLAN)
         del payload["compiled_execution_plan"]["runtime"]["placement"][field]
         with pytest.raises(ValueError):
             RecipeInstallPayload.model_validate(payload)
         assert not _rust_accepts(wire_probe, AgentOperation.RECIPE_INSTALL, payload)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda payload: payload.update(memory_floor_bytes=1),
+        lambda payload: payload["compiled_execution_plan"]["runtime"][
+            "placement"
+        ].update(memory_floor_bytes=1),
+    ],
+)
+def test_start_memory_floor_must_match_compiled_placement_on_both_wires(
+    wire_probe: Path, mutate
+) -> None:
+    payload = _start()
+    mutate(payload)
+    with pytest.raises(ValueError, match="compiled plan"):
+        RecipeStartPayload.model_validate(payload)
+    assert not _rust_accepts(wire_probe, AgentOperation.RECIPE_START, payload)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda payload: payload.update(memory_kind="host"),
+        lambda payload: payload["compiled_execution_plan"]["runtime"][
+            "placement"
+        ].update(memory_kind="host"),
+    ],
+)
+def test_start_memory_kind_must_match_compiled_placement_on_both_wires(
+    wire_probe: Path, mutate
+) -> None:
+    payload = _start()
+    mutate(payload)
+    with pytest.raises(ValueError, match="compiled plan"):
+        RecipeStartPayload.model_validate(payload)
+    assert not _rust_accepts(wire_probe, AgentOperation.RECIPE_START, payload)
 
 
 @pytest.mark.parametrize(

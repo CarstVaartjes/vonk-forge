@@ -87,7 +87,7 @@ def test_controller_artifact_job_result_crosses_rust_and_python(
         },
         "timeout_seconds": 3600,
         "actor": "operator",
-        "request_id": "00000000-0000-0000-0000-000000000152",
+        "request_id": "00000000-0000-4000-8000-000000000152",
     }
     job = service.create(**request)
     service.put_input(
@@ -105,7 +105,7 @@ def test_controller_artifact_job_result_crosses_rust_and_python(
     service.submit(
         job.id,
         actor="operator",
-        request_id="00000000-0000-0000-0000-000000000153",
+        request_id="00000000-0000-4000-8000-000000000153",
     )
     claim = claim_agent(agent_jobs, node_id, "serial-0", 3600)
     assert claim is not None

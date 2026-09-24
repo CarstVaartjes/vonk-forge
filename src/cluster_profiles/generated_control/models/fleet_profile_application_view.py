@@ -19,6 +19,7 @@ import datetime
 if TYPE_CHECKING:
   from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
   from ..models.fleet_profile_application_result import FleetProfileApplicationResult
+  from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
 
 
 
@@ -40,12 +41,14 @@ class FleetProfileApplicationView:
             profile_digest (str):
             profile_id (str):
             progress (FleetProfileApplicationProgress): Typed progress tree persisted with every profile application.
+            request_key (str):
             result (Union['FleetProfileApplicationResult', None]):
             state (FleetProfileApplicationViewState):
             status_reason (Union[None, str]):
             total_steps (int):
             updated_at (datetime.datetime):
             attempt (Union[Unset, int]):  Default: 1.
+            cancellation (Union['FleetProfileApplicationCancellationView', None, Unset]):
             retry_of_application_id (Union[None, Unset, str]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
@@ -58,12 +61,14 @@ class FleetProfileApplicationView:
     profile_digest: str
     profile_id: str
     progress: 'FleetProfileApplicationProgress'
+    request_key: str
     result: Union['FleetProfileApplicationResult', None]
     state: FleetProfileApplicationViewState
     status_reason: Union[None, str]
     total_steps: int
     updated_at: datetime.datetime
     attempt: Union[Unset, int] = 1
+    cancellation: Union['FleetProfileApplicationCancellationView', None, Unset] = UNSET
     retry_of_application_id: Union[None, Unset, str] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
@@ -74,6 +79,7 @@ class FleetProfileApplicationView:
     def to_dict(self) -> dict[str, Any]:
         from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
         from ..models.fleet_profile_application_result import FleetProfileApplicationResult
+        from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
         created_at = self.created_at.isoformat()
 
         current_operation_id: Union[None, str]
@@ -91,6 +97,8 @@ class FleetProfileApplicationView:
 
         progress = self.progress.to_dict()
 
+        request_key = self.request_key
+
         result: Union[None, dict[str, Any]]
         if isinstance(self.result, FleetProfileApplicationResult):
             result = self.result.to_dict()
@@ -107,6 +115,14 @@ class FleetProfileApplicationView:
         updated_at = self.updated_at.isoformat()
 
         attempt = self.attempt
+
+        cancellation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.cancellation, Unset):
+            cancellation = UNSET
+        elif isinstance(self.cancellation, FleetProfileApplicationCancellationView):
+            cancellation = self.cancellation.to_dict()
+        else:
+            cancellation = self.cancellation
 
         retry_of_application_id: Union[None, Unset, str]
         if isinstance(self.retry_of_application_id, Unset):
@@ -128,6 +144,7 @@ class FleetProfileApplicationView:
             "profile_digest": profile_digest,
             "profile_id": profile_id,
             "progress": progress,
+            "request_key": request_key,
             "result": result,
             "state": state,
             "status_reason": status_reason,
@@ -136,6 +153,8 @@ class FleetProfileApplicationView:
         })
         if attempt is not UNSET:
             field_dict["attempt"] = attempt
+        if cancellation is not UNSET:
+            field_dict["cancellation"] = cancellation
         if retry_of_application_id is not UNSET:
             field_dict["retry_of_application_id"] = retry_of_application_id
         if schema_version is not UNSET:
@@ -149,6 +168,7 @@ class FleetProfileApplicationView:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
         from ..models.fleet_profile_application_result import FleetProfileApplicationResult
+        from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
         d = dict(src_dict)
         created_at = isoparse(d.pop("created_at"))
 
@@ -177,6 +197,8 @@ class FleetProfileApplicationView:
 
 
 
+
+        request_key = d.pop("request_key")
 
         def _parse_result(data: object) -> Union['FleetProfileApplicationResult', None]:
             if data is None:
@@ -218,6 +240,26 @@ class FleetProfileApplicationView:
 
         attempt = d.pop("attempt", UNSET)
 
+        def _parse_cancellation(data: object) -> Union['FleetProfileApplicationCancellationView', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                cancellation_type_0 = FleetProfileApplicationCancellationView.from_dict(data)
+
+
+
+                return cancellation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['FleetProfileApplicationCancellationView', None, Unset], data)
+
+        cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
+
+
         def _parse_retry_of_application_id(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -241,12 +283,14 @@ class FleetProfileApplicationView:
             profile_digest=profile_digest,
             profile_id=profile_id,
             progress=progress,
+            request_key=request_key,
             result=result,
             state=state,
             status_reason=status_reason,
             total_steps=total_steps,
             updated_at=updated_at,
             attempt=attempt,
+            cancellation=cancellation,
             retry_of_application_id=retry_of_application_id,
             schema_version=schema_version,
         )

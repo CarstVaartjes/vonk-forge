@@ -10,11 +10,13 @@ from ..models.recipe_operator_response_state import check_recipe_operator_respon
 from ..models.recipe_operator_response_state import RecipeOperatorResponseState
 from ..types import UNSET, Unset
 from typing import cast
+from typing import cast, Union
 from typing import Literal, cast
 from typing import Literal, Union, cast
 from typing import Union
 
 if TYPE_CHECKING:
+  from ..models.availability_operation_failure import AvailabilityOperationFailure
   from ..models.operation_progress import OperationProgress
 
 
@@ -35,10 +37,13 @@ class RecipeOperatorResponse:
             recipe_revision_id (str):
             reclaimed_bytes (int):
             request_key (str):
+            review_digest (str):
             selector (str):
             state (RecipeOperatorResponseState):
+            with_model (bool):
             cancelled_builds (Union[Unset, list[str]]):
             cancelled_operations (Union[Unset, list[str]]):
+            failure (Union['AvailabilityOperationFailure', None, Unset]):
             model_removals (Union[Unset, list[str]]):
             next_actions (Union[Unset, list[str]]):
             preserved (Union[Unset, list[str]]):
@@ -51,10 +56,13 @@ class RecipeOperatorResponse:
     recipe_revision_id: str
     reclaimed_bytes: int
     request_key: str
+    review_digest: str
     selector: str
     state: RecipeOperatorResponseState
+    with_model: bool
     cancelled_builds: Union[Unset, list[str]] = UNSET
     cancelled_operations: Union[Unset, list[str]] = UNSET
+    failure: Union['AvailabilityOperationFailure', None, Unset] = UNSET
     model_removals: Union[Unset, list[str]] = UNSET
     next_actions: Union[Unset, list[str]] = UNSET
     preserved: Union[Unset, list[str]] = UNSET
@@ -65,6 +73,7 @@ class RecipeOperatorResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.availability_operation_failure import AvailabilityOperationFailure
         from ..models.operation_progress import OperationProgress
         action = self.action
 
@@ -78,9 +87,13 @@ class RecipeOperatorResponse:
 
         request_key = self.request_key
 
+        review_digest = self.review_digest
+
         selector = self.selector
 
         state: str = self.state
+
+        with_model = self.with_model
 
         cancelled_builds: Union[Unset, list[str]] = UNSET
         if not isinstance(self.cancelled_builds, Unset):
@@ -93,6 +106,14 @@ class RecipeOperatorResponse:
             cancelled_operations = self.cancelled_operations
 
 
+
+        failure: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.failure, Unset):
+            failure = UNSET
+        elif isinstance(self.failure, AvailabilityOperationFailure):
+            failure = self.failure.to_dict()
+        else:
+            failure = self.failure
 
         model_removals: Union[Unset, list[str]] = UNSET
         if not isinstance(self.model_removals, Unset):
@@ -124,13 +145,17 @@ class RecipeOperatorResponse:
             "recipe_revision_id": recipe_revision_id,
             "reclaimed_bytes": reclaimed_bytes,
             "request_key": request_key,
+            "review_digest": review_digest,
             "selector": selector,
             "state": state,
+            "with_model": with_model,
         })
         if cancelled_builds is not UNSET:
             field_dict["cancelled_builds"] = cancelled_builds
         if cancelled_operations is not UNSET:
             field_dict["cancelled_operations"] = cancelled_operations
+        if failure is not UNSET:
+            field_dict["failure"] = failure
         if model_removals is not UNSET:
             field_dict["model_removals"] = model_removals
         if next_actions is not UNSET:
@@ -146,6 +171,7 @@ class RecipeOperatorResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.availability_operation_failure import AvailabilityOperationFailure
         from ..models.operation_progress import OperationProgress
         d = dict(src_dict)
         action = cast(Literal['remove'] , d.pop("action"))
@@ -165,6 +191,8 @@ class RecipeOperatorResponse:
 
         request_key = d.pop("request_key")
 
+        review_digest = d.pop("review_digest")
+
         selector = d.pop("selector")
 
         state = check_recipe_operator_response_state(d.pop("state"))
@@ -172,10 +200,32 @@ class RecipeOperatorResponse:
 
 
 
+        with_model = d.pop("with_model")
+
         cancelled_builds = cast(list[str], d.pop("cancelled_builds", UNSET))
 
 
         cancelled_operations = cast(list[str], d.pop("cancelled_operations", UNSET))
+
+
+        def _parse_failure(data: object) -> Union['AvailabilityOperationFailure', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                failure_type_0 = AvailabilityOperationFailure.from_dict(data)
+
+
+
+                return failure_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['AvailabilityOperationFailure', None, Unset], data)
+
+        failure = _parse_failure(d.pop("failure", UNSET))
 
 
         model_removals = cast(list[str], d.pop("model_removals", UNSET))
@@ -198,10 +248,13 @@ class RecipeOperatorResponse:
             recipe_revision_id=recipe_revision_id,
             reclaimed_bytes=reclaimed_bytes,
             request_key=request_key,
+            review_digest=review_digest,
             selector=selector,
             state=state,
+            with_model=with_model,
             cancelled_builds=cancelled_builds,
             cancelled_operations=cancelled_operations,
+            failure=failure,
             model_removals=model_removals,
             next_actions=next_actions,
             preserved=preserved,

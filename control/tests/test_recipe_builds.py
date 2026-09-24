@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     AgentClaim,
     AgentResult,
     RecipeBuildRequest,
+    canonical_message,
     canonical_payload,
 )
 from vonk_agent_protocol import (
@@ -50,7 +51,11 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
 from vonk_control.recipe_execution_contract import parse_stored_build_plan
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
+from vonk_control.recipe_image_availability import (
+    RecipeImageAvailabilityError,
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_image_removal_contract import RecipeCacheRemovalOwner
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
@@ -66,6 +71,8 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, content_sha256
+
+from .recipe_removal_review_support import remove_after_review
 
 _CACHED_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
 
@@ -131,12 +138,22 @@ def test_build_disk_reserve_scales_to_the_spark_cap() -> None:
     assert recipe_builds_module._build_disk_reserve(4 * 1024**4) == 64 * 1024**3
 
 
-def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
-    engine = create_engine(f"sqlite:///{tmp_path / 'build.sqlite'}")
+def setup(
+    tmp_path: Path,
+    *,
+    network: dict[str, object] | None = None,
+    engine=None,
+    existing_node: bool = False,
+    builder_node_id: str | None = None,
+    recipe_slug: str = "qwen3-vllm",
+):
+    engine = engine or create_engine(f"sqlite:///{tmp_path / 'build.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     now = datetime(2026, 8, 7, 12, tzinfo=UTC)
-    node_id = "spk_" + "1" * 32
+    if existing_node:
+        now += timedelta(seconds=1)
+    node_id = builder_node_id or "spk_" + "1" * 32
     bundle = generate_source_bundle(
         {
             "Dockerfile": (
@@ -155,25 +172,36 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
         "mode": "none",
         "hosts": [],
     }
-    document["identity"]["slug"] = "qwen3-vllm"
+    document["identity"]["slug"] = recipe_slug
     document["execution"]["build"]["target"] = "runtime"
     with sessions.begin() as session:
-        session.add(
-            AgentNode(
-                node_id=node_id,
-                state="active",
-                architecture="linux-arm64",
-                semantic_version="1.2.3",
-                build_digest="sha256:" + "a" * 64,
-                binary_digest="1" * 64,
-                self_test_passed=True,
-                capabilities=[
-                    "recipe.build.v1",
-                    "recipe.image.import.v1",
-                ],
-                last_seen_at=now,
+        builder = session.get(AgentNode, node_id) if existing_node else None
+        if existing_node:
+            assert builder is not None
+            builder.binary_digest = "1" * 64
+            builder.self_test_passed = True
+            builder.capabilities = [
+                *builder.capabilities,
+                "recipe.build.v1",
+                "recipe.image.import.v1",
+            ]
+        else:
+            session.add(
+                AgentNode(
+                    node_id=node_id,
+                    state="active",
+                    architecture="linux-arm64",
+                    semantic_version="1.2.3",
+                    build_digest="sha256:" + "a" * 64,
+                    binary_digest="1" * 64,
+                    self_test_passed=True,
+                    capabilities=[
+                        "recipe.build.v1",
+                        "recipe.image.import.v1",
+                    ],
+                    last_seen_at=now,
+                )
             )
-        )
         session.add(
             RecipeSourceBundle(
                 sha256=bundle.sha256,
@@ -203,6 +231,7 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
                 "recipe.build.egress-proxy.v1",
                 "recipe.image.import.v1",
             ),
+            memory_pool="separate",
         )
     )
     catalog = CatalogEntityService(sessions, clock=lambda: now)
@@ -211,8 +240,9 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
         .joinpath("examples", "model-definition.json")
         .read_text(encoding="utf-8")
     )
-    model_draft = catalog.create_draft(model, actor="admin")
-    catalog.resolve(model_draft.id, actor="admin")
+    if not existing_node:
+        model_draft = catalog.create_draft(model, actor="admin")
+        catalog.resolve(model_draft.id, actor="admin")
     recipe_draft = catalog.create_draft(document, actor="admin")
     with sessions.begin() as session:
         stored_revision = session.get(CatalogDocumentRevision, recipe_draft.id)
@@ -891,6 +921,7 @@ def test_resolution_reuses_the_present_receipt_for_the_shared_identity(
                 "recipe.build.egress-proxy.v1",
                 "recipe.image.import.v1",
             ),
+            memory_pool="separate",
         )
     )
     second_plan = service.plan(revision.id, second_node, now=now)
@@ -1115,6 +1146,7 @@ def test_build_plan_from_intent_rechecks_selected_builder_capacity(
             1,
             False,
             ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
+            memory_pool="separate",
         )
     )
 
@@ -1195,14 +1227,10 @@ def test_stored_build_envelope_names_the_field_that_invalidated_it(
 
 
 def test_removal_does_not_corrupt_the_stored_build_envelope(tmp_path: Path) -> None:
-    """A cache removal must not write engine keys into the build contract.
+    """Removal preserves another request's build and its canonical envelope.
 
-    ``remove_selector`` marked cancelled builds by merging ``removal_fence``
-    and ``cancelled`` into ``RecipeBuild.plan``.  That column is the canonical
-    ``RecipeBuildRequest`` document, whose model forbids extra keys, so the row
-    could never be parsed again and every later plan failed with
-    ``build.plan_invalid``.  A removal cancels the build through state and
-    error; the fence belongs to the removal operation that owns it.
+    This catches implicit build cancellation or removal-only fields written
+    into the strict build plan while cache eviction is accepted.
     """
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
@@ -1223,27 +1251,33 @@ def test_removal_does_not_corrupt_the_stored_build_envelope(tmp_path: Path) -> N
         clock=lambda: now,
     )
 
-    result = availability.remove_selector(
-        recipe.identity.slug, actor="operator", request_id="1" * 36
+    result = remove_after_review(
+        availability,
+        recipe.identity.slug,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000024",
     )
-    assert result["cancelled_builds"] == [planned.build_id]
+    assert result["cancelled_builds"] == []
 
     with sessions() as session:
         stored = session.get(RecipeBuild, planned.build_id)
         assert stored is not None
-        assert stored.state == "failed"
+        assert stored.state == "planned"
         # The exact stored document still satisfies the canonical contract.
         assert parse_stored_build_plan(stored.plan).build_id == planned.build_id
 
-    # The fence is recorded on the removal operation that owns the
-    # cancellation, not smuggled into the build contract document.
+    # The fence belongs to the exact removal owner.
     with sessions() as session:
-        removal = session.scalar(select(Job).where(Job.request_id == "1" * 36))
+        removal = session.scalar(
+            select(Job).where(Job.request_id == "00000000-0000-4000-8000-000000000024")
+        )
         assert removal is not None
-        assert isinstance(_json_object(removal.payload).get("removal_fence"), str)
+        owner = RecipeCacheRemovalOwner.model_validate_json(
+            canonical_message(removal.payload)
+        )
+        assert owner.plan.intent.request_key == removal.request_id
 
-    # The planning path the operator runs next must return the cancelled row to
-    # a clean planned attempt with a usable envelope, not reject it.
+    # Replanning reconnects to the same valid build request.
     replanned = builds.plan(revision.id, node_id, now=now)
     assert replanned.build_id == planned.build_id
     assert parse_stored_build_plan(replanned.agent_payload).build_id == planned.build_id
@@ -1488,10 +1522,23 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
         node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
     if source_state == "waiting-for-operator":
         with sessions.begin() as session:
-            row = session.get(RecipeBuild, plan.build_id)
-            assert row is not None
-            row.state = "failed"
-            row.plan = {**row.plan, "cancelled": True}
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.capabilities = [
+                capability
+                for capability in node.capabilities
+                if capability != "recipe.build.cleanup.v1"
+            ]
+        operations.cancel(
+            original.id,
+            actor="admin",
+            request_id="d75c1b26-f9f5-48b0-94a3-8190bf7c181f",
+            reason="remove recipe cache",
+        )
+        with sessions.begin() as session:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
         assert operations.reconcile_cancelled_builds()
     else:
         operations.cancel(
@@ -1820,7 +1867,6 @@ def test_successful_build_retry_converges_original_and_new_request_keys(
 def test_forced_image_build_resumes_after_worker_restart(
     tmp_path: Path,
     completed_before_restart: bool,
-    monkeypatch,
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     builds = RecipeBuildService(sessions, bundles=bundles)
@@ -1847,7 +1893,11 @@ def test_forced_image_build_resumes_after_worker_restart(
                     authority_revision=revision.id,
                     targets=[revision.id],
                     payload_digest="a" * 64,
-                    payload={"runtime": runtime},
+                    payload={
+                        "runtime": runtime,
+                        "recipe_revision_id": revision.id,
+                        "build_input_sha256": plan.build_input_sha256,
+                    },
                     current_attempt=1,
                     created_at=now,
                     updated_at=now,
@@ -1900,36 +1950,49 @@ def test_forced_image_build_resumes_after_worker_restart(
     )
     complete_build()
 
-    class WorkerStopped(Exception):
-        pass
-
-    def stop_worker(_seconds):
-        raise WorkerStopped
-
     first = production()
     assert first.service._builder is not None
+    claim = first.service.claim_pending(limit=1)[0]
     recipe = RecipeDefinition.model_validate_json(json.dumps(revision.document))
-    monkeypatch.setattr(availability_production_module.time, "sleep", stop_worker)
-    with pytest.raises(WorkerStopped):
+    with pytest.raises(RecipeImageAvailabilityError) as waiting:
         first.service._builder(
             recipe,
             runtime,
-            operation_id=parent_id,
+            claim=claim,
             build_input_sha256=plan.build_input_sha256,
             force=True,
             progress=lambda _: None,
         )
+    assert waiting.value.code == "recipe_image.build_wait"
     first.close()
     if completed_before_restart:
         complete_build()
 
     restarted = production()
     assert restarted.service._builder is not None
-    monkeypatch.setattr(availability_production_module.time, "sleep", complete_build)
+    with sessions.begin() as session:
+        parent = session.get(Job, parent_id)
+        assert parent is not None
+        parent.payload = dict(parent.payload) | {
+            "claim_until": (now - timedelta(seconds=1)).isoformat()
+        }
+    claim = restarted.service.claim_pending(limit=1)[0]
+    if not completed_before_restart:
+        with pytest.raises(RecipeImageAvailabilityError) as waiting:
+            restarted.service._builder(
+                recipe,
+                runtime,
+                claim=claim,
+                build_input_sha256=plan.build_input_sha256,
+                force=True,
+                progress=lambda _: None,
+            )
+        assert waiting.value.code == "recipe_image.build_wait"
+        complete_build()
     result = restarted.service._builder(
         recipe,
         runtime,
-        operation_id=parent_id,
+        claim=claim,
         build_input_sha256=plan.build_input_sha256,
         force=True,
         progress=lambda _: None,
@@ -1943,10 +2006,22 @@ def test_forced_image_build_resumes_after_worker_restart(
     # A separate explicit download still requests a fresh build.
     new_parent_id = "00000000-0000-4000-8000-000000000732"
     add_parent(new_parent_id)
+    new_claim = restarted.service.claim_pending(limit=1)[0]
+    with pytest.raises(RecipeImageAvailabilityError) as waiting:
+        restarted.service._builder(
+            recipe,
+            runtime,
+            claim=new_claim,
+            build_input_sha256=plan.build_input_sha256,
+            force=True,
+            progress=lambda _: None,
+        )
+    assert waiting.value.code == "recipe_image.build_wait"
+    complete_build()
     restarted.service._builder(
         recipe,
         runtime,
-        operation_id=new_parent_id,
+        claim=new_claim,
         build_input_sha256=plan.build_input_sha256,
         force=True,
         progress=lambda _: None,
@@ -2004,6 +2079,7 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
             1,
             False,
             ("recipe.build.v1",),
+            memory_pool="separate",
         )
     )
 
@@ -2088,6 +2164,7 @@ def test_public_build_rejects_stale_inventory_without_egress_capability(
             1,
             False,
             ("recipe.build.v1", "recipe.image.import.v1"),
+            memory_pool="separate",
         )
     )
 

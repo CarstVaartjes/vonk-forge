@@ -52,6 +52,7 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
     RunNode,
+    User,
 )
 from vonk_control.operation_api import OperationQuery
 from vonk_control.preparation_contract import (
@@ -62,9 +63,109 @@ from vonk_control.preparation_contract import (
     RuntimeImagePreparation,
     TargetAssetState,
 )
+from vonk_control.recipe_execution_contract import installation_plan_document
+from vonk_control.run_switch_contract import (
+    RunSwitchAssessment,
+    RunSwitchReason,
+    SparkFit,
+    SparkFitNode,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
+from .test_recipe_execution_contract import _installation_plan
+
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
+
+
+def _installed_pair_plan(
+    *, mapping_id: str, build_id: str, recipe_revision_id: str, recipe_digest: str
+) -> dict[str, object]:
+    """Use the real persisted contract for fixtures which promise image reuse."""
+    plan = _installation_plan({})
+    template = _nested_object(plan, "compiled_execution_plans", "spk_" + "0" * 32)
+    node_template = _nested_object(plan, "nodes", 0)
+    nodes: list[dict[str, object]] = []
+    compiled: dict[str, object] = {}
+    for rank, role in enumerate(("entrypoint", "worker")):
+        node_id = _node_id(rank + 1)
+        nodes.append({**node_template, "node_id": node_id, "rank": rank, "role": role})
+        payload = deepcopy(template)
+        _nested_object(payload, "identity")["recipe_revision_sha256"] = recipe_digest
+        _nested_object(payload, "runtime")["image_digest"] = "sha256:" + "d" * 64
+        _nested_object(payload, "runtime", "placement").update(
+            rank=rank, role=role, world_size=2
+        )
+        _nested_object(payload, "topology").update(
+            name="pair",
+            mode="distributed",
+            node_count=2,
+            world_size=2,
+            rank=rank,
+            role=role,
+        )
+        _nested_object(payload, "runtime_image").update(
+            image_digest="sha256:" + "d" * 64,
+            platform_manifest_digest="sha256:" + "d" * 64,
+            registry_manifest_digest=None,
+            oci_layout_sha256="e" * 64,
+            image_bytes=1024,
+            source="controller-build",
+            build_id=build_id,
+            local_image_reference="localhost/vonk/compiled-runtime-"
+            + "e" * 64
+            + "@sha256:"
+            + "d" * 64,
+        )
+        _nested_object(payload, "runtime_image", "distribution_object").update(
+            sha256="e" * 64, bytes=1024
+        )
+        compiled[node_id] = payload
+    plan.update(
+        mapping_id=mapping_id,
+        recipe_build_id=build_id,
+        image_digest="sha256:" + "d" * 64,
+        recipe_revision_id=recipe_revision_id,
+        recipe_content_sha256=recipe_digest,
+        plan_digest="f" * 64,
+        nodes=nodes,
+        compiled_execution_plans=compiled,
+    )
+    return installation_plan_document(plan)
+
+
+def _assessment(preparation: RolloutPreparation) -> RunSwitchAssessment:
+    blockers = [
+        RunSwitchReason(**reason.model_dump(), scope="artifact")
+        for reason in preparation.reasons
+        if reason.severity == "blocker"
+    ]
+    return RunSwitchAssessment(
+        alias="test",
+        preparation=preparation,
+        allowed=not blockers,
+        blockers=blockers,
+        warnings=[],
+        stops=[],
+        fit_current=SparkFit(
+            allowed=not blockers,
+            nodes=[
+                SparkFitNode(
+                    node_id=node,
+                    rank=rank,
+                    role="worker",
+                    allowed=True,
+                    ports_required=[],
+                    disk_required_bytes=0,
+                    memory_required_bytes=100,
+                    memory_kind="unified",
+                    memory_pool="shared",
+                    memory_floor_bytes=0,
+                )
+                for rank, node in enumerate(preparation.target_node_ids)
+            ],
+        ),
+        fit_after_stop=None,
+    )
 
 
 def _json_object(value: object) -> dict[str, object]:
@@ -299,7 +400,7 @@ def _exact_preparation(
         "missing_bytes": 0,
         "verified_sha256": image_layout_digest,
         "verified_at": observed_at,
-        "source": "controller-build",
+        "source": "published",
     }
     return RolloutPreparation.model_validate(
         {
@@ -332,7 +433,6 @@ def _exact_preparation(
                 "image_bytes": 100,
                 "architecture": "linux-arm64",
                 "runtime_interface": "vonk.runtime.v1",
-                "build_id": "build-1",
                 "controller": controller_image,
                 "targets": [
                     {
@@ -377,11 +477,22 @@ class _SwitchAdapter:
         self._operations: dict[str, list[FleetProfileChildOperation]] = {}
         self._by_request: dict[str, str] = {}
         self.cancellations: list[tuple[tuple[str, ...], int]] = []
+        self.cancellation_requests: list[tuple[str, str, str]] = []
+
+    def validate_resources_in_session(self, session, assignments, reviewed) -> None:
+        # This deterministic adapter owns the isolated service-test boundary.
+        # Production capacity is exercised through the real Run/Switch adapter.
+        pass
 
     def request_superseded_workload_cancellation_in_session(
         self, session: Session, targets: tuple[str, ...], ordinal: int, now: datetime
     ) -> None:
         self.cancellations.append((targets, ordinal))
+
+    def request_cancellation(
+        self, application_id: str, *, request_key: str, actor: str
+    ) -> None:
+        self.cancellation_requests.append((application_id, request_key, actor))
 
     def recoverable_cache_loss(self, application_id: str, *, session: Session) -> bool:
         del application_id, session
@@ -445,6 +556,11 @@ class _SwitchAdapter:
     def get(
         self, operation_id: str, *, session: object = None
     ) -> FleetProfileChildOperation:
+        return self._operations[operation_id][self._states[operation_id]]
+
+    def advance(
+        self, operation_id: str, *, session: object = None
+    ) -> FleetProfileChildOperation:
         states = self._operations[operation_id]
         index = min(self._states[operation_id] + 1, len(states) - 1)
         self._states[operation_id] = index
@@ -466,6 +582,8 @@ def _recipe_document() -> dict[str, object]:
 
 
 def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
+    with sessions.begin() as session:
+        session.add(User(subject="admin", role="administrator"))
     recipe_id = _uuid(1)
     revision_id = _uuid(2)
     document = _recipe_document()
@@ -673,6 +791,37 @@ def _seed_dual_solo_without_runtime_state(
     return dual_revision_id, solo_revision_id
 
 
+def test_profile_admission_refuses_a_missing_exact_build() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    preparation = _exact_preparation((_node_id(1),))
+    preparation = preparation.model_copy(
+        update={
+            "runtime_image": preparation.runtime_image.model_copy(
+                update={"build_id": _uuid(999)}
+            )
+        }
+    )
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        switch_adapter=_SwitchAdapter(),
+        assessment_provider=lambda *_args, **_kwargs: _assessment(preparation),
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    assert preview.allowed
+    with pytest.raises(FleetProfileConflict, match="build.consumer_invalid"):
+        service.apply(
+            profile.id,
+            plan_digest=preview.plan_digest,
+            request_key=_uuid(40),
+            actor="admin",
+        )
+    with sessions() as session:
+        assert session.scalar(select(FleetProfileApplication)) is None
+
+
 def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -680,8 +829,8 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
         sessions,
         clock=lambda: NOW,
         switch_adapter=_SwitchAdapter(),
-        preparation_provider=lambda _session, _assignment, node_ids: _exact_preparation(
-            node_ids
+        assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
+            _assessment(_exact_preparation(node_ids))
         ),
     )
     profile = service.create(_input(revision_id), actor="admin")
@@ -703,6 +852,59 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
     assert item["node_ids"] == [_node_id(1)]
     assert item["kind"] == "fleet-profile.apply"
     assert item["progress"] == {"phase": "prepare"}
+
+
+def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        switch_adapter=_SwitchAdapter(),
+        assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
+            _assessment(_exact_preparation(node_ids))
+        ),
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    with sessions() as session:
+        saved_only = service.endpoint_intent(session, profile.number)
+    assert saved_only.assignments == ()
+
+    preview = service.preview(profile.id)
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(440),
+        actor="admin",
+    )
+
+    with sessions.begin() as session:
+        saved = session.get(FleetProfile, profile.id)
+        assert saved is not None
+        saved.assignments = []
+
+    with sessions() as session:
+        intent = service.endpoint_intent(session, profile.number)
+
+    assert intent.application_id == application.id
+    assert intent.application_state == "queued"
+    assert len(intent.assignments) == 1
+    assert intent.assignments[0].alias == "studio-chat"
+    assert intent.assignments[0].state == "not-published-yet"
+
+    # A completed application cannot make a missing run look merely pending.
+    # The saved definition is still empty; the immutable assignment remains
+    # visible with truthful withdrawal and no usable run identity.
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.state = "succeeded"
+    with sessions() as session:
+        withdrawn = service.endpoint_intent(session, profile.number)
+    assert withdrawn.application_id == application.id
+    assert len(withdrawn.assignments) == 1
+    assert withdrawn.assignments[0].state == "withdrawn"
+    assert withdrawn.assignments[0].expected_run_id is None
 
 
 def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progress() -> (
@@ -826,7 +1028,12 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
         sessions, clock=lambda: now, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-    first = service.load(profile.number, request_key=_uuid(975), actor="admin")
+    first = service.load(
+        profile.number,
+        request_key=_uuid(975),
+        actor="admin",
+        expected_plan_digest=service.preview(profile.id).plan_digest,
+    )
     now += timedelta(seconds=1)
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, first.id)
@@ -836,11 +1043,25 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
         damaged_progress = {**row.progress, "unexpected": {}}
         row.progress = damaged_progress
 
-    second = service.load(profile.number, request_key=_uuid(976), actor="admin")
+    second = service.load(
+        profile.number,
+        request_key=_uuid(976),
+        actor="admin",
+        expected_plan_digest=service.preview(profile.id).plan_digest,
+    )
     assert second.state == "queued"
     assert second.progress.workload_intent_ordinal == 2
     assert second.retry_of_application_id is None
-    assert service.load(profile.number, request_key=_uuid(976), actor="admin") == second
+    assert second.progress.intended_profile is not None
+    assert (
+        service.load(
+            profile.number,
+            request_key=_uuid(976),
+            actor="admin",
+            expected_plan_digest=second.progress.intended_profile.reviewed_plan_digest,
+        )
+        == second
+    )
     assert service.progress_number(profile.number).id == second.id
     with sessions() as session:
         old = session.get(FleetProfileApplication, first.id)
@@ -849,7 +1070,12 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
         assert old.state == "failed"
     # Invalid history remains invalid; it is never executed or silently repaired.
     with pytest.raises(ValidationError):
-        service.load(profile.number, request_key=_uuid(975), actor="admin")
+        service.load(
+            profile.number,
+            request_key=_uuid(975),
+            actor="admin",
+            expected_plan_digest=service.preview(profile.id).plan_digest,
+        )
 
 
 def test_preview_isolates_an_unreadable_pending_plan() -> None:
@@ -861,7 +1087,12 @@ def test_preview_isolates_an_unreadable_pending_plan() -> None:
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     assigned = service.create(_input(revision_id), actor="admin")
-    pending = service.load(assigned.number, request_key=_uuid(981), actor="admin")
+    pending = service.load(
+        assigned.number,
+        request_key=_uuid(981),
+        actor="admin",
+        expected_plan_digest=service.preview(assigned.id).plan_digest,
+    )
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, pending.id)
         assert row is not None
@@ -896,7 +1127,12 @@ def test_preview_reports_an_unreadable_pending_plan_without_a_scope() -> None:
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     assigned = service.create(_input(revision_id), actor="admin")
-    pending = service.load(assigned.number, request_key=_uuid(982), actor="admin")
+    pending = service.load(
+        assigned.number,
+        request_key=_uuid(982),
+        actor="admin",
+        expected_plan_digest=service.preview(assigned.id).plan_digest,
+    )
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, pending.id)
         assert row is not None
@@ -1010,7 +1246,9 @@ def test_preview_treats_a_preparation_blocker_as_not_allowed() -> None:
         sessions,
         clock=lambda: NOW,
         switch_adapter=_SwitchAdapter(),
-        preparation_provider=blocking_preparation,
+        assessment_provider=lambda *args, **_kwargs: _assessment(
+            blocking_preparation(*args)
+        ),
     )
     profile = service.create(_input(revision_id), actor="admin")
 
@@ -1032,7 +1270,12 @@ def test_activity_projection_keeps_valid_records_when_one_is_unreadable() -> Non
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-    valid = service.load(profile.number, request_key=_uuid(983), actor="admin")
+    valid = service.load(
+        profile.number,
+        request_key=_uuid(983),
+        actor="admin",
+        expected_plan_digest=service.preview(profile.id).plan_digest,
+    )
     with sessions() as session:
         valid_row = session.get(FleetProfileApplication, valid.id)
         assert valid_row is not None
@@ -1084,7 +1327,12 @@ def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-    first = service.load(profile.number, request_key=_uuid(986), actor="admin")
+    first = service.load(
+        profile.number,
+        request_key=_uuid(986),
+        actor="admin",
+        expected_plan_digest=service.preview(profile.id).plan_digest,
+    )
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, first.id)
         assert row is not None
@@ -1115,7 +1363,12 @@ def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
 
     # The authoritative per-node intent still fences the receipt once a later
     # load supersedes it, even though a damaged sibling is present.
-    service.load(profile.number, request_key=_uuid(989), actor="admin")
+    service.load(
+        profile.number,
+        request_key=_uuid(989),
+        actor="admin",
+        expected_plan_digest=service.preview(profile.id).plan_digest,
+    )
     assert service.retry_eligible(first.id) is False
 
 
@@ -1126,12 +1379,31 @@ def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-    first = service.load(profile.number, request_key=_uuid(977), actor="admin")
-    second = service.load(profile.number, request_key=_uuid(978), actor="admin")
+    first = service.load(
+        profile.number,
+        request_key=_uuid(977),
+        actor="admin",
+        expected_plan_digest=service.preview(profile.id).plan_digest,
+    )
+    second = service.load(
+        profile.number,
+        request_key=_uuid(978),
+        actor="admin",
+        expected_plan_digest=service.preview(profile.id).plan_digest,
+    )
     assert second.id != first.id
     assert second.progress.workload_intent_ordinal == 2
     assert service.application(first.id).state == "cancelled"
-    assert service.load(profile.number, request_key=_uuid(978), actor="admin") == second
+    assert second.progress.intended_profile is not None
+    assert (
+        service.load(
+            profile.number,
+            request_key=_uuid(978),
+            actor="admin",
+            expected_plan_digest=second.progress.intended_profile.reviewed_plan_digest,
+        )
+        == second
+    )
 
 
 def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() -> None:
@@ -1230,6 +1502,12 @@ def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
         sessions
     )
     with sessions.begin() as session:
+        dual_recipe_digest = session.scalar(
+            select(CatalogDocumentRevision.content_digest).where(
+                CatalogDocumentRevision.id == dual_revision_id
+            )
+        )
+        assert dual_recipe_digest is not None
         session.add(
             ClusterMapping(
                 id=_uuid(600),
@@ -1294,7 +1572,12 @@ def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
                 recipe_build_id=_uuid(603),
                 image_digest="sha256:" + "d" * 64,
                 plan_digest="f" * 64,
-                plan={},
+                plan=_installed_pair_plan(
+                    mapping_id=_uuid(600),
+                    build_id=_uuid(603),
+                    recipe_revision_id=dual_revision_id,
+                    recipe_digest=dual_recipe_digest,
+                ),
                 state="installed",
                 actor="admin",
                 created_at=NOW,
@@ -1553,7 +1836,10 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     )
     adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
     service = FleetProfileService(
-        sessions, clock=lifecycle._clock, switch_adapter=adapter
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
     )
     profile = service.create(
         FleetProfileInput.model_validate(
@@ -1629,6 +1915,7 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
         sessions,
         clock=lifecycle._clock,
         switch_adapter=restarted_adapter,
+        assessment_provider=restarted_adapter.assess,
     )
     assert restarted_service.tick() is False
     resumed = restarted_service.application(application.id)
@@ -1725,7 +2012,10 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     )
     adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
     service = FleetProfileService(
-        sessions, clock=lifecycle._clock, switch_adapter=adapter
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
     )
     profile = service.create(
         FleetProfileInput.model_validate(
@@ -1793,7 +2083,10 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
 
     # A restart reads the same receipt out of the persisted application.
     restarted = FleetProfileService(
-        sessions, clock=lifecycle._clock, switch_adapter=adapter
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
     )
     persisted = restarted.application(application.id)
     assert persisted.progress.step_results == completed.progress.step_results
@@ -1847,7 +2140,10 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
     )
     adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
     service = FleetProfileService(
-        sessions, clock=lifecycle._clock, switch_adapter=adapter
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
     )
     profile = service.create(
         FleetProfileInput.model_validate(
@@ -1957,7 +2253,10 @@ def test_profile_tick_advances_a_switch_child_on_postgres(
         )
         adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
         service = FleetProfileService(
-            sessions, clock=lifecycle._clock, switch_adapter=adapter
+            sessions,
+            clock=lifecycle._clock,
+            switch_adapter=adapter,
+            assessment_provider=adapter.assess,
         )
         profile = service.create(
             FleetProfileInput.model_validate(
@@ -2042,7 +2341,10 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
     )
     adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
     service = FleetProfileService(
-        sessions, clock=lifecycle._clock, switch_adapter=adapter
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
     )
     profile = service.create(
         FleetProfileInput(
@@ -2127,8 +2429,8 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
     service = FleetProfileService(
         sessions,
         clock=lambda: NOW,
-        preparation_provider=lambda _session, _assignment, node_ids: _exact_preparation(
-            node_ids
+        assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
+            _assessment(_exact_preparation(node_ids))
         ),
     )
     profile = service.create(
@@ -2154,7 +2456,9 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
     digest_service = FleetProfileService(
         sessions,
         clock=lambda: NOW,
-        preparation_provider=changing_observation_provider,
+        assessment_provider=lambda *args, **_kwargs: _assessment(
+            changing_observation_provider(*args)
+        ),
     )
     assert (
         digest_service.preview(profile.id).plan_digest
@@ -2182,8 +2486,10 @@ def test_profile_rejects_preparation_evidence_for_another_scope() -> None:
     service = FleetProfileService(
         sessions,
         clock=lambda: NOW,
-        preparation_provider=lambda _session, _assignment, _node_ids: (
-            _exact_preparation((_node_id(2),))
+        assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
+            _assessment(_exact_preparation(node_ids)).model_copy(
+                update={"preparation": _exact_preparation((_node_id(2),))}
+            )
         ),
     )
     profile = service.create(_input(revision_id), actor="admin")
@@ -2363,7 +2669,11 @@ def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
         )
 
     updated = service.update(
-        profile.id, _input(revision_id, name="Studio exact"), actor="admin"
+        profile.id,
+        _input(revision_id, name="Studio exact").model_copy(
+            update={"expected_revision": profile.revision}
+        ),
+        actor="admin",
     )
     assert updated.profile_digest != profile.profile_digest
 
@@ -2526,7 +2836,12 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
                 recipe_build_id=_uuid(13),
                 image_digest=f"sha256:{'d' * 64}",
                 plan_digest="f" * 64,
-                plan={},
+                plan=_installed_pair_plan(
+                    mapping_id=_uuid(10),
+                    build_id=_uuid(13),
+                    recipe_revision_id=dual_revision_id,
+                    recipe_digest=content_sha256(dual_recipe),
+                ),
                 state="installed",
                 actor="admin",
                 created_at=NOW,
@@ -2715,14 +3030,14 @@ def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
 
-    def _unavailable(_session, _assignment, _node_ids):
+    def _unavailable(_session, _assignment, _node_ids, **_kwargs):
         raise ValueError(
             "The Run/Switch authority cannot attest exact model and OCI "
             "preparation evidence (run-switch.install-preparation-unavailable)."
         )
 
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, preparation_provider=_unavailable
+        sessions, clock=lambda: NOW, assessment_provider=_unavailable
     )
     profile = service.create(_input(revision_id), actor="admin")
 
@@ -2751,7 +3066,7 @@ def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
 ) -> None:
     """Regression: the production composition must project real preparation.
 
-    Production binds ``RunSwitchFleetProfileAdapter.preparation`` as the
+    Production binds ``RunSwitchFleetProfileAdapter.assess`` as the
     service's preparation provider.  When that binding is missing the preview
     reported ``allowed`` with an empty ``preparations`` list, which is the
     defect the Spark acceptance canary surfaced.
@@ -2837,7 +3152,7 @@ def test_child_operation_state_distinguishes_absence_from_corruption() -> None:
         _operation_state(7, default="running")
 
 
-def _exact_cleanup_profile(tmp_path: Path):
+def _exact_cleanup_profile(tmp_path: Path, *, engine=None):
     """A production-wired profile that removes an unlisted installation."""
 
     from vonk_control.run_switch_operations import RunSwitchOperationService
@@ -2849,7 +3164,7 @@ def _exact_cleanup_profile(tmp_path: Path):
     )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2
+        tmp_path, nodes=2, engine=engine
     )
     installed = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
@@ -2864,7 +3179,10 @@ def _exact_cleanup_profile(tmp_path: Path):
     )
     adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
     service = FleetProfileService(
-        sessions, clock=lifecycle._clock, switch_adapter=adapter
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
     )
     profile = service.create(
         FleetProfileInput.model_validate(
@@ -2884,16 +3202,26 @@ def test_switch_queue_removes_an_installation_the_profile_no_longer_references(
 ) -> None:
     """The orchestrator, not the profile layer, performs the removal."""
 
-    sessions, _lifecycle, adapter, _service, _profile, installed, nodes = (
+    sessions, _lifecycle, adapter, service, profile, installed, nodes = (
         _exact_cleanup_profile(tmp_path)
     )
-
+    reviewed = service.preview(profile.id)
     with sessions() as session:
         exact = adapter._plan_queue(
-            session, (), tuple(nodes), installation_policy="exact"
+            session,
+            (),
+            tuple(nodes),
+            installation_policy="exact",
+            reviewed_effects=reviewed.effects,
+            expected_images={},
         )
         retained = adapter._plan_queue(
-            session, (), tuple(nodes), installation_policy="keep-cached"
+            session,
+            (),
+            tuple(nodes),
+            installation_policy="keep-cached",
+            reviewed_effects=reviewed.effects,
+            expected_images={},
         )
 
     assert {"kind": "cleanup", "id": installed.owner_id} in exact
@@ -2941,9 +3269,7 @@ def _exact_planned_cleanup_profile(tmp_path: Path):
     admission = lifecycle._install_admission
     plan = admission.plan_install(mapping_id, build_id, now=lifecycle._clock())
     assert plan.allowed, [
-        (node.node_id, reason.code)
-        for node in plan.nodes
-        for reason in node.blockers
+        (node.node_id, reason.code) for node in plan.nodes for reason in node.blockers
     ]
     planned = admission.accept_install(plan, actor="admin", now=lifecycle._clock())
     run_switch = RunSwitchOperationService(
@@ -3075,7 +3401,10 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
     )
     adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
     service = FleetProfileService(
-        sessions, clock=lifecycle._clock, switch_adapter=adapter
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
     )
     profile = service.create(
         FleetProfileInput(

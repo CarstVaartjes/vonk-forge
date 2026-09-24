@@ -27,6 +27,8 @@ from .harnesses.common import HarnessCompileError
 from .models import CatalogDocumentRevision
 from .runtime_writable_paths import document as writable_path_document
 
+RUNTIME_INTERFACE = "vonk.runtime.v1"
+
 
 class RecipeRuntimeSpecError(ValueError):
     """The canonical recipe cannot produce a secure runtime projection."""
@@ -212,7 +214,7 @@ def compile_runtime_spec(
     )
     compiled_arguments = _compiled_arguments(parsed, parameters)
     runtime: dict[str, object] = {
-        "interface": "vonk.runtime.v1",
+        "interface": RUNTIME_INTERFACE,
         "adapter": projection.slug,
         "adapter_version": projection.contract_version,
         "telemetry": {

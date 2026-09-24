@@ -9,9 +9,11 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import httpx
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_agent_protocol.package_source import AgentPackageSource
@@ -52,6 +54,35 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+def _request_intent(
+    value: object,
+    node_ids: Sequence[str] | None,
+) -> dict[str, object]:
+    if value is None:
+        return {
+            "all": node_ids is None,
+            "selectors": None if node_ids is None else list(node_ids),
+        }
+    if not isinstance(value, Mapping):
+        raise AgentUpgradeConflict("agent upgrade request intent is invalid")
+    if set(value) != {"all", "selectors"} or type(value.get("all")) is not bool:
+        raise AgentUpgradeConflict("agent upgrade request intent is invalid")
+    all_nodes = value["all"]
+    selectors = value["selectors"]
+    if all_nodes:
+        if selectors is not None:
+            raise AgentUpgradeConflict("agent upgrade request intent is invalid")
+        return {"all": True, "selectors": None}
+    if (
+        not isinstance(selectors, list)
+        or not selectors
+        or len(selectors) > 64
+        or not all(isinstance(selector, str) and selector for selector in selectors)
+    ):
+        raise AgentUpgradeConflict("agent upgrade request intent is invalid")
+    return {"all": False, "selectors": list(selectors)}
+
+
 class AgentUpgradeConflict(RuntimeError):
     """An agent upgrade plan is invalid, stale, or not safely executable.
 
@@ -77,7 +108,8 @@ class AgentUpgradePlan:
     package: dict[str, object]
     plan_digest: str
     repair_manifest: dict[str, object] | None
-    strategy: str
+    request_intent: dict[str, object]
+    strategy: Literal["one-at-a-time"]
     sources: dict[str, dict[str, object]]
 
 
@@ -176,11 +208,13 @@ class AgentUpgradeService:
         package: Mapping[str, object],
         *,
         repair_manifest: Mapping[str, object] | None = None,
-        strategy: str = "one-at-a-time",
+        strategy: Literal["one-at-a-time"] = "one-at-a-time",
+        request_intent: Mapping[str, object] | None = None,
     ) -> AgentUpgradePlan:
-        if strategy not in {"one-at-a-time", "all-at-once"}:
+        if strategy != "one-at-a-time":
             raise AgentUpgradeConflict("agent upgrade rollout strategy is invalid")
         payload = self._package(package)
+        intent = _request_intent(request_intent, node_ids)
         repair = (
             None
             if repair_manifest is None
@@ -257,6 +291,7 @@ class AgentUpgradeService:
             "authority_revision": authority_revision,
             "node_ids": list(targets),
             "package": payload,
+            "request_intent": intent,
             **({"repair_manifest": repair} if repair is not None else {}),
             "strategy": strategy,
         }
@@ -266,9 +301,50 @@ class AgentUpgradeService:
             package=payload,
             plan_digest=hashlib.sha256(canonical_message(document)).hexdigest(),
             repair_manifest=repair,
+            request_intent=intent,
             strategy=strategy,
             sources=sources,
         )
+
+    def get_request(
+        self,
+        request_id: str,
+        *,
+        actor: str,
+        request_intent: Mapping[str, object],
+    ) -> Job | None:
+        """Return the exact durable job for a repeated fleet-upgrade request."""
+
+        intent = _request_intent(request_intent, None)
+        with self._sessions() as session:
+            job = session.scalar(select(Job).where(Job.request_id == request_id))
+            if job is None:
+                return None
+            self._check_replayed_request(job, actor, intent)
+            session.expunge(job)
+            return job
+
+    @staticmethod
+    def _check_replayed_request(
+        job: Job, actor: str, request_intent: Mapping[str, object]
+    ) -> None:
+        if (
+            job.kind != "agent-upgrade"
+            or job.actor != actor
+            or not isinstance(job.payload, Mapping)
+            or "request_intent" not in job.payload
+        ):
+            raise AgentUpgradeConflict("agent upgrade request key was already used")
+        try:
+            stored_intent = _request_intent(job.payload.get("request_intent"), None)
+        except AgentUpgradeConflict:
+            raise AgentUpgradeConflict(
+                "agent upgrade request key was already used differently"
+            ) from None
+        if stored_intent != request_intent:
+            raise AgentUpgradeConflict(
+                "agent upgrade request key was already used differently"
+            )
 
     def apply(
         self,
@@ -279,13 +355,21 @@ class AgentUpgradeService:
         actor: str,
         request_id: str,
         repair_manifest: Mapping[str, object] | None = None,
-        strategy: str = "one-at-a-time",
+        strategy: Literal["one-at-a-time"] = "one-at-a-time",
+        request_intent: Mapping[str, object] | None = None,
     ) -> Job:
+        if strategy != "one-at-a-time":
+            raise AgentUpgradeConflict("agent upgrade rollout strategy is invalid")
+        intent = _request_intent(request_intent, node_ids)
+        existing = self.get_request(request_id, actor=actor, request_intent=intent)
+        if existing is not None:
+            return existing
         plan = self.preview(
             node_ids,
             package,
             repair_manifest=repair_manifest,
             strategy=strategy,
+            request_intent=intent,
         )
         if plan.plan_digest != plan_digest:
             raise AgentUpgradeConflict("agent upgrade preview is stale")
@@ -302,6 +386,7 @@ class AgentUpgradeService:
                 "sources": plan.sources,
                 "node_order": list(plan.node_ids),
                 "package": plan.package,
+                "request_intent": plan.request_intent,
                 **(
                     {"repair_manifest": plan.repair_manifest}
                     if plan.repair_manifest is not None
@@ -313,14 +398,23 @@ class AgentUpgradeService:
             created_at=now,
             updated_at=now,
         )
-        with self._sessions.begin() as session:
-            session.add(job)
-            session.flush()
-            if plan.strategy == "all-at-once":
-                for node_id in plan.node_ids:
-                    self._enqueue_node(session, job, node_id)
-            else:
+        try:
+            with self._sessions.begin() as session:
+                existing = session.scalar(
+                    select(Job).where(Job.request_id == request_id).with_for_update()
+                )
+                if existing is not None:
+                    self._check_replayed_request(existing, actor, intent)
+                    session.expunge(existing)
+                    return existing
+                session.add(job)
+                session.flush()
                 self._enqueue_next(session, job)
+        except IntegrityError:
+            existing = self.get_request(request_id, actor=actor, request_intent=intent)
+            if existing is not None:
+                return existing
+            raise
         self._operations.notify_available()
         return job
 
@@ -377,7 +471,14 @@ class AgentUpgradeService:
             order = parent.payload.get("node_order")
             strategy = parent.payload.get("strategy")
             repair = parent.payload.get("repair_manifest")
-            expected_payload_keys = {"node_order", "package", "strategy", "sources"}
+            request_intent = parent.payload.get("request_intent")
+            expected_payload_keys = {
+                "node_order",
+                "package",
+                "request_intent",
+                "strategy",
+                "sources",
+            }
             if repair is not None:
                 expected_payload_keys.add("repair_manifest")
             if (
@@ -388,10 +489,14 @@ class AgentUpgradeService:
                 or not all(isinstance(node_id, str) for node_id in order)
                 or len(order) != len(set(order))
                 or order != parent.targets
-                or strategy not in {"one-at-a-time", "all-at-once"}
+                or strategy != "one-at-a-time"
                 or (repair is not None and not isinstance(repair, Mapping))
             ):
                 raise ValueError("stored agent upgrade plan is invalid")
+            try:
+                normalized_intent = _request_intent(request_intent, None)
+            except AgentUpgradeConflict as error:
+                raise ValueError("stored agent upgrade plan is invalid") from error
             try:
                 normalized_package = self._package(package)
                 normalized_repair = (
@@ -401,9 +506,9 @@ class AgentUpgradeService:
                 )
             except AgentUpgradeConflict as error:
                 raise ValueError("stored agent upgrade plan is invalid") from error
-            if normalized_repair is not None and (
-                order != [normalized_repair["node_id"]] or strategy != "one-at-a-time"
-            ):
+            if normalized_repair is not None and order != [
+                normalized_repair["node_id"]
+            ]:
                 raise ValueError("stored agent upgrade plan is invalid")
             plan_digest = hashlib.sha256(
                 canonical_message(
@@ -412,6 +517,7 @@ class AgentUpgradeService:
                         "authority_revision": parent.authority_revision,
                         "node_ids": order,
                         "package": normalized_package,
+                        "request_intent": normalized_intent,
                         **(
                             {"repair_manifest": normalized_repair}
                             if normalized_repair is not None
@@ -478,25 +584,21 @@ class AgentUpgradeService:
             materialized = {
                 operation.node_id: operation for operation in stored_operations
             }
-            if strategy == "all-at-once":
-                if set(materialized) != set(order):
-                    raise ValueError("stored agent upgrade topology is invalid")
-            else:
-                expected_prefix = order[: len(materialized)]
-                if not materialized or set(materialized) != set(expected_prefix):
-                    raise ValueError("stored agent upgrade topology is invalid")
-                if any(
-                    materialized[node_id].state != "succeeded"
-                    for node_id in expected_prefix[:-1]
-                ):
-                    raise ValueError("stored agent upgrade topology is invalid")
-                if materialized[expected_prefix[-1]].state not in {
-                    "queued",
-                    "running",
-                    "succeeded",
-                    "waiting-for-operator",
-                }:
-                    raise ValueError("stored agent upgrade topology is invalid")
+            expected_prefix = order[: len(materialized)]
+            if not materialized or set(materialized) != set(expected_prefix):
+                raise ValueError("stored agent upgrade topology is invalid")
+            if any(
+                materialized[node_id].state != "succeeded"
+                for node_id in expected_prefix[:-1]
+            ):
+                raise ValueError("stored agent upgrade topology is invalid")
+            if materialized[expected_prefix[-1]].state not in {
+                "queued",
+                "running",
+                "succeeded",
+                "waiting-for-operator",
+            }:
+                raise ValueError("stored agent upgrade topology is invalid")
             for operation in active:
                 if operation.state == "queued":
                     if operation.current_attempt != 0:
@@ -628,8 +730,7 @@ class AgentUpgradeService:
             return
         else:
             return
-        if parent.payload.get("strategy") == "one-at-a-time":
-            self._enqueue_next(session, parent)
+        self._enqueue_next(session, parent)
 
     @staticmethod
     def _wait_for_identity(

@@ -17,9 +17,13 @@ from typing import Union
 
 if TYPE_CHECKING:
   from ..models.availability_operation_failure import AvailabilityOperationFailure
+  from ..models.recipe_retry_intent import RecipeRetryIntent
+  from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
   from ..models.recipe_image_availability_child import RecipeImageAvailabilityChild
+  from ..models.recipe_revision_intent import RecipeRevisionIntent
   from ..models.recipe_image_availability_action import RecipeImageAvailabilityAction
   from ..models.operation_progress import OperationProgress
+  from ..models.recipe_selector_intent import RecipeSelectorIntent
   from ..models.recipe_image_availability_result import RecipeImageAvailabilityResult
 
 
@@ -41,10 +45,12 @@ class RecipeImageAvailabilityResponse:
             progress (OperationProgress): Canonical durable progress payload shared by Controller and agents.
             recipe_content_sha256 (str):
             recipe_revision_id (str):
+            request (Union['RecipeRetryIntent', 'RecipeRevisionIntent', 'RecipeSelectorIntent']):
             request_id (str):
             state (RecipeImageAvailabilityResponseState):
             updated_at (str):
             actions (Union[Unset, list['RecipeImageAvailabilityAction']]):
+            cancellation (Union['RecipeOperationCancellationResult', None, Unset]):
             children (Union[Unset, list['RecipeImageAvailabilityChild']]):
             failure (Union['AvailabilityOperationFailure', None, Unset]):
             result (Union['RecipeImageAvailabilityResult', None, Unset]):
@@ -58,10 +64,12 @@ class RecipeImageAvailabilityResponse:
     progress: 'OperationProgress'
     recipe_content_sha256: str
     recipe_revision_id: str
+    request: Union['RecipeRetryIntent', 'RecipeRevisionIntent', 'RecipeSelectorIntent']
     request_id: str
     state: RecipeImageAvailabilityResponseState
     updated_at: str
     actions: Union[Unset, list['RecipeImageAvailabilityAction']] = UNSET
+    cancellation: Union['RecipeOperationCancellationResult', None, Unset] = UNSET
     children: Union[Unset, list['RecipeImageAvailabilityChild']] = UNSET
     failure: Union['AvailabilityOperationFailure', None, Unset] = UNSET
     result: Union['RecipeImageAvailabilityResult', None, Unset] = UNSET
@@ -73,9 +81,13 @@ class RecipeImageAvailabilityResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.availability_operation_failure import AvailabilityOperationFailure
+        from ..models.recipe_retry_intent import RecipeRetryIntent
+        from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
         from ..models.recipe_image_availability_child import RecipeImageAvailabilityChild
+        from ..models.recipe_revision_intent import RecipeRevisionIntent
         from ..models.recipe_image_availability_action import RecipeImageAvailabilityAction
         from ..models.operation_progress import OperationProgress
+        from ..models.recipe_selector_intent import RecipeSelectorIntent
         from ..models.recipe_image_availability_result import RecipeImageAvailabilityResult
         attempt = self.attempt
 
@@ -91,6 +103,15 @@ class RecipeImageAvailabilityResponse:
 
         recipe_revision_id = self.recipe_revision_id
 
+        request: dict[str, Any]
+        if isinstance(self.request, RecipeSelectorIntent):
+            request = self.request.to_dict()
+        elif isinstance(self.request, RecipeRevisionIntent):
+            request = self.request.to_dict()
+        else:
+            request = self.request.to_dict()
+
+
         request_id = self.request_id
 
         state: str = self.state
@@ -105,6 +126,14 @@ class RecipeImageAvailabilityResponse:
                 actions.append(actions_item)
 
 
+
+        cancellation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.cancellation, Unset):
+            cancellation = UNSET
+        elif isinstance(self.cancellation, RecipeOperationCancellationResult):
+            cancellation = self.cancellation.to_dict()
+        else:
+            cancellation = self.cancellation
 
         children: Union[Unset, list[dict[str, Any]]] = UNSET
         if not isinstance(self.children, Unset):
@@ -144,12 +173,15 @@ class RecipeImageAvailabilityResponse:
             "progress": progress,
             "recipe_content_sha256": recipe_content_sha256,
             "recipe_revision_id": recipe_revision_id,
+            "request": request,
             "request_id": request_id,
             "state": state,
             "updated_at": updated_at,
         })
         if actions is not UNSET:
             field_dict["actions"] = actions
+        if cancellation is not UNSET:
+            field_dict["cancellation"] = cancellation
         if children is not UNSET:
             field_dict["children"] = children
         if failure is not UNSET:
@@ -166,9 +198,13 @@ class RecipeImageAvailabilityResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.availability_operation_failure import AvailabilityOperationFailure
+        from ..models.recipe_retry_intent import RecipeRetryIntent
+        from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
         from ..models.recipe_image_availability_child import RecipeImageAvailabilityChild
+        from ..models.recipe_revision_intent import RecipeRevisionIntent
         from ..models.recipe_image_availability_action import RecipeImageAvailabilityAction
         from ..models.operation_progress import OperationProgress
+        from ..models.recipe_selector_intent import RecipeSelectorIntent
         from ..models.recipe_image_availability_result import RecipeImageAvailabilityResult
         d = dict(src_dict)
         attempt = d.pop("attempt")
@@ -190,6 +226,38 @@ class RecipeImageAvailabilityResponse:
 
         recipe_revision_id = d.pop("recipe_revision_id")
 
+        def _parse_request(data: object) -> Union['RecipeRetryIntent', 'RecipeRevisionIntent', 'RecipeSelectorIntent']:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                request_type_0 = RecipeSelectorIntent.from_dict(data)
+
+
+
+                return request_type_0
+            except: # noqa: E722
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                request_type_1 = RecipeRevisionIntent.from_dict(data)
+
+
+
+                return request_type_1
+            except: # noqa: E722
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            request_type_2 = RecipeRetryIntent.from_dict(data)
+
+
+
+            return request_type_2
+
+        request = _parse_request(d.pop("request"))
+
+
         request_id = d.pop("request_id")
 
         state = check_recipe_image_availability_response_state(d.pop("state"))
@@ -207,6 +275,26 @@ class RecipeImageAvailabilityResponse:
 
 
             actions.append(actions_item)
+
+
+        def _parse_cancellation(data: object) -> Union['RecipeOperationCancellationResult', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                cancellation_type_0 = RecipeOperationCancellationResult.from_dict(data)
+
+
+
+                return cancellation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['RecipeOperationCancellationResult', None, Unset], data)
+
+        cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
 
 
         children = []
@@ -271,10 +359,12 @@ class RecipeImageAvailabilityResponse:
             progress=progress,
             recipe_content_sha256=recipe_content_sha256,
             recipe_revision_id=recipe_revision_id,
+            request=request,
             request_id=request_id,
             state=state,
             updated_at=updated_at,
             actions=actions,
+            cancellation=cancellation,
             children=children,
             failure=failure,
             result=result,

@@ -1,0 +1,40 @@
+{
+  "attempt": 1,
+  "created_at": "2026-09-10T00:00:00Z",
+  "current_operation_id": null,
+  "current_step": 0,
+  "id": "cbee14cf-2404-4523-84f5-6d80c797fab9",
+  "plan_digest": "128b4d68f42a3d5912c03b992040e6ea24c7dd177822c180ce71857c7d9bcb4b",
+  "profile_digest": "58b32a1f14cba85613c191c51c867df5a988cc7ad4257f5430209e4e1c583dcd",
+  "profile_id": "4a426143-ba9c-48b7-b16f-9a92f9e01c40",
+  "progress": {
+    "attempt": 1,
+    "completed_steps": 0,
+    "intended_profile": {
+      "assignments": [],
+      "installation_policy": "keep-cached",
+      "profile_digest": "58b32a1f14cba85613c191c51c867df5a988cc7ad4257f5430209e4e1c583dcd",
+      "reviewed_application_id": "cbee14cf-2404-4523-84f5-6d80c797fab9",
+      "reviewed_plan_digest": "920377f2779a469be93bd863c0e70b582d42b37845b9d17a1b8fae6cf98a485c",
+      "scope": {
+        "node_ids": [
+          "spk_11111111111111111111111111111111",
+          "spk_22222222222222222222222222222222"
+        ]
+      }
+    },
+    "operation_kind": "fleet-profile.apply",
+    "step_results": {},
+    "total_steps": 0
+  },
+  "request_key": "22222222-2222-4222-8222-222222222222",
+  "result": {
+    "changed": false,
+    "completed_steps": 0
+  },
+  "schema_version": 2,
+  "state": "succeeded",
+  "status_reason": null,
+  "total_steps": 0,
+  "updated_at": "2026-09-10T00:00:00Z"
+}

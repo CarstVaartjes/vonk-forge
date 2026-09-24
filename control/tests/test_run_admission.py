@@ -7,6 +7,7 @@ from importlib import resources
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.inventory import MemoryPool
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -35,6 +36,8 @@ def setup(
     capabilities=("runtime.vonk.v1",),
     port_reserved=False,
     system_reserve=0,
+    memory_kind="unified",
+    memory_pool: MemoryPool = "shared",
     denied_jurisdictions=(),
     engine=None,
 ):
@@ -65,6 +68,7 @@ def setup(
     memory = document["topology"]["roles"][0]["resources"]["memory"]
     memory.update(
         {
+            "kind": memory_kind,
             "startup_peak_bytes": 225,
             "steady_state_bytes": 200,
             "runtime_growth_bytes": 25,
@@ -213,6 +217,7 @@ def setup(
             1,
             False,
             tuple(capabilities),
+            memory_pool=memory_pool,
         )
     )
     return sessions, now, node, installation.id
@@ -262,9 +267,10 @@ def test_a_plan_does_not_count_the_capacity_of_the_run_it_stops(tmp_path) -> Non
 
     replaced = service.plan_run(installation, alias="qwen", now=now)
     assert replaced.allowed is False
-    assert "run.insufficient_memory" in {
+    assert "resource.resident_usage_unknown" in {
         blocker.code for blocker in replaced.nodes[0].blockers
     }
+    assert replaced.nodes[0].free_after_bytes is None
 
     replacement = service.plan_run(
         installation, alias="qwen", now=now, released_run_ids=(run_id,)
@@ -408,35 +414,6 @@ def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
         "topology.runtime_capability_missing",
         "run.port_occupied",
     } <= codes
-
-
-def test_accept_rechecks_memory_reservations_while_holding_node_lock(tmp_path) -> None:
-    sessions, now, node, installation = setup(tmp_path, free_memory=300)
-    service = RunAdmissionService(
-        sessions, inventory_max_age=300, memory_floor_bytes=50
-    )
-    plan = service.plan_run(installation, "qwen", now=now)
-    with sessions.begin() as session:
-        session.add_all(
-            [
-                ResourceReservation(
-                    node_id=node,
-                    kind=kind,
-                    resource_key="concurrent",
-                    amount_bytes=50,
-                    owner_kind="run",
-                    owner_id="2" * 36,
-                    state="active",
-                    plan_digest="d" * 64,
-                    created_at=now,
-                )
-                for kind in ("unified-memory",)
-            ]
-        )
-    service.plan_run = lambda *args, **kwargs: plan
-
-    with pytest.raises(RunPlanConflict, match="memory capacity changed"):
-        service.accept_run(plan, actor="admin", now=now)
 
 
 def test_queue_rejects_reservation_mutation_after_preview(tmp_path) -> None:

@@ -1,0 +1,21 @@
+{
+  "files": [
+    {
+      "name": "output.png",
+      "path": "/disposable-fixture/downloaded-output/output.png",
+      "sha256": "ea766b651151a3c7fa7638aa0cbad3fcd54e627daf1cdeac96f99702eb50a154",
+      "size_bytes": 30,
+      "state": "downloaded",
+      "transfer": {
+        "destination": "/disposable-fixture/downloaded-output/output.png",
+        "media_type": "image/png",
+        "sha256": "ea766b651151a3c7fa7638aa0cbad3fcd54e627daf1cdeac96f99702eb50a154",
+        "size_bytes": 30
+      }
+    }
+  ],
+  "job_id": "1eb7cb50-b91b-4410-be70-089825a97d45",
+  "output_manifest_sha256": "a1a274c053e9d995e8d2423af969910f0ebcd3b6e2f0ac093fc21ac9953eefec",
+  "state": "succeeded",
+  "total_bytes": 30
+}

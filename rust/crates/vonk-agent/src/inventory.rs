@@ -7,6 +7,7 @@ use std::{
 
 use serde::Serialize;
 use thiserror::Error;
+use vonk_agent_protocol::MemoryPool;
 
 use crate::process::{ProcessError, ProcessRunner, Program};
 
@@ -22,6 +23,7 @@ pub struct Inventory {
     pub gpu_count: u32,
     pub gpu_memory_total_bytes: u64,
     pub gpu_memory_free_bytes: u64,
+    pub memory_pool: MemoryPool,
     pub nvidia_driver_version: String,
     pub container_runtime_version: String,
     pub artifact_store_read_only: bool,
@@ -76,8 +78,13 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
         if !gpu.success {
             return Err(InventoryError::Parse);
         }
-        let (gpu_count, gpu_memory_total_bytes, gpu_memory_free_bytes, nvidia_driver_version) =
-            parse_gpus(&gpu.stdout, memory_total_bytes, memory_available_bytes)?;
+        let (
+            gpu_count,
+            gpu_memory_total_bytes,
+            gpu_memory_free_bytes,
+            nvidia_driver_version,
+            memory_pool,
+        ) = parse_gpus(&gpu.stdout, memory_total_bytes, memory_available_bytes)?;
         let podman = self.runner.run(
             Program::Podman,
             &[
@@ -136,6 +143,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             gpu_count,
             gpu_memory_total_bytes,
             gpu_memory_free_bytes,
+            memory_pool,
             nvidia_driver_version,
             container_runtime_version: text(&docker.stdout)?,
             artifact_store_read_only: filesystem
@@ -163,6 +171,7 @@ fn egress_boundary_available(path: &Path) -> bool {
 pub fn available_memory_bytes<R: ProcessRunner>(
     runner: &R,
     meminfo_path: &Path,
+    memory_kind: &str,
 ) -> Result<u64, InventoryError> {
     let (host_total, host_available) = parse_meminfo(&fs::read_to_string(meminfo_path)?)?;
     let gpu = runner.run(
@@ -176,8 +185,15 @@ pub fn available_memory_bytes<R: ProcessRunner>(
     if !gpu.success {
         return Err(InventoryError::Parse);
     }
-    let (_, _, gpu_available, _) = parse_gpus(&gpu.stdout, host_total, host_available)?;
-    Ok(host_available.min(gpu_available))
+    let (_, _, gpu_available, _, memory_pool) =
+        parse_gpus(&gpu.stdout, host_total, host_available)?;
+    match (memory_pool, memory_kind) {
+        (MemoryPool::Shared, "host" | "accelerator" | "unified") => Ok(host_available),
+        (MemoryPool::Separate, "host") => Ok(host_available),
+        (MemoryPool::Separate, "accelerator") => Ok(gpu_available),
+        (MemoryPool::Separate, "unified") => Ok(host_available.min(gpu_available)),
+        _ => Err(InventoryError::Parse),
+    }
 }
 
 pub fn available_disk_bytes(path: &Path) -> Result<u64, InventoryError> {
@@ -207,11 +223,19 @@ fn parse_meminfo(value: &str) -> Result<(u64, u64), InventoryError> {
     }
 }
 
+pub(crate) fn shared_memory_pool(name: Option<&str>) -> bool {
+    name.is_some_and(|value| {
+        value
+            .split_ascii_whitespace()
+            .any(|part| part.eq_ignore_ascii_case("GB10"))
+    })
+}
+
 fn parse_gpus(
     value: &[u8],
     host_total: u64,
     host_available: u64,
-) -> Result<(u32, u64, u64, String), InventoryError> {
+) -> Result<(u32, u64, u64, String, MemoryPool), InventoryError> {
     let value = std::str::from_utf8(value).map_err(|_| InventoryError::Parse)?;
     let lines = value
         .lines()
@@ -220,13 +244,22 @@ fn parse_gpus(
     if lines.len() == 1 {
         let fields = lines[0].split(',').map(str::trim).collect::<Vec<_>>();
         if fields.len() == 4
-            && fields[0] == "NVIDIA GB10"
-            && fields[1] == "[N/A]"
-            && fields[2] == "[N/A]"
+            && shared_memory_pool(Some(fields[0]))
             && !fields[3].is_empty()
             && host_available <= host_total
         {
-            return Ok((1, host_total, host_available, fields[3].to_owned()));
+            // Numeric GPU-attributed allocation, when available, does not create
+            // dedicated VRAM. Host readings own this single physical pool.
+            if (fields[1], fields[2]) != ("[N/A]", "[N/A]") && mib(fields[2])? > mib(fields[1])? {
+                return Err(InventoryError::Parse);
+            }
+            return Ok((
+                1,
+                host_total,
+                host_available,
+                fields[3].to_owned(),
+                MemoryPool::Shared,
+            ));
         }
     }
     let mut count = 0_u32;
@@ -235,7 +268,11 @@ fn parse_gpus(
     let mut driver = None;
     for line in lines {
         let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
-        if fields.len() != 4 || fields[0].is_empty() || fields[3].is_empty() {
+        if fields.len() != 4
+            || fields[0].is_empty()
+            || fields[3].is_empty()
+            || shared_memory_pool(Some(fields[0]))
+        {
             return Err(InventoryError::Parse);
         }
         count = count.checked_add(1).ok_or(InventoryError::Parse)?;
@@ -252,7 +289,13 @@ fn parse_gpus(
     if count == 0 || free > total {
         return Err(InventoryError::Parse);
     }
-    Ok((count, total, free, driver.ok_or(InventoryError::Parse)?))
+    Ok((
+        count,
+        total,
+        free,
+        driver.ok_or(InventoryError::Parse)?,
+        MemoryPool::Separate,
+    ))
 }
 
 fn kib(value: &str) -> Result<u64, InventoryError> {

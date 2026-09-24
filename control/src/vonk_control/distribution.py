@@ -27,6 +27,12 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
+from .artifact_lifecycle import (
+    ArtifactIdentity,
+    ArtifactLifecycleError,
+    require_reference_open,
+)
+from .artifact_reference_scan import require_model_sets_open
 from .cached_file_verification import verified_files
 from .catalog_revision_contract import read_catalog_document
 from .models import (
@@ -811,6 +817,23 @@ class DistributionService:
                         )
                     return
                 now = self.clock()
+                try:
+                    require_model_sets_open(
+                        session,
+                        (assignment.model_artifact_set_sha256,),
+                        now=now,
+                    )
+                    require_reference_open(
+                        session,
+                        (
+                            ArtifactIdentity(
+                                "runtime-image", assignment.oci_archive_sha256
+                            ),
+                        ),
+                        now=now,
+                    )
+                except ArtifactLifecycleError as error:
+                    raise DistributionError(error.code, error.detail) from error
                 session.add(
                     ArtifactDistributionAssignment(
                         id=assignment.assignment_id,

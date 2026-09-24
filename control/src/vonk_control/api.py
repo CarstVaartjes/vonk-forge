@@ -41,6 +41,8 @@ from starlette.responses import FileResponse, StreamingResponse
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
 from .agent_api import (
     MAX_RECIPE_IMAGE_BYTES,
     AgentApiServices,
@@ -72,6 +74,7 @@ from .cluster_mappings import ClusterMappingService
 from .deployment_provenance import DeploymentProvenanceService
 from .distribution_executor import CompositeDistributionPhaseExecutor
 from .download_contract import download_responses
+from .endpoint_contract import EndpointResponse
 from .failure_evidence import FailureEvidenceService
 from .failure_evidence_api import install_failure_evidence_routes
 from .fleet_profile_api import install_fleet_profile_routes
@@ -80,6 +83,7 @@ from .fleet_projection import (
 )
 from .fleet_stream import parse_last_event_id
 from .fleet_stream_contract import FleetStreamEvent
+from .library_assessment import LibraryAssessment
 from .logging import JobLogCorruptError
 from .metrics import MetricsRegistry, runnable_job_ages
 from .model_cache_api import (
@@ -90,7 +94,6 @@ from .operation_api import (
     AuditEventResponse,
     AuditResponse,
     BoundedErrorResponse,
-    EndpointResponse,
     ErrorContextResponse,
     HealthzResponse,
     IdentityHistoryItem,
@@ -104,6 +107,7 @@ from .operation_api import (
     JobSummary,
     OperationApiServices,
     OperationDetailResponse,
+    OperationOwnerReference,
     OperationPage,
     OperationsResponse,
     ReadyzResponse,
@@ -116,11 +120,13 @@ from .operation_api import (
     job_response,
     operation_detail_response,
 )
+from .operation_contract import OperationFailureEvidence, OperationRecoveryAction
 from .operator_projection_api import (
     FleetOperatorServices,
     build_fleet_operator_services,
     install_operator_projection_routes,
 )
+from .profile_application_cancel_api import install_profile_application_cancel_route
 from .recipe_builds import RecipeBuildService
 from .recipe_library_types import RecipeLibraryError
 from .recipe_operations import RecipeOperationService
@@ -163,6 +169,7 @@ def _bounded_error_content(
     *,
     validation: bool = False,
     context: ErrorContextResponse | None = None,
+    candidates: list[str] | None = None,
 ) -> bytes:
     """Serialize the documented non-agent HTTP error contract.
 
@@ -177,7 +184,9 @@ def _bounded_error_content(
         detail = "request failed"
     detail = redact_text(detail)[:256]
     response = (
-        RequestValidationProblem(detail=detail, issues=[], context=context)
+        RequestValidationProblem(
+            detail=detail, issues=[], context=context, candidates=candidates
+        )
         if validation
         else BoundedErrorResponse(detail=detail, context=context)
     )
@@ -552,6 +561,8 @@ def create_app(
     async def canonical_agent_http_error(
         request: Request, error: StarletteHTTPException
     ) -> Response:
+        from .library_api import SelectorAmbiguityHTTPError
+
         if request.url.path.startswith("/api/catalog/"):
             return Response(
                 content=_catalog_error_content(request, error),
@@ -563,7 +574,13 @@ def create_app(
             if request.url.path.startswith("/api/"):
                 return Response(
                     content=_bounded_error_content(
-                        error.detail, validation=error.status_code == 422
+                        error.detail,
+                        validation=error.status_code == 422,
+                        candidates=(
+                            error.problem.candidates
+                            if isinstance(error, SelectorAmbiguityHTTPError)
+                            else None
+                        ),
                     ),
                     status_code=error.status_code,
                     headers=error.headers,
@@ -689,7 +706,7 @@ def create_app(
             if artifact_input_upload
             else 1024**3
             if artifact_output_upload
-            else 1_048_576
+            else MAX_CONTROL_DOCUMENT_BYTES
         )
         try:
             if telemetry_ingest:
@@ -836,6 +853,13 @@ def create_app(
         managed_sync=managed_catalog_sync,
     )
     install_fleet_profile_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        profiles=fleet_profiles,
+        operations=operations,
+        audits=audits,
+    )
+    install_profile_application_cancel_route(
         app,
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
@@ -1016,11 +1040,69 @@ def create_app(
             total=total,
         )
 
-    def activity_detail(item: Mapping[str, object]) -> OperationDetailResponse:
+    def activity_detail(
+        item: Mapping[str, object], *, tolerate_unreadable: bool = False
+    ) -> OperationDetailResponse:
         """Expose recovery only when its family route is installed."""
-        if failure_evidence is not None:
-            item = failure_evidence.decorate(item)
-        return operation_detail_response(item, available_actions=())
+        try:
+            if failure_evidence is not None:
+                item = failure_evidence.decorate(item)
+            supported_actions = item.get("supported_actions")
+            available_actions = (
+                (OperationRecoveryAction.RESUME,)
+                if isinstance(supported_actions, (list, tuple))
+                and "resume" in supported_actions
+                else ()
+            )
+            return operation_detail_response(item, available_actions=available_actions)
+        except (BoundedJSONError, OSError, RuntimeError, TypeError, ValueError):
+            if not tolerate_unreadable:
+                raise
+            # A corrupt row keeps its durable identity and timestamp visible;
+            # its broken historical details do not hide other current work.
+            operation_id = item.get("id")
+            created_at = item.get("created_at")
+            if (
+                not isinstance(operation_id, str)
+                or not operation_id
+                or len(operation_id) > 128
+                or not isinstance(created_at, str)
+                or not created_at
+                or len(created_at) > 64
+            ):
+                raise
+            raw_nodes = item.get("node_ids")
+            node_ids = (
+                [
+                    node
+                    for node in raw_nodes
+                    if isinstance(node, str) and re.fullmatch(r"spk_[0-9a-f]{32}", node)
+                ][:1024]
+                if isinstance(raw_nodes, (list, tuple))
+                else []
+            )
+            raw_owner = item.get("owner")
+            owner = None
+            if isinstance(raw_owner, Mapping):
+                try:
+                    owner = OperationOwnerReference.model_validate(raw_owner)
+                except ValueError:
+                    owner = None
+            return OperationDetailResponse(
+                id=operation_id,
+                node_ids=node_ids,
+                kind="unreadable",
+                state="unavailable",
+                attempt=0,
+                created_at=created_at,
+                failure=OperationFailureEvidence(
+                    error_code="operation_history_unreadable",
+                    summary="Historical operation details are unavailable",
+                    retryable=False,
+                ),
+                owner=owner,
+                status_reason="Stored operation history is malformed.",
+            )
 
     @app.get(
         "/api/operations",
@@ -1037,6 +1119,13 @@ def create_app(
             pattern=r"^[a-z][a-z0-9-]{0,31}$",
         ),
         node_id: str | None = Query(default=None, pattern=r"^spk_[0-9a-f]{32}$"),
+        request_id: str | None = Query(
+            default=None,
+            pattern=(
+                r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+                r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            ),
+        ),
         _actor: Actor = authenticated_actor,
     ) -> OperationsResponse:
         if operations is None:
@@ -1045,7 +1134,7 @@ def create_app(
             )
         try:
             page = _global_list_operations(
-                operations, cursor, limit, operation_state, node_id
+                operations, cursor, limit, operation_state, node_id, request_id
             )
         except CursorError:
             raise HTTPException(
@@ -1058,17 +1147,7 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
-        try:
-            items = [activity_detail(item) for item in page.items]
-        except BoundedJSONError as error:
-            # A stored evidence decoration that no longer validates is the
-            # Controller's fault. It stays a declared server fault, and the
-            # message names the operation so the corrupt row can be found.
-            raise HTTPException(status_code=503, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="operation projection unavailable"
-            ) from None
+        items = [activity_detail(item, tolerate_unreadable=True) for item in page.items]
         return OperationsResponse(
             operations=items,
             next_cursor=page.next_cursor,
@@ -1361,8 +1440,7 @@ def production_app() -> FastAPI:
         FilesystemRuntimeImageStorage,
         RuntimeImageReceipt,
         SkopeoOCIImageTransport,
-        persist_runtime_image_receipt,
-        prepare_runtime_image,
+        make_runtime_image_receipt_preparer,
         resolve_persisted_runtime_image_receipt,
         runtime_image_expectations,
     )
@@ -1398,16 +1476,6 @@ def production_app() -> FastAPI:
         visual_fleet,
         clock=clock,
     )
-    visual_library = LibraryProjection(
-        sessions,
-        cursors=cursor_codec,
-        clock=clock,
-        inventory_fresh_seconds=300,
-        telemetry_live_seconds=6,
-        telemetry_delayed_seconds=20,
-        disk_floor_bytes=10_000_000_000,
-        runtime_archive_available=runtime_image_storage.build_archive_available,
-    )
     metrics = MetricsRegistry()
     operational_metrics = OperationalMetricsCollector(
         metrics,
@@ -1438,65 +1506,12 @@ def production_app() -> FastAPI:
         model_cache=model_cache,
     )
     runtime_image_transport = SkopeoOCIImageTransport()
-
-    def prepare_runtime_image_receipt(
-        document, runtime_spec, build
-    ) -> RuntimeImageReceipt:
-        runtime = runtime_spec.get("runtime")
-        if not isinstance(runtime, Mapping):
-            raise TypeError("compiled runtime projection is unavailable")
-        identity = runtime_spec.get("identity")
-        effective_execution_key = (
-            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
-        )
-        if not isinstance(effective_execution_key, str):
-            raise TypeError("compiled runtime execution identity is unavailable")
-        build_receipt = None
-        execution = document.get("execution")
-        if isinstance(execution, Mapping) and execution.get("mode") == "build":
-            if build is None:
-                raise ValueError("source build receipt is unavailable")
-            build_receipt = {
-                "state": build.state,
-                "build_id": build.id,
-                "build_input_sha256": build.build_input_sha256,
-                "image_digest": build.image_digest,
-                "oci_layout_sha256": build.oci_layout_sha256,
-                "image_bytes": build.image_bytes,
-            }
-
-        def write_receipt(receipt: RuntimeImageReceipt) -> None:
-            recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
-            with sessions.begin() as session:
-                revision = session.scalar(
-                    select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                        CatalogDocumentRevision.content_digest == recipe_digest,
-                    )
-                )
-                if revision is None or revision.content_digest is None:
-                    raise ValueError(
-                        "active recipe revision for runtime receipt is unavailable"
-                    )
-                persist_runtime_image_receipt(
-                    session,
-                    recipe_revision_id=revision.id,
-                    original_content_digest=revision.content_digest,
-                    effective_execution_key=effective_execution_key,
-                    receipt=receipt,
-                    verified_at=clock(),
-                )
-
-        return prepare_runtime_image(
-            document,
-            runtime=runtime,
-            storage=runtime_image_storage,
-            transport=runtime_image_transport,
-            build_receipt=build_receipt,
-            now=clock(),
-            receipt_writer=write_receipt,
-        )
+    prepare_runtime_image_receipt = make_runtime_image_receipt_preparer(
+        sessions,
+        runtime_image_storage,
+        runtime_image_transport,
+        clock=clock,
+    )
 
     def resolve_runtime_image_receipt(
         document, image_digest, runtime_spec
@@ -1610,12 +1625,25 @@ def production_app() -> FastAPI:
         mappings=ClusterMappingService(sessions),
         model_cache=model_cache,
         build_archive_available=runtime_image_storage.build_archive_available,
+        published_image_receipt=runtime_image_storage.find_published,
         artifact_phase_executor=CompositeDistributionPhaseExecutor(
             sessions,
             agent_services.operations,
             agent_services.distribution,
             model_cache=model_cache,
             runtime_image_preparer=prepare_runtime_image_receipt,
+            clock=clock,
+        ),
+    )
+    visual_library = LibraryProjection(
+        sessions,
+        cursors=cursor_codec,
+        clock=clock,
+        runtime_archive_available=runtime_image_storage.build_archive_available,
+        assessment=LibraryAssessment(
+            sessions,
+            run_switch=run_switch_operations,
+            model_cache=model_cache,
             clock=clock,
         ),
     )
@@ -1798,7 +1826,9 @@ def production_app() -> FastAPI:
                 operation_providers=(
                     fleet_profiles.operation_provider(),
                     run_switch_operations.activity_provider(),
+                    recipe_image_production.service.update_activity_provider(),
                 ),
+                profile_endpoint_intent=fleet_profiles.endpoint_intent,
             ),
             model_cache,
         ),

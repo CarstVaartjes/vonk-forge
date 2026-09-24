@@ -37,6 +37,7 @@ def _record_disk(sessions, node_id, *, at, free, observed_at=None):
             1,
             False,
             ("runtime.vonk.v1", "recipe.operations.v1"),
+            memory_pool="shared",
         )
     )
 

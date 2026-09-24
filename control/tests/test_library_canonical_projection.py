@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor, CursorError, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_projection import LibraryProjection, LibraryProjectionError
@@ -31,6 +31,7 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from tests.recipe_library_source import recipe_library_root
 
 ROOT = recipe_library_root()
@@ -50,12 +51,17 @@ def _insert_canonical_rows(
     kind: str,
     template: dict[str, object],
     count: int,
+    description: str | None = None,
+    runtime_arguments: list[dict[str, object]] | None = None,
 ) -> None:
     rows: list[CatalogDocument | CatalogDocumentRevision] = []
     revisions: list[CatalogDocumentRevision] = []
     heads: list[CatalogDocumentHead] = []
     for index in range(count):
         document = copy.deepcopy(template)
+        if description is not None:
+            metadata = _document_section(document, "metadata")
+            metadata["description"] = description
         identity = document["identity"]
         assert isinstance(identity, dict)
         identity["publisher"] = "test"
@@ -72,6 +78,10 @@ def _insert_canonical_rows(
             canonical = ModelDefinition.model_validate(document)
             title = canonical.identity.model.title
         else:
+            if runtime_arguments is not None:
+                runtime = document["runtime"]
+                assert isinstance(runtime, dict)
+                runtime["arguments"] = copy.deepcopy(runtime_arguments)
             canonical = RecipeDefinition.model_validate(document)
             title = canonical.metadata.title
         clean = canonical.model_dump(mode="json")
@@ -176,6 +186,15 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert len(models) == expected_model_count
     assert {model.identity.content_sha256 for model in models} == set(expected_models)
     recipe_page = projection.recipe_library(limit=100, all_models=True)
+    recipe_items = list(recipe_page.recipes)
+    recipe_cursor = recipe_page.next_cursor
+    while recipe_cursor is not None:
+        next_page = projection.recipe_library(
+            limit=100, cursor=recipe_cursor, all_models=True
+        )
+        recipe_items.extend(next_page.recipes)
+        recipe_cursor = next_page.next_cursor
+    recipe_page = recipe_page.model_copy(update={"recipes": recipe_items})
     assert len(recipe_page.recipes) == expected_recipe_count
     assert {item.identity.recipe_id for item in recipe_page.recipes} == recipe_ids
     for sort in ("name", "updated"):
@@ -278,7 +297,20 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     client = TestClient(app)
     response = client.get("/api/model/library", params={"limit": 512})
     assert response.status_code == 200
+    assert len(response.content) <= MAX_CONTROL_DOCUMENT_BYTES
     payload = response.json()
+    model_rows = list(payload["models"])
+    model_cursor = payload["next_cursor"]
+    while model_cursor is not None:
+        response = client.get(
+            "/api/model/library", params={"limit": 512, "cursor": model_cursor}
+        )
+        assert response.status_code == 200
+        assert len(response.content) <= MAX_CONTROL_DOCUMENT_BYTES
+        payload = response.json()
+        model_rows.extend(payload["models"])
+        model_cursor = payload["next_cursor"]
+    payload["models"] = model_rows
     assert len(payload["models"]) == expected_model_count
     assert {model["identity"]["kind"] for model in payload["models"]} == {"model"}
     assert {model["identity"]["content_sha256"] for model in payload["models"]} == set(
@@ -296,7 +328,21 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     )
     recipe_response = client.get("/api/recipe/library", params={"all_models": True})
     assert recipe_response.status_code == 200
+    assert len(recipe_response.content) <= MAX_CONTROL_DOCUMENT_BYTES
     recipe_payload = recipe_response.json()
+    recipe_rows = list(recipe_payload["recipes"])
+    recipe_cursor = recipe_payload["next_cursor"]
+    while recipe_cursor is not None:
+        recipe_response = client.get(
+            "/api/recipe/library",
+            params={"all_models": True, "cursor": recipe_cursor},
+        )
+        assert recipe_response.status_code == 200
+        assert len(recipe_response.content) <= MAX_CONTROL_DOCUMENT_BYTES
+        recipe_payload = recipe_response.json()
+        recipe_rows.extend(recipe_payload["recipes"])
+        recipe_cursor = recipe_payload["next_cursor"]
+    recipe_payload["recipes"] = recipe_rows
     assert len(recipe_payload["recipes"]) == expected_recipe_count
     assert {
         recipe["identity"]["recipe_id"] for recipe in recipe_payload["recipes"]
@@ -679,3 +725,346 @@ def test_cached_download_progress_preserves_zero_and_rejects_negative_totals(
         progress = response.json()["models"][0]["local"]["preparation"]
         assert progress["state"] == "succeeded"
         assert progress["total_bytes"] == 0
+
+
+@pytest.mark.parametrize("kind", ["model", "recipe"])
+def test_library_cursor_refuses_a_changed_accepted_catalog(tmp_path: Path, kind: str):
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    engine = create_engine(f"sqlite:///{tmp_path / 'changing-library.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    template = index["catalog_entities" if kind == "model" else "recipes"][0][
+        "document"
+    ]
+    _insert_canonical_rows(sessions, kind=kind, template=template, count=2)
+    projection = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        clock=lambda: datetime(2026, 9, 6, tzinfo=UTC),
+    )
+
+    def read(cursor: str | None = None):
+        if kind == "model":
+            return projection.models(limit=1, sort="name", cursor=cursor)
+        return projection.recipe_library(
+            limit=1, sort="name", cursor=cursor, all_models=True
+        )
+
+    first = read()
+    assert first.next_cursor is not None
+    # A later-page accepted revision is replaced during the scan. An old
+    # boundary alone would silently mix the old and new library in one choice.
+    with sessions.begin() as session:
+        old = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == kind,
+                CatalogDocumentRevision.slug == f"{kind}-0001",
+            )
+        )
+        assert old is not None
+        document = copy.deepcopy(old.document)
+        metadata = _document_section(document, "metadata")
+        metadata["description"] = "Changed after the first page"
+        canonical_type = ModelDefinition if kind == "model" else RecipeDefinition
+        canonical = canonical_type.model_validate(document)
+        new = CatalogDocumentRevision(
+            id=str(uuid.uuid4()),
+            document_id=old.document_id,
+            kind=kind,
+            publisher=old.publisher,
+            slug=old.slug,
+            revision_number=2,
+            state="active",
+            document=canonical.model_dump(mode="json"),
+            content_digest=content_sha256(canonical),
+            schema_version=2,
+            projected={},
+            created_by="test",
+            created_at=old.created_at,
+        )
+        session.add(new)
+        head = session.scalar(
+            select(CatalogDocumentHead).where(
+                CatalogDocumentHead.kind == kind,
+                CatalogDocumentHead.publisher == old.publisher,
+                CatalogDocumentHead.slug == old.slug,
+            )
+        )
+        assert head is not None
+        head.active_revision_id = new.id
+    with pytest.raises(CursorError):
+        read(first.next_cursor)
+
+
+def test_model_detail_resolves_every_model_cache_selector_form(tmp_path: Path) -> None:
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    template = index["catalog_entities"][0]["document"]
+    engine = create_engine(f"sqlite:///{tmp_path / 'model-selectors.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    _insert_canonical_rows(sessions, kind="model", template=template, count=1)
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model"
+            )
+        )
+        assert revision is not None
+        selectors = (
+            "test/model-0000",
+            "model-0000",
+            revision.id,
+            revision.document_id,
+            revision.content_digest,
+        )
+        expected_digest = revision.content_digest
+
+    app = FastAPI()
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("test", "viewer")),
+        projection=LibraryProjection(
+            sessions,
+            cursors=TokenCodec(b"m" * 32).cursor_codec(),
+        ),
+    )
+    with TestClient(app) as client:
+        for selector in selectors:
+            response = client.get(f"/api/model/{selector}")
+            assert response.status_code == 200, response.text
+            assert response.json()["identity"]["content_sha256"] == expected_digest
+
+
+def test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit(
+    tmp_path: Path,
+) -> None:
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    template = index["recipes"][0]["document"]
+    engine = create_engine(f"sqlite:///{tmp_path / 'large-recipe-library.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    count = 300
+    _insert_canonical_rows(
+        sessions,
+        kind="recipe",
+        template=template,
+        count=count,
+        # Multibyte canonical text ensures the limit is a wire-byte budget, not
+        # a character count or a fixed row count.
+        description="é" * 4000,
+    )
+    cursors = TokenCodec(b"b" * 32).cursor_codec()
+    app = FastAPI()
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("test", "viewer")),
+        projection=LibraryProjection(sessions, cursors=cursors),
+    )
+
+    collected: list[str] = []
+    cursor: str | None = None
+    with TestClient(app) as client:
+        while True:
+            params: dict[str, str | int | bool] = {
+                "all_models": True,
+                "limit": 512,
+                "sort": "name",
+            }
+            if cursor is not None:
+                params["cursor"] = cursor
+            response = client.get("/api/recipe/library", params=params)
+            assert response.status_code == 200, response.text
+            assert len(response.content) <= MAX_CONTROL_DOCUMENT_BYTES
+            payload = response.json()
+            assert payload["filters"]["sort"] == "name"
+            page = payload["recipes"]
+            collected.extend(item["selector"] for item in page)
+            next_cursor = payload["next_cursor"]
+            if cursor is None:
+                assert 0 < len(page) < count
+                assert next_cursor is not None
+                # The selected page is the largest contiguous prefix that
+                # fits: adding the next real row with an equal-size name
+                # cursor would cross the exact serialized response budget.
+                next_page = client.get(
+                    "/api/recipe/library",
+                    params={
+                        "all_models": True,
+                        "limit": 512,
+                        "sort": "name",
+                        "cursor": next_cursor,
+                    },
+                )
+                assert next_page.status_code == 200, next_page.text
+                next_payload = next_page.json()
+                assert next_payload["recipes"]
+                assert next_payload["next_cursor"] is not None
+                assert len(next_payload["next_cursor"]) == len(next_cursor)
+                assert response.content == json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                over_budget_payload = dict(payload)
+                over_budget_payload["recipes"] = [
+                    *page,
+                    next_payload["recipes"][0],
+                ]
+                over_budget_payload["next_cursor"] = next_payload["next_cursor"]
+                assert (
+                    len(
+                        json.dumps(
+                            over_budget_payload,
+                            ensure_ascii=False,
+                            allow_nan=False,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    )
+                    > MAX_CONTROL_DOCUMENT_BYTES
+                )
+                changed_limit = client.get(
+                    "/api/recipe/library",
+                    params={
+                        "all_models": True,
+                        "limit": 511,
+                        "sort": "name",
+                        "cursor": next_cursor,
+                    },
+                )
+                assert changed_limit.status_code == 422
+            if next_cursor is None:
+                break
+            cursor = next_cursor
+
+    assert collected == [f"test/recipe-{index:04d}" for index in range(count)]
+
+
+def test_model_library_pages_by_wire_bytes_without_losing_entries(
+    tmp_path: Path,
+) -> None:
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    template = index["catalog_entities"][0]["document"]
+    engine = create_engine(f"sqlite:///{tmp_path / 'large-model-library.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    count = 160
+    _insert_canonical_rows(
+        sessions,
+        kind="model",
+        template=template,
+        count=count,
+        description="é" * 4000,
+    )
+    app = FastAPI()
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("test", "viewer")),
+        projection=LibraryProjection(
+            sessions, cursors=TokenCodec(b"n" * 32).cursor_codec()
+        ),
+    )
+
+    collected: list[str] = []
+    cursor: str | None = None
+    with TestClient(app) as client:
+        while True:
+            params: dict[str, str | int | bool] = {
+                "limit": 512,
+                "sort": "name",
+            }
+            if cursor is not None:
+                params["cursor"] = cursor
+            response = client.get("/api/model/library", params=params)
+            assert response.status_code == 200, response.text
+            assert len(response.content) <= MAX_CONTROL_DOCUMENT_BYTES
+            payload = response.json()
+            collected.extend(item["selector"] for item in payload["models"])
+            cursor = payload["next_cursor"]
+            if cursor is None:
+                break
+
+    assert collected == [f"test/model-{index:04d}" for index in range(count)]
+
+
+def test_library_item_at_one_byte_over_wire_budget_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    template = index["recipes"][0]["document"]
+    engine = create_engine(f"sqlite:///{tmp_path / 'exact-budget.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    _insert_canonical_rows(sessions, kind="recipe", template=template, count=1)
+    app = FastAPI()
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("test", "viewer")),
+        projection=LibraryProjection(
+            sessions,
+            cursors=TokenCodec(b"p" * 32).cursor_codec(),
+        ),
+    )
+
+    with TestClient(app) as client:
+        fitting = client.get("/api/recipe/library", params={"all_models": True})
+        assert fitting.status_code == 200, fitting.text
+        exact_wire_bytes = len(fitting.content)
+        assert exact_wire_bytes <= MAX_CONTROL_DOCUMENT_BYTES
+
+        # This cap is one byte below the observed, fully serialized response.
+        # An envelope-bracket undercount of two bytes would incorrectly accept
+        # and return a response larger than this configured budget.
+        monkeypatch.setattr(
+            "vonk_control.library_projection.MAX_CONTROL_DOCUMENT_BYTES",
+            exact_wire_bytes - 1,
+        )
+        over_budget = client.get("/api/recipe/library", params={"all_models": True})
+
+    assert over_budget.status_code == 422
+    detail = over_budget.json()["detail"]
+    assert isinstance(detail, str)
+    observed = int(detail.split("requires ", 1)[1].split(" bytes", 1)[0])
+    assert observed == exact_wire_bytes
+
+
+def test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably(
+    tmp_path: Path,
+) -> None:
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    template = index["recipes"][0]["document"]
+    engine = create_engine(f"sqlite:///{tmp_path / 'oversized-recipe-library.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    arguments = [
+        {"name": f"large-{index}", "setting": None, "value": "x" * 65_400}
+        for index in range(16)
+    ]
+    _insert_canonical_rows(
+        sessions,
+        kind="recipe",
+        template=template,
+        count=1,
+        runtime_arguments=arguments,
+    )
+    app = FastAPI()
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("test", "viewer")),
+        projection=LibraryProjection(
+            sessions, cursors=TokenCodec(b"o" * 32).cursor_codec()
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/recipe/library", params={"all_models": True, "limit": 10}
+        )
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert isinstance(detail, str)
+    assert "narrow filters" in detail
+    assert str(MAX_CONTROL_DOCUMENT_BYTES) in detail
+    observed = int(detail.split("requires ", 1)[1].split(" bytes", 1)[0])
+    assert observed > MAX_CONTROL_DOCUMENT_BYTES

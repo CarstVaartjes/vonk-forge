@@ -601,9 +601,18 @@ class CompiledExecutionPlan(_StrictModel):
                 "runtime reserved memory",
                 minimum=1,
             ),
+            "memory_floor_bytes": _required_int(
+                placement.get("memory_floor_bytes"),
+                "runtime memory floor",
+            ),
+            "memory_kind": placement.get("memory_kind"),
         }
         if type(placement_doc["role"]) is not str or not placement_doc["role"]:
             raise CompiledExecutionPlanError("runtime role is invalid")
+        if type(placement_doc["memory_kind"]) is not str or placement_doc[
+            "memory_kind"
+        ] not in {"unified", "host", "accelerator"}:
+            raise CompiledExecutionPlanError("runtime memory kind is invalid")
 
         declared_network_mode = security.get("network_mode")
         if (

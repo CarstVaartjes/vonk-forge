@@ -1,5 +1,5 @@
 use chrono::DateTime;
-use vonk_agent_protocol::InventoryRequest;
+use vonk_agent_protocol::{InventoryRequest, MemoryPool};
 
 fn main() {
     let request = InventoryRequest {
@@ -12,6 +12,7 @@ fn main() {
         gpu_memory_total_bytes: 16 * 1024 * 1024 * 1024,
         gpu_memory_free_bytes: 12 * 1024 * 1024 * 1024,
         gpu_count: 1,
+        memory_pool: MemoryPool::Separate,
         artifact_store_read_only: false,
         capabilities: vec![
             "build.rootless-podman.v1".to_owned(),

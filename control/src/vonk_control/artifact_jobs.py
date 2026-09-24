@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -12,7 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -40,6 +41,7 @@ from .compiled_artifact_contract import (
     validate_parameter_definition,
 )
 from .execution_plan_service import compile_job_invocation
+from .library_contract import UuidId
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -63,6 +65,7 @@ from .strict_json import StrictJSONModel
 MAX_INPUT_FILES = 32
 MAX_INPUT_FILE_BYTES = 512 * 1024**2
 MAX_INPUT_TOTAL_BYTES = 1024**3
+_UUID_ID_ADAPTER = TypeAdapter(UuidId)
 
 
 class ArtifactJobError(ValueError):
@@ -174,6 +177,11 @@ class ArtifactJobResponse(ArtifactJobContractModel):
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
         r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
     )
+    submit_request_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    )
     interface: Literal[
         "audio-job", "video-job", "image-job", "mesh-job", "artifact-job"
     ]
@@ -204,20 +212,33 @@ class ArtifactJobResponse(ArtifactJobContractModel):
     updated_at: datetime
 
     @model_validator(mode="after")
-    def terminal_evidence_is_consistent(self) -> ArtifactJobResponse:
+    def response_is_consistent(self) -> ArtifactJobResponse:
+        if (self.operation_id is None) != (self.submit_request_id is None):
+            raise ValueError(
+                "artifact submission operation and request identity must be paired"
+            )
         if self.state == "succeeded":
-            if (
-                self.output_manifest_sha256 is None
-                or not self.output_files
-                or self.result_evidence is None
-            ):
+            if self.output_manifest_sha256 is None or self.result_evidence is None:
                 raise ValueError(
-                    "successful artifact job requires output manifest, files and result evidence"
+                    "successful artifact job requires output manifest and result evidence"
                 )
             if self.status_reason is not None:
                 raise ValueError(
                     "successful artifact job cannot retain a failure reason"
                 )
+            try:
+                _validate_outputs_against_contract(
+                    self.compiled_contract,
+                    tuple(
+                        RecipeJobFile.parse(
+                            item.model_dump(mode="json"), maximum_bytes=1024**3
+                        )
+                        for item in self.output_files
+                    ),
+                    terminal=True,
+                )
+            except ArtifactJobError as error:
+                raise ValueError(str(error)) from error
         if (
             self.state in {"failed", "waiting-for-operator"}
             and not (self.status_reason or "").strip()
@@ -262,6 +283,7 @@ class ArtifactJobView:
     id: str
     run_id: str
     operation_id: str | None
+    submit_request_id: str | None
     interface: str
     state: str
     contract_sha256: str
@@ -612,6 +634,36 @@ def _canonical_declared_parameters(
     if not isinstance(canonical, dict):
         raise ArtifactJobError("artifact job parameters must be a JSON object")
     return canonical
+
+
+def _artifact_submission_in_session(
+    session: Session, artifact_job: ArtifactJob
+) -> Job | None:
+    if artifact_job.operation_id is None:
+        return None
+    submission = session.get(Job, artifact_job.operation_id)
+    if submission is None or submission.kind != "recipe.job.run.v1":
+        raise ArtifactJobError("artifact job submission owner is invalid")
+    payload = submission.payload
+    if not isinstance(payload, Mapping):
+        raise ArtifactJobError("artifact job submission owner is invalid")
+    try:
+        payload_digest = hashlib.sha256(canonical_message(payload)).hexdigest()
+    except (TypeError, ValueError):
+        raise ArtifactJobError("artifact job submission owner is invalid") from None
+    if (
+        payload_digest != submission.payload_digest
+        or payload.get("owner_kind") != "artifact-job"
+        or payload.get("owner_id") != artifact_job.id
+    ):
+        raise ArtifactJobError("artifact job submission owner is invalid")
+    try:
+        _UUID_ID_ADAPTER.validate_python(submission.request_id, strict=True)
+    except ValidationError:
+        raise ArtifactJobError(
+            "artifact job submission request identity is invalid"
+        ) from None
+    return submission
 
 
 class ArtifactJobService:
@@ -1054,6 +1106,13 @@ class ArtifactJobService:
             if artifact_job is None:
                 raise KeyError(job_id)
             if artifact_job.operation_id is not None:
+                submission = _artifact_submission_in_session(session, artifact_job)
+                if submission is None:
+                    raise ArtifactJobError("artifact job submission owner is invalid")
+                if submission.request_id != request_id:
+                    raise ArtifactJobError(
+                        "artifact job was submitted under another request identity"
+                    )
                 return self._view_in_session(session, artifact_job)
             if artifact_job.state != "ready":
                 raise ArtifactJobError("artifact job is not ready")
@@ -1086,6 +1145,22 @@ class ArtifactJobService:
             revision, recipe = resolved
             node = self._job_node_in_session(session, run)
             try:
+                stored_run_plan = parse_stored_run_plan(run.plan)
+            except RecipeExecutionContractError as error:
+                raise ArtifactJobError("recipe run plan is invalid") from error
+            planned_node = next(
+                (
+                    item
+                    for item in stored_run_plan.nodes
+                    if item.node_id == node.node_id
+                    and item.rank == node.rank
+                    and item.role == node.role
+                ),
+                None,
+            )
+            if planned_node is None:
+                raise ArtifactJobError("recipe run memory requirement is unavailable")
+            try:
                 installation_plan = parse_stored_installation_plan(installation.plan)
             except RecipeExecutionContractError as error:
                 raise ArtifactJobError(
@@ -1115,6 +1190,8 @@ class ArtifactJobService:
                 ),
                 parameters=parameters,
                 timeout_seconds=artifact_job.timeout_seconds,
+                memory_floor_bytes=planned_node.memory_floor_bytes,
+                memory_kind=planned_node.memory_kind,
             )
             raw_files = _input_manifest(artifact_job).model_dump(mode="json")["files"]
             payload = {
@@ -1130,6 +1207,8 @@ class ArtifactJobService:
                 "rank": node.rank,
                 "role": node.role,
                 "reserved_memory_bytes": node.reserved_memory_bytes,
+                "memory_floor_bytes": planned_node.memory_floor_bytes,
+                "memory_kind": planned_node.memory_kind,
                 "contract_sha256": artifact_job.contract_sha256,
                 "input_manifest_sha256": artifact_job.input_manifest_sha256,
                 "input_total_bytes": artifact_job.input_total_bytes,
@@ -1163,6 +1242,16 @@ class ArtifactJobService:
             job = session.get(ArtifactJob, job_id)
             if job is None:
                 raise KeyError(job_id)
+            return self._view_in_session(session, job)
+
+    def get_by_request_id(self, request_id: str) -> ArtifactJobView:
+        """Resolve the original draft after a create response was lost."""
+        with self._sessions() as session:
+            job = session.scalar(
+                select(ArtifactJob).where(ArtifactJob.request_id == request_id)
+            )
+            if job is None:
+                raise KeyError(request_id)
             return self._view_in_session(session, job)
 
     def list_for_run(
@@ -1420,7 +1509,9 @@ class ArtifactJobService:
             raise ArtifactJobError("artifact job result is not available")
         return view
 
-    def result_blob(self, job_id: str, sha256: str) -> tuple[Path, str, str, int]:
+    def result_blob(
+        self, job_id: str, name: str, sha256: str
+    ) -> tuple[Path, str, str, int]:
         with self._sessions() as session:
             job = session.get(ArtifactJob, job_id)
             if job is None:
@@ -1431,6 +1522,7 @@ class ArtifactJobService:
                 select(ArtifactJobFile).where(
                     ArtifactJobFile.artifact_job_id == job_id,
                     ArtifactJobFile.direction == "output",
+                    ArtifactJobFile.name == name,
                     ArtifactJobFile.blob_sha256 == sha256,
                 )
             )
@@ -1528,9 +1620,7 @@ class ArtifactJobService:
                 > limits.max_total_bytes
             ):
                 raise AgentProtocolError("artifact result exceeds output limits")
-            succeeded = (
-                state == "succeeded" and result.exit_code == 0 and bool(result.outputs)
-            )
+            succeeded = state == "succeeded" and result.exit_code == 0
             failed = state == "failed" and result.exit_code != 0
             cancelled = bool(
                 state == "cancelled"
@@ -1696,6 +1786,7 @@ class ArtifactJobService:
 
     def _view_in_session(self, session: Session, job: ArtifactJob) -> ArtifactJobView:
         state = job.state
+        submission = _artifact_submission_in_session(session, job)
         if state == "queued" and job.operation_id is not None:
             operation_state = session.scalar(
                 select(AgentOperation.state).where(
@@ -1718,6 +1809,9 @@ class ArtifactJobService:
             id=job.id,
             run_id=job.run_id,
             operation_id=job.operation_id,
+            submit_request_id=(
+                submission.request_id if submission is not None else None
+            ),
             interface=job.interface,
             state=state,
             contract_sha256=job.contract_sha256,

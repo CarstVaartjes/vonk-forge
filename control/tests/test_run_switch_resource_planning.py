@@ -1,11 +1,11 @@
 from vonk_control.bounded_json import text
 from vonk_control.resource_planning import (
+    _resource_evidence,
+    _selected_model_bytes,
     resolve_effective_settings,
 )
 from vonk_control.run_switch_operations import (
-    _resource_evidence,
     _resource_evidence_digest,
-    _selected_model_bytes,
     _settings_view,
 )
 
@@ -137,7 +137,6 @@ def test_run_switch_resource_view_binds_canonical_identity_and_evidence() -> Non
 
     evidence = _resource_evidence(
         recipe,
-        {},
         "worker",
         {
             ("radixark", "qwen3-target", "a" * 64): {

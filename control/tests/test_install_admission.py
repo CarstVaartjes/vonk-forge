@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
     InstallAdmissionService,
@@ -247,6 +248,8 @@ def _compiled_plan(
     recipe_digest: str,
     build_input: str | None,
     build_id: str | None,
+    memory_floor_bytes: int,
+    memory_kind: MemoryKind,
     image_digest: str | None = None,
 ) -> dict[str, object]:
     artifact_digest = "3" * 64
@@ -283,6 +286,8 @@ def _compiled_plan(
                 "master_port": None,
                 "port": 8000,
                 "reserved_memory_bytes": 1,
+                "memory_floor_bytes": memory_floor_bytes,
+                "memory_kind": memory_kind,
             },
         },
         "artifacts": [
@@ -377,6 +382,10 @@ def _compiled_plan_provider(
     assert isinstance(raw_models, Sequence) and raw_models
     model_revision = raw_models[0]
     assert isinstance(model_revision, CatalogDocumentRevision)
+    recipe = RecipeDefinition.model_validate_json(json.dumps(revision.document))
+    memory_by_role = {
+        role.name: role.resources.memory for role in recipe.topology.roles
+    }
     build_input = build.build_input_sha256 if build is not None else None
     execution = revision.document.get("execution", {})
     image = execution.get("image") if isinstance(execution, dict) else None
@@ -393,6 +402,8 @@ def _compiled_plan_provider(
             recipe_digest=revision.content_digest,
             build_input=build_input,
             build_id=build.id if build is not None else None,
+            memory_floor_bytes=memory_by_role[node.role].system_reserve_bytes,
+            memory_kind=memory_by_role[node.role].kind,
             image_digest=image_digest,
         )
         for node in mapping_nodes
@@ -464,6 +475,7 @@ def setup(
             1,
             read_only,
             ("runtime.vonk.v1",),
+            memory_pool="shared",
         )
     )
     resolved = _seed_canonical_catalog(
@@ -766,6 +778,7 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
             1,
             False,
             ("runtime.vonk.v1",),
+            memory_pool="shared",
         )
     )
 
@@ -838,6 +851,7 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
             1,
             False,
             (),
+            memory_pool="shared",
         )
     )
 
@@ -886,6 +900,7 @@ def _record_inventory(sessions, node_id, at, *, free=200) -> None:
             1,
             False,
             ("runtime.vonk.v1",),
+            memory_pool="shared",
         )
     )
 

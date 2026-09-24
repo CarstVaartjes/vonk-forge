@@ -1761,6 +1761,7 @@ impl AgentHttpClient {
             gpu_memory_total_bytes: inventory.gpu_memory_total_bytes,
             gpu_memory_free_bytes: inventory.gpu_memory_free_bytes,
             gpu_count: inventory.gpu_count,
+            memory_pool: inventory.memory_pool,
             artifact_store_read_only: inventory.artifact_store_read_only,
             capabilities: inventory.capabilities.clone(),
             fabric_address: inventory.fabric_address.map(|value| value.to_string()),

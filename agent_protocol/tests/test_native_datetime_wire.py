@@ -73,6 +73,7 @@ def test_inventory_native_datetimes_preserve_declared_offset(timestamp: str) -> 
         "gpu_memory_total_bytes": 1,
         "gpu_memory_free_bytes": 0,
         "gpu_count": 0,
+        "memory_pool": "separate",
         "artifact_store_read_only": False,
         "capabilities": [],
         "nvidia_driver_version": "unavailable",

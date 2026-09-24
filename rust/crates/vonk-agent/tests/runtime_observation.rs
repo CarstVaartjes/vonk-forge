@@ -30,7 +30,8 @@ fn schema2_dual_plan() -> CompiledExecutionPlan {
     value["runtime"]["placement"] = json!({
         "endpoint_address": null, "rank": 1, "role": "worker", "world_size": 2,
         "local_address": "192.168.100.11", "master_address": "192.168.100.10",
-        "master_port": 29500, "port": 8000, "reserved_memory_bytes": 68719476736_u64
+        "master_port": 29500, "port": 8000, "reserved_memory_bytes": 68719476736_u64,
+        "memory_floor_bytes": 0, "memory_kind": "unified"
     });
     value["security"]["network_mode"] = json!("host");
     value["security"]["host_network"] = json!(true);

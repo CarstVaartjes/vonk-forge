@@ -8,7 +8,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import Literal, Union, cast
-from typing import Union
 
 
 
@@ -26,12 +25,10 @@ class ModelCacheOperatorRequest:
         Attributes:
             request_key (str):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
-            with_model (Union[Unset, bool]):  Default: False.
      """
 
     request_key: str
     schema_version: Union[Literal[2], Unset] = 2
-    with_model: Union[Unset, bool] = False
 
 
 
@@ -42,8 +39,6 @@ class ModelCacheOperatorRequest:
 
         schema_version = self.schema_version
 
-        with_model = self.with_model
-
 
         field_dict: dict[str, Any] = {}
 
@@ -52,8 +47,6 @@ class ModelCacheOperatorRequest:
         })
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
-        if with_model is not UNSET:
-            field_dict["with_model"] = with_model
 
         return field_dict
 
@@ -68,12 +61,9 @@ class ModelCacheOperatorRequest:
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
-        with_model = d.pop("with_model", UNSET)
-
         model_cache_operator_request = cls(
             request_key=request_key,
             schema_version=schema_version,
-            with_model=with_model,
         )
 
         return model_cache_operator_request

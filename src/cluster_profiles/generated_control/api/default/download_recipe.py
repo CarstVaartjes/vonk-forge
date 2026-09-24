@@ -8,8 +8,8 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.recipe_download_request import RecipeDownloadRequest
 from ...models.recipe_image_availability_response import RecipeImageAvailabilityResponse
-from ...models.recipe_operator_request import RecipeOperatorRequest
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
@@ -18,7 +18,7 @@ from typing import cast
 def _get_kwargs(
     selector: str,
     *,
-    body: RecipeOperatorRequest,
+    body: RecipeDownloadRequest,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -112,14 +112,14 @@ def sync_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
-    body: RecipeOperatorRequest,
+    body: RecipeDownloadRequest,
 
 ) -> Response[Union[BoundedErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]:
     """ Download
 
     Args:
         selector (str):
-        body (RecipeOperatorRequest):
+        body (RecipeDownloadRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -146,14 +146,14 @@ def sync(
     selector: str,
     *,
     client: AuthenticatedClient,
-    body: RecipeOperatorRequest,
+    body: RecipeDownloadRequest,
 
 ) -> Optional[Union[BoundedErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]:
     """ Download
 
     Args:
         selector (str):
-        body (RecipeOperatorRequest):
+        body (RecipeDownloadRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -175,14 +175,14 @@ async def asyncio_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
-    body: RecipeOperatorRequest,
+    body: RecipeDownloadRequest,
 
 ) -> Response[Union[BoundedErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]:
     """ Download
 
     Args:
         selector (str):
-        body (RecipeOperatorRequest):
+        body (RecipeDownloadRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -209,14 +209,14 @@ async def asyncio(
     selector: str,
     *,
     client: AuthenticatedClient,
-    body: RecipeOperatorRequest,
+    body: RecipeDownloadRequest,
 
 ) -> Optional[Union[BoundedErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]:
     """ Download
 
     Args:
         selector (str):
-        body (RecipeOperatorRequest):
+        body (RecipeDownloadRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

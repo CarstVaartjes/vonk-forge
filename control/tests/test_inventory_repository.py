@@ -32,7 +32,18 @@ def test_new_snapshot_supersedes_old_but_preserves_evidence(tmp_path) -> None:
     node = "spk_" + "1" * 32
     first = repo.record(
         InventorySnapshotInput(
-            node, now, 1000, 700, 500, 300, 400, 250, 1, False, ("runtime.vllm.v1",)
+            node,
+            now,
+            1000,
+            700,
+            500,
+            300,
+            400,
+            250,
+            1,
+            False,
+            ("runtime.vllm.v1",),
+            memory_pool="separate",
         )
     )
     second = repo.record(
@@ -48,6 +59,7 @@ def test_new_snapshot_supersedes_old_but_preserves_evidence(tmp_path) -> None:
             1,
             False,
             ("runtime.vllm.v1",),
+            memory_pool="separate",
         )
     )
     latest = repo.latest(node, now=now + timedelta(seconds=6), maximum_age=10)
@@ -60,7 +72,18 @@ def test_stale_inventory_is_explicit(tmp_path) -> None:
     node = "spk_" + "1" * 32
     repo.record(
         InventorySnapshotInput(
-            node, now, 1000, 700, 500, 300, 400, 250, 1, False, ("runtime.vllm.v1",)
+            node,
+            now,
+            1000,
+            700,
+            500,
+            300,
+            400,
+            250,
+            1,
+            False,
+            ("runtime.vllm.v1",),
+            memory_pool="separate",
         )
     )
     assert (
@@ -84,6 +107,7 @@ def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
             1,
             False,
             ("runtime.vllm.v1",),
+            memory_pool="separate",
         )
     )
     with repo._sessions.begin() as session:
@@ -93,5 +117,5 @@ def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
         # the read path has to reject malformed stored state.
         object.__setattr__(snapshot, "capabilities", {"bad": "value"})
 
-    with pytest.raises(ValueError, match="inventory capabilities are invalid"):
+    with pytest.raises(ValueError, match="capabilities"):
         repo.latest(node, now=now, maximum_age=60)

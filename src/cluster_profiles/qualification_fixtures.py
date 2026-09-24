@@ -1926,7 +1926,7 @@ def validate_outputs(
             name, media_type, size, digest = metadata
             destination = Path(root) / f"{index:02d}-{name}"
             client.download_file(
-                f"/api/artifact-jobs/{result['id']}/results/{digest}",
+                f"/api/artifact-jobs/{result['id']}/results/{name}/{digest}",
                 destination,
                 media_type=media_type,
                 expected_sha256=digest,

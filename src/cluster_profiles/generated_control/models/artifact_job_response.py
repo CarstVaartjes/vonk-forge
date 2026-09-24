@@ -55,6 +55,7 @@ class ArtifactJobResponse:
             output_manifest_sha256 (Union[None, Unset, str]):
             result_evidence (Union['ArtifactJobResultEvidence', None, Unset]):
             status_reason (Union[None, Unset, str]):
+            submit_request_id (Union[None, Unset, str]):
      """
 
     compiled_contract: 'CompiledArtifactContract'
@@ -76,6 +77,7 @@ class ArtifactJobResponse:
     output_manifest_sha256: Union[None, Unset, str] = UNSET
     result_evidence: Union['ArtifactJobResultEvidence', None, Unset] = UNSET
     status_reason: Union[None, Unset, str] = UNSET
+    submit_request_id: Union[None, Unset, str] = UNSET
 
 
 
@@ -158,6 +160,12 @@ class ArtifactJobResponse:
         else:
             status_reason = self.status_reason
 
+        submit_request_id: Union[None, Unset, str]
+        if isinstance(self.submit_request_id, Unset):
+            submit_request_id = UNSET
+        else:
+            submit_request_id = self.submit_request_id
+
 
         field_dict: dict[str, Any] = {}
 
@@ -186,6 +194,8 @@ class ArtifactJobResponse:
             field_dict["result_evidence"] = result_evidence
         if status_reason is not UNSET:
             field_dict["status_reason"] = status_reason
+        if submit_request_id is not UNSET:
+            field_dict["submit_request_id"] = submit_request_id
 
         return field_dict
 
@@ -321,6 +331,16 @@ class ArtifactJobResponse:
         status_reason = _parse_status_reason(d.pop("status_reason", UNSET))
 
 
+        def _parse_submit_request_id(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        submit_request_id = _parse_submit_request_id(d.pop("submit_request_id", UNSET))
+
+
         artifact_job_response = cls(
             compiled_contract=compiled_contract,
             contract_sha256=contract_sha256,
@@ -341,6 +361,7 @@ class ArtifactJobResponse:
             output_manifest_sha256=output_manifest_sha256,
             result_evidence=result_evidence,
             status_reason=status_reason,
+            submit_request_id=submit_request_id,
         )
 
         return artifact_job_response

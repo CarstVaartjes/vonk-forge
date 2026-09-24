@@ -411,12 +411,15 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     pub fn ensure_memory_available(
         &self,
         required_bytes: u64,
+        memory_floor_bytes: u64,
+        memory_kind: &str,
         meminfo_path: &Path,
     ) -> Result<(), OciError> {
         let required = required_bytes
-            .checked_add(4_000_000_000)
+            .checked_add(memory_floor_bytes)
             .ok_or(OciError::Capacity)?;
-        if available_memory_bytes(self.runner, meminfo_path).map_err(|_| OciError::Capacity)?
+        if available_memory_bytes(self.runner, meminfo_path, memory_kind)
+            .map_err(|_| OciError::Capacity)?
             < required
         {
             return Err(OciError::Capacity);
@@ -2337,6 +2340,188 @@ mod tests {
         }
     }
 
+    struct Gb10MemoryRunner;
+
+    impl ProcessRunner for Gb10MemoryRunner {
+        fn run(
+            &self,
+            program: Program,
+            _: &[String],
+            _: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            assert_eq!(program, Program::NvidiaSmi);
+            Ok(ProcessOutput {
+                success: true,
+                stdout: b"NVIDIA GB10, [N/A], [N/A], 590.44\n".to_vec(),
+                stderr: vec![],
+            })
+        }
+    }
+
+    struct SeparateMemoryRunner {
+        total_mib: u64,
+        free_mib: u64,
+    }
+
+    impl ProcessRunner for SeparateMemoryRunner {
+        fn run(
+            &self,
+            program: Program,
+            _: &[String],
+            _: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            assert_eq!(program, Program::NvidiaSmi);
+            Ok(ProcessOutput {
+                success: true,
+                stdout: format!(
+                    "NVIDIA RTX, {}, {}, 590.44\n",
+                    self.total_mib, self.free_mib
+                )
+                .into_bytes(),
+                stderr: vec![],
+            })
+        }
+    }
+
+    #[test]
+    fn declared_recipe_reserve_is_the_only_agent_memory_floor() {
+        let directory = tempdir().unwrap();
+        let meminfo = directory.path().join("meminfo");
+        // This is 122,999,999,488 bytes: enough for the 120 GB GLM demand and
+        // its declared 2 GB reserve, with almost 1 GB left over.
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 120117187 kB\n",
+        )
+        .unwrap();
+        let runtime = OciRuntime {
+            runner: &Gb10MemoryRunner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+
+        assert!(
+            runtime
+                .ensure_memory_available(120_000_000_000, 2_000_000_000, "unified", &meminfo)
+                .is_ok()
+        );
+
+        // 119,140,625 KiB is exactly 122,000,000,000 bytes: demand plus the
+        // declared reserve must fit at the inclusive boundary.
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 119140625 kB\n",
+        )
+        .unwrap();
+        assert!(
+            runtime
+                .ensure_memory_available(120_000_000_000, 2_000_000_000, "unified", &meminfo)
+                .is_ok()
+        );
+
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 119140624 kB\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            runtime.ensure_memory_available(120_000_000_000, 2_000_000_000, "unified", &meminfo),
+            Err(OciError::Capacity)
+        ));
+    }
+
+    #[test]
+    fn host_only_demand_fits_without_counting_separate_vram() {
+        let directory = tempdir().unwrap();
+        let meminfo = directory.path().join("meminfo");
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 50331648 kB\n",
+        )
+        .unwrap();
+        let runtime = OciRuntime {
+            runner: &SeparateMemoryRunner {
+                total_mib: 65_536,
+                free_mib: 8_192,
+            },
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+
+        assert!(
+            runtime
+                .ensure_memory_available(17 * 1024_u64.pow(3), 0, "host", &meminfo)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn accelerator_only_demand_fits_without_counting_separate_host_ram() {
+        let directory = tempdir().unwrap();
+        let meminfo = directory.path().join("meminfo");
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 8388608 kB\n",
+        )
+        .unwrap();
+        let runtime = OciRuntime {
+            runner: &SeparateMemoryRunner {
+                total_mib: 65_536,
+                free_mib: 49_152,
+            },
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+
+        assert!(
+            runtime
+                .ensure_memory_available(17 * 1024_u64.pow(3), 0, "accelerator", &meminfo)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn unified_separate_demand_needs_both_pools_and_shared_uses_host_capacity() {
+        let directory = tempdir().unwrap();
+        let meminfo = directory.path().join("meminfo");
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 8388608 kB\n",
+        )
+        .unwrap();
+        let separate_runner = SeparateMemoryRunner {
+            total_mib: 65_536,
+            free_mib: 49_152,
+        };
+        let separate = OciRuntime {
+            runner: &separate_runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+        assert!(matches!(
+            separate.ensure_memory_available(17 * 1024_u64.pow(3), 0, "unified", &meminfo),
+            Err(OciError::Capacity)
+        ));
+
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 50331648 kB\n",
+        )
+        .unwrap();
+        let shared = OciRuntime {
+            runner: &Gb10MemoryRunner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+        for memory_kind in ["host", "accelerator", "unified"] {
+            assert!(
+                shared
+                    .ensure_memory_available(17 * 1024_u64.pow(3), 0, memory_kind, &meminfo)
+                    .is_ok()
+            );
+        }
+    }
+
     fn digest(value: &[u8]) -> String {
         hex::encode(sha2::Sha256::digest(value))
     }
@@ -2373,7 +2558,9 @@ mod tests {
                     "master_address": null,
                     "master_port": null,
                     "port": 8000,
-                    "reserved_memory_bytes": 4096
+                    "reserved_memory_bytes": 4096,
+                    "memory_floor_bytes": 0,
+                    "memory_kind": "unified"
                 }
             },
             "artifacts": [

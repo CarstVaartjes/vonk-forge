@@ -54,7 +54,7 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
         if (controller.signal.aborted) return;
         const next = await api.recipeCacheOperation(current.id, controller.signal);
-        if (!("children" in next)) {
+        if (!("kind" in next) || next.kind !== "recipe.image.availability.v2" || next.id !== current.id) {
           setBusy(false);
           setError("Recipe download returned an unexpected operation shape");
           return;

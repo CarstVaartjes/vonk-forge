@@ -981,14 +981,14 @@ wheels = [
 
 [[package]]
 name = "vonk-agent-protocol"
-version = "2.2.0"
-source = { path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" }
+version = "3.0.0"
+source = { path = "../inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pydantic" },
 ]
 wheels = [
-    { filename = "vonk_agent_protocol-2.2.0-py3-none-any.whl", hash = "sha256:7555df9ec0f576ac0530d1e6abdd2f3845614cf397a7bc2c8dcd01bc86967565" },
+    { filename = "vonk_agent_protocol-3.0.0-py3-none-any.whl", hash = "sha256:519484690b626f03e27efabad787ad1040a7d527404f2dd4faa3e2d84c40d116" },
 ]
 
 [package.metadata]
@@ -1075,7 +1075,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = "==2.0.42" },
     { name = "tomli-w", specifier = "==1.2.0" },
     { name = "uvicorn", specifier = "==0.35.0" },
-    { name = "vonk-agent-protocol", path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" },
+    { name = "vonk-agent-protocol", path = "../inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl" },
     { name = "vonk-cluster-profiles", directory = "../" },
     { name = "vonk-forge-public-contracts", git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main" },
 ]

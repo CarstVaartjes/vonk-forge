@@ -1936,6 +1936,21 @@
           ],
           "title": "Master Port"
         },
+        "memory_floor_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Memory Floor Bytes",
+          "type": "integer"
+        },
+        "memory_kind": {
+          "enum": [
+            "unified",
+            "host",
+            "accelerator"
+          ],
+          "title": "Memory Kind",
+          "type": "string"
+        },
         "port": {
           "anyOf": [
             {
@@ -1981,7 +1996,9 @@
         "master_address",
         "master_port",
         "port",
-        "reserved_memory_bytes"
+        "reserved_memory_bytes",
+        "memory_floor_bytes",
+        "memory_kind"
       ],
       "title": "CompiledPlacement",
       "type": "object"
@@ -4079,6 +4096,14 @@
           "title": "Host Memory Total Bytes",
           "type": "integer"
         },
+        "memory_pool": {
+          "enum": [
+            "shared",
+            "separate"
+          ],
+          "title": "Memory Pool",
+          "type": "string"
+        },
         "nvidia_driver_version": {
           "maxLength": 256,
           "minLength": 1,
@@ -4107,6 +4132,7 @@
         "gpu_memory_total_bytes",
         "gpu_memory_free_bytes",
         "gpu_count",
+        "memory_pool",
         "artifact_store_read_only",
         "capabilities",
         "nvidia_driver_version",
@@ -6743,6 +6769,21 @@
           "title": "Job Id",
           "type": "string"
         },
+        "memory_floor_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Memory Floor Bytes",
+          "type": "integer"
+        },
+        "memory_kind": {
+          "enum": [
+            "unified",
+            "host",
+            "accelerator"
+          ],
+          "title": "Memory Kind",
+          "type": "string"
+        },
         "output_limits": {
           "$ref": "#/$defs/RecipeJobOutputLimits"
         },
@@ -6816,6 +6857,8 @@
         "rank",
         "role",
         "reserved_memory_bytes",
+        "memory_floor_bytes",
+        "memory_kind",
         "contract_sha256",
         "input_manifest_sha256",
         "input_total_bytes",
@@ -7990,6 +8033,21 @@
           ],
           "title": "Master Port"
         },
+        "memory_floor_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Memory Floor Bytes",
+          "type": "integer"
+        },
+        "memory_kind": {
+          "enum": [
+            "unified",
+            "host",
+            "accelerator"
+          ],
+          "title": "Memory Kind",
+          "type": "string"
+        },
         "phase": {
           "anyOf": [
             {
@@ -8101,6 +8159,8 @@
         "role",
         "port",
         "reserved_memory_bytes",
+        "memory_floor_bytes",
+        "memory_kind",
         "endpoint_address",
         "world_size",
         "compiled_execution_plan",
@@ -8605,6 +8665,23 @@
     "RequestValidationProblem": {
       "additionalProperties": false,
       "properties": {
+        "candidates": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 127,
+                "pattern": "^(?:spk_[0-9a-f]{32}|[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9][a-z0-9._-]{0,62})$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidates"
+        },
         "context": {
           "anyOf": [
             {

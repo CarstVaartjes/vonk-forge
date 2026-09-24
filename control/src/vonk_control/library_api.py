@@ -16,8 +16,8 @@ from .library_contract import (
     RecipeDetailResponse,
     RecipeLibraryResponse,
 )
-from .library_projection import LibrarySelectorAmbiguous
-from .operation_api import bounded_error_responses
+from .library_projection import LibraryAssessmentUnavailable, LibrarySelectorAmbiguous
+from .operation_api import RequestValidationProblem, bounded_error_responses
 from .request_fault import RequestFault
 from .strict_json import stored_document_detail
 
@@ -36,13 +36,23 @@ LIBRARY_OPERATION_IDS = {
 }
 
 
-def _error(error: Exception) -> HTTPException:
-    if isinstance(error, LibrarySelectorAmbiguous):
-        candidates = ", ".join(error.candidates[:16])
-        return HTTPException(
-            status_code=422,
-            detail=f"selector is ambiguous: {error.selector}; candidates: {candidates}",
+class SelectorAmbiguityHTTPError(HTTPException):
+    """Carry canonical choices separately from bounded, redacted error copy."""
+
+    def __init__(self, error: LibrarySelectorAmbiguous) -> None:
+        self.problem = RequestValidationProblem(
+            detail="selector is ambiguous; choose an exact canonical candidate",
+            issues=[],
+            candidates=list(error.candidates),
         )
+        super().__init__(status_code=422, detail=self.problem.detail)
+
+
+def _error(error: Exception) -> HTTPException:
+    if isinstance(error, LibraryAssessmentUnavailable):
+        return HTTPException(status_code=503, detail=str(error))
+    if isinstance(error, LibrarySelectorAmbiguous):
+        return SelectorAmbiguityHTTPError(error)
     if isinstance(error, KeyError):
         return HTTPException(status_code=404, detail="operator object not found")
     if isinstance(error, (CursorError, RequestFault)):
@@ -164,6 +174,9 @@ def install_library_routes(
         cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH)] = None,
         model: Annotated[list[str] | None, Query(max_length=64)] = None,
         all_models: Annotated[bool, Query()] = False,
+        ready: Annotated[bool | None, Query()] = None,
+        fits_fleet: Annotated[bool | None, Query()] = None,
+        assess: Annotated[bool, Query()] = True,
         usage: Annotated[list[str] | None, Query(max_length=64)] = None,
         publisher: Annotated[list[str] | None, Query(max_length=64)] = None,
         alignment: Annotated[list[str] | None, Query(max_length=64)] = None,
@@ -179,6 +192,9 @@ def install_library_routes(
                 cursor=cursor,
                 model_selectors=model or [],
                 all_models=all_models,
+                ready=ready,
+                fits_fleet=fits_fleet,
+                assess=assess,
                 usage=usage or [],
                 publisher=publisher or [],
                 alignment=alignment or [],

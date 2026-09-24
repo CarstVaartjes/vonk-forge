@@ -7,6 +7,13 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Literal, Protocol, overload
 
+import pytest
+
+from cluster_profiles.control_client import (
+    ControlClientError,
+    validate_control_document,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_CLIENT = ROOT / "src/cluster_profiles/generated_control"
@@ -84,6 +91,35 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
     serialized = json.dumps(schema, sort_keys=True).lower()
     assert "certificate_pem" not in serialized
     assert "chain_pem" not in serialized
+
+
+def test_generated_fleet_upgrade_request_rejects_retired_strategy() -> None:
+    from cluster_profiles.generated_control.models.fleet_upgrade_request import (
+        FleetUpgradeRequest,
+    )
+
+    request_key = "11111111-1111-4111-8111-111111111111"
+    request = FleetUpgradeRequest.from_dict(
+        {
+            "all": True,
+            "request_key": request_key,
+            "strategy": "one-at-a-time",
+        }
+    )
+    assert request.to_dict() == {
+        "all": True,
+        "request_key": request_key,
+        "strategy": "one-at-a-time",
+    }
+
+    with pytest.raises(ValueError, match="strategy must match const"):
+        FleetUpgradeRequest.from_dict(
+            {
+                "all": True,
+                "request_key": request_key,
+                "strategy": "all-at-once",
+            }
+        )
 
 
 def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None:
@@ -328,18 +364,21 @@ def test_generated_python_models_compile() -> None:
         compile(path.read_text(), str(path), "exec")
 
 
-def test_profile_load_contract_does_not_accept_client_revision_pins() -> None:
-    components = json.loads(OPENAPI.read_text())["components"]["schemas"]
-    assert set(components["FleetProfileLoadRequest"]["properties"]) == {
-        "request_key",
-        "dry_run",
-        "plan_digest",
+def test_packaged_profile_load_requires_review_and_refuses_revision_overrides() -> None:
+    request = {
+        "request_key": "00000000-0000-4000-8000-000000000001",
+        "plan_digest": "a" * 64,
     }
-    assert "plan_digest" in components["FleetProfileLoadRequest"]["required"]
-    assert {"plan_digest", "profile_digest", "progress"} <= set(
-        components["FleetProfileApplicationView"]["properties"]
-    )
-    assert "RunPreviewRequest" not in components
+    assert validate_control_document("FleetProfileLoadRequest", request) == request
+    with pytest.raises(ControlClientError):
+        validate_control_document(
+            "FleetProfileLoadRequest", {"request_key": request["request_key"]}
+        )
+    with pytest.raises(ControlClientError):
+        validate_control_document(
+            "FleetProfileLoadRequest",
+            {**request, "recipe_revision_id": "00000000-0000-4000-8000-000000000002"},
+        )
 
 
 def test_generated_recipe_detail_has_one_canonical_topology() -> None:

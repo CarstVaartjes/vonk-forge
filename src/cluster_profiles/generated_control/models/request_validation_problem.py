@@ -29,11 +29,13 @@ class RequestValidationProblem:
         Attributes:
             detail (str):
             issues (list['RequestValidationIssue']):
+            candidates (Union[None, Unset, list[str]]):
             context (Union['ErrorContextResponse', None, Unset]):
      """
 
     detail: str
     issues: list['RequestValidationIssue']
+    candidates: Union[None, Unset, list[str]] = UNSET
     context: Union['ErrorContextResponse', None, Unset] = UNSET
 
 
@@ -52,6 +54,16 @@ class RequestValidationProblem:
 
 
 
+        candidates: Union[None, Unset, list[str]]
+        if isinstance(self.candidates, Unset):
+            candidates = UNSET
+        elif isinstance(self.candidates, list):
+            candidates = self.candidates
+
+
+        else:
+            candidates = self.candidates
+
         context: Union[None, Unset, dict[str, Any]]
         if isinstance(self.context, Unset):
             context = UNSET
@@ -67,6 +79,8 @@ class RequestValidationProblem:
             "detail": detail,
             "issues": issues,
         })
+        if candidates is not UNSET:
+            field_dict["candidates"] = candidates
         if context is not UNSET:
             field_dict["context"] = context
 
@@ -89,6 +103,24 @@ class RequestValidationProblem:
 
 
             issues.append(issues_item)
+
+
+        def _parse_candidates(data: object) -> Union[None, Unset, list[str]]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, list):
+                    raise TypeError()
+                candidates_type_0 = cast(list[str], data)
+
+                return candidates_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, Unset, list[str]], data)
+
+        candidates = _parse_candidates(d.pop("candidates", UNSET))
 
 
         def _parse_context(data: object) -> Union['ErrorContextResponse', None, Unset]:
@@ -114,6 +146,7 @@ class RequestValidationProblem:
         request_validation_problem = cls(
             detail=detail,
             issues=issues,
+            candidates=candidates,
             context=context,
         )
 

@@ -36,6 +36,7 @@ def test_recipe_job_vectors_are_canonical_typed_and_digest_bound() -> None:
         claim_document, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     )
     assert request.reserved_memory_bytes == 32 * 1024**3
+    assert request.memory_floor_bytes == 2 * 1024**3
     assert request.compiled_execution_plan.job.interface == request.interface
     assert request.output_mappings[0].to_mapping() == {
         "slot": "image",
@@ -57,6 +58,12 @@ def test_recipe_job_vectors_are_canonical_typed_and_digest_bound() -> None:
         lambda value: value["inputs"][0].update(name="../escape"),
         lambda value: value.update(input_total_bytes=4),
         lambda value: value.update(reserved_memory_bytes=0),
+        lambda value: value.update(memory_floor_bytes=-1),
+        lambda value: value.update(memory_floor_bytes=1),
+        lambda value: value.update(memory_kind="host"),
+        lambda value: value["compiled_execution_plan"]["runtime"]["placement"].update(
+            memory_kind="host"
+        ),
         lambda value: value["compiled_execution_plan"]["runtime"].update(
             argv=["bad\x00value"]
         ),

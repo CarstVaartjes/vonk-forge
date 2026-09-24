@@ -6,11 +6,10 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.fleet_upgrade_request_strategy import check_fleet_upgrade_request_strategy
-from ..models.fleet_upgrade_request_strategy import FleetUpgradeRequestStrategy
 from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
+from typing import Literal, Union, cast
 from typing import Union
 
 
@@ -26,20 +25,24 @@ T = TypeVar("T", bound="FleetUpgradeRequest")
 class FleetUpgradeRequest:
     """
         Attributes:
+            request_key (str):
             all_ (Union[Unset, bool]):  Default: False.
             selectors (Union[None, Unset, list[str]]):
-            strategy (Union[Unset, FleetUpgradeRequestStrategy]):  Default: 'one-at-a-time'.
+            strategy (Union[Literal['one-at-a-time'], Unset]):  Default: 'one-at-a-time'.
      """
 
+    request_key: str
     all_: Union[Unset, bool] = False
     selectors: Union[None, Unset, list[str]] = UNSET
-    strategy: Union[Unset, FleetUpgradeRequestStrategy] = 'one-at-a-time'
+    strategy: Union[Literal['one-at-a-time'], Unset] = 'one-at-a-time'
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        request_key = self.request_key
+
         all_ = self.all_
 
         selectors: Union[None, Unset, list[str]]
@@ -52,15 +55,13 @@ class FleetUpgradeRequest:
         else:
             selectors = self.selectors
 
-        strategy: Union[Unset, str] = UNSET
-        if not isinstance(self.strategy, Unset):
-            strategy = self.strategy
-
+        strategy = self.strategy
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "request_key": request_key,
         })
         if all_ is not UNSET:
             field_dict["all"] = all_
@@ -76,6 +77,8 @@ class FleetUpgradeRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        request_key = d.pop("request_key")
+
         all_ = d.pop("all", UNSET)
 
         def _parse_selectors(data: object) -> Union[None, Unset, list[str]]:
@@ -96,17 +99,12 @@ class FleetUpgradeRequest:
         selectors = _parse_selectors(d.pop("selectors", UNSET))
 
 
-        _strategy = d.pop("strategy", UNSET)
-        strategy: Union[Unset, FleetUpgradeRequestStrategy]
-        if isinstance(_strategy,  Unset):
-            strategy = UNSET
-        else:
-            strategy = check_fleet_upgrade_request_strategy(_strategy)
-
-
-
+        strategy = cast(Union[Literal['one-at-a-time'], Unset] , d.pop("strategy", UNSET))
+        if strategy != 'one-at-a-time' and not isinstance(strategy, Unset):
+            raise ValueError(f"strategy must match const 'one-at-a-time', got '{strategy}'")
 
         fleet_upgrade_request = cls(
+            request_key=request_key,
             all_=all_,
             selectors=selectors,
             strategy=strategy,

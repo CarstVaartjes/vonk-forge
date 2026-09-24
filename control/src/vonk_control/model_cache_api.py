@@ -11,6 +11,7 @@ from vonk_agent_protocol import OperationProgress
 from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
 from .bounded_json import require_integer, require_sequence
+from .cache_removal_review import CacheRemovalReview
 from .model_cache import (
     ModelCacheConflict,
     ModelCacheError,
@@ -19,9 +20,12 @@ from .model_cache import (
     ModelCacheService,
 )
 from .model_cache_contract import (
+    UUID_PATTERN,
+    ModelCacheCancellationRequest,
     ModelCacheOperatorAction,
     ModelCacheOperatorRequest,
     ModelCacheOperatorResponse,
+    ModelCacheRemovalRequest,
     ModelCacheRemovalResult,
 )
 from .model_cache_progress import project_cache_progress
@@ -36,8 +40,11 @@ from .operation_contract import AvailabilityOperationFailure
 
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/model/operations/{operation_id}"): "getModelOperation",
+    ("get", "/api/model/requests/{request_key}"): "getModelRequest",
+    ("get", "/api/model/{selector}/remove-review"): "reviewModelRemoval",
     ("post", "/api/model/{selector}/download"): "downloadModel",
     ("post", "/api/model/{selector}/remove"): "removeModel",
+    ("post", "/api/model/operations/{operation_id}/cancel"): "cancelModelOperation",
 }
 
 
@@ -56,6 +63,8 @@ def _model_operator_response(
         action=action,
         selector=selector,
         request_key=operation.request_key,
+        model_content_sha256=operation.model_content_sha256,
+        review_digest=operation.review_digest,
         operation_id=operation.id,
         state=operation.state,
         phase=str(raw.get("phase", progress.phase)),
@@ -72,6 +81,7 @@ def _model_operator_response(
             ["retry"] if operation.state == "failed" and operation.retryable else []
         ),
         cancelled_operations=list(cancelled),
+        cancellation=getattr(operation, "cancellation", None),
         result=result,
         failure=(
             AvailabilityOperationFailure.model_validate(operation.failure)
@@ -90,8 +100,8 @@ def install_model_operator_routes(
 ) -> None:
     """Install the current singular Model mutation routes.
 
-    The service resolves selectors and binds its own current preview.  The
-    operator therefore submits only intent and a request identity.
+    The service resolves selectors against an explicit immutable model digest.
+    Replays bind the actor, request identity, action, selector, and digest.
     """
 
     from .operation_api import _ADMIN_OPERATION_IDS
@@ -131,6 +141,26 @@ def install_model_operator_routes(
         return HTTPException(status_code=503, detail="model cache unavailable")
 
     @app.get(
+        "/api/model/requests/{request_key}",
+        response_model=ModelCacheOperatorResponse,
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        operation_id="getModelRequest",
+    )
+    def get_request(
+        request_key: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        try:
+            operation, action, selector = cache().get_operator_request(
+                request_key, actor=actor.subject
+            )
+            return _model_operator_response(operation, action=action, selector=selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise failure(error) from None
+
+    @app.get(
         "/api/model/operations/{operation_id}",
         response_model=ModelCacheOperatorResponse,
         responses=bounded_error_responses(401, 404, 409, 422, 503),
@@ -151,8 +181,26 @@ def install_model_operator_routes(
         except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise failure(error) from None
 
+    @app.get(
+        "/api/model/{selector:path}/remove-review",
+        response_model=CacheRemovalReview,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="reviewModelRemoval",
+    )
+    def review_removal(
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
+        actor: Actor = actor_dependency,
+    ) -> CacheRemovalReview:
+        require_operator(actor, "/api/model/{selector:path}/remove")
+        try:
+            return cache().review_model_removal(selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise failure(error) from None
+
     @app.post(
-        "/api/model/{selector}/download",
+        "/api/model/{selector:path}/download",
         response_model=ModelCacheOperatorResponse,
         status_code=status.HTTP_202_ACCEPTED,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
@@ -164,7 +212,7 @@ def install_model_operator_routes(
         selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Actor = actor_dependency,
     ) -> ModelCacheOperatorResponse:
-        require_operator(actor, "/api/model/{selector}/download")
+        require_operator(actor, "/api/model/{selector:path}/download")
         try:
             operation = cache().download_model_selector(
                 selector,
@@ -182,29 +230,61 @@ def install_model_operator_routes(
             raise failure(error) from None
 
     @app.post(
-        "/api/model/{selector}/remove",
+        "/api/model/{selector:path}/remove",
         response_model=ModelCacheOperatorResponse,
         status_code=status.HTTP_202_ACCEPTED,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="removeModel",
     )
     def remove(
-        body: ModelCacheOperatorRequest,
+        body: ModelCacheRemovalRequest,
         request: Request,
         selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Actor = actor_dependency,
     ) -> ModelCacheOperatorResponse:
-        require_operator(actor, "/api/model/{selector}/remove")
+        require_operator(actor, "/api/model/{selector:path}/remove")
         try:
             operation = cache().remove_model_selector(
                 selector,
                 actor=actor.subject,
                 request_key=body.request_key,
+                model_content_sha256=body.model_content_sha256,
+                review_digest=body.review_digest,
             )
             audit(request, actor, "model.remove", selector, operation.id)
             return _model_operator_response(
                 operation, action="remove", selector=selector
             )
+        except HTTPException:
+            raise
+        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise failure(error) from None
+
+    @app.post(
+        "/api/model/operations/{operation_id}/cancel",
+        response_model=ModelCacheOperatorResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="cancelModelOperation",
+    )
+    def cancel_operation(
+        body: ModelCacheCancellationRequest,
+        request: Request,
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        route = "/api/model/operations/{operation_id}/cancel"
+        require_operator(actor, route)
+        try:
+            cache().cancel_operation(
+                operation_id,
+                actor=actor.subject,
+                request_key=body.request_key,
+                reason=body.reason,
+            )
+            operation, action, selector = cache().get_operator_operation(operation_id)
+            audit(request, actor, "model.cancel", selector, operation_id)
+            return _model_operator_response(operation, action=action, selector=selector)
         except HTTPException:
             raise
         except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
@@ -225,18 +305,23 @@ class ModelCacheOperationProvider:
         after = getattr(query, "after", None)
         state = getattr(query, "state", None)
         node_id = getattr(query, "node_id", None)
+        request_id = getattr(query, "request_id", None)
         page = self._service.activity_operations(
             after=after,
             limit=min(limit, 101),
             state=state,
             node_id=node_id,
+            request_id=request_id,
         )
         items = [
             self._summary(item)
             for item in require_sequence(page["operations"], "page operations")
         ]
         next_cursor = self._next_cursor(
-            page.get("_next_boundary"), state=state, node_id=node_id
+            page.get("_next_boundary"),
+            state=state,
+            node_id=node_id,
+            request_id=request_id,
         )
         return OperationListPage(
             items=items,
@@ -250,6 +335,7 @@ class ModelCacheOperationProvider:
         *,
         state: object,
         node_id: object,
+        request_id: object,
     ) -> str | None:
         """Encode the page boundary, keeping absence distinct from corruption.
 
@@ -266,7 +352,7 @@ class ModelCacheOperationProvider:
         created_at, operation_id = boundary
         if not isinstance(created_at, str) or not isinstance(operation_id, str):
             raise OperationProjectionError("operation cursor boundary is invalid")
-        context = {"state": state, "node_id": node_id}
+        context = {"state": state, "node_id": node_id, "request_id": request_id}
         if self._cursors is not None:
             return self._cursors.encode(
                 resource="model-cache-operations",
@@ -306,6 +392,11 @@ class ModelCacheOperationProvider:
             "supported_actions": ["retry"] if retryable else [],
             "result": result,
             "failure": operation.failure,
+            "owner": {
+                "kind": "model-cache-operation",
+                "id": operation.id,
+                "request_id": operation.request_key,
+            },
         }
 
     @staticmethod

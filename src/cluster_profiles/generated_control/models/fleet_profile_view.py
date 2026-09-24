@@ -21,6 +21,7 @@ if TYPE_CHECKING:
   from ..models.fleet_profile_assignment_view import FleetProfileAssignmentView
   from ..models.fleet_profile_view_cache_summary import FleetProfileViewCacheSummary
   from ..models.fleet_profile_view_labels import FleetProfileViewLabels
+  from ..models.fleet_profile_definition import FleetProfileDefinition
 
 
 
@@ -37,6 +38,7 @@ class FleetProfileView:
             assignments (list['FleetProfileAssignmentView']):
             created_at (datetime.datetime):
             created_by (str):
+            definition (FleetProfileDefinition): Saved authoring intent, independent of execution and cache projections.
             description (str):
             favorite (bool):
             id (str):
@@ -59,6 +61,7 @@ class FleetProfileView:
     assignments: list['FleetProfileAssignmentView']
     created_at: datetime.datetime
     created_by: str
+    definition: 'FleetProfileDefinition'
     description: str
     favorite: bool
     id: str
@@ -86,6 +89,7 @@ class FleetProfileView:
         from ..models.fleet_profile_assignment_view import FleetProfileAssignmentView
         from ..models.fleet_profile_view_cache_summary import FleetProfileViewCacheSummary
         from ..models.fleet_profile_view_labels import FleetProfileViewLabels
+        from ..models.fleet_profile_definition import FleetProfileDefinition
         assignments = []
         for assignments_item_data in self.assignments:
             assignments_item = assignments_item_data.to_dict()
@@ -96,6 +100,8 @@ class FleetProfileView:
         created_at = self.created_at.isoformat()
 
         created_by = self.created_by
+
+        definition = self.definition.to_dict()
 
         description = self.description
 
@@ -159,6 +165,7 @@ class FleetProfileView:
             "assignments": assignments,
             "created_at": created_at,
             "created_by": created_by,
+            "definition": definition,
             "description": description,
             "favorite": favorite,
             "id": id,
@@ -195,6 +202,7 @@ class FleetProfileView:
         from ..models.fleet_profile_assignment_view import FleetProfileAssignmentView
         from ..models.fleet_profile_view_cache_summary import FleetProfileViewCacheSummary
         from ..models.fleet_profile_view_labels import FleetProfileViewLabels
+        from ..models.fleet_profile_definition import FleetProfileDefinition
         d = dict(src_dict)
         assignments = []
         _assignments = d.pop("assignments")
@@ -212,6 +220,11 @@ class FleetProfileView:
 
 
         created_by = d.pop("created_by")
+
+        definition = FleetProfileDefinition.from_dict(d.pop("definition"))
+
+
+
 
         description = d.pop("description")
 
@@ -288,6 +301,7 @@ class FleetProfileView:
             assignments=assignments,
             created_at=created_at,
             created_by=created_by,
+            definition=definition,
             description=description,
             favorite=favorite,
             id=id,

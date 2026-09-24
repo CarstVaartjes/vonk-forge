@@ -1,0 +1,531 @@
+{
+  "source_snapshot": "134bcbf9fd54a70da2be8204a805dfd5c34feccc",
+  "captured_at": "2026-09-24T14:20:36.079741+00:00",
+  "scenario_files": [
+    "control/tests/test_profile_load_review_installed_cli.py",
+    "control/tests/test_profile_load_stale_admission_installed_cli.py",
+    "control/tests/test_profile_cancel_activity_installed_cli.py",
+    "control/tests/test_artifact_job_installed_cli.py"
+  ],
+  "boundary": "disposable PostgreSQL, registered HTTPS API, installed wheel",
+  "not_proven": [
+    "human usability",
+    "deployment",
+    "physical Spark"
+  ],
+  "normalization": "executable path replaced by vonkctl; fixture-root paths replaced by /disposable-fixture; other stream content unchanged",
+  "records": [
+    {
+      "scenario": "tests/test_profile_load_review_installed_cli.py::test_installed_cli_reviews_real_whole_fleet_effects_before_prompt",
+      "command": [
+        "vonkctl",
+        "--profile",
+        "1",
+        "profile",
+        "load",
+        "--detach"
+      ],
+      "exit_code": 2,
+      "stdout": "",
+      "terminal": "Ready for review\r\nProfile: Studio replacement\r\nRevision: 1\r\nPlan digest: d88f0400e3293d571911301b2a57a860907773bb0fdea5db2a5736f304b49a2c\r\nAll Sparks: spk_00000000000000000000000000000001, spk_00000000000000000000000000000002, spk_33333333333333333333333333333333\r\nIdle Sparks: spk_33333333333333333333333333333333\r\nAlready Correct: 0\r\nPlacements: 0\r\nBuilds: 0\r\nDistributions: 0\r\nInstalls: 0\r\nStarts: 1\r\nStops: 1\r\nUninstalls: 0\r\nBlockers: 0\r\nRecipe: Synthetic Tiny image\r\nSparks: spk_00000000000000000000000000000001, spk_00000000000000000000000000000002\r\nCurrent: degraded\r\nDesired: running\r\n0. Switch profile Studio replacement\r\nAffected Sparks: spk_00000000000000000000000000000001, spk_00000000000000000000000000000002\r\nStop endpoint: studio-chat\r\nRun: d1ee5245-7c68-4bd1-9b7c-ec92c400ed2d\r\nComplete group: spk_00000000000000000000000000000001, spk_00000000000000000000000000000002\r\nKeep installation: 4a8ca52d-3d82-44f8-af0d-849e02705be7\r\nComplete group: spk_00000000000000000000000000000001, spk_00000000000000000000000000000002\r\nAssignment: 756cf4c0-cce5-5c9f-858a-0edd415ead81\r\nExact model set: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\r\nExact image: sha256:1111111111111111111111111111111111111111111111111111111111111111\r\nOCI archive SHA-256: fc3674abb069b349caf8573256160eb1be4ccc4851e69b14873662f3f189e191\r\nImage size: 30 B\r\nArchitecture: linux-arm64\r\nRuntime interface: vonk.runtime.v1\r\nBuild: 511674d8-1bd9-4ab3-a7ee-2f8e420c89d9\r\nReuse model on: spk_00000000000000000000000000000001, spk_00000000000000000000000000000002\r\nReuse image on: spk_00000000000000000000000000000001, spk_00000000000000000000000000000002\r\nAdmission for assignment: 756cf4c0-cce5-5c9f-858a-0edd415ead81\r\nIntended endpoint: studio-chat\r\nCurrent capacity: blocked\r\nSpark: spk_00000000000000000000000000000001\r\nPorts required: 8000, 29500\r\nMemory demand kind: unified\r\nPhysical memory pool: shared\r\nMemory required: 225 B\r\nMemory reserve: 50 B\r\nPhysical memory capacity: 9.8 KiB (10000 bytes)\r\nAvailable in limiting pool: 7.8 KiB (8000 bytes)\r\nMemory after placement: unavailable\r\nResident usage evidence: Per-run usage is unavailable; admission uses each full residual upper bound.\r\nCapacity source: aggregate_inventory_without_run_usage\r\nInventory sample: 2026-08-07T12:00:00Z\r\nInventory evidence digest: a5544eee276c4442c13a58c0b304f4df7db7bbd3dd863531e9d5678794cb8c77\r\nPossible run residual: d1ee5245-7c68-4bd1-9b7c-ec92c400ed2d generation 1: 0\u2013225 B (not measured)\r\nDisk required: 1.1 KiB (1084 bytes)\r\nDisk after placement: 5.7 KiB (5872 bytes)\r\nAttention: spk_00000000000000000000000000000001 capacity blocker: run.port_occupied: Port 8000 is already reserved on this GPU node.\r\nAttention: spk_00000000000000000000000000000001 capacity blocker: run.rendezvous_port_occupied: Multi-node rendezvous port 29500 is already reserved.\r\nAttention: spk_00000000000000000000000000000001 capacity warning: run-switch.resource.estimate_uncertain: Forecast 225 bytes from the declared recipe-role memory envelope (225 bytes); runtime_overhead_bytes is unavailable, so actual demand may exceed this bound.\r\nAttention: spk_00000000000000000000000000000001 capacity warning: run-switch.resource.resident_usage_unknown: Aggregate inventory 2026-08-07T12:00:00+00:00 (a5544eee276c4442c13a58c0b304f4df7db7bbd3dd863531e9d5678794cb8c77) reports no per-run resident usage for 1 exact active claim(s); their remaining commitment is in the range 0..225 bytes. Admission applies the full upper bound.\r\nSpark: spk_00000000000000000000000000000002\r\nPorts required: 8000\r\nMemory demand kind: unified\r\nPhysical memory pool: shared\r\nMemory required: 225 B\r\nMemory reserve: 50 B\r\nPhysical memory capacity: 9.8 KiB (10000 bytes)\r\nAvailable in limiting pool: 7.8 KiB (8000 bytes)\r\nMemory after placement: unavailable\r\nResident usage evidence: Per-run usage is unavailable; admission uses each full residual upper bound.\r\nCapacity source: aggregate_inventory_without_run_usage\r\nInventory sample: 2026-08-07T12:00:00Z\r\nInventory evidence digest: bb481bff33c1cbed852aef9d42c5535793ececbc8fd8aba259ceefc72738094d\r\nPossible run residual: d1ee5245-7c68-4bd1-9b7c-ec92c400ed2d generation 1: 0\u2013225 B (not measured)\r\nDisk required: 1.1 KiB (1084 bytes)\r\nDisk after placement: 5.7 KiB (5872 bytes)\r\nAttention: spk_00000000000000000000000000000002 capacity blocker: run.port_occupied: Port 8000 is already reserved on this GPU node.\r\nAttention: spk_00000000000000000000000000000002 capacity warning: run-switch.resource.estimate_uncertain: Forecast 225 bytes from the declared recipe-role memory envelope (225 bytes); runtime_overhead_bytes is unavailable, so actual demand may exceed this bound.\r\nAttention: spk_00000000000000000000000000000002 capacity warning: run-switch.resource.resident_usage_unknown: Aggregate inventory 2026-08-07T12:00:00+00:00 (bb481bff33c1cbed852aef9d42c5535793ececbc8fd8aba259ceefc72738094d) reports no per-run resident usage for 1 exact active claim(s); their remaining commitment is in the range 0..225 bytes. Admission applies the full upper bound.\r\nCapacity after stops: fits\r\nSpark: spk_00000000000000000000000000000001\r\nPorts required: 8000, 29500\r\nMemory demand kind: unified\r\nPhysical memory pool: shared\r\nMemory required: 225 B\r\nMemory reserve: 50 B\r\nPhysical memory capacity: 9.8 KiB (10000 bytes)\r\nAvailable in limiting pool: 7.8 KiB (8000 bytes)\r\nMemory after placement: 7.6 KiB (7775 bytes)\r\nDisk required: 1.1 KiB (1084 bytes)\r\nDisk after placement: 5.7 KiB (5872 bytes)\r\nAttention: spk_00000000000000000000000000000001 capacity warning: run-switch.resource.estimate_uncertain: Forecast 225 bytes from the declared recipe-role memory envelope (225 bytes); runtime_overhead_bytes is unavailable, so actual demand may exceed this bound.\r\nSpark: spk_00000000000000000000000000000002\r\nPorts required: 8000\r\nMemory demand kind: unified\r\nPhysical memory pool: shared\r\nMemory required: 225 B\r\nMemory reserve: 50 B\r\nPhysical memory capacity: 9.8 KiB (10000 bytes)\r\nAvailable in limiting pool: 7.8 KiB (8000 bytes)\r\nMemory after placement: 7.6 KiB (7775 bytes)\r\nDisk required: 1.1 KiB (1084 bytes)\r\nDisk after placement: 5.7 KiB (5872 bytes)\r\nAttention: spk_00000000000000000000000000000002 capacity warning: run-switch.resource.estimate_uncertain: Forecast 225 bytes from the declared recipe-role memory envelope (225 bytes); runtime_overhead_bytes is unavailable, so actual demand may exceed this bound.\r\nAttention: run-switch.resource.estimate_uncertain: Forecast 225 bytes from the declared recipe-role memory envelope (225 bytes); runtime_overhead_bytes is unavailable, so actual demand may exceed this bound.\r\nAttention: run-switch.resource.resident_usage_unknown: Aggregate inventory 2026-08-07T12:00:00+00:00 (a5544eee276c4442c13a58c0b304f4df7db7bbd3dd863531e9d5678794cb8c77) reports no per-run resident usage for 1 exact active claim(s); their remaining commitment is in the range 0..225 bytes. Admission applies the full upper bound.\r\nAttention: run-switch.resource.estimate_uncertain: Forecast 225 bytes from the declared recipe-role memory envelope (225 bytes); runtime_overhead_bytes is unavailable, so actual demand may exceed this bound.\r\nAttention: run-switch.resource.resident_usage_unknown: Aggregate inventory 2026-08-07T12:00:00+00:00 (bb481bff33c1cbed852aef9d42c5535793ececbc8fd8aba259ceefc72738094d) reports no per-run resident usage for 1 exact active claim(s); their remaining commitment is in the range 0..225 bytes. Admission applies the full upper bound.\r\nAttention: resource.estimate_uncertain: Forecast 225 bytes from the declared recipe-role memory envelope (225 bytes); runtime_overhead_bytes is unavailable, so actual demand may exceed this bound.\r\nAttention: resource.estimate_uncertain: Forecast 225 bytes from the declared recipe-role memory envelope (225 bytes); runtime_overhead_bytes is unavailable, so actual demand may exceed this bound.\r\nAttention: run-switch.model_capabilities_unknown: The exact model revision declares no typed capability facts.\r\nPreparation: 756cf4c0-cce5-5c9f-858a-0edd415ead81\r\nController ready: yes\r\nTargets ready: yes\r\nAttention: profile.interruption_expected: The reviewed plan includes required runtime stops; affected workloads may be unavailable until final starts complete.\r\nLoad profile 1 with these effects? [y/N] no\r\nError: action was not confirmed\r\nCode: control.api_error\r\nDetail: action was not confirmed\r\n"
+    },
+    {
+      "scenario": "tests/test_profile_load_stale_admission_installed_cli.py::test_installed_stale_review_is_shown_and_never_admitted_or_replayed",
+      "command": [
+        "vonkctl",
+        "--no-input",
+        "--json",
+        "--profile",
+        "1",
+        "profile",
+        "load",
+        "--dry-run"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"admission_decisions\":[],\"allowed\":true,\"assessments\":[],\"assignments\":[],\"effects\":{\"installations\":[],\"runs\":[],\"superseded\":[]},\"generated_at\":\"2026-09-10T00:00:00Z\",\"plan_digest\":\"1b0d557ca344249bf36fd29a9747627ea9939962bb8b48d0140b801aa9376163\",\"preparation_decisions\":[],\"preparations\":[],\"profile_definition\":{\"assignments\":[],\"description\":\"\",\"favorite\":false,\"installation_policy\":\"keep-cached\",\"labels\":{},\"name\":\"Reviewed idle\"},\"profile_digest\":\"d84914b380b0916db3a96d41018397c4762f8bd8f1a1d14ef369828db390126c\",\"profile_id\":\"4a426143-ba9c-48b7-b16f-9a92f9e01c40\",\"profile_name\":\"Reviewed idle\",\"profile_revision\":1,\"reasons\":[],\"resolved_assignments\":[],\"schema_version\":2,\"scope\":{\"idle_node_ids\":[\"spk_11111111111111111111111111111111\",\"spk_22222222222222222222222222222222\"],\"node_ids\":[\"spk_11111111111111111111111111111111\",\"spk_22222222222222222222222222222222\"]},\"steps\":[],\"summary\":{\"already_correct\":0,\"blockers\":0,\"builds\":0,\"distributions\":0,\"installs\":0,\"placements\":0,\"starts\":0,\"stops\":0,\"uninstalls\":0}}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_profile_load_stale_admission_installed_cli.py::test_installed_stale_review_is_shown_and_never_admitted_or_replayed",
+      "command": [
+        "vonkctl",
+        "--profile",
+        "1",
+        "profile",
+        "load",
+        "--expected-plan",
+        "1b0d557ca344249bf36fd29a9747627ea9939962bb8b48d0140b801aa9376163",
+        "--request-key",
+        "11111111-1111-4111-8111-111111111111",
+        "--detach"
+      ],
+      "exit_code": 2,
+      "stdout": "",
+      "terminal": "Ready for review\r\nProfile: Reviewed idle\r\nRevision: 1\r\nPlan digest: 1b0d557ca344249bf36fd29a9747627ea9939962bb8b48d0140b801aa9376163\r\nAll Sparks: spk_11111111111111111111111111111111, spk_22222222222222222222222222222222\r\nIdle Sparks: spk_11111111111111111111111111111111, spk_22222222222222222222222222222222\r\nAlready Correct: 0\r\nPlacements: 0\r\nBuilds: 0\r\nDistributions: 0\r\nInstalls: 0\r\nStarts: 0\r\nStops: 0\r\nUninstalls: 0\r\nBlockers: 0\r\nLoad profile 1 with reviewed plan 1b0d557ca344249bf36fd29a9747627ea9939962bb8b48d0140b801aa9376163? [y/N] yes\r\nRequest key: 11111111-1111-4111-8111-111111111111\r\nReconnect: vonkctl --profile 1 profile progress --request-key 11111111-1111-4111-8111-111111111111 --follow\r\nReady for review\r\nProfile: Edited after review\r\nRevision: 2\r\nPlan digest: 920377f2779a469be93bd863c0e70b582d42b37845b9d17a1b8fae6cf98a485c\r\nAll Sparks: spk_11111111111111111111111111111111, spk_22222222222222222222222222222222\r\nIdle Sparks: spk_11111111111111111111111111111111, spk_22222222222222222222222222222222\r\nAlready Correct: 0\r\nPlacements: 0\r\nBuilds: 0\r\nDistributions: 0\r\nInstalls: 0\r\nStarts: 0\r\nStops: 0\r\nUninstalls: 0\r\nBlockers: 0\r\nThe submitted load was refused. Review these current effects, then start a new load with the current plan digest.\r\nError: POST /api/profile/1/load profile.stale_plan HTTP 409: Fleet profile preview is stale; review the profile again before loading request_id=bfd2140b-16b8-49ec-9d6a-df9d72b67110 [exit]\r\nCode: profile.stale_plan\r\nDetail: Fleet profile preview is stale; review the profile again before loading\r\nOperation: POST /api/profile/1/load\r\nEndpoint: /api/profile/1/load\r\nHTTP status: 409\r\nRequest ID: bfd2140b-16b8-49ec-9d6a-df9d72b67110\r\nSource: remote_rejection\r\nDecision: exit\r\nRequest key: 11111111-1111-4111-8111-111111111111\r\nNext: vonkctl --profile 1 profile load --dry-run\r\n"
+    },
+    {
+      "scenario": "tests/test_profile_load_stale_admission_installed_cli.py::test_installed_stale_review_is_shown_and_never_admitted_or_replayed",
+      "command": [
+        "vonkctl",
+        "--no-input",
+        "--json",
+        "--profile",
+        "1",
+        "profile",
+        "load",
+        "--dry-run"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"admission_decisions\":[],\"allowed\":true,\"assessments\":[],\"assignments\":[],\"effects\":{\"installations\":[],\"runs\":[],\"superseded\":[]},\"generated_at\":\"2026-09-10T00:00:00Z\",\"plan_digest\":\"920377f2779a469be93bd863c0e70b582d42b37845b9d17a1b8fae6cf98a485c\",\"preparation_decisions\":[],\"preparations\":[],\"profile_definition\":{\"assignments\":[],\"description\":\"\",\"favorite\":false,\"installation_policy\":\"keep-cached\",\"labels\":{},\"name\":\"Edited after review\"},\"profile_digest\":\"58b32a1f14cba85613c191c51c867df5a988cc7ad4257f5430209e4e1c583dcd\",\"profile_id\":\"4a426143-ba9c-48b7-b16f-9a92f9e01c40\",\"profile_name\":\"Edited after review\",\"profile_revision\":2,\"reasons\":[],\"resolved_assignments\":[],\"schema_version\":2,\"scope\":{\"idle_node_ids\":[\"spk_11111111111111111111111111111111\",\"spk_22222222222222222222222222222222\"],\"node_ids\":[\"spk_11111111111111111111111111111111\",\"spk_22222222222222222222222222222222\"]},\"steps\":[],\"summary\":{\"already_correct\":0,\"blockers\":0,\"builds\":0,\"distributions\":0,\"installs\":0,\"placements\":0,\"starts\":0,\"stops\":0,\"uninstalls\":0}}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_profile_load_stale_admission_installed_cli.py::test_installed_stale_review_is_shown_and_never_admitted_or_replayed",
+      "command": [
+        "vonkctl",
+        "--no-input",
+        "--json",
+        "--profile",
+        "1",
+        "profile",
+        "load",
+        "--expected-plan",
+        "920377f2779a469be93bd863c0e70b582d42b37845b9d17a1b8fae6cf98a485c",
+        "--yes",
+        "--request-key",
+        "22222222-2222-4222-8222-222222222222",
+        "--detach"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"attempt\":1,\"created_at\":\"2026-09-10T00:00:00Z\",\"current_operation_id\":null,\"current_step\":0,\"id\":\"cbee14cf-2404-4523-84f5-6d80c797fab9\",\"plan_digest\":\"128b4d68f42a3d5912c03b992040e6ea24c7dd177822c180ce71857c7d9bcb4b\",\"profile_digest\":\"58b32a1f14cba85613c191c51c867df5a988cc7ad4257f5430209e4e1c583dcd\",\"profile_id\":\"4a426143-ba9c-48b7-b16f-9a92f9e01c40\",\"progress\":{\"attempt\":1,\"completed_steps\":0,\"intended_profile\":{\"assignments\":[],\"installation_policy\":\"keep-cached\",\"profile_digest\":\"58b32a1f14cba85613c191c51c867df5a988cc7ad4257f5430209e4e1c583dcd\",\"reviewed_application_id\":\"cbee14cf-2404-4523-84f5-6d80c797fab9\",\"reviewed_plan_digest\":\"920377f2779a469be93bd863c0e70b582d42b37845b9d17a1b8fae6cf98a485c\",\"scope\":{\"node_ids\":[\"spk_11111111111111111111111111111111\",\"spk_22222222222222222222222222222222\"]}},\"operation_kind\":\"fleet-profile.apply\",\"step_results\":{},\"total_steps\":0},\"request_key\":\"22222222-2222-4222-8222-222222222222\",\"result\":{\"changed\":false,\"completed_steps\":0},\"schema_version\":2,\"state\":\"succeeded\",\"status_reason\":null,\"total_steps\":0,\"updated_at\":\"2026-09-10T00:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_profile_cancel_activity_installed_cli.py::test_installed_profile_cancel_recovery_is_visible_in_activity",
+      "command": [
+        "vonkctl",
+        "--profile",
+        "1",
+        "profile",
+        "cancel",
+        "3ab5fca8-c070-40d8-a5bf-f87666d2dbb8",
+        "--yes",
+        "--request-key",
+        "eed77706-bba3-4edb-b6c2-790d4b478057",
+        "--detach",
+        "--json"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"attempt\":1,\"cancellation\":{\"actor\":\"administrator\",\"cancelled_effects\":[{\"effect_id\":\"step:0\",\"kind\":\"profile-step\",\"label\":\"Not issued profile step 1: Switch profile Cancellation boundary\",\"outcome\":\"not-issued\"}],\"cause\":\"operator\",\"completed_effects\":[],\"pending_effects\":[],\"request_key\":\"eed77706-bba3-4edb-b6c2-790d4b478057\",\"requested_at\":\"2026-08-07T12:00:00Z\",\"state\":\"cancelling\"},\"created_at\":\"2026-08-07T12:00:00Z\",\"current_operation_id\":null,\"current_step\":0,\"id\":\"3ab5fca8-c070-40d8-a5bf-f87666d2dbb8\",\"plan_digest\":\"6c1e3efc2a127ef1e6a890b5eee2017f1d30788dd97aee37b31917ba5de46863\",\"profile_digest\":\"06eee58e3449a1c9406a990b0a00e008e3ba7db28402ac3ea05366667c48c8b7\",\"profile_id\":\"4257c205-30e1-4760-959c-6493b091b407\",\"progress\":{\"attempt\":1,\"cancellation\":{\"actor\":\"administrator\",\"cause\":\"operator\",\"pending_operation_ids\":[],\"request_key\":\"eed77706-bba3-4edb-b6c2-790d4b478057\",\"requested_at\":\"2026-08-07T12:00:00Z\",\"state\":\"cancelling\",\"workload_intent_ordinal\":2},\"completed_steps\":0,\"intended_profile\":{\"assignments\":[{\"alias\":\"cancel-boundary\",\"desired_state\":\"running\",\"id\":\"e91429fc-7932-547d-9e7e-8c3f440ebe04\",\"model_title\":\"Synthetic Tiny\",\"nodes\":[{\"endpoint_owner\":true,\"node_id\":\"spk_00000000000000000000000000000001\",\"rank\":0,\"role\":\"entrypoint\"}],\"recipe_id\":\"404fda94-3189-4035-80dd-f4e742882dcb\",\"recipe_revision_id\":\"9d66d34b-9ae0-4cf7-98a3-5a744887877d\",\"recipe_title\":\"Synthetic Tiny image\",\"topology_name\":\"solo\"}],\"installation_policy\":\"keep-cached\",\"profile_digest\":\"06eee58e3449a1c9406a990b0a00e008e3ba7db28402ac3ea05366667c48c8b7\",\"reviewed_application_id\":\"3ab5fca8-c070-40d8-a5bf-f87666d2dbb8\",\"reviewed_plan_digest\":\"c7b69b0f4d3679104304c03cec8a5430acf8c29de25d8adbbce0ae9cfffbcd00\",\"scope\":{\"node_ids\":[\"spk_00000000000000000000000000000001\"]}},\"operation_kind\":\"fleet-profile.apply\",\"step_results\":{},\"total_steps\":1,\"workload_intent_ordinal\":1},\"request_key\":\"00000000-0000-4000-8000-0000000003d4\",\"result\":null,\"schema_version\":2,\"state\":\"running\",\"status_reason\":\"Cancellation requested; reconciling issued profile effects.\",\"total_steps\":1,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_profile_cancel_activity_installed_cli.py::test_installed_profile_cancel_recovery_is_visible_in_activity",
+      "command": [
+        "vonkctl",
+        "fleet",
+        "activity",
+        "--state",
+        "cancelling",
+        "--request-id",
+        "00000000-0000-4000-8000-0000000003d4"
+      ],
+      "exit_code": 0,
+      "stdout": "Activity: 1 of 1 references on this page\nOperation: 3ab5fca8-c070-40d8-a5bf-f87666d2dbb8\nKind: fleet-profile.apply\nState: cancelling\nCreated: 2026-08-07 12:00:00+00:00\nTargets: spk_00000000000000000000000000000001\nAttempt: 1\nOwner: fleet-profile-application 3ab5fca8-c070-40d8-a5bf-f87666d2dbb8\nRequest: 00000000-0000-4000-8000-0000000003d4\nReconnect: vonkctl profile progress --application 3ab5fca8-c070-40d8-a5bf-f87666d2dbb8 --follow\nCancellation: cancelling (operator)\nCancellation request: eed77706-bba3-4edb-b6c2-790d4b478057\nCancellation actor: administrator\nCompleted effect count: 0\nPending effect count: 0\nCancelled or unissued effect count: 1\nCancelled or unissued effect: not-issued: profile-step step:0: Not issued profile step 1: Switch profile Cancellation boundary\nNext: inspect\n\nMore results: no\n",
+      "stderr": "Reason: Cancellation requested; reconciling issued profile effects.\n"
+    },
+    {
+      "scenario": "tests/test_profile_cancel_activity_installed_cli.py::test_installed_profile_cancel_recovery_is_visible_in_activity",
+      "command": [
+        "vonkctl",
+        "fleet",
+        "activity",
+        "--state",
+        "cancelled",
+        "--request-id",
+        "00000000-0000-4000-8000-0000000003d4",
+        "--json"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"operations\":[{\"attempt\":1,\"cancellation\":{\"actor\":\"administrator\",\"cancelled_effects\":[{\"effect_id\":\"step:0\",\"kind\":\"profile-step\",\"label\":\"Not issued profile step 1: Switch profile Cancellation boundary\",\"outcome\":\"not-issued\"}],\"cause\":\"operator\",\"completed_effects\":[],\"pending_effects\":[],\"request_key\":\"eed77706-bba3-4edb-b6c2-790d4b478057\",\"requested_at\":\"2026-08-07T12:00:00Z\",\"state\":\"cancelled\"},\"created_at\":\"2026-08-07T12:00:00+00:00\",\"id\":\"3ab5fca8-c070-40d8-a5bf-f87666d2dbb8\",\"kind\":\"fleet-profile.apply\",\"node_ids\":[\"spk_00000000000000000000000000000001\"],\"owner\":{\"id\":\"3ab5fca8-c070-40d8-a5bf-f87666d2dbb8\",\"kind\":\"fleet-profile-application\",\"request_id\":\"00000000-0000-4000-8000-0000000003d4\"},\"progress\":{\"completed_bytes\":0,\"members\":[],\"phase\":\"prepare\",\"total_bytes_known\":false},\"recovery\":{\"actions\":[\"inspect\"],\"uncertain\":false},\"schema_version\":2,\"state\":\"cancelled\",\"status_reason\":\"Profile application cancelled after issued effects were reconciled\",\"updated_at\":\"2026-08-07T12:00:00+00:00\"}],\"schema_version\":2,\"total\":1}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_profile_cancel_activity_installed_cli.py::test_installed_cancel_reports_issued_child_until_late_receipt_is_reconciled",
+      "command": [
+        "vonkctl",
+        "--profile",
+        "1",
+        "profile",
+        "cancel",
+        "cedb720b-f82e-4bdd-a4e1-949f3ebb356f",
+        "--yes",
+        "--request-key",
+        "fd198755-2ea8-4956-a690-d0a000df97ba",
+        "--detach",
+        "--json"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"attempt\":1,\"cancellation\":{\"actor\":\"administrator\",\"cancelled_effects\":[],\"cause\":\"operator\",\"completed_effects\":[],\"dependency\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"owner\":\"run-switch\",\"pending_effects\":[{\"effect_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"kind\":\"run\",\"label\":\"Active Run/Switch child\",\"operation_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"outcome\":\"pending\"}],\"request_key\":\"fd198755-2ea8-4956-a690-d0a000df97ba\",\"requested_at\":\"2026-08-07T12:00:00Z\",\"state\":\"cancelling\"},\"created_at\":\"2026-08-07T12:00:00Z\",\"current_operation_id\":null,\"current_step\":0,\"id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"plan_digest\":\"c163e2e539bd7d204eab5fd3e6b187f1edc462f2c945f59e6e76c828c899b2a8\",\"profile_digest\":\"e1bbea3b3180ed1d54637baca03a79d6d83cb42b4900f80d8b45ad0f308a997a\",\"profile_id\":\"882f8dfd-8ea1-4083-b132-88839780afdf\",\"progress\":{\"attempt\":1,\"cancellation\":{\"actor\":\"administrator\",\"cause\":\"operator\",\"pending_operation_ids\":[],\"request_key\":\"fd198755-2ea8-4956-a690-d0a000df97ba\",\"requested_at\":\"2026-08-07T12:00:00Z\",\"state\":\"cancelling\",\"workload_intent_ordinal\":2},\"completed_steps\":0,\"current_label\":\"Switch profile Cancellation boundary\",\"intended_profile\":{\"assignments\":[{\"alias\":\"cancel-boundary\",\"desired_state\":\"running\",\"id\":\"e91429fc-7932-547d-9e7e-8c3f440ebe04\",\"model_title\":\"Synthetic Tiny\",\"nodes\":[{\"endpoint_owner\":true,\"node_id\":\"spk_00000000000000000000000000000001\",\"rank\":0,\"role\":\"entrypoint\"}],\"recipe_id\":\"cf16b77e-7b21-4605-8dec-5690ab04c81c\",\"recipe_revision_id\":\"3052e242-dfbb-4d72-b8bf-3b9a650aee88\",\"recipe_title\":\"Synthetic Tiny image\",\"topology_name\":\"solo\"}],\"installation_policy\":\"keep-cached\",\"profile_digest\":\"e1bbea3b3180ed1d54637baca03a79d6d83cb42b4900f80d8b45ad0f308a997a\",\"reviewed_application_id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"reviewed_plan_digest\":\"ea4dd5a6adbf5c09014eb97dd42df527b56ccc8a8372155f67d4a0ffafa84f28\",\"scope\":{\"node_ids\":[\"spk_00000000000000000000000000000001\"]}},\"operation_kind\":\"fleet-profile.apply\",\"step_results\":{},\"switch_adapter\":{\"active_kind\":\"run\",\"active_operation_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"actor\":\"admin\",\"assignment_ids\":[\"e91429fc-7932-547d-9e7e-8c3f440ebe04\"],\"assignments\":[{\"alias\":\"cancel-boundary\",\"desired_state\":\"running\",\"id\":\"e91429fc-7932-547d-9e7e-8c3f440ebe04\",\"model_title\":\"Synthetic Tiny\",\"nodes\":[{\"endpoint_owner\":true,\"node_id\":\"spk_00000000000000000000000000000001\",\"rank\":0,\"role\":\"entrypoint\"}],\"recipe_id\":\"cf16b77e-7b21-4605-8dec-5690ab04c81c\",\"recipe_revision_id\":\"3052e242-dfbb-4d72-b8bf-3b9a650aee88\",\"recipe_title\":\"Synthetic Tiny image\",\"topology_name\":\"solo\"}],\"child_id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"children\":[],\"pending_operation_ids\":[],\"position\":0,\"queue\":[{\"id\":\"e91429fc-7932-547d-9e7e-8c3f440ebe04\",\"kind\":\"run\"}],\"request_id\":\"5cba9c11-f7c5-55a3-afa5-eb01cdaef5ee\",\"schema_version\":2,\"scope_node_ids\":[\"spk_00000000000000000000000000000001\"],\"state\":\"queued\"},\"total_steps\":1,\"workload_intent_ordinal\":1},\"request_key\":\"00000000-0000-4000-8000-0000000003d4\",\"result\":null,\"schema_version\":2,\"state\":\"running\",\"status_reason\":\"Cancellation requested; reconciling issued profile effects.\",\"total_steps\":1,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_profile_cancel_activity_installed_cli.py::test_installed_cancel_reports_issued_child_until_late_receipt_is_reconciled",
+      "command": [
+        "vonkctl",
+        "profile",
+        "progress",
+        "--application",
+        "cedb720b-f82e-4bdd-a4e1-949f3ebb356f",
+        "--json"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"attempt\":1,\"cancellation\":{\"actor\":\"administrator\",\"cancelled_effects\":[],\"cause\":\"operator\",\"completed_effects\":[],\"dependency\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"owner\":\"run-switch\",\"pending_effects\":[{\"effect_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"kind\":\"run\",\"label\":\"Active Run/Switch child\",\"operation_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"outcome\":\"pending\"}],\"request_key\":\"fd198755-2ea8-4956-a690-d0a000df97ba\",\"requested_at\":\"2026-08-07T12:00:00Z\",\"state\":\"cancelling\"},\"created_at\":\"2026-08-07T12:00:00Z\",\"current_operation_id\":null,\"current_step\":0,\"id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"plan_digest\":\"c163e2e539bd7d204eab5fd3e6b187f1edc462f2c945f59e6e76c828c899b2a8\",\"profile_digest\":\"e1bbea3b3180ed1d54637baca03a79d6d83cb42b4900f80d8b45ad0f308a997a\",\"profile_id\":\"882f8dfd-8ea1-4083-b132-88839780afdf\",\"progress\":{\"attempt\":1,\"cancellation\":{\"actor\":\"administrator\",\"cause\":\"operator\",\"pending_operation_ids\":[],\"request_key\":\"fd198755-2ea8-4956-a690-d0a000df97ba\",\"requested_at\":\"2026-08-07T12:00:00Z\",\"state\":\"cancelling\",\"workload_intent_ordinal\":2},\"completed_steps\":0,\"current_label\":\"Switch profile Cancellation boundary\",\"intended_profile\":{\"assignments\":[{\"alias\":\"cancel-boundary\",\"desired_state\":\"running\",\"id\":\"e91429fc-7932-547d-9e7e-8c3f440ebe04\",\"model_title\":\"Synthetic Tiny\",\"nodes\":[{\"endpoint_owner\":true,\"node_id\":\"spk_00000000000000000000000000000001\",\"rank\":0,\"role\":\"entrypoint\"}],\"recipe_id\":\"cf16b77e-7b21-4605-8dec-5690ab04c81c\",\"recipe_revision_id\":\"3052e242-dfbb-4d72-b8bf-3b9a650aee88\",\"recipe_title\":\"Synthetic Tiny image\",\"topology_name\":\"solo\"}],\"installation_policy\":\"keep-cached\",\"profile_digest\":\"e1bbea3b3180ed1d54637baca03a79d6d83cb42b4900f80d8b45ad0f308a997a\",\"reviewed_application_id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"reviewed_plan_digest\":\"ea4dd5a6adbf5c09014eb97dd42df527b56ccc8a8372155f67d4a0ffafa84f28\",\"scope\":{\"node_ids\":[\"spk_00000000000000000000000000000001\"]}},\"operation_kind\":\"fleet-profile.apply\",\"step_results\":{},\"switch_adapter\":{\"active_kind\":\"run\",\"active_operation_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"actor\":\"admin\",\"assignment_ids\":[\"e91429fc-7932-547d-9e7e-8c3f440ebe04\"],\"assignments\":[{\"alias\":\"cancel-boundary\",\"desired_state\":\"running\",\"id\":\"e91429fc-7932-547d-9e7e-8c3f440ebe04\",\"model_title\":\"Synthetic Tiny\",\"nodes\":[{\"endpoint_owner\":true,\"node_id\":\"spk_00000000000000000000000000000001\",\"rank\":0,\"role\":\"entrypoint\"}],\"recipe_id\":\"cf16b77e-7b21-4605-8dec-5690ab04c81c\",\"recipe_revision_id\":\"3052e242-dfbb-4d72-b8bf-3b9a650aee88\",\"recipe_title\":\"Synthetic Tiny image\",\"topology_name\":\"solo\"}],\"child_id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"children\":[],\"pending_operation_ids\":[],\"position\":0,\"queue\":[{\"id\":\"e91429fc-7932-547d-9e7e-8c3f440ebe04\",\"kind\":\"run\"}],\"request_id\":\"5cba9c11-f7c5-55a3-afa5-eb01cdaef5ee\",\"schema_version\":2,\"scope_node_ids\":[\"spk_00000000000000000000000000000001\"],\"state\":\"queued\"},\"total_steps\":1,\"workload_intent_ordinal\":1},\"request_key\":\"00000000-0000-4000-8000-0000000003d4\",\"result\":null,\"schema_version\":2,\"state\":\"running\",\"status_reason\":\"Cancellation requested; reconciling issued profile effects.\",\"total_steps\":1,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_profile_cancel_activity_installed_cli.py::test_installed_cancel_reports_issued_child_until_late_receipt_is_reconciled",
+      "command": [
+        "vonkctl",
+        "profile",
+        "progress",
+        "--application",
+        "cedb720b-f82e-4bdd-a4e1-949f3ebb356f",
+        "--json"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"attempt\":1,\"cancellation\":{\"actor\":\"administrator\",\"cancelled_effects\":[{\"effect_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"kind\":\"run\",\"label\":\"run child receipt\",\"operation_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"outcome\":\"cancelled\"}],\"cause\":\"operator\",\"completed_effects\":[],\"pending_effects\":[],\"request_key\":\"fd198755-2ea8-4956-a690-d0a000df97ba\",\"requested_at\":\"2026-08-07T12:00:00Z\",\"state\":\"cancelled\"},\"created_at\":\"2026-08-07T12:00:00Z\",\"current_operation_id\":null,\"current_step\":0,\"id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"plan_digest\":\"c163e2e539bd7d204eab5fd3e6b187f1edc462f2c945f59e6e76c828c899b2a8\",\"profile_digest\":\"e1bbea3b3180ed1d54637baca03a79d6d83cb42b4900f80d8b45ad0f308a997a\",\"profile_id\":\"882f8dfd-8ea1-4083-b132-88839780afdf\",\"progress\":{\"attempt\":1,\"cancellation\":{\"actor\":\"administrator\",\"cause\":\"operator\",\"pending_operation_ids\":[],\"request_key\":\"fd198755-2ea8-4956-a690-d0a000df97ba\",\"requested_at\":\"2026-08-07T12:00:00Z\",\"state\":\"cancelled\",\"workload_intent_ordinal\":2},\"child_progress\":{\"node_ids\":[\"spk_00000000000000000000000000000001\"],\"phase\":\"prepare\"},\"child_source\":\"switch-adapter\",\"completed_steps\":0,\"current_label\":\"Switch profile Cancellation boundary\",\"intended_profile\":{\"assignments\":[{\"alias\":\"cancel-boundary\",\"desired_state\":\"running\",\"id\":\"e91429fc-7932-547d-9e7e-8c3f440ebe04\",\"model_title\":\"Synthetic Tiny\",\"nodes\":[{\"endpoint_owner\":true,\"node_id\":\"spk_00000000000000000000000000000001\",\"rank\":0,\"role\":\"entrypoint\"}],\"recipe_id\":\"cf16b77e-7b21-4605-8dec-5690ab04c81c\",\"recipe_revision_id\":\"3052e242-dfbb-4d72-b8bf-3b9a650aee88\",\"recipe_title\":\"Synthetic Tiny image\",\"topology_name\":\"solo\"}],\"installation_policy\":\"keep-cached\",\"profile_digest\":\"e1bbea3b3180ed1d54637baca03a79d6d83cb42b4900f80d8b45ad0f308a997a\",\"reviewed_application_id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"reviewed_plan_digest\":\"ea4dd5a6adbf5c09014eb97dd42df527b56ccc8a8372155f67d4a0ffafa84f28\",\"scope\":{\"node_ids\":[\"spk_00000000000000000000000000000001\"]}},\"operation_kind\":\"fleet-profile.apply\",\"step_results\":{},\"switch_adapter\":{\"actor\":\"admin\",\"assignment_ids\":[\"e91429fc-7932-547d-9e7e-8c3f440ebe04\"],\"assignments\":[{\"alias\":\"cancel-boundary\",\"desired_state\":\"running\",\"id\":\"e91429fc-7932-547d-9e7e-8c3f440ebe04\",\"model_title\":\"Synthetic Tiny\",\"nodes\":[{\"endpoint_owner\":true,\"node_id\":\"spk_00000000000000000000000000000001\",\"rank\":0,\"role\":\"entrypoint\"}],\"recipe_id\":\"cf16b77e-7b21-4605-8dec-5690ab04c81c\",\"recipe_revision_id\":\"3052e242-dfbb-4d72-b8bf-3b9a650aee88\",\"recipe_title\":\"Synthetic Tiny image\",\"topology_name\":\"solo\"}],\"child_id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"children\":[{\"kind\":\"run\",\"operation_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"result\":{\"run_switch\":{\"cancellation\":{\"actor\":\"administrator\",\"reason\":\"Profile application cancellation\",\"request_key\":\"fd198755-2ea8-4956-a690-d0a000df97ba\",\"requested_at\":\"2026-08-07T12:00:00Z\"},\"completed_bytes\":0,\"completed_phases\":[],\"item_index\":0,\"members\":[{\"cached\":false,\"completed_bytes\":0,\"node_id\":\"spk_00000000000000000000000000000001\",\"phase\":\"prepare\",\"state\":\"pending\",\"total_bytes\":0}],\"phase\":\"prepare\",\"phase_index\":0,\"phase_results\":[],\"profile_application_id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"retryable\":false,\"subphase\":\"runtime-plan\",\"total_bytes\":0,\"total_bytes_known\":true,\"workload_intent_ordinal\":1},\"run_switch_operation_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\"},\"state\":\"cancelled\"}],\"pending_operation_ids\":[],\"position\":1,\"queue\":[{\"id\":\"e91429fc-7932-547d-9e7e-8c3f440ebe04\",\"kind\":\"run\"}],\"request_id\":\"5cba9c11-f7c5-55a3-afa5-eb01cdaef5ee\",\"result\":{\"assignment_ids\":[\"e91429fc-7932-547d-9e7e-8c3f440ebe04\"],\"children\":[{\"kind\":\"run\",\"operation_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\",\"result\":{\"run_switch\":{\"cancellation\":{\"actor\":\"administrator\",\"reason\":\"Profile application cancellation\",\"request_key\":\"fd198755-2ea8-4956-a690-d0a000df97ba\",\"requested_at\":\"2026-08-07T12:00:00Z\"},\"completed_bytes\":0,\"completed_phases\":[],\"item_index\":0,\"members\":[{\"cached\":false,\"completed_bytes\":0,\"node_id\":\"spk_00000000000000000000000000000001\",\"phase\":\"prepare\",\"state\":\"pending\",\"total_bytes\":0}],\"phase\":\"prepare\",\"phase_index\":0,\"phase_results\":[],\"profile_application_id\":\"cedb720b-f82e-4bdd-a4e1-949f3ebb356f\",\"retryable\":false,\"subphase\":\"runtime-plan\",\"total_bytes\":0,\"total_bytes_known\":true,\"workload_intent_ordinal\":1},\"run_switch_operation_id\":\"77ed636a-8a84-4939-a4ec-c187180ee459\"},\"state\":\"cancelled\"}]},\"schema_version\":2,\"scope_node_ids\":[\"spk_00000000000000000000000000000001\"],\"state\":\"cancelled\",\"status_reason\":\"Profile effects were reconciled after cancellation\"},\"total_steps\":1,\"workload_intent_ordinal\":1},\"request_key\":\"00000000-0000-4000-8000-0000000003d4\",\"result\":{\"changed\":false,\"completed_steps\":0},\"schema_version\":2,\"state\":\"cancelled\",\"status_reason\":\"Profile application cancelled after issued effects were reconciled\",\"total_steps\":1,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "create",
+        "--run",
+        "92228b59-981e-4c98-a3d7-0983daee366f",
+        "--file",
+        "/disposable-fixture/artifact-binding.json",
+        "--request-key",
+        "00000000-0000-4000-8000-000000000103"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"compiled_contract\":{\"input\":{\"max_bytes\":33554432,\"media_types\":[\"image/png\"],\"required\":true,\"slots\":[{\"description\":\"Recipe input\",\"extensions\":[],\"id\":\"input\",\"label\":\"Input\",\"max_file_bytes\":33554432,\"max_files\":32,\"max_total_bytes\":33554432,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"interface\":\"image-job\",\"max_timeout_seconds\":3600,\"output\":{\"max_total_bytes\":4096,\"path\":\"/outputs\",\"slots\":[{\"description\":\"Generated image\",\"extensions\":[\".png\"],\"id\":\"image\",\"label\":\"Image\",\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"parameters\":[{\"allowed_values\":[],\"default\":\"\",\"name\":\"prompt\",\"type\":\"string\"},{\"allowed_values\":[],\"default\":0,\"name\":\"seed\",\"type\":\"integer\"}],\"schema_version\":1},\"contract_sha256\":\"c5da774a5943cc127067f1e4be56782dced94515991fb1c4554f67f3dee0d277\",\"created_at\":\"2026-08-07T12:00:00Z\",\"id\":\"1eb7cb50-b91b-4410-be70-089825a97d45\",\"input_declarations\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_files\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_manifest_sha256\":\"535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\",\"input_total_bytes\":20,\"interface\":\"image-job\",\"output_files\":[],\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"run_id\":\"92228b59-981e-4c98-a3d7-0983daee366f\",\"state\":\"ready\",\"timeout_seconds\":3600,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "submit",
+        "1eb7cb50-b91b-4410-be70-089825a97d45",
+        "--request-key",
+        "00000000-0000-4000-8000-000000000104"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"compiled_contract\":{\"input\":{\"max_bytes\":33554432,\"media_types\":[\"image/png\"],\"required\":true,\"slots\":[{\"description\":\"Recipe input\",\"extensions\":[],\"id\":\"input\",\"label\":\"Input\",\"max_file_bytes\":33554432,\"max_files\":32,\"max_total_bytes\":33554432,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"interface\":\"image-job\",\"max_timeout_seconds\":3600,\"output\":{\"max_total_bytes\":4096,\"path\":\"/outputs\",\"slots\":[{\"description\":\"Generated image\",\"extensions\":[\".png\"],\"id\":\"image\",\"label\":\"Image\",\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"parameters\":[{\"allowed_values\":[],\"default\":\"\",\"name\":\"prompt\",\"type\":\"string\"},{\"allowed_values\":[],\"default\":0,\"name\":\"seed\",\"type\":\"integer\"}],\"schema_version\":1},\"contract_sha256\":\"c5da774a5943cc127067f1e4be56782dced94515991fb1c4554f67f3dee0d277\",\"created_at\":\"2026-08-07T12:00:00Z\",\"id\":\"1eb7cb50-b91b-4410-be70-089825a97d45\",\"input_declarations\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_files\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_manifest_sha256\":\"535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\",\"input_total_bytes\":20,\"interface\":\"image-job\",\"operation_id\":\"8bc1e575-147b-4036-9ef2-943318471a32\",\"output_files\":[],\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"run_id\":\"92228b59-981e-4c98-a3d7-0983daee366f\",\"state\":\"queued\",\"submit_request_id\":\"00000000-0000-4000-8000-000000000104\",\"timeout_seconds\":3600,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "submit",
+        "1eb7cb50-b91b-4410-be70-089825a97d45",
+        "--request-key",
+        "00000000-0000-4000-8000-000000000104"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"compiled_contract\":{\"input\":{\"max_bytes\":33554432,\"media_types\":[\"image/png\"],\"required\":true,\"slots\":[{\"description\":\"Recipe input\",\"extensions\":[],\"id\":\"input\",\"label\":\"Input\",\"max_file_bytes\":33554432,\"max_files\":32,\"max_total_bytes\":33554432,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"interface\":\"image-job\",\"max_timeout_seconds\":3600,\"output\":{\"max_total_bytes\":4096,\"path\":\"/outputs\",\"slots\":[{\"description\":\"Generated image\",\"extensions\":[\".png\"],\"id\":\"image\",\"label\":\"Image\",\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"parameters\":[{\"allowed_values\":[],\"default\":\"\",\"name\":\"prompt\",\"type\":\"string\"},{\"allowed_values\":[],\"default\":0,\"name\":\"seed\",\"type\":\"integer\"}],\"schema_version\":1},\"contract_sha256\":\"c5da774a5943cc127067f1e4be56782dced94515991fb1c4554f67f3dee0d277\",\"created_at\":\"2026-08-07T12:00:00Z\",\"id\":\"1eb7cb50-b91b-4410-be70-089825a97d45\",\"input_declarations\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_files\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_manifest_sha256\":\"535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\",\"input_total_bytes\":20,\"interface\":\"image-job\",\"operation_id\":\"8bc1e575-147b-4036-9ef2-943318471a32\",\"output_files\":[],\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"run_id\":\"92228b59-981e-4c98-a3d7-0983daee366f\",\"state\":\"queued\",\"submit_request_id\":\"00000000-0000-4000-8000-000000000104\",\"timeout_seconds\":3600,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "submit",
+        "1eb7cb50-b91b-4410-be70-089825a97d45",
+        "--request-key",
+        "00000000-0000-4000-8000-000000000105"
+      ],
+      "exit_code": 2,
+      "stdout": "{\"artifact_job_id\":\"1eb7cb50-b91b-4410-be70-089825a97d45\",\"code\":\"http.409\",\"decision\":\"exit\",\"detail\":\"artifact job was submitted under another request identity\",\"endpoint\":\"/api/artifact-jobs/1eb7cb50-b91b-4410-be70-089825a97d45/submit\",\"error\":\"POST /api/artifact-jobs/1eb7cb50-b91b-4410-be70-089825a97d45/submit http.409 HTTP 409: artifact job was submitted under another request identity [exit]\",\"error_type\":\"control_api\",\"http_status\":409,\"operation\":\"POST /api/artifact-jobs/1eb7cb50-b91b-4410-be70-089825a97d45/submit\",\"reconcile\":{\"operation\":\"vonkctl recipe job detail 1eb7cb50-b91b-4410-be70-089825a97d45\"},\"recovery_actions\":[],\"request_key\":\"00000000-0000-4000-8000-000000000105\",\"retryable\":false,\"source\":\"remote_rejection\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output",
+      "command": [
+        "vonkctl",
+        "recipe",
+        "job",
+        "submit",
+        "1eb7cb50-b91b-4410-be70-089825a97d45",
+        "--request-key",
+        "00000000-0000-4000-8000-000000000105"
+      ],
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "Request key: 00000000-0000-4000-8000-000000000105\nRetry: vonkctl recipe job submit 1eb7cb50-b91b-4410-be70-089825a97d45 --request-key 00000000-0000-4000-8000-000000000105\nError: POST /api/artifact-jobs/1eb7cb50-b91b-4410-be70-089825a97d45/submit http.409 HTTP 409: artifact job was submitted under another request identity [exit]\nCode: http.409\nDetail: artifact job was submitted under another request identity\nOperation: POST /api/artifact-jobs/1eb7cb50-b91b-4410-be70-089825a97d45/submit\nEndpoint: /api/artifact-jobs/1eb7cb50-b91b-4410-be70-089825a97d45/submit\nHTTP status: 409\nSource: remote_rejection\nDecision: exit\nRequest key: 00000000-0000-4000-8000-000000000105\nNext: vonkctl recipe job detail 1eb7cb50-b91b-4410-be70-089825a97d45\n"
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "download",
+        "1eb7cb50-b91b-4410-be70-089825a97d45",
+        "--output",
+        "/disposable-fixture/downloaded-output"
+      ],
+      "exit_code": 2,
+      "stdout": "{\"artifact_job_id\":\"1eb7cb50-b91b-4410-be70-089825a97d45\",\"code\":\"control.api_error\",\"detail\":\"artifact output content does not match its manifest\",\"downloaded_file_count\":0,\"downloaded_files\":[],\"error\":\"artifact output content does not match its manifest\",\"error_type\":\"control_api\",\"expected_file_count\":1,\"partial_collection\":false,\"recovery_actions\":[],\"retryable\":false}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "download",
+        "1eb7cb50-b91b-4410-be70-089825a97d45",
+        "--output",
+        "/disposable-fixture/downloaded-output"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"files\":[{\"name\":\"output.png\",\"path\":\"/disposable-fixture/downloaded-output/output.png\",\"sha256\":\"ea766b651151a3c7fa7638aa0cbad3fcd54e627daf1cdeac96f99702eb50a154\",\"size_bytes\":30,\"state\":\"downloaded\",\"transfer\":{\"destination\":\"/disposable-fixture/downloaded-output/output.png\",\"media_type\":\"image/png\",\"sha256\":\"ea766b651151a3c7fa7638aa0cbad3fcd54e627daf1cdeac96f99702eb50a154\",\"size_bytes\":30}}],\"job_id\":\"1eb7cb50-b91b-4410-be70-089825a97d45\",\"output_manifest_sha256\":\"a1a274c053e9d995e8d2423af969910f0ebcd3b6e2f0ac093fc21ac9953eefec\",\"state\":\"succeeded\",\"total_bytes\":30}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output",
+      "command": [
+        "vonkctl",
+        "recipe",
+        "job",
+        "download",
+        "1eb7cb50-b91b-4410-be70-089825a97d45",
+        "--output",
+        "/disposable-fixture/downloaded-output"
+      ],
+      "exit_code": 0,
+      "stdout": "Artifact job: 1eb7cb50-b91b-4410-be70-089825a97d45\nState: succeeded\nOutput manifest SHA-256: a1a274c053e9d995e8d2423af969910f0ebcd3b6e2f0ac093fc21ac9953eefec\nTotal output bytes: 30 B\nVerified output files: 1\nOutput file: output.png\nFile state: reused\nVerified path: /disposable-fixture/downloaded-output/output.png\nVerified size: 30 B\nVerified SHA-256: ea766b651151a3c7fa7638aa0cbad3fcd54e627daf1cdeac96f99702eb50a154\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[optional-output]",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "create",
+        "--run",
+        "f1878cba-db3c-4382-b984-73354edb664a",
+        "--file",
+        "/disposable-fixture/artifact-binding.json",
+        "--request-key",
+        "00000000-0000-4000-8000-000000000106"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"compiled_contract\":{\"input\":{\"max_bytes\":33554432,\"media_types\":[\"image/png\"],\"required\":true,\"slots\":[{\"description\":\"Recipe input\",\"extensions\":[],\"id\":\"input\",\"label\":\"Input\",\"max_file_bytes\":33554432,\"max_files\":32,\"max_total_bytes\":33554432,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"interface\":\"image-job\",\"max_timeout_seconds\":3600,\"output\":{\"max_total_bytes\":4096,\"path\":\"/outputs\",\"slots\":[{\"description\":\"Generated image\",\"extensions\":[\".png\"],\"id\":\"image\",\"label\":\"Image\",\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096,\"media_types\":[\"image/png\"],\"min_files\":0}]},\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"parameters\":[{\"allowed_values\":[],\"default\":\"\",\"name\":\"prompt\",\"type\":\"string\"},{\"allowed_values\":[],\"default\":0,\"name\":\"seed\",\"type\":\"integer\"}],\"schema_version\":1},\"contract_sha256\":\"dbd5f2ec633e10e4bab4393ab3dddbacba0b7c268691e55c752c517350a7e401\",\"created_at\":\"2026-08-07T12:00:00Z\",\"id\":\"6647fcc3-ed11-4bc7-9e67-9031422bc28a\",\"input_declarations\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_files\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_manifest_sha256\":\"535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\",\"input_total_bytes\":20,\"interface\":\"image-job\",\"output_files\":[],\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"run_id\":\"f1878cba-db3c-4382-b984-73354edb664a\",\"state\":\"ready\",\"timeout_seconds\":3600,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[optional-output]",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "submit",
+        "6647fcc3-ed11-4bc7-9e67-9031422bc28a",
+        "--request-key",
+        "00000000-0000-4000-8000-000000000107"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"compiled_contract\":{\"input\":{\"max_bytes\":33554432,\"media_types\":[\"image/png\"],\"required\":true,\"slots\":[{\"description\":\"Recipe input\",\"extensions\":[],\"id\":\"input\",\"label\":\"Input\",\"max_file_bytes\":33554432,\"max_files\":32,\"max_total_bytes\":33554432,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"interface\":\"image-job\",\"max_timeout_seconds\":3600,\"output\":{\"max_total_bytes\":4096,\"path\":\"/outputs\",\"slots\":[{\"description\":\"Generated image\",\"extensions\":[\".png\"],\"id\":\"image\",\"label\":\"Image\",\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096,\"media_types\":[\"image/png\"],\"min_files\":0}]},\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"parameters\":[{\"allowed_values\":[],\"default\":\"\",\"name\":\"prompt\",\"type\":\"string\"},{\"allowed_values\":[],\"default\":0,\"name\":\"seed\",\"type\":\"integer\"}],\"schema_version\":1},\"contract_sha256\":\"dbd5f2ec633e10e4bab4393ab3dddbacba0b7c268691e55c752c517350a7e401\",\"created_at\":\"2026-08-07T12:00:00Z\",\"id\":\"6647fcc3-ed11-4bc7-9e67-9031422bc28a\",\"input_declarations\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_files\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_manifest_sha256\":\"535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\",\"input_total_bytes\":20,\"interface\":\"image-job\",\"operation_id\":\"73e42e6a-1fcb-4497-a474-165b26ac8298\",\"output_files\":[],\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"run_id\":\"f1878cba-db3c-4382-b984-73354edb664a\",\"state\":\"queued\",\"submit_request_id\":\"00000000-0000-4000-8000-000000000107\",\"timeout_seconds\":3600,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[optional-output]",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "download",
+        "6647fcc3-ed11-4bc7-9e67-9031422bc28a",
+        "--output",
+        "/disposable-fixture/empty-result-output"
+      ],
+      "exit_code": 2,
+      "stdout": "{\"artifact_job_id\":\"6647fcc3-ed11-4bc7-9e67-9031422bc28a\",\"code\":\"http.409\",\"decision\":\"exit\",\"detail\":\"artifact job result is not available\",\"downloaded_files\":[],\"endpoint\":\"/api/artifact-jobs/6647fcc3-ed11-4bc7-9e67-9031422bc28a/result\",\"error\":\"GET /api/artifact-jobs/6647fcc3-ed11-4bc7-9e67-9031422bc28a/result http.409 HTTP 409: artifact job result is not available [exit]\",\"error_type\":\"control_api\",\"http_status\":409,\"operation\":\"GET /api/artifact-jobs/6647fcc3-ed11-4bc7-9e67-9031422bc28a/result\",\"partial_collection\":false,\"recovery_actions\":[],\"retryable\":false,\"source\":\"remote_rejection\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[optional-output]",
+      "command": [
+        "vonkctl",
+        "recipe",
+        "job",
+        "detail",
+        "6647fcc3-ed11-4bc7-9e67-9031422bc28a"
+      ],
+      "exit_code": 0,
+      "stdout": "Artifact job: 6647fcc3-ed11-4bc7-9e67-9031422bc28a\nCommand: detail\nRun: f1878cba-db3c-4382-b984-73354edb664a\nState: queued\nInterface: image-job\nContract SHA-256: dbd5f2ec633e10e4bab4393ab3dddbacba0b7c268691e55c752c517350a7e401\nInput manifest SHA-256: 535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\nInput bytes: 20 B\nCreated: 2026-08-07 12:00:00+00:00\nUpdated: 2026-08-07 12:00:00+00:00\nOperation: 73e42e6a-1fcb-4497-a474-165b26ac8298\nSubmit request: 00000000-0000-4000-8000-000000000107\nInputs: 1 declared, 1 uploaded\nInput: input.png\nInput slot: input\nInput state: uploaded\nInput media type: image/png\nInput size: 20 B\nInput SHA-256: 9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\nResult files: unavailable until job succeeds (state: queued)\nReconnect: vonkctl recipe job detail 6647fcc3-ed11-4bc7-9e67-9031422bc28a --follow\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[optional-output]",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "download",
+        "6647fcc3-ed11-4bc7-9e67-9031422bc28a",
+        "--output",
+        "/disposable-fixture/empty-result-output"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"files\":[],\"job_id\":\"6647fcc3-ed11-4bc7-9e67-9031422bc28a\",\"output_manifest_sha256\":\"1ebc44849dc2e50399317bcb0d24c20fec29d28586074cfc39fd363cf50f4556\",\"state\":\"succeeded\",\"total_bytes\":0}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[optional-output]",
+      "command": [
+        "vonkctl",
+        "recipe",
+        "job",
+        "detail",
+        "6647fcc3-ed11-4bc7-9e67-9031422bc28a"
+      ],
+      "exit_code": 0,
+      "stdout": "Artifact job: 6647fcc3-ed11-4bc7-9e67-9031422bc28a\nCommand: detail\nRun: f1878cba-db3c-4382-b984-73354edb664a\nState: succeeded\nInterface: image-job\nContract SHA-256: dbd5f2ec633e10e4bab4393ab3dddbacba0b7c268691e55c752c517350a7e401\nInput manifest SHA-256: 535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\nInput bytes: 20 B\nCreated: 2026-08-07 12:00:00+00:00\nUpdated: 2026-08-07 12:00:00+00:00\nOperation: 73e42e6a-1fcb-4497-a474-165b26ac8298\nSubmit request: 00000000-0000-4000-8000-000000000107\nInputs: 1 declared, 1 uploaded\nInput: input.png\nInput slot: input\nInput state: uploaded\nInput media type: image/png\nInput size: 20 B\nInput SHA-256: 9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\nOutput manifest SHA-256: 1ebc44849dc2e50399317bcb0d24c20fec29d28586074cfc39fd363cf50f4556\nResult files: none (job succeeded with an empty result).\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[optional-output]",
+      "command": [
+        "vonkctl",
+        "recipe",
+        "job",
+        "download",
+        "6647fcc3-ed11-4bc7-9e67-9031422bc28a",
+        "--output",
+        "/disposable-fixture/empty-result-output"
+      ],
+      "exit_code": 0,
+      "stdout": "Artifact job: 6647fcc3-ed11-4bc7-9e67-9031422bc28a\nState: succeeded\nOutput manifest SHA-256: 1ebc44849dc2e50399317bcb0d24c20fec29d28586074cfc39fd363cf50f4556\nTotal output bytes: 0 B\nResult files: none (job succeeded with an empty result).\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[required-output]",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "create",
+        "--run",
+        "2fa97eee-02af-4ef6-a2d7-073a376aedcc",
+        "--file",
+        "/disposable-fixture/artifact-binding.json",
+        "--request-key",
+        "00000000-0000-4000-8000-000000000106"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"compiled_contract\":{\"input\":{\"max_bytes\":33554432,\"media_types\":[\"image/png\"],\"required\":true,\"slots\":[{\"description\":\"Recipe input\",\"extensions\":[],\"id\":\"input\",\"label\":\"Input\",\"max_file_bytes\":33554432,\"max_files\":32,\"max_total_bytes\":33554432,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"interface\":\"image-job\",\"max_timeout_seconds\":3600,\"output\":{\"max_total_bytes\":4096,\"path\":\"/outputs\",\"slots\":[{\"description\":\"Generated image\",\"extensions\":[\".png\"],\"id\":\"image\",\"label\":\"Image\",\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"parameters\":[{\"allowed_values\":[],\"default\":\"\",\"name\":\"prompt\",\"type\":\"string\"},{\"allowed_values\":[],\"default\":0,\"name\":\"seed\",\"type\":\"integer\"}],\"schema_version\":1},\"contract_sha256\":\"c5da774a5943cc127067f1e4be56782dced94515991fb1c4554f67f3dee0d277\",\"created_at\":\"2026-08-07T12:00:00Z\",\"id\":\"8682bd9b-ee6e-45a8-b811-e8c559d6df6a\",\"input_declarations\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_files\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_manifest_sha256\":\"535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\",\"input_total_bytes\":20,\"interface\":\"image-job\",\"output_files\":[],\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"run_id\":\"2fa97eee-02af-4ef6-a2d7-073a376aedcc\",\"state\":\"ready\",\"timeout_seconds\":3600,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[required-output]",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "submit",
+        "8682bd9b-ee6e-45a8-b811-e8c559d6df6a",
+        "--request-key",
+        "00000000-0000-4000-8000-000000000107"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"compiled_contract\":{\"input\":{\"max_bytes\":33554432,\"media_types\":[\"image/png\"],\"required\":true,\"slots\":[{\"description\":\"Recipe input\",\"extensions\":[],\"id\":\"input\",\"label\":\"Input\",\"max_file_bytes\":33554432,\"max_files\":32,\"max_total_bytes\":33554432,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"interface\":\"image-job\",\"max_timeout_seconds\":3600,\"output\":{\"max_total_bytes\":4096,\"path\":\"/outputs\",\"slots\":[{\"description\":\"Generated image\",\"extensions\":[\".png\"],\"id\":\"image\",\"label\":\"Image\",\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096,\"media_types\":[\"image/png\"],\"min_files\":1}]},\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"parameters\":[{\"allowed_values\":[],\"default\":\"\",\"name\":\"prompt\",\"type\":\"string\"},{\"allowed_values\":[],\"default\":0,\"name\":\"seed\",\"type\":\"integer\"}],\"schema_version\":1},\"contract_sha256\":\"c5da774a5943cc127067f1e4be56782dced94515991fb1c4554f67f3dee0d277\",\"created_at\":\"2026-08-07T12:00:00Z\",\"id\":\"8682bd9b-ee6e-45a8-b811-e8c559d6df6a\",\"input_declarations\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_files\":[{\"media_type\":\"image/png\",\"name\":\"input.png\",\"sha256\":\"9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\",\"size_bytes\":20,\"slot\":\"input\"}],\"input_manifest_sha256\":\"535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\",\"input_total_bytes\":20,\"interface\":\"image-job\",\"operation_id\":\"6ddc5dea-12d7-4d7d-bc05-fbd1d4d61261\",\"output_files\":[],\"output_limits\":{\"allowed_media_types\":[\"image/png\"],\"max_file_bytes\":1024,\"max_files\":1,\"max_total_bytes\":4096},\"run_id\":\"2fa97eee-02af-4ef6-a2d7-073a376aedcc\",\"state\":\"queued\",\"submit_request_id\":\"00000000-0000-4000-8000-000000000107\",\"timeout_seconds\":3600,\"updated_at\":\"2026-08-07T12:00:00Z\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[required-output]",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "download",
+        "8682bd9b-ee6e-45a8-b811-e8c559d6df6a",
+        "--output",
+        "/disposable-fixture/empty-result-output"
+      ],
+      "exit_code": 2,
+      "stdout": "{\"artifact_job_id\":\"8682bd9b-ee6e-45a8-b811-e8c559d6df6a\",\"code\":\"http.409\",\"decision\":\"exit\",\"detail\":\"artifact job result is not available\",\"downloaded_files\":[],\"endpoint\":\"/api/artifact-jobs/8682bd9b-ee6e-45a8-b811-e8c559d6df6a/result\",\"error\":\"GET /api/artifact-jobs/8682bd9b-ee6e-45a8-b811-e8c559d6df6a/result http.409 HTTP 409: artifact job result is not available [exit]\",\"error_type\":\"control_api\",\"http_status\":409,\"operation\":\"GET /api/artifact-jobs/8682bd9b-ee6e-45a8-b811-e8c559d6df6a/result\",\"partial_collection\":false,\"recovery_actions\":[],\"retryable\":false,\"source\":\"remote_rejection\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[required-output]",
+      "command": [
+        "vonkctl",
+        "recipe",
+        "job",
+        "detail",
+        "8682bd9b-ee6e-45a8-b811-e8c559d6df6a"
+      ],
+      "exit_code": 0,
+      "stdout": "Artifact job: 8682bd9b-ee6e-45a8-b811-e8c559d6df6a\nCommand: detail\nRun: 2fa97eee-02af-4ef6-a2d7-073a376aedcc\nState: queued\nInterface: image-job\nContract SHA-256: c5da774a5943cc127067f1e4be56782dced94515991fb1c4554f67f3dee0d277\nInput manifest SHA-256: 535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\nInput bytes: 20 B\nCreated: 2026-08-07 12:00:00+00:00\nUpdated: 2026-08-07 12:00:00+00:00\nOperation: 6ddc5dea-12d7-4d7d-bc05-fbd1d4d61261\nSubmit request: 00000000-0000-4000-8000-000000000107\nInputs: 1 declared, 1 uploaded\nInput: input.png\nInput slot: input\nInput state: uploaded\nInput media type: image/png\nInput size: 20 B\nInput SHA-256: 9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\nResult files: unavailable until job succeeds (state: queued)\nReconnect: vonkctl recipe job detail 8682bd9b-ee6e-45a8-b811-e8c559d6df6a --follow\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[required-output]",
+      "command": [
+        "vonkctl",
+        "--json",
+        "recipe",
+        "job",
+        "download",
+        "8682bd9b-ee6e-45a8-b811-e8c559d6df6a",
+        "--output",
+        "/disposable-fixture/empty-result-output"
+      ],
+      "exit_code": 2,
+      "stdout": "{\"artifact_job_id\":\"8682bd9b-ee6e-45a8-b811-e8c559d6df6a\",\"code\":\"http.409\",\"decision\":\"exit\",\"detail\":\"artifact job result is not available\",\"downloaded_files\":[],\"endpoint\":\"/api/artifact-jobs/8682bd9b-ee6e-45a8-b811-e8c559d6df6a/result\",\"error\":\"GET /api/artifact-jobs/8682bd9b-ee6e-45a8-b811-e8c559d6df6a/result http.409 HTTP 409: artifact job result is not available [exit]\",\"error_type\":\"control_api\",\"http_status\":409,\"operation\":\"GET /api/artifact-jobs/8682bd9b-ee6e-45a8-b811-e8c559d6df6a/result\",\"partial_collection\":false,\"recovery_actions\":[],\"retryable\":false,\"source\":\"remote_rejection\"}\n",
+      "stderr": ""
+    },
+    {
+      "scenario": "tests/test_artifact_job_installed_cli.py::test_installed_cli_distinguishes_unavailable_from_empty_result_manifest[required-output]",
+      "command": [
+        "vonkctl",
+        "recipe",
+        "job",
+        "detail",
+        "8682bd9b-ee6e-45a8-b811-e8c559d6df6a"
+      ],
+      "exit_code": 0,
+      "stdout": "Artifact job: 8682bd9b-ee6e-45a8-b811-e8c559d6df6a\nCommand: detail\nRun: 2fa97eee-02af-4ef6-a2d7-073a376aedcc\nState: failed\nInterface: image-job\nContract SHA-256: c5da774a5943cc127067f1e4be56782dced94515991fb1c4554f67f3dee0d277\nInput manifest SHA-256: 535a205632af975fdb14de354ee37342c68da52ae700993e7494d6e9c668d5db\nInput bytes: 20 B\nCreated: 2026-08-07 12:00:00+00:00\nUpdated: 2026-08-07 12:00:00+00:00\nReason: artifact output slot image file count is invalid\nOperation: 6ddc5dea-12d7-4d7d-bc05-fbd1d4d61261\nSubmit request: 00000000-0000-4000-8000-000000000107\nInputs: 1 declared, 1 uploaded\nInput: input.png\nInput slot: input\nInput state: uploaded\nInput media type: image/png\nInput size: 20 B\nInput SHA-256: 9623dade440176b2fbd783abef030a9dea7b058cbb1fbf2c758bdddd61ca54d2\nResult files: unavailable until job succeeds (state: failed)\n",
+      "stderr": ""
+    }
+  ]
+}

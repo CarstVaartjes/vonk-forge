@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
@@ -30,7 +31,7 @@ from vonk_control.request_fault import RequestFault
 
 _NODE = "spk_" + "a" * 32
 _GRANT = {
-    "id": "grant-1",
+    "id": "11111111-1111-4111-8111-111111111111",
     "expires_at": "2026-09-10T12:00:00+00:00",
     "purpose": "new-node",
     "token": "t" * 43,
@@ -44,6 +45,12 @@ _GRANT = {
 
 
 class _Enrollment:
+    def grant_status(self, grant_id: str, *, actor: str):
+        raise AssertionError("not used")
+
+    def revoke_grant(self, grant_id: str, *, actor: str):
+        raise AssertionError("not used")
+
     def create_named(self, **kwargs: object) -> dict[str, object]:
         assert kwargs["name"] == "Friendly Spark"
         return {"display_name": "Friendly Spark", "state": "pending", "grant": _GRANT}
@@ -60,7 +67,7 @@ def _app(actor: Actor, *, services: FleetOperatorServices | None = None) -> Fast
 
     @app.middleware("http")
     async def request_id(request, call_next):
-        request.state.request_id = "request-1"
+        request.state.request_id = "11111111-1111-4111-8111-111111111111"
         return await call_next(request)
 
     install_operator_projection_routes(
@@ -88,7 +95,10 @@ def test_operator_routes_use_singular_namespaces_and_shared_mutation_roles() -> 
         app = _app(Actor("viewer", "viewer"))
         client = TestClient(app)
         assert (
-            client.post("/api/fleet/enroll", json={"name": "Spark"}).status_code == 403
+            client.post(
+                "/api/fleet/enroll", json={"name": "Spark", "request_key": _GRANT["id"]}
+            ).status_code
+            == 403
         )
         assert (
             client.post(
@@ -96,7 +106,16 @@ def test_operator_routes_use_singular_namespaces_and_shared_mutation_roles() -> 
             ).status_code
             == 403
         )
-        assert client.post("/api/fleet/upgrade", json={"all": True}).status_code == 403
+        assert (
+            client.post(
+                "/api/fleet/upgrade",
+                json={
+                    "all": True,
+                    "request_key": "11111111-1111-4111-8111-111111111111",
+                },
+            ).status_code
+            == 403
+        )
         paths = set(app.openapi()["paths"])
         assert "/api/model/library" in paths
         assert "/api/model/{selector}" in paths
@@ -118,7 +137,8 @@ def test_enroll_preserves_canonical_one_time_bootstrap_material() -> None:
             services=FleetOperatorServices(enrollment=_Enrollment()),
         )
         payload = TestClient(app).post(
-            "/api/fleet/enroll", json={"name": "Friendly Spark"}
+            "/api/fleet/enroll",
+            json={"name": "Friendly Spark", "request_key": _GRANT["id"]},
         )
         assert payload.status_code == 201, payload.text
         result = payload.json()
@@ -216,6 +236,36 @@ def test_fleet_node_detail_preserves_typed_live_observations() -> None:
     assert detail.model_dump(exclude={"provenance"}) == snapshot.nodes[0].model_dump()
 
 
+def test_node_selection_returns_exact_ids_before_names_and_all_ambiguity_candidates():
+    from vonk_control.library_projection import LibrarySelectorAmbiguous
+    from vonk_control.operator_projection_api import _node
+
+    from .test_metrics import _fleet_snapshot
+
+    snapshot = _fleet_snapshot()
+    template = snapshot.nodes[0]
+    snapshot.nodes = [
+        template.model_copy(
+            update={
+                "id": "spk_" + f"{index:032x}",
+                "display_name": "Atlas",
+            }
+        )
+        for index in range(18)
+    ]
+    with pytest.raises(LibrarySelectorAmbiguous) as error:
+        _node(snapshot, "Atlas")
+    ids = [node.id for node in snapshot.nodes]
+    assert error.value.candidates == tuple(ids)
+    response = _operator_error(error.value)
+    from vonk_control.library_api import SelectorAmbiguityHTTPError
+
+    assert isinstance(response, SelectorAmbiguityHTTPError)
+    assert response.problem.candidates == ids
+    snapshot.nodes[1].display_name = ids[0]
+    assert _node(snapshot, ids[0]).id == ids[0]
+
+
 def test_only_an_explicit_request_fault_is_reported_as_the_callers_error() -> None:
     """A server-side failure must not answer 422, and a bad request must not 503.
 
@@ -251,7 +301,7 @@ def test_agent_enrollment_adapter_binds_the_reviewed_display_name() -> None:
     """
 
     class _Grant:
-        id = "grant-1"
+        id = "11111111-1111-4111-8111-111111111111"
         expires_at = datetime(2026, 9, 10, 12, 0, tzinfo=UTC)
         purpose = "new-node"
         token = "t" * 43
@@ -260,7 +310,10 @@ def test_agent_enrollment_adapter_binds_the_reviewed_display_name() -> None:
         def __init__(self) -> None:
             self.created: tuple[str, str, int] | None = None
 
-        def create_named(self, name: str, actor: str, ttl_seconds: int) -> _Grant:
+        def create_named(
+            self, name: str, actor: str, ttl_seconds: int, *, request_key: str
+        ) -> _Grant:
+            assert request_key == _GRANT["id"]
             self.created = (name, actor, ttl_seconds)
             return _Grant()
 
@@ -282,7 +335,10 @@ def test_agent_enrollment_adapter_binds_the_reviewed_display_name() -> None:
 
     adapter = _AgentEnrollmentAdapter(cast(AgentApiServices, services))
     result = adapter.create_named(
-        name="Living Spark", ttl_seconds=600, actor="admin", request_id="request-1"
+        name="Living Spark",
+        ttl_seconds=600,
+        actor="admin",
+        request_id="11111111-1111-4111-8111-111111111111",
     )
 
     assert enrollment.created == ("Living Spark", "admin", 600)
@@ -368,7 +424,7 @@ def _action_app(actor: Actor, *, services: FleetOperatorServices) -> FastAPI:
 
     @app.middleware("http")
     async def request_id(request, call_next):
-        request.state.request_id = "request-1"
+        request.state.request_id = "11111111-1111-4111-8111-111111111111"
         return await call_next(request)
 
     install_operator_projection_routes(
@@ -389,6 +445,9 @@ class _RefusingUpgrade:
 
     def current_package(self) -> dict[str, object]:
         raise self._error
+
+    def get_request(self, *args: object, **kwargs: object) -> object | None:
+        return None
 
     def preview(self, *args: object, **kwargs: object) -> object:
         raise AssertionError("preview must not run once the authority refused")
@@ -419,14 +478,96 @@ def test_a_refused_upgrade_names_the_authority_reason(reason: str) -> None:
             upgrades=_RefusingUpgrade(AgentUpgradeConflict(reason))
         ),
     )
-    response = TestClient(app).post("/api/fleet/upgrade", json={"all": True})
+    response = TestClient(app).post(
+        "/api/fleet/upgrade",
+        json={
+            "all": True,
+            "request_key": "11111111-1111-4111-8111-111111111111",
+        },
+    )
 
     assert response.status_code == 409, response.text
     assert response.headers["x-vonk-error-code"] == "controller.fleet.upgrade_conflict"
     assert response.json()["detail"] == reason
 
 
-class _RefusingEnrollment:
+def test_retired_upgrade_strategy_is_rejected_before_dispatch() -> None:
+    app = _action_app(
+        Actor("admin", "administrator"),
+        services=FleetOperatorServices(
+            upgrades=_RefusingUpgrade(AgentUpgradeConflict("must not dispatch"))
+        ),
+    )
+
+    response = TestClient(app).post(
+        "/api/fleet/upgrade",
+        json={
+            "all": True,
+            "request_key": "11111111-1111-4111-8111-111111111111",
+            "strategy": "all-at-once",
+        },
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_upgrade_request_replay_returns_the_same_durable_job() -> None:
+    class ReplayUpgrade:
+        def __init__(self) -> None:
+            self.lookup_calls: list[tuple[str, str, dict[str, object]]] = []
+
+        def get_request(
+            self,
+            request_id: str,
+            *,
+            actor: str,
+            request_intent: Mapping[str, object],
+        ) -> object:
+            self.lookup_calls.append((request_id, actor, dict(request_intent)))
+            return SimpleNamespace(
+                id="existing-job",
+                state="running",
+                payload_digest="d" * 64,
+                targets=[_NODE],
+            )
+
+        def current_package(self) -> dict[str, object]:
+            raise AssertionError("a replay must not resolve a new package")
+
+        def preview(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("a replay must not build a new plan")
+
+        def apply(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("a replay must not enqueue another job")
+
+    upgrades = ReplayUpgrade()
+    app = _action_app(
+        Actor("admin", "administrator"),
+        services=FleetOperatorServices(upgrades=upgrades),
+    )
+
+    response = TestClient(app).post(
+        "/api/fleet/upgrade",
+        json={
+            "all": False,
+            "selectors": [_NODE],
+            "request_key": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["operation_id"] == "existing-job"
+    assert response.json()["request_key"] == "11111111-1111-4111-8111-111111111111"
+    assert upgrades.lookup_calls == [
+        (
+            "11111111-1111-4111-8111-111111111111",
+            "admin",
+            {"all": False, "selectors": [_NODE]},
+        )
+    ]
+
+
+class _RefusingEnrollment(_Enrollment):
     def __init__(self, error: Exception) -> None:
         self._error = error
 
@@ -481,7 +622,7 @@ def test_a_refused_removal_names_the_enrollment_layer(
     assert response.json()["detail"] == str(error)
 
 
-class _RecordingEnrollment:
+class _RecordingEnrollment(_Enrollment):
     def __init__(self) -> None:
         self.called = False
 
@@ -513,7 +654,8 @@ def test_enroll_rejects_a_ttl_the_bootstrap_authority_would_refuse() -> None:
         services=FleetOperatorServices(enrollment=enrollment),
     )
     response = TestClient(app).post(
-        "/api/fleet/enroll", json={"name": "Spark", "ttl_seconds": 901}
+        "/api/fleet/enroll",
+        json={"name": "Spark", "ttl_seconds": 901, "request_key": _GRANT["id"]},
     )
 
     assert response.status_code == 422, response.text

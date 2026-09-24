@@ -104,8 +104,8 @@ class TargetAssetState(_StrictModel):
         return self
 
 
-class ModelArtifactPreparation(_StrictModel):
-    """Complete exact model set, including auxiliary and dependency files."""
+class ModelArtifactIdentity(_StrictModel):
+    """Exact model set, independent of transfer progress and verification time."""
 
     artifact_set_sha256: Digest
     model_content_sha256: Digest
@@ -115,12 +115,9 @@ class ModelArtifactPreparation(_StrictModel):
     dependency_model_content_sha256: list[Digest] = Field(
         default_factory=list, max_length=128
     )
-    completeness: Literal["complete", "incomplete", "unknown"]
-    controller: ControllerAssetState
-    targets: list[TargetAssetState] = Field(max_length=64)
 
     @model_validator(mode="after")
-    def exact_model_set_is_bound(self) -> ModelArtifactPreparation:
+    def dependency_identities_are_canonical(self) -> ModelArtifactIdentity:
         if len(self.dependency_model_content_sha256) != len(
             set(self.dependency_model_content_sha256)
         ) or self.dependency_model_content_sha256 != sorted(
@@ -129,6 +126,18 @@ class ModelArtifactPreparation(_StrictModel):
             raise ValueError("dependency model identities must be sorted and unique")
         if self.model_content_sha256 in self.dependency_model_content_sha256:
             raise ValueError("primary model cannot also be a dependency")
+        return self
+
+
+class ModelArtifactPreparation(ModelArtifactIdentity):
+    """Complete exact model set, including auxiliary and dependency files."""
+
+    completeness: Literal["complete", "incomplete", "unknown"]
+    controller: ControllerAssetState
+    targets: list[TargetAssetState] = Field(max_length=64)
+
+    @model_validator(mode="after")
+    def exact_model_set_is_bound(self) -> ModelArtifactPreparation:
         if self.controller.expected_bytes != self.artifact_set_bytes:
             raise ValueError(
                 "Controller model bytes do not match the exact artifact set"
@@ -165,8 +174,8 @@ class ModelArtifactPreparation(_StrictModel):
         return self
 
 
-class RuntimeImagePreparation(_StrictModel):
-    """Exact executable OCI image kept separate from model payloads."""
+class RuntimeImageIdentity(_StrictModel):
+    """Executable OCI identity, independent of its transfer observations."""
 
     image_digest: ImageDigest
     oci_layout_sha256: Digest
@@ -174,6 +183,11 @@ class RuntimeImagePreparation(_StrictModel):
     architecture: Literal["linux-arm64"]
     runtime_interface: str = Field(min_length=1, max_length=64)
     build_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class RuntimeImagePreparation(RuntimeImageIdentity):
+    """Exact executable OCI image kept separate from model payloads."""
+
     controller: ControllerAssetState
     targets: list[TargetAssetState] = Field(max_length=64)
 
@@ -197,6 +211,15 @@ class RuntimeImagePreparation(_StrictModel):
                     "ready runtime image must verify the exact OCI layout and imported image"
                 )
         return self
+
+
+def controller_assets_ready(
+    model: ModelArtifactPreparation, runtime_image: RuntimeImagePreparation
+) -> bool:
+    """NAS availability does not depend on staging copies on the target Sparks."""
+    return (
+        model.controller.state == "ready" and runtime_image.controller.state == "ready"
+    )
 
 
 class CompatibilityIdentity(_StrictModel):
@@ -289,11 +312,7 @@ class RolloutPreparation(_StrictModel):
                 raise ValueError(
                     "exception identity does not match the rollout authority"
                 )
-        computed_controller = (
-            self.model.completeness == "complete"
-            and self.model.controller.state == "ready"
-            and self.runtime_image.controller.state == "ready"
-        )
+        computed_controller = controller_assets_ready(self.model, self.runtime_image)
         computed_targets = all(
             target.state == "ready"
             for asset in (self.model, self.runtime_image)
@@ -321,10 +340,12 @@ __all__ = [
     "CompatibilityIdentity",
     "CompatibilityPreparation",
     "ControllerAssetState",
+    "ModelArtifactIdentity",
     "ModelArtifactPreparation",
     "PreparationReason",
     "PreparationState",
     "RolloutPreparation",
+    "RuntimeImageIdentity",
     "RuntimeImagePreparation",
     "TargetAssetState",
 ]

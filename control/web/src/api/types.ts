@@ -31,11 +31,12 @@ export type ModelDetail = components["schemas"]["ModelDetailResponse"];
 export type RecipeStatus = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
+export type CacheRemovalReview = components["schemas"]["CacheRemovalReview"];
 export type ModelCacheOperatorResponse = components["schemas"]["ModelCacheOperatorResponse"];
 export type RecipeImageAvailabilityResponse = components["schemas"]["RecipeImageAvailabilityResponse"];
 export type RecipeOperatorResponse = components["schemas"]["RecipeOperatorResponse"];
 export type RecipeUpdateResponse = components["schemas"]["RecipeUpdateResponse"];
-export type RecipeCacheOperation = RecipeImageAvailabilityResponse | RecipeOperatorResponse;
+export type RecipeCacheOperation = RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse;
 // The library ordering vocabulary is the generated query parameter, so the UI
 // cannot offer a `sort` the API would reject as a 422.
 export type LibrarySort = NonNullable<NonNullable<paths["/api/model/library"]["get"]["parameters"]["query"]>["sort"]>;
@@ -149,20 +150,25 @@ export interface LibraryApi {
   recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail>;
   libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
   artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList>;
+  artifactJobByRequestId(requestId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities>;
-  createArtifactJob(runId: string, input: ArtifactJobCreateInput, signal?: AbortSignal): Promise<ArtifactJob>;
+  createArtifactJob(runId: string, input: ArtifactJobCreateInput, requestId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   uploadArtifactJobInput(jobId: string, file: ArtifactJobInputFile, content: Blob, signal?: AbortSignal, onProgress?: (progress: ArtifactTransferProgress) => void): Promise<ArtifactJob>;
   finalizeArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
-  submitArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
+  submitArtifactJob(jobId: string, requestId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
-  cancelArtifactJob(jobId: string, reason: string, signal?: AbortSignal): Promise<ArtifactJob>;
+  cancelArtifactJob(jobId: string, reason: string, requestId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
-  artifactJobResultUrl(jobId: string, sha256: string): string;
+  artifactJobResultUrl(jobId: string, name: string, sha256: string): string;
   prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
-  removeModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  modelRemovalReview(selector: string, signal?: AbortSignal): Promise<CacheRemovalReview>;
+  removeModelCache(selector: string, modelContentSha256: string, requestKey: string, reviewDigest: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  modelCacheRequest(requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   downloadRecipe(selector: string, requestKey: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityResponse>;
-  removeRecipe(selector: string, requestKey: string, withModel: boolean, signal?: AbortSignal): Promise<RecipeOperatorResponse>;
+  recipeRemovalReview(selector: string, withModel: boolean, signal?: AbortSignal): Promise<CacheRemovalReview>;
+  removeRecipe(selector: string, requestKey: string, withModel: boolean, reviewDigest: string, signal?: AbortSignal): Promise<RecipeOperatorResponse>;
+  recipeCacheRequest(requestKey: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
   updateRecipes(all: boolean, selectors: string[], requestKey: string, signal?: AbortSignal): Promise<RecipeUpdateResponse>;
   recipeCacheOperation(operationId: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
 }

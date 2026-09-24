@@ -15,6 +15,8 @@ from typing import Union
 if TYPE_CHECKING:
   from ..models.operation_evidence_provenance import OperationEvidenceProvenance
   from ..models.availability_operation_failure import AvailabilityOperationFailure
+  from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
+  from ..models.operation_owner_reference import OperationOwnerReference
   from ..models.operation_evidence_download import OperationEvidenceDownload
   from ..models.operation_progress import OperationProgress
   from ..models.agent_failure_result import AgentFailureResult
@@ -39,8 +41,10 @@ class OperationDetailResponse:
             kind (str):
             node_ids (list[str]):
             state (str):
+            cancellation (Union['FleetProfileApplicationCancellationView', None, Unset]):
             evidence_download (Union['OperationEvidenceDownload', None, Unset]):
             failure (Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset]):
+            owner (Union['OperationOwnerReference', None, Unset]):
             parent_id (Union[None, Unset, str]):
             progress (Union['OperationProgress', None, Unset]):
             provenance (Union['OperationEvidenceProvenance', None, Unset]):
@@ -56,8 +60,10 @@ class OperationDetailResponse:
     kind: str
     node_ids: list[str]
     state: str
+    cancellation: Union['FleetProfileApplicationCancellationView', None, Unset] = UNSET
     evidence_download: Union['OperationEvidenceDownload', None, Unset] = UNSET
     failure: Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset] = UNSET
+    owner: Union['OperationOwnerReference', None, Unset] = UNSET
     parent_id: Union[None, Unset, str] = UNSET
     progress: Union['OperationProgress', None, Unset] = UNSET
     provenance: Union['OperationEvidenceProvenance', None, Unset] = UNSET
@@ -73,6 +79,8 @@ class OperationDetailResponse:
     def to_dict(self) -> dict[str, Any]:
         from ..models.operation_evidence_provenance import OperationEvidenceProvenance
         from ..models.availability_operation_failure import AvailabilityOperationFailure
+        from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
+        from ..models.operation_owner_reference import OperationOwnerReference
         from ..models.operation_evidence_download import OperationEvidenceDownload
         from ..models.operation_progress import OperationProgress
         from ..models.agent_failure_result import AgentFailureResult
@@ -91,6 +99,14 @@ class OperationDetailResponse:
 
 
         state = self.state
+
+        cancellation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.cancellation, Unset):
+            cancellation = UNSET
+        elif isinstance(self.cancellation, FleetProfileApplicationCancellationView):
+            cancellation = self.cancellation.to_dict()
+        else:
+            cancellation = self.cancellation
 
         evidence_download: Union[None, Unset, dict[str, Any]]
         if isinstance(self.evidence_download, Unset):
@@ -111,6 +127,14 @@ class OperationDetailResponse:
             failure = self.failure.to_dict()
         else:
             failure = self.failure
+
+        owner: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.owner, Unset):
+            owner = UNSET
+        elif isinstance(self.owner, OperationOwnerReference):
+            owner = self.owner.to_dict()
+        else:
+            owner = self.owner
 
         parent_id: Union[None, Unset, str]
         if isinstance(self.parent_id, Unset):
@@ -167,10 +191,14 @@ class OperationDetailResponse:
             "node_ids": node_ids,
             "state": state,
         })
+        if cancellation is not UNSET:
+            field_dict["cancellation"] = cancellation
         if evidence_download is not UNSET:
             field_dict["evidence_download"] = evidence_download
         if failure is not UNSET:
             field_dict["failure"] = failure
+        if owner is not UNSET:
+            field_dict["owner"] = owner
         if parent_id is not UNSET:
             field_dict["parent_id"] = parent_id
         if progress is not UNSET:
@@ -194,6 +222,8 @@ class OperationDetailResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.operation_evidence_provenance import OperationEvidenceProvenance
         from ..models.availability_operation_failure import AvailabilityOperationFailure
+        from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
+        from ..models.operation_owner_reference import OperationOwnerReference
         from ..models.operation_evidence_download import OperationEvidenceDownload
         from ..models.operation_progress import OperationProgress
         from ..models.agent_failure_result import AgentFailureResult
@@ -212,6 +242,26 @@ class OperationDetailResponse:
 
 
         state = d.pop("state")
+
+        def _parse_cancellation(data: object) -> Union['FleetProfileApplicationCancellationView', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                cancellation_type_0 = FleetProfileApplicationCancellationView.from_dict(data)
+
+
+
+                return cancellation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['FleetProfileApplicationCancellationView', None, Unset], data)
+
+        cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
+
 
         def _parse_evidence_download(data: object) -> Union['OperationEvidenceDownload', None, Unset]:
             if data is None:
@@ -271,6 +321,26 @@ class OperationDetailResponse:
             return cast(Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset], data)
 
         failure = _parse_failure(d.pop("failure", UNSET))
+
+
+        def _parse_owner(data: object) -> Union['OperationOwnerReference', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                owner_type_0 = OperationOwnerReference.from_dict(data)
+
+
+
+                return owner_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['OperationOwnerReference', None, Unset], data)
+
+        owner = _parse_owner(d.pop("owner", UNSET))
 
 
         def _parse_parent_id(data: object) -> Union[None, Unset, str]:
@@ -374,8 +444,10 @@ class OperationDetailResponse:
             kind=kind,
             node_ids=node_ids,
             state=state,
+            cancellation=cancellation,
             evidence_download=evidence_download,
             failure=failure,
+            owner=owner,
             parent_id=parent_id,
             progress=progress,
             provenance=provenance,

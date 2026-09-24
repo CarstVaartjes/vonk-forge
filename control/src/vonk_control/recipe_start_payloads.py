@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 from vonk_agent_protocol import RecipeStartPayload, canonical_message
 
+from .run_switch_contract import MemoryKind
+
 
 class RecipeStartPayloadError(ValueError):
     """A Controller start payload cannot cross the agent wire boundary."""
@@ -28,6 +30,8 @@ class RecipeStartPlacement:
     role: str
     port: int
     reserved_memory_bytes: int
+    memory_floor_bytes: int
+    memory_kind: MemoryKind
     fabric_address: str | None
 
 
@@ -72,6 +76,8 @@ def build_recipe_start_payload(
             "role": placement.role,
             "port": placement.port,
             "reserved_memory_bytes": placement.reserved_memory_bytes,
+            "memory_floor_bytes": placement.memory_floor_bytes,
+            "memory_kind": placement.memory_kind,
             "endpoint_address": endpoint_address,
             "world_size": world_size,
             "compiled_execution_plan": _bind_compiled_execution_plan(
@@ -116,6 +122,10 @@ def _bind_compiled_execution_plan(
     )
     if not isinstance(runtime, dict) or not isinstance(compiled_placement, dict):
         raise RecipeStartPayloadError("compiled execution plan placement is invalid")
+    if compiled_placement.get("memory_kind") != placement.memory_kind:
+        raise RecipeStartPayloadError(
+            "compiled execution plan memory kind differs from accepted placement"
+        )
     compiled_placement.update(
         {
             "endpoint_address": endpoint_address,
@@ -127,6 +137,8 @@ def _bind_compiled_execution_plan(
             "master_port": master_port,
             "port": placement.port,
             "reserved_memory_bytes": placement.reserved_memory_bytes,
+            "memory_floor_bytes": placement.memory_floor_bytes,
+            "memory_kind": placement.memory_kind,
         }
     )
     security = payload.get("security")

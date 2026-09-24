@@ -3,36 +3,22 @@
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import json
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from pydantic import ConfigDict, TypeAdapter
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_agent_protocol.inventory import Capability
+from vonk_agent_protocol.inventory import InventoryRequest, MemoryPool
 
 from .models import NodeInventorySnapshot
 
 # Agent inventory may lead the Controller clock by this much. Consumers that
 # order it against Controller-owned events must retain the same uncertainty.
 MAX_INVENTORY_FUTURE_SKEW = timedelta(seconds=30)
-
-_CAPABILITIES = TypeAdapter(list[Capability], config=ConfigDict(strict=True))
-
-
-def _stored_capabilities(value: object) -> tuple[str, ...]:
-    try:
-        capabilities = _CAPABILITIES.validate_json(canonical_message(value))
-    except (TypeError, ValueError) as error:
-        raise ValueError("inventory capabilities are invalid") from error
-    if len(capabilities) > 64 or len(capabilities) != len(set(capabilities)):
-        raise ValueError("inventory capabilities are invalid")
-    return tuple(capabilities)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +34,7 @@ class InventorySnapshotInput:
     gpu_count: int
     artifact_store_read_only: bool
     capabilities: tuple[str, ...]
+    memory_pool: MemoryPool = field(kw_only=True)
     fabric_address: str | None = None
     fabric_bandwidth_mbps: int | None = None
     nvidia_driver_version: str = "unknown"
@@ -75,6 +62,19 @@ class InventorySnapshotView:
     fabric_bandwidth_mbps: int | None
     nvidia_driver_version: str
     container_runtime_version: str
+    memory_pool: MemoryPool = field(kw_only=True)
+
+
+def _validated_inventory(
+    value: InventorySnapshotInput | NodeInventorySnapshot, *, observed_at: datetime
+) -> InventoryRequest:
+    document = {
+        name: getattr(value, name)
+        for name in InventoryRequest.model_fields
+        if name not in {"schema_version", "observed_at"}
+    }
+    document.update(schema_version=1, observed_at=observed_at.isoformat())
+    return InventoryRequest.model_validate_json(canonical_message(document))
 
 
 class InventoryRepository:
@@ -87,36 +87,10 @@ class InventoryRepository:
         self._sessions, self._clock = sessions, clock
 
     def record(self, value: InventorySnapshotInput) -> NodeInventorySnapshot:
-        if (
-            value.observed_at.tzinfo is None
-            or len(value.capabilities) != len(set(value.capabilities))
-            or not all(
-                capability and len(capability) <= 128
-                for capability in value.capabilities
-            )
-        ):
-            raise ValueError("inventory evidence is invalid")
-        if (value.fabric_address is None) != (value.fabric_bandwidth_mbps is None):
-            raise ValueError("inventory fabric evidence is incomplete")
-        if value.fabric_address is not None:
-            try:
-                address = ipaddress.ip_address(value.fabric_address)
-            except ValueError as error:
-                raise ValueError("inventory fabric address is invalid") from error
-            if (
-                str(address) != value.fabric_address
-                or not value.fabric_bandwidth_mbps
-                or value.fabric_bandwidth_mbps > 1_000_000
-            ):
-                raise ValueError("inventory fabric address is invalid")
-        if any(
-            not value or len(value) > 256 or not value.isascii()
-            for value in (value.nvidia_driver_version, value.container_runtime_version)
-        ):
-            raise ValueError("inventory runtime evidence is invalid")
-        document = asdict(value)
-        document["observed_at"] = value.observed_at.isoformat()
-        document["capabilities"] = sorted(value.capabilities)
+        validated = _validated_inventory(value, observed_at=value.observed_at)
+        document = validated.model_dump(mode="json", exclude={"schema_version"})
+        document["node_id"] = value.node_id
+        document["capabilities"] = sorted(validated.capabilities)
         digest = hashlib.sha256(
             json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -131,6 +105,7 @@ class InventoryRepository:
             gpu_memory_total_bytes=value.gpu_memory_total_bytes,
             gpu_memory_free_bytes=value.gpu_memory_free_bytes,
             gpu_count=value.gpu_count,
+            memory_pool=validated.memory_pool,
             artifact_store_read_only=value.artifact_store_read_only,
             capabilities=sorted(value.capabilities),
             fabric_address=value.fabric_address,
@@ -167,6 +142,9 @@ class InventoryRepository:
                 if row.observed_at.tzinfo
                 else row.observed_at.replace(tzinfo=UTC)
             )
+            # Validate the persisted JSON semantics using the producer's current
+            # contract. A typed annotation or SQL string alone is not evidence.
+            validated = _validated_inventory(row, observed_at=observed)
             return InventorySnapshotView(
                 row.id,
                 row.node_id,
@@ -180,13 +158,14 @@ class InventoryRepository:
                 row.gpu_memory_free_bytes,
                 row.gpu_count,
                 row.artifact_store_read_only,
-                _stored_capabilities(row.capabilities),
+                tuple(validated.capabilities),
                 row.evidence_digest,
                 (now - observed).total_seconds() > maximum_age,
                 row.fabric_address,
                 row.fabric_bandwidth_mbps,
                 row.nvidia_driver_version,
                 row.container_runtime_version,
+                memory_pool=validated.memory_pool,
             )
 
     def snapshot_count(self, node_id: str) -> int:

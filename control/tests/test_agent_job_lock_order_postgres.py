@@ -4,7 +4,7 @@ import hashlib
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -19,6 +19,7 @@ from vonk_control.models import (
     Base,
     Job,
 )
+from vonk_control.run_admission import RunAdmissionBusy
 
 from .runtime_identity_support import claim_agent
 
@@ -236,16 +237,105 @@ def test_revocation_between_hint_and_lock_stays_fail_closed(queue, postgres_engi
 
 
 def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
-    _, parent, services, _ = queue
-    operations = _concurrent_node_lock_calls(
-        postgres_engine,
-        [
-            lambda: services[0].enqueue(
-                parent.id, NODES[0], "recipe.stop", REVISION, PAYLOAD
-            ),
-            lambda: services[1].enqueue(
-                parent.id, NODES[1], "recipe.stop", REVISION, PAYLOAD
-            ),
-        ],
-    )
-    assert {operation.node_id for operation in operations} == set(NODES)
+    sessions, parent, services, original = queue
+    operation_ids = (str(uuid.uuid4()), str(uuid.uuid4()))
+    expected_key = f"vonk-admission:node:{NODES[0]}"
+    first_key_owner: int | None = None
+    owner_guard = threading.Lock()
+    owner_has_key = threading.Event()
+    release_owner = threading.Event()
+    observed_key_threads: set[int] = set()
+
+    def hold_first_key_owner(
+        _connection, _cursor, statement, parameters, _context, _many
+    ):
+        nonlocal first_key_owner
+        if "pg_try_advisory_xact_lock" not in statement:
+            return
+        values = parameters if isinstance(parameters, dict) else {}
+        if values.get("key") != expected_key:
+            return
+        thread_id = threading.get_ident()
+        with owner_guard:
+            observed_key_threads.add(thread_id)
+            if first_key_owner is None:
+                first_key_owner = thread_id
+            owns_key = thread_id == first_key_owner
+        if owns_key:
+            owner_has_key.set()
+            assert release_owner.wait(timeout=10), "test did not release the key owner"
+
+    def enqueue(index):
+        try:
+            with sessions.begin() as session:
+                return services[index].enqueue_in_session(
+                    session,
+                    parent.id,
+                    NODES[index],
+                    "recipe.stop",
+                    REVISION,
+                    PAYLOAD,
+                    operation_id=operation_ids[index],
+                )
+        except RunAdmissionBusy as error:
+            return error
+
+    event.listen(postgres_engine, "after_cursor_execute", hold_first_key_owner)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(enqueue, index) for index in range(2)]
+            try:
+                assert owner_has_key.wait(timeout=10)
+                completed, _ = wait(
+                    futures, timeout=3, return_when=FIRST_COMPLETED
+                )
+                assert len(completed) == 1, "contending enqueue did not return promptly"
+                refusal = next(iter(completed)).result()
+                assert isinstance(refusal, RunAdmissionBusy), refusal
+                assert len(observed_key_threads) == 2
+                with sessions() as observer:
+                    visible = tuple(
+                        observer.scalars(
+                            select(AgentOperation).where(
+                                AgentOperation.parent_job_id == parent.id
+                            )
+                        )
+                    )
+                assert {operation.id for operation in visible} == {
+                    operation.id for operation in original
+                }
+            finally:
+                release_owner.set()
+            results = [future.result(timeout=10) for future in futures]
+    finally:
+        release_owner.set()
+        event.remove(postgres_engine, "after_cursor_execute", hold_first_key_owner)
+
+    busy_indexes = [
+        index
+        for index, result in enumerate(results)
+        if isinstance(result, RunAdmissionBusy)
+    ]
+    assert len(busy_indexes) == 1
+    completed_index = 1 - busy_indexes[0]
+    completed_result = results[completed_index]
+    assert isinstance(completed_result, AgentOperation), completed_result
+    assert completed_result.id == operation_ids[completed_index]
+
+    retried = enqueue(busy_indexes[0])
+    assert isinstance(retried, AgentOperation), retried
+    assert retried.id == operation_ids[busy_indexes[0]]
+    with sessions() as observer:
+        final = tuple(
+            observer.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == parent.id
+                )
+            )
+        )
+    new_rows = {operation.id: operation.node_id for operation in final}
+    assert len(final) == len(original) + 2
+    assert {
+        operation_id: new_rows[operation_id]
+        for operation_id in operation_ids
+    } == dict(zip(operation_ids, NODES, strict=True))

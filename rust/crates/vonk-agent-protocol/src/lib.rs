@@ -10,17 +10,17 @@ pub use generated::{
     AgentUpgradePayload as AgentUpgradeRequest,
     ArtifactDistributionPayload as ArtifactDistributionRequest, DistributionAssignment,
     DistributionObject, EnrollmentEvidence, EnrollmentSubmitRequest as EnrollmentRequest,
-    InventoryRequest, RecipeBuildAdapter, RecipeBuildAdapterDefinition,
-    RecipeBuildAdditionalContext, RecipeBuildArgument, RecipeBuildBaseImage,
-    RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence, RecipeBuildLimits,
-    RecipeBuildMetadata, RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildPolicy,
-    RecipeBuildPolicyFinding, RecipeBuildRequest, RecipeImageImportEvidence,
-    RecipeImageImportRequest, RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence,
-    RecipeJobFile, RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest,
-    RecipeJobOutputMapping, RecipeJobRunRequest, RecipeJobRunResult,
-    RecipeStartPayload as RecipeStartRequest, RecipeStartPayloadPhase as RecipeStartPhase,
-    RecipeStopPayload as RecipeStopRequest, RecipeStopResult,
-    RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
+    InventoryRequest, InventoryRequestMemoryPool as MemoryPool, RecipeBuildAdapter,
+    RecipeBuildAdapterDefinition, RecipeBuildAdditionalContext, RecipeBuildArgument,
+    RecipeBuildBaseImage, RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest,
+    RecipeBuildEvidence, RecipeBuildLimits, RecipeBuildMetadata, RecipeBuildNetwork,
+    RecipeBuildOptions, RecipeBuildPolicy, RecipeBuildPolicyFinding, RecipeBuildRequest,
+    RecipeImageImportEvidence, RecipeImageImportRequest,
+    RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence, RecipeJobFile,
+    RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
+    RecipeJobRunRequest, RecipeJobRunResult, RecipeStartPayload as RecipeStartRequest,
+    RecipeStartPayloadPhase as RecipeStartPhase, RecipeStopPayload as RecipeStopRequest,
+    RecipeStopResult, RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
 };
 pub use generated::{
     ExecuteContainerRuntimeRequestOperationAction as HostHelperContainerRuntimeAction,
@@ -716,6 +716,7 @@ impl InventoryRequest {
             || self.disk_free_bytes > self.disk_total_bytes
             || self.host_memory_free_bytes > self.host_memory_total_bytes
             || self.gpu_memory_free_bytes > self.gpu_memory_total_bytes
+            || (self.memory_pool == MemoryPool::Shared && self.gpu_count == 0)
             || self.capabilities.len() > 64
             || self
                 .capabilities
@@ -1352,6 +1353,20 @@ impl RecipeOperationRequest {
                     }
                     && valid_alias(&value.alias)
                     && value.compiled_execution_plan.schema_version == 2
+                    && value.memory_floor_bytes <= 16 * 1024_u64.pow(4)
+                    && value.memory_floor_bytes
+                        == value
+                            .compiled_execution_plan
+                            .runtime
+                            .placement
+                            .memory_floor_bytes
+                    && value.memory_kind.to_string()
+                        == value
+                            .compiled_execution_plan
+                            .runtime
+                            .placement
+                            .memory_kind
+                            .to_string()
             }
             Self::Stop(value) => valid_common(value.schema_version, &value.plan_digest),
             Self::Uninstall(value) => {
@@ -1386,6 +1401,7 @@ mod inventory_tests {
             gpu_memory_total_bytes: 100_000,
             gpu_memory_free_bytes: 80_000,
             gpu_count: 1,
+            memory_pool: MemoryPool::Separate,
             artifact_store_read_only: false,
             capabilities: vec!["recipe.build.v1".to_owned()],
             fabric_address: None,
@@ -1443,6 +1459,8 @@ mod recipe_start_tests {
             "recipe_content_sha256": "c".repeat(64),
             "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
             "reserved_memory_bytes": 1024,
+            "memory_floor_bytes": 2 * 1024_u64.pow(3),
+            "memory_kind": "unified",
             "role": if rank == 0 { "entrypoint" } else { "worker" },
             "run_id": "00000000-0000-4000-8000-000000000004",
             "schema_version": 2,
@@ -1520,6 +1538,30 @@ mod recipe_start_tests {
         assert_eq!(distributed.phase, None);
         assert_eq!(distributed.start_deadline, None);
         assert_eq!(distributed.run_generation, None);
+    }
+
+    #[test]
+    fn start_request_memory_floor_must_match_compiled_placement() {
+        let mut request = start_payload(1, 0, None, None, None);
+        request["memory_floor_bytes"] = Value::from(1);
+        assert!(parsed_start(request).is_err());
+
+        let mut request = start_payload(1, 0, None, None, None);
+        request["compiled_execution_plan"]["runtime"]["placement"]["memory_floor_bytes"] =
+            Value::from(1);
+        assert!(parsed_start(request).is_err());
+    }
+
+    #[test]
+    fn start_request_memory_kind_must_match_compiled_placement() {
+        let mut request = start_payload(1, 0, None, None, None);
+        request["memory_kind"] = Value::String("host".to_owned());
+        assert!(parsed_start(request).is_err());
+
+        let mut request = start_payload(1, 0, None, None, None);
+        request["compiled_execution_plan"]["runtime"]["placement"]["memory_kind"] =
+            Value::String("host".to_owned());
+        assert!(parsed_start(request).is_err());
     }
 
     #[test]
@@ -1811,6 +1853,20 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
         })
         && (1..=3600).contains(&value.timeout_seconds)
         && (1..=16 * 1024_u64.pow(4)).contains(&value.reserved_memory_bytes)
+        && value.memory_floor_bytes <= 16 * 1024_u64.pow(4)
+        && value.memory_floor_bytes
+            == value
+                .compiled_execution_plan
+                .runtime
+                .placement
+                .memory_floor_bytes
+        && value.memory_kind.to_string()
+            == value
+                .compiled_execution_plan
+                .runtime
+                .placement
+                .memory_kind
+                .to_string()
 }
 
 fn valid_job_slot(value: &str) -> bool {
@@ -2285,6 +2341,8 @@ mod recipe_job_tests {
             },
             timeout_seconds: 3600,
             reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
+            memory_floor_bytes: 2 * 1024 * 1024 * 1024,
+            memory_kind: "unified".parse().unwrap(),
         }
     }
 
@@ -2304,6 +2362,14 @@ mod recipe_job_tests {
         let mut invalid_slot = valid.clone();
         invalid_slot.inputs[0].slot = "0input".to_owned();
         assert!(!validate_recipe_job(&invalid_slot));
+
+        let mut mismatched_floor = valid.clone();
+        mismatched_floor.memory_floor_bytes += 1;
+        assert!(!validate_recipe_job(&mismatched_floor));
+
+        let mut mismatched_kind = valid.clone();
+        mismatched_kind.memory_kind = "host".parse().unwrap();
+        assert!(!validate_recipe_job(&mismatched_kind));
 
         let mut reserved_manifest = valid.clone();
         reserved_manifest.inputs[0].name = "manifest.json".to_owned();
@@ -2403,6 +2469,20 @@ mod recipe_job_tests {
             serde_json::to_value(unavailable_peak).unwrap()["evidence"]["peak_memory_bytes"]
                 .is_null()
         );
+    }
+
+    #[test]
+    fn payload_digest_valid_claim_cannot_change_the_compiled_memory_pool() {
+        let mut document: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ))
+        .unwrap();
+        document["payload"]["memory_kind"] = Value::String("host".to_owned());
+        let payload = canonical_json(&document["payload"]).unwrap();
+        document["payload_digest"] = Value::String(hex_sha256(&payload));
+        let claim: AgentClaim = serde_json::from_value(document).unwrap();
+        claim.validate().unwrap();
+        assert!(RecipeOperationRequest::parse(&claim).is_err());
     }
 
     #[test]

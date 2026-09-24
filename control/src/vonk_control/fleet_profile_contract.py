@@ -2,18 +2,51 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
+from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol.inventory import MemoryPool
 
-from .preparation_contract import RolloutPreparation
-from .run_switch_contract import RunSwitchOperationResult
+from .endpoint_contract import EndpointResponse
+from .preparation_contract import (
+    CompatibilityIdentity,
+    ModelArtifactIdentity,
+    PreparationReason,
+    RolloutPreparation,
+    RuntimeImageIdentity,
+)
+from .run_switch_contract import (
+    ConditionalPostStopMemoryCheck,
+    EffectiveSettingsSelection,
+    MemoryKind,
+    PortNumber,
+    ResourceDemandEvidence,
+    RunSwitchAssessment,
+    RunSwitchOperationResult,
+    RunSwitchReason,
+    StopImpact,
+)
 from .strict_json import StrictJSONModel
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+
+def profile_switch_child_request_key(
+    application_id: str, position: int, kind: str, owner_id: str
+) -> str:
+    """One child identity for dispatch and recovery before its checkpoint exists."""
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            f"vonk-forge:profile-run-switch:{application_id}:{position}:{kind}:{owner_id}",
+        )
+    )
+
 
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -89,10 +122,80 @@ FleetProfileAssignmentState = Literal[
 FleetProfileAction = Literal["switch", "keep"]
 FleetProfilePlanStepKind = Literal["switch"]
 FleetProfileOperationKind = Literal["fleet-profile.apply"]
+FleetProfileEndpointState = Literal[
+    "installed-only",
+    "not-published-yet",
+    "published",
+    "expired",
+    "withdrawn",
+    "unavailable",
+]
 
 
 class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+
+@dataclass(frozen=True)
+class FleetProfileEndpointAssignmentIntent:
+    """Loaded application assignment and exact current run candidate."""
+
+    assignment_id: str
+    recipe_title: str
+    desired_state: Literal["installed", "running"]
+    alias: str | None
+    state: FleetProfileEndpointState
+    expected_run_id: str | None = None
+
+
+@dataclass(frozen=True)
+class FleetProfileEndpointIntent:
+    """Loaded profile intent captured from the durable application record."""
+
+    number: int
+    profile_id: str | None
+    application_id: str | None
+    application_state: FleetProfileOperationState | None
+    assignments: tuple[FleetProfileEndpointAssignmentIntent, ...]
+
+
+class FleetProfileEndpointAssignmentView(_StrictModel):
+    assignment_id: UuidId
+    recipe_title: Name
+    desired_state: Literal["installed", "running"]
+    alias: Alias | None = None
+    state: FleetProfileEndpointState
+    endpoint: EndpointResponse | None = None
+
+    @model_validator(mode="after")
+    def endpoint_matches_assignment(self) -> FleetProfileEndpointAssignmentView:
+        if self.state == "published":
+            if self.alias is None or self.endpoint is None:
+                raise ValueError("published profile endpoint is incomplete")
+            if self.endpoint.alias != self.alias:
+                raise ValueError("published profile endpoint alias is inconsistent")
+        elif self.endpoint is not None:
+            raise ValueError("unpublished profile endpoint contains route data")
+        if self.state == "installed-only" and self.desired_state != "installed":
+            raise ValueError("installed-only endpoint has a running assignment")
+        return self
+
+
+class FleetProfileEndpointsView(_StrictModel):
+    number: int = Field(ge=1)
+    profile_id: UuidId | None = None
+    application_id: UuidId | None = None
+    application_state: FleetProfileOperationState | None = None
+    observed_at: datetime
+    assignments: list[FleetProfileEndpointAssignmentView] = Field(max_length=64)
+
+    @model_validator(mode="after")
+    def application_identity_is_consistent(self) -> FleetProfileEndpointsView:
+        if (self.application_id is None) != (self.application_state is None):
+            raise ValueError("profile endpoint application identity is incomplete")
+        if self.application_id is not None and self.profile_id is None:
+            raise ValueError("profile endpoint application has no profile identity")
+        return self
 
 
 class FleetProfileNode(_StrictModel):
@@ -208,19 +311,20 @@ class FleetProfileAssignmentView(_StrictModel):
         return self
 
 
-class FleetProfileInput(_StrictModel):
+class FleetProfileDefinition(_StrictModel):
+    """Saved authoring intent, independent of execution and cache projections."""
+
     name: Name = "Default"
     description: Description = ""
     installation_policy: FleetProfileInstallationPolicy = "keep-cached"
     labels: dict[LabelName, LabelValue] = Field(default_factory=dict, max_length=16)
     favorite: bool = False
-    expected_revision: int | None = Field(default=None, ge=1)
     assignments: list[FleetProfileAssignmentInput] = Field(
         default_factory=list, max_length=64
     )
 
     @model_validator(mode="after")
-    def validate_profile(self) -> FleetProfileInput:
+    def validate_profile(self) -> FleetProfileDefinition:
         identities = [
             (
                 assignment.recipe_selector,
@@ -243,6 +347,28 @@ class FleetProfileInput(_StrictModel):
         return self
 
 
+class FleetProfileInput(FleetProfileDefinition):
+    # Zero means create only: an absent profile read cannot authorize replacing
+    # somebody else's intervening first save.
+    expected_revision: int = Field(default=0, ge=0)
+
+
+class FleetProfileDefinitionView(_StrictModel):
+    schema_version: Literal[2] = 2
+    id: UuidId | None
+    number: int = Field(ge=1)
+    revision: int = Field(ge=0)
+    definition: FleetProfileDefinition
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> FleetProfileDefinitionView:
+        if (self.id is None) != (self.revision == 0):
+            raise ValueError(
+                "only an uncreated profile has revision zero and no identity"
+            )
+        return self
+
+
 class FleetProfileView(_StrictModel):
     schema_version: Literal[2] = 2
     id: UuidId
@@ -253,6 +379,7 @@ class FleetProfileView(_StrictModel):
     installation_policy: FleetProfileInstallationPolicy
     labels: dict[LabelName, LabelValue]
     favorite: bool
+    definition: FleetProfileDefinition
     assignments: list[FleetProfileAssignmentView]
     fleet: list[dict[str, object]] = Field(default_factory=list)
     status: str = "draft"
@@ -340,6 +467,181 @@ class FleetProfileAssignmentPreparation(_StrictModel):
     preparation: RolloutPreparation
 
 
+class FleetProfileAssignmentAssessment(_StrictModel):
+    assignment_id: UuidId
+    assessment: RunSwitchAssessment
+
+
+class FleetProfileResourceRequirement(_StrictModel):
+    """Stable demand and eligibility, separate from observed free capacity."""
+
+    node_id: NodeId
+    allowed: bool
+    ports_required: list[PortNumber]
+    disk_required_bytes: int | None = Field(ge=0)
+    memory_required_bytes: int | None = Field(ge=0)
+    memory_kind: MemoryKind | None
+    memory_pool: MemoryPool | None
+    memory_floor_bytes: int | None = Field(ge=0)
+    resource_demand: ResourceDemandEvidence | None
+
+
+class FleetProfileAdmissionDecision(_StrictModel):
+    assignment_id: UuidId
+    alias: Alias | None
+    allowed: bool
+    blockers: list[RunSwitchReason] = Field(max_length=128)
+    requirements: list[FleetProfileResourceRequirement] = Field(max_length=32)
+    effective_settings: EffectiveSettingsSelection | None
+    stops: list[StopImpact] = Field(max_length=128)
+    stop_before_prepare: bool
+    stop_before_transfer: bool
+    post_stop_memory_check: ConditionalPostStopMemoryCheck | None = None
+
+    @classmethod
+    def from_assessment(
+        cls, value: FleetProfileAssignmentAssessment
+    ) -> FleetProfileAdmissionDecision:
+        assessment = value.assessment
+        fit = assessment.fit_after_stop or assessment.fit_current
+        return cls(
+            assignment_id=value.assignment_id,
+            alias=assessment.alias,
+            allowed=assessment.allowed,
+            blockers=sorted(
+                assessment.blockers,
+                key=lambda item: (item.code, tuple(item.node_ids), item.detail),
+            ),
+            requirements=[
+                FleetProfileResourceRequirement(
+                    **{
+                        name: getattr(node, name)
+                        for name in FleetProfileResourceRequirement.model_fields
+                    }
+                )
+                for node in sorted(fit.nodes, key=lambda node: node.node_id)
+            ],
+            effective_settings=assessment.effective_settings,
+            stops=sorted(assessment.stops, key=lambda stop: stop.run_id),
+            stop_before_prepare=assessment.stop_before_prepare,
+            stop_before_transfer=assessment.stop_before_transfer,
+            post_stop_memory_check=assessment.post_stop_memory_check,
+        )
+
+
+class FleetProfileCompatibilityDecision(_StrictModel):
+    kind: Literal["engine-generation", "jit", "tuning"]
+    stage: Literal["controller-prepare", "target-prepare"]
+    compatibility: CompatibilityIdentity
+    node_ids: list[NodeId] = Field(min_length=1, max_length=64)
+    artifact_sha256: Digest | None
+    ready: bool
+
+
+class FleetProfilePreparationDecision(_StrictModel):
+    """Exact assets and reuse decisions; byte counters are observations only."""
+
+    assignment_id: UuidId
+    model: ModelArtifactIdentity
+    runtime_image: RuntimeImageIdentity
+    model_complete: bool
+    model_controller_ready: bool
+    image_controller_ready: bool
+    model_reuse_node_ids: list[NodeId] = Field(max_length=64)
+    image_reuse_node_ids: list[NodeId] = Field(max_length=64)
+    exceptions: list[FleetProfileCompatibilityDecision] = Field(max_length=64)
+    blockers: list[PreparationReason] = Field(max_length=128)
+
+    @classmethod
+    def from_preparation(
+        cls, value: FleetProfileAssignmentPreparation
+    ) -> FleetProfilePreparationDecision:
+        preparation = value.preparation
+        return cls(
+            assignment_id=value.assignment_id,
+            model=ModelArtifactIdentity.model_validate(
+                {
+                    name: getattr(preparation.model, name)
+                    for name in ModelArtifactIdentity.model_fields
+                }
+            ),
+            runtime_image=RuntimeImageIdentity.model_validate(
+                {
+                    name: getattr(preparation.runtime_image, name)
+                    for name in RuntimeImageIdentity.model_fields
+                }
+            ),
+            model_complete=preparation.model.completeness == "complete",
+            model_controller_ready=preparation.model.controller.state == "ready",
+            image_controller_ready=preparation.runtime_image.controller.state
+            == "ready",
+            model_reuse_node_ids=sorted(
+                target.node_id
+                for target in preparation.model.targets
+                if target.state == "ready"
+            ),
+            image_reuse_node_ids=sorted(
+                target.node_id
+                for target in preparation.runtime_image.targets
+                if target.state == "ready"
+            ),
+            exceptions=[
+                FleetProfileCompatibilityDecision(
+                    kind=item.kind,
+                    stage=item.stage,
+                    compatibility=item.compatibility,
+                    node_ids=item.node_ids,
+                    artifact_sha256=item.artifact_sha256,
+                    ready=item.state == "ready",
+                )
+                for item in sorted(
+                    preparation.exceptions,
+                    key=lambda item: (
+                        item.kind,
+                        item.stage,
+                        item.compatibility_key_sha256,
+                    ),
+                )
+            ],
+            blockers=sorted(
+                (
+                    reason
+                    for reason in preparation.reasons
+                    if reason.severity == "blocker"
+                ),
+                key=lambda reason: (reason.code, tuple(reason.node_ids), reason.detail),
+            ),
+        )
+
+
+class FleetProfileRunEffect(_StrictModel):
+    run_id: UuidId
+    installation_id: UuidId
+    alias: Alias
+    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    action: Literal["keep", "stop"]
+
+
+class FleetProfileInstallationEffect(_StrictModel):
+    installation_id: UuidId
+    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    action: Literal["keep", "remove"]
+
+
+class FleetProfilePendingEffect(_StrictModel):
+    kind: Literal["job", "profile-application"]
+    id: UuidId
+    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+
+
+class FleetProfileEffects(_StrictModel):
+    """Identified live effects, including complete distributed membership."""
+
+    runs: list[FleetProfileRunEffect]
+    installations: list[FleetProfileInstallationEffect]
+    superseded: list[FleetProfilePendingEffect]
+
+
 class FleetProfileChildProgress(_StrictModel):
     """Typed progress emitted by the profile-owned Run switch adapter."""
 
@@ -367,10 +669,13 @@ class FleetProfileChildProgress(_StrictModel):
         return self
 
 
+FleetProfileSwitchChildKind = Literal["install", "run", "stop", "cleanup"]
+
+
 class FleetProfileSwitchQueueItem(_StrictModel):
     """One durable Run/Switch child in the profile reconciliation queue."""
 
-    kind: Literal["run", "stop", "cleanup"]
+    kind: FleetProfileSwitchChildKind
     id: UuidId
 
 
@@ -378,7 +683,7 @@ class FleetProfileSwitchChildState(_StrictModel):
     """Terminal receipt for a child already completed by the adapter."""
 
     operation_id: UuidId
-    kind: Literal["run", "stop", "cleanup"]
+    kind: FleetProfileSwitchChildKind
     state: Literal["succeeded", "failed", "cancelled"]
     result: FleetProfileSwitchChildResult | None = None
 
@@ -407,7 +712,7 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     queue: list[FleetProfileSwitchQueueItem] = Field(max_length=128)
     position: int = Field(default=0, ge=0, le=128)
     active_operation_id: UuidId | None = None
-    active_kind: Literal["run", "stop", "cleanup"] | None = None
+    active_kind: FleetProfileSwitchChildKind | None = None
     children: list[FleetProfileSwitchChildState] = Field(
         default_factory=list, max_length=128
     )
@@ -471,9 +776,54 @@ class FleetProfileIntendedConfiguration(_StrictModel):
     """Immutable desired configuration captured when execution is admitted."""
 
     profile_digest: Digest
+    reviewed_plan_digest: Digest
+    reviewed_application_id: UuidId
     installation_policy: FleetProfileInstallationPolicy
     scope: FleetProfileScope
     assignments: list[FleetProfileAssignment] = Field(max_length=64)
+
+
+class FleetProfileApplicationCancellationIntent(_StrictModel):
+    """Durable identity and authority for an explicit or superseding cancel."""
+
+    request_key: UuidId
+    actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    requested_at: datetime
+    state: Literal["cancelling", "cancelled"] = "cancelling"
+    cause: Literal["operator", "superseded"]
+    successor_application_id: UuidId | None = None
+    workload_intent_ordinal: int | None = Field(default=None, ge=1)
+    pending_operation_ids: list[UuidId] = Field(default_factory=list, max_length=128)
+    observation_due_at: datetime | None = None
+    observation_deadline_at: datetime | None = None
+
+
+class FleetProfileApplicationEffect(_StrictModel):
+    """One exact profile or child effect in the cancellation receipt."""
+
+    effect_id: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    kind: Literal[
+        "profile-step", "run", "install", "stop", "cleanup", "agent-operation"
+    ]
+    label: Annotated[str, StringConstraints(min_length=1, max_length=240)]
+    operation_id: UuidId | None = None
+    outcome: Literal["succeeded", "failed", "cancelled", "pending", "not-issued"]
+
+
+class FleetProfileApplicationCancellationView(_StrictModel):
+    """Live projection of completed, pending, and unissued cancelled effects."""
+
+    request_key: UuidId
+    actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    requested_at: datetime
+    state: Literal["cancelling", "cancelled"]
+    cause: Literal["operator", "superseded"]
+    completed_effects: list[FleetProfileApplicationEffect] = Field(max_length=1024)
+    pending_effects: list[FleetProfileApplicationEffect] = Field(max_length=1024)
+    cancelled_effects: list[FleetProfileApplicationEffect] = Field(max_length=1024)
+    owner: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
+    dependency: UuidId | None = None
+    deadline_at: datetime | None = None
 
 
 class FleetProfileApplicationProgress(_StrictModel):
@@ -491,6 +841,7 @@ class FleetProfileApplicationProgress(_StrictModel):
     child_progress: FleetProfileChildProgress | None = None
     step_results: dict[str, FleetProfileStepResult] = Field(default_factory=dict)
     switch_adapter: FleetProfileSwitchAdapterState | None = None
+    cancellation: FleetProfileApplicationCancellationIntent | None = None
 
     @model_validator(mode="after")
     def progress_is_consistent(self) -> FleetProfileApplicationProgress:
@@ -519,6 +870,16 @@ class FleetProfileChildOperation(_StrictModel):
 class FleetProfileSwitchAdapter(Protocol):
     """Profile boundary for the integrated automatic Run switch service."""
 
+    def validate_resources_in_session(
+        self,
+        session: Session,
+        assignments: tuple[FleetProfileAssignment, ...],
+        reviewed: FleetProfilePreview,
+    ) -> None:
+        """Recheck resource eligibility inside the admission writer fence."""
+
+        ...
+
     def request_superseded_workload_cancellation_in_session(
         self,
         session: Session,
@@ -532,6 +893,17 @@ class FleetProfileSwitchAdapter(Protocol):
 
     def recoverable_cache_loss(self, application_id: str, *, session: Session) -> bool:
         """Whether the current exact child failed only because managed bytes vanished."""
+
+        ...
+
+    def request_cancellation(
+        self,
+        application_id: str,
+        *,
+        request_key: str,
+        actor: str,
+    ) -> None:
+        """Request cancellation from the existing Run/Switch child owner."""
 
         ...
 
@@ -557,7 +929,14 @@ class FleetProfileSwitchAdapter(Protocol):
     def get(
         self, operation_id: str, *, session: Session | None = None
     ) -> FleetProfileChildOperation:
-        """Return the durable child state for inspection or resumption.
+        """Observe the durable child without ticking or dispatching work."""
+
+        ...
+
+    def advance(
+        self, operation_id: str, *, session: Session | None = None
+    ) -> FleetProfileChildOperation:
+        """Advance the durable child from the worker's execution path.
 
         A caller that already holds this application's row passes its session so
         the adapter joins that transaction instead of opening a second one on a
@@ -567,33 +946,58 @@ class FleetProfileSwitchAdapter(Protocol):
         ...
 
 
-class FleetProfilePreview(_StrictModel):
+class FleetProfileReviewedDecision(_StrictModel):
+    """The reviewable semantic decision that owns the reconciliation digest."""
+
     schema_version: Literal[2] = 2
     profile_id: UuidId
     profile_name: Name
     profile_digest: Digest
-    generated_at: datetime
+    profile_revision: int | None = Field(ge=1)
+    profile_definition: FleetProfileDefinition | None
     allowed: bool
     scope: FleetProfileScopePreview
     summary: FleetProfilePlanSummary
     assignments: list[FleetProfileAssignmentPreview] = Field(max_length=64)
+    resolved_assignments: list[FleetProfileAssignment] = Field(max_length=64)
+    admission_decisions: list[FleetProfileAdmissionDecision] = Field(max_length=64)
+    preparation_decisions: list[FleetProfilePreparationDecision] = Field(max_length=64)
+    effects: FleetProfileEffects
+    steps: list[FleetProfilePlanStep] = Field(max_length=1024)
+    reasons: list[FleetProfileReason] = Field(max_length=128)
+
+
+class FleetProfilePreview(FleetProfileReviewedDecision):
+    generated_at: datetime
+    assessments: list[FleetProfileAssignmentAssessment] = Field(max_length=64)
     preparations: list[FleetProfileAssignmentPreparation] = Field(
         default_factory=list, max_length=64
     )
-    steps: list[FleetProfilePlanStep] = Field(max_length=1024)
-    reasons: list[FleetProfileReason] = Field(max_length=128)
     plan_digest: Digest
+
+    def reviewed_decision(self) -> FleetProfileReviewedDecision:
+        return FleetProfileReviewedDecision.model_validate(
+            {
+                name: getattr(self, name)
+                for name in FleetProfileReviewedDecision.model_fields
+            }
+        )
 
 
 class FleetProfileLoadRequest(_StrictModel):
-    dry_run: bool = False
     plan_digest: Digest
-    request_key: UuidId | None = None
+    request_key: UuidId
+
+
+class FleetProfileApplicationCancelRequest(_StrictModel):
+    profile_number: int = Field(ge=1)
+    request_key: UuidId
 
 
 class FleetProfileApplicationView(_StrictModel):
     schema_version: Literal[2] = 2
     id: UuidId
+    request_key: UuidId
     profile_id: UuidId
     profile_digest: Digest
     plan_digest: Digest
@@ -605,6 +1009,7 @@ class FleetProfileApplicationView(_StrictModel):
     current_operation_id: UuidId | None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None
     progress: FleetProfileApplicationProgress
+    cancellation: FleetProfileApplicationCancellationView | None = None
     result: FleetProfileApplicationResult | None
     created_at: datetime
     updated_at: datetime
@@ -641,6 +1046,10 @@ class FleetProfileApplicationView(_StrictModel):
 
 
 __all__ = [
+    "FleetProfileApplicationCancelRequest",
+    "FleetProfileApplicationCancellationIntent",
+    "FleetProfileApplicationCancellationView",
+    "FleetProfileApplicationEffect",
     "FleetProfileApplicationProgress",
     "FleetProfileApplicationResult",
     "FleetProfileApplicationView",
@@ -652,15 +1061,22 @@ __all__ = [
     "FleetProfileChildOperation",
     "FleetProfileChildProgress",
     "FleetProfileChildResult",
+    "FleetProfileCompatibilityDecision",
+    "FleetProfileEffects",
     "FleetProfileInput",
+    "FleetProfileInstallationEffect",
     "FleetProfileIntendedConfiguration",
     "FleetProfileList",
     "FleetProfileLoadRequest",
     "FleetProfileNode",
+    "FleetProfilePendingEffect",
     "FleetProfilePlanStep",
     "FleetProfilePlanSummary",
+    "FleetProfilePreparationDecision",
     "FleetProfilePreview",
     "FleetProfileReason",
+    "FleetProfileReviewedDecision",
+    "FleetProfileRunEffect",
     "FleetProfileScope",
     "FleetProfileScopePreview",
     "FleetProfileStepResult",

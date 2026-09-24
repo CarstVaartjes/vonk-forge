@@ -10,6 +10,7 @@ from vonk_control.models import AgentNode, Base, FleetProfileApplication
 
 from .test_fleet_profiles import (
     NOW,
+    _assessment,
     _exact_preparation,
     _input,
     _node_id,
@@ -32,12 +33,17 @@ def test_active_profile_cannot_starve_a_recovered_parked_parent(
         sessions,
         clock=lambda: NOW,
         switch_adapter=adapter,
-        preparation_provider=lambda _session, _assignment, node_ids: _exact_preparation(
-            node_ids
+        assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
+            _assessment(_exact_preparation(node_ids))
         ),
     )
     parked_profile = service.create(_input(revision_id), actor="admin")
-    parked = service.load(parked_profile.number, request_key=_uuid(930), actor="admin")
+    parked = service.load(
+        parked_profile.number,
+        request_key=_uuid(930),
+        actor="admin",
+        expected_plan_digest=service.preview(parked_profile.id).plan_digest,
+    )
     assert service.tick()
     parked_child_id = service.application(parked.id).current_operation_id
     assert parked_child_id is not None
@@ -60,7 +66,12 @@ def test_active_profile_cannot_starve_a_recovered_parked_parent(
     other_input = _input(revision_id, name="Unrelated node")
     other_input.assignments[0].spark_ids = [_node_id(2)]
     active_profile = service.create(other_input, actor="admin")
-    active = service.load(active_profile.number, request_key=_uuid(931), actor="admin")
+    active = service.load(
+        active_profile.number,
+        request_key=_uuid(931),
+        actor="admin",
+        expected_plan_digest=service.preview(active_profile.id).plan_digest,
+    )
     assert service.tick()
     active_child_id = service.application(active.id).current_operation_id
     assert active_child_id is not None

@@ -72,7 +72,9 @@
       "rank": 0,
       "reserved_memory_bytes": 67108864,
       "role": "entrypoint",
-      "world_size": 1
+      "world_size": 1,
+      "memory_floor_bytes": 2147483648,
+      "memory_kind": "unified"
     },
     "telemetry": {
       "engine": "vllm",

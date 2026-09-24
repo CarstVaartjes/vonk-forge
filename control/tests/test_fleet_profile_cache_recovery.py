@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+import pytest
 from sqlalchemy import select
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.fleet_profile_contract import FleetProfileInput
@@ -182,10 +183,14 @@ def test_cache_recovery_refuses_access_and_integrity_failures(tmp_path: Path) ->
             assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
 
 
-def test_cache_recovery_keeps_missing_exact_build_archive_as_a_dependency(
+@pytest.mark.parametrize(
+    "recovery_blocker", [None, "contract", "capacity", "model-drift"]
+)
+def test_cache_recovery_replans_an_actually_missing_build_archive(
     tmp_path: Path,
+    recovery_blocker: str | None,
 ) -> None:
-    sessions, _lifecycle, service, _profile, _desired, first, child_id, _nodes = (
+    sessions, _lifecycle, service, profile, _desired, first, child_id, nodes = (
         _failed_profile(tmp_path)
     )
     adapter = cast(RunSwitchFleetProfileAdapter, service._switch_adapter)
@@ -249,23 +254,110 @@ def test_cache_recovery_keeps_missing_exact_build_archive_as_a_dependency(
         return build_plan
 
     lifecycle.preview_build = replan_build
+    # Ordinary review can report cache loss, but only recovery of the accepted
+    # request may create a replacement build plan. Exercise the real profile
+    # and Run/Switch planners with a builder seam that persists its SQL effect.
+    with sessions() as session:
+        before_build = session.get(RecipeBuild, build_plan.build_id)
+        assert before_build is not None
+        before = (
+            before_build.state,
+            before_build.image_digest,
+            before_build.oci_layout_sha256,
+            before_build.image_bytes,
+        )
+    review = service.preview(profile.id)
+    assert not review.allowed
+    with sessions() as session:
+        after_build = session.get(RecipeBuild, build_plan.build_id)
+        assert after_build is not None
+        assert (
+            after_build.state,
+            after_build.image_digest,
+            after_build.oci_layout_sha256,
+            after_build.image_bytes,
+        ) == before
     _typed_cache_failure(sessions, first.id, child_id, "runtime_image.cache_missing")
 
+    if recovery_blocker == "model-drift":
+        original_inspector = run_switch._artifacts
+
+        class ChangedArtifactSet:
+            def inspect(self, *args, **kwargs):
+                return replace(
+                    original_inspector.inspect(*args, **kwargs),
+                    artifact_set_sha256="9" * 64,
+                )
+
+        run_switch._artifacts = ChangedArtifactSet()
+        # Image repair must not copy the old model projection over current
+        # evidence. A changed model set still requires a new operator review.
+        assert service.tick() is True
+        with sessions() as session:
+            applications = list(session.scalars(select(FleetProfileApplication)))
+            assert len(applications) == 1
+            assert "profile.recovery_artifact_changed" in (
+                applications[0].status_reason or ""
+            )
+            assert (
+                len(
+                    list(
+                        session.scalars(
+                            select(Job).where(Job.kind == "recipe.run-switch.v2")
+                        )
+                    )
+                )
+                == 1
+            )
+        return
+
+    if recovery_blocker is not None:
+        with sessions.begin() as session:
+            if recovery_blocker == "contract":
+                build = session.get(RecipeBuild, build_plan.build_id)
+                assert build is not None
+                build.plan = {}
+            else:
+                inventory = session.scalar(select(NodeInventorySnapshot))
+                assert inventory is not None
+                inventory.host_memory_free_bytes = 0
+                inventory.gpu_memory_free_bytes = 0
+        recovery_review = service.preview(profile.id, allow_pending_cache_rebuild=True)
+        assert not recovery_review.allowed
+        assert recovery_review.assessments[0].assessment.blockers
+        assert service.tick() is False
+        with sessions() as session:
+            assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
+            build = session.get(RecipeBuild, build_plan.build_id)
+            assert build is not None and build.state == before[0]
+        return
+
     assert service.tick() is True
-    assert service.tick() is False
+    recovery_review = service.preview(profile.id, allow_pending_cache_rebuild=True)
+    assert recovery_review.allowed and recovery_review.assessments
+    assert service.tick() is True
     with sessions() as session:
-        applications = list(session.scalars(select(FleetProfileApplication)))
-        assert len(applications) == 1
-        blocked = applications[0]
-        assert blocked.id == first.id and blocked.state == "failed"
-        assert "profile.recovery_cache_pending" in (blocked.status_reason or "")
-        assert "Prepare cache" in (blocked.status_reason or "")
-        assert archive_digest in (blocked.status_reason or "")
-        assert "Next cache check:" in (blocked.status_reason or "")
-        children = list(
-            session.scalars(select(Job).where(Job.kind == "recipe.run-switch.v2"))
+        retry = session.scalar(
+            select(FleetProfileApplication)
+            .where(FleetProfileApplication.id != first.id)
+            .order_by(FleetProfileApplication.created_at.desc())
         )
-        assert len(children) == 1 and children[0].id == child_id
+        assert retry is not None
+        switch_state = require_mapping(
+            retry.progress["switch_adapter"], "profile switch state"
+        )
+        retry_child = session.get(Job, switch_state["active_operation_id"])
+        assert retry_child is not None
+        child_plan = require_mapping(retry_child.payload["plan"], "child plan")
+        child_build = require_mapping(child_plan["build"], "child build")
+        child_phases = require_sequence(child_plan["phases"], "child phases")
+        first_phase = require_mapping(child_phases[0], "first child phase")
+        assert child_build["state"] == "planned"
+        assert first_phase["subphase"] == "container-build"
+        retry_scope = require_mapping(retry.plan["scope"], "retry scope")
+        assert tuple(require_sequence(retry_scope["node_ids"], "retry nodes")) == tuple(
+            nodes
+        )
 
 
 def test_malformed_failed_profile_does_not_block_unrelated_queued_work(

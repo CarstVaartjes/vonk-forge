@@ -35,6 +35,7 @@ from vonk_control.models import (
     RecipeBuild,
     RuntimeImageAuthorization,
 )
+from vonk_control.recipe_builds import RecipeBuildPlan, RecipeBuildResolution
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
@@ -66,6 +67,7 @@ class _Service(RecipeImageAvailabilityService):
                 image_identity=None,
                 build_input_sha256=None,
                 claim_owner="owner",
+                execution_attempt=1,
             ),
         )[:limit]
 
@@ -73,6 +75,15 @@ class _Service(RecipeImageAvailabilityService):
         del claim
         self.started.set()
         self.release.wait(5)
+
+    def claim_update(self, owner: str):
+        return None
+
+    def reconcile_cancellations(self, *, limit: int = 8) -> int:
+        return 0
+
+    def advance_removals(self, *, limit: int = 1) -> int:
+        return 0
 
 
 def test_scheduler_submits_durable_claim_without_waiting_for_image_io() -> None:
@@ -384,8 +395,10 @@ def test_authority_resolves_builds_without_an_open_transaction(
     production.close()
 
 
+@pytest.mark.parametrize("capacity_busy", [False, True])
 def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
     tmp_path,
+    capacity_busy,
 ) -> None:
     recipe = RecipeDefinition.model_validate(
         json.loads(
@@ -418,7 +431,11 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
                 targets=["revision-builder"],
                 payload_digest="a" * 64,
                 payload={
-                    "runtime": {"recipe_revision_id": "revision-builder"},
+                    "recipe_revision_id": "revision-builder",
+                    "runtime": {
+                        "recipe_revision_id": "revision-builder",
+                        "input_intent_sha256": "a" * 64,
+                    },
                     "build_input_sha256": None,
                 },
                 result=None,
@@ -433,7 +450,13 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
             self.plan_calls = 0
 
         def resolve(self, _revision_id: str):
-            return SimpleNamespace(input_intent_sha256="a" * 64)
+            return RecipeBuildResolution(
+                recipe_revision_id=_revision_id,
+                recipe_content_sha256=content_sha256(recipe),
+                source_bundle_sha256="c" * 64,
+                input_intent_sha256="a" * 64,
+                input_intent={},
+            )
 
         def prepare_plan(self, *_args, **_kwargs):
             self.plan_calls += 1
@@ -442,6 +465,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
             return SimpleNamespace(
                 build_input_sha256="b" * 64,
                 builder_node_id="builder-node-000000000000000000000000000000",
+                build_id="00000000-0000-4000-8000-000000000703",
             )
 
         def persist_plan_in_session(self, _session, plan, **_kwargs):
@@ -449,7 +473,12 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
 
     class Operations:
         def build(self, plan, **_kwargs):
+            if capacity_busy:
+                from vonk_control.recipe_builds import RecipeBuildAdmissionBusy
+
+                raise RecipeBuildAdmissionBusy()
             return SimpleNamespace(
+                id=str(uuid.uuid4()),
                 state="succeeded",
                 owner_id="build-id",
                 result={
@@ -485,19 +514,32 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
         clock=lambda: now,
     )
     assert production.service._builder is not None
-    result = production.service._builder(
-        recipe,
-        {
-            "recipe_revision_id": "revision-builder",
-            "input_intent_sha256": "a" * 64,
-        },
-        operation_id="00000000-0000-4000-8000-000000000701",
-        build_input_sha256="",
-        force=False,
-        progress=lambda _progress: None,
-    )
+
+    claim = production.service.claim_pending(limit=1)[0]
+
+    def execute():
+        assert production.service._builder is not None
+        return production.service._builder(
+            recipe,
+            {
+                "recipe_revision_id": "revision-builder",
+                "input_intent_sha256": "a" * 64,
+            },
+            claim=claim,
+            build_input_sha256="",
+            force=False,
+            progress=lambda _progress: None,
+        )
+
+    if capacity_busy:
+        with pytest.raises(RecipeImageAvailabilityError) as failure:
+            execute()
+        assert failure.value.code == "recipe_image.build_capacity_wait"
+        assert failure.value.retryable
+    else:
+        result = execute()
+        assert result["build_input_sha256"] == "b" * 64
     assert builds.plan_calls == 1
-    assert result["build_input_sha256"] == "b" * 64
     production.close()
 
 
@@ -650,15 +692,22 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     )
 
     class Builds:
-        def resolve(self, _revision_id: str):
-            return SimpleNamespace(
-                cached=False,
+        def resolve(self, revision_id: str):
+            return RecipeBuildResolution(
+                recipe_revision_id=revision_id,
+                recipe_content_sha256=content_sha256(recipe),
+                source_bundle_sha256="c" * 64,
                 input_intent_sha256="a" * 64,
-                stale_receipt=False,
+                input_intent={},
             )
 
-        def prepare_plan(self, _revision_id: str, node_id: str, **_kwargs):
-            return SimpleNamespace(
+        def prepare_plan(self, revision_id: str, node_id: str, **_kwargs):
+            return RecipeBuildPlan(
+                build_id="00000000-0000-4000-8000-000000000743",
+                recipe_revision_id=revision_id,
+                recipe_content_sha256=content_sha256(recipe),
+                source_bundle_sha256="c" * 64,
+                agent_payload={},
                 build_input_sha256="b" * 64,
                 builder_node_id=node_id,
             )
@@ -729,7 +778,7 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
                 else {}
             )
             return SimpleNamespace(
-                id="canonical-build-operation",
+                id="00000000-0000-4000-8000-000000000744",
                 state="failed",
                 result={
                     "successful_nodes": [],
@@ -790,12 +839,37 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
     engine = create_engine(f"sqlite:///{tmp_path / 'builder-error.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        session.add(
+            Job(
+                id="00000000-0000-4000-8000-000000000703",
+                request_id=str(uuid.uuid4()),
+                kind="recipe.image.availability.v2",
+                state="running",
+                actor="operator",
+                authority_revision="revision-builder",
+                targets=["revision-builder"],
+                payload_digest="a" * 64,
+                payload={
+                    "recipe_revision_id": "revision-builder",
+                    "runtime": {
+                        "recipe_revision_id": "revision-builder",
+                        "builder_node_id": "builder-node",
+                    },
+                    "build_input_sha256": "b" * 64,
+                },
+                current_attempt=1,
+                created_at=now,
+                updated_at=now,
+            )
+        )
 
     class Builds:
         def resolve(self, _revision_id: str):
             return SimpleNamespace(input_intent_sha256="a" * 64)
 
-        def plan(self, *_args, **_kwargs):
+        def prepare_plan(self, *_args, **_kwargs):
             raise RecipeImageAvailabilityError(
                 "build.source_invalid", "canonical source is invalid"
             )
@@ -812,6 +886,7 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
         clock=lambda: datetime.now(UTC),
     )
     assert production.service._builder is not None
+    claim = production.service.claim_pending(limit=1)[0]
     with pytest.raises(RecipeImageAvailabilityError) as raised:
         production.service._builder(
             recipe,
@@ -819,7 +894,7 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
                 "recipe_revision_id": "revision-builder",
                 "builder_node_id": "builder-node",
             },
-            operation_id="00000000-0000-4000-8000-000000000703",
+            claim=claim,
             build_input_sha256="b" * 64,
             force=False,
             progress=lambda _progress: None,
@@ -871,7 +946,11 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                     targets=["revision-builder"],
                     payload_digest="a" * 64,
                     payload={
-                        "runtime": {"recipe_revision_id": "revision-builder"},
+                        "recipe_revision_id": "revision-builder",
+                        "runtime": {
+                            "recipe_revision_id": "revision-builder",
+                            "input_intent_sha256": "a" * 64,
+                        },
                         "build_input_sha256": None,
                     },
                     result=None,
@@ -919,7 +998,13 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
 
     class Builds:
         def resolve(self, _revision_id: str):
-            return SimpleNamespace(input_intent_sha256="a" * 64)
+            return RecipeBuildResolution(
+                recipe_revision_id=_revision_id,
+                recipe_content_sha256=content_sha256(recipe),
+                source_bundle_sha256="c" * 64,
+                input_intent_sha256="a" * 64,
+                input_intent={},
+            )
 
         def prepare_plan(self, _revision_id: str, node_id: str, **_kwargs):
             thread_id = threading.get_ident()
@@ -930,13 +1015,15 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                 barrier.wait(timeout=5)
             suffix = node_id[-1]
             return SimpleNamespace(
-                build_input_sha256=(suffix * 64), builder_node_id=node_id
+                build_input_sha256=(suffix * 64),
+                builder_node_id=node_id,
+                build_id=str(uuid.uuid4()),
             )
 
         def persist_plan_in_session(self, _session, plan, **_kwargs):
             assert _session.in_transaction()
             persisted_nodes.append(plan.builder_node_id)
-            build_id = str(uuid.uuid4())
+            build_id = plan.build_id
             _session.add(
                 RecipeBuild(
                     id=build_id,
@@ -957,6 +1044,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
     class Operations:
         def build(self, plan, **_kwargs):
             return SimpleNamespace(
+                id=str(uuid.uuid4()),
                 state="succeeded",
                 owner_id="build-id",
                 result={
@@ -991,12 +1079,16 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         clock=lambda: now,
     )
 
+    claims = {
+        claim.operation_id: claim for claim in production.service.claim_pending(limit=2)
+    }
+
     def dispatch(operation_id: str):
         assert production.service._builder is not None
         return production.service._builder(
             recipe,
             {"recipe_revision_id": "revision-builder"},
-            operation_id=operation_id,
+            claim=claims[operation_id],
             build_input_sha256="",
             force=False,
             progress=lambda _progress: None,
@@ -1095,17 +1187,19 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
 
     class Builds:
         def resolve(self, _revision_id: str):
-            return SimpleNamespace(
-                cached=False,
+            return RecipeBuildResolution(
+                recipe_revision_id=_revision_id,
+                recipe_content_sha256=content_sha256(recipe),
+                source_bundle_sha256="c" * 64,
                 input_intent_sha256=intent,
-                build_input_sha256=None,
-                image_digest=None,
+                input_intent={},
             )
 
         def prepare_plan(self, _revision_id: str, node_id: str, **_kwargs):
             return SimpleNamespace(
                 build_input_sha256=final_input,
                 builder_node_id=node_id,
+                build_id="00000000-0000-4000-8000-000000000721",
             )
 
         def persist_plan_in_session(self, _session, plan, **_kwargs):
@@ -1136,6 +1230,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
             production.storage.root.mkdir(parents=True, exist_ok=True)
             (production.storage.root / archive_digest).write_bytes(archive)
             return SimpleNamespace(
+                id=str(uuid.uuid4()),
                 state="succeeded",
                 owner_id=build_id,
                 result={
@@ -1191,17 +1286,18 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
         request_id="00000000-0000-4000-8000-000000000722",
     )
     assert parent.state == "queued"
-    assert parent.model_child is not None
+    assert parent.model_child is None
 
     assert production.service.run_pending() == 1
     waiting = production.service.get(parent.id)
     assert waiting.state == "queued"
     assert waiting.failure is not None
     assert waiting.failure["code"] == "recipe_image.build_capacity_wait"
+    assert waiting.model_child is not None
 
     for _ in range(100):
         model_cache.tick()
-        child = model_cache.get_operation(str(parent.model_child["id"]))
+        child = model_cache.get_operation(str(waiting.model_child["id"]))
         if child.state == "succeeded":
             break
         time.sleep(0.01)

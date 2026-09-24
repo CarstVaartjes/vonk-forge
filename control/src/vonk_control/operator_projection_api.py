@@ -13,8 +13,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_serializer
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
@@ -29,6 +30,11 @@ from .enrollment import (
     RemoteRevocationUncertain,
 )
 from .enrollment_bootstrap import accepted_installer_url
+from .enrollment_contract import (
+    ENROLLMENT_ID_PATTERN,
+    EnrollmentGrantStatus,
+    EnrollmentId,
+)
 from .failure_evidence import (
     EvidenceRetention,
     FailureEvidenceBundle,
@@ -71,6 +77,8 @@ FLEET_OPERATION_IDS = {
     ("post", "/api/fleet/{selector}/rename"): "renameFleetNode",
     ("post", "/api/fleet/enroll"): "enrollFleetNode",
     ("post", "/api/fleet/{selector}/re-enroll"): "reenrollFleetNode",
+    ("get", "/api/fleet/enrollments/{grant_id}"): "getFleetEnrollment",
+    ("post", "/api/fleet/enrollments/{grant_id}/revoke"): "revokeFleetEnrollment",
     ("post", "/api/fleet/{selector}/remove"): "removeFleetNode",
     ("post", "/api/fleet/upgrade"): "upgradeFleet",
 }
@@ -88,17 +96,24 @@ class FleetEnrollRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=80, pattern=r"^[^\x00-\x1f\x7f]+$")
+    request_key: EnrollmentId
     # The enrollment authority caps a one-time bootstrap grant; advertising a
     # longer TTL turned its refusal into an unavailable projection.
     ttl_seconds: int = Field(default=900, ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
 
 
+class FleetReenrollRequest(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    request_key: EnrollmentId
+
+
 class FleetUpgradeRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    request_key: EnrollmentId
     selectors: list[str] | None = Field(default=None, min_length=1, max_length=64)
     all: bool = False
-    strategy: Literal["one-at-a-time", "all-at-once"] = "one-at-a-time"
+    strategy: Literal["one-at-a-time"] = "one-at-a-time"
 
 
 class FleetActionResponse(StrictJSONModel):
@@ -109,10 +124,18 @@ class FleetActionResponse(StrictJSONModel):
     node_id: str | None = Field(default=None, pattern=_NODE_PATTERN)
     display_name: str | None = Field(default=None, max_length=80)
     plan_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    request_key: EnrollmentId | None = None
     targets: list[str] = Field(default_factory=list, max_length=64)
     grant: EnrollmentGrantResponse | None = None
     provenance: DeploymentProvenance | None = None
     detail: str | None = Field(default=None, max_length=256)
+
+    @model_serializer(mode="wrap")
+    def _omit_unused_request_key(self, handler):
+        document = handler(self)
+        if self.request_key is None:
+            document.pop("request_key", None)
+        return document
 
 
 class FleetLogEntry(StrictJSONModel):
@@ -163,12 +186,29 @@ class FleetEnrollmentProvider(Protocol):
 
     def revoke_node(self, node_id: str, actor: str) -> None: ...
 
+    def grant_status(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus: ...
+
+    def revoke_grant(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus: ...
+
 
 class FleetUpgradeProvider(Protocol):
     def current_package(self) -> Mapping[str, object]: ...
 
+    def get_request(
+        self,
+        request_id: str,
+        *,
+        actor: str,
+        request_intent: Mapping[str, object],
+    ) -> Any | None: ...
+
     def preview(
-        self, node_ids: Sequence[str], package: Mapping[str, object], *, strategy: str
+        self,
+        node_ids: Sequence[str],
+        package: Mapping[str, object],
+        *,
+        strategy: Literal["one-at-a-time"],
+        request_intent: Mapping[str, object],
     ) -> Any: ...
 
     def apply(
@@ -179,7 +219,8 @@ class FleetUpgradeProvider(Protocol):
         plan_digest: str,
         actor: str,
         request_id: str,
-        strategy: str,
+        strategy: Literal["one-at-a-time"],
+        request_intent: Mapping[str, object],
     ) -> Any: ...
 
 
@@ -237,10 +278,11 @@ class _AgentEnrollmentAdapter:
     def create_named(
         self, *, name: str, ttl_seconds: int, actor: str, request_id: str
     ) -> Mapping[str, object]:
-        del request_id
         services = self._required()
         assert services.enrollment is not None
-        grant = services.enrollment.create_named(name, actor, ttl_seconds)
+        grant = services.enrollment.create_named(
+            name, actor, ttl_seconds, request_key=request_id
+        )
         return {
             "display_name": name,
             "state": "pending",
@@ -250,14 +292,27 @@ class _AgentEnrollmentAdapter:
     def create_reenrollment(
         self, node_id: str, actor: str, ttl_seconds: int, request_id: str
     ) -> Mapping[str, object]:
-        del request_id
         services = self._required()
         assert services.enrollment is not None
-        grant = services.enrollment.create_reenrollment(node_id, actor, ttl_seconds)
+        grant = services.enrollment.create_reenrollment(
+            node_id, actor, ttl_seconds, request_key=request_id
+        )
         return {
             "state": "pending",
             "grant": self._response(grant).model_dump(mode="json"),
         }
+
+    def grant_status(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus:
+        enrollment = self._services.enrollment
+        if enrollment is None:
+            raise RuntimeError("agent enrollment is unavailable")
+        return enrollment.grant_status(grant_id, actor=actor)
+
+    def revoke_grant(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus:
+        enrollment = self._services.enrollment
+        if enrollment is None:
+            raise RuntimeError("agent enrollment is unavailable")
+        return enrollment.revoke_grant(grant_id, actor=actor)
 
     def revoke_node(self, node_id: str, actor: str) -> None:
         services = self._required()
@@ -663,12 +718,12 @@ def build_fleet_operator_services(
 
 def _node(snapshot: FleetSnapshot, selector: str) -> FleetNode:
     wanted = selector.casefold()
-    matches = [
+    exact = [value for value in snapshot.nodes if value.id.casefold() == wanted]
+    matches = exact or [
         value
         for value in snapshot.nodes
         if wanted
         in {
-            value.id.casefold(),
             value.display_name.casefold(),
             value.hostname.casefold(),
         }
@@ -676,9 +731,7 @@ def _node(snapshot: FleetSnapshot, selector: str) -> FleetNode:
     if not matches:
         raise KeyError(selector)
     if len(matches) > 1:
-        raise LibrarySelectorAmbiguous(
-            selector, [value.display_name for value in matches]
-        )
+        raise LibrarySelectorAmbiguous(selector, sorted(value.id for value in matches))
     return matches[0]
 
 
@@ -694,11 +747,9 @@ def _domain_refusal_detail(error: Exception) -> str:
 
 def _operator_error(error: Exception) -> HTTPException:
     if isinstance(error, LibrarySelectorAmbiguous):
-        candidates = ", ".join(error.candidates[:16])
-        return HTTPException(
-            status_code=422,
-            detail=f"selector is ambiguous: {error.selector}; candidates: {candidates}",
-        )
+        from .library_api import SelectorAmbiguityHTTPError
+
+        return SelectorAmbiguityHTTPError(error)
     if isinstance(error, KeyError):
         return HTTPException(status_code=404, detail="operator object not found")
     if isinstance(error, (CursorError, RequestFault)):
@@ -858,7 +909,7 @@ def install_operator_projection_routes(
         run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated,
     ) -> TelemetryHistoryResponse:
-        node = _node(snapshot(), selector)
+        node = selected(selector)
         try:
             return fleet().telemetry_history(
                 node.id,
@@ -877,7 +928,7 @@ def install_operator_projection_routes(
     @app.get(
         "/api/fleet/{selector}/metrics/current",
         response_model=TelemetryCurrentResponse,
-        responses=bounded_error_responses(401, 404, 503),
+        responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getFleetMetricsCurrent",
     )
     def fleet_metrics_current(
@@ -890,7 +941,7 @@ def install_operator_projection_routes(
         run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated,
     ) -> TelemetryCurrentResponse:
-        node = _node(snapshot(), selector)
+        node = selected(selector)
         try:
             return fleet().telemetry_current(
                 node.id,
@@ -905,7 +956,7 @@ def install_operator_projection_routes(
     @app.get(
         "/api/fleet/{selector}/metrics/capabilities",
         response_model=TelemetryCapabilitiesResponse,
-        responses=bounded_error_responses(401, 404, 503),
+        responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getFleetMetricsCapabilities",
     )
     def fleet_metrics_capabilities(
@@ -918,7 +969,7 @@ def install_operator_projection_routes(
         run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated,
     ) -> TelemetryCapabilitiesResponse:
-        node = _node(snapshot(), selector)
+        node = selected(selector)
         try:
             return fleet().telemetry_capabilities(
                 node.id,
@@ -942,7 +993,7 @@ def install_operator_projection_routes(
         state: Annotated[str | None, Query(min_length=1, max_length=32)] = None,
         _actor: Actor = authenticated,
     ) -> TelemetryWorkloadsResponse:
-        node = _node(snapshot(), selector)
+        node = selected(selector)
         try:
             return fleet().telemetry_workloads(node.id, run_id=run_id, state=state)
         except (OSError, RuntimeError, TypeError, ValueError) as error:
@@ -965,7 +1016,7 @@ def install_operator_projection_routes(
         follow: Annotated[bool, Query()] = False,
         _actor: Actor = authenticated,
     ) -> FleetLogResponse:
-        node = _node(snapshot(), selector)
+        node = selected(selector)
         if fleet_services is None or fleet_services.logs is None:
             raise HTTPException(
                 status_code=503, detail="fleet log evidence unavailable"
@@ -993,7 +1044,7 @@ def install_operator_projection_routes(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         _actor: Actor = authenticated,
     ) -> FleetNodeDetailResponse:
-        node = _node(snapshot(), selector)
+        node = selected(selector)
         return FleetNodeDetailResponse.model_validate(
             node.model_dump() | {"provenance": provenance()}
         )
@@ -1011,7 +1062,7 @@ def install_operator_projection_routes(
         actor: Actor = authenticated,
     ) -> FleetNodeIdentity:
         _require_mutation(actor, "POST", "/api/fleet/{selector}/rename")
-        node = _node(snapshot(), selector)
+        node = selected(selector)
         try:
             result = fleet().update_display_name(node.id, body.display_name)
         except (OSError, RuntimeError, TypeError, ValueError) as error:
@@ -1023,7 +1074,7 @@ def install_operator_projection_routes(
         "/api/fleet/enroll",
         response_model=FleetActionResponse,
         status_code=status.HTTP_201_CREATED,
-        responses=bounded_error_responses(401, 403, 422, 503),
+        responses=bounded_error_responses(401, 403, 409, 422, 503),
         operation_id="enrollFleetNode",
     )
     def fleet_enroll(
@@ -1039,40 +1090,96 @@ def install_operator_projection_routes(
                 name=body.name,
                 ttl_seconds=body.ttl_seconds,
                 actor=actor.subject,
-                request_id=request.state.request_id,
+                request_id=body.request_key,
             )
             result = FleetActionResponse.model_validate({"action": "enroll", **value})
             audit(request, actor, "fleet.node.enroll", (body.name,))
             return result
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
 
     @app.post(
         "/api/fleet/{selector}/re-enroll",
-        openapi_extra={"x-vonk-request-body": "none"},
         response_model=FleetActionResponse,
-        responses=bounded_error_responses(401, 403, 404, 422, 503),
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="reenrollFleetNode",
     )
     def fleet_reenroll(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
+        body: FleetReenrollRequest,
         request: Request,
         actor: Actor = authenticated,
     ) -> FleetActionResponse:
         _require_mutation(actor, "POST", "/api/fleet/{selector}/re-enroll")
-        node = _node(snapshot(), selector)
+        node = selected(selector)
         if fleet_services is None or fleet_services.enrollment is None:
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
         try:
             value = fleet_services.enrollment.create_reenrollment(
-                node.id, actor.subject, 900, request.state.request_id
+                node.id, actor.subject, 900, body.request_key
             )
             result = FleetActionResponse.model_validate(
                 {"action": "re-enroll", "node_id": node.id, **value}
             )
             audit(request, actor, "fleet.node.re-enroll", (node.id,))
             return result
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
+        except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
+            raise _operator_error(error) from None
+
+    @app.get(
+        "/api/fleet/enrollments/{grant_id}",
+        response_model=EnrollmentGrantStatus,
+        responses=bounded_error_responses(401, 403, 404, 422, 503),
+        operation_id="getFleetEnrollment",
+    )
+    def get_enrollment(
+        grant_id: Annotated[str, Path(pattern=ENROLLMENT_ID_PATTERN)],
+        actor: Actor = authenticated,
+    ) -> EnrollmentGrantStatus:
+        _require_mutation(actor, "POST", "/api/fleet/enroll")
+        if fleet_services is None or fleet_services.enrollment is None:
+            raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
+        try:
+            return fleet_services.enrollment.grant_status(grant_id, actor=actor.subject)
+        except (
+            KeyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            SQLAlchemyError,
+        ) as error:
+            raise _operator_error(error) from None
+
+    @app.post(
+        "/api/fleet/enrollments/{grant_id}/revoke",
+        openapi_extra={"x-vonk-request-body": "none"},
+        response_model=EnrollmentGrantStatus,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="revokeFleetEnrollment",
+    )
+    def revoke_enrollment(
+        grant_id: Annotated[str, Path(pattern=ENROLLMENT_ID_PATTERN)],
+        request: Request,
+        actor: Actor = authenticated,
+    ) -> EnrollmentGrantStatus:
+        _require_mutation(actor, "POST", "/api/fleet/enrollments/{grant_id}/revoke")
+        if fleet_services is None or fleet_services.enrollment is None:
+            raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
+        try:
+            result = fleet_services.enrollment.revoke_grant(
+                grant_id, actor=actor.subject
+            )
+            audit(request, actor, "fleet.enrollment.revoke", (grant_id,))
+            return result
+        except (
+            KeyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            SQLAlchemyError,
+        ) as error:
             raise _operator_error(error) from None
 
     @app.post(
@@ -1088,7 +1195,7 @@ def install_operator_projection_routes(
         actor: Actor = authenticated,
     ) -> FleetActionResponse:
         _require_mutation(actor, "POST", "/api/fleet/{selector}/remove")
-        node = _node(snapshot(), selector)
+        node = selected(selector)
         if fleet_services is None or fleet_services.enrollment is None:
             raise HTTPException(status_code=503, detail="fleet removal unavailable")
         try:
@@ -1118,8 +1225,26 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet upgrades unavailable")
         if body.all == (body.selectors is not None):
             raise HTTPException(status_code=422, detail="choose all or selectors")
-        fleet_snapshot = snapshot()
+        request_intent = {"all": body.all, "selectors": body.selectors}
         try:
+            existing = fleet_services.upgrades.get_request(
+                body.request_key,
+                actor=actor.subject,
+                request_intent=request_intent,
+            )
+            if existing is not None:
+                result = FleetActionResponse(
+                    action="upgrade",
+                    state=str(getattr(existing, "state", "accepted")),
+                    operation_id=str(getattr(existing, "id", "")) or None,
+                    plan_digest=str(getattr(existing, "payload_digest", "")) or None,
+                    request_key=body.request_key,
+                    targets=list(getattr(existing, "targets", ())),
+                    provenance=provenance(),
+                )
+                audit(request, actor, "fleet.upgrade", tuple(result.targets))
+                return result
+            fleet_snapshot = snapshot()
             nodes = (
                 list(fleet_snapshot.nodes)
                 if body.all
@@ -1128,25 +1253,30 @@ def install_operator_projection_routes(
             node_ids = list(dict.fromkeys(node.id for node in nodes))
             package = fleet_services.upgrades.current_package()
             plan = fleet_services.upgrades.preview(
-                node_ids, package, strategy=body.strategy
+                node_ids,
+                package,
+                strategy=body.strategy,
+                request_intent=request_intent,
             )
             job = fleet_services.upgrades.apply(
                 node_ids,
                 package,
                 plan_digest=plan.plan_digest,
                 actor=actor.subject,
-                request_id=request.state.request_id,
+                request_id=body.request_key,
                 strategy=body.strategy,
+                request_intent=request_intent,
             )
             result = FleetActionResponse(
                 action="upgrade",
                 state=str(getattr(job, "state", "accepted")),
                 operation_id=str(getattr(job, "id", "")) or None,
-                plan_digest=plan.plan_digest,
-                targets=node_ids,
+                plan_digest=str(getattr(job, "payload_digest", plan.plan_digest)),
+                request_key=body.request_key,
+                targets=list(getattr(job, "targets", node_ids)),
                 provenance=provenance(),
             )
-            audit(request, actor, "fleet.upgrade", tuple(node_ids))
+            audit(request, actor, "fleet.upgrade", tuple(result.targets))
             return result
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None

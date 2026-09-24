@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from vonk_agent_protocol import (
@@ -20,10 +20,14 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.compiled_execution_plan import COMPILED_PLAN_STORAGE_CONTEXT
+from vonk_agent_protocol.inventory import MemoryPool
 
 from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
 from .strict_json import StrictJSONModel
 from .validation_detail import validation_error_detail
+
+if TYPE_CHECKING:
+    from .models import RecipeInstallation
 
 DateTimeString = Annotated[
     str,
@@ -118,6 +122,7 @@ class StoredRunNodePlan(_PersistedModel):
     allowed: bool
     inventory_observed_at: DateTimeString | None
     memory_kind: Literal["unified", "host", "accelerator"]
+    memory_pool: MemoryPool
     required_memory_bytes: int = Field(ge=0)
     available_memory_bytes: int | None
     active_reserved_bytes: int = Field(ge=0)
@@ -213,6 +218,53 @@ def installation_plan_document(
     value: object, *, for_uninstall: bool = False
 ) -> dict[str, object]:
     return _document(parse_stored_installation_plan(value, for_uninstall=for_uninstall))
+
+
+def installation_matches_runtime_image(
+    installation: RecipeInstallation,
+    *,
+    build_id: str | None,
+    image_digest: str | None,
+    oci_layout_sha256: str | None,
+    image_bytes: int | None,
+) -> bool:
+    """Whether the stored execution plan uses this exact immutable image.
+
+    A build row can acquire a different result after repair. Its ID and the
+    installation's state cannot establish that existing compiled ranks use
+    the newly selected image or archive.
+    """
+    if (
+        image_digest is None
+        or oci_layout_sha256 is None
+        or image_bytes is None
+        or installation.recipe_build_id != build_id
+        or installation.image_digest != image_digest
+    ):
+        return False
+    plan = parse_stored_installation_plan(installation.plan)
+    expected = {
+        "build_id": build_id,
+        "image_digest": image_digest,
+        "oci_layout_sha256": oci_layout_sha256,
+        "image_bytes": image_bytes,
+    }
+    return (
+        plan.mapping_id == installation.mapping_id
+        and plan.mapping_generation == installation.mapping_generation
+        and plan.recipe_revision_id == installation.recipe_revision_id
+        and plan.plan_digest == installation.plan_digest
+        and plan.recipe_build_id == build_id
+        and plan.image_digest == image_digest
+        and bool(plan.compiled_execution_plans)
+        and all(
+            all(
+                getattr(compiled.runtime_image, name) == value
+                for name, value in expected.items()
+            )
+            for compiled in plan.compiled_execution_plans.values()
+        )
+    )
 
 
 def parse_stored_run_plan(value: object) -> StoredRunPlan:

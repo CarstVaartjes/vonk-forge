@@ -1,4 +1,4 @@
-"""Evidence based memory planning for canonical recipe settings.
+"""Evidence based capacity planning for canonical recipe settings.
 
 The public RecipeDefinition owns settings and topology.  This module consumes
 that typed projection and never invents an engine memory formula.  Context and
@@ -11,11 +11,14 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import Literal, Protocol, TypeGuard, get_args, runtime_checkable
 
+from vonk_agent_protocol.inventory import MemoryPool
+
 from .bounded_json import require_integer
-from .run_switch_contract import RunSwitchChangeEffect
+from .run_switch_contract import MemoryKind, RunSwitchChangeEffect
 
 EvidenceState = Literal["declared", "measured", "fresh", "stale", "unknown"]
 Effect = Literal["reuse", "restart", "reprepare", "reinstall", "rebuild"]
@@ -55,6 +58,51 @@ class ResourceReason:
     detail: str
     severity: Literal["blocker", "warning"] = "blocker"
     node_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InstallationDiskRequirement:
+    required_bytes: int
+    floor_bytes: int
+
+
+def installation_disk_requirement(
+    disk: Mapping[str, object],
+    *,
+    required_download_bytes: int,
+    minimum_floor_bytes: int,
+) -> InstallationDiskRequirement:
+    """One disk envelope for operator review and installation admission.
+
+    The caller supplies exact missing payload bytes, or a full allocation when
+    it cannot yet promise reuse. The reserve remains separate from consumed
+    bytes so installation does not mistake headroom for downloaded data.
+    """
+    staging, cache, rollback, safety = (
+        require_integer(disk.get(name), name)
+        for name in (
+            "staging_bytes",
+            "cache_bytes",
+            "rollback_bytes",
+            "safety_margin_bytes",
+        )
+    )
+    if any(
+        value < 0
+        for value in (
+            staging,
+            cache,
+            rollback,
+            safety,
+            required_download_bytes,
+            minimum_floor_bytes,
+        )
+    ):
+        raise ValueError("installation disk envelope contains negative bytes")
+    return InstallationDiskRequirement(
+        required_download_bytes + staging + cache + rollback,
+        max(minimum_floor_bytes, safety),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +191,213 @@ class ResourceDemand:
 
 
 @dataclass(frozen=True, slots=True)
+class UnknownRunMemoryResidual:
+    """Upper bound for an active run whose resident usage is not observed."""
+
+    run_id: str
+    run_generation: int
+    reservation_kind: str
+    maximum_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryReservationTotals:
+    """Hard peak commitments and bounds not resolved by physical observations."""
+
+    committed_bytes_by_kind: Mapping[str, int]
+    unmaterialized_bytes_by_kind: Mapping[str, int]
+    unknown_run_residuals_by_kind: Mapping[
+        str, tuple[UnknownRunMemoryResidual, ...]
+    ] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryRequirement:
+    """One recipe rank's demand and reserve, shared by review and admission."""
+
+    kind: MemoryKind
+    floor_bytes: int
+    demand: ResourceDemand
+
+    @property
+    def reservation_kind(self) -> str:
+        return memory_reservation_kind(self.kind)
+
+
+def memory_reservation_kind(kind: str) -> str:
+    return {
+        "unified": "unified-memory",
+        "host": "host-memory",
+        "accelerator": "gpu-memory",
+    }[kind]
+
+
+def memory_reservation_kinds(kind: str, pool: MemoryPool) -> tuple[str, ...]:
+    """Declared consumers of one physical pool, independent of owner names."""
+    kinds = ("host-memory", "gpu-memory", "unified-memory")
+    if kind not in kinds:
+        raise ValueError("reservation is not memory")
+    if pool == "shared":
+        return kinds
+    if kind == "unified-memory":
+        # Unified demand is checked against both independent capacities below.
+        return kinds
+    return kind, "unified-memory"
+
+
+def _is_memory_kind(value: object) -> TypeGuard[MemoryKind]:
+    return isinstance(value, str) and value in get_args(MemoryKind)
+
+
+def memory_requirement(
+    recipe_document: Mapping[str, object],
+    memory: Mapping[str, object],
+    role_name: str,
+    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    *,
+    settings: object | None = None,
+    platform_floor_bytes: int = 0,
+) -> MemoryRequirement:
+    kind = memory.get("kind")
+    if not _is_memory_kind(kind):
+        raise ValueError("recipe memory kind is invalid")
+    values = [
+        require_integer(memory.get(name), name)
+        for name in (
+            "startup_peak_bytes",
+            "steady_state_bytes",
+            "runtime_growth_bytes",
+            "system_reserve_bytes",
+        )
+    ]
+    if min(*values, platform_floor_bytes) < 0:
+        raise ValueError("recipe memory envelope is invalid")
+    startup, steady, growth, reserve = values
+    selected = settings if settings is not None else recipe_document
+    resolution = (
+        SettingsResolution(selected)
+        if isinstance(selected, EffectiveResourceSettings)
+        else resolve_effective_settings(selected)
+    )
+    evidence = _resource_evidence(
+        recipe_document,
+        role_name,
+        model_documents,
+        max(startup, steady + growth),
+        resolution.settings,
+    )
+    demand = resource_demand(
+        resolution.settings if resolution.settings is not None else selected,
+        evidence,
+    )
+    return MemoryRequirement(kind, max(platform_floor_bytes, reserve), demand)
+
+
+def memory_capacity_snapshot(
+    node_id: str,
+    kind: MemoryKind,
+    *,
+    host: tuple[int, int] | None,
+    accelerator: tuple[int, int] | None,
+    reservations: MemoryReservationTotals,
+    memory_pool: MemoryPool | None,
+    evidence_state: EvidenceState,
+    evidence_digest: str | None = None,
+    evidence_observed_at: datetime | None = None,
+) -> CapacitySnapshot:
+    def component(kind: MemoryKind, values: tuple[int, int] | None) -> CapacitySnapshot:
+        reserved = (
+            sum(
+                reservations.committed_bytes_by_kind.get(item, 0)
+                for item in memory_reservation_kinds(
+                    memory_reservation_kind(kind), memory_pool
+                )
+            )
+            if memory_pool is not None
+            else None
+        )
+        unmaterialized = (
+            sum(
+                reservations.unmaterialized_bytes_by_kind.get(item, 0)
+                for item in memory_reservation_kinds(
+                    memory_reservation_kind(kind), memory_pool
+                )
+            )
+            if memory_pool is not None
+            else None
+        )
+        unknown_run_residuals = (
+            tuple(
+                residual
+                for item in memory_reservation_kinds(
+                    memory_reservation_kind(kind), memory_pool
+                )
+                for residual in reservations.unknown_run_residuals_by_kind.get(item, ())
+            )
+            if memory_pool is not None
+            else ()
+        )
+        total, free = values if values is not None else (None, None)
+        return CapacitySnapshot(
+            node_id,
+            kind,
+            total,
+            total - free if total is not None and free is not None else None,
+            reserved,
+            evidence_state if total is not None else "unknown",
+            evidence_digest,
+            unmaterialized_bytes=unmaterialized,
+            unknown_run_residuals=unknown_run_residuals,
+            evidence_observed_at=evidence_observed_at,
+        )
+
+    if memory_pool == "shared":
+        values = (
+            (min(host[0], accelerator[0]), min(host[1], accelerator[1]))
+            if host is not None and accelerator is not None
+            else None
+        )
+        return component(kind, values)
+    if kind == "host":
+        return component("host", host)
+    if kind == "accelerator":
+        return component("accelerator", accelerator)
+    # A unified envelope on separate hardware must fit each pool. Adding their
+    # independent reservations would invent consumption; checking only one pool
+    # would miss a blocker, including a different limiting pool after a stop.
+    components = (component("host", host), component("accelerator", accelerator))
+    limiting = min(
+        components,
+        key=lambda item: (
+            min(
+                item.available_bytes - item.reserved_bytes,
+                item.available_bytes
+                - item.occupied_bytes
+                - (item.unmaterialized_bytes or 0)
+                - sum(item.maximum_bytes for item in item.unknown_run_residuals),
+            )
+            if item.available_bytes is not None
+            and item.occupied_bytes is not None
+            and item.reserved_bytes is not None
+            else -1
+        ),
+    )
+    residuals = tuple(
+        dict.fromkeys(
+            residual
+            for component in components
+            for residual in component.unknown_run_residuals
+        )
+    )
+    return replace(
+        limiting,
+        memory_kind="unified",
+        components=components,
+        unknown_run_residuals=residuals,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class CapacitySnapshot:
     node_id: str
     memory_kind: str
@@ -151,6 +406,10 @@ class CapacitySnapshot:
     reserved_bytes: int | None
     evidence_state: EvidenceState = "unknown"
     evidence_digest: str | None = None
+    components: tuple[CapacitySnapshot, ...] = ()
+    unmaterialized_bytes: int | None = 0
+    unknown_run_residuals: tuple[UnknownRunMemoryResidual, ...] = ()
+    evidence_observed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +432,8 @@ class NodeCapacityPlan:
     stop_required: bool
     allowed: bool
     reasons: tuple[ResourceReason, ...] = ()
+    insufficient_components: tuple[str, ...] = ()
+    unknown_run_residuals: tuple[UnknownRunMemoryResidual, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,7 +457,7 @@ class ResourcePreflightPlan:
             self.settings is not None
             and self.capacity is not None
             and self.capacity.allowed
-            and not self.reasons
+            and not any(reason.severity == "blocker" for reason in self.reasons)
         )
 
 
@@ -412,6 +673,92 @@ def resolve_effective_settings(
     )
 
 
+def _selected_model_bytes(
+    recipe_document: Mapping[str, object],
+    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    role_name: str,
+) -> int | None:
+    if not model_documents:
+        return None
+    selections = recipe_document.get("models")
+    if not isinstance(selections, Sequence) or isinstance(selections, (str, bytes)):
+        return None
+    total = 0
+    selected_any = False
+    for selection in selections:
+        if not isinstance(selection, Mapping):
+            return None
+        model_ref = selection.get("model")
+        if not isinstance(model_ref, Mapping):
+            return None
+        publisher = model_ref.get("publisher")
+        slug = model_ref.get("slug")
+        content_sha256 = model_ref.get("content_sha256")
+        if (
+            not isinstance(publisher, str)
+            or not publisher
+            or not isinstance(slug, str)
+            or not slug
+            or not isinstance(content_sha256, str)
+            or not content_sha256
+        ):
+            return None
+        model_document = model_documents.get((publisher, slug, content_sha256))
+        if model_document is None:
+            return None
+        files = model_document.get("files")
+        if not isinstance(files, Sequence) or isinstance(files, (str, bytes)):
+            return None
+        by_id = {
+            str(file.get("id")): file
+            for file in files
+            if isinstance(file, Mapping) and isinstance(file.get("id"), str)
+        }
+        raw_files = selection.get("files")
+        if not isinstance(raw_files, Sequence) or isinstance(raw_files, (str, bytes)):
+            return None
+        selected_ids: set[str] = set()
+        for item in raw_files:
+            if not isinstance(item, Mapping):
+                return None
+            roles = item.get("roles", ())
+            if (
+                isinstance(roles, Sequence)
+                and not isinstance(roles, (str, bytes))
+                and role_name in roles
+            ):
+                file_id = item.get("file_id")
+                if not isinstance(file_id, str) or file_id not in by_id:
+                    return None
+                selected_ids.add(file_id)
+        for file_id in selected_ids:
+            size = by_id[file_id].get("size_bytes")
+            if type(size) is not int or size < 0:
+                return None
+            total += size
+            selected_any = True
+    return total if selected_any else None
+
+
+def _resource_evidence(
+    recipe_document: Mapping[str, object],
+    role_name: str,
+    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    declared_total_bytes: int,
+    settings: object | None,
+) -> ResourceEvidence:
+    model_bytes = _selected_model_bytes(recipe_document, model_documents, role_name)
+    return ResourceEvidence(
+        weights_bytes=model_bytes,
+        runtime_overhead_bytes=None,
+        declared_total_bytes=declared_total_bytes if model_bytes is not None else None,
+        baseline_context_tokens=getattr(settings, "context_tokens", None),
+        baseline_concurrency=getattr(settings, "concurrency", None),
+        baseline_batch_tokens=getattr(settings, "batch_tokens", None),
+        evidence_state="declared" if model_bytes is not None else "unknown",
+    )
+
+
 def resource_demand(
     settings: EffectiveResourceSettings | object,
     evidence: ResourceEvidence,
@@ -429,14 +776,32 @@ def resource_demand(
             None, None, None, None, None, None, "unknown", tuple(reasons)
         )
     selected = resolution.settings
-    if evidence.evidence_state in {"unknown", "stale"}:
+    declared_bound = (
+        evidence.declared_total_bytes
+        if type(evidence.declared_total_bytes) is int
+        and evidence.declared_total_bytes >= 0
+        else None
+    )
+    uncertain: list[str] = []
+    if evidence.declared_total_bytes is not None and declared_bound is None:
         reasons.append(
             _reason(
-                "resource.evidence_unknown",
-                "Memory evidence is missing or stale for the selected settings.",
+                "resource.evidence_invalid",
+                "Declared recipe-role memory envelope is invalid.",
                 node_id=node_id,
             )
         )
+    if evidence.evidence_state in {"unknown", "stale"}:
+        if declared_bound is None:
+            reasons.append(
+                _reason(
+                    "resource.evidence_unknown",
+                    "Memory evidence is missing or stale and no declared role bound is available.",
+                    node_id=node_id,
+                )
+            )
+        else:
+            uncertain.append(f"{evidence.evidence_state} evidence")
     if evidence.evidence_digest is not None and not _is_digest(
         evidence.evidence_digest
     ):
@@ -451,14 +816,22 @@ def resource_demand(
         ("weights_bytes", evidence.weights_bytes),
         ("runtime_overhead_bytes", evidence.runtime_overhead_bytes),
     ):
-        if (type(item) is not int or item < 0) and not (
-            type(evidence.declared_total_bytes) is int
-            and evidence.declared_total_bytes >= 0
-        ):
+        if item is None:
+            if declared_bound is None:
+                reasons.append(
+                    _reason(
+                        "resource.evidence_unknown",
+                        f"{name} is missing and no declared role bound is available.",
+                        node_id=node_id,
+                    )
+                )
+            else:
+                uncertain.append(name)
+        elif type(item) is not int or item < 0:
             reasons.append(
                 _reason(
-                    "resource.evidence_unknown",
-                    f"{name} is missing or invalid; capacity cannot be predicted.",
+                    "resource.evidence_invalid",
+                    f"{name} is invalid; resource evidence cannot be trusted.",
                     node_id=node_id,
                 )
             )
@@ -489,13 +862,27 @@ def resource_demand(
         node_id,
         required=selected.batch_tokens is not None,
     )
-    for term in (context, concurrency, batch):
-        reasons.extend(term[1])
-    total: int | None = None
-    if not reasons and all(
-        isinstance(term[0], int) for term in (context, concurrency, batch)
+    terms: list[tuple[int | None, tuple[ResourceReason, ...]]] = []
+    for name, term in (
+        ("context", context),
+        ("concurrency", concurrency),
+        ("batch", batch),
     ):
-        base = evidence.declared_total_bytes
+        if term[0] is None and declared_bound is not None:
+            if term[1] and all(
+                reason.code.endswith(("_unknown", "_unsupported")) for reason in term[1]
+            ):
+                uncertain.append(f"{name} estimate")
+                terms.append((0, ()))
+            else:
+                terms.append(term)
+                reasons.extend(term[1])
+        else:
+            terms.append(term)
+            reasons.extend(term[1])
+    total: int | None = None
+    if not reasons and all(isinstance(term[0], int) for term in terms):
+        base = declared_bound
         if (
             base is None
             and type(evidence.weights_bytes) is int
@@ -505,10 +892,19 @@ def resource_demand(
         if base is not None:
             total = (
                 base
-                + require_integer(context[0], "context")
-                + require_integer(concurrency[0], "concurrency")
-                + require_integer(batch[0], "batch")
+                + require_integer(terms[0][0], "context")
+                + require_integer(terms[1][0], "concurrency")
+                + require_integer(terms[2][0], "batch")
             )
+    if uncertain and declared_bound is not None and total is not None:
+        reasons.append(
+            _reason(
+                "resource.estimate_uncertain",
+                f"Forecast {total} bytes from the declared recipe-role memory envelope ({declared_bound} bytes); {', '.join(dict.fromkeys(uncertain))} is unavailable, so actual demand may exceed this bound.",
+                severity="warning",
+                node_id=node_id,
+            )
+        )
     return ResourceDemand(
         evidence.weights_bytes if type(evidence.weights_bytes) is int else None,
         evidence.runtime_overhead_bytes
@@ -520,6 +916,40 @@ def resource_demand(
         total,
         evidence.evidence_state,
         tuple(reasons),
+    )
+
+
+def _minimum_known(values: Sequence[int | None]) -> int | None:
+    return (
+        None if None in values else min(value for value in values if value is not None)
+    )
+
+
+def _resident_usage_uncertainty_detail(
+    capacity: CapacitySnapshot,
+    residuals: Sequence[UnknownRunMemoryResidual],
+    *,
+    admitted: bool,
+) -> str:
+    observed_at = (
+        capacity.evidence_observed_at.isoformat()
+        if capacity.evidence_observed_at is not None
+        else "timestamp unavailable"
+    )
+    digest = capacity.evidence_digest or "digest unavailable"
+    maximum = sum(item.maximum_bytes for item in residuals)
+    if admitted:
+        return (
+            f"Aggregate inventory {observed_at} ({digest}) reports no per-run "
+            f"resident usage for {len(residuals)} exact active claim(s); their "
+            f"remaining commitment is in the range 0..{maximum} bytes. Admission "
+            "applies the full upper bound."
+        )
+    return (
+        f"Capacity is unverified by aggregate inventory {observed_at} ({digest}): "
+        f"{len(residuals)} exact active run claim(s) may retain 0..{maximum} "
+        "bytes, and the safe upper bound does not fit. Reconcile the exact run "
+        "claims and retry against fresh inventory."
     )
 
 
@@ -574,12 +1004,61 @@ def plan_capacity(
             )
             continue
         available = capacity.available_bytes
+        if capacity.components:
+            parts = [
+                plan_capacity(
+                    {node_id: demand},
+                    [part],
+                    planned_stops,
+                    memory_floor_bytes=memory_floor_bytes,
+                ).nodes[0]
+                for part in capacity.components
+            ]
+            nodes.append(
+                NodeCapacityPlan(
+                    node_id,
+                    demand.total_bytes,
+                    _minimum_known([part.current_free_after_bytes for part in parts]),
+                    _minimum_known(
+                        [part.after_stop_free_after_bytes for part in parts]
+                    ),
+                    _minimum_known([part.selected_free_after_bytes for part in parts]),
+                    any(part.stop_required for part in parts),
+                    all(part.allowed for part in parts),
+                    tuple(
+                        dict.fromkeys(
+                            reason for part in parts for reason in part.reasons
+                        )
+                    ),
+                    tuple(
+                        dict.fromkeys(
+                            component
+                            for part in parts
+                            for component in part.insufficient_components
+                        )
+                    ),
+                    tuple(
+                        dict.fromkeys(
+                            residual
+                            for part in parts
+                            for residual in part.unknown_run_residuals
+                        )
+                    ),
+                )
+            )
+            continue
         occupied = capacity.occupied_bytes
         reserved = capacity.reserved_bytes
+        unmaterialized = capacity.unmaterialized_bytes
+        unknown_residuals = capacity.unknown_run_residuals
+        unknown_upper_bytes = sum(
+            residual.maximum_bytes for residual in unknown_residuals
+        )
         for name, value in (
             ("available", available),
             ("occupied", occupied),
             ("reserved", reserved),
+            ("unmaterialized", unmaterialized),
         ):
             if type(value) is not int or value < 0:
                 node_reasons.append(
@@ -602,8 +1081,9 @@ def plan_capacity(
             not isinstance(available, int)
             or not isinstance(occupied, int)
             or not isinstance(reserved, int)
+            or not isinstance(unmaterialized, int)
             or total_bytes is None
-            or node_reasons
+            or any(reason.severity == "blocker" for reason in node_reasons)
         ):
             nodes.append(
                 NodeCapacityPlan(
@@ -618,7 +1098,13 @@ def plan_capacity(
                 )
             )
             continue
-        current = available - occupied - reserved - total_bytes
+        # Aggregate inventory has no exact resident usage for a retained run.
+        # Its remaining reservation is therefore a range from zero to the full
+        # peak. Admission uses the safe lower-capacity bound; it never treats a
+        # starting/running state as measured bytes or as a release receipt.
+        current_without_unknown = available - occupied - unmaterialized - total_bytes
+        current = current_without_unknown - unknown_upper_bytes
+        budget_after = available - reserved - total_bytes - memory_floor_bytes
         release = releases.get((node_id, capacity.memory_kind), 0)
         if not release:
             release = max(
@@ -631,17 +1117,66 @@ def plan_capacity(
                 default=0,
             )
         after_stop = current + release
-        current_fit = current >= memory_floor_bytes
-        after_fit = after_stop >= memory_floor_bytes
+        budget_after_stop = budget_after + release
+        current_fit = current >= memory_floor_bytes and budget_after >= 0
+        after_fit = after_stop >= memory_floor_bytes and budget_after_stop >= 0
         selected = after_stop if release else current
-        allowed = selected >= memory_floor_bytes
-        if not allowed:
+        allowed = (after_fit if release else current_fit) and not any(
+            reason.severity == "blocker" for reason in node_reasons
+        )
+        if budget_after < 0 and (not release or budget_after_stop < 0):
             node_reasons.append(
                 _reason(
-                    "resource.insufficient_capacity_after_stop"
-                    if release
-                    else "resource.insufficient_capacity",
-                    f"Selected settings leave {selected} bytes after planned stops.",
+                    "resource.insufficient_reservation_budget",
+                    f"Exact memory commitments plus demand and reserve exceed the physical pool by {-budget_after} bytes.",
+                    node_id=node_id,
+                )
+            )
+        if (
+            current_without_unknown >= memory_floor_bytes
+            and current < memory_floor_bytes
+            and not release
+        ):
+            node_reasons.append(
+                _reason(
+                    "resource.resident_usage_unknown",
+                    _resident_usage_uncertainty_detail(
+                        capacity, unknown_residuals, admitted=False
+                    ),
+                    node_id=node_id,
+                )
+            )
+        elif current_without_unknown < memory_floor_bytes and not release:
+            node_reasons.append(
+                _reason(
+                    "resource.insufficient_capacity",
+                    f"Observed free capacity less definite claims and selected demand leaves "
+                    f"{current_without_unknown} bytes before the required "
+                    f"{memory_floor_bytes}-byte reserve, even if retained runs use zero bytes.",
+                    node_id=node_id,
+                )
+            )
+        elif release and after_stop < memory_floor_bytes:
+            node_reasons.append(
+                _reason(
+                    "resource.insufficient_capacity_after_stop",
+                    f"Selected demand leaves {selected} bytes after planned stops; {memory_floor_bytes} bytes must remain reserved.",
+                    node_id=node_id,
+                )
+            )
+        elif (
+            not release
+            and current >= memory_floor_bytes
+            and budget_after >= 0
+            and unknown_residuals
+        ):
+            node_reasons.append(
+                _reason(
+                    "resource.resident_usage_unknown",
+                    _resident_usage_uncertainty_detail(
+                        capacity, unknown_residuals, admitted=True
+                    ),
+                    severity="warning",
                     node_id=node_id,
                 )
             )
@@ -649,18 +1184,22 @@ def plan_capacity(
             NodeCapacityPlan(
                 node_id,
                 demand.total_bytes,
-                current,
-                after_stop,
-                selected,
+                None if unknown_residuals else current,
+                None if unknown_residuals else after_stop,
+                None if unknown_residuals else selected,
                 not current_fit and after_fit and release > 0,
                 allowed,
                 tuple(node_reasons),
+                (capacity.memory_kind,) if not current_fit else (),
+                unknown_residuals,
             )
         )
     reasons.extend(reason for node in nodes for reason in node.reasons)
     return CapacityPlan(
         tuple(nodes),
-        bool(nodes) and not reasons and all(node.allowed for node in nodes),
+        bool(nodes)
+        and all(node.allowed for node in nodes)
+        and not any(reason.severity == "blocker" for reason in reasons),
         any(node.stop_required for node in nodes),
         tuple(reasons),
     )
@@ -782,9 +1321,27 @@ def _term(
                 ),
             )
         )
+    if baseline is not None and (type(baseline) is not int or baseline < 0):
+        return None, (
+            _reason(
+                f"resource.{name}_evidence_invalid",
+                f"Measured baseline evidence for {name} is invalid.",
+                node_id=node_id,
+            ),
+        )
     if supported is not None and (
-        len(supported) != 2 or value < supported[0] or value > supported[1]
+        len(supported) != 2
+        or any(type(item) is not int or item < 0 for item in supported)
+        or supported[0] > supported[1]
     ):
+        return None, (
+            _reason(
+                f"resource.{name}_evidence_invalid",
+                f"Declared supported range for {name} is invalid.",
+                node_id=node_id,
+            ),
+        )
+    if supported is not None and (value < supported[0] or value > supported[1]):
         return None, (
             _reason(
                 f"resource.{name}_unsupported",
@@ -802,11 +1359,19 @@ def _term(
         )
     if value == baseline:
         return 0, ()
-    if type(coefficient) is not int or coefficient < 0:
+    if coefficient is None:
         return None, (
             _reason(
                 f"resource.{name}_evidence_unknown",
                 f"No evidence supports changing effective {name} from its measured baseline.",
+                node_id=node_id,
+            ),
+        )
+    if type(coefficient) is not int or coefficient < 0:
+        return None, (
+            _reason(
+                f"resource.{name}_evidence_invalid",
+                f"Measured coefficient for {name} is invalid.",
                 node_id=node_id,
             ),
         )
@@ -859,8 +1424,14 @@ def _same_memory_kind(left: str, right: str) -> bool:
     )
 
 
-def _reason(code: str, detail: str, *, node_id: str | None = None) -> ResourceReason:
-    return ResourceReason(code, detail, node_id=node_id)
+def _reason(
+    code: str,
+    detail: str,
+    *,
+    severity: Literal["blocker", "warning"] = "blocker",
+    node_id: str | None = None,
+) -> ResourceReason:
+    return ResourceReason(code, detail, severity=severity, node_id=node_id)
 
 
 def _canonical(value: object) -> object:

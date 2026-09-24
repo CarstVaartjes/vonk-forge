@@ -68,6 +68,8 @@ pub fn same_installed_workload(
         && installed.runtime.env == requested.runtime.env
         && installed.runtime.telemetry == requested.runtime.telemetry
         && installed.runtime.image_digest == requested.runtime.image_digest
+        && installed.runtime.placement.memory_kind
+            == requested.runtime.placement.memory_kind
         && installed.runtime_image == requested.runtime_image
         && installed.security.devices == requested.security.devices
         && installed.security.capabilities == requested.security.capabilities
@@ -776,7 +778,10 @@ fn validate_distribution_object(
 
 #[cfg(test)]
 mod argv_bound_tests {
-    use super::{MAX_ARGV_BYTES, MAX_ARGV_ITEM_BYTES, MAX_ARGV_ITEMS, valid_argv, valid_opaque_argv};
+    use super::{
+        CompiledExecutionPlan, MAX_ARGV_BYTES, MAX_ARGV_ITEM_BYTES, MAX_ARGV_ITEMS,
+        same_installed_workload, valid_argv, valid_opaque_argv,
+    };
 
     #[test]
     fn a_long_command_is_admitted_and_an_absurd_one_is_refused() {
@@ -809,5 +814,16 @@ mod argv_bound_tests {
         assert!(valid_opaque_argv(&exact));
         exact.push("x".to_owned());
         assert!(!valid_opaque_argv(&exact));
+    }
+
+    #[test]
+    fn installed_workload_identity_binds_the_physical_memory_pool() {
+        let installed: CompiledExecutionPlan = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+        ))
+        .unwrap();
+        let mut requested = installed.clone();
+        requested.runtime.placement.memory_kind = "host".parse().unwrap();
+        assert!(!same_installed_workload(&installed, &requested));
     }
 }

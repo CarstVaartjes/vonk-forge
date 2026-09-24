@@ -6,7 +6,7 @@ dependencies = [
   "alembic==1.16.4",
   "argon2-cffi==25.1.0",
   "cryptography==46.0.7",
-  "vonk-agent-protocol==2.2.0",
+  "vonk-agent-protocol==3.0.0",
   "vonk-forge-public-contracts",
   "fastapi==0.116.1",
   "httpx==0.28.1",
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" }
+vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl" }
 vonk-cluster-profiles = { path = ".." }
 # Resolve the public contract from the recipe repository's moving main branch.
 # control/packaging/public-contracts.lock records the exact commit consumed by

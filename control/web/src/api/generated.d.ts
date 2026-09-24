@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/artifact-jobs/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Job By Request Id */
+        get: operations["getArtifactJobByRequestId"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/artifact-jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -270,6 +287,40 @@ export interface paths {
         put?: never;
         /** Fleet Enroll */
         post: operations["enrollFleetNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/enrollments/{grant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Enrollment */
+        get: operations["getFleetEnrollment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/enrollments/{grant_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Enrollment */
+        post: operations["revokeFleetEnrollment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -585,6 +636,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model/operations/{operation_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Operation */
+        post: operations["cancelModelOperation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/model/requests/{request_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Request */
+        get: operations["getModelRequest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/model/{selector}": {
         parameters: {
             query?: never;
@@ -630,6 +715,23 @@ export interface paths {
         put?: never;
         /** Remove */
         post: operations["removeModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/model/{selector}/remove-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Removal */
+        get: operations["reviewModelRemoval"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -721,6 +823,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/applications/{application_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Profile Application */
+        post: operations["cancelProfileApplication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/applications/{application_id}/cancellations/{request_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Profile Application Cancellation */
+        get: operations["getProfileApplicationCancellation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/{number}": {
         parameters: {
             query?: never;
@@ -732,6 +868,40 @@ export interface paths {
         get: operations["getProfile"];
         /** Autosave Profile */
         put: operations["autosaveProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/{number}/definition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Profile Definition */
+        get: operations["getProfileDefinition"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/{number}/endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Profile Endpoints */
+        get: operations["getProfileEndpoints"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -861,6 +1031,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recipe/operations/{operation_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Operation */
+        post: operations["cancelRecipeOperation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recipe/requests/{request_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Request */
+        get: operations["getRecipeRequest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recipe/runs/{run_id}/artifact-jobs": {
         parameters: {
             query?: never;
@@ -947,6 +1151,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recipe/{selector}/remove-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Remove */
+        get: operations["reviewRecipeRemoval"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1014,6 +1235,11 @@ export interface components {
             summary?: string | null;
             /** Uncertain */
             uncertain?: boolean | null;
+        };
+        /** AgentInstallResult */
+        AgentInstallResult: {
+            /** Installed Bytes */
+            installed_bytes: number;
         };
         /**
          * AgentOperation
@@ -1199,6 +1425,8 @@ export interface components {
             state: "draft" | "ready" | "queued" | "running" | "succeeded" | "failed" | "cancelling" | "cancelled" | "waiting-for-operator";
             /** Status Reason */
             status_reason?: string | null;
+            /** Submit Request Id */
+            submit_request_id?: string | null;
             /** Timeout Seconds */
             timeout_seconds: number;
             /**
@@ -1461,6 +1689,113 @@ export interface components {
             /** Path */
             path: string;
         };
+        /**
+         * CacheRemovalAsset
+         * @description One exact cache identity and its owner-reported storage condition.
+         */
+        CacheRemovalAsset: {
+            /**
+             * Availability
+             * @enum {string}
+             */
+            availability: "verified" | "partial" | "missing" | "unknown";
+            /** Available Bytes */
+            available_bytes?: number | null;
+            /**
+             * Disposition
+             * @enum {string}
+             */
+            disposition: "remove" | "retain-shared";
+            /** Expected Bytes */
+            expected_bytes?: number | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "model-set" | "model-object" | "runtime-image";
+            /** Sha256 */
+            sha256: string;
+        };
+        /** CacheRemovalBlocker */
+        CacheRemovalBlocker: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Recovery Actions */
+            recovery_actions?: string[];
+            /** Retryable */
+            retryable: boolean;
+        };
+        /**
+         * CacheRemovalFinding
+         * @description One existing owner predicate's exact reference or active-work finding.
+         */
+        CacheRemovalFinding: {
+            /**
+             * Asset Kind
+             * @enum {string}
+             */
+            asset_kind: "model-set" | "model-object" | "runtime-image";
+            /** Asset Sha256 */
+            asset_sha256: string;
+            /**
+             * Classification
+             * @enum {string}
+             */
+            classification: "saved-reference" | "active-work";
+            /** Detail */
+            detail: string;
+            /** Owner Id */
+            owner_id: string;
+            /** Owner Kind */
+            owner_kind: string;
+            /** Reason */
+            reason: string;
+            /** State */
+            state: string;
+        };
+        /**
+         * CacheRemovalReview
+         * @description A complete review whose digest is verified during model validation.
+         */
+        CacheRemovalReview: {
+            /**
+             * Action
+             * @default remove
+             * @constant
+             */
+            action: "remove";
+            /** Active Work */
+            active_work: components["schemas"]["CacheRemovalFinding"][];
+            /** Assets */
+            assets: components["schemas"]["CacheRemovalAsset"][];
+            /** Blockers */
+            blockers: components["schemas"]["CacheRemovalBlocker"][];
+            /** Observed At */
+            observed_at: string;
+            /** References */
+            references: components["schemas"]["CacheRemovalFinding"][];
+            /**
+             * Resource Kind
+             * @enum {string}
+             */
+            resource_kind: "model" | "recipe";
+            /** Review Digest */
+            review_digest: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Selector */
+            selector: string;
+            /** Target Identity */
+            target_identity: string;
+            /** With Model */
+            with_model: boolean | null;
+        };
         /** CancelRequest */
         CancelRequest: {
             /** Reason */
@@ -1565,6 +1900,14 @@ export interface components {
              * @constant
              */
             schema_version: 1;
+        };
+        /**
+         * ConditionalPostStopMemoryCheck
+         * @description Fresh inventory and ordinary memory admission required after stops.
+         */
+        ConditionalPostStopMemoryCheck: {
+            /** Stop Run Ids */
+            stop_run_ids: string[];
         };
         /**
          * ControllerAssetState
@@ -1687,6 +2030,50 @@ export interface components {
             /** Sha256 */
             sha256: string;
         };
+        /**
+         * EffectiveParallelism
+         * @description Derived from topology; never an editable settings field.
+         */
+        EffectiveParallelism: {
+            /** Backend */
+            backend: string;
+            /** Data */
+            data: number;
+            /** Pipeline */
+            pipeline: number;
+            /** Tensor */
+            tensor: number;
+            /** World Size */
+            world_size: number;
+        };
+        /**
+         * EffectiveSettingsSelection
+         * @description Canonical effective settings bound into the Run/Switch plan digest.
+         */
+        EffectiveSettingsSelection: {
+            /** Change Effects */
+            change_effects: {
+                [key: string]: "none" | "restart" | "reprepare" | "rebuild" | "reinstall";
+            };
+            /** Concurrency */
+            concurrency?: number | null;
+            /** Context Tokens */
+            context_tokens?: number | null;
+            /** Identity Sha256 */
+            identity_sha256: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "generation" | "embedding" | "job";
+            /** Knobs */
+            knobs?: {
+                [key: string]: unknown;
+            };
+            /** Max Batch Tokens */
+            max_batch_tokens?: number | null;
+            parallelism: components["schemas"]["EffectiveParallelism"];
+        };
         /** EndpointResponse */
         EndpointResponse: {
             /** Alias */
@@ -1734,6 +2121,40 @@ export interface components {
             service_hostnames?: string[];
             /** Token */
             token: string;
+        };
+        /** EnrollmentGrantStatus */
+        EnrollmentGrantStatus: {
+            /** Consumed At */
+            consumed_at: string | null;
+            /** Display Name */
+            display_name: string | null;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Id */
+            id: string;
+            /** Node Id */
+            node_id: string | null;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "new-node" | "re-enroll";
+            /** Revoked At */
+            revoked_at: string | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "expired" | "consumed" | "revoked";
         };
         /** EnumParameter */
         EnumParameter: {
@@ -1916,6 +2337,8 @@ export interface components {
             /** Plan Digest */
             plan_digest?: string | null;
             provenance?: components["schemas"]["DeploymentProvenance"] | null;
+            /** Request Key */
+            request_key?: string | null;
             /**
              * Schema Version
              * @default 2
@@ -1948,6 +2371,8 @@ export interface components {
         FleetEnrollRequest: {
             /** Name */
             name: string;
+            /** Request Key */
+            request_key: string;
             /**
              * Ttl Seconds
              * @default 900
@@ -2066,6 +2491,129 @@ export interface components {
             /** Ip Address */
             ip_address?: string | null;
         };
+        /** FleetProfileAdmissionDecision */
+        FleetProfileAdmissionDecision: {
+            /** Alias */
+            alias: string | null;
+            /** Allowed */
+            allowed: boolean;
+            /** Assignment Id */
+            assignment_id: string;
+            /** Blockers */
+            blockers: components["schemas"]["RunSwitchReason"][];
+            effective_settings: components["schemas"]["EffectiveSettingsSelection"] | null;
+            post_stop_memory_check?: components["schemas"]["ConditionalPostStopMemoryCheck"] | null;
+            /** Requirements */
+            requirements: components["schemas"]["FleetProfileResourceRequirement"][];
+            /** Stop Before Prepare */
+            stop_before_prepare: boolean;
+            /** Stop Before Transfer */
+            stop_before_transfer: boolean;
+            /** Stops */
+            stops: components["schemas"]["StopImpact"][];
+        };
+        /** FleetProfileApplicationCancelRequest */
+        FleetProfileApplicationCancelRequest: {
+            /** Profile Number */
+            profile_number: number;
+            /** Request Key */
+            request_key: string;
+        };
+        /**
+         * FleetProfileApplicationCancellationIntent
+         * @description Durable identity and authority for an explicit or superseding cancel.
+         */
+        FleetProfileApplicationCancellationIntent: {
+            /** Actor */
+            actor: string;
+            /**
+             * Cause
+             * @enum {string}
+             */
+            cause: "operator" | "superseded";
+            /** Observation Deadline At */
+            observation_deadline_at?: string | null;
+            /** Observation Due At */
+            observation_due_at?: string | null;
+            /** Pending Operation Ids */
+            pending_operation_ids?: string[];
+            /** Request Key */
+            request_key: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /**
+             * State
+             * @default cancelling
+             * @enum {string}
+             */
+            state: "cancelling" | "cancelled";
+            /** Successor Application Id */
+            successor_application_id?: string | null;
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal?: number | null;
+        };
+        /**
+         * FleetProfileApplicationCancellationView
+         * @description Live projection of completed, pending, and unissued cancelled effects.
+         */
+        FleetProfileApplicationCancellationView: {
+            /** Actor */
+            actor: string;
+            /** Cancelled Effects */
+            cancelled_effects: components["schemas"]["FleetProfileApplicationEffect"][];
+            /**
+             * Cause
+             * @enum {string}
+             */
+            cause: "operator" | "superseded";
+            /** Completed Effects */
+            completed_effects: components["schemas"]["FleetProfileApplicationEffect"][];
+            /** Deadline At */
+            deadline_at?: string | null;
+            /** Dependency */
+            dependency?: string | null;
+            /** Owner */
+            owner?: string | null;
+            /** Pending Effects */
+            pending_effects: components["schemas"]["FleetProfileApplicationEffect"][];
+            /** Request Key */
+            request_key: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "cancelling" | "cancelled";
+        };
+        /**
+         * FleetProfileApplicationEffect
+         * @description One exact profile or child effect in the cancellation receipt.
+         */
+        FleetProfileApplicationEffect: {
+            /** Effect Id */
+            effect_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "profile-step" | "run" | "install" | "stop" | "cleanup" | "agent-operation";
+            /** Label */
+            label: string;
+            /** Operation Id */
+            operation_id?: string | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "succeeded" | "failed" | "cancelled" | "pending" | "not-issued";
+        };
         /**
          * FleetProfileApplicationProgress
          * @description Typed progress tree persisted with every profile application.
@@ -2076,6 +2624,7 @@ export interface components {
              * @default 1
              */
             attempt: number;
+            cancellation?: components["schemas"]["FleetProfileApplicationCancellationIntent"] | null;
             child_progress?: components["schemas"]["FleetProfileChildProgress"] | null;
             /** Child Source */
             child_source?: "switch-adapter" | null;
@@ -2121,6 +2670,7 @@ export interface components {
              * @default 1
              */
             attempt: number;
+            cancellation?: components["schemas"]["FleetProfileApplicationCancellationView"] | null;
             /**
              * Created At
              * Format: date-time
@@ -2139,6 +2689,8 @@ export interface components {
             /** Profile Id */
             profile_id: string;
             progress: components["schemas"]["FleetProfileApplicationProgress"];
+            /** Request Key */
+            request_key: string;
             result: components["schemas"]["FleetProfileApplicationResult"] | null;
             /** Retry Of Application Id */
             retry_of_application_id?: string | null;
@@ -2186,6 +2738,12 @@ export interface components {
             recipe_title: string;
             /** Topology Name */
             topology_name: string;
+        };
+        /** FleetProfileAssignmentAssessment */
+        FleetProfileAssignmentAssessment: {
+            assessment: components["schemas"]["RunSwitchAssessment"];
+            /** Assignment Id */
+            assignment_id: string;
         };
         /**
          * FleetProfileAssignmentInput
@@ -2302,8 +2860,31 @@ export interface components {
             /** Total Bytes */
             total_bytes?: number | null;
         };
-        /** FleetProfileInput */
-        FleetProfileInput: {
+        /** FleetProfileCompatibilityDecision */
+        FleetProfileCompatibilityDecision: {
+            /** Artifact Sha256 */
+            artifact_sha256: string | null;
+            compatibility: components["schemas"]["CompatibilityIdentity"];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "engine-generation" | "jit" | "tuning";
+            /** Node Ids */
+            node_ids: string[];
+            /** Ready */
+            ready: boolean;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "controller-prepare" | "target-prepare";
+        };
+        /**
+         * FleetProfileDefinition
+         * @description Saved authoring intent, independent of execution and cache projections.
+         */
+        FleetProfileDefinition: {
             /** Assignments */
             assignments?: components["schemas"]["FleetProfileAssignmentInput"][];
             /**
@@ -2311,8 +2892,6 @@ export interface components {
              * @default
              */
             description: string;
-            /** Expected Revision */
-            expected_revision?: number | null;
             /**
              * Favorite
              * @default false
@@ -2334,6 +2913,119 @@ export interface components {
              */
             name: string;
         };
+        /** FleetProfileDefinitionView */
+        FleetProfileDefinitionView: {
+            definition: components["schemas"]["FleetProfileDefinition"];
+            /** Id */
+            id: string | null;
+            /** Number */
+            number: number;
+            /** Revision */
+            revision: number;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * FleetProfileEffects
+         * @description Identified live effects, including complete distributed membership.
+         */
+        FleetProfileEffects: {
+            /** Installations */
+            installations: components["schemas"]["FleetProfileInstallationEffect"][];
+            /** Runs */
+            runs: components["schemas"]["FleetProfileRunEffect"][];
+            /** Superseded */
+            superseded: components["schemas"]["FleetProfilePendingEffect"][];
+        };
+        /** FleetProfileEndpointAssignmentView */
+        FleetProfileEndpointAssignmentView: {
+            /** Alias */
+            alias?: string | null;
+            /** Assignment Id */
+            assignment_id: string;
+            /**
+             * Desired State
+             * @enum {string}
+             */
+            desired_state: "installed" | "running";
+            endpoint?: components["schemas"]["EndpointResponse"] | null;
+            /** Recipe Title */
+            recipe_title: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "installed-only" | "not-published-yet" | "published" | "expired" | "withdrawn" | "unavailable";
+        };
+        /** FleetProfileEndpointsView */
+        FleetProfileEndpointsView: {
+            /** Application Id */
+            application_id?: string | null;
+            /** Application State */
+            application_state?: ("queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled") | null;
+            /** Assignments */
+            assignments: components["schemas"]["FleetProfileEndpointAssignmentView"][];
+            /** Number */
+            number: number;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Profile Id */
+            profile_id?: string | null;
+        };
+        /** FleetProfileInput */
+        FleetProfileInput: {
+            /** Assignments */
+            assignments?: components["schemas"]["FleetProfileAssignmentInput"][];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Expected Revision
+             * @default 0
+             */
+            expected_revision: number;
+            /**
+             * Favorite
+             * @default false
+             */
+            favorite: boolean;
+            /**
+             * Installation Policy
+             * @default keep-cached
+             * @enum {string}
+             */
+            installation_policy: "keep-cached" | "exact";
+            /** Labels */
+            labels?: {
+                [key: string]: string;
+            };
+            /**
+             * Name
+             * @default Default
+             */
+            name: string;
+        };
+        /** FleetProfileInstallationEffect */
+        FleetProfileInstallationEffect: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "keep" | "remove";
+            /** Installation Id */
+            installation_id: string;
+            /** Node Ids */
+            node_ids: string[];
+        };
         /**
          * FleetProfileIntendedConfiguration
          * @description Immutable desired configuration captured when execution is admitted.
@@ -2348,6 +3040,10 @@ export interface components {
             installation_policy: "keep-cached" | "exact";
             /** Profile Digest */
             profile_digest: string;
+            /** Reviewed Application Id */
+            reviewed_application_id: string;
+            /** Reviewed Plan Digest */
+            reviewed_plan_digest: string;
             scope: components["schemas"]["FleetProfileScope"];
         };
         /** FleetProfileList */
@@ -2368,15 +3064,10 @@ export interface components {
         };
         /** FleetProfileLoadRequest */
         FleetProfileLoadRequest: {
-            /**
-             * Dry Run
-             * @default false
-             */
-            dry_run: boolean;
             /** Plan Digest */
             plan_digest: string;
             /** Request Key */
-            request_key?: string | null;
+            request_key: string;
         };
         /** FleetProfileNode */
         FleetProfileNode: {
@@ -2391,6 +3082,18 @@ export interface components {
             rank: number;
             /** Role */
             role: string;
+        };
+        /** FleetProfilePendingEffect */
+        FleetProfilePendingEffect: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "job" | "profile-application";
+            /** Node Ids */
+            node_ids: string[];
         };
         /** FleetProfilePlanStep */
         FleetProfilePlanStep: {
@@ -2427,12 +3130,41 @@ export interface components {
             /** Uninstalls */
             uninstalls: number;
         };
+        /**
+         * FleetProfilePreparationDecision
+         * @description Exact assets and reuse decisions; byte counters are observations only.
+         */
+        FleetProfilePreparationDecision: {
+            /** Assignment Id */
+            assignment_id: string;
+            /** Blockers */
+            blockers: components["schemas"]["PreparationReason"][];
+            /** Exceptions */
+            exceptions: components["schemas"]["FleetProfileCompatibilityDecision"][];
+            /** Image Controller Ready */
+            image_controller_ready: boolean;
+            /** Image Reuse Node Ids */
+            image_reuse_node_ids: string[];
+            model: components["schemas"]["ModelArtifactIdentity"];
+            /** Model Complete */
+            model_complete: boolean;
+            /** Model Controller Ready */
+            model_controller_ready: boolean;
+            /** Model Reuse Node Ids */
+            model_reuse_node_ids: string[];
+            runtime_image: components["schemas"]["RuntimeImageIdentity"];
+        };
         /** FleetProfilePreview */
         FleetProfilePreview: {
+            /** Admission Decisions */
+            admission_decisions: components["schemas"]["FleetProfileAdmissionDecision"][];
             /** Allowed */
             allowed: boolean;
+            /** Assessments */
+            assessments: components["schemas"]["FleetProfileAssignmentAssessment"][];
             /** Assignments */
             assignments: components["schemas"]["FleetProfileAssignmentPreview"][];
+            effects: components["schemas"]["FleetProfileEffects"];
             /**
              * Generated At
              * Format: date-time
@@ -2440,16 +3172,23 @@ export interface components {
             generated_at: string;
             /** Plan Digest */
             plan_digest: string;
+            /** Preparation Decisions */
+            preparation_decisions: components["schemas"]["FleetProfilePreparationDecision"][];
             /** Preparations */
             preparations?: components["schemas"]["FleetProfileAssignmentPreparation"][];
+            profile_definition: components["schemas"]["FleetProfileDefinition"] | null;
             /** Profile Digest */
             profile_digest: string;
             /** Profile Id */
             profile_id: string;
             /** Profile Name */
             profile_name: string;
+            /** Profile Revision */
+            profile_revision: number | null;
             /** Reasons */
             reasons: components["schemas"]["FleetProfileReason"][];
+            /** Resolved Assignments */
+            resolved_assignments: components["schemas"]["FleetProfileAssignment"][];
             /**
              * Schema Version
              * @default 2
@@ -2472,6 +3211,45 @@ export interface components {
              * @enum {string}
              */
             severity: "info" | "warning" | "error";
+        };
+        /**
+         * FleetProfileResourceRequirement
+         * @description Stable demand and eligibility, separate from observed free capacity.
+         */
+        FleetProfileResourceRequirement: {
+            /** Allowed */
+            allowed: boolean;
+            /** Disk Required Bytes */
+            disk_required_bytes: number | null;
+            /** Memory Floor Bytes */
+            memory_floor_bytes: number | null;
+            /** Memory Kind */
+            memory_kind: ("unified" | "host" | "accelerator") | null;
+            /** Memory Pool */
+            memory_pool: ("shared" | "separate") | null;
+            /** Memory Required Bytes */
+            memory_required_bytes: number | null;
+            /** Node Id */
+            node_id: string;
+            /** Ports Required */
+            ports_required: number[];
+            resource_demand: components["schemas"]["ResourceDemandEvidence"] | null;
+        };
+        /** FleetProfileRunEffect */
+        FleetProfileRunEffect: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "keep" | "stop";
+            /** Alias */
+            alias: string;
+            /** Installation Id */
+            installation_id: string;
+            /** Node Ids */
+            node_ids: string[];
+            /** Run Id */
+            run_id: string;
         };
         /**
          * FleetProfileScope
@@ -2523,7 +3301,7 @@ export interface components {
          */
         FleetProfileSwitchAdapterState: {
             /** Active Kind */
-            active_kind?: ("run" | "stop" | "cleanup") | null;
+            active_kind?: ("install" | "run" | "stop" | "cleanup") | null;
             /** Active Operation Id */
             active_operation_id?: string | null;
             /** Actor */
@@ -2588,7 +3366,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "run" | "stop" | "cleanup";
+            kind: "install" | "run" | "stop" | "cleanup";
             /** Operation Id */
             operation_id: string;
             result?: components["schemas"]["FleetProfileSwitchChildResult"] | null;
@@ -2609,7 +3387,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "run" | "stop" | "cleanup";
+            kind: "install" | "run" | "stop" | "cleanup";
         };
         /**
          * FleetProfileVerificationResult
@@ -2634,6 +3412,7 @@ export interface components {
             created_at: string;
             /** Created By */
             created_by: string;
+            definition: components["schemas"]["FleetProfileDefinition"];
             /** Description */
             description: string;
             /** Favorite */
@@ -2683,6 +3462,11 @@ export interface components {
             updated_at: string;
             /** Warnings */
             warnings?: string[];
+        };
+        /** FleetReenrollRequest */
+        FleetReenrollRequest: {
+            /** Request Key */
+            request_key: string;
         };
         /** FleetRenameRequest */
         FleetRenameRequest: {
@@ -2745,14 +3529,16 @@ export interface components {
              * @default false
              */
             all: boolean;
+            /** Request Key */
+            request_key: string;
             /** Selectors */
             selectors?: string[] | null;
             /**
              * Strategy
              * @default one-at-a-time
-             * @enum {string}
+             * @constant
              */
-            strategy: "one-at-a-time" | "all-at-once";
+            strategy: "one-at-a-time";
         };
         /** FloatParameter */
         FloatParameter: {
@@ -2773,6 +3559,24 @@ export interface components {
              * @enum {string}
              */
             type: "float";
+        };
+        /** FreshnessEvidence */
+        FreshnessEvidence: {
+            /** Age Seconds */
+            age_seconds?: number | null;
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /** Maximum Age Seconds */
+            maximum_age_seconds?: number | null;
+            /** Observed At */
+            observed_at?: string | null;
+            /** Source */
+            source: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "fresh" | "stale" | "unknown";
         };
         /** FreshnessPolicy */
         FreshnessPolicy: {
@@ -2964,6 +3768,7 @@ export interface components {
             /** Operations */
             operations: components["schemas"]["JobOperationResponse"][];
             progress: components["schemas"]["JobProgress"];
+            recovery?: components["schemas"]["OperationRecovery"] | null;
             /** State */
             state: string;
             /** Status Reason */
@@ -3118,6 +3923,8 @@ export interface components {
             all_models?: boolean | null;
             /** Family */
             family?: string[];
+            /** Fits Fleet */
+            fits_fleet?: boolean | null;
             /** Local Only */
             local_only?: boolean | null;
             /** Model */
@@ -3126,6 +3933,8 @@ export interface components {
             publisher?: string[];
             /** Quantization */
             quantization?: string[];
+            /** Ready */
+            ready?: boolean | null;
             /** Search */
             search?: string | null;
             /** Sort */
@@ -3257,6 +4066,7 @@ export interface components {
         LibraryRecipeProjection: {
             /** Alignment */
             alignment?: string | null;
+            assessment?: components["schemas"]["RecipeReadiness"] | null;
             document: components["schemas"]["RecipeDefinition"];
             identity: components["schemas"]["LibraryRecipeIdentity"];
             local: components["schemas"]["LibraryLocalState"];
@@ -3294,6 +4104,16 @@ export interface components {
             memory_bytes?: number | null;
             /** Runtime Memory Bytes */
             runtime_memory_bytes?: number | null;
+        };
+        /**
+         * LifecycleCodeFailureResult
+         * @description Bounded failure marker used by the Controller's node projector.
+         */
+        LifecycleCodeFailureResult: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail?: string | null;
         };
         /** LifecyclePreflightCheckpoint */
         LifecyclePreflightCheckpoint: {
@@ -3421,6 +4241,26 @@ export interface components {
             /** Release Version */
             release_version?: string | null;
         };
+        /**
+         * MemoryUsageUncertainty
+         * @description Fresh aggregate capacity lacks per-run resident usage evidence.
+         */
+        MemoryUsageUncertainty: {
+            /** Inventory Evidence Digest */
+            inventory_evidence_digest: string;
+            /**
+             * Inventory Observed At
+             * Format: date-time
+             */
+            inventory_observed_at: string;
+            /** Residual Ranges */
+            residual_ranges: components["schemas"]["RunMemoryResidualRange"][];
+            /**
+             * Source
+             * @constant
+             */
+            source: "aggregate_inventory_without_run_usage";
+        };
         /** ModelAccess */
         ModelAccess: {
             /**
@@ -3435,6 +4275,24 @@ export interface components {
              * @enum {string}
              */
             visibility: "public" | "restricted";
+        };
+        /**
+         * ModelArtifactIdentity
+         * @description Exact model set, independent of transfer progress and verification time.
+         */
+        ModelArtifactIdentity: {
+            /** Artifact Count */
+            artifact_count: number;
+            /** Artifact Set Bytes */
+            artifact_set_bytes: number;
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /** Dependency Model Content Sha256 */
+            dependency_model_content_sha256?: string[];
+            /** Model Content Sha256 */
+            model_content_sha256: string;
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256?: string | null;
         };
         /**
          * ModelArtifactPreparation
@@ -3461,6 +4319,36 @@ export interface components {
             recipe_revision_sha256?: string | null;
             /** Targets */
             targets: components["schemas"]["TargetAssetState"][];
+        };
+        /**
+         * ModelCacheCancellation
+         * @description Durable record of the one accepted cancellation request.
+         */
+        ModelCacheCancellation: {
+            /** Actor */
+            actor: string;
+            /** Reason */
+            reason: string;
+            /** Request Key */
+            request_key: string;
+            /** Requested At */
+            requested_at: string;
+        };
+        /**
+         * ModelCacheCancellationRequest
+         * @description Stable identity and operator explanation for one cancellation request.
+         */
+        ModelCacheCancellationRequest: {
+            /** Reason */
+            reason: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
         };
         /** ModelCacheDownloadResult */
         ModelCacheDownloadResult: {
@@ -3490,11 +4378,6 @@ export interface components {
              * @constant
              */
             schema_version: 2;
-            /**
-             * With Model
-             * @default false
-             */
-            with_model: boolean;
         };
         /**
          * ModelCacheOperatorResponse
@@ -3506,11 +4389,14 @@ export interface components {
              * @enum {string}
              */
             action: "download" | "remove";
+            cancellation?: components["schemas"]["ModelCacheCancellation"] | null;
             /** Cancelled Operations */
             cancelled_operations?: string[];
             /** Eta Seconds */
             eta_seconds?: number | null;
             failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
+            /** Model Content Sha256 */
+            model_content_sha256?: string | null;
             /** Next Actions */
             next_actions?: string[];
             /** Operation Id */
@@ -3524,6 +4410,8 @@ export interface components {
             request_key: string;
             /** Result */
             result?: components["schemas"]["ModelCacheDownloadResult"] | components["schemas"]["ModelCacheRemovalResult"] | null;
+            /** Review Digest */
+            review_digest?: string | null;
             /**
              * Schema Version
              * @default 2
@@ -3536,11 +4424,29 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "accepted" | "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
+            state: "accepted" | "queued" | "running" | "partial" | "cancelling" | "succeeded" | "failed" | "cancelled";
             /** Total Bytes */
             total_bytes?: number | null;
             /** Transferred Bytes */
             transferred_bytes: number;
+        };
+        /**
+         * ModelCacheRemovalRequest
+         * @description Exact content identity and request key for a model cache removal.
+         */
+        ModelCacheRemovalRequest: {
+            /** Model Content Sha256 */
+            model_content_sha256: string;
+            /** Request Key */
+            request_key: string;
+            /** Review Digest */
+            review_digest: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
         };
         /** ModelCacheRemovalResult */
         ModelCacheRemovalResult: {
@@ -3928,6 +4834,7 @@ export interface components {
         OperationDetailResponse: {
             /** Attempt */
             attempt: number;
+            cancellation?: components["schemas"]["FleetProfileApplicationCancellationView"] | null;
             /** Created At */
             created_at: string;
             evidence_download?: components["schemas"]["OperationEvidenceDownload"] | null;
@@ -3939,6 +4846,7 @@ export interface components {
             kind: string;
             /** Node Ids */
             node_ids: string[];
+            owner?: components["schemas"]["OperationOwnerReference"] | null;
             /** Parent Id */
             parent_id?: string | null;
             progress?: components["schemas"]["OperationProgress"] | null;
@@ -4044,6 +4952,18 @@ export interface components {
             total_bytes?: number | null;
             /** Total Items */
             total_items?: number | null;
+        };
+        /**
+         * OperationOwnerReference
+         * @description Exact durable owner and original request identity for Activity.
+         */
+        OperationOwnerReference: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Request Id */
+            request_id?: string | null;
         };
         /**
          * OperationProgress
@@ -4285,6 +5205,23 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** RecipeBuildCleanupEvidence */
+        RecipeBuildCleanupEvidence: {
+            /** Build Id */
+            build_id: string;
+            /** Operation Id */
+            operation_id: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Stopped
+             * @constant
+             */
+            stopped: true;
+        };
         /** RecipeBuildDefinition */
         RecipeBuildDefinition: {
             /** Arguments */
@@ -4299,6 +5236,18 @@ export interface components {
             /** Target */
             target?: string | null;
         };
+        /** RecipeBuildEvidence */
+        RecipeBuildEvidence: {
+            /** Build Input Sha256 */
+            build_input_sha256: string;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256: string;
+            policy: components["schemas"]["RecipeBuildPolicy"];
+        };
         /** RecipeBuildExecution */
         RecipeBuildExecution: {
             build: components["schemas"]["RecipeBuildDefinition"];
@@ -4307,6 +5256,39 @@ export interface components {
              * @enum {string}
              */
             mode: "build";
+        };
+        /** RecipeBuildPolicy */
+        RecipeBuildPolicy: {
+            /** Dockerfile */
+            dockerfile: string;
+            /** Findings */
+            findings: components["schemas"]["RecipeBuildPolicyFinding"][];
+            /** Passed */
+            passed: boolean;
+        };
+        /** RecipeBuildPolicyFinding */
+        RecipeBuildPolicyFinding: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Line */
+            line?: number | null;
+            /** Path */
+            path: string;
+        };
+        /** RecipeCancellationRequest */
+        RecipeCancellationRequest: {
+            /** Reason */
+            reason: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
         };
         /**
          * RecipeDefinition
@@ -4345,6 +5327,7 @@ export interface components {
         RecipeDetailResponse: {
             /** Alignment */
             alignment?: string | null;
+            assessment?: components["schemas"]["RecipeReadiness"] | null;
             document: components["schemas"]["RecipeDefinition"];
             identity: components["schemas"]["LibraryRecipeIdentity"];
             local: components["schemas"]["LibraryLocalState"];
@@ -4385,6 +5368,17 @@ export interface components {
             safety_margin_bytes: number;
             /** Staging Bytes */
             staging_bytes: number;
+        };
+        /** RecipeDownloadRequest */
+        RecipeDownloadRequest: {
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
         };
         /** RecipeEmbeddingSettings */
         RecipeEmbeddingSettings: {
@@ -4530,7 +5524,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "partial" | "cancelling" | "succeeded" | "failed" | "cancelled";
         };
         /** RecipeImageAvailabilityResponse */
         RecipeImageAvailabilityResponse: {
@@ -4538,6 +5532,7 @@ export interface components {
             actions?: components["schemas"]["RecipeImageAvailabilityAction"][];
             /** Attempt */
             attempt: number;
+            cancellation?: components["schemas"]["RecipeOperationCancellationResult"] | null;
             /** Children */
             children?: components["schemas"]["RecipeImageAvailabilityChild"][];
             /** Created At */
@@ -4555,6 +5550,8 @@ export interface components {
             recipe_content_sha256: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+            /** Request */
+            request: components["schemas"]["RecipeSelectorIntent"] | components["schemas"]["RecipeRevisionIntent"] | components["schemas"]["RecipeRetryIntent"];
             /** Request Id */
             request_id: string;
             result?: components["schemas"]["RecipeImageAvailabilityResult"] | null;
@@ -4568,7 +5565,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "partial" | "cancelling" | "succeeded" | "failed" | "cancelled";
             /** Updated At */
             updated_at: string;
         };
@@ -4617,6 +5614,17 @@ export interface components {
              * @enum {string}
              */
             mode: "image";
+        };
+        /** RecipeImageImportEvidence */
+        RecipeImageImportEvidence: {
+            /** Build Id */
+            build_id: string;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256: string;
         };
         /** RecipeInputSlot */
         RecipeInputSlot: {
@@ -4880,20 +5888,50 @@ export interface components {
             /** Port */
             port: number;
         };
+        /**
+         * RecipeOperationCancellationResult
+         * @description Cancellation metadata merged into a pending lifecycle result.
+         */
+        RecipeOperationCancellationResult: {
+            /** Cancel Actor */
+            cancel_actor: string;
+            /** Cancel Request Id */
+            cancel_request_id: string;
+            /**
+             * Cancel Requested
+             * @constant
+             */
+            cancel_requested: true;
+            /** Cancel Requested At */
+            cancel_requested_at?: string | null;
+            /** Cancelled */
+            cancelled?: true | null;
+            /** Launch Evidence */
+            launch_evidence?: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            } | null;
+            /** Node Evidence */
+            node_evidence?: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            } | null;
+            /** Reason */
+            reason: string;
+            /** Recovery */
+            recovery?: "retry creates a new operation" | null;
+        };
         /** RecipeOperatorRequest */
         RecipeOperatorRequest: {
             /** Request Key */
             request_key: string;
+            /** Review Digest */
+            review_digest: string;
             /**
              * Schema Version
              * @default 2
              * @constant
              */
             schema_version: 2;
-            /**
-             * With Model
-             * @default false
-             */
+            /** With Model */
             with_model: boolean;
         };
         /** RecipeOperatorResponse */
@@ -4907,6 +5945,7 @@ export interface components {
             cancelled_builds?: string[];
             /** Cancelled Operations */
             cancelled_operations?: string[];
+            failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
             /** Model Removals */
             model_removals?: string[];
             /** Next Actions */
@@ -4922,6 +5961,8 @@ export interface components {
             reclaimed_bytes: number;
             /** Request Key */
             request_key: string;
+            /** Review Digest */
+            review_digest: string;
             /**
              * Schema Version
              * @default 2
@@ -4935,6 +5976,8 @@ export interface components {
              * @enum {string}
              */
             state: "accepted" | "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
+            /** With Model */
+            with_model: boolean;
         };
         /** RecipeOutputSlot */
         RecipeOutputSlot: {
@@ -5019,6 +6062,29 @@ export interface components {
             /** Source Reference */
             source_reference?: string | null;
         };
+        /** RecipeReadiness */
+        RecipeReadiness: {
+            cache: components["schemas"]["RecipeReadinessCheck"];
+            fit?: components["schemas"]["SparkFit"] | null;
+            fleet_fit: components["schemas"]["RecipeReadinessCheck"];
+            group?: components["schemas"]["SparkGroup"] | null;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            readiness: components["schemas"]["RecipeReadinessCheck"];
+        };
+        /** RecipeReadinessCheck */
+        RecipeReadinessCheck: {
+            /** Reasons */
+            reasons?: components["schemas"]["RunSwitchReason"][];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ready" | "blocked" | "unavailable";
+        };
         /** RecipeRelease */
         RecipeRelease: {
             /** History */
@@ -5057,6 +6123,47 @@ export interface components {
             upgrade_effect: "none" | "restart" | "reprepare" | "rebuild";
             /** Version */
             version: string;
+        };
+        /** RecipeRetryIntent */
+        RecipeRetryIntent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "retry";
+            /** Operation Id */
+            operation_id: string;
+        };
+        /** RecipeRevisionIntent */
+        RecipeRevisionIntent: {
+            /** Build Input Sha256 */
+            build_input_sha256?: string | null;
+            /** Effective Execution Key */
+            effective_execution_key?: string | null;
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
+            /**
+             * Force Download
+             * @default false
+             */
+            force_download: boolean;
+            /**
+             * Force Rebuild
+             * @default false
+             */
+            force_rebuild: boolean;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "revision";
+            /** Model Digest */
+            model_digest?: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
         };
         /** RecipeRoleResources */
         RecipeRoleResources: {
@@ -5139,6 +6246,21 @@ export interface components {
             /** Value */
             value?: string | number | boolean | null;
         };
+        /** RecipeSelectorIntent */
+        RecipeSelectorIntent: {
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "selector";
+            /** Selector */
+            selector: string;
+        };
         /** RecipeServingValidation */
         RecipeServingValidation: {
             /** Checks */
@@ -5158,6 +6280,175 @@ export interface components {
             change_effect: "none" | "restart" | "reprepare" | "rebuild";
             /** Value */
             value: string | number | boolean;
+        };
+        /** RecipeStartCollectiveReadinessEvidence */
+        RecipeStartCollectiveReadinessEvidence: {
+            /** Artifact Set Digest */
+            artifact_set_digest: string;
+            /** Endpoint */
+            endpoint: string;
+            /** Evidence Digest */
+            evidence_digest: string;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Address */
+            local_address: string | null;
+            /** Master Address */
+            master_address: string | null;
+            /** Master Port */
+            master_port?: number | null;
+            /** Memory Reservation Bytes */
+            memory_reservation_bytes: number;
+            /** Model Identity */
+            model_identity?: string | null;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "collective-readiness";
+            /** Rank */
+            rank: number;
+            /**
+             * Ready
+             * @constant
+             */
+            ready: true;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /**
+             * Recipe Revision Id
+             * Format: uuid
+             */
+            recipe_revision_id: string;
+            /** Role */
+            role: string;
+            /** Run Generation */
+            run_generation: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Runtime Arguments Sha256 */
+            runtime_arguments_sha256: string;
+            /** World Size */
+            world_size: number;
+        };
+        /** RecipeStartRankLaunchEvidence */
+        RecipeStartRankLaunchEvidence: {
+            /** Artifact Set Digest */
+            artifact_set_digest: string;
+            /** Evidence Digest */
+            evidence_digest: string;
+            /**
+             * Fabric Projection Bound
+             * @constant
+             */
+            fabric_projection_bound: true;
+            /** Image Digest */
+            image_digest: string;
+            /**
+             * Launched
+             * @constant
+             */
+            launched: true;
+            /** Local Address */
+            local_address: string | null;
+            /** Master Address */
+            master_address: string | null;
+            /** Master Port */
+            master_port?: number | null;
+            /** Memory Reservation Bytes */
+            memory_reservation_bytes: number;
+            /** Model Identity */
+            model_identity?: string | null;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "rank-launch";
+            /**
+             * Process Running
+             * @constant
+             */
+            process_running: true;
+            /** Rank */
+            rank: number;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /**
+             * Recipe Revision Id
+             * Format: uuid
+             */
+            recipe_revision_id: string;
+            /** Role */
+            role: string;
+            /** Run Generation */
+            run_generation: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Runtime Arguments Sha256 */
+            runtime_arguments_sha256: string;
+            /** World Size */
+            world_size: number;
+        };
+        /** RecipeStartSingleEvidence */
+        RecipeStartSingleEvidence: {
+            /** Artifact Set Digest */
+            artifact_set_digest: string;
+            /** Endpoint */
+            endpoint: string;
+            /** Evidence Digest */
+            evidence_digest: string;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Address */
+            local_address: null;
+            /** Master Address */
+            master_address: null;
+            /** Master Port */
+            master_port: null;
+            /** Memory Reservation Bytes */
+            memory_reservation_bytes: number;
+            /** Model Identity */
+            model_identity?: string | null;
+            /**
+             * Rank
+             * @constant
+             */
+            rank: 0;
+            /**
+             * Ready
+             * @constant
+             */
+            ready: true;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /**
+             * Recipe Revision Id
+             * Format: uuid
+             */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number;
+            /** Runtime Arguments Sha256 */
+            runtime_arguments_sha256: string;
+            /**
+             * World Size
+             * @constant
+             */
+            world_size: 1;
+        };
+        /** RecipeStopResult */
+        RecipeStopResult: {
+            /**
+             * Stopped
+             * @constant
+             */
+            stopped: true;
         };
         /** RecipeTopology */
         RecipeTopology: {
@@ -5189,6 +6480,57 @@ export interface components {
             name: string;
             resources: components["schemas"]["RecipeRoleResources"];
         };
+        /** RecipeUninstallResult */
+        RecipeUninstallResult: {
+            /** Removed Model Bytes */
+            removed_model_bytes: number;
+            /**
+             * Uninstalled
+             * @constant
+             */
+            uninstalled: true;
+        };
+        /**
+         * RecipeUpdateChild
+         * @description Frozen identity plus a rebuildable observation; child jobs own execution.
+         */
+        RecipeUpdateChild: {
+            /** Effective Execution Key */
+            effective_execution_key: string;
+            failure?: components["schemas"]["RecipeUpdateFailure"] | null;
+            /** Observed At */
+            observed_at?: string | null;
+            /** Operation Id */
+            operation_id?: string | null;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Name */
+            recipe_name: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Request Key */
+            request_key: string;
+            /** Retry At */
+            retry_at?: string | null;
+            /**
+             * State
+             * @default pending
+             * @enum {string}
+             */
+            state: "pending" | "queued" | "running" | "cancelling" | "succeeded" | "partial" | "failed" | "cancelled";
+        };
+        /**
+         * RecipeUpdateFailure
+         * @description Bounded admission failure or observation of the referenced child's failure.
+         */
+        RecipeUpdateFailure: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Retryable */
+            retryable: boolean;
+        };
         /** RecipeUpdateRequest */
         RecipeUpdateRequest: {
             /**
@@ -5205,7 +6547,7 @@ export interface components {
              */
             schema_version: 2;
             /** Selectors */
-            selectors?: string[] | null;
+            selectors?: string[];
         };
         /** RecipeUpdateResponse */
         RecipeUpdateResponse: {
@@ -5215,14 +6557,62 @@ export interface components {
              * @constant
              */
             action: "update";
+            /** Attempt */
+            attempt: number;
+            cancellation?: components["schemas"]["RecipeOperationCancellationResult"] | null;
+            /** Children */
+            children: components["schemas"]["RecipeUpdateChild"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @default recipe.cache.update.v2
+             * @constant
+             */
+            kind: "recipe.cache.update.v2";
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            progress: components["schemas"]["OperationProgress"];
+            request: components["schemas"]["RecipeUpdateScope"];
+            /** Request Id */
+            request_id: string;
+            /** Resume Condition */
+            resume_condition?: string | null;
             /**
              * Schema Version
              * @default 2
              * @constant
              */
             schema_version: 2;
-            /** Updates */
-            updates: components["schemas"]["RecipeImageAvailabilityResponse"][];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "cancelling" | "succeeded" | "partial" | "failed" | "cancelled";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Wait Owner */
+            wait_owner?: "recipe-image-availability" | null;
+            /** Waiting On */
+            waiting_on?: string | null;
+        };
+        /** RecipeUpdateScope */
+        RecipeUpdateScope: {
+            /**
+             * All
+             * @default false
+             */
+            all: boolean;
+            /** Selectors */
+            selectors?: string[];
         };
         /** RecipeValidation */
         RecipeValidation: {
@@ -5245,6 +6635,17 @@ export interface components {
             request: components["schemas"]["RecipeHttpServingRequest"] | components["schemas"]["RecipeJobServingRequest"];
         };
         /**
+         * RemovedRecipeNodeResult
+         * @description Result emitted by the Controller's logical uninstall projection.
+         */
+        RemovedRecipeNodeResult: {
+            /**
+             * Removed
+             * @constant
+             */
+            removed: true;
+        };
+        /**
          * RequestValidationIssue
          * @description A structural input error without the submitted input or validator context.
          */
@@ -5258,11 +6659,38 @@ export interface components {
         };
         /** RequestValidationProblem */
         RequestValidationProblem: {
+            /** Candidates */
+            candidates?: string[] | null;
             context?: components["schemas"]["ErrorContextResponse"] | null;
             /** Detail */
             detail: string;
             /** Issues */
             issues: components["schemas"]["RequestValidationIssue"][];
+        };
+        /**
+         * ResourceDemandEvidence
+         * @description The evidence terms used for one selected rank's memory fit.
+         */
+        ResourceDemandEvidence: {
+            /** Batch Bytes */
+            batch_bytes?: number | null;
+            /** Concurrency Bytes */
+            concurrency_bytes?: number | null;
+            /** Context Bytes */
+            context_bytes?: number | null;
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /**
+             * Evidence State
+             * @enum {string}
+             */
+            evidence_state: "declared" | "measured" | "fresh" | "stale" | "unknown";
+            /** Runtime Overhead Bytes */
+            runtime_overhead_bytes?: number | null;
+            /** Total Bytes */
+            total_bytes?: number | null;
+            /** Weights Bytes */
+            weights_bytes?: number | null;
         };
         /**
          * RolloutPreparation
@@ -5289,6 +6717,29 @@ export interface components {
             target_node_ids: string[];
             /** Targets Ready */
             targets_ready: boolean;
+        };
+        /**
+         * RunMemoryResidualRange
+         * @description Possible remaining bytes for one exact active run reservation.
+         */
+        RunMemoryResidualRange: {
+            /** Maximum Bytes */
+            maximum_bytes: number;
+            /**
+             * Minimum Bytes
+             * @default 0
+             * @constant
+             */
+            minimum_bytes: 0;
+            /**
+             * Reservation Kind
+             * @enum {string}
+             */
+            reservation_kind: "host-memory" | "gpu-memory" | "unified-memory";
+            /** Run Generation */
+            run_generation: number;
+            /** Run Id */
+            run_id: string;
         };
         /** RunNodeChange */
         RunNodeChange: {
@@ -5390,6 +6841,39 @@ export interface components {
             run_state: "planned" | "starting" | "running" | "stopping" | "stopped" | "failed" | "lost";
             /** Title */
             title: string;
+        };
+        /**
+         * RunSwitchAssessment
+         * @description Planner-owned admission and observations shared by operator reviews.
+         */
+        RunSwitchAssessment: {
+            /** Alias */
+            alias: string | null;
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers: components["schemas"]["RunSwitchReason"][];
+            effective_settings?: components["schemas"]["EffectiveSettingsSelection"] | null;
+            fit_after_stop: components["schemas"]["SparkFit"] | null;
+            fit_current: components["schemas"]["SparkFit"];
+            /** Freshness */
+            freshness?: components["schemas"]["FreshnessEvidence"][];
+            post_stop_memory_check?: components["schemas"]["ConditionalPostStopMemoryCheck"] | null;
+            preparation?: components["schemas"]["RolloutPreparation"] | null;
+            /**
+             * Stop Before Prepare
+             * @default false
+             */
+            stop_before_prepare: boolean;
+            /**
+             * Stop Before Transfer
+             * @default false
+             */
+            stop_before_transfer: boolean;
+            /** Stops */
+            stops: components["schemas"]["StopImpact"][];
+            /** Warnings */
+            warnings: components["schemas"]["RunSwitchReason"][];
         };
         /** RunSwitchCachedTransferResult */
         RunSwitchCachedTransferResult: {
@@ -5570,6 +7054,31 @@ export interface components {
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
         };
         /**
+         * RunSwitchInstallationVerifyResult
+         * @description Exact installed membership observed without a serving workload.
+         */
+        RunSwitchInstallationVerifyResult: {
+            /** Active Runs */
+            active_runs: number;
+            /** Final Verified */
+            final_verified: boolean;
+            /** Installation Id */
+            installation_id: string;
+            /** Installation State */
+            installation_state: string;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "final_verify";
+            /** Ranks */
+            ranks: components["schemas"]["RunSwitchRankReceipt"][];
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
+            /** Unwithdrawn Routes */
+            unwithdrawn_routes: number;
+        };
+        /**
          * RunSwitchMemberReceipt
          * @description Durable member projection emitted by a child distribution operation.
          */
@@ -5685,7 +7194,7 @@ export interface components {
             /** Failure Code */
             failure_code?: string | null;
             /** Final Observation */
-            final_observation?: components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | null;
+            final_observation?: components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"] | null;
             /** Final Verify Started At */
             final_verify_started_at?: number | null;
             /**
@@ -5710,8 +7219,10 @@ export interface components {
              */
             phase_index: number;
             /** Phase Results */
-            phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"])[];
+            phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"])[];
             preflight?: components["schemas"]["LifecyclePreflightCheckpoint"] | null;
+            /** Profile Application Id */
+            profile_application_id?: string | null;
             /** Retry Attempt */
             retry_attempt?: number | null;
             /** Retry Reason */
@@ -5721,6 +7232,7 @@ export interface components {
              * @default false
              */
             retryable: boolean;
+            runtime_image_reference_intent?: components["schemas"]["RunSwitchRuntimeImageReferenceIntent"] | null;
             /** Start Deadline */
             start_deadline?: string | null;
             /** Startup Budget Seconds */
@@ -5767,6 +7279,84 @@ export interface components {
             role: string;
             /** State */
             state: string;
+        };
+        /** RunSwitchReason */
+        RunSwitchReason: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Node Ids */
+            node_ids?: string[];
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "model" | "recipe" | "mapping" | "group" | "node" | "artifact" | "freshness" | "conflict" | "operation";
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "blocker" | "warning" | "info";
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+        };
+        /**
+         * RunSwitchRuntimeImageReferenceIntent
+         * @description Exact image bytes provisionally protected by a current RunSwitch job.
+         */
+        RunSwitchRuntimeImageReferenceIntent: {
+            /** Actor */
+            actor: string;
+            /** Archive Sha256 */
+            archive_sha256: string;
+            /** Build Id */
+            build_id?: string | null;
+            /** Build Input Sha256 */
+            build_input_sha256?: string | null;
+            /** Execution Keys */
+            execution_keys: string[];
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Item Index */
+            item_index: number;
+            /** Operation Id */
+            operation_id: string;
+            /**
+             * Owner Kind
+             * @constant
+             */
+            owner_kind: "run-switch-job";
+            /** Phase Index */
+            phase_index: number;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Profile Application Id */
+            profile_application_id?: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Registry Manifest Digest */
+            registry_manifest_digest?: string | null;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "published" | "controller-build";
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal: number;
         };
         /** RunSwitchRuntimeImageResult */
         RunSwitchRuntimeImageResult: {
@@ -5978,6 +7568,27 @@ export interface components {
             [key: string]: components["schemas"]["JsonValue"];
         };
         /**
+         * RuntimeImageIdentity
+         * @description Executable OCI identity, independent of its transfer observations.
+         */
+        RuntimeImageIdentity: {
+            /**
+             * Architecture
+             * @constant
+             */
+            architecture: "linux-arm64";
+            /** Build Id */
+            build_id?: string | null;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256: string;
+            /** Runtime Interface */
+            runtime_interface: string;
+        };
+        /**
          * RuntimeImagePreparation
          * @description Exact executable OCI image kept separate from model payloads.
          */
@@ -6113,6 +7724,95 @@ export interface components {
             sha256: string;
             /** Total Bytes */
             total_bytes: number;
+        };
+        /** SparkFit */
+        SparkFit: {
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers?: components["schemas"]["RunSwitchReason"][];
+            /** Nodes */
+            nodes: components["schemas"]["SparkFitNode"][];
+            /** Warnings */
+            warnings?: components["schemas"]["RunSwitchReason"][];
+        };
+        /** SparkFitNode */
+        SparkFitNode: {
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers?: components["schemas"]["RunSwitchReason"][];
+            /** Disk Free After Bytes */
+            disk_free_after_bytes?: number | null;
+            /** Disk Free Bytes */
+            disk_free_bytes?: number | null;
+            /** Disk Required Bytes */
+            disk_required_bytes?: number | null;
+            /** Memory Available Bytes */
+            memory_available_bytes?: number | null;
+            /** Memory Capacity Bytes */
+            memory_capacity_bytes?: number | null;
+            /** Memory Floor Bytes */
+            memory_floor_bytes?: number | null;
+            /** Memory Free After Bytes */
+            memory_free_after_bytes?: number | null;
+            /** Memory Kind */
+            memory_kind?: ("unified" | "host" | "accelerator") | null;
+            /** Memory Pool */
+            memory_pool?: ("shared" | "separate") | null;
+            /** Memory Required Bytes */
+            memory_required_bytes?: number | null;
+            memory_usage_uncertainty?: components["schemas"]["MemoryUsageUncertainty"] | null;
+            /** Node Id */
+            node_id: string;
+            /** Ports Required */
+            ports_required: number[];
+            /** Rank */
+            rank: number;
+            resource_demand?: components["schemas"]["ResourceDemandEvidence"] | null;
+            /** Role */
+            role: string;
+            /** Warnings */
+            warnings?: components["schemas"]["RunSwitchReason"][];
+        };
+        /**
+         * SparkGroup
+         * @description A complete, rank-labelled Spark group selected by the operator.
+         */
+        SparkGroup: {
+            /** Nodes */
+            nodes: components["schemas"]["SparkGroupNode"][];
+        };
+        /** SparkGroupNode */
+        SparkGroupNode: {
+            /**
+             * Endpoint Owner
+             * @default false
+             */
+            endpoint_owner: boolean;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+        };
+        /** StopImpact */
+        StopImpact: {
+            /** Alias */
+            alias: string;
+            /** Node Ids */
+            node_ids: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Reserved Bytes */
+            reserved_bytes: number;
+            /** Run Id */
+            run_id: string;
+            /** Run Plan Digest */
+            run_plan_digest: string;
+            /** State */
+            state: string;
         };
         /** StringParameter */
         StringParameter: {
@@ -6677,6 +8377,50 @@ export interface components {
             /** Workloads */
             workloads: components["schemas"]["TelemetryWorkload"][];
         };
+        /**
+         * TensorParallelStartEvidence
+         * @description Exact endpoint evidence for a phase-free tensor-parallel start.
+         */
+        TensorParallelStartEvidence: {
+            /** Artifact Set Digest */
+            artifact_set_digest: string;
+            /** Endpoint */
+            endpoint: string;
+            /** Evidence Digest */
+            evidence_digest: string;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Address */
+            local_address: string;
+            /** Master Address */
+            master_address: string;
+            /** Master Port */
+            master_port: number;
+            /** Memory Reservation Bytes */
+            memory_reservation_bytes: number;
+            /** Model Identity */
+            model_identity?: string | null;
+            /** Rank */
+            rank: number;
+            /**
+             * Ready
+             * @constant
+             */
+            ready: true;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /**
+             * Recipe Revision Id
+             * Format: uuid
+             */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number;
+            /** Runtime Arguments Sha256 */
+            runtime_arguments_sha256: string;
+            /** World Size */
+            world_size: number;
+        };
         /** WorkloadProvenance */
         WorkloadProvenance: {
             /** Build Id */
@@ -6785,6 +8529,64 @@ export interface operations {
             };
         };
     };
+    getArtifactJobByRequestId: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactJobResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     getArtifactJobStatus: {
         parameters: {
             query?: never;
@@ -6846,7 +8648,9 @@ export interface operations {
     cancelArtifactJob: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-Request-ID": string;
+            };
             path: {
                 job_id: string;
             };
@@ -7069,7 +8873,9 @@ export interface operations {
     submitArtifactJob: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-Request-ID": string;
+            };
             path: {
                 job_id: string;
             };
@@ -7664,6 +9470,158 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getFleetEnrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentGrantStatus"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    revokeFleetEnrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentGrantStatus"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -8147,7 +10105,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetReenrollRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -8178,6 +10140,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8815,6 +10786,153 @@ export interface operations {
             };
         };
     };
+    cancelModelOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelCacheCancellationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheOperatorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getModelRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheOperatorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     getModel: {
         parameters: {
             query?: never;
@@ -8964,7 +11082,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ModelCacheOperatorRequest"];
+                "application/json": components["schemas"]["ModelCacheRemovalRequest"];
             };
         };
         responses: {
@@ -9033,6 +11151,82 @@ export interface operations {
             };
         };
     };
+    reviewModelRemoval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheRemovalReview"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     listOperations: {
         parameters: {
             query?: {
@@ -9040,6 +11234,7 @@ export interface operations {
                 limit?: number;
                 state?: string | null;
                 node_id?: string | null;
+                request_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -9308,6 +11503,163 @@ export interface operations {
             };
         };
     };
+    cancelProfileApplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                application_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetProfileApplicationCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileApplicationView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getProfileApplicationCancellation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                application_id: string;
+                request_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileApplicationView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     getProfile: {
         parameters: {
             query?: never;
@@ -9401,6 +11753,115 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getProfileDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileDefinitionView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getProfileEndpoints: {
+        parameters: {
+            query?: {
+                alias?: string | null;
+            };
+            header?: never;
+            path: {
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileEndpointsView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9663,6 +12124,15 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -9746,6 +12216,9 @@ export interface operations {
                 cursor?: string | null;
                 model?: string[] | null;
                 all_models?: boolean;
+                ready?: boolean | null;
+                fits_fleet?: boolean | null;
+                assess?: boolean;
                 usage?: string[] | null;
                 publisher?: string[] | null;
                 alignment?: string[] | null;
@@ -9815,7 +12288,145 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"] | components["schemas"]["RecipeOperatorResponse"];
+                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"] | components["schemas"]["RecipeOperatorResponse"] | components["schemas"]["RecipeUpdateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    cancelRecipeOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeCancellationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"] | components["schemas"]["RecipeOperatorResponse"] | components["schemas"]["RecipeUpdateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getRecipeRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"] | components["schemas"]["RecipeOperatorResponse"] | components["schemas"]["RecipeUpdateResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -9917,7 +12528,9 @@ export interface operations {
     createArtifactJob: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-Request-ID": string;
+            };
             path: {
                 run_id: string;
             };
@@ -10132,7 +12745,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RecipeOperatorRequest"];
+                "application/json": components["schemas"]["RecipeDownloadRequest"];
             };
         };
         responses: {
@@ -10223,6 +12836,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecipeOperatorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    reviewRecipeRemoval: {
+        parameters: {
+            query: {
+                with_model: boolean;
+            };
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheRemovalReview"];
                 };
             };
             /** @description Unauthorized */

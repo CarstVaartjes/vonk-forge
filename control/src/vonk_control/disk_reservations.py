@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from .models import InstallationNode, RecipeInstallation, ResourceReservation
+from .profile_capacity import reservation_visible
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
@@ -22,6 +23,7 @@ def outstanding_disk_reservation_bytes(
     *,
     inventory_observed_at: datetime | None,
     excluded_run_ids: Collection[str] = (),
+    excluded_profile_application_ids: Collection[str] = (),
 ) -> int:
     """Keep uncertain commitments; count completed download bytes only once.
 
@@ -56,12 +58,14 @@ def outstanding_disk_reservation_bytes(
             ResourceReservation.node_id == node_id,
             ResourceReservation.kind == "disk",
             ResourceReservation.state == "active",
+            reservation_visible(
+                tuple(excluded_profile_application_ids),
+                excluded_run_ids=tuple(excluded_run_ids),
+            ),
         )
     )
     total = 0
     for reservation, installation, node in rows:
-        if reservation.owner_kind == "run" and reservation.owner_id in excluded_run_ids:
-            continue
         materialized = 0
         if (
             inventory_observed_at is not None

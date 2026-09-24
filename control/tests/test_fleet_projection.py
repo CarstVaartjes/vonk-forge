@@ -209,6 +209,7 @@ def _inventory(
         artifact_store_read_only=False,
         capabilities=["runtime.vonk.v1"],
         evidence_digest=((suffix + f"{free_bytes:x}") * 64)[:64],
+        memory_pool="separate",
     )
 
 
@@ -1111,7 +1112,7 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
     ]
 
 
-def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
+def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1438,6 +1439,28 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
         )
 
     snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
+    from cluster_profiles.cli_render import render_payload
+
+    render_payload(snapshot.model_dump(mode="json"), "fleet")
+    rendered = capsys.readouterr()
+    assert "Workloads: 3 distinct runs" in rendered.out
+    assert rendered.out.count("Workload: Pair Recipe") == 3
+    assert "Controller run state: running" in rendered.out
+    assert "Observed group: degraded" in rendered.out
+    assert "rank-stale" in rendered.err
+    assert "route-not-published" in rendered.err
+    assert NODE_A in rendered.out and NODE_B in rendered.out
+    render_payload(snapshot.model_dump(mode="json"), "fleet", wide=True)
+    rendered = capsys.readouterr()
+    assert "Installations: 2 distinct placements" in rendered.out
+    assert rendered.out.count("Installed recipe: Pair Recipe") == 2
+    assert "Complete: no" in rendered.out
+    selected = snapshot.model_copy(update={"nodes": snapshot.nodes[:1]})
+    render_payload(selected.model_dump(mode="json"), "fleet")
+    rendered = capsys.readouterr()
+    assert "other reported members are outside this view" in rendered.out
+    assert NODE_B in rendered.out
+    assert "Observed group: degraded" in rendered.out
     alpha, beta = snapshot.nodes
     complete = next(
         value

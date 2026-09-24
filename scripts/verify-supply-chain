@@ -24,7 +24,7 @@ from pathlib import Path
 # digest reference fails this check.
 VERSIONED_IMAGE = re.compile(r"^[^\s@]+:[^\s@]+$")
 FLOATING_TAGS = frozenset({"latest", "main", "edge", "stable", "master", "dev"})
-PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
+PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
 PUBLIC_CONTRACT_LOCK = "control/packaging/public-contracts.lock"
 PUBLIC_CONTRACT_WHEEL = (
     "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
@@ -190,6 +190,8 @@ def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
         "agent_protocol/src/vonk_agent_protocol/host_helper.py",
         "control/src/vonk_control/strict_json.py",
         "src/cluster_profiles/control_client.py",
+        "src/cluster_profiles/control_transport.py",
+        "src/cluster_profiles/control_limits.py",
         "src/cluster_profiles/schemas/control-openapi.json",
         "scripts/generate-control-clients",
         "control/src/vonk_control/compiled_execution_plan.py",
@@ -211,9 +213,13 @@ def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
         "control/src/vonk_control/model_cache_contract.py",
         "control/src/vonk_control/model_cache_progress.py",
         "control/src/vonk_control/recipe_builds.py",
+        "control/src/vonk_control/recipe_build_cancellation.py",
         "control/src/vonk_control/recipe_operations.py",
         "control/src/vonk_control/recipe_image_availability.py",
         "control/src/vonk_control/recipe_image_availability_api.py",
+        "control/src/vonk_control/recipe_update_batches.py",
+        "control/src/vonk_control/recipe_update_contract.py",
+        "control/src/vonk_control/recipe_availability_intent.py",
         "control/src/vonk_control/operation_contract.py",
         "control/src/vonk_control/operation_progress.py",
         "control/src/vonk_control/operation_api.py",
@@ -291,7 +297,7 @@ def protocol_version(lock: bytes) -> str:
     ]
     expected_source = (
         'source = { path = "../inventory/wheels/'
-        'vonk_agent_protocol-2.2.0-py3-none-any.whl" }'
+        'vonk_agent_protocol-3.0.0-py3-none-any.whl" }'
     )
     if len(packages) != 1 or expected_source not in packages[0]["record"].splitlines():
         raise ValueError("control and agent must resolve the verified protocol wheel")
@@ -634,9 +640,7 @@ def image_errors(root: Path) -> list[str]:
     if not isinstance(hermes_reference, str):
         errors.append("hermes build base is missing or invalid")
     elif hermes_reference not in hermes_dockerfile:
-        errors.append(
-            "hermes build base is absent from Hermes Dockerfile"
-        )
+        errors.append("hermes build base is absent from Hermes Dockerfile")
     if "ARG NODE_IMAGE" not in dockerfile or "ARG PYTHON_IMAGE" not in dockerfile:
         errors.append("control build bases are not explicit locked arguments")
     if (

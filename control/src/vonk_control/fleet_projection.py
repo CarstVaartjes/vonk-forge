@@ -1728,11 +1728,21 @@ class FleetProjection:
                 ResourceReservation.node_id,
                 ResourceReservation.kind,
                 func.sum(ResourceReservation.amount_bytes),
-                func.count(ResourceReservation.id),
+                func.count(
+                    func.distinct(
+                        case(
+                            (
+                                ResourceReservation.kind == "port",
+                                ResourceReservation.resource_key,
+                            ),
+                            else_=ResourceReservation.id,
+                        )
+                    )
+                ),
             )
             .where(
                 ResourceReservation.node_id.in_(node_ids),
-                ResourceReservation.state == "active",
+                ResourceReservation.state.in_(("active", "promised")),
             )
             .group_by(ResourceReservation.node_id, ResourceReservation.kind)
             .order_by(ResourceReservation.node_id, ResourceReservation.kind)

@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import ValidationError
 from sqlalchemy import Boolean, and_, case, or_, select, update
@@ -32,9 +32,17 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_payload
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
+from .admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    acquire_admission_keys,
+    lock_admission_rows,
+    node_admission_key,
+)
 from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
 from .failure_evidence import safe_text, sanitize_diagnostics
+from .install_admission import InstallAdmissionBusy
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -68,6 +76,7 @@ from .recovery_policy import (
     classify,
     kind_for_agent_error,
 )
+from .run_admission import RunAdmissionBusy
 
 AgentFence = str | AgentClaim | AgentProgress | AgentResult
 ResultConsumer = Callable[
@@ -331,6 +340,106 @@ def release_owned_reservations_in_session(
         reservation.released_at = now
 
 
+def operator_resume_candidates_in_session(
+    session: Session, job_id: str, now: datetime
+) -> tuple[StoredOperation, ...]:
+    """Return the parked children whose current Job owner still has intent.
+
+    The Job projection and the resume mutation share this owner and intent
+    decision. Retry budget is applied by the latter as a typed refusal and by
+    the former as an absent action.
+    """
+
+    job = session.get(Job, job_id)
+    if job is None or job.state not in {"queued", "running", "waiting-for-operator"}:
+        return ()
+    if job.result is not None:
+        if not isinstance(job.result, Mapping):
+            return ()
+        cancel_requested = job.result.get("cancel_requested")
+        if cancel_requested is not None and cancel_requested is not False:
+            return ()
+    scope = AgentJobService._target_scope(job.targets)
+    if scope is None:
+        return ()
+    payload = job.payload if isinstance(job.payload, Mapping) else None
+    if payload is None:
+        return ()
+    parent_intent = payload.get("workload_intent_ordinal")
+    if parent_intent is not None and (
+        type(parent_intent) is not int or parent_intent < 1
+    ):
+        return ()
+    candidates = tuple(
+        session.scalars(
+            select(StoredOperation)
+            .where(
+                StoredOperation.parent_job_id == job_id,
+                StoredOperation.state == "waiting-for-operator",
+            )
+            .order_by(StoredOperation.id)
+        )
+    )
+    if not candidates:
+        return ()
+    nodes = {
+        node.node_id: node
+        for node in session.scalars(
+            select(AgentNode).where(AgentNode.node_id.in_(scope))
+        )
+    }
+    # A topology-wide request cannot resume only its still-current subset.
+    # The mutation locks this complete target scope before this shared decision.
+    if set(nodes) != set(scope) or any(
+        node.state != "active"
+        or node.revoked_at is not None
+        or (parent_intent is not None and node.workload_intent_ordinal != parent_intent)
+        for node in nodes.values()
+    ):
+        return ()
+    eligible: list[StoredOperation] = []
+    for operation in candidates:
+        if operation.node_id not in scope:
+            continue
+        node = nodes.get(operation.node_id)
+        if node is None:
+            continue
+        if operation.current_attempt < 1:
+            continue
+        if parent_intent is None:
+            if operation.workload_intent_ordinal is not None:
+                continue
+        elif operation.workload_intent_ordinal != parent_intent:
+            continue
+        if (
+            operation.kind in _WORKLOAD_INTENT_OPERATIONS
+            and operation.workload_intent_ordinal is None
+        ):
+            continue
+        eligible.append(operation)
+    return tuple(eligible)
+
+
+def operator_resume_eligible_operations_in_session(
+    session: Session, job_id: str, now: datetime
+) -> tuple[StoredOperation, ...]:
+    """Return the current-owner resume action when its bounded budget remains."""
+
+    job = session.get(Job, job_id)
+    if job is None or job.state != "waiting-for-operator":
+        return ()
+    policy = RecoveryPolicy()
+    return tuple(
+        operation
+        for operation in operator_resume_candidates_in_session(session, job_id, now)
+        if not (
+            operation.retry_disposition == _RETRY_DISPOSITION
+            and operation.retry_disposition_attempt == operation.current_attempt
+        )
+        and retry_due_after_operator_action(operation, now, policy) is not None
+    )
+
+
 def authorize_operator_resume_in_session(
     session: Session, job_id: str, now: datetime
 ) -> None:
@@ -346,17 +455,27 @@ def authorize_operator_resume_in_session(
     is safe inside the caller's SQL transaction.
     """
 
-    operations = list(
+    operations = operator_resume_candidates_in_session(session, job_id, now)
+    if not operations:
+        raise ValueError("job has no current authorized resume action")
+    operations = tuple(
         session.scalars(
             select(StoredOperation)
-            .where(
-                StoredOperation.parent_job_id == job_id,
-                StoredOperation.state == "waiting-for-operator",
-            )
+            .where(StoredOperation.id.in_([operation.id for operation in operations]))
             .order_by(StoredOperation.id)
             .with_for_update(of=StoredOperation)
         )
     )
+    parent = session.get(Job, job_id)
+    if parent is None or (
+        parent.state != "waiting-for-operator"
+        and any(
+            operation.retry_disposition != _RETRY_DISPOSITION
+            or operation.retry_disposition_attempt != operation.current_attempt
+            for operation in operations
+        )
+    ):
+        raise ValueError("job is not waiting for operator")
     policy = RecoveryPolicy()
     for operation in operations:
         if (
@@ -1248,15 +1367,27 @@ class AgentJobService:
         scope = self._target_scope(targets)
         if scope is None or node_id not in scope:
             raise ValueError("agent operation node must be a parent target")
-        if not self._lock_target_scopes(
-            session, {"enqueue": (parent_job_id, scope)}, node_id
-        ):
+        uses_workload_admission = protocol_operation.value in _RECIPE_CAPABILITIES
+        try:
+            if uses_workload_admission:
+                acquire_admission_keys(
+                    session, tuple(node_admission_key(target) for target in scope)
+                )
+            scopes_locked = self._lock_target_scopes(
+                session,
+                {"enqueue": (parent_job_id, scope)},
+                node_id,
+                nowait=uses_workload_admission,
+            )
+        except AdmissionLockBusy as error:
+            if protocol_operation.value == AgentOperation.RECIPE_INSTALL.value:
+                raise InstallAdmissionBusy("install.capacity_busy") from error
+            if uses_workload_admission:
+                raise RunAdmissionBusy("run capacity writer is busy") from error
+            raise
+        if not scopes_locked:
             raise ValueError("agent operation parent target scope changed")
-        node = session.scalar(
-            select(AgentNode)
-            .where(AgentNode.node_id == node_id)
-            .with_for_update(of=AgentNode)
-        )
+        node = session.scalar(select(AgentNode).where(AgentNode.node_id == node_id))
         if node is None:
             raise KeyError(node_id)
         if node.state != "active" or node.revoked_at is not None:
@@ -1265,9 +1396,7 @@ class AgentJobService:
             raise ValueError(
                 f"agent does not advertise operation capability {operation}"
             )
-        parent = session.scalar(
-            select(Job).where(Job.id == parent_job_id).with_for_update(of=Job)
-        )
+        parent = session.scalar(select(Job).where(Job.id == parent_job_id))
         if parent is None:
             raise KeyError(parent_job_id)
         if parent.state in _TERMINAL_PARENT_STATES:
@@ -1339,6 +1468,9 @@ class AgentJobService:
             or ordinal < 1
         ):
             raise ValueError("workload cancellation scope is invalid")
+        acquire_admission_keys(
+            session, tuple(node_admission_key(node_id) for node_id in scope)
+        )
         parent_ids = tuple(
             session.scalars(
                 select(StoredOperation.parent_job_id)
@@ -1354,24 +1486,41 @@ class AgentJobService:
                 .order_by(StoredOperation.parent_job_id)
             )
         )
-        for parent_id in parent_ids:
-            parent = session.scalar(
-                select(Job).where(Job.id == parent_id).with_for_update(of=Job)
+        locked = lock_admission_rows(
+            session,
+            (
+                AdmissionRowLock(
+                    "superseded-workload-parents",
+                    Job,
+                    select(Job).where(Job.id.in_(parent_ids)),
+                ),
+                AdmissionRowLock(
+                    "superseded-workload-children",
+                    StoredOperation,
+                    select(StoredOperation).where(
+                        StoredOperation.parent_job_id.in_(parent_ids)
+                    ),
+                ),
             )
+            if parent_ids
+            else (),
+        )
+        parents = {
+            parent.id: parent
+            for parent in locked.get("superseded-workload-parents", ())
+        }
+        children_by_parent: dict[str, list[StoredOperation]] = {}
+        for child in locked.get("superseded-workload-children", ()):
+            children_by_parent.setdefault(child.parent_job_id, []).append(child)
+        for parent_id in parent_ids:
+            parent = parents.get(parent_id)
             if parent is None or parent.state not in {
                 "queued",
                 "running",
                 "waiting-for-operator",
             }:
                 continue
-            children = tuple(
-                session.scalars(
-                    select(StoredOperation)
-                    .where(StoredOperation.parent_job_id == parent_id)
-                    .order_by(StoredOperation.id)
-                    .with_for_update(of=StoredOperation)
-                )
-            )
+            children = tuple(children_by_parent.get(parent_id, ()))
             bound = parent.payload.get("workload_intent_ordinal")
             if (
                 type(bound) is not int
@@ -2925,31 +3074,60 @@ class AgentJobService:
         session: Session,
         scopes: dict[str, tuple[str, tuple[str, ...]]],
         node_id: str,
+        *,
+        nowait: bool = False,
     ) -> bool:
         nodes = sorted(
             {node_id} | {target for _, scope in scopes.values() for target in scope}
         )
-        locked = list(
-            session.scalars(
-                select(AgentNode)
-                .where(AgentNode.node_id.in_(nodes))
-                .order_by(AgentNode.node_id)
-                .with_for_update(of=AgentNode)
-                .execution_options(populate_existing=True)
+        locked_rows: Mapping[str, tuple[Any, ...]] = {}
+        if nowait:
+            locked_rows = lock_admission_rows(
+                session,
+                (
+                    AdmissionRowLock(
+                        "target-agent-nodes",
+                        AgentNode,
+                        select(AgentNode).where(AgentNode.node_id.in_(nodes)),
+                    ),
+                    AdmissionRowLock(
+                        "target-parent-jobs",
+                        Job,
+                        select(Job).where(
+                            Job.id.in_(
+                                sorted({parent_id for parent_id, _ in scopes.values()})
+                            )
+                        ),
+                    ),
+                ),
             )
-        )
+            locked = list(locked_rows.get("target-agent-nodes", ()))
+        else:
+            locked = list(
+                session.scalars(
+                    select(AgentNode)
+                    .where(AgentNode.node_id.in_(nodes))
+                    .order_by(AgentNode.node_id)
+                    .with_for_update(of=AgentNode)
+                    .execution_options(populate_existing=True)
+                )
+            )
         if [node.node_id for node in locked] != nodes:
             return False
         parent_ids = sorted({parent_id for parent_id, _ in scopes.values()})
         parents = (
             {
                 job.id: job
-                for job in session.scalars(
-                    select(Job)
-                    .where(Job.id.in_(parent_ids))
-                    .order_by(Job.id)
-                    .with_for_update(of=Job)
-                    .execution_options(populate_existing=True)
+                for job in (
+                    locked_rows.get("target-parent-jobs", ())
+                    if nowait
+                    else session.scalars(
+                        select(Job)
+                        .where(Job.id.in_(parent_ids))
+                        .order_by(Job.id)
+                        .with_for_update(of=Job)
+                        .execution_options(populate_existing=True)
+                    )
                 )
             }
             if parent_ids

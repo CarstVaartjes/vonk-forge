@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import json
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -17,7 +18,6 @@ from sqlalchemy.orm import Session
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
-from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -55,7 +55,6 @@ from vonk_control.recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
 )
-from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract import (
     InvocationMetadata,
     RunSwitchApplyRequest,
@@ -925,6 +924,15 @@ def test_default_run_switch_admission_uses_the_recipe_memory_reserve(
     )
     plan = service.preview(_request(sessions, nodes[0]), actor="admin")
     assert plan.allowed, plan.blockers
+    assert any(
+        reason.code == "run-switch.resource.estimate_uncertain"
+        and reason.severity == "warning"
+        and "declared recipe-role memory envelope" in reason.detail
+        for reason in plan.warnings
+    )
+    node = plan.fit_current.nodes[0]
+    assert node.resource_demand is not None
+    assert node.resource_demand.total_bytes == node.memory_required_bytes
 
 
 def test_mapping_selection_reads_typed_parameters_from_persisted_mapping(
@@ -1033,6 +1041,10 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(
     }
     assert plan.build.state == "available"
     assert plan.preparation is not None
+    # NAS readiness must not wait for copies on the Sparks. The preparation
+    # below is exactly the one a profile preview and later apply will consume.
+    assert plan.preparation.controller_ready is True
+    assert plan.preparation.targets_ready is False
     assert [phase.kind for phase in plan.phases] == [
         "prepare",
         "transfer",
@@ -1650,6 +1662,7 @@ def _cold_compile_switch(tmp_path: Path, *, seconds: int = 716, slow_compiles: i
                     1,
                     False,
                     ("runtime.vonk.v1", "recipe.operations.v1"),
+                    memory_pool="shared",
                 )
             )
         for hook in hooks:
@@ -2196,6 +2209,20 @@ def test_first_profile_preparation_preview_replans_a_missing_build_archive(
         build_archive_available=lambda _digest, _size: False,
         memory_floor_bytes=50,
     )
+    request = _request(sessions, nodes[0])
+    with sessions() as session:
+        before = [(row.id, row.state) for row in session.scalars(select(RecipeBuild))]
+        jobs = tuple(session.scalars(select(Job.id)))
+    inspected = service.inspect_candidate(
+        request.recipe_revision_id, (nodes[0],), actor="viewer"
+    )
+    assert not inspected.allowed
+    with sessions() as session:
+        assert [
+            (row.id, row.state) for row in session.scalars(select(RecipeBuild))
+        ] == before
+        assert tuple(session.scalars(select(Job.id))) == jobs
+    # The identical normal planning path below really invokes the writer.
     plan = service.preview(_request(sessions, nodes[0]), actor="admin")
 
     assert plan.allowed, [reason.code for reason in plan.blockers]
@@ -2464,6 +2491,7 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
             1,
             False,
             ("recipe.build.v1",),
+            memory_pool="shared",
         )
     )
     with sessions.begin() as session:
@@ -2576,6 +2604,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
 
     def start_build(*_args, **_kwargs) -> RecipeOperationView:
         with sessions.begin() as session:
+            _kwargs["admission_guard"](session)
             build = session.get(RecipeBuild, build_id)
             assert build is not None
             build.state = "building"
@@ -2604,7 +2633,18 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         lifecycle,
         RecordingArtifactExecutor(),
     )
-    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    parent = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            request_key=request_key,
+            plan_digest=plan.plan_digest,
+        ),
+        actor="admin",
+    )
+    assert parent.result is not None
+    progress = parent.result.model_dump(mode="json")
     phase = next(phase for phase in plan.phases if phase.subphase == "container-build")
     execution = executor.execute(
         plan,
@@ -2612,7 +2652,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         item_index=0,
         actor="admin",
         request_key=request_key,
-        progress={},
+        progress=progress,
     )
     assert execution.operation_id == child_id
     assert execution.result == {
@@ -2640,12 +2680,12 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
             phase,
             item_index=0,
             actor="admin",
-            request_key=str(uuid.uuid4()),
-            progress={},
+            request_key=request_key,
+            progress=progress,
         )
 
 
-def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_before_prepare(
+def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -2675,6 +2715,7 @@ def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_befo
         installation.state = "partial"
         run.state = "running"
         run.route_state = "published"
+        run_generation = run.run_generation
         for item in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
             item.state = "running"
             item.reserved_memory_bytes = 7_800
@@ -2695,11 +2736,76 @@ def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_befo
         RecordingArtifactExecutor(),
         phase_executor=SynchronousPhaseExecutor(),
     )
+    baseline = service.preview(request, actor="admin")
+    required = baseline.fit_current.nodes[0].memory_required_bytes
+    floor = baseline.fit_current.nodes[0].memory_floor_bytes
+    assert required is not None and floor is not None
+    # Aggregate free already accounts for the running owner. The declared
+    # peak still owns the hard budget until this exact run stops.
+    total = 7_800 + required + floor - 1
+    free = required + floor + 10
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.host_memory_total_bytes = total
+        snapshot.host_memory_free_bytes = free
+        snapshot.gpu_memory_total_bytes = total
+        snapshot.gpu_memory_free_bytes = free
     plan = service.preview(request, actor="admin")
 
     assert plan.fit_current.allowed is False
-    assert plan.fit_after_stop is not None and plan.fit_after_stop.allowed is True
+    assert "run-switch.resource.insufficient_reservation_budget" in {
+        reason.code for reason in plan.fit_current.blockers
+    }
+    assert plan.fit_after_stop is None
+    assert plan.post_stop_memory_check is not None
+    assert plan.post_stop_memory_check.stop_run_ids == [run_id]
+    assert plan.allowed, plan.blockers
     assert plan.stop_before_prepare is True
+    current_node = plan.fit_current.nodes[0]
+    uncertainty = current_node.memory_usage_uncertainty
+    assert uncertainty is not None
+    sample = next(
+        item
+        for item in plan.freshness
+        if item.source == f"spark:{node_id}:inventory"
+    )
+    assert uncertainty.source == "aggregate_inventory_without_run_usage"
+    assert uncertainty.inventory_observed_at == sample.observed_at
+    assert uncertainty.inventory_evidence_digest == sample.evidence_digest
+    assert [
+        (
+            item.run_id,
+            item.run_generation,
+            item.reservation_kind,
+            item.maximum_bytes,
+        )
+        for item in uncertainty.residual_ranges
+    ] == [(run_id, run_generation, "unified-memory", 7_800)]
+    assert current_node.memory_free_after_bytes is None
+    uncertain_reason = next(
+        reason
+        for reason in current_node.blockers
+        if reason.code == "run-switch.resource.resident_usage_unknown"
+    )
+    assert "Capacity is unverified" in uncertain_reason.detail
+    assert "0..7800 bytes" in uncertain_reason.detail
+    assert "leaves -" not in uncertain_reason.detail
+    round_tripped = RunSwitchPlan.model_validate_json(plan.model_dump_json())
+    assert (
+        round_tripped.fit_current.nodes[0].memory_usage_uncertainty == uncertainty
+    )
+    bad_stop = plan.model_dump(mode="python")
+    bad_stop["post_stop_memory_check"] = {"stop_run_ids": [str(uuid.uuid4())]}
+    with pytest.raises(ValidationError, match="exact reviewed stops"):
+        RunSwitchPlan.model_validate(bad_stop)
+    impossible_capacity = plan.model_dump(mode="python")
+    fit_node = impossible_capacity["fit_current"]["nodes"][0]
+    fit_node["memory_capacity_bytes"] = (
+        fit_node["memory_required_bytes"] + fit_node["memory_floor_bytes"] - 1
+    )
+    with pytest.raises(ValidationError, match="known feasible demand and capacity"):
+        RunSwitchPlan.model_validate(impossible_capacity)
     assert [phase.kind for phase in plan.phases] == [
         "stop",
         "prepare",
@@ -2707,6 +2813,52 @@ def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_befo
         "start",
         "final_verify",
     ]
+    required = plan.fit_current.nodes[0].memory_required_bytes
+    floor = plan.fit_current.nodes[0].memory_floor_bytes
+    assert required is not None and floor is not None
+    impossible_total = required + floor - 1
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        saved_capacity = (
+            snapshot.host_memory_total_bytes,
+            snapshot.host_memory_free_bytes,
+            snapshot.gpu_memory_total_bytes,
+            snapshot.gpu_memory_free_bytes,
+        )
+        snapshot.host_memory_total_bytes = impossible_total
+        snapshot.host_memory_free_bytes = impossible_total
+        snapshot.gpu_memory_total_bytes = impossible_total
+        snapshot.gpu_memory_free_bytes = impossible_total
+    physically_impossible = service.preview(request, actor="admin")
+    assert physically_impossible.post_stop_memory_check is None
+    assert not physically_impossible.allowed
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        (
+            snapshot.host_memory_total_bytes,
+            snapshot.host_memory_free_bytes,
+            snapshot.gpu_memory_total_bytes,
+            snapshot.gpu_memory_free_bytes,
+        ) = saved_capacity
+    with sessions.begin() as session:
+        claim = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run_id,
+                ResourceReservation.kind == "unified-memory",
+                ResourceReservation.state == "active",
+            )
+        )
+        assert claim is not None
+        claim.plan_digest = "a" * 64
+    changed = service.preview(request, actor="admin")
+    assert changed.post_stop_memory_check is None
+    assert not changed.allowed
+    assert "run-switch.resource.insufficient_reservation_budget" in {
+        reason.code for reason in changed.blockers
+    }
 
 
 def test_switch_replaces_the_run_that_holds_the_nodes_capacity(
@@ -3126,9 +3278,17 @@ class _CountingPreviewLifecycle(RecipeOperationService):
         self._inner = inner
         self.previews = 0
 
-    def preview_run(self, installation_id: str, alias: str):
+    def preview_run(
+        self,
+        installation_id: str,
+        alias: str,
+        *,
+        profile_application_id: str | None = None,
+    ):
         self.previews += 1
-        return self._inner.preview_run(installation_id, alias)
+        return self._inner.preview_run(
+            installation_id, alias, profile_application_id=profile_application_id
+        )
 
     def __getattr__(self, name: str):
         return getattr(self._inner, name)
@@ -3753,46 +3913,25 @@ def test_cancel_queued_start_is_idempotent_but_active_runtime_requires_stop(tmp_
 
 def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
     tmp_path: Path,
+    postgres_engine,
 ) -> None:
-    from vonk_control.agent_jobs import AgentJobService
+    from .test_run_switch_build_fencing import _direct_parent
 
-    from .test_recipe_builds import setup as setup_build
-
-    sessions, bundles, now, node_id, revision = setup_build(tmp_path)
-    builds = RecipeBuildService(sessions, bundles=bundles)
-    selected = builds.plan(revision.id, node_id, now=now)
-    queue = AgentJobService(sessions, clock=lambda: now)
-    lifecycle = RecipeOperationService(
-        sessions,
-        install_admission=InstallAdmissionService(sessions),
-        run_admission=RunAdmissionService(sessions),
-        agent_jobs=queue,
-        clock=lambda: now,
-        builds=builds,
+    sessions, planner, parent, request, selected = _direct_parent(
+        tmp_path, postgres_engine
     )
-    executor = RecipeLifecyclePhaseExecutor(
-        lifecycle,
-        sessions,
-        ClusterMappingService(sessions),
-        lambda: now,
-    )
-    # This phase consumes only the build identities already selected by preview.
-    plan = RunSwitchPlan.model_construct(
-        recipe_build_id=selected.build_id,
-        recipe_revision_id=selected.recipe_revision_id,
-        build=SimpleNamespace(
-            build_id=selected.build_id,
-            build_input_sha256=selected.build_input_sha256,
-        ),
-    )
-    phase = RunSwitchPhase(
-        index=0,
-        kind="prepare",
-        subphase="container-build",
-        state="planned",
-        detail="Build selected source recipe",
-    )
-    request_key = str(uuid.uuid4())
+    lifecycle = planner._lifecycle
+    executor = planner._phase_executor
+    assert lifecycle is not None and executor is not None
+    with sessions() as session:
+        job = session.get(Job, parent.operation_id)
+        assert job is not None
+        plan = RunSwitchPlan.model_validate_json(json.dumps(job.payload["plan"]))
+        progress = dict(job.result or {})
+    phase = plan.phases[0]
+    assert phase.subphase == "container-build"
+    request_key = request.request_key
+    assert request_key is not None
 
     def execute():
         return executor.execute(
@@ -3801,7 +3940,7 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
             item_index=0,
             actor="admin",
             request_key=request_key,
-            progress={},
+            progress=progress,
         )
 
     scheduled = execute()
@@ -4503,3 +4642,42 @@ def test_late_dependency_receipt_resumes_original_checkpoint_after_deadline(
         recovered.result is not None and "transfer" in recovered.result.completed_phases
     )
     assert executor.calls_while_pending == 1
+
+
+def test_shared_admission_contention_preserves_operation_for_retry(
+    tmp_path: Path,
+) -> None:
+    """A busy child enqueue must retain intent instead of escaping the worker."""
+    from vonk_control.admission_locking import AdmissionLockBusy
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+
+    class BusyExecutor(RecordingArtifactExecutor):
+        def execute(self, *args, **kwargs):
+            raise AdmissionLockBusy("admission lock node is busy")
+
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=BusyExecutor(),
+    )
+    request = _request(sessions, nodes[0])
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    for _ in range(12):
+        service.tick()
+        with sessions() as session:
+            job = session.get(Job, operation.operation_id)
+            assert job is not None
+            if job.status_reason and "capacity writer" in job.status_reason:
+                assert job.state == "running"
+                assert "retry at" in job.status_reason
+                break
+    else:
+        pytest.fail("shared admission contention did not schedule a durable retry")

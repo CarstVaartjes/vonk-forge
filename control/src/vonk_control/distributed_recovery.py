@@ -407,12 +407,17 @@ def _recovery_authority(
         compiled_plan = compiled_plans.get(node.node_id)
         local_address = plan.get("fabric_address")
         endpoint_owner = plan.get("endpoint_owner")
+        memory_floor = plan.get("memory_floor_bytes")
+        memory_kind = plan.get("memory_kind")
         if (
             plan.get("node_id") != node.node_id
             or plan.get("rank") != node.rank
             or plan.get("role") != node.role
             or plan.get("port") != node.port
             or plan.get("required_memory_bytes") != node.reserved_memory_bytes
+            or type(memory_floor) is not int
+            or memory_floor < 0
+            or memory_kind not in {"unified", "host", "accelerator"}
             or not isinstance(local_address, str)
             or type(endpoint_owner) is not bool
             or not isinstance(compiled_plan, Mapping)
@@ -436,6 +441,8 @@ def _recovery_authority(
                     node.role,
                     node.port,
                     node.reserved_memory_bytes,
+                    memory_floor,
+                    memory_kind,
                     local_address,
                 ),
                 endpoint_address=(

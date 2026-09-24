@@ -13,6 +13,8 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_agent_protocol import DistributionAssignment, OperationProgress
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.inventory import MemoryPool
 
 from .lifecycle_preflight import LifecyclePreflightCheckpoint
 from .model_cache_contract import ModelCacheDownloadResult
@@ -30,6 +32,7 @@ _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 Digest = Annotated[str, StringConstraints(pattern=_DIGEST_PATTERN)]
+PortNumber = Annotated[int, Field(ge=1, le=65535)]
 Alias = Annotated[
     str,
     StringConstraints(
@@ -43,7 +46,8 @@ Alias = Annotated[
 # annotations and by the Run/Switch operation helpers that build those fields.
 # A shared alias is what keeps a helper signature from drifting away from the
 # set the model will accept, so the two cannot disagree without a type error.
-RunSwitchAction = Literal["run", "switch", "stop", "cleanup"]
+RunSwitchPlacementAction = Literal["install", "run", "switch"]
+RunSwitchAction = Literal[RunSwitchPlacementAction, "stop", "cleanup"]
 RunSwitchRetention = Literal["retain-cached", "reclaim-unreferenced"]
 RunSwitchReasonSeverity = Literal["blocker", "warning", "info"]
 RunSwitchReasonScope = Literal[
@@ -149,13 +153,42 @@ class SparkGroup(_StrictModel):
         return self
 
 
+class RunMemoryResidualRange(_StrictModel):
+    """Possible remaining bytes for one exact active run reservation."""
+
+    run_id: UuidId
+    run_generation: int = Field(ge=1, le=2**63 - 1)
+    reservation_kind: Literal["host-memory", "gpu-memory", "unified-memory"]
+    minimum_bytes: Literal[0] = 0
+    maximum_bytes: int = Field(ge=0)
+
+
+class MemoryUsageUncertainty(_StrictModel):
+    """Fresh aggregate capacity lacks per-run resident usage evidence."""
+
+    source: Literal["aggregate_inventory_without_run_usage"]
+    inventory_observed_at: datetime
+    inventory_evidence_digest: Digest
+    residual_ranges: list[RunMemoryResidualRange] = Field(max_length=128)
+
+    @model_validator(mode="after")
+    def unique_ordered_claims(self) -> MemoryUsageUncertainty:
+        keys = [
+            (item.run_id, item.run_generation, item.reservation_kind)
+            for item in self.residual_ranges
+        ]
+        if keys != sorted(set(keys)):
+            raise ValueError("memory uncertainty claims must be unique and ordered")
+        return self
+
+
 class RunSwitchPreviewRequest(_StrictModel):
     schema_version: Literal[2] = 2
     model_content_sha256: Digest
     recipe_revision_id: UuidId
     spark_group: SparkGroup
     alias: Alias
-    action: Literal["run", "switch"] = "run"
+    action: RunSwitchPlacementAction = "run"
     retention: RunSwitchRetention = "retain-cached"
     invocation: InvocationMetadata = Field(default_factory=InvocationMetadata)
 
@@ -274,12 +307,18 @@ class SparkFitNode(_StrictModel):
     rank: int = Field(ge=0, le=31)
     role: Annotated[str, StringConstraints(min_length=1, max_length=64)]
     allowed: bool
+    ports_required: list[PortNumber]
     disk_required_bytes: int | None = Field(default=None, ge=0)
     disk_free_bytes: int | None = Field(default=None, ge=0)
     disk_free_after_bytes: int | None = None
     memory_required_bytes: int | None = Field(default=None, ge=0)
+    memory_kind: MemoryKind | None = None
+    memory_pool: MemoryPool | None = None
+    memory_floor_bytes: int | None = Field(default=None, ge=0)
+    memory_capacity_bytes: int | None = Field(default=None, ge=0)
     memory_available_bytes: int | None = Field(default=None, ge=0)
     memory_free_after_bytes: int | None = None
+    memory_usage_uncertainty: MemoryUsageUncertainty | None = None
     resource_demand: ResourceDemandEvidence | None = None
     blockers: list[RunSwitchReason] = Field(default_factory=list, max_length=32)
     warnings: list[RunSwitchReason] = Field(default_factory=list, max_length=32)
@@ -334,6 +373,10 @@ class BuildCompatibilityEvidence(_StrictModel):
 
 class RuntimeImageStorageImpact(_StrictModel):
     build_id: UuidId | None
+    preparation_required: bool
+    registry_manifest_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    ) = None
     image_digest: (
         Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
     )
@@ -383,11 +426,26 @@ class MappingSelection(_StrictModel):
 
 class StopImpact(_StrictModel):
     run_id: UuidId
+    run_plan_digest: Digest
     alias: Alias
     state: Annotated[str, StringConstraints(min_length=1, max_length=24)]
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     reserved_bytes: int = Field(ge=0)
     plan_digest: Digest
+
+
+class ConditionalPostStopMemoryCheck(_StrictModel):
+    """Fresh inventory and ordinary memory admission required after stops."""
+
+    stop_run_ids: list[UuidId] = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def ordered_unique_stops(self) -> ConditionalPostStopMemoryCheck:
+        if self.stop_run_ids != sorted(set(self.stop_run_ids)):
+            raise ValueError(
+                "post-stop memory check identities must be unique and ordered"
+            )
+        return self
 
 
 class RunSwitchPhase(_StrictModel):
@@ -403,14 +461,101 @@ class RunSwitchPhase(_StrictModel):
     detail: Annotated[str, StringConstraints(min_length=1, max_length=256)]
 
 
-class RunSwitchPlan(_StrictModel):
+class RunSwitchAssessment(_StrictModel):
+    """Planner-owned admission and observations shared by operator reviews."""
+
+    alias: Alias | None
+    freshness: list[FreshnessEvidence] = Field(default_factory=list, max_length=128)
+    fit_current: SparkFit
+    fit_after_stop: SparkFit | None
+    post_stop_memory_check: ConditionalPostStopMemoryCheck | None = None
+    effective_settings: EffectiveSettingsSelection | None = None
+    preparation: RolloutPreparation | None = None
+    stops: list[StopImpact] = Field(max_length=128)
+    allowed: bool
+    blockers: list[RunSwitchReason] = Field(max_length=128)
+    warnings: list[RunSwitchReason] = Field(max_length=128)
+    stop_before_prepare: bool = False
+    stop_before_transfer: bool = False
+
+    @model_validator(mode="after")
+    def admission_matches_reasons(self) -> RunSwitchAssessment:
+        if self.allowed != (not self.blockers):
+            raise ValueError("admission verdict must agree with its named blockers")
+        named = {
+            (reason.code, reason.detail, tuple(sorted(reason.node_ids)))
+            for reason in self.blockers
+        }
+        if self.preparation is not None and any(
+            reason.severity == "blocker"
+            and (reason.code, reason.detail, tuple(sorted(reason.node_ids)))
+            not in named
+            for reason in self.preparation.reasons
+        ):
+            raise ValueError("preparation blockers must be named by admission")
+        freshness_by_node = {
+            item.source.removeprefix("spark:").removesuffix(":inventory"): item
+            for item in self.freshness
+            if item.source.startswith("spark:") and item.source.endswith(":inventory")
+        }
+        for fit in (self.fit_current, self.fit_after_stop):
+            if fit is None:
+                continue
+            for node in fit.nodes:
+                uncertainty = node.memory_usage_uncertainty
+                if uncertainty is None:
+                    continue
+                sample = freshness_by_node.get(node.node_id)
+                if (
+                    sample is None
+                    or sample.observed_at != uncertainty.inventory_observed_at
+                    or sample.evidence_digest != uncertainty.inventory_evidence_digest
+                ):
+                    raise ValueError(
+                        "memory usage uncertainty must bind the node inventory sample"
+                    )
+        if self.post_stop_memory_check is not None:
+            expected_stops = sorted(stop.run_id for stop in self.stops)
+            if not expected_stops or (
+                self.post_stop_memory_check.stop_run_ids != expected_stops
+            ):
+                raise ValueError(
+                    "conditional memory check must bind the exact reviewed stops"
+                )
+            if self.fit_after_stop is not None:
+                raise ValueError(
+                    "conditional memory check cannot claim measured after-stop capacity"
+                )
+            if any(
+                node.memory_required_bytes is None
+                or node.memory_kind is None
+                or node.memory_pool is None
+                or node.memory_floor_bytes is None
+                or node.memory_capacity_bytes is None
+                or node.memory_available_bytes is None
+                or node.resource_demand is None
+                or node.memory_capacity_bytes
+                < node.memory_required_bytes + node.memory_floor_bytes
+                for node in self.fit_current.nodes
+            ):
+                raise ValueError(
+                    "conditional memory check requires known feasible demand and capacity"
+                )
+            fit_nodes = {node.node_id for node in self.fit_current.nodes}
+            if any(not set(stop.node_ids) <= fit_nodes for stop in self.stops):
+                raise ValueError(
+                    "conditional memory stops must stay within the reviewed target scope"
+                )
+        return self
+
+
+class RunSwitchPlan(RunSwitchAssessment):
     schema_version: Literal[2] = 2
     generated_at: datetime
     action: RunSwitchAction
     model_content_sha256: Digest | None
     recipe_revision_id: UuidId | None
     recipe_content_sha256: Digest | None
-    alias: Alias | None
     run_id: UuidId | None
     spark_group: SparkGroup
     mapping: MappingSelection | None
@@ -429,10 +574,6 @@ class RunSwitchPlan(_StrictModel):
     start_plan_digest: Digest | None
     model_capabilities: list[CapabilityEvidence] = Field(max_length=128)
     recipe_capabilities: list[CapabilityEvidence] = Field(max_length=128)
-    freshness: list[FreshnessEvidence] = Field(max_length=128)
-    fit_current: SparkFit
-    fit_after_stop: SparkFit | None
-    effective_settings: EffectiveSettingsSelection | None = None
     # ``fit`` is the current admission view retained as a compact client
     # affordance; the two named views above make stop-before-prepare decisions
     # explicit for reviewers and profile callers.
@@ -440,18 +581,16 @@ class RunSwitchPlan(_StrictModel):
     storage: ArtifactStorageImpact
     runtime_storage: RuntimeImageStorageImpact
     build: RunSwitchBuildEvidence
-    preparation: RolloutPreparation | None = None
     conflicts: list[RunSwitchReason] = Field(max_length=128)
-    stops: list[StopImpact] = Field(max_length=128)
     reclaimed_bytes: int = Field(ge=0)
     phases: list[RunSwitchPhase] = Field(min_length=1, max_length=16)
-    allowed: bool
-    blockers: list[RunSwitchReason] = Field(max_length=128)
-    warnings: list[RunSwitchReason] = Field(max_length=128)
     invocation: InvocationMetadata
     plan_digest: Digest
-    stop_before_prepare: bool = False
-    stop_before_transfer: bool = False
+
+    def assessment(self) -> RunSwitchAssessment:
+        return RunSwitchAssessment.model_validate(
+            {name: getattr(self, name) for name in RunSwitchAssessment.model_fields}
+        )
 
 
 class RunSwitchMemberProgress(_StrictModel):
@@ -799,6 +938,19 @@ class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):
     ranks: list[RunSwitchRankReceipt] = Field(max_length=32)
 
 
+class RunSwitchInstallationVerifyResult(_RunSwitchPhaseBase):
+    """Exact installed membership observed without a serving workload."""
+
+    phase: Literal["final_verify"]
+    subphase: RunSwitchSubphase | None = None
+    final_verified: bool
+    installation_id: UuidId
+    installation_state: Annotated[str, StringConstraints(min_length=1, max_length=24)]
+    active_runs: int = Field(ge=0)
+    unwithdrawn_routes: int = Field(ge=0)
+    ranks: list[RunSwitchRankReceipt] = Field(min_length=1, max_length=32)
+
+
 class RunSwitchDistributionChildResult(_StrictModel):
     """Durable projection of one target-copy child operation.
 
@@ -834,6 +986,7 @@ RunSwitchPhaseResult = (
     | RunSwitchUninstallResult
     | RunSwitchFinalVerifyResult
     | RunSwitchCleanupVerifyResult
+    | RunSwitchInstallationVerifyResult
 )
 
 
@@ -844,11 +997,58 @@ class RunSwitchCancellation(_StrictModel):
     requested_at: datetime
 
 
+class RunSwitchRuntimeImageReferenceIntent(_StrictModel):
+    """Exact image bytes provisionally protected by a current RunSwitch job."""
+
+    schema_version: Literal[2] = 2
+    owner_kind: Literal["run-switch-job"]
+    operation_id: UuidId
+    request_key: UuidId
+    actor: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    plan_digest: Digest
+    phase_index: int = Field(ge=0, le=31)
+    item_index: int = Field(ge=0, le=31)
+    workload_intent_ordinal: int = Field(ge=1)
+    recipe_revision_id: UuidId
+    profile_application_id: UuidId | None = None
+    execution_keys: list[Digest] = Field(min_length=1, max_length=32)
+    source: Literal["published", "controller-build"]
+    registry_manifest_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    ) = None
+    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+    archive_sha256: Digest
+    image_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
+    build_id: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = (
+        None
+    )
+    build_input_sha256: Digest | None = None
+
+    @model_validator(mode="after")
+    def reference_identity_is_consistent(
+        self,
+    ) -> RunSwitchRuntimeImageReferenceIntent:
+        if self.execution_keys != sorted(set(self.execution_keys)):
+            raise ValueError("RunSwitch runtime execution keys are not canonical")
+        if self.source == "published" and (
+            self.registry_manifest_digest is None
+            or self.build_id is not None
+            or self.build_input_sha256 is not None
+        ):
+            raise ValueError("published RunSwitch image reference is inconsistent")
+        if self.source == "controller-build" and (
+            self.registry_manifest_digest is not None or self.build_id is None
+        ):
+            raise ValueError("built RunSwitch image reference is inconsistent")
+        return self
+
+
 class RunSwitchOperationResult(_StrictModel):
     """Exact durable result tree stored in ``Job.result``."""
 
     phase_index: int = Field(default=0, ge=0, le=31)
     workload_intent_ordinal: int | None = Field(default=None, ge=1)
+    profile_application_id: UuidId | None = None
     item_index: int = Field(default=0, ge=0, le=31)
     phase: RunSwitchPhaseKind | None = None
     subphase: RunSwitchSubphase | None = None
@@ -856,6 +1056,7 @@ class RunSwitchOperationResult(_StrictModel):
         default_factory=list, max_length=16
     )
     child_operation_id: UuidId | None = None
+    runtime_image_reference_intent: RunSwitchRuntimeImageReferenceIntent | None = None
     phase_results: list[RunSwitchPhaseResult] = Field(default_factory=list)
     operation_phase_index: int | None = Field(default=None, ge=0, le=31)
     preflight: LifecyclePreflightCheckpoint | None = None
@@ -947,6 +1148,7 @@ __all__ = [
     "MappingSelection",
     "RunSwitchAction",
     "RunSwitchApplyRequest",
+    "RunSwitchAssessment",
     "RunSwitchBuildEvidence",
     "RunSwitchBuildEvidenceState",
     "RunSwitchCachedTransferResult",
@@ -958,6 +1160,7 @@ __all__ = [
     "RunSwitchCoverage",
     "RunSwitchDistributionChildResult",
     "RunSwitchFinalVerifyResult",
+    "RunSwitchInstallationVerifyResult",
     "RunSwitchMemberProgress",
     "RunSwitchMemberState",
     "RunSwitchModelDownloadPendingResult",
@@ -968,6 +1171,7 @@ __all__ = [
     "RunSwitchPhase",
     "RunSwitchPhaseKind",
     "RunSwitchPhaseResult",
+    "RunSwitchPlacementAction",
     "RunSwitchPlan",
     "RunSwitchPreparedResult",
     "RunSwitchPreviewRequest",
@@ -978,6 +1182,7 @@ __all__ = [
     "RunSwitchReasonSeverity",
     "RunSwitchRetention",
     "RunSwitchRetryRequest",
+    "RunSwitchRuntimeImageReferenceIntent",
     "RunSwitchRuntimeImageResult",
     "RunSwitchRuntimeInstallResult",
     "RunSwitchRuntimePlanResult",

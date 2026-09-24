@@ -1480,6 +1480,9 @@ def test_submit_load_rejects_request_lookup_with_a_different_bound_plan() -> Non
 def test_cleanup_preview_stop_scope_must_match_exact_campaign_run() -> None:
     from datetime import UTC, datetime
 
+    from cluster_profiles.generated_control.models.fleet_profile_effects import (
+        FleetProfileEffects,
+    )
     from cluster_profiles.generated_control.models.fleet_profile_plan_step import (
         FleetProfilePlanStep,
     )
@@ -1491,6 +1494,13 @@ def test_cleanup_preview_stop_scope_must_match_exact_campaign_run() -> None:
     )
 
     preview = campaign_cli.FleetProfilePreview(
+        admission_decisions=[],
+        assessments=[],
+        effects=FleetProfileEffects(installations=[], runs=[], superseded=[]),
+        preparation_decisions=[],
+        profile_definition=None,
+        profile_revision=None,
+        resolved_assignments=[],
         allowed=True,
         assignments=[],
         generated_at=datetime(2026, 9, 24, tzinfo=UTC),

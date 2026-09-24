@@ -42,9 +42,13 @@ from .run_switch_contract import (
     RunSwitchPhaseResult,
     RunSwitchPlan,
 )
-from .run_switch_operations import PhaseExecution
+from .run_switch_operations import (
+    PhaseExecution,
+    _persist_run_switch_runtime_image_reference,
+)
 from .runtime_image_preparation import (
     RuntimeImagePreparationError,
+    RuntimeImageReceipt,
     RuntimeImageStorage,
     prefixed_image_digest,
 )
@@ -1283,7 +1287,14 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             # durable high-level phase so install admission cannot compile a
             # schema-2 payload until the Controller archive and receipt are
             # present.  Target-copy only consumes the persisted evidence.
-            runtime_result = self._prepare_runtime_image(plan)
+            runtime_result = self._prepare_runtime_image(
+                plan,
+                phase,
+                item_index=item_index,
+                actor=actor,
+                request_key=request_key,
+                progress=progress,
+            )
             if runtime_result is None:
                 raise RuntimeError("runtime image preparation returned no evidence")
             return PhaseExecution(result=_phase_receipt(runtime_result, phase=phase))
@@ -1426,7 +1437,14 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         )
 
     def _prepare_runtime_image(
-        self, plan: RunSwitchPlan
+        self,
+        plan: RunSwitchPlan,
+        phase: RunSwitchPhase,
+        *,
+        item_index: int,
+        actor: str,
+        request_key: str,
+        progress: Mapping[str, object],
     ) -> Mapping[str, object] | None:
         """Prepare one Controller image and authorize every target execution.
 
@@ -1511,10 +1529,29 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         # Each role/rank has its own execution identity. Persist all of them
         # before install admission compiles the group. The preparer reuses the
         # immutable archive; close the read session before its receipt writes.
+        execution_keys = tuple(sorted(runtime_specs))
+
+        def before_publish(receipt: RuntimeImageReceipt) -> None:
+            _persist_run_switch_runtime_image_reference(
+                self._sessions,
+                plan,
+                phase,
+                item_index=item_index,
+                actor=actor,
+                request_key=request_key,
+                progress=progress,
+                execution_keys=execution_keys,
+                receipt=receipt,
+                clock=self._clock,
+            )
+
         raw = None
         for runtime_spec in runtime_specs.values():
             receipt = self._runtime_image_preparer(
-                revision.document, runtime_spec, build
+                revision.document,
+                runtime_spec,
+                build,
+                before_publish=before_publish,
             )
             to_mapping = getattr(receipt, "to_mapping", None)
             prepared = to_mapping() if callable(to_mapping) else receipt

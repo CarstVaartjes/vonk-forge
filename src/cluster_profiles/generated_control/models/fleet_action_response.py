@@ -39,6 +39,7 @@ class FleetActionResponse:
             operation_id (Union[None, Unset, str]):
             plan_digest (Union[None, Unset, str]):
             provenance (Union['DeploymentProvenance', None, Unset]):
+            request_key (Union[None, Unset, str]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
             targets (Union[Unset, list[str]]):
      """
@@ -52,6 +53,7 @@ class FleetActionResponse:
     operation_id: Union[None, Unset, str] = UNSET
     plan_digest: Union[None, Unset, str] = UNSET
     provenance: Union['DeploymentProvenance', None, Unset] = UNSET
+    request_key: Union[None, Unset, str] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
     targets: Union[Unset, list[str]] = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -113,6 +115,12 @@ class FleetActionResponse:
         else:
             provenance = self.provenance
 
+        request_key: Union[None, Unset, str]
+        if isinstance(self.request_key, Unset):
+            request_key = UNSET
+        else:
+            request_key = self.request_key
+
         schema_version = self.schema_version
 
         targets: Union[Unset, list[str]] = UNSET
@@ -142,6 +150,8 @@ class FleetActionResponse:
             field_dict["plan_digest"] = plan_digest
         if provenance is not UNSET:
             field_dict["provenance"] = provenance
+        if request_key is not UNSET:
+            field_dict["request_key"] = request_key
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
         if targets is not UNSET:
@@ -253,6 +263,16 @@ class FleetActionResponse:
         provenance = _parse_provenance(d.pop("provenance", UNSET))
 
 
+        def _parse_request_key(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        request_key = _parse_request_key(d.pop("request_key", UNSET))
+
+
         schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
@@ -270,6 +290,7 @@ class FleetActionResponse:
             operation_id=operation_id,
             plan_digest=plan_digest,
             provenance=provenance,
+            request_key=request_key,
             schema_version=schema_version,
             targets=targets,
         )

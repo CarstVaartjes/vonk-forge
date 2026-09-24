@@ -37,6 +37,7 @@ def _failed_profile_application(reason: str) -> dict[str, object]:
     return {
         "schema_version": 2,
         "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "request_key": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
         "profile_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "profile_digest": "c" * 64,
         "plan_digest": "d" * 64,
@@ -54,7 +55,6 @@ def _failed_profile_application(reason: str) -> dict[str, object]:
             "current_label": "container-build",
             "operation_kind": "fleet-profile.apply",
             "step_results": {},
-            "assignments": {},
         },
         "result": None,
         "created_at": "2026-09-10T10:00:00Z",
@@ -888,7 +888,9 @@ def test_installer_failure_diagnostics_are_bounded_and_redact_secrets(
 
     assert secret not in rendered
     assert "discarded diagnostic beginning" not in rendered
-    assert len(rendered) < 8_500
+    assert len(rendered) <= run._DIAGNOSTIC_BUDGET + len(
+        "baseline Spark installation failed; "
+    )
     assert "baseline Spark installation failed" in rendered
     assert "setup command failed for <redacted>" in rendered
 
@@ -1001,7 +1003,9 @@ def test_installer_error_survives_bounded_controller_diagnostics(
     )
 
     rendered = str(failure)
-    assert len(rendered) < 8_500
+    assert len(rendered) <= run._DIAGNOSTIC_BUDGET + len(
+        "baseline Spark installation failed; "
+    )
     assert "Error: Certificate" in rendered
 
 
@@ -1019,7 +1023,11 @@ def test_profile_application_failure_is_typed_and_redacts_provider_secret(
     operation = _failed_profile_application(f"container-build rejected {secret}")
 
     with pytest.raises(lifecycle.LifecycleError) as failure:
-        run._await_profile_application(operation, label="synthetic canary profile load")
+        run._await_profile_application(
+            operation,
+            label="synthetic canary profile load",
+            node_id="spk_" + "a" * 32,
+        )
 
     message = str(failure.value)
     assert "container-build" in message
@@ -1057,9 +1065,10 @@ def test_profile_failure_cannot_erase_failure_or_service_journals(
                 "container runtime could not start the workload"
             ),
             label="synthetic canary profile load",
+            node_id="spk_" + "a" * 32,
         )
     rendered = str(run._installation_failure("synthetic canary", failure.value))
-    assert len(rendered) < 8_000
+    assert len(rendered) <= run._DIAGNOSTIC_BUDGET + len("synthetic canary failed; ")
     assert "container runtime could not start the workload" in rendered
     assert "model ACL: Read-only file system" in rendered
     assert "start job rejected" in rendered
@@ -1224,7 +1233,9 @@ def test_preflight_failure_reports_only_projected_receipt_comparison_fields() ->
     run._psql = psql
     operation = _failed_profile_application("runtime_preflight.retry_exhausted")
     with pytest.raises(lifecycle.LifecycleError) as failure:
-        run._await_profile_application(operation, label="canary")
+        run._await_profile_application(
+            operation, label="canary", node_id=evidence["node_id"]
+        )
     message = str(failure.value)
     assert evidence["current_fingerprint"] in message
     assert evidence["receipt_fingerprint"] in message
@@ -1258,6 +1269,7 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
     )
     lifecycle = _module()
     from vonk_agent_protocol import OperationProgress
+    from vonk_control.recipe_availability_intent import RecipeSelectorIntent
     from vonk_control.recipe_image_availability_api import (
         RecipeImageAvailabilityResponse,
         RecipeImageAvailabilityResult,
@@ -1270,6 +1282,9 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
     terminal = RecipeImageAvailabilityResponse(
         id="11111111-1111-4111-8111-111111111111",
         request_id="22222222-2222-4222-8222-222222222222",
+        request=RecipeSelectorIntent(
+            selector="acceptance/synthetic-canary", force=True
+        ),
         kind="recipe.image.availability.v2",
         state="succeeded",
         attempt=1,
@@ -1316,7 +1331,7 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
     assert observed["result"]["model_content_digests"] == [model_digest]
 
 
-def test_profile_progress_poll_uses_current_numbered_route(monkeypatch) -> None:
+def test_profile_application_poll_pins_exact_identity(monkeypatch) -> None:
     pytest.importorskip(
         "fastapi", reason="Controller contract tests run in the control suite"
     )
@@ -1346,10 +1361,55 @@ def test_profile_progress_poll_uses_current_numbered_route(monkeypatch) -> None:
     monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
 
     assert (
-        run._await_profile_application(pending, label="profile load")["state"]
+        run._await_profile_application(
+            pending,
+            label="profile load",
+            node_id="spk_" + "a" * 32,
+        )["state"]
         == "succeeded"
     )
-    assert calls == [("GET", "/api/profile/1/progress")]
+    assert calls == [("GET", f"/api/profile/applications/{pending['id']}")]
+
+
+def test_profile_application_poll_rejects_a_different_returned_identity(
+    monkeypatch,
+) -> None:
+    pytest.importorskip(
+        "fastapi", reason="Controller contract tests run in the control suite"
+    )
+    lifecycle = _module()
+    pending = _failed_profile_application("pending")
+    pending["state"] = "queued"
+    pending["status_reason"] = None
+    redirected = _failed_profile_application("")
+    redirected.update(
+        id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        state="succeeded",
+        status_reason=None,
+        total_steps=0,
+        progress={"attempt": 1, "completed_steps": 0, "total_steps": 0},
+        result={"changed": False, "completed_steps": 0},
+    )
+    calls: list[tuple[str, str]] = []
+
+    class Control:
+        @staticmethod
+        def request(method, path, payload=None, **kwargs):
+            calls.append((method, path))
+            assert payload is None
+            return 200, redirected
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = Control()
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(lifecycle.LifecycleError, match="different application"):
+        run._await_profile_application(
+            pending,
+            label="profile load",
+            node_id="spk_" + "a" * 32,
+        )
+    assert calls == [("GET", f"/api/profile/applications/{pending['id']}")]
 
 
 @pytest.mark.parametrize(

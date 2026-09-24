@@ -29,6 +29,7 @@ import type {
   ModelLibrary,
   ModelStatus,
   ModelCacheOperatorResponse,
+  CacheRemovalReview,
   RecipeImageAvailabilityResponse,
   RecipeCacheOperation,
   RecipeOperatorResponse,
@@ -301,18 +302,29 @@ export class ApiClient implements ControlApi {
   async prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
     return resultData(await this.generated.POST("/api/model/{selector}/download", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2, with_model: false},
+      body: {request_key: requestKey, schema_version: 2},
       signal,
     }));
   }
 
-  async removeModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
-    // Removal is the counterpart of the download action: the Controller
-    // cancels any matching transfer and drops the entry when unreferenced.
+  async modelRemovalReview(selector: string, signal?: AbortSignal): Promise<CacheRemovalReview> {
+    return resultData(await this.generated.GET("/api/model/{selector}/remove-review", {
+      params: {path: {selector}}, signal,
+    }));
+  }
+
+  async removeModelCache(selector: string, modelContentSha256: string, requestKey: string, reviewDigest: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
+    // Bind removal to the exact revision the operator reviewed.
     return resultData(await this.generated.POST("/api/model/{selector}/remove", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2, with_model: false},
+      body: {model_content_sha256: modelContentSha256, request_key: requestKey, review_digest: reviewDigest, schema_version: 2},
       signal,
+    }));
+  }
+
+  async modelCacheRequest(requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
+    return resultData(await this.generated.GET("/api/model/requests/{request_key}", {
+      params: {path: {request_key: requestKey}}, signal,
     }));
   }
 
@@ -328,18 +340,24 @@ export class ApiClient implements ControlApi {
     // artifacts together, which is what `vonkctl recipe download` documents.
     return resultData(await this.generated.POST("/api/recipe/{selector}/download", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2, with_model: true},
+      body: {request_key: requestKey, schema_version: 2},
       signal,
     }));
   }
 
-  async removeRecipe(selector: string, requestKey: string, withModel: boolean, signal?: AbortSignal): Promise<RecipeOperatorResponse> {
+  async recipeRemovalReview(selector: string, withModel: boolean, signal?: AbortSignal): Promise<CacheRemovalReview> {
+    return resultData(await this.generated.GET("/api/recipe/{selector}/remove-review", {
+      params: {path: {selector}, query: {with_model: withModel}}, signal,
+    }));
+  }
+
+  async removeRecipe(selector: string, requestKey: string, withModel: boolean, reviewDigest: string, signal?: AbortSignal): Promise<RecipeOperatorResponse> {
     // The model choice is explicit, like the CLI's mandatory --keep-model or
     // --with-model: the Controller fails closed rather than guessing whether a
     // shared model entry should go too.
     return resultData(await this.generated.POST("/api/recipe/{selector}/remove", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2, with_model: withModel},
+      body: {request_key: requestKey, review_digest: reviewDigest, schema_version: 2, with_model: withModel},
       signal,
     }));
   }
@@ -361,18 +379,29 @@ export class ApiClient implements ControlApi {
     }));
   }
 
+  async recipeCacheRequest(requestKey: string, signal?: AbortSignal): Promise<RecipeCacheOperation> {
+    return resultData(await this.generated.GET("/api/recipe/requests/{request_key}", {
+      params: {path: {request_key: requestKey}}, signal,
+    }));
+  }
+
   artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList> {
     return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, {signal});
+  }
+
+  artifactJobByRequestId(requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
+    return this.request(`/api/artifact-jobs/requests/${encodeURIComponent(requestId)}`, {signal});
   }
 
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities> {
     return this.request("/api/artifact-jobs/capabilities", {signal});
   }
 
-  createArtifactJob(runId: string, input: ArtifactJobCreateInput, signal?: AbortSignal): Promise<ArtifactJob> {
+  createArtifactJob(runId: string, input: ArtifactJobCreateInput, requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, {
       method: "POST",
       body: JSON.stringify(input),
+      headers: {"X-Request-ID": requestId},
       signal,
     });
   }
@@ -415,18 +444,19 @@ export class ApiClient implements ControlApi {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/finalize`, {method: "POST", signal});
   }
 
-  submitArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/submit`, {method: "POST", signal});
+  submitArtifactJob(jobId: string, requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
+    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/submit`, {method: "POST", headers: {"X-Request-ID": requestId}, signal});
   }
 
   artifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}`, {signal});
   }
 
-  cancelArtifactJob(jobId: string, reason: string, signal?: AbortSignal): Promise<ArtifactJob> {
+  cancelArtifactJob(jobId: string, reason: string, requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: "POST",
       body: JSON.stringify({reason}),
+      headers: {"X-Request-ID": requestId},
       signal,
     });
   }
@@ -435,9 +465,14 @@ export class ApiClient implements ControlApi {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/result`, {signal});
   }
 
-  artifactJobResultUrl(jobId: string, sha256: string): string {
+  artifactJobResultUrl(jobId: string, name: string, sha256: string): string {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) {
+      throw new Error("Unsafe artifact result name");
+    }
     if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error("Unsafe artifact result digest");
-    return `/api/artifact-jobs/${encodeURIComponent(jobId)}/results/${sha256}`;
+    const encodedJobId = encodeURIComponent(jobId);
+    const encodedName = encodeURIComponent(name);
+    return `/api/artifact-jobs/${encodedJobId}/results/${encodedName}/${sha256}`;
   }
 
   async jobs(cursor?: string): Promise<JobsResponse> {

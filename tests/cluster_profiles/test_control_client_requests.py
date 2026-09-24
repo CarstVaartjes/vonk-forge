@@ -22,6 +22,12 @@ from cluster_profiles.control_client import (
     ControlUnauthorized,
     _RecordingTransport,
 )
+from cluster_profiles.generated_control.models.fleet_profile_definition import (
+    FleetProfileDefinition,
+)
+from cluster_profiles.generated_control.models.fleet_profile_effects import (
+    FleetProfileEffects,
+)
 from cluster_profiles.generated_control.models.fleet_profile_plan_summary import (
     FleetProfilePlanSummary,
 )
@@ -76,6 +82,28 @@ def _token(tmp_path: Path) -> Path:
     path.write_text("private-token")
     path.chmod(0o600)
     return path
+
+
+def test_request_budget_limits_transport_without_changing_client_default(
+    tmp_path: Path,
+) -> None:
+    timeouts: list[float] = []
+
+    def opener(request, *, timeout):
+        timeouts.append(timeout)
+        return _Response(200, _artifact_job_response())
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
+    client.request("GET", path, timeout_seconds=0.025)
+    client.request("GET", path)
+    assert timeouts == [0.025, 15]
+    for invalid in (0, -1, float("nan"), float("inf")):
+        with pytest.raises(ControlClientError, match="finite and positive"):
+            client.request("GET", path, timeout_seconds=invalid)
+    assert len(timeouts) == 2
 
 
 def _artifact_job_response() -> dict[str, object]:
@@ -149,6 +177,13 @@ def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
         profile_digest="b" * 64,
         profile_id="12345678-1234-4123-8123-123456789abc",
         profile_name="Empty profile",
+        profile_revision=1,
+        profile_definition=FleetProfileDefinition(name="Empty profile"),
+        resolved_assignments=[],
+        admission_decisions=[],
+        assessments=[],
+        preparation_decisions=[],
+        effects=FleetProfileEffects(runs=[], installations=[], superseded=[]),
         reasons=[],
         scope=FleetProfileScopePreview(node_ids=[]),
         steps=[],
@@ -185,6 +220,63 @@ def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
     assert observed[0].data is None
 
 
+def test_cli_profile_endpoint_uses_generated_scoped_endpoint_client(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    endpoint_view = {
+        "number": 7,
+        "profile_id": "11111111-1111-4111-8111-111111111111",
+        "application_id": "22222222-2222-4222-8222-222222222222",
+        "application_state": "succeeded",
+        "observed_at": "2026-09-23T12:59:31Z",
+        "assignments": [
+            {
+                "assignment_id": "33333333-3333-4333-8333-333333333333",
+                "recipe_title": "Example Model",
+                "desired_state": "running",
+                "alias": "studio-chat",
+                "state": "published",
+                "endpoint": {
+                    "alias": "studio-chat",
+                    "api_base": "http://10.0.0.10:8000/v1",
+                    "expires_at": "2026-09-23T13:00:00Z",
+                    "generation": 8,
+                    "node_id": "spk_" + "a" * 32,
+                    "observed_at": "2026-09-23T12:59:30Z",
+                    "plan_digest": "a" * 64,
+                    "state": "published",
+                },
+            }
+        ],
+    }
+    observed: list[urllib.request.Request] = []
+
+    def opener(request, *, timeout: float):
+        observed.append(request)
+        return _Response(200, endpoint_view)
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    status = cli.main(
+        ("--profile", "7", "profile", "endpoint", "studio-chat", "--json"),
+        control_client=client,
+    )
+    output = capsys.readouterr().out
+
+    assert status == 0
+    assert json.loads(output)["assignments"][0]["endpoint"]["generation"] == 8
+    assert "private-token" not in output
+    assert len(observed) == 1
+    assert observed[0].get_method() == "GET"
+    assert (
+        observed[0].full_url
+        == "https://forge.example.test/api/profile/7/endpoints?alias=studio-chat"
+    )
+    assert observed[0].data is None
+
+
 def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
     observed: list[object] = []
 
@@ -211,10 +303,13 @@ def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
     assert request.get_header("Authorization") == "Bearer private-token"
 
 
-def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:
+@pytest.mark.parametrize("retry_seconds", [7, 120])
+def test_raw_request_preserves_typed_bounded_api_errors(
+    tmp_path: Path, retry_seconds: int
+) -> None:
     headers = Message()
     headers["Content-Type"] = "application/json"
-    headers["Retry-After"] = "7"
+    headers["Retry-After"] = str(retry_seconds)
     body = io.BytesIO(json.dumps({"detail": "bad token private-token"}).encode())
 
     def opener(*_args, **_kwargs):
@@ -234,7 +329,7 @@ def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:
         client.request("GET", "/api/jobs")
 
     assert raised.value.detail == "bad token <redacted>"
-    assert raised.value.retry_after_seconds == 7
+    assert raised.value.retry_after_seconds == retry_seconds
 
 
 @pytest.mark.parametrize(
@@ -699,7 +794,7 @@ def test_artifact_output_download_is_verified_and_atomically_published(
     destination = tmp_path / "result.png"
 
     result = client.download_file(
-        f"/api/artifact-jobs/job-1/results/{digest}",
+        f"/api/artifact-jobs/job-1/results/result.png/{digest}",
         destination,
         media_type="image/png",
         expected_sha256=digest,
@@ -733,10 +828,77 @@ def test_artifact_output_download_fails_closed_without_partial_file(
 
     with pytest.raises(ControlMalformedResponse, match="does not match"):
         client.download_file(
-            f"/api/artifact-jobs/job-1/results/{expected}",
+            f"/api/artifact-jobs/job-1/results/result.png/{expected}",
             destination,
             media_type="image/png",
             expected_sha256=expected,
+            expected_size=len(content),
+            overwrite=False,
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".result.png.*.download")) == []
+
+
+def test_artifact_output_download_preserves_an_existing_destination(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "result.png"
+    destination.write_bytes(b"operator data")
+    opened = False
+
+    def opener(*_args, **_kwargs):
+        nonlocal opened
+        opened = True
+        raise AssertionError("existing destination must be refused before transfer")
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+
+    with pytest.raises(ControlClientError, match="already exists"):
+        client.download_file(
+            "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/results/result.png/"
+            + hashlib.sha256(b"new output").hexdigest(),
+            destination,
+            media_type="image/png",
+            expected_sha256=hashlib.sha256(b"new output").hexdigest(),
+            expected_size=len(b"new output"),
+            overwrite=False,
+        )
+
+    assert not opened
+    assert destination.read_bytes() == b"operator data"
+    assert list(tmp_path.glob(".result.png.*.download")) == []
+
+
+def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cluster_profiles import control_client
+
+    content = b"verified output"
+    digest = hashlib.sha256(content).hexdigest()
+    client = ControlClient(
+        "https://forge.example.test",
+        _token(tmp_path),
+        opener=lambda *_args, **_kwargs: _StreamResponse(
+            content, media_type="image/png", sha256=digest
+        ),
+    )
+    destination = tmp_path / "result.png"
+
+    def disk_full(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(control_client.os, "link", disk_full)
+
+    with pytest.raises(OSError, match="disk full"):
+        client.download_file(
+            f"/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/results/result.png/{digest}",
+            destination,
+            media_type="image/png",
+            expected_sha256=digest,
             expected_size=len(content),
             overwrite=False,
         )

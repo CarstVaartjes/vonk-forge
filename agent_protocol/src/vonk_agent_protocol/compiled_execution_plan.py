@@ -35,6 +35,7 @@ MAX_COMPILED_EXECUTION_PLAN_MOUNTS = MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS + 2
 # structural mirror of the schema, not the size authority. The size authority is
 # `MAX_ARGV_BYTES`, derived from the canonical host-runtime request ceiling.
 MAX_ARGV_ITEMS = 4096
+MemoryKind = Literal["unified", "host", "accelerator"]
 # Only the Controller's uninstall reader supplies this process-local context.
 # It cannot be selected by fields in a persisted or incoming JSON document.
 COMPILED_PLAN_STORAGE_CONTEXT = object()
@@ -139,6 +140,8 @@ class CompiledPlacement(_Strict):
     master_port: int | None = Field(ge=1024, le=65535)
     port: int | None = Field(default=..., ge=1, le=65535)
     reserved_memory_bytes: int = Field(gt=0, le=16 * 1024**4)
+    memory_floor_bytes: int = Field(ge=0, le=16 * 1024**4)
+    memory_kind: MemoryKind
 
     _addresses_are_safe = field_validator(
         "endpoint_address", "local_address", "master_address"
