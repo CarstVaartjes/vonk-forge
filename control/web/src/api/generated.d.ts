@@ -2373,6 +2373,8 @@ export interface components {
              * @default false
              */
             dry_run: boolean;
+            /** Plan Digest */
+            plan_digest: string;
             /** Request Key */
             request_key?: string | null;
         };

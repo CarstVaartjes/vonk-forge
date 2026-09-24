@@ -1832,7 +1832,6 @@ class FleetProfileService:
         profile_id: str,
         *,
         execution_assignments: tuple[FleetProfileAssignment, ...] | None = None,
-        target_node_ids: tuple[str, ...] | None = None,
         profile_name: str | None = None,
         profile_digest: str | None = None,
         allow_pending_cache_rebuild: bool = False,
@@ -1880,11 +1879,7 @@ class FleetProfileService:
             preparation_unavailable_reported = False
             # Scope is the authoritative reconciliation boundary.  An idle
             # member has no assignment and must still participate in the plan.
-            target_nodes = (
-                set(target_node_ids)
-                if target_node_ids is not None
-                else {node.node_id for node in roster}
-            )
+            target_nodes = {node.node_id for node in roster}
 
             for assignment in resolved_assignments:
                 state = self._assignment_state(session, assignment)

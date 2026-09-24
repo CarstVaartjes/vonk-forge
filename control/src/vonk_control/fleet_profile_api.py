@@ -162,8 +162,13 @@ def install_fleet_profile_routes(
         require_mutation(actor, "POST", "/api/profile/{number}/load")
         request_key = body.request_key or str(uuid.uuid4())
         try:
-            result = service().load(
-                number, actor=actor.subject, request_key=request_key
+            profiles = service()
+            profile = profiles.get_number(number)
+            result = profiles.apply(
+                profile.id,
+                plan_digest=body.plan_digest,
+                request_key=request_key,
+                actor=actor.subject,
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="Profile not found") from None

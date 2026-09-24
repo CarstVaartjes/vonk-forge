@@ -23,10 +23,12 @@ T = TypeVar("T", bound="FleetProfileLoadRequest")
 class FleetProfileLoadRequest:
     """
         Attributes:
+            plan_digest (str):
             dry_run (Union[Unset, bool]):  Default: False.
             request_key (Union[None, Unset, str]):
      """
 
+    plan_digest: str
     dry_run: Union[Unset, bool] = False
     request_key: Union[None, Unset, str] = UNSET
 
@@ -35,6 +37,8 @@ class FleetProfileLoadRequest:
 
 
     def to_dict(self) -> dict[str, Any]:
+        plan_digest = self.plan_digest
+
         dry_run = self.dry_run
 
         request_key: Union[None, Unset, str]
@@ -47,6 +51,7 @@ class FleetProfileLoadRequest:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "plan_digest": plan_digest,
         })
         if dry_run is not UNSET:
             field_dict["dry_run"] = dry_run
@@ -60,6 +65,8 @@ class FleetProfileLoadRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        plan_digest = d.pop("plan_digest")
+
         dry_run = d.pop("dry_run", UNSET)
 
         def _parse_request_key(data: object) -> Union[None, Unset, str]:
@@ -73,6 +80,7 @@ class FleetProfileLoadRequest:
 
 
         fleet_profile_load_request = cls(
+            plan_digest=plan_digest,
             dry_run=dry_run,
             request_key=request_key,
         )

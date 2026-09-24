@@ -1,5 +1,6 @@
 import {useEffect, useMemo, useState} from "react";
 import type {MouseEvent} from "react";
+import {ApiError} from "../api/client";
 import {canonicalRecipeSelector} from "../api/types";
 import type {ControlApi, FleetProfile, FleetProfileApplicationView, FleetProfileInput, FleetProfilePreview, VisualFleetSnapshot} from "../api/types";
 import {nodeDisplayName} from "../lib/fleet";
@@ -26,6 +27,7 @@ type ProfileDraft = {
   assignments: AssignmentDraft[];
 };
 type FleetEntry = {id: string; name: string; state: string};
+type PendingProfileLoad = {requestKey: string; planDigest: string};
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 
@@ -97,6 +99,29 @@ function applicationProgressRecord(application: FleetProfileApplicationView): Re
   return child && typeof child === "object" ? child as Record<string, unknown> : progress;
 }
 
+function isAmbiguousLoadFailure(error: unknown): boolean {
+  return error instanceof TypeError || (error instanceof ApiError && error.status >= 500);
+}
+
+async function submitProfileLoad(
+  api: ControlApi,
+  number: number,
+  pending: PendingProfileLoad,
+): Promise<FleetProfileApplicationView> {
+  const input = {dry_run: false, plan_digest: pending.planDigest, request_key: pending.requestKey};
+  try {
+    return await api.loadProfile(number, input);
+  } catch (error) {
+    if (!isAmbiguousLoadFailure(error)) throw error;
+    try {
+      return await api.profileApplicationByRequest(number, pending.requestKey);
+    } catch (lookupError) {
+      if (!(lookupError instanceof ApiError && lookupError.status === 404)) throw error;
+    }
+    return api.loadProfile(number, input);
+  }
+}
+
 function formatBytes(value: unknown): string | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
   if (value < 1024) return `${Math.round(value)} B`;
@@ -131,6 +156,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
   const [saving, setSaving] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [preview, setPreview] = useState<FleetProfilePreview>();
+  const [pendingLoad, setPendingLoad] = useState<PendingProfileLoad>();
   const [application, setApplication] = useState<FleetProfileApplicationView>();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -181,10 +207,10 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
   useEffect(() => { onBusyChange?.(saving || loadingProfile || applicationRunning); return () => onBusyChange?.(false); }, [applicationRunning, loadingProfile, onBusyChange, saving]);
 
   function selectProfile(profile: FleetProfile) {
-    setSelectedNumber(profile.number); setDraft(draftFromProfile(profile)); setEditing(false); setPreview(undefined); setApplication(undefined); setNotice("");
+    setSelectedNumber(profile.number); setDraft(draftFromProfile(profile)); setEditing(false); setPreview(undefined); setApplication(undefined); setPendingLoad(undefined); setNotice("");
   }
 
-  function startNew() { setSelectedNumber(undefined); setDraft(blankDraft()); setEditing(true); setPreview(undefined); setApplication(undefined); setNotice("Draft profile created. Saving does not change the running fleet."); }
+  function startNew() { setSelectedNumber(undefined); setDraft(blankDraft()); setEditing(true); setPreview(undefined); setApplication(undefined); setPendingLoad(undefined); setNotice("Draft profile created. Saving does not change the running fleet."); }
   function updateDraft(next: Partial<ProfileDraft>) { setDraft(current => current ? {...current, ...next} : current); setNotice(""); }
   function updateAssignment(key: string, next: Partial<AssignmentDraft>) { if (draft) updateDraft({assignments: draft.assignments.map(item => item.key === key ? {...item, ...next} : item)}); }
   function toggleSpark(key: string, sparkId: string) {
@@ -216,10 +242,32 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
   }
 
   async function load() {
-    if (selectedNumber === undefined || !preview?.allowed || loadingProfile) return;
+    if (selectedNumber === undefined || (!pendingLoad && !preview?.allowed) || loadingProfile) return;
     setLoadingProfile(true); setError("");
-    try { setApplication(await api.loadProfile(selectedNumber, {dry_run: false, request_key: crypto.randomUUID()})); }
-    catch (value) { setError(value instanceof Error ? value.message : "The profile could not be loaded."); }
+    try {
+      let pending = pendingLoad;
+      if (pending) {
+        try {
+          const existing = await api.profileApplicationByRequest(selectedNumber, pending.requestKey);
+          setApplication(existing); setPendingLoad(undefined); return;
+        } catch (value) {
+          if (!(value instanceof ApiError && value.status === 404)) throw value;
+        }
+      } else {
+        pending = {requestKey: crypto.randomUUID(), planDigest: preview!.plan_digest};
+        setPendingLoad(pending);
+      }
+      setApplication(await submitProfileLoad(api, selectedNumber, pending));
+      setPendingLoad(undefined);
+    }
+    catch (value) {
+      if (value instanceof ApiError && value.status === 409) {
+        setPendingLoad(undefined);
+        try { setPreview(await api.previewProfile(selectedNumber)); }
+        catch (refreshError) { setError(refreshError instanceof Error ? refreshError.message : "The profile preview could not be refreshed."); }
+      }
+      setError(value instanceof Error ? value.message : "The profile could not be loaded.");
+    }
     finally { setLoadingProfile(false); }
   }
 
@@ -237,7 +285,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
         <section className="library-profile-scope" aria-labelledby="profile-fleet-heading"><div className="library-profile-section-heading"><div><h4 id="profile-fleet-heading">Fleet and assignments</h4><p>Every enrolled Spark is in the profile view. Sparks without an assignment become idle when the profile loads.</p></div><span>{availableFleet.length} Sparks</span></div><div className="library-profile-scope-list" role="list" aria-label="Enrolled Sparks">{availableFleet.map(item => <div key={item.id} role="listitem"><strong>{item.name}</strong><small>{item.state}</small></div>)}{availableFleet.length === 0 && <p>No enrolled Sparks are visible yet.</p>}</div></section>
         <section className="library-profile-assignments" aria-label="Profile assignments"><header><h4>Recipe assignments</h4><button type="button" className="button secondary" onClick={addRecipe} disabled={matchingEntries.length === 0 || availableFleet.length === 0}>Add available Recipe</button></header>{draft.assignments.map(assignment => <article key={assignment.key} className="library-profile-assignment"><label><span>Recipe</span><select value={assignment.recipeSelector} onChange={event => updateAssignment(assignment.key, {recipeSelector: event.target.value})}>{recipeOptions.map(([selector, title]) => <option key={selector} value={selector}>{title} · {selector}</option>)}</select></label><label><span>Assignment name</span><input value={assignment.assignmentName} onChange={event => updateAssignment(assignment.key, {assignmentName: event.target.value})}/></label><label><span>Model variant</span><input value={assignment.modelVariant} onChange={event => updateAssignment(assignment.key, {modelVariant: event.target.value})}/></label><label><span>Desired state</span><select value={assignment.desiredState} onChange={event => updateAssignment(assignment.key, {desiredState: event.target.value as AssignmentInput["desired_state"]})}><option value="running">Running</option><option value="installed">Installed</option></select></label><fieldset><legend>Assigned Sparks</legend>{availableFleet.map(item => <label key={item.id}><input type="checkbox" checked={assignment.sparkIds.includes(item.id)} onChange={() => toggleSpark(assignment.key, item.id)}/><span>{names[item.id] ?? item.id}</span></label>)}</fieldset><button type="button" className="button danger" onClick={() => updateDraft({assignments: draft.assignments.filter(item => item.key !== assignment.key)})}>Remove assignment</button></article>)}{draft.assignments.length === 0 && <p>All Sparks will be idle when this profile loads.</p>}</section>
         <footer className="library-profile-editor-footer"><button type="button" className="button secondary" onClick={() => { if (selectedProfile) { setDraft(draftFromProfile(selectedProfile)); setEditing(false); } else setDraft(undefined); }}>Cancel</button><button type="button" className="button" disabled={!draftValid || saving} onClick={() => void saveDraft()}>{saving ? "Saving profile…" : draft.number ? "Save profile" : "Create profile"}</button></footer></div>}
-      {selectedProfile && !editing && <section className="library-profile-saved" aria-label={`Profile ${selectedProfile.number} saved profile`}><header><div><span>Saved profile</span><h3>{selectedProfile.name}</h3></div><div><button type="button" className="button secondary" onClick={() => setEditing(true)}>Edit profile</button><button type="button" className="button" disabled={loadingProfile || applicationRunning || !preview?.allowed} onClick={() => void load()}>{loadingProfile ? "Loading…" : "Load profile"}</button></div></header><dl><div><dt>Number</dt><dd>{selectedProfile.number}</dd></div><div><dt>Revision</dt><dd>{selectedProfile.revision}</dd></div><div><dt>Cache</dt><dd>{selectedProfile.cache_summary?.state ? String(selectedProfile.cache_summary.state) : "Latest compatible cached recipes"}</dd></div></dl><ul>{selectedProfile.assignments.map(assignment => <li key={assignment.selector}><strong>{assignment.display_name}</strong><span>{assignment.recipe_selector} · {assignment.spark_ids.map(id => names[id] ?? id).join(" + ")} · {assignment.observed_state}</span></li>)}{selectedProfile.assignments.length === 0 && <li><strong>Idle fleet</strong><span>No assignments; every Spark becomes idle on load.</span></li>}</ul>{preview && !preview.allowed && preview.reasons[0] && <p className="library-profile-plain-error" role="alert">{preview.reasons[0].detail}</p>}{(selectedProfile.next_actions ?? []).length > 0 && <p>{(selectedProfile.next_actions ?? []).join(" · ")}</p>}</section>}
+      {selectedProfile && !editing && <section className="library-profile-saved" aria-label={`Profile ${selectedProfile.number} saved profile`}><header><div><span>Saved profile</span><h3>{selectedProfile.name}</h3></div><div><button type="button" className="button secondary" onClick={() => setEditing(true)}>Edit profile</button><button type="button" className="button" disabled={loadingProfile || applicationRunning || (!preview?.allowed && !pendingLoad)} onClick={() => void load()}>{loadingProfile ? "Loading…" : "Load profile"}</button></div></header><dl><div><dt>Number</dt><dd>{selectedProfile.number}</dd></div><div><dt>Revision</dt><dd>{selectedProfile.revision}</dd></div><div><dt>Cache</dt><dd>{selectedProfile.cache_summary?.state ? String(selectedProfile.cache_summary.state) : "Latest compatible cached recipes"}</dd></div></dl><ul>{selectedProfile.assignments.map(assignment => <li key={assignment.selector}><strong>{assignment.display_name}</strong><span>{assignment.recipe_selector} · {assignment.spark_ids.map(id => names[id] ?? id).join(" + ")} · {assignment.observed_state}</span></li>)}{selectedProfile.assignments.length === 0 && <li><strong>Idle fleet</strong><span>No assignments; every Spark becomes idle on load.</span></li>}</ul>{preview && !preview.allowed && preview.reasons[0] && <p className="library-profile-plain-error" role="alert">{preview.reasons[0].detail}</p>}{(selectedProfile.next_actions ?? []).length > 0 && <p>{(selectedProfile.next_actions ?? []).join(" · ")}</p>}</section>}
       {!draft && !loading && <div className="library-profile-empty-editor"><h3>Select or create a profile</h3><button type="button" className="button" onClick={startNew}>Create profile</button></div>}
     </div>
   </section>;

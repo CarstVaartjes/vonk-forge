@@ -286,6 +286,37 @@ def _app() -> FastAPI:
             raise HTTPException(status_code=404, detail="profile not found")
         return _profile_application()
 
+    @app.post("/api/profile/{number}/preview")
+    def preview_profile(number: int, request: Request) -> dict[str, Any]:
+        _auth(request)
+        if number != 1:
+            raise HTTPException(status_code=404, detail="profile not found")
+        return {
+            "schema_version": 2,
+            "profile_id": PROFILE_ID,
+            "profile_name": profile["name"],
+            "profile_digest": "a" * 64,
+            "generated_at": NOW,
+            "allowed": True,
+            "scope": {"node_ids": [SPARK], "idle_node_ids": []},
+            "summary": {
+                "already_correct": 0,
+                "placements": 1,
+                "builds": 0,
+                "distributions": 0,
+                "installs": 0,
+                "starts": 1,
+                "stops": 0,
+                "uninstalls": 0,
+                "blockers": 0,
+            },
+            "assignments": [],
+            "preparations": [],
+            "steps": [],
+            "reasons": [],
+            "plan_digest": "b" * 64,
+        }
+
     @app.get("/api/profile/{number}/progress")
     def profile_progress(number: int, request: Request) -> dict[str, Any]:
         _auth(request)
@@ -382,7 +413,10 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
         "--json",
     ) == browser_transport.request("PUT", "/api/profile/1", profile_body)
 
-    load_request: dict[str, object] = {"request_key": REQUEST_KEY}
+    load_request: dict[str, object] = {
+        "request_key": REQUEST_KEY,
+        "plan_digest": "b" * 64,
+    }
     assert _cli(
         cli_transport, "--profile", "1", "profile", "load", "--json"
     ) == browser_transport.request("POST", "/api/profile/1/load", load_request)
