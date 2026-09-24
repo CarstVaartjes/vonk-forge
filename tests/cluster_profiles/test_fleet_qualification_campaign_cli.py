@@ -811,6 +811,15 @@ class _MissingEndpoint:
         raise campaign_cli.ControlNotFound(404, "endpoint is absent", endpoint=path)
 
 
+class _ExistingEndpoint:
+    def request(
+        self, method: str, path: str, *args: object, **kwargs: object
+    ) -> dict[str, object]:
+        assert method == "GET"
+        assert unquote(path.rsplit("/", 1)[-1]) == "current-service"
+        return {"api_base": "http://127.0.0.1:8000/v1"}
+
+
 def test_manifest_loads_confined_parent_references_and_binds_all_local_inputs(
     tmp_path: Path,
 ) -> None:
@@ -1535,6 +1544,26 @@ def test_rank_loss_requires_exact_failed_rank_and_withdrawn_route() -> None:
     assert observed is False
 
 
+def test_rank_recovery_rejects_a_permuted_spark_rank_assignment() -> None:
+    fleet = {
+        "nodes": [
+            _node(NODE_A, loaded=[_loaded_run_presence(rank=1)]),
+            _node(NODE_B, loaded=[_loaded_run_presence(rank=0)]),
+        ]
+    }
+
+    with pytest.raises(QualificationError, match="exact canary Spark/rank mapping"):
+        campaign_cli._rank_recovered(
+            _ExistingEndpoint(),
+            fleet,
+            run_id=RUN_ID,
+            revision_id="revision-current",
+            alias="current-service",
+            node_ids=[NODE_A, NODE_B],
+            node_to_rank={NODE_A: 0, NODE_B: 1},
+        )
+
+
 def test_offline_restart_requires_observed_downtime_and_changed_live_boot_id(
     tmp_path: Path,
 ) -> None:
@@ -1745,6 +1774,227 @@ def _append_single_recipe_evidence(
             "observed_boot_id": "boot-before" if same_boot else "boot-after",
             "telemetry_freshness": "live",
         },
+    )
+
+
+def _append_two_node_recipe_evidence(
+    ledger: EvidenceLedger,
+    *,
+    recovered_node_to_rank: Mapping[str, int] | None = None,
+) -> None:
+    row = _row(node_count=2)
+    alias = "test-alias"
+    fixture_digest = "e" * 64
+    node_to_rank = {NODE_A: 0, NODE_B: 1}
+    recovered_node_to_rank = recovered_node_to_rank or node_to_rank
+    request_key = campaign_cli._request_key(CAMPAIGN_ID, RECIPE_KEY, "load")
+    preview = {"plan_digest": "profile-plan", "exact_preparations": {}}
+    smoke_preview = {
+        "kind": "openai-service",
+        "endpoint_alias": alias,
+        "fixture_manifest_sha256": fixture_digest,
+        "cases": [{"case_id": "health"}],
+    }
+    ledger.append(
+        "plan.generated",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={
+            "authority_row": dict(row.raw),
+            "controller_recipe_identity": {
+                "content_sha256": CONTENT_SHA,
+                "recipe_revision_id": REVISION_ID,
+            },
+            "profile_digest": "profile-digest",
+            "preview": preview,
+            "smoke_preview": smoke_preview,
+        },
+    )
+    ledger.append(
+        "profile.load.requested",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={"request_key": request_key},
+    )
+
+    def presence(node_id: str, rank: int, *, recovered: bool = False) -> dict[str, object]:
+        result = _loaded_run_presence(rank=rank)
+        result.update(
+            {
+                "node_id": node_id,
+                "alias": alias,
+                "run_id": RUN_ID,
+                "recipe_revision_id": REVISION_ID,
+                "member_node_ids": [NODE_A, NODE_B],
+            }
+        )
+        if recovered:
+            result.update(
+                {"route_state": "published", "group_state": "healthy", "healthy": True}
+            )
+        return result
+
+    ledger.append(
+        "canary.completed",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={
+            "recipe_content_sha256": CONTENT_SHA,
+            "alias": alias,
+            "run_id": RUN_ID,
+            "recipe_revision_id": REVISION_ID,
+            "node_to_rank": node_to_rank,
+            "fleet_rank_presence": [
+                presence(node_id, rank)
+                for node_id, rank in node_to_rank.items()
+            ],
+            "application": {
+                "state": "succeeded",
+                "profile_digest": "profile-digest",
+                "plan_digest": campaign_cli._application_plan_digest(
+                    "profile-plan", request_key
+                ),
+            },
+            "exact_preparations": {},
+            "smoke": {
+                "fixture_manifest_sha256": fixture_digest,
+                "cases": [{"case_id": "health"}],
+            },
+            "review_acknowledgements": {
+                "operator_acceptance": False,
+                "capacity_review": False,
+            },
+        },
+    )
+    ledger.append(
+        "rank-loss.observed",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={
+            "failure_node_id": NODE_B,
+            "failure_rank": 1,
+            "expected_present_ranks": [0],
+            "survivors": [
+                {
+                    "rank": 0,
+                    "group_state": "degraded",
+                    "route_state": "withdrawn",
+                    "healthy": False,
+                    "expected_rank_count": 2,
+                    "present_ranks": [0],
+                }
+            ],
+            "failed_rank_presence": [
+                {
+                    "rank": 1,
+                    "rank_state": "stopped",
+                    "recipe_revision_id": REVISION_ID,
+                    "expected_rank_count": 2,
+                    "group_state": "degraded",
+                    "route_state": "withdrawn",
+                    "healthy": False,
+                }
+            ],
+            "failed_node_online_state": "offline",
+            "endpoint_not_found": True,
+        },
+    )
+    ledger.append(
+        "rank-recovery.smoke-completed",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={
+            "run_id": RUN_ID,
+            "recipe_revision_id": REVISION_ID,
+            "fleet_rank_presence": [
+                presence(node_id, rank, recovered=True)
+                for node_id, rank in recovered_node_to_rank.items()
+            ],
+            "smoke": {
+                "endpoint_alias": alias,
+                "recipe_content_sha256": CONTENT_SHA,
+                "cases": [{"case_id": "health"}],
+            },
+        },
+    )
+    ledger.append(
+        "profile.cleanup.completed",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={
+            "application_id": "cleanup-application",
+            "application_state": "succeeded",
+            "cleanup_policy": "stop",
+            "uninstalls": 0,
+            "route_withdrawn": True,
+            "run_absent_from_fleet": True,
+            "run_id": RUN_ID,
+            "alias": alias,
+            "node_ids": [NODE_A, NODE_B],
+        },
+    )
+    ledger.append(
+        "host-restart.baseline",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={
+            "nodes": {NODE_A: "boot-a-before", NODE_B: "boot-b-before"},
+            "route_alias": alias,
+            "run_id": RUN_ID,
+        },
+    )
+    for node_id, baseline in (
+        (NODE_A, "boot-a-before"),
+        (NODE_B, "boot-b-before"),
+    ):
+        ledger.append(
+            "host-restart.offline",
+            plan_digest=CAMPAIGN_ID,
+            recipe=RECIPE_KEY,
+            payload={
+                "node_id": node_id,
+                "online_state": "offline",
+                "baseline_boot_id": baseline,
+            },
+        )
+        ledger.append(
+            "host-restart.recovered",
+            plan_digest=CAMPAIGN_ID,
+            recipe=RECIPE_KEY,
+            payload={
+                "node_id": node_id,
+                "online_state": "online",
+                "baseline_boot_id": baseline,
+                "observed_boot_id": f"{baseline}-after",
+                "telemetry_freshness": "live",
+            },
+        )
+
+
+def test_spark_acceptance_rejects_permuted_recovered_rank_mapping(
+    tmp_path: Path,
+) -> None:
+    exact = EvidenceLedger(tmp_path / "exact-rank-evidence.jsonl")
+    _append_two_node_recipe_evidence(exact)
+    accepted = campaign_cli._accept_if_complete(
+        row=_row(node_count=2),
+        campaign_id=CAMPAIGN_ID,
+        ledger=exact,
+        node_ids=[NODE_A, NODE_B],
+    )
+    assert accepted["status"] == "spark-accepted"
+
+    permuted = EvidenceLedger(tmp_path / "permuted-rank-evidence.jsonl")
+    _append_two_node_recipe_evidence(
+        permuted,
+        recovered_node_to_rank={NODE_A: 1, NODE_B: 0},
+    )
+    with pytest.raises(QualificationError, match="exact canary Spark/rank mapping"):
+        campaign_cli._accept_if_complete(
+            row=_row(node_count=2),
+        campaign_id=CAMPAIGN_ID,
+        ledger=permuted,
+        node_ids=[NODE_A, NODE_B],
     )
 
 

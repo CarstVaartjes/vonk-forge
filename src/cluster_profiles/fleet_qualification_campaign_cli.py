@@ -2320,10 +2320,45 @@ def _check_serving_fleet(
             raise QualificationError(
                 "Fleet lacks fresh healthy evidence from every rank"
             )
-        rows.append(dict(presence))
+        rows.append({**dict(presence), "node_id": node_id})
     if observed_nodes != set(node_ids):
         raise QualificationError("Fleet run presence node set differs from assignment")
     return rows
+
+
+def _rank_presence_bindings(
+    raw_presences: object,
+) -> dict[str, int]:
+    if not isinstance(raw_presences, list):
+        raise QualificationError("Fleet rank presence evidence is not a list")
+    bindings: dict[str, int] = {}
+    for raw_presence in raw_presences:
+        presence = _object(raw_presence, "Fleet rank presence")
+        node_id = presence.get("node_id")
+        rank = presence.get("rank")
+        if (
+            not isinstance(node_id, str)
+            or not node_id
+            or node_id in bindings
+            or type(rank) is not int
+        ):
+            raise QualificationError(
+                "Fleet rank presence lacks an exact Spark/rank identity"
+            )
+        bindings[node_id] = rank
+    return bindings
+
+
+def _require_rank_presence_bindings(
+    raw_presences: object,
+    expected_node_to_rank: Mapping[str, int],
+    *,
+    label: str,
+) -> None:
+    if _rank_presence_bindings(raw_presences) != dict(expected_node_to_rank):
+        raise QualificationError(
+            f"{label} changed the exact canary Spark/rank mapping"
+        )
 
 
 def _assert_no_campaign_run(
@@ -3415,6 +3450,11 @@ def _load_and_smoke(
         expected_route_state="published",
         expected_health=True,
     )
+    _require_rank_presence_bindings(
+        presences,
+        node_to_rank,
+        label="serving canary",
+    )
     if kind == "artifact-job":
         adapter = ArtifactJobSmokeAdapter(fixtures)
         smoke = adapter.run(
@@ -3741,6 +3781,7 @@ def _rank_recovered(
     revision_id: str,
     alias: str,
     node_ids: Sequence[str],
+    node_to_rank: Mapping[str, int],
 ) -> list[dict[str, object]] | None:
     nodes = _nodes(fleet)
     if any(node_id not in nodes or not _online(nodes[node_id]) for node_id in node_ids):
@@ -3758,6 +3799,11 @@ def _rank_recovered(
         )
     except QualificationError:
         return None
+    _require_rank_presence_bindings(
+        presences,
+        node_to_rank,
+        label="recovered run",
+    )
     try:
         endpoint = client.request(
             "GET", f"/api/endpoints/{urllib.parse.quote(alias, safe='')}"
@@ -4057,6 +4103,12 @@ def _accept_if_complete(
         raise QualificationError(
             "canary execution differs from its exact reviewed plan or fixtures"
         )
+    if row.node_count == 2:
+        _require_rank_presence_bindings(
+            canary.get("fleet_rank_presence"),
+            cast(Mapping[str, int], ranks),
+            label="serving canary",
+        )
     smoke_cases = smoke.get("cases")
     if isinstance(smoke_cases, list):
         observed_case_ids = [
@@ -4206,6 +4258,15 @@ def _accept_if_complete(
             raise QualificationError(
                 "rank-loss evidence lacks per-rank route-withdrawal receipts"
             )
+        if not isinstance(recovered_presences, list):
+            raise QualificationError(
+                "rank-recovery evidence lacks exact Fleet rank presence"
+            )
+        _require_rank_presence_bindings(
+            recovered_presences,
+            cast(Mapping[str, int], ranks),
+            label="recovered run",
+        )
         survivor_ranks: set[int] = set()
         survivor_evidence_valid = True
         for raw_presence in survivors:
@@ -4260,13 +4321,6 @@ def _accept_if_complete(
             or rank_loss.get("endpoint_not_found") is not True
             or recovery.get("run_id") != canary.get("run_id")
             or recovery.get("recipe_revision_id") != canary.get("recipe_revision_id")
-            or not isinstance(recovered_presences, list)
-            or len(recovered_presences) != row.node_count
-            or {
-                _object(item, "recovered rank presence").get("rank")
-                for item in recovered_presences
-            }
-            != set(range(row.node_count))
             or any(
                 _object(item, "recovered rank presence").get("route_state")
                 != "published"
@@ -4812,6 +4866,9 @@ def _observe(
         )
     node_to_rank = canary.get("node_to_rank")
     node_ids = _ordered_rank_nodes(node_to_rank, row.node_count)
+    # _ordered_rank_nodes validates the durable JSON shape and rank values;
+    # carry that exact mapping type through recovery and acceptance.
+    node_to_rank = cast(Mapping[str, int], node_to_rank)
     run_id = _string(canary.get("run_id"), "canary run ID")
     alias = _string(canary.get("alias"), "canary route alias")
     if (
@@ -4858,10 +4915,14 @@ def _observe(
             )
         failure_node = _string(pending.get("failure_spark"), "failure Spark")
         revision_id = _string(pending.get("revision_id"), "recipe revision ID")
-        node_to_rank = pending.get("node_to_rank")
-        if not isinstance(node_to_rank, Mapping):
+        pending_node_to_rank = pending.get("node_to_rank")
+        if not isinstance(pending_node_to_rank, Mapping):
             raise QualificationError(
                 "rank-loss request lacks exact rank-to-Spark identities"
+            )
+        if _ordered_rank_nodes(pending_node_to_rank, row.node_count) != node_ids:
+            raise QualificationError(
+                "rank-loss request differs from the canary Spark/rank mapping"
             )
         if _latest_payload(ledger, campaign_id, row.key, "rank-loss.observed") is None:
             fleet = _typed_fleet(client)
@@ -4911,6 +4972,7 @@ def _observe(
                 revision_id=revision_id,
                 alias=alias,
                 node_ids=node_ids,
+                node_to_rank=node_to_rank,
             )
             if presences is None:
                 return {
