@@ -2624,6 +2624,46 @@ def test_profile_endpoint_alias_uses_controller_membership_query_and_json() -> N
     ]
 
 
+def test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = {
+        "number": 3,
+        "profile_id": "11111111-1111-4111-8111-111111111111",
+        "application_id": "22222222-2222-4222-8222-222222222222",
+        "application_state": "cancelled",
+        "observed_at": "2026-09-23T12:59:31Z",
+        "assignments": None,
+        "projection_issue": {
+            "code": "profile.application_intent.invalid",
+            "detail": "stored document is invalid at assignments.0 (missing)",
+        },
+    }
+
+    class UnavailableEndpointClient:
+        def profile_endpoints(self, number: int, alias: str | None = None):
+            assert number == 3
+            assert alias == "qwen"
+            return type("EndpointResponse", (), {"to_dict": lambda _self: payload})()
+
+    monkeypatch.setattr(
+        controller_cli,
+        "validate_control_document",
+        lambda _name, value: value,
+    )
+    status = cli.main(
+        ("--profile", "3", "profile", "endpoint", "qwen"),
+        control_client=UnavailableEndpointClient(),
+    )
+
+    output = capsys.readouterr().out
+    assert status == 0
+    assert "Endpoint assignments are unavailable" in output
+    assert "stored document is invalid at assignments.0 (missing)" in output
+    assert "not part of profile 3" not in output
+
+
 def test_fleet_actions_use_readable_selectors_and_avoid_legacy_agent_routes() -> None:
     node_id = "spk_" + "1" * 32
     log_path = f"/api/fleet/{node_id}/loginfo"

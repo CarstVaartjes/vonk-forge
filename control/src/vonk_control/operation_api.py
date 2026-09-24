@@ -1799,6 +1799,24 @@ class _DurableOperationProjection:
         with self._sessions() as session:
             intent = self._profile_endpoint_intent(session, number)
             assignments = intent.assignments
+            if assignments is None:
+                if intent.projection_issue is None:
+                    raise RuntimeError(
+                        "profile endpoint membership is unavailable without a reason"
+                    )
+                return FleetProfileEndpointsView(
+                    number=intent.number,
+                    profile_id=intent.profile_id,
+                    application_id=intent.application_id,
+                    application_state=intent.application_state,
+                    observed_at=_aware(self._clock()),
+                    assignments=None,
+                    projection_issue=intent.projection_issue,
+                )
+            if intent.projection_issue is not None:
+                raise RuntimeError(
+                    "profile endpoint issue conflicts with available membership"
+                )
             if alias is not None:
                 assignments = tuple(item for item in assignments if item.alias == alias)
                 if not assignments:

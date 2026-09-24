@@ -136,6 +136,13 @@ class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
+class FleetProfileEndpointProjectionIssue(_StrictModel):
+    """Safe diagnostic for immutable profile history that cannot be read."""
+
+    code: Literal["profile.application_intent.invalid"]
+    detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+
+
 @dataclass(frozen=True)
 class FleetProfileEndpointAssignmentIntent:
     """Loaded application assignment and exact current run candidate."""
@@ -156,7 +163,8 @@ class FleetProfileEndpointIntent:
     profile_id: str | None
     application_id: str | None
     application_state: FleetProfileOperationState | None
-    assignments: tuple[FleetProfileEndpointAssignmentIntent, ...]
+    assignments: tuple[FleetProfileEndpointAssignmentIntent, ...] | None
+    projection_issue: FleetProfileEndpointProjectionIssue | None = None
 
 
 class FleetProfileEndpointAssignmentView(_StrictModel):
@@ -187,7 +195,10 @@ class FleetProfileEndpointsView(_StrictModel):
     application_id: UuidId | None = None
     application_state: FleetProfileOperationState | None = None
     observed_at: datetime
-    assignments: list[FleetProfileEndpointAssignmentView] = Field(max_length=64)
+    # Required nullable: [] means membership is known to be empty, while null
+    # means the immutable application could not be validated.
+    assignments: list[FleetProfileEndpointAssignmentView] | None = Field(max_length=64)
+    projection_issue: FleetProfileEndpointProjectionIssue | None = None
 
     @model_validator(mode="after")
     def application_identity_is_consistent(self) -> FleetProfileEndpointsView:
@@ -195,6 +206,10 @@ class FleetProfileEndpointsView(_StrictModel):
             raise ValueError("profile endpoint application identity is incomplete")
         if self.application_id is not None and self.profile_id is None:
             raise ValueError("profile endpoint application has no profile identity")
+        if (self.assignments is None) != (self.projection_issue is not None):
+            raise ValueError("profile endpoint membership availability is inconsistent")
+        if self.projection_issue is not None and self.application_id is None:
+            raise ValueError("profile endpoint projection issue has no application")
         return self
 
 

@@ -489,6 +489,13 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         return
     _field("Loaded application", application_id)
     _field("Application state", payload.get("application_state"))
+    issue = _optional(payload.get("projection_issue"), "projection_issue")
+    if issue:
+        print(
+            "Endpoint assignments are unavailable because stored application history is invalid."
+        )
+        _field("Stored evidence", issue.get("detail"))
+        return
     assignments = _records(payload, "assignments")
     if not assignments:
         print("The loaded application has no endpoint assignments.")

@@ -1299,6 +1299,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     assert endpoint["node_id"] == "spk_" + "1".zfill(32)
 
     profile_endpoint = projection.profile_endpoint(3, None)
+    assert profile_endpoint.assignments is not None
     assert profile_endpoint.assignments[0].state == "published"
     assert profile_endpoint.assignments[0].endpoint is not None
     assert profile_endpoint.assignments[0].endpoint.generation == 1
@@ -1329,6 +1330,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     )
     assert wrong_owner.profile_endpoint is not None
     wrong_owner_endpoint = wrong_owner.profile_endpoint(3, "qwen")
+    assert wrong_owner_endpoint.assignments is not None
     assert wrong_owner_endpoint.assignments[0].state == "withdrawn"
     assert wrong_owner_endpoint.assignments[0].endpoint is None
 
@@ -1341,6 +1343,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     )
     assert expired.profile_endpoint is not None
     expired_endpoint = expired.profile_endpoint(3, "qwen")
+    assert expired_endpoint.assignments is not None
     assert expired_endpoint.assignments[0].state == "expired"
     assert expired_endpoint.assignments[0].endpoint is None
 
@@ -1375,6 +1378,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     assert replacement_generation is not None
     assert replacement_generation > generation.generation
     current_endpoint = projection.profile_endpoint(3, "qwen")
+    assert current_endpoint.assignments is not None
     assert current_endpoint.assignments[0].state == "published"
     assert current_endpoint.assignments[0].endpoint is not None
     assert current_endpoint.assignments[0].endpoint.generation == replacement_generation
@@ -1403,6 +1407,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     assert withdrew_during_verification
 
     withdrawn = projection.profile_endpoint(3, "qwen")
+    assert withdrawn.assignments is not None
     assert withdrawn.assignments[0].state == "withdrawn"
     assert withdrawn.assignments[0].endpoint is None
 

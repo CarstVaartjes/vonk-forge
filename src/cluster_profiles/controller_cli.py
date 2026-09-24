@@ -2973,11 +2973,15 @@ def _profile(
             client.profile_endpoints(number, alias=args.alias).to_dict(),
         )
         assignments = result.get("assignments")
-        if args.alias is not None and (
-            not isinstance(assignments, list)
-            or not any(
-                isinstance(item, dict) and item.get("alias") == args.alias
-                for item in assignments
+        if (
+            args.alias is not None
+            and result.get("projection_issue") is None
+            and (
+                not isinstance(assignments, list)
+                or not any(
+                    isinstance(item, dict) and item.get("alias") == args.alias
+                    for item in assignments
+                )
             )
         ):
             raise ValueError(f"endpoint alias is not part of profile {number}")
