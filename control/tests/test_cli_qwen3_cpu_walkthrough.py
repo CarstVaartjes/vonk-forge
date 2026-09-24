@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import CatalogDocumentRevision
+from vonk_control.models import CatalogDocumentRevision, Job
 from vonk_control.recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
@@ -29,9 +29,9 @@ from vonk_forge_contracts.recipe import RecipeHttpServingRequest
 from .test_cli_operator_walkthrough import (
     _QWEN3_BLOCKED_RECIPE_SELECTOR,
     _QWEN3_IMAGE_DIGEST,
+    _QWEN3_READY_RECIPE_SELECTOR,
     _QWEN3_RUNTIME_REPOSITORY,
     _QWEN3_RUNTIME_TAG,
-    _READY_RECIPE_SELECTOR,
     _run_cli,
     _session_environment,
     _walkthrough_app,
@@ -397,8 +397,8 @@ def test_installed_cli_later_page_qwen_candidate_runs_real_cpu_inference(
             app,
             headers,
             _node_id,
-            _candidate_revision_id,
-            _candidate_digest,
+            candidate_revision_id,
+            candidate_digest,
             ready_revision_id,
             ready_digest,
         ) = _walkthrough_app(
@@ -410,7 +410,7 @@ def test_installed_cli_later_page_qwen_candidate_runs_real_cpu_inference(
         operator_cwd.mkdir(mode=0o700)
         with (
             TestClient(app) as api,
-            _https_api_peer(workspace, api, headers) as (url, certificate, _peer),
+            _https_api_peer(workspace, api, headers) as (url, certificate, peer),
         ):
             environment = _session_environment(
                 installed_vonkctl=installed_vonkctl,
@@ -451,6 +451,74 @@ def test_installed_cli_later_page_qwen_candidate_runs_real_cpu_inference(
             assert first_assessment["fleet_fit"]["state"] == "ready"
             assert first_assessment["cache"]["state"] == "blocked"
             assert isinstance(cursor, str) and cursor
+            assert first_candidate["identity"]["recipe_revision_id"] == (
+                candidate_revision_id
+            )
+            assert first_candidate["identity"]["content_sha256"] == candidate_digest
+            blocked_reasons = first_assessment["cache"].get("reasons")
+            assert isinstance(blocked_reasons, list) and blocked_reasons
+            blocked_details = [reason.get("detail") for reason in blocked_reasons]
+            assert all(isinstance(detail, str) for detail in blocked_details)
+            assert any("recipe-not-cached" in detail for detail in blocked_details)
+            assert not any("model-not-cached" in detail for detail in blocked_details)
+
+            blocked_recipe, blocked_model, _blocked_projection = _runtime_projection(
+                sessions, candidate_revision_id
+            )
+            assert blocked_model.identity == assets.model.identity
+            blocked_execution = blocked_recipe.model_dump(mode="json")["execution"]
+            assert isinstance(blocked_execution, dict)
+            blocked_image = blocked_execution["image"]
+            assert isinstance(blocked_image, dict)
+            assert f"sha256:{blocked_image['digest']}" != _QWEN3_IMAGE_DIGEST
+
+            request_key = "33333333-3333-4333-8333-333333333303"
+            prepared = _run_cli(
+                installed_vonkctl,
+                (
+                    "--no-input",
+                    "--json",
+                    "recipe",
+                    "download",
+                    f"vonk-forge/{_QWEN3_BLOCKED_RECIPE_SELECTOR}",
+                    "--request-key",
+                    request_key,
+                    "--detach",
+                ),
+                environment,
+                operator_cwd,
+            )
+            assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+            preparation_receipt = json.loads(prepared.stdout)
+            operation_id = preparation_receipt.get("id")
+            assert isinstance(operation_id, str) and operation_id
+            observed = api.get(
+                f"/api/recipe/operations/{operation_id}", headers=headers
+            )
+            assert observed.status_code == 200, observed.text
+            operation = observed.json()
+            assert operation["id"] == operation_id
+            assert operation["request_id"] == request_key
+            assert operation["recipe_revision_id"] == candidate_revision_id
+            assert operation["state"] == "queued"
+            with sessions() as session:
+                durable = session.scalar(
+                    select(Job).where(Job.request_id == request_key)
+                )
+                assert durable is not None
+                assert durable.id == operation_id
+                assert durable.state == "queued"
+                payload = durable.payload
+                assert isinstance(payload, dict)
+                assert payload["recipe_revision_id"] == candidate_revision_id
+                assert payload["recipe_content_sha256"] == candidate_digest
+            assert any(
+                method == "POST"
+                and path
+                == f"/api/recipe/vonk-forge/{_QWEN3_BLOCKED_RECIPE_SELECTOR}/download"
+                for method, path, _document in peer.calls
+            )
+
             ready_page = _run_cli(
                 installed_vonkctl,
                 (
@@ -475,7 +543,9 @@ def test_installed_cli_later_page_qwen_candidate_runs_real_cpu_inference(
             ready_rows = ready_document.get("recipes")
             assert isinstance(ready_rows, list) and len(ready_rows) == 1
             candidate = ready_rows[0]
-            assert candidate["selector"] == f"vonk-forge/{_READY_RECIPE_SELECTOR}"
+            assert candidate["selector"] == (
+                f"vonk-forge/{_QWEN3_READY_RECIPE_SELECTOR}"
+            )
             assert candidate["identity"]["recipe_revision_id"] == ready_revision_id
             assert candidate["identity"]["content_sha256"] == ready_digest
             assessment = candidate.get("assessment")

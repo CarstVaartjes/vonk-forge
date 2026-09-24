@@ -128,8 +128,10 @@ _READY_MODEL_PAYLOAD = len(_READY_MODEL_HEADER).to_bytes(8, "little") + (
 )
 _READY_MODEL_REVISION = "a" * 40
 _READY_MODEL_SELECTOR = "walkthrough-synthetic-tiny-ready-fp16"
-_READY_RECIPE_SELECTOR = "qwen3-vllm-a-ready"
-_BLOCKED_RECIPE_SELECTOR = "qwen3-vllm-z-candidate"
+_READY_RECIPE_SELECTOR = "walkthrough-synthetic-vllm-b-ready"
+_QWEN3_READY_RECIPE_SELECTOR = "qwen3-vllm-a-ready"
+_SYNTHETIC_BASE_RECIPE_SELECTOR = "walkthrough-synthetic-vllm-a-base"
+_BLOCKED_RECIPE_SELECTOR = "walkthrough-synthetic-vllm-z-blocked"
 # Match the fingerprint seeded by the shared disposable-host fixture; this is
 # not a physical host observation. Newly issued probe operations still travel
 # through AgentJobService with typed receipts in the linked journey.
@@ -679,6 +681,52 @@ def _session_environment(
     }
 
 
+def _stage_participant_materials(
+    workspace: Path,
+    *,
+    controller_url: str,
+    valid_token_file: Path,
+    expired_token: str,
+) -> Path:
+    """Stage the shipped runbook and the two connection cases for U1."""
+
+    materials = workspace / "participant-materials"
+    materials.mkdir(mode=0o700)
+    repository_root = Path(__file__).resolve().parents[2]
+    runbook_source = repository_root / "docs" / "runbooks" / "vonkctl.md"
+    runbook_copy = materials / "vonkctl.md"
+    shutil.copyfile(runbook_source, runbook_copy)
+    runbook_copy.chmod(0o600)
+
+    valid_connection = materials / "valid-connection.env"
+    valid_connection.write_text(
+        f"export VONK_CONTROL_URL='{controller_url}'\n"
+        f"export VONK_CONTROL_TOKEN_FILE='{valid_token_file}'\n",
+        encoding="utf-8",
+    )
+    valid_connection.chmod(0o600)
+
+    invalid_connection = materials / "invalid-connection.env"
+    invalid_connection.write_text(
+        "export VONK_CONTROL_URL='https://127.0.0.1:1'\n"
+        f"export VONK_CONTROL_TOKEN_FILE='{valid_token_file}'\n",
+        encoding="utf-8",
+    )
+    invalid_connection.chmod(0o600)
+
+    expired_token_file = materials / "expired-token"
+    expired_token_file.write_text(expired_token, encoding="utf-8")
+    expired_token_file.chmod(0o600)
+    expired_connection = materials / "expired-token.env"
+    expired_connection.write_text(
+        f"export VONK_CONTROL_URL='{controller_url}'\n"
+        f"export VONK_CONTROL_TOKEN_FILE='{expired_token_file}'\n",
+        encoding="utf-8",
+    )
+    expired_connection.chmod(0o600)
+    return materials
+
+
 def _run_cli(
     executable: Path,
     arguments: tuple[str, ...],
@@ -733,6 +781,11 @@ def _walkthrough_app(
         document.update(base_model.model_dump(mode="json"))
 
     def bind_base_model(document: dict[str, object]) -> None:
+        identity = document["identity"]
+        metadata = document["metadata"]
+        assert isinstance(identity, dict) and isinstance(metadata, dict)
+        identity["slug"] = _SYNTHETIC_BASE_RECIPE_SELECTOR
+        metadata["title"] = "Walkthrough synthetic source-build base"
         selections = document["models"]
         assert isinstance(selections, list) and selections
         selection = selections[0]
@@ -823,7 +876,7 @@ def _walkthrough_app(
         base_recipe_row = next(
             row
             for row in revisions
-            if row.kind == "recipe" and row.slug == "qwen3-vllm"
+            if row.kind == "recipe" and row.slug == _SYNTHETIC_BASE_RECIPE_SELECTOR
         )
         base_recipe_document = copy.deepcopy(base_recipe_row.document)
     model_document = json.loads(
@@ -901,11 +954,15 @@ def _walkthrough_app(
     ready_identity = ready_recipe_document["identity"]
     ready_metadata = ready_recipe_document["metadata"]
     assert isinstance(ready_identity, dict) and isinstance(ready_metadata, dict)
-    ready_identity["slug"] = _READY_RECIPE_SELECTOR
+    ready_identity["slug"] = (
+        _QWEN3_READY_RECIPE_SELECTOR
+        if qwen_cpu_assets is not None
+        else _READY_RECIPE_SELECTOR
+    )
     ready_metadata["title"] = (
         "Qwen3 0.6B vLLM CPU ready candidate"
         if qwen_cpu_assets is not None
-        else "Qwen 3 VLLM ready candidate"
+        else "Walkthrough synthetic vLLM ready candidate"
     )
     if qwen_cpu_assets is not None:
         ready_metadata["description"] = (
@@ -1070,9 +1127,9 @@ def _walkthrough_app(
         else _BLOCKED_RECIPE_SELECTOR
     )
     metadata["title"] = (
-        "Qwen3 0.6B vLLM CPU blocked candidate"
+        "Qwen3 0.6B vLLM CPU candidate with missing fixture image"
         if qwen_cpu_assets is not None
-        else "Qwen 3 VLLM later-page candidate"
+        else "Walkthrough synthetic vLLM later-page candidate"
     )
     selections = candidate_recipe_document["models"]
     assert isinstance(selections, list) and selections
@@ -1080,11 +1137,18 @@ def _walkthrough_app(
     assert isinstance(selection, dict)
     model_reference = selection["model"]
     assert isinstance(model_reference, dict)
-    candidate_model = model
+    candidate_model = ready_model if qwen_cpu_assets is not None else model
     model_reference["publisher"] = candidate_model.identity.publisher
     model_reference["slug"] = candidate_model.identity.slug
     model_reference["content_sha256"] = content_sha256(candidate_model)
     if qwen_cpu_assets is not None:
+        execution = candidate_recipe_document["execution"]
+        assert isinstance(execution, dict)
+        image = execution["image"]
+        assert isinstance(image, dict)
+        image["digest"] = hashlib.sha256(
+            b"walkthrough Qwen fixture image is intentionally unavailable"
+        ).hexdigest()
         selection["files"] = [
             {
                 "id": model_file.id,
@@ -1476,6 +1540,10 @@ def _walkthrough_app(
         app.state.linked_profile_owners = linked_owners
     actor = Actor("test", "administrator")
     token = codec.issue(actor, ttl_seconds=4 * 60 * 60, now=now())
+    expired_token = codec.issue(
+        Actor("expired-walkthrough", "administrator"), ttl_seconds=1, now=0
+    )
+    app.state.walkthrough_expired_token = expired_token
     return (
         sessions,
         app,
@@ -1512,18 +1580,65 @@ def _smoke(
     candidate_digest: str,
     ready_revision_id: str,
     ready_digest: str,
+    participant_materials: Path,
 ) -> None:
     before_effects = _effect_counts(sessions)
     help_result = _run_cli(executable, ("--help",), environment, cwd)
     assert help_result.returncode == 0, help_result.stderr
 
+    invalid_values = dict(
+        line.removeprefix("export ").split("=", 1)
+        for line in (participant_materials / "invalid-connection.env")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line
+    )
+    invalid_environment = dict(environment)
+    invalid_environment["VONK_CONTROL_URL"] = invalid_values[
+        "VONK_CONTROL_URL"
+    ].strip("'")
     invalid_origin = _run_cli(
         executable,
-        ("--controller", "https://127.0.0.1:1", "fleet", "--json"),
-        environment,
+        ("--check-connection", "--json"),
+        invalid_environment,
         cwd,
     )
-    assert invalid_origin.returncode != 0
+    assert invalid_origin.returncode == 2
+    invalid_error = json.loads(invalid_origin.stdout)
+    assert invalid_error["error_type"] == "control_api"
+    assert invalid_error["code"] == "controller.transport_connect"
+    assert invalid_error["operation"] == "GET /api/fleet"
+    assert invalid_error["endpoint"] == "/api/fleet"
+    assert invalid_error["source"] == "transport"
+    assert invalid_error["transport"] == "connect"
+    assert invalid_error["decision"] == "retry"
+    assert invalid_error["retryable"] is True
+
+    expired_values = dict(
+        line.removeprefix("export ").split("=", 1)
+        for line in (participant_materials / "expired-token.env")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line
+    )
+    expired_environment = dict(environment)
+    expired_environment["VONK_CONTROL_TOKEN_FILE"] = expired_values[
+        "VONK_CONTROL_TOKEN_FILE"
+    ].strip("'")
+    expired_auth = _run_cli(
+        executable,
+        ("--check-connection", "--json"),
+        expired_environment,
+        cwd,
+    )
+    assert expired_auth.returncode == 2
+    expired_error = json.loads(expired_auth.stdout)
+    assert expired_error["error_type"] == "control_api"
+    assert expired_error["code"] == "controller.authentication_required"
+    assert expired_error["operation"] == "GET /api/fleet"
+    assert expired_error["endpoint"] == "/api/fleet"
+    assert expired_error["source"] == "remote_rejection"
+    assert expired_error["http_status"] == 401
 
     fleet = _run_cli(executable, ("fleet", "--json"), environment, cwd)
     assert fleet.returncode == 0, fleet.stderr
@@ -1553,7 +1668,9 @@ def _smoke(
     cursor = first_document.get("next_cursor")
     assert isinstance(first_rows, list) and len(first_rows) == 1
     assert isinstance(cursor, str) and cursor
-    assert first_rows[0]["selector"] == "vonk-forge/qwen3-vllm"
+    assert first_rows[0]["selector"] == (
+        f"vonk-forge/{_SYNTHETIC_BASE_RECIPE_SELECTOR}"
+    )
 
     ready_page = _run_cli(
         executable,
@@ -1765,8 +1882,28 @@ def _smoke(
     assert assignment["recipe_selector"] == f"vonk-forge/{_BLOCKED_RECIPE_SELECTOR}"
     assert assignment["spark_ids"] == [node_id]
 
-    # The app deliberately has no fleet mutation providers. Verify the exact
-    # registered routes refuse cleanup and upgrade even for this admin token.
+    openapi = api.get("/openapi.json")
+    assert openapi.status_code == 200, openapi.text
+    assert "/api/profile/{number}/load" in openapi.json()["paths"]
+    profile_preview = api.post("/api/profile/1/preview", headers=api_headers)
+    assert profile_preview.status_code == 200, profile_preview.text
+    profile_load = api.post(
+        "/api/profile/1/load",
+        headers=api_headers,
+        json={
+            "request_key": "11111111-1111-4111-8111-111111111194",
+            "plan_digest": profile_preview.json()["plan_digest"],
+        },
+    )
+    assert profile_load.status_code == 409, profile_load.text
+    profile_load_detail = profile_load.json().get("detail")
+    assert isinstance(profile_load_detail, str) and profile_load_detail.startswith(
+        "Fleet profile "
+    )
+
+    # Fleet cleanup and upgrade providers are deliberately absent. The profile
+    # load route is registered, but refuses this plan because its Run/Switch
+    # authority is unavailable in the disposable fixture.
     remove = api.post(f"/api/fleet/{node_id}/remove")
     upgrade = api.post(
         "/api/fleet/upgrade",
@@ -1803,10 +1940,12 @@ def _smoke(
         for method, path, _document in peer_calls
     )
     print(
-        "Walkthrough smoke passed: installed wheel, local Fleet read, a later-page "
-        "cache-ready candidate, a separate cache-blocked candidate with queued "
-        "preparation, and Profile installed-only edit/export/import. No profile "
-        "application or recipe run was created.",
+        "Walkthrough smoke passed: installed wheel, invalid-origin and expired-token "
+        "rejections, later-page synthetic cache readiness, and Profile "
+        "installed-only edit/export/import. A synthetic recipe-preparation request "
+        "was accepted into PostgreSQL as queued; Profile load returned the "
+        "registered route's HTTP 409 refusal. No profile application or recipe run "
+        "was created.",
         flush=True,
     )
 
@@ -1849,6 +1988,7 @@ def _run_walkthrough(postgres_engine, mode: str) -> None:
                 certificate=certificate,
                 headers=headers,
             )
+            expired_token = app.state.walkthrough_expired_token
             token_file = Path(environment["VONK_CONTROL_TOKEN_FILE"])
             assert stat.S_IMODE(token_file.stat().st_mode) == 0o600
             if headers["Authorization"] != (
@@ -1858,6 +1998,23 @@ def _run_walkthrough(postgres_engine, mode: str) -> None:
                     "private token file does not match the local API identity",
                     pytrace=False,
                 )
+            participant_materials = _stage_participant_materials(
+                workspace,
+                controller_url=url,
+                valid_token_file=token_file,
+                expired_token=expired_token,
+            )
+            runbook_copy = participant_materials / "vonkctl.md"
+            assert runbook_copy.read_bytes() == (
+                Path(__file__).resolve().parents[2]
+                / "docs"
+                / "runbooks"
+                / "vonkctl.md"
+            ).read_bytes()
+            assert stat.S_IMODE(runbook_copy.stat().st_mode) == 0o600
+            assert stat.S_IMODE(
+                (participant_materials / "expired-token").stat().st_mode
+            ) == 0o600
             if mode == "smoke":
                 _smoke(
                     executable=executable,
@@ -1872,19 +2029,37 @@ def _run_walkthrough(postgres_engine, mode: str) -> None:
                     candidate_digest=candidate_digest,
                     ready_revision_id=ready_revision_id,
                     ready_digest=ready_digest,
+                    participant_materials=participant_materials,
                 )
             else:
                 print(f"Disposable Controller: {url}", flush=True)
                 print(f"Installed CLI: {executable}", flush=True)
+                print(
+                    f"Participant runbook copy: {runbook_copy}", flush=True
+                )
+                print(
+                    f"Valid connection case: {participant_materials / 'valid-connection.env'}",
+                    flush=True,
+                )
+                print(
+                    f"Seeded invalid connection case: {participant_materials / 'invalid-connection.env'}",
+                    flush=True,
+                )
+                print(
+                    f"Seeded expired token case: {participant_materials / 'expired-token.env'}",
+                    flush=True,
+                )
+                print(f"Valid token file: {token_file}", flush=True)
                 print(
                     "The bearer credential is in a private 0600 file; its contents "
                     "are not displayed. Use the shipped runbook and outcome cards.",
                     flush=True,
                 )
                 print(
-                    "The API is pointed at local disposable services, including "
-                    "the prepared U2 candidate, and has no "
-                    "Fleet removal, upgrade, or profile-load provider. This is "
+                    "The API is pointed at local disposable services. Fleet "
+                    "removal and upgrade providers are unavailable. Profile load "
+                    "is registered and returns HTTP 409 while this disposable "
+                    "profile cannot be applied. This is "
                     "not an OS network sandbox. Type `exit` or press Ctrl-D to "
                     "close the session and clean up.",
                     flush=True,
