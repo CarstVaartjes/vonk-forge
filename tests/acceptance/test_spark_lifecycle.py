@@ -2159,6 +2159,7 @@ class SparkLifecycle:
                 or UUID.fullmatch(recipe_id) is None
                 or not isinstance(revision_id, str)
                 or UUID.fullmatch(revision_id) is None
+                or not isinstance(recipe_selector, str)
                 or recipe_selector != f"{fixture.publisher}/{fixture.slug}"
             ):
                 raise LifecycleError("synthetic canary Recipe identity is invalid")
@@ -2192,17 +2193,11 @@ class SparkLifecycle:
                 raise LifecycleError(
                     "synthetic canary requires a disposable fleet with exactly one enrolled Spark"
                 )
-            _, download_payload = self.control.request(
-                "POST",
-                f"/api/recipe/{recipe_selector}/download",
-                {
-                    "schema_version": 2,
-                    "request_key": self._canary_request_key(
-                        fixture, node_id, "recipe-download"
-                    ),
-                    "with_model": True,
-                },
-                allowed=(200, 201, 202),
+            download_payload = self._request_recipe_download(
+                recipe_selector,
+                request_key=self._canary_request_key(
+                    fixture, node_id, "recipe-download"
+                ),
             )
             download = self._await_recipe_download(
                 require_object(download_payload, "synthetic canary recipe download"),
@@ -2557,6 +2552,22 @@ class SparkLifecycle:
             return [json.loads(row[0]) for row in rows if len(row) == 1]
         except (AcceptanceError, OSError, ValueError, subprocess.SubprocessError):
             return [{"diagnostic": "preflight evidence unavailable"}]
+
+    def _request_recipe_download(
+        self, selector: str, *, request_key: str
+    ) -> dict[str, object]:
+        from cluster_profiles.generated_control.models.recipe_download_request import (
+            RecipeDownloadRequest,
+        )
+
+        assert self.control is not None
+        _, payload = self.control.request(
+            "POST",
+            f"/api/recipe/{selector}/download",
+            RecipeDownloadRequest(request_key=request_key).to_dict(),
+            allowed=(200, 201, 202),
+        )
+        return require_object(payload, "synthetic canary recipe download")
 
     def _await_recipe_download(
         self,

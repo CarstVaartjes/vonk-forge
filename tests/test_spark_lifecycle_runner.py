@@ -344,13 +344,32 @@ def test_agent_identity_wait_requires_recipe_builder_capability(monkeypatch) -> 
 
 
 def test_synthetic_canary_download_uses_the_current_operator_request_shape() -> None:
-    source = ENTRY_POINT.read_text(encoding="utf-8")
-    start = source.index('f"/api/recipe/{recipe_selector}/download"')
-    end = source.index("download = self._await_recipe_download", start)
-    request = source[start:end]
+    from cluster_profiles.control_client import validate_control_document
 
-    assert '"with_model": True' in request
-    assert '"force":' not in request
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    request_key = "11111111-1111-4111-8111-111111111111"
+    response = {"id": "original-download"}
+
+    class Control:
+        @staticmethod
+        def request(method, path, body, *, allowed):
+            assert (method, path) == (
+                "POST",
+                "/api/recipe/vonk-forge-test/canonical-synthetic-canary/download",
+            )
+            request = validate_control_document("RecipeDownloadRequest", body)
+            assert request["request_key"] == request_key
+            assert 202 in allowed
+            return 202, response
+
+    run.control = Control()
+    assert (
+        run._request_recipe_download(
+            "vonk-forge-test/canonical-synthetic-canary", request_key=request_key
+        )
+        == response
+    )
 
 
 def test_canonical_canary_package_ancestors_are_traversable_with_private_umask(
