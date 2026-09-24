@@ -396,3 +396,31 @@ revision and command recorded.
 This inventory includes the smoke and interactive instruments themselves,
 including the linked-profile journey, Qwen CPU setup, and every U4–U8
 facilitator. The human U1–U8 scorecard is still unperformed.
+
+## Connected gate run record
+
+Copy this table for each acceptance run. For every row, record the source and
+recipe revisions, exact selected nodes and mode, injected fault, exit status,
+executed/pass/fail/skip counts, and sanitized evidence location. Use the map
+above to select the evidence; a test name alone is not a result. Blank rows,
+skips, and unresolved seams cannot be counted as passed. The three scenarios
+without a human card are owned and recorded here by the acceptance facilitator.
+Existing automated results are retained in the
+[correction checkpoint](cli-operator-status.md#acceptance-review-corrections--2026-09-24);
+copy only results whose stated revision and scope match the acceptance claim.
+
+| Scenario | Source / recipes / selected nodes / mode | Injected boundary | Exit and executed / passed / failed / skipped | Sanitized evidence and remaining gap |
+| --- | --- | --- | --- | --- |
+| First connection | | | | |
+| Find and prepare | | | | |
+| Preserve authoring | | | | |
+| Review and load | | | | |
+| Ambiguous submit | | | | |
+| Recipe update batch | | | | |
+| Reconnect | | | | |
+| Recover storage | | | | |
+| Cancel | | | | |
+| Serving result | | | | |
+| Artifact result | | | | |
+| Maintenance | | | | |
+| Automation | | | | |

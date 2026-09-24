@@ -12,6 +12,7 @@ import tempfile
 import time
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
+from urllib.parse import unquote
 from uuid import uuid4
 
 import pytest
@@ -514,7 +515,7 @@ def test_installed_cli_later_page_qwen_candidate_runs_real_cpu_inference(
                 assert payload["recipe_content_sha256"] == candidate_digest
             assert any(
                 method == "POST"
-                and path
+                and unquote(path)
                 == f"/api/recipe/vonk-forge/{_QWEN3_BLOCKED_RECIPE_SELECTOR}/download"
                 for method, path, _document in peer.calls
             )

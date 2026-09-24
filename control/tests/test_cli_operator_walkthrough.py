@@ -44,8 +44,13 @@ from vonk_control.distribution import (
 )
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.fleet_profile_contract import (
+    FleetProfileLoadRequest,
+    FleetProfilePreview,
+)
 from vonk_control.fleet_profiles import (
     FleetProfileService,
+    RunSwitchFleetProfileAdapter,
     build_production_fleet_profile_service,
 )
 from vonk_control.fleet_projection import FleetProjection
@@ -1394,7 +1399,14 @@ def _walkthrough_app(
             cache_resolver=model_cache.resolve_latest_cached,
         )
         if linked_profile
-        else FleetProfileService(sessions, clock=clock)
+        else FleetProfileService(
+            sessions,
+            clock=clock,
+            cache_resolver=model_cache.resolve_latest_cached,
+            assessment_provider=RunSwitchFleetProfileAdapter(
+                sessions, run_switch
+            ).assess,
+        )
     )
 
     def resolve_recipe(
@@ -1586,23 +1598,25 @@ def _smoke(
     help_result = _run_cli(executable, ("--help",), environment, cwd)
     assert help_result.returncode == 0, help_result.stderr
 
-    invalid_values = dict(
-        line.removeprefix("export ").split("=", 1)
-        for line in (participant_materials / "invalid-connection.env")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line
-    )
-    invalid_environment = dict(environment)
-    invalid_environment["VONK_CONTROL_URL"] = invalid_values[
-        "VONK_CONTROL_URL"
-    ].strip("'")
-    invalid_origin = _run_cli(
-        executable,
-        ("--check-connection", "--json"),
-        invalid_environment,
-        cwd,
-    )
+    def check_connection_case(case: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "/bin/sh",
+                "-c",
+                '. "$1"; exec "$2" --check-connection --json',
+                "walkthrough-connection-case",
+                str(participant_materials / case),
+                str(executable),
+            ],
+            cwd=cwd,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+    invalid_origin = check_connection_case("invalid-connection.env")
     assert invalid_origin.returncode == 2
     invalid_error = json.loads(invalid_origin.stdout)
     assert invalid_error["error_type"] == "control_api"
@@ -1614,23 +1628,7 @@ def _smoke(
     assert invalid_error["decision"] == "retry"
     assert invalid_error["retryable"] is True
 
-    expired_values = dict(
-        line.removeprefix("export ").split("=", 1)
-        for line in (participant_materials / "expired-token.env")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line
-    )
-    expired_environment = dict(environment)
-    expired_environment["VONK_CONTROL_TOKEN_FILE"] = expired_values[
-        "VONK_CONTROL_TOKEN_FILE"
-    ].strip("'")
-    expired_auth = _run_cli(
-        executable,
-        ("--check-connection", "--json"),
-        expired_environment,
-        cwd,
-    )
+    expired_auth = check_connection_case("expired-token.env")
     assert expired_auth.returncode == 2
     expired_error = json.loads(expired_auth.stdout)
     assert expired_error["error_type"] == "control_api"
@@ -1639,6 +1637,9 @@ def _smoke(
     assert expired_error["endpoint"] == "/api/fleet"
     assert expired_error["source"] == "remote_rejection"
     assert expired_error["http_status"] == 401
+
+    restored_connection = check_connection_case("valid-connection.env")
+    assert restored_connection.returncode == 0, restored_connection.stderr
 
     fleet = _run_cli(executable, ("fleet", "--json"), environment, cwd)
     assert fleet.returncode == 0, fleet.stderr
@@ -1879,6 +1880,7 @@ def _smoke(
     assert definition.json()["definition"] == exported_definition
     assignment = definition.json()["definition"]["assignments"][0]
     assert assignment["desired_state"] == "installed"
+    assert assignment["assignment_name"] == "walkthrough-install-only"
     assert assignment["recipe_selector"] == f"vonk-forge/{_BLOCKED_RECIPE_SELECTOR}"
     assert assignment["spark_ids"] == [node_id]
 
@@ -1887,18 +1889,24 @@ def _smoke(
     assert "/api/profile/{number}/load" in openapi.json()["paths"]
     profile_preview = api.post("/api/profile/1/preview", headers=api_headers)
     assert profile_preview.status_code == 200, profile_preview.text
+    preview = FleetProfilePreview.model_validate_json(profile_preview.content)
+    assert preview.resolved_assignments[0].alias is None
+    assert any(
+        reason.code == "profile.switch_authority_unavailable"
+        for reason in preview.reasons
+    )
     profile_load = api.post(
         "/api/profile/1/load",
         headers=api_headers,
-        json={
-            "request_key": "11111111-1111-4111-8111-111111111194",
-            "plan_digest": profile_preview.json()["plan_digest"],
-        },
+        json=FleetProfileLoadRequest(
+            request_key="11111111-1111-4111-8111-111111111194",
+            plan_digest=preview.plan_digest,
+        ).model_dump(mode="json"),
     )
     assert profile_load.status_code == 409, profile_load.text
     profile_load_detail = profile_load.json().get("detail")
-    assert isinstance(profile_load_detail, str) and profile_load_detail.startswith(
-        "Fleet profile "
+    assert profile_load_detail == (
+        "Fleet profile preview is blocked; review the current blockers before loading"
     )
 
     # Fleet cleanup and upgrade providers are deliberately absent. The profile
@@ -2005,16 +2013,20 @@ def _run_walkthrough(postgres_engine, mode: str) -> None:
                 expired_token=expired_token,
             )
             runbook_copy = participant_materials / "vonkctl.md"
-            assert runbook_copy.read_bytes() == (
-                Path(__file__).resolve().parents[2]
-                / "docs"
-                / "runbooks"
-                / "vonkctl.md"
-            ).read_bytes()
+            assert (
+                runbook_copy.read_bytes()
+                == (
+                    Path(__file__).resolve().parents[2]
+                    / "docs"
+                    / "runbooks"
+                    / "vonkctl.md"
+                ).read_bytes()
+            )
             assert stat.S_IMODE(runbook_copy.stat().st_mode) == 0o600
-            assert stat.S_IMODE(
-                (participant_materials / "expired-token").stat().st_mode
-            ) == 0o600
+            assert (
+                stat.S_IMODE((participant_materials / "expired-token").stat().st_mode)
+                == 0o600
+            )
             if mode == "smoke":
                 _smoke(
                     executable=executable,
@@ -2034,9 +2046,7 @@ def _run_walkthrough(postgres_engine, mode: str) -> None:
             else:
                 print(f"Disposable Controller: {url}", flush=True)
                 print(f"Installed CLI: {executable}", flush=True)
-                print(
-                    f"Participant runbook copy: {runbook_copy}", flush=True
-                )
+                print(f"Participant runbook copy: {runbook_copy}", flush=True)
                 print(
                     f"Valid connection case: {participant_materials / 'valid-connection.env'}",
                     flush=True,
