@@ -38,19 +38,18 @@ Use these entry points to review or execute the plan:
 
 Execution checkpoint: 2026-09-24. Continue from the integrated evidence in the
 [package status](cli-operator-status.md#package-state), rather than restarting
-implemented packages. Admission locking, memory uncertainty policy, durable
-removal and recovery are implemented and the combined source at `c1a92c29`
-passes full CI. The final acceptance audit identified two remaining concrete
-boundaries: W17 must display and bind the exact removal impact before consent,
-and W12 needs a connected cancellation-versus-removal race. Both increments
-and W19's disposable cleanup facilitator pass local integrated checks and full
-Linux/ARM64 CI at `ab25b1d7`. U2, the connected same-profile authoring/load/
-reconnect/endpoint journey, and the independent human scorecard remain open.
-The existing separate walkthrough cards do not establish the same-profile
-boundary; preserve that requirement in W19's final acceptance. Upstream build
-failure/retry policy is now integrated and qualified by full CI and both ARM64
-acceptance workflows at `023466cf`; the latest checkpoint and evidence links
-are in the status document.
+implemented packages. Admission locking, memory uncertainty, exact removal
+consent, durable removal/cancellation and build recovery are implemented. All
+23 applicable checks pass at source `134bcbf9`, including Linux/PostgreSQL wire
+coverage and both ARM64 acceptance workflows. The connected same-profile
+journey is now implemented and passes locally at `f6985e40`: installed-only
+save/import causes no effects, explicit reviewed running intent retains the
+same Profile, a new CLI process reconnects by application ID, and endpoint
+discovery follows current signed observation and route ownership. The existing
+walkthrough smoke and interactive-clock regression also pass. This is
+Controller-owner evidence, not a running model or independent human result.
+The genuine runnable U2 fixture integration and the human U1–U8 scorecard remain
+open. Exact checks and remaining evidence boundaries are in the status document.
 
 The [shared-build closure checklist](#shared-build-closure-checklist) retains
 historical implementation detail. It does not supersede the current status.

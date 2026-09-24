@@ -9,8 +9,8 @@ All 23 applicable PR checks pass at recovery source
 and [ARM64 signed helper](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36011808590).
 The refreshed [handoff examples](../examples/cli-operator/README.md) retain
 32 actual installed-CLI observations from seven passing scenarios at this
-revision. Publication remains skipped for the PR. The same-profile journey,
-runnable U2 fixture integration and independent human scorecard remain open.
+revision. Publication remains skipped for the PR. The runnable U2 fixture integration and independent human scorecard remain
+open. The same-profile owner journey is qualified locally below.
 
 The native build-failure audit found two connected recovery defects. Source
 fetch and image-upload failures lost their typed causes at the Rust producer;
@@ -53,13 +53,20 @@ and [ARM64 signed helper](https://github.com/CarstVaartjes/vonk-forge/actions/ru
 Publication jobs were skipped for the PR; no accepted release or deployment is
 claimed.
 
-The final W19 audit also found a connected-journey evidence gap: the existing
-authoring, load/reconnect and endpoint scenarios use different profiles and
-fixtures. A new single-profile journey is in progress through the actual
-Profile, application, Run/Switch and publication owners. Its deterministic
-agent receipts qualify owner identity and recovery, not runtime execution.
-A real pinned CPU model/runtime fixture and an independent human walkthrough
-remain required; neither is supplied by synthetic cache-ready assets.
+The connected same-profile gap is closed locally at `f6985e40`. The installed
+CLI authors/imports installed-only intent with no effects, explicitly changes
+the same assignment to running, binds its reviewed load, reconnects from a new
+process to the exact application ID, and retrieves that Profile's published
+endpoint. Actual Profile, Run/Switch, distribution, installation and publication
+owners consume typed local executor receipts. Exact-generation observation
+uses a signed grant through registered agent endpoints; no route is seeded as
+successful. The integrated linked journey, existing U1–U3 smoke and controlled
+interactive-clock regression pass: **3 passed, 2 interactive cases skipped**.
+Interactive mode leaves consent to the operator, follows elapsed time, and
+refreshes simulated inventory through its registered owner route. These are
+disposable Controller-owner checks; the projected endpoint is not a running
+inference service. The genuine runnable U2 fixture integration and independent
+human walkthrough remain required.
 
 The active candidate is `codex/cli-approved-integration` in
 `/private/tmp/vonk-cli-approved-integration`. The latest verified source is
