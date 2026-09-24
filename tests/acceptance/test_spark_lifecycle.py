@@ -2159,6 +2159,7 @@ class SparkLifecycle:
                 or UUID.fullmatch(recipe_id) is None
                 or not isinstance(revision_id, str)
                 or UUID.fullmatch(revision_id) is None
+                or not isinstance(recipe_selector, str)
                 or recipe_selector != f"{fixture.publisher}/{fixture.slug}"
             ):
                 raise LifecycleError("synthetic canary Recipe identity is invalid")
