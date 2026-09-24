@@ -25,8 +25,6 @@ from .control_client import (
     ControlClient,
     ControlClientError,
     ControlNotFound,
-    ControlTransportError,
-    ControlUnavailable,
 )
 from .fleet_qualification import (
     ArtifactJobSmokeAdapter,
@@ -1006,13 +1004,20 @@ def _validate_preparations(
         )
     preparation_entry = _object(raw[0], "profile preparation entry")
     preparation = _object(preparation_entry.get("preparation"), "rollout preparation")
-    if (
-        preparation.get("ready") is not True
-        or preparation.get("controller_ready") is not True
-        or preparation.get("targets_ready") is not True
-        or preparation.get("target_node_ids") != sorted(node_ids)
-    ):
-        raise QualificationError(f"{row.key} exact model/image cache is not ready")
+    if preparation.get("controller_ready") is not True:
+        raise QualificationError(
+            f"{row.key} exact model/image assets are not verified in the Controller cache"
+        )
+    if preparation.get("target_node_ids") != sorted(node_ids):
+        raise QualificationError(
+            f"{row.key} preparation does not cover the exact selected Sparks"
+        )
+    if preparation.get("targets_ready") is not True or preparation.get("ready") is not True:
+        raise QualificationError(
+            f"{row.key} is blocked: this runner requires exact model and runtime-image "
+            "bytes already verified on every selected Spark; prepare the exact assets "
+            "on those Sparks and rerun the preview. No profile load was submitted"
+        )
     model = _object(preparation.get("model"), "model preparation")
     if model.get("recipe_revision_sha256") != row.content_sha256:
         raise QualificationError(f"{row.key} preparation is bound to another revision")
@@ -1113,8 +1118,17 @@ def _check_preview(
     if cleanup:
         if scope.get("idle_node_ids") != expected_scope:
             raise QualificationError("cleanup preview does not leave the complete Fleet idle")
-        if preview.get("summary", {}).get("uninstalls") != 0:
+        summary = _object(preview.get("summary"), "cleanup preview summary")
+        if summary.get("uninstalls") != 0:
             raise QualificationError("cleanup would uninstall assets instead of keeping cache")
+        steps = preview.get("steps")
+        if not isinstance(steps, list):
+            raise QualificationError("cleanup preview steps are invalid")
+        if summary.get("stops") != 0 or steps:
+            raise QualificationError(
+                "cleanup preview contains stop effects but does not identify the exact "
+                "campaign run in its plan steps; refusing an unbound whole-Fleet cleanup"
+            )
         _assert_fleet_exclusive(fleet, owned_run_ids=owned_run_ids)
         if _profile_assignments_equal(profile, []):
             return preview
@@ -1194,23 +1208,30 @@ def _request_key(campaign_id: str, key: str, phase: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"vonk-qualification:{campaign_id}:{key}:{phase}"))
 
 
+def _application_plan_digest(
+    reconciliation_digest: str,
+    request_key: str,
+    *,
+    retry_of_application_id: str | None = None,
+) -> str:
+    """Mirror Controller's execution identity layered over the preview digest."""
+    return _digest(
+        {
+            "schema_version": 2,
+            "reconciliation_digest": reconciliation_digest,
+            "retry_of_application_id": retry_of_application_id,
+            "request_key": request_key,
+        }
+    )
+
+
 def _submit_load(client: Any, number: int, request_key: str) -> dict[str, object]:
-    path = f"/api/profile/{number}/load"
-    try:
-        return client.request("POST", path, {"request_key": request_key})
-    except (ControlTransportError, ControlUnavailable, OSError) as lost:
-        try:
-            observed = client.request(
-                "GET",
-                f"/api/profile/{number}/requests/{urllib.parse.quote(request_key, safe='')}",
-            )
-        except ControlNotFound:
-            return client.request("POST", path, {"request_key": request_key})
-        except (ControlTransportError, ControlUnavailable, OSError):
-            raise lost from None
-        if not isinstance(observed.get("id"), str) or not observed["id"]:
-            raise lost from None
-        return observed
+    del client, number, request_key
+    raise QualificationError(
+        "profile load is disabled: Controller /api/profile/{number}/load does not "
+        "compare a reviewed plan_digest; no unbound load may be submitted until "
+        "the Controller exposes digest-bound apply/CAS"
+    )
 
 
 def _await_application(
@@ -1383,21 +1404,43 @@ def _record_restart_baseline(
     return baseline
 
 
-def _profile_cleanup(
+def _record_cleanup_then_restart_baseline(
     *,
+    receipt: Mapping[str, object],
     client: Any,
-    profile_number: int,
-    authority_id: str,
-    ledger_id: str,
     row: RecipeAuthorityRow,
     campaign_id: str,
     run_id: str,
     alias: str,
     node_ids: Sequence[str],
     ledger: EvidenceLedger,
-    options: CampaignManifest,
-    clock: Callable[[], float],
-    sleeper: Callable[[float], None],
+) -> None:
+    ledger.append(
+        "profile.cleanup.completed",
+        plan_digest=campaign_id,
+        recipe=row.key,
+        payload=dict(receipt),
+    )
+    _record_restart_baseline(
+        client=client,
+        row=row,
+        campaign_id=campaign_id,
+        run_id=run_id,
+        alias=alias,
+        node_ids=node_ids,
+        ledger=ledger,
+    )
+
+
+def _profile_cleanup(
+    *,
+    client: Any,
+    row: RecipeAuthorityRow,
+    campaign_id: str,
+    run_id: str,
+    alias: str,
+    node_ids: Sequence[str],
+    ledger: EvidenceLedger,
 ) -> Mapping[str, object]:
     existing_cleanup = _latest_payload(
         ledger, campaign_id, row.key, "profile.cleanup.completed"
@@ -1413,103 +1456,11 @@ def _profile_cleanup(
             ledger=ledger,
         )
         return existing_cleanup
-    fleet = _typed_fleet(client)
-    _assert_fleet_exclusive(fleet, owned_run_ids={run_id})
-    profile = _profile_view(client, profile_number)
-    _assert_profile_owner(profile, authority_id, ledger_id)
-    assignments = profile.get("assignments")
-    if not isinstance(assignments, list):
-        raise QualificationError("dedicated profile assignment list is invalid")
-    if assignments and not _profile_assignments_equal(
-        profile,
-        [_profile_assignment(row, node_ids, alias)],
-    ):
-        raise QualificationError("dedicated profile contains a non-campaign assignment")
-    if assignments:
-        profile = _save_profile(
-            client,
-            profile,
-            assignments=[],
-            authority_id=authority_id,
-            ledger_id=ledger_id,
-        )
-    raw_preview = client.request("POST", f"/api/profile/{profile_number}/preview")
-    preview = _check_preview(
-        raw_preview,
-        profile=profile,
-        fleet=fleet,
-        row=row,
-        node_ids=node_ids,
-        cleanup=True,
-        owned_run_ids={run_id},
+    raise QualificationError(
+        "profile cleanup is disabled: the current Controller cleanup preview cannot "
+        "bind stop effects to the exact campaign run, and profile load lacks reviewed "
+        "plan-digest CAS; no profile mutation or cleanup load was submitted"
     )
-    summary = _object(preview.get("summary"), "cleanup preview summary")
-    if summary.get("uninstalls") != 0:
-        raise QualificationError("cleanup preview would uninstall cached assets")
-    if _latest_payload(ledger, campaign_id, row.key, "profile.cleanup.submitted") is None:
-        request_key = _request_key(campaign_id, row.key, "cleanup")
-        accepted = _submit_load(client, profile_number, request_key)
-        application_id = accepted.get("id")
-        if not isinstance(application_id, str):
-            raise QualificationError("cleanup load did not return a durable application")
-        ledger.append(
-            "profile.cleanup.submitted",
-            plan_digest=campaign_id,
-            recipe=row.key,
-            payload={
-                "request_key": request_key,
-                "application_id": application_id,
-                "plan_digest": preview.get("plan_digest"),
-                "profile_digest": preview.get("profile_digest"),
-            },
-        )
-    else:
-        submitted = _latest_payload(
-            ledger, campaign_id, row.key, "profile.cleanup.submitted"
-        )
-        assert submitted is not None
-        accepted = {"id": submitted.get("application_id")}
-    application = _await_application(
-        client,
-        accepted,
-        ledger=ledger,
-        campaign_id=campaign_id,
-        key=row.key,
-        timeout=options.operation_timeout_seconds,
-        interval=options.poll_interval_seconds,
-        clock=clock,
-        sleeper=sleeper,
-    )
-    fleet_after = _typed_fleet(client)
-    _assert_no_campaign_run(client, fleet_after, run_id, alias)
-    if _all_loaded_runs(fleet_after):
-        raise QualificationError("cleanup left another run active across the whole Fleet")
-    _record_restart_baseline(
-        client=client,
-        row=row,
-        campaign_id=campaign_id,
-        run_id=run_id,
-        alias=alias,
-        node_ids=node_ids,
-        ledger=ledger,
-    )
-    receipt = {
-        "application_id": application.get("id"),
-        "application_state": application.get("state"),
-        "preview_plan_digest": preview.get("plan_digest"),
-        "profile_digest": preview.get("profile_digest"),
-        "cleanup_policy": "stop",
-        "uninstalls": summary.get("uninstalls"),
-        "route_withdrawn": True,
-        "run_absent_from_fleet": True,
-    }
-    ledger.append(
-        "profile.cleanup.completed",
-        plan_digest=campaign_id,
-        recipe=row.key,
-        payload=receipt,
-    )
-    return receipt
 
 
 def _make_campaign_id(
@@ -1946,8 +1897,16 @@ def _load_and_smoke(
     )
     if application.get("profile_digest") != preview.get("profile_digest"):
         raise QualificationError("accepted profile application changed profile digest")
-    if application.get("plan_digest") != preview.get("plan_digest"):
-        raise QualificationError("accepted profile application changed the reviewed plan digest")
+    request_key = request.get("request_key")
+    preview_digest = preview.get("plan_digest")
+    if not isinstance(request_key, str) or not isinstance(preview_digest, str):
+        raise QualificationError("accepted profile application lacks its execution identity")
+    if application.get("plan_digest") != _application_plan_digest(
+        preview_digest, request_key
+    ):
+        raise QualificationError(
+            "accepted profile application digest differs from the reviewed reconciliation and request"
+        )
     run_id, final = _run_id_from_application(application, row.node_count)
     node_to_rank = {
         str(item.get("node_id")): int(item["rank"])
@@ -2010,118 +1969,35 @@ def _load_and_smoke(
 
 def _resume_load_and_smoke(
     *,
-    client: Any,
-    manifest: CampaignManifest,
-    fixtures: FixtureRegistry,
     row: RecipeAuthorityRow,
     campaign_id: str,
     ledger: EvidenceLedger,
-    profile_number: int,
-    clock: Callable[[], float],
-    sleeper: Callable[[float], None],
 ) -> Mapping[str, object]:
     if _latest_payload(ledger, campaign_id, row.key, "canary.completed") is not None:
         raise QualificationError("successful canary already exists; resume physical checkpoints")
     request = _latest_payload(ledger, campaign_id, row.key, "profile.load.requested")
     if request is None:
         raise QualificationError(f"{row.key} has no durable profile load intent to resume")
-    plan = _latest_payload(ledger, campaign_id, row.key, "plan.generated")
-    if plan is None:
-        raise QualificationError("durable load intent has no reviewed profile preview")
-    profile = _profile_view(client, profile_number)
-    _assert_profile_owner(
-        profile, manifest.authority.authority_id, _ledger_identity(ledger.path)
+    application_observation = _latest_payload(
+        ledger, campaign_id, row.key, "profile.application.observed"
     )
-    if profile.get("profile_digest") != request.get("profile_digest"):
-        raise QualificationError("dedicated profile changed after the durable load intent")
-    preview = _object(plan.get("preview"), "saved profile preview")
-    smoke_preview = _object(plan.get("smoke_preview"), "saved smoke preview")
-    campaign_digest = plan.get("campaign_digest")
-    if request.get("campaign_digest") != campaign_digest:
-        raise QualificationError("durable load intent is not bound to its reviewed plan")
-    if request.get("preview") != dict(preview) or request.get("smoke_preview") != dict(smoke_preview):
-        raise QualificationError("durable load intent changed its saved profile/smoke preview")
-    if campaign_digest != _preview_digest(
-        manifest=manifest,
-        fixtures=fixtures,
-        row=row,
-        profile=profile,
-        preview=preview,
-        node_ids=_string_array(request.get("node_ids"), "load-intent Spark IDs"),
-        failure_node_id=(
-            request.get("failure_node_id")
-            if isinstance(request.get("failure_node_id"), str)
-            else None
-        ),
-        profile_number=profile_number,
-    ):
-        raise QualificationError("saved campaign digest no longer closes over its preview")
-    kind, _definition = _fixture_bindings(row, fixtures)
-    if kind != request.get("smoke_kind"):
-        raise QualificationError("durable load intent changed smoke fixture kind")
-    node_ids = _string_array(request.get("node_ids"), "load-intent Spark IDs")
-    if len(node_ids) != row.node_count or any(
-        _NODE_ID.fullmatch(node_id) is None for node_id in node_ids
-    ):
-        raise QualificationError("durable load intent Spark identities are invalid")
-    alias = _string(request.get("alias"), "load-intent route alias")
-    if _ALIAS.fullmatch(alias) is None:
-        raise QualificationError("durable load intent route alias is invalid")
-    failure_node_id = request.get("failure_node_id")
-    if row.node_count == 2:
-        if failure_node_id not in node_ids:
-            raise QualificationError("durable distributed load intent lacks its failure Spark")
-    elif failure_node_id is not None:
-        raise QualificationError("single-Spark load intent has a failure Spark")
-    capacity_review_required = any(
-        gate.get("kind") == "capacity-review" for gate in row.review_gates
+    observed_state = (
+        application_observation.get("state")
+        if application_observation is not None
+        else None
     )
-    if (
-        request.get("operator_gate_accepted") is not row.operator_acceptance_required
-        or request.get("capacity_review_accepted") is not capacity_review_required
-    ):
-        raise QualificationError("durable load intent lacks the exact recipe review acknowledgements")
-    detail, _definition = _validate_current_recipe(client, row)
-    _run_id, _final, receipt = _load_and_smoke(
-        client=client,
-        row=row,
-        fixtures=fixtures,
-        node_ids=node_ids,
-        alias=alias,
-        kind=kind,
-        detail=detail,
-        smoke_preview=smoke_preview,
-        preview=preview,
-        profile_number=profile_number,
-        campaign_id=campaign_id,
-        ledger=ledger,
-        options=manifest,
-        failure_node_id=failure_node_id if isinstance(failure_node_id, str) else None,
-        operator_gate_accepted=row.operator_acceptance_required,
-        capacity_review_accepted=capacity_review_required,
-        clock=clock,
-        sleeper=sleeper,
-    )
-    if row.node_count == 2 and _latest_payload(
-        ledger, campaign_id, row.key, "rank-loss.pending"
-    ) is None:
-        ranks = receipt.get("node_to_rank")
-        if not isinstance(ranks, Mapping):
-            raise QualificationError("resumed canary lacks exact rank-to-Spark bindings")
-        ledger.append(
-            "rank-loss.pending",
-            plan_digest=campaign_id,
-            recipe=row.key,
-            payload={
-                "failure_spark": failure_node_id,
-                "run_id": receipt.get("run_id"),
-                "revision_id": receipt.get("recipe_revision_id"),
-                "alias": alias,
-                "node_ids": node_ids,
-                "node_to_rank": dict(ranks),
-            },
+    if observed_state in {"failed", "cancelled", "waiting-for-operator"}:
+        raise QualificationError(
+            "the durable profile application is terminal and its request key cannot be "
+            "replayed; reconcile any partial workload, then use a freshly dedicated "
+            "profile number and a new evidence ledger after digest-bound apply is available"
         )
-    return receipt
+    raise QualificationError(
+        "profile-load resume is disabled: the Controller load API does not enforce the "
+        "reviewed plan digest; no request key was replayed. Inspect the durable "
+        "application in Controller, preserve this ledger, and use a fresh dedicated "
+        "profile and ledger only after safe reconciliation and digest-bound apply support"
+    )
 
 
 def _rank_lost(
@@ -2498,6 +2374,11 @@ def _accept_if_complete(
     application = _object(canary.get("application"), "profile application receipt")
     smoke = _object(canary.get("smoke"), "fixture smoke receipt")
     smoke_preview = _object(plan.get("smoke_preview"), "reviewed smoke preview")
+    load_request = _latest_payload(ledger, campaign_id, row.key, "profile.load.requested")
+    request_key = load_request.get("request_key") if load_request is not None else None
+    reconciliation_digest = _object(
+        plan.get("preview"), "reviewed profile preview"
+    ).get("plan_digest")
     expected_alias = (
         smoke_preview.get("endpoint_alias")
         if smoke_preview.get("kind") == "openai-service"
@@ -2510,7 +2391,10 @@ def _accept_if_complete(
         or controller_identity.get("recipe_revision_id") != canary.get("recipe_revision_id")
         or application.get("state") != "succeeded"
         or application.get("profile_digest") != plan.get("profile_digest")
-        or application.get("plan_digest") != _object(plan.get("preview"), "reviewed profile preview").get("plan_digest")
+        or not isinstance(request_key, str)
+        or not isinstance(reconciliation_digest, str)
+        or application.get("plan_digest")
+        != _application_plan_digest(reconciliation_digest, request_key)
         or smoke.get("fixture_manifest_sha256")
         != smoke_preview.get("fixture_manifest_sha256")
         or canary.get("exact_preparations")
@@ -2812,6 +2696,12 @@ def run(
     sleeper: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
     args = _arguments(argv)
+    if args.apply:
+        raise QualificationError(
+            "profile apply is disabled: Controller /api/profile/{number}/load does not "
+            "compare the reviewed plan_digest, so --campaign-digest is not an execution "
+            "precondition; no profile mutation, load, cleanup, or acceptance was attempted"
+        )
     library_root = args.library_root.resolve(strict=True)
     manifest = load_manifest(args.manifest, library_root)
     if manifest.fixture_manifest.stat().st_size > _MAX_FIXTURE_MANIFEST_BYTES:
@@ -3044,18 +2934,12 @@ def run(
         if row.node_count == 1:
             _profile_cleanup(
                 client=client,
-                profile_number=args.profile_number,
-                authority_id=manifest.authority.authority_id,
-                ledger_id=ledger_id,
                 row=row,
                 campaign_id=campaign_id,
                 run_id=run_id,
                 alias=alias,
                 node_ids=node_ids,
                 ledger=ledger,
-                options=manifest,
-                clock=clock,
-                sleeper=sleeper,
             )
             return {
                 "schema_version": 1,
@@ -3182,15 +3066,9 @@ def _observe(
     canary = _latest_payload(ledger, campaign_id, row.key, "canary.completed")
     if canary is None:
         canary = _resume_load_and_smoke(
-            client=client,
-            manifest=manifest,
-            fixtures=fixtures,
             row=row,
             campaign_id=campaign_id,
             ledger=ledger,
-            profile_number=profile_number,
-            clock=clock,
-            sleeper=sleeper,
         )
     node_to_rank = canary.get("node_to_rank")
     node_ids = _ordered_rank_nodes(node_to_rank, row.node_count)
@@ -3307,18 +3185,12 @@ def _observe(
             )
             _profile_cleanup(
                 client=client,
-                profile_number=profile_number,
-                authority_id=manifest.authority.authority_id,
-                ledger_id=_ledger_identity(ledger.path),
                 row=row,
                 campaign_id=campaign_id,
                 run_id=run_id,
                 alias=alias,
                 node_ids=node_ids,
                 ledger=ledger,
-                options=manifest,
-                clock=clock,
-                sleeper=sleeper,
             )
             return {
                 "schema_version": 1,
@@ -3331,18 +3203,12 @@ def _observe(
     if _latest_payload(ledger, campaign_id, row.key, "profile.cleanup.completed") is None:
         _profile_cleanup(
             client=client,
-            profile_number=profile_number,
-            authority_id=manifest.authority.authority_id,
-            ledger_id=_ledger_identity(ledger.path),
             row=row,
             campaign_id=campaign_id,
             run_id=run_id,
             alias=alias,
             node_ids=node_ids,
             ledger=ledger,
-            options=manifest,
-            clock=clock,
-            sleeper=sleeper,
         )
     fleet = _typed_fleet(client)
     observation = _restart_observation(

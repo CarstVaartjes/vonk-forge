@@ -280,6 +280,193 @@ def test_exact_fixture_cases_are_derived_from_the_reviewed_registry() -> None:
     assert campaign_cli._fixture_bindings(row, registry)[1]["cases"][0]["id"] == "health"
 
 
+def test_profile_application_digest_binds_preview_retry_and_request_identity() -> None:
+    expected = "44870ddccd9cc6e6219681871c5113d0113f49666d36770980fcbb7b43a37d20"
+    assert (
+        campaign_cli._application_plan_digest("profile-plan", "qualification-request")
+        == expected
+    )
+    assert (
+        campaign_cli._application_plan_digest(
+            "profile-plan",
+            "qualification-request",
+            retry_of_application_id="parent-application",
+        )
+        != expected
+    )
+
+
+class _NoRequests:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def request(self, method: str, path: str, *args: object, **kwargs: object):
+        self.calls.append((method, path))
+        raise AssertionError("profile load guard must run before a Controller request")
+
+
+def test_apply_fails_before_constructing_controller_client_or_reading_inputs(
+    tmp_path: Path,
+) -> None:
+    def unexpected_client() -> _NoRequests:
+        pytest.fail("apply must fail before creating a Controller client")
+
+    with pytest.raises(
+        QualificationError, match="does not compare the reviewed plan_digest"
+    ):
+        campaign_cli.run(
+            [
+                "--manifest",
+                str(tmp_path / "missing-campaign.json"),
+                "--library-root",
+                str(tmp_path / "missing-library"),
+                "--ledger",
+                str(tmp_path / "evidence.jsonl"),
+                "--profile-number",
+                "7",
+                "--spark",
+                NODE_A,
+                "--apply",
+                "--campaign-digest",
+                "a" * 64,
+            ],
+            client_factory=unexpected_client,
+        )
+
+
+def test_unbound_load_resume_and_cleanup_fail_before_controller_mutation(
+    tmp_path: Path,
+) -> None:
+    client = _NoRequests()
+    with pytest.raises(
+        QualificationError, match="does not compare a reviewed plan_digest"
+    ):
+        campaign_cli._submit_load(client, 7, "request-key")
+
+    ledger = EvidenceLedger(tmp_path / "pending-load.jsonl")
+    ledger.append(
+        "profile.load.requested",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={"request_key": "request-key"},
+    )
+    ledger.append(
+        "profile.application.observed",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={"application_id": "failed-app", "state": "failed"},
+    )
+    with pytest.raises(QualificationError, match="request key cannot be replayed"):
+        campaign_cli._resume_load_and_smoke(
+            row=_row(),
+            campaign_id=CAMPAIGN_ID,
+            ledger=ledger,
+        )
+
+    empty_ledger = EvidenceLedger(tmp_path / "cleanup.jsonl")
+    with pytest.raises(QualificationError, match="cleanup is disabled"):
+        campaign_cli._profile_cleanup(
+            client=client,
+            row=_row(),
+            campaign_id=CAMPAIGN_ID,
+            run_id=RUN_ID,
+            alias="test-alias",
+            node_ids=[NODE_A],
+            ledger=empty_ledger,
+        )
+    assert client.calls == []
+
+
+def test_cleanup_preview_with_unidentified_stop_effect_is_rejected() -> None:
+    from datetime import UTC, datetime
+
+    from cluster_profiles.generated_control.models.fleet_profile_plan_step import (
+        FleetProfilePlanStep,
+    )
+    from cluster_profiles.generated_control.models.fleet_profile_plan_summary import (
+        FleetProfilePlanSummary,
+    )
+    from cluster_profiles.generated_control.models.fleet_profile_scope_preview import (
+        FleetProfileScopePreview,
+    )
+
+    preview = campaign_cli.FleetProfilePreview(
+        allowed=True,
+        assignments=[],
+        generated_at=datetime(2026, 9, 24, tzinfo=UTC),
+        plan_digest="a" * 64,
+        profile_digest="b" * 64,
+        profile_id="12345678-1234-4123-8123-123456789abc",
+        profile_name="Qualification profile",
+        reasons=[],
+        scope=FleetProfileScopePreview(node_ids=[NODE_A], idle_node_ids=[NODE_A]),
+        steps=[
+            FleetProfilePlanStep(
+                index=0,
+                kind="switch",
+                node_ids=[NODE_A],
+                label="Stop workload",
+            )
+        ],
+        summary=FleetProfilePlanSummary(
+            already_correct=0,
+            blockers=0,
+            builds=0,
+            distributions=0,
+            installs=0,
+            placements=0,
+            starts=0,
+            stops=1,
+            uninstalls=0,
+        ),
+    ).to_dict()
+    with pytest.raises(
+        QualificationError, match="does not identify the exact campaign run"
+    ):
+        campaign_cli._check_preview(
+            preview,
+            profile={
+                "id": "12345678-1234-4123-8123-123456789abc",
+                "profile_digest": "b" * 64,
+                "assignments": [],
+            },
+            fleet={"nodes": [_node(NODE_A, loaded=[{"run_id": RUN_ID}])]},
+            row=_row(),
+            node_ids=[NODE_A],
+            cleanup=True,
+            owned_run_ids={RUN_ID},
+        )
+
+
+def test_cleanup_completion_is_written_before_restart_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = EvidenceLedger(tmp_path / "cleanup-order.jsonl")
+
+    def record_baseline(**kwargs: object) -> None:
+        ledger.append(
+            "host-restart.baseline",
+            plan_digest=CAMPAIGN_ID,
+            recipe=RECIPE_KEY,
+            payload={"run_id": kwargs["run_id"]},
+        )
+
+    monkeypatch.setattr(campaign_cli, "_record_restart_baseline", record_baseline)
+    campaign_cli._record_cleanup_then_restart_baseline(
+        receipt={"application_id": "cleanup-app"},
+        client=object(),
+        row=_row(),
+        campaign_id=CAMPAIGN_ID,
+        run_id=RUN_ID,
+        alias="test-alias",
+        node_ids=[NODE_A],
+        ledger=ledger,
+    )
+    assert [
+        record["event"] for record in ledger.recipe_records(CAMPAIGN_ID, RECIPE_KEY)
+    ] == ["profile.cleanup.completed", "host-restart.baseline"]
+
+
 def test_rank_loss_requires_exact_failed_rank_and_withdrawn_route() -> None:
     survivor = {
         "run_id": RUN_ID,
@@ -398,7 +585,11 @@ def test_offline_restart_refuses_an_unrelated_whole_fleet_workload(
 
 
 def _append_single_recipe_evidence(
-    ledger: EvidenceLedger, *, include_offline: bool = True, same_boot: bool = False
+    ledger: EvidenceLedger,
+    *,
+    include_offline: bool = True,
+    same_boot: bool = False,
+    cleanup_before_baseline: bool = True,
 ) -> None:
     ledger.append(
         "plan.generated",
@@ -425,7 +616,7 @@ def _append_single_recipe_evidence(
                 "recipe_revision_id": REVISION_ID,
             },
             "profile_digest": "profile-digest",
-            "preview": {"plan_digest": "profile-plan"},
+            "preview": {"plan_digest": "profile-plan", "exact_preparations": {}},
             "smoke_preview": {
                 "kind": "openai-service",
                 "endpoint_alias": "test-alias",
@@ -433,6 +624,13 @@ def _append_single_recipe_evidence(
                 "cases": [{"id": "health"}],
             },
         },
+    )
+    request_key = campaign_cli._request_key(CAMPAIGN_ID, RECIPE_KEY, "load")
+    ledger.append(
+        "profile.load.requested",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={"request_key": request_key, "plan_digest": "profile-plan"},
     )
     ledger.append(
         "canary.completed",
@@ -447,8 +645,11 @@ def _append_single_recipe_evidence(
             "application": {
                 "state": "succeeded",
                 "profile_digest": "profile-digest",
-                "plan_digest": "profile-plan",
+                "plan_digest": campaign_cli._application_plan_digest(
+                    "profile-plan", request_key
+                ),
             },
+            "exact_preparations": {},
             "smoke": {
                 "fixture_manifest_sha256": "e" * 64,
                 "case_id": "health",
@@ -459,31 +660,44 @@ def _append_single_recipe_evidence(
             },
         },
     )
-    ledger.append(
-        "profile.cleanup.completed",
-        plan_digest=CAMPAIGN_ID,
-        recipe=RECIPE_KEY,
-        payload={
-            "application_id": "cleanup-application",
-            "application_state": "succeeded",
-            "cleanup_policy": "stop",
-            "uninstalls": 0,
-            "route_withdrawn": True,
-            "run_absent_from_fleet": True,
-        },
+    cleanup_payload = {
+        "application_id": "cleanup-application",
+        "application_state": "succeeded",
+        "cleanup_policy": "stop",
+        "uninstalls": 0,
+        "route_withdrawn": True,
+        "run_absent_from_fleet": True,
+    }
+    baseline_payload = {
+        "nodes": {NODE_A: "boot-before"},
+        "route_alias": "test-alias",
+        "run_id": RUN_ID,
+    }
+    ordered_events = (
+        (
+            ("profile.cleanup.completed", cleanup_payload),
+            ("host-restart.baseline", baseline_payload),
+        )
+        if cleanup_before_baseline
+        else (
+            ("host-restart.baseline", baseline_payload),
+            ("profile.cleanup.completed", cleanup_payload),
+        )
     )
-    ledger.append(
-        "host-restart.baseline",
-        plan_digest=CAMPAIGN_ID,
-        recipe=RECIPE_KEY,
-        payload={"nodes": {NODE_A: "boot-before"}, "route_alias": "test-alias", "run_id": RUN_ID},
-    )
+    for event, payload in ordered_events:
+        ledger.append(
+            event, plan_digest=CAMPAIGN_ID, recipe=RECIPE_KEY, payload=payload
+        )
     if include_offline:
         ledger.append(
             "host-restart.offline",
             plan_digest=CAMPAIGN_ID,
             recipe=RECIPE_KEY,
-            payload={"node_id": NODE_A, "online_state": "offline", "baseline_boot_id": "boot-before"},
+            payload={
+                "node_id": NODE_A,
+                "online_state": "offline",
+                "baseline_boot_id": "boot-before",
+            },
         )
     ledger.append(
         "host-restart.recovered",
@@ -512,7 +726,6 @@ def test_spark_accepted_requires_the_offline_event_and_changed_boot_id(
             ledger=ledger,
             node_ids=[NODE_A],
         )
-
     other = EvidenceLedger(tmp_path / "unchanged-boot-evidence.jsonl")
     _append_single_recipe_evidence(other, same_boot=True)
     with pytest.raises(QualificationError, match="changed live boot ID"):
@@ -521,6 +734,24 @@ def test_spark_accepted_requires_the_offline_event_and_changed_boot_id(
             campaign_id=CAMPAIGN_ID,
             ledger=other,
             node_ids=[NODE_A],
+        )
+
+
+def test_spark_acceptance_is_reachable_only_when_cleanup_precedes_restart_baseline(
+    tmp_path: Path,
+) -> None:
+    complete = EvidenceLedger(tmp_path / "ordered-evidence.jsonl")
+    _append_single_recipe_evidence(complete)
+    result = campaign_cli._accept_if_complete(
+        row=_row(), campaign_id=CAMPAIGN_ID, ledger=complete, node_ids=[NODE_A]
+    )
+    assert result["status"] == "spark-accepted"
+
+    reordered = EvidenceLedger(tmp_path / "reordered-evidence.jsonl")
+    _append_single_recipe_evidence(reordered, cleanup_before_baseline=False)
+    with pytest.raises(QualificationError, match="out of sequence"):
+        campaign_cli._accept_if_complete(
+            row=_row(), campaign_id=CAMPAIGN_ID, ledger=reordered, node_ids=[NODE_A]
         )
 
 
