@@ -25,6 +25,7 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
+from vonk_control.run_admission import RunAdmissionBusy
 
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import exercise_upgrade_reconnect
@@ -136,11 +137,11 @@ def test_postgres_resume_transition_has_one_concurrent_winner(
 ) -> None:
     sessions, clock = service
     job = parent(sessions, clock)
-    with sessions.begin() as session:
-        durable = session.get(Job, job.id)
-        assert durable is not None
-        durable.state = "waiting-for-operator"
-        durable.status_reason = "operator approval required"
+    jobs = AgentJobService(sessions, clock=clock)
+    operation = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    original = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert original is not None
+    jobs.wait_for_operator(original.fence, "operator must inspect the stopped effect")
     first = durable_operation_services(
         sessions,
         tmp_path / "routes-a",
@@ -169,6 +170,21 @@ def test_postgres_resume_transition_has_one_concurrent_winner(
     assert outcomes.count("won") == 1
     assert outcomes.count("conflict") == 1
     assert state(sessions, job.id) == "queued"
+    resumed = claim_agent(
+        jobs,
+        NODE_A,
+        "serial-a",
+        30,
+        protocol_version=3,
+        capabilities=(
+            "agent.runtime.rust.v1",
+            "recipe.stop",
+            "agent.lifecycle.resume.exact.v1",
+        ),
+    )
+    assert resumed is not None
+    assert resumed.operation_id == operation.id
+    assert resumed.attempt == original.attempt + 1
 
 
 def test_postgres_claim_locks_only_operations_without_nullable_join(
@@ -741,8 +757,12 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
         finisher.start()
         assert aggregation_read.wait(timeout=5)
         enqueuer.start()
-        time.sleep(0.25)
-        assert enqueuer.is_alive(), "enqueue must wait for the parent row lock"
+        enqueuer.join(timeout=2)
+        assert not enqueuer.is_alive(), (
+            "busy admission must release the caller promptly"
+        )
+        assert len(enqueue_errors) == 1
+        assert isinstance(enqueue_errors[0], RunAdmissionBusy)
         release.set()
         finisher.join(timeout=5)
         enqueuer.join(timeout=5)
@@ -754,9 +774,11 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
 
     assert not finish_errors
     assert len(enqueue_errors) == 1
-    assert isinstance(enqueue_errors[0], ValueError)
-    assert "terminal" in str(enqueue_errors[0])
+    assert isinstance(enqueue_errors[0], RunAdmissionBusy)
     assert state(sessions, parent_job.id) == "succeeded"
+    # A fresh retry rechecks the completed parent instead of adding work to it.
+    with pytest.raises(ValueError, match="terminal"):
+        enqueueing.enqueue(parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
     with sessions() as session:
         child_count = session.scalar(
             select(func.count())
