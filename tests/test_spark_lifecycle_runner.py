@@ -734,6 +734,12 @@ def test_spark_project_identity_is_arm64_only() -> None:
 
 
 def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
+    from uuid import UUID
+
+    from cluster_profiles.generated_control.models.fleet_enroll_request import (
+        FleetEnrollRequest,
+    )
+
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control_hostname = "vonk-forge-acceptance.tailnet.example"
@@ -759,11 +765,11 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
     class Control:
         @staticmethod
         def request(method, path, body):
-            assert (method, path, body) == (
-                "POST",
-                "/api/fleet/enroll",
-                {"name": "Acceptance Spark", "ttl_seconds": 600},
-            )
+            assert (method, path) == ("POST", "/api/fleet/enroll")
+            request = FleetEnrollRequest.from_dict(body)
+            assert UUID(request.request_key).version == 4
+            assert request.name == "Acceptance Spark"
+            assert request.ttl_seconds == 600
             return 201, {"grant": dict(grant)}
 
     run.control = Control()
