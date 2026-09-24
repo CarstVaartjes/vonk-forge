@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,9 +24,15 @@ from vonk_agent_protocol import (
     DistributionAssignment,
     RecipeOperationRequest,
     canonical_message,
+    format_model_identity,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt, _claim_predicate
+from vonk_control.agent_jobs import (
+    AgentJobService,
+    StaleAgentAttempt,
+    _claim_predicate,
+    authorize_operator_resume_in_session,
+)
 from vonk_control.distribution import (
     DistributionError,
     DistributionService,
@@ -72,6 +78,14 @@ STOP_PAYLOAD = {
 }
 STOP_RESULT = {"stopped": True}
 
+#: The capability set a Spark advertises when it can re-acquire one exact fenced
+#: lifecycle attempt after an operator-authorised retry.
+EXACT_LIFECYCLE_CAPABILITIES = [
+    "agent.runtime.rust.v1",
+    "recipe.start",
+    "agent.lifecycle.resume.exact.v1",
+]
+
 
 def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
     """One wire-valid distributed rank-launch document.
@@ -95,9 +109,7 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
             ).read_text(encoding="utf-8")
         )
     )
-    plan["topology"].update(
-        name="dual", mode="distributed", node_count=2, backend="mp"
-    )
+    plan["topology"].update(name="dual", mode="distributed", node_count=2, backend="mp")
     plan["security"]["devices"] = ["nvidia.com/gpu=all"]
     compiled = _bind_compiled_execution_plan(
         plan,
@@ -107,6 +119,8 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
             role="entrypoint",
             port=8000,
             reserved_memory_bytes=4096,
+            memory_floor_bytes=2048,
+            memory_kind="unified",
             fabric_address="192.168.100.10",
         ),
         endpoint_address="192.168.100.10",
@@ -134,6 +148,8 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
         "role": "entrypoint",
         "port": 8000,
         "reserved_memory_bytes": 4096,
+        "memory_floor_bytes": 2048,
+        "memory_kind": plan["runtime"]["placement"]["memory_kind"],
         "endpoint_address": "192.168.100.10",
         "world_size": 2,
         "compiled_execution_plan": compiled,
@@ -145,6 +161,37 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
     }
     RecipeOperationRequest.parse(ProtocolAgentOperation.RECIPE_START, payload)
     return payload
+
+
+def canonical_start_result(payload: Mapping[str, object]) -> dict[str, object]:
+    """One wire-valid rank-launch success receipt for a bound start payload."""
+
+    identity: dict[str, object] = {
+        "phase": "rank-launch",
+        "run_id": payload["run_id"],
+        "recipe_revision_id": payload["recipe_revision_id"],
+        "recipe_content_sha256": payload["recipe_content_sha256"],
+        "image_digest": str(payload["image_digest"]),
+        "artifact_set_digest": "b" * 64,
+        "model_identity": format_model_identity("vonk-forge", "tiny", "d" * 64),
+        "rank": payload["rank"],
+        "role": payload["role"],
+        "world_size": payload["world_size"],
+        "local_address": payload["local_address"],
+        "master_address": payload["master_address"],
+        "master_port": payload["master_port"],
+        "memory_reservation_bytes": payload["reserved_memory_bytes"],
+        "process_running": True,
+        "fabric_projection_bound": True,
+        "launched": True,
+        "run_generation": payload["run_generation"],
+        "runtime_arguments_sha256": "c" * 64,
+    }
+    evidence = {
+        **identity,
+        "evidence_digest": hashlib.sha256(canonical_message(identity)).hexdigest(),
+    }
+    return {"evidence": evidence, "evidence_digest": evidence["evidence_digest"]}
 
 
 def canonical_install_payload() -> dict[str, object]:
@@ -1542,9 +1589,10 @@ def test_a_lapsed_renewal_is_reacquired_inside_the_start_budget(service) -> None
         # SQLite hands back a naive timestamp; the fact under test is that the
         # stored deadline moved past the lease the agent had accepted.
         stored = attempt.lease_deadline
-        assert stored.replace(
-            tzinfo=UTC if stored.tzinfo is None else stored.tzinfo
-        ) > claim.deadline
+        assert (
+            stored.replace(tzinfo=UTC if stored.tzinfo is None else stored.tzinfo)
+            > claim.deadline
+        )
         current = session.get(AgentOperation, operation.id)
         assert current is not None
         assert current.state == "running"
@@ -1587,26 +1635,167 @@ def test_a_lapsed_renewal_without_a_start_budget_is_refused(service) -> None:
         jobs.heartbeat(claim, None, 30)
 
 
-def test_a_late_result_is_still_not_applied_to_a_lapsed_attempt(service) -> None:
-    # The allowance is a renewal door, not a result door: a receipt that arrives
-    # after the lease lapsed is still refused as no longer current, because a
-    # late outcome is a different decision with its own fencing.  The payload
-    # binds a start deadline, so the allowance is open and only the result
-    # boundary can be what refuses.
+def test_a_silent_start_inside_its_launch_budget_is_not_parked_and_completes(
+    service,
+) -> None:
+    # Wrong implementation: the attempt's accepted 30-second lease was the only
+    # clock, so a rank launch that legitimately spends longer than that -- the
+    # plan's own readiness budget is what the recipe declares -- was expired and
+    # parked, and the eventual success arrived after the fence had closed.  The
+    # operation's immutable start budget is the deadline that protects the
+    # launch, so the exact attempt stays current, the successful outcome is
+    # applied, and its owner is released.
     jobs, sessions, clock = service
-    jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        "recipe.start",
-        COMMIT,
-        canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30)),
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+
+    # The agent is blocked inside the launch and sends no heartbeat for four
+    # times the lease the agent accepted, while the declared budget is open.
+    clock.advance(seconds=120)
+
+    # A poll for work by the same node must neither expire nor park it.
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    with sessions() as session:
+        running = session.get(AgentOperation, operation.id)
+    assert running is not None and running.state == "running"
+
+    # The launch finally succeeds and the still-current attempt publishes it.
+    jobs.succeed(claim, canonical_start_result(payload))
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+    assert stored is not None and stored.state == "succeeded"
+    assert attempt is not None and attempt.state == "succeeded"
+    assert job_state(sessions, operation.parent_job_id).state == "succeeded"
+
+
+def test_a_start_that_stops_reporting_past_its_budget_is_parked_with_the_reason(
+    service,
+) -> None:
+    # The launch allowance is bounded by the operation's own budget: a node that
+    # never reports again is still parked once that budget is spent, with the
+    # same typed lease-expiry reason an operator reconciles against today.  A
+    # fix that simply made the park unreachable would strand the effect.
+    jobs, sessions, clock = service
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(seconds=40))
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
     )
     claim = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert claim is not None
 
     clock.advance(seconds=60)
-    with pytest.raises(StaleAgentAttempt):
-        jobs.fail(claim, "outcome arrived for an attempt whose lease had lapsed")
+    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+    assert stored is not None and stored.state == "waiting-for-operator"
+    reason = stored.status_reason
+    assert reason is not None
+    assert "attempt 1 lease expired" in reason
+    assert "the effect is unobserved" in reason
+
+
+def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
+    service,
+) -> None:
+    # The launch budget accepts a slow-but-live result; it never re-blesses an
+    # attempt another executor has replaced.  The positive control first pins
+    # the acceptance the defect lacked, then the same late receipt is refused
+    # once a second attempt owns the operation's fence.
+    jobs, sessions, clock = service
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    accepted = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
+    )
+    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert first is not None
+    clock.advance(seconds=60)
+    jobs.succeed(first, canonical_start_result(payload))
+    with sessions() as session:
+        accepted_row = session.get(AgentOperation, accepted.id)
+    assert accepted_row is not None and accepted_row.state == "succeeded"
+
+    # The same shape of late receipt cannot cross a newer attempt's ownership.
+    superseded = jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_B,
+        "recipe.start",
+        COMMIT,
+        canonical_start_payload(start_deadline=clock.now + timedelta(seconds=40)),
+    )
+    abandoned = claim_agent(
+        jobs,
+        NODE_B,
+        "serial-b",
+        30,
+        capabilities=EXACT_LIFECYCLE_CAPABILITIES,
+    )
+    assert abandoned is not None
+    clock.advance(seconds=60)
+    assert (
+        claim_agent(
+            jobs,
+            NODE_B,
+            "serial-b",
+            30,
+            capabilities=EXACT_LIFECYCLE_CAPABILITIES,
+        )
+        is None
+    )
+    with sessions.begin() as session:
+        authorize_operator_resume_in_session(
+            session, superseded.parent_job_id, clock.now
+        )
+    # The park already scheduled its bounded safe retry, so let it come due
+    # before the next claim; the retry clock and the operator authorisation are
+    # the same decision and must not be moved earlier by a resume.
+    clock.advance(seconds=3)
+    current = claim_agent(
+        jobs,
+        NODE_B,
+        "serial-b",
+        30,
+        capabilities=EXACT_LIFECYCLE_CAPABILITIES,
+    )
+    assert current is not None and current.attempt == 2
+    late = AgentResult.model_validate_json(
+        canonical_message(
+            {
+                "schema_version": 1,
+                "job_id": abandoned.job_id,
+                "operation_id": abandoned.operation_id,
+                "attempt": abandoned.attempt,
+                "fence": abandoned.fence,
+                "node_id": abandoned.node_id,
+                "deadline": abandoned.deadline,
+                "state": "succeeded",
+                "result": canonical_start_result(payload),
+            }
+        )
+    )
+    jobs.record_late_result(late)
+
+    with sessions() as session:
+        stored = session.get(AgentOperation, superseded.id)
+        current_attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == current.fence
+            )
+        )
+    assert stored is not None
+    assert stored.state == "running" and stored.current_attempt == 2
+    assert current_attempt is not None
+    assert current_attempt.state == "running" and current_attempt.result is None
 
 
 @pytest.mark.parametrize(
@@ -2108,7 +2297,7 @@ def test_late_result_is_retained_under_expired_fence_without_completing_operatio
     assert jobs.record_late_result(late) is True
 
 
-def test_transient_distribution_failure_backs_off_across_restart_then_blocks(
+def test_transient_distribution_failure_recovers_after_repeated_faults_and_restart(
     service,
 ) -> None:
     from vonk_agent_protocol import AgentResult
@@ -2123,7 +2312,7 @@ def test_transient_distribution_failure_backs_off_across_restart_then_blocks(
         {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
     )
     capabilities = ["agent.runtime.rust.v1", kind]
-    for attempt_number in range(1, 6):
+    for attempt_number in range(1, 8):
         claim = claim_agent(
             jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
         )
@@ -2178,18 +2367,36 @@ def test_transient_distribution_failure_backs_off_across_restart_then_blocks(
             )
             is None
         )
-        if attempt_number < 5:
-            assert due is not None
-            if attempt_number == 1:
-                assert due.replace(tzinfo=UTC) >= clock.now + timedelta(seconds=120)
-            clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
+        assert due is not None
+        if attempt_number == 1:
+            assert due.replace(tzinfo=UTC) >= clock.now + timedelta(seconds=120)
         else:
-            assert due is None
-            with sessions() as session:
-                assert (
-                    "budget exhausted"
-                    in session.get(AgentOperation, operation.id).status_reason
-                )
+            assert (
+                clock.now < due.replace(tzinfo=UTC) <= clock.now + timedelta(seconds=60)
+            )
+        clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
+
+    recovered = claim_agent(
+        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+    )
+    assert recovered is not None and recovered.operation_id == operation.id
+    jobs.succeed(
+        recovered,
+        {
+            "assignment_id": "33333333-3333-4333-8333-333333333333",
+            "model_artifact_set_sha256": COMMIT,
+            "verified": True,
+            "verified_digests": [COMMIT],
+            "verified_image_digest": "sha256:" + COMMIT,
+            "imported_image_digest": "sha256:" + COMMIT,
+            "verified_oci_layout_sha256": COMMIT,
+            "oci_image_digest": "sha256:" + COMMIT,
+            "downloaded_bytes": 0,
+            "evidence_digest": COMMIT,
+        },
+    )
+    with sessions() as session:
+        assert session.get(AgentOperation, operation.id).state == "succeeded"
 
 
 def test_successful_distribution_receipt_closes_coalesced_final_counters(
@@ -2520,7 +2727,6 @@ def test_live_cancellation_still_blocks_later_work(service) -> None:
         assert waiting is not None and waiting.state == "waiting-for-operator"
 
 
-
 def test_live_prior_mutation_still_blocks_later_work(service) -> None:
     jobs, sessions, clock = service
     old_parent = parent(sessions, clock)
@@ -2822,7 +3028,9 @@ def _scenario_parent_job_missing(sessions, clock, parent_job, operation) -> None
     _set_operation(sessions, operation, parent_job_id=str(uuid.uuid4()))
 
 
-def _scenario_workload_intent_superseded(sessions, clock, parent_job, operation) -> None:
+def _scenario_workload_intent_superseded(
+    sessions, clock, parent_job, operation
+) -> None:
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
@@ -2836,7 +3044,9 @@ def _scenario_parent_cancel_requested(sessions, clock, parent_job, operation) ->
         job.result = {"cancel_requested": True}
 
 
-def _scenario_parent_cancel_flag_malformed(sessions, clock, parent_job, operation) -> None:
+def _scenario_parent_cancel_flag_malformed(
+    sessions, clock, parent_job, operation
+) -> None:
     with sessions.begin() as session:
         job = session.get(Job, parent_job.id)
         assert job is not None
@@ -2851,7 +3061,9 @@ def _scenario_running_attempt_missing(sessions, clock, parent_job, operation) ->
     _set_operation(sessions, operation, state="running", current_attempt=1)
 
 
-def _scenario_running_attempt_not_running(sessions, clock, parent_job, operation) -> None:
+def _scenario_running_attempt_not_running(
+    sessions, clock, parent_job, operation
+) -> None:
     _set_operation(sessions, operation, state="running", current_attempt=1)
     _add_attempt(sessions, operation, clock, state="failed", lease_seconds=60)
 
@@ -2867,7 +3079,9 @@ def _scenario_operator_retry_not_authorized(
     _set_operation(sessions, operation, state="waiting-for-operator", current_attempt=1)
 
 
-def _scenario_upgrade_safety_not_elapsed(sessions, clock, parent_job, operation) -> None:
+def _scenario_upgrade_safety_not_elapsed(
+    sessions, clock, parent_job, operation
+) -> None:
     _set_operation(
         sessions,
         operation,
@@ -2954,3 +3168,135 @@ def test_excluded_work_refusal_names_every_predicate_condition(service, check) -
     _, refusal, _ = excluded
     assert refusal == check
     assert refusal != "unclassified-unclaimable"
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "temporary",
+        "expired",
+        "cancelled",
+        "revoked",
+        "superseded",
+        "invalid-authority",
+        "integrity-failure",
+        "unknown",
+    ],
+)
+def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
+    service, condition
+):
+    """Reconcile valid persisted exhaustion without reviving obsolete authority."""
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    job = parent(sessions, clock)
+    operation = jobs.enqueue(
+        job.id,
+        NODE_A,
+        kind,
+        COMMIT,
+        {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+    )
+    capabilities = ["agent.runtime.rust.v1", kind]
+    for _ in range(5):
+        claim = claim_agent(
+            jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+        )
+        assert claim is not None
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                canonical_message(
+                    {
+                        **{
+                            key: claim.model_dump(mode="json")[key]
+                            for key in (
+                                "schema_version",
+                                "job_id",
+                                "operation_id",
+                                "attempt",
+                                "fence",
+                                "node_id",
+                                "deadline",
+                            )
+                        },
+                        "state": "failed",
+                        "result": {
+                            "status": "failed",
+                            "error_code": "artifact_distribution_failed",
+                            "reason": "NAS transport unavailable",
+                            "failure_kind": "temporary-dependency",
+                        },
+                    }
+                )
+            )
+        )
+        with sessions() as session:
+            row = session.get(AgentOperation, operation.id)
+            assert row is not None and row.retry_due_at is not None
+            clock.now = row.retry_due_at.replace(tzinfo=UTC) + timedelta(seconds=1)
+    with sessions.begin() as session:
+        row = session.get(AgentOperation, operation.id)
+        assert row is not None
+        original_payload = dict(row.payload)
+        # The prior finite policy legitimately persisted this current-schema
+        # state after its fifth interrupted attempt.
+        row.retry_disposition = None
+        row.retry_disposition_attempt = None
+        row.retry_due_at = None
+        parent_row = session.get(Job, job.id)
+        assert parent_row is not None
+        parent_row.state = "waiting-for-operator"
+        last = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == 5,
+            )
+        )
+        assert last is not None
+        if condition == "expired":
+            last.state = "expired"
+            last.result = None
+            last.lease_deadline = clock.now - timedelta(seconds=1)
+        elif condition == "cancelled":
+            parent_row.result = {"cancel_requested": True}
+        elif condition in {"revoked", "superseded"}:
+            node = session.get(AgentNode, NODE_A)
+            assert node is not None
+            if condition == "revoked":
+                node.revoked_at = clock.now
+            else:
+                node.workload_intent_ordinal += 1
+        elif condition in {"invalid-authority", "integrity-failure", "unknown"}:
+            last.result = {
+                "status": "failed",
+                "error_code": "artifact_distribution_failed",
+                "reason": "Blocked",
+                **({"failure_kind": condition} if condition != "unknown" else {}),
+            }
+    jobs = AgentJobService(sessions, clock=clock)
+    assert (
+        claim_agent(
+            jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+        )
+        is None
+    )
+    with sessions() as session:
+        row = session.get(AgentOperation, operation.id)
+        assert row is not None
+        due = row.retry_due_at
+        assert row.current_attempt == 5 and row.payload == original_payload
+        if condition not in {"temporary", "expired"}:
+            assert due is None
+            return
+        assert due is not None
+        assert clock.now < due.replace(tzinfo=UTC) <= clock.now + timedelta(seconds=60)
+    clock.now = due.replace(tzinfo=UTC)
+    jobs = AgentJobService(sessions, clock=clock)
+    resumed = claim_agent(
+        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+    )
+    assert (
+        resumed is not None
+        and resumed.operation_id == operation.id
+        and resumed.attempt == 6
+    )

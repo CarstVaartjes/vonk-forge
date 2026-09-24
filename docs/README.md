@@ -15,6 +15,7 @@ require routine SSH.
 | Understand the engineering stance | [Engineering principles](engineering-principles.md) |
 | Understand state ownership and deadlock prevention | [Coordination boundaries](architecture-overview.md#coordination-and-deadlock-prevention) |
 | Implement resilient artifact storage | [Storage and coordination plan](plans/resilient-artifact-storage.md) |
+| Follow the current fault-resilience review | [Resilience handover and acceptance criteria](operations/resilience-handover.md) |
 | Use the complete terminal interface | [`vonkctl` guide](runbooks/vonkctl.md) |
 | Improve and qualify the terminal interface | [CLI operator experience plan](plans/cli-operator-experience.md) |
 | Implement the terminal interface improvements | [Detailed CLI implementation plan](plans/cli-operator-implementation.md) |
@@ -43,7 +44,8 @@ flowchart LR
 - The target [ownership boundary](architecture-overview.md#state-ownership)
   keeps control intent, permissions, coordination, and audit in PostgreSQL while
   moving physical artifact state and local checkpoints to self-descriptive
-  managed storage. The implementation plan marks that cutover as pending.
+  managed storage. The implementation plan records that cutover as implemented
+  in the repository; deployed recovery and physical acceptance remain separate.
   Derived indexes are disposable; they do not create another authority.
 - Coordination has strict transaction, lock, and resource boundaries: no SQL
   transaction waits for an artifact lock or external work, waiting parents

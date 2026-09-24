@@ -92,6 +92,7 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/compiled_execution_plan.py",
         "control/src/vonk_control/execution_plan_service.py",
         "control/src/vonk_control/install_admission.py",
+        "control/src/vonk_control/disk_reservations.py",
         "control/src/vonk_control/run_admission.py",
         "control/src/vonk_control/run_switch_contract.py",
         "control/src/vonk_control/run_switch_operations.py",

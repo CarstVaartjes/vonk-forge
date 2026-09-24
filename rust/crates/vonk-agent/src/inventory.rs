@@ -171,6 +171,7 @@ fn egress_boundary_available(path: &Path) -> bool {
 pub fn available_memory_bytes<R: ProcessRunner>(
     runner: &R,
     meminfo_path: &Path,
+    memory_kind: &str,
 ) -> Result<u64, InventoryError> {
     let (host_total, host_available) = parse_meminfo(&fs::read_to_string(meminfo_path)?)?;
     let gpu = runner.run(
@@ -184,8 +185,15 @@ pub fn available_memory_bytes<R: ProcessRunner>(
     if !gpu.success {
         return Err(InventoryError::Parse);
     }
-    let (_, _, gpu_available, _, _) = parse_gpus(&gpu.stdout, host_total, host_available)?;
-    Ok(host_available.min(gpu_available))
+    let (_, _, gpu_available, _, memory_pool) =
+        parse_gpus(&gpu.stdout, host_total, host_available)?;
+    match (memory_pool, memory_kind) {
+        (MemoryPool::Shared, "host" | "accelerator" | "unified") => Ok(host_available),
+        (MemoryPool::Separate, "host") => Ok(host_available),
+        (MemoryPool::Separate, "accelerator") => Ok(gpu_available),
+        (MemoryPool::Separate, "unified") => Ok(host_available.min(gpu_available)),
+        _ => Err(InventoryError::Parse),
+    }
 }
 
 pub fn available_disk_bytes(path: &Path) -> Result<u64, InventoryError> {

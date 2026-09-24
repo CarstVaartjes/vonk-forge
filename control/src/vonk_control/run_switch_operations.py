@@ -13,25 +13,35 @@ import errno
 import hashlib
 import json
 import logging
+import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol, TypeGuard, runtime_checkable
+from typing import Any, Literal, Protocol, TypeGuard, runtime_checkable
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     DistributionAssignment,
     OperationProgress,
     canonical_message,
 )
-from vonk_agent_protocol.inventory import MemoryPool
 
 from .agent_jobs import AgentJobService
+from .artifact_lifecycle import (
+    ArtifactIdentity,
+    ArtifactLifecycleError,
+    require_reference_open,
+)
+from .artifact_reference_scan import (
+    _run_switch_runtime_image_intent,
+    require_model_sets_open,
+)
 from .bounded_json import require_integer, require_sequence
 from .cluster_mappings import (
     ClusterMappingError,
@@ -40,7 +50,9 @@ from .cluster_mappings import (
     candidate_placements,
     validate_mapping_parameters,
 )
+from .disk_reservations import outstanding_disk_reservation_bytes
 from .install_admission import InstallAdmissionBusy
+from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .logging import log_event
 from .memory_reservations import (
@@ -66,7 +78,11 @@ from .models import (
     RunNode,
     RuntimeImageAuthorization,
 )
-from .operation_api import OperationListPage, OperationQuery
+from .operation_api import (
+    OperationListPage,
+    OperationQuery,
+    _activity_keyset_filter,
+)
 from .operation_progress import observe_progress, project_progress
 from .preparation_contract import (
     ControllerAssetState,
@@ -111,11 +127,11 @@ from .recipe_runtime_specs import (
 from .recovery_policy import (
     FailureKind,
     RecoveryDecision,
+    RecoveryPolicy,
     classify,
     kind_for_agent_error,
 )
 from .resource_planning import (
-    PlannedStopRelease,
     ResourceDemand,
     installation_disk_requirement,
     memory_capacity_snapshot,
@@ -135,6 +151,7 @@ from .run_switch_contract import (
     BuildCompatibilityEvidence,
     BuildSourceEvidence,
     CapabilityEvidence,
+    ConditionalPostStopMemoryCheck,
     EffectiveParallelism,
     EffectiveSettingsSelection,
     FreshnessEvidence,
@@ -170,6 +187,7 @@ from .run_switch_contract import (
     RunSwitchReasonScope,
     RunSwitchReasonSeverity,
     RunSwitchRetention,
+    RunSwitchRuntimeImageReferenceIntent,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
     RunSwitchSubphase,
@@ -187,6 +205,17 @@ from .runtime_image_preparation import (
 from .runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
+
+
+class PublishedImageReceiptLookup(Protocol):
+    def __call__(
+        self,
+        registry_manifest_digest: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> RuntimeImageReceiptDocument | None: ...
+
 
 # Persisted progress and catalog documents arrive as decoded JSON, so the
 # contract's closed value sets are read back through the declared alias instead
@@ -227,6 +256,12 @@ class RunSwitchIssuedWorkloadPending(RunSwitchOperationConflict):
         self.job_id = job_id
         self.observe_due_at = observe_due_at
         self.observation_deadline = observation_deadline
+
+
+class RunSwitchPostStopEvidencePending(RunSwitchOperationConflict):
+    """A released claim is not evidence that its physical bytes are free."""
+
+    code = "run-switch.post-stop-inventory-pending"
 
 
 class RunSwitchInstallPreflightExpired(RunSwitchOperationConflict):
@@ -392,6 +427,7 @@ class _ResourceFits:
     current_blockers: list[RunSwitchReason]
     blockers: list[RunSwitchReason]
     warnings: list[RunSwitchReason]
+    post_stop_memory_check: ConditionalPostStopMemoryCheck | None
 
     def requires_early_stop(self, *reason_prefixes: str) -> bool:
         return (
@@ -406,8 +442,11 @@ class _ResourceFits:
 
     @property
     def stop_before_prepare(self) -> bool:
-        return self.requires_early_stop(
-            "run-switch.insufficient-memory", "run-switch.resource.insufficient"
+        return (
+            self.requires_early_stop(
+                "run-switch.insufficient-memory", "run-switch.resource.insufficient"
+            )
+            or self.post_stop_memory_check is not None
         )
 
     @property
@@ -422,9 +461,16 @@ _OPERATION_KINDS = frozenset(
     {"recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"}
 )
 _MAX_RETRY_ATTEMPTS = 3
+_MEMORY_CAPACITY_REFUSALS = frozenset(
+    {
+        "run-switch.resource.insufficient_capacity",
+        "run-switch.resource.insufficient_capacity_after_stop",
+    }
+)
 _INSTALL_PREFLIGHT_REFRESH_REASON = (
     "runtime preflight expired during install compilation"
 )
+_RUNTIME_IMAGE_OWNER_CHANGED = "run-switch.runtime-image-owner-changed"
 _LOGGER = logging.getLogger("vonk-control-run-switch")
 _PHASES: tuple[RunSwitchPhaseKind, ...] = (
     "transfer",
@@ -526,6 +572,68 @@ def _resource_reason(
     )
 
 
+def _conditional_post_stop_memory_check(
+    session: Session,
+    stops: Sequence[StopImpact],
+    fit: SparkFit,
+    blockers: Sequence[RunSwitchReason],
+    insufficient_components: Mapping[str, frozenset[str]],
+) -> ConditionalPostStopMemoryCheck | None:
+    """Permit only a known-capacity memory shortfall covered by exact stop claims."""
+
+    if (
+        not stops
+        or not blockers
+        or any(reason.code not in _MEMORY_CAPACITY_REFUSALS for reason in blockers)
+    ):
+        return None
+    blocked_nodes = {node_id for reason in blockers for node_id in reason.node_ids}
+    nodes = {node.node_id: node for node in fit.nodes}
+    if not blocked_nodes or not blocked_nodes <= nodes.keys():
+        return None
+    for node in fit.nodes:
+        if (
+            node.memory_required_bytes is None
+            or node.memory_kind is None
+            or node.memory_pool is None
+            or node.memory_floor_bytes is None
+            or node.memory_capacity_bytes is None
+            or node.memory_available_bytes is None
+            or node.resource_demand is None
+            or node.memory_capacity_bytes
+            < node.memory_required_bytes + node.memory_floor_bytes
+        ):
+            return None
+    for node_id in blocked_nodes:
+        node = nodes[node_id]
+        components = insufficient_components.get(node_id, frozenset())
+        if not components or node.memory_pool is None:
+            return None
+        for component in components:
+            reservation_kind = {
+                "host": "host-memory",
+                "accelerator": "gpu-memory",
+                "shared": "unified-memory",
+            }.get(component)
+            if reservation_kind is None:
+                return None
+            claim_kinds = memory_reservation_kinds(reservation_kind, node.memory_pool)
+            if not any(
+                node_id in stop.node_ids
+                and any(
+                    claim.kind in claim_kinds
+                    for claim in reviewed_run_memory_reservations(
+                        session, node_id, stop
+                    )
+                )
+                for stop in stops
+            ):
+                return None
+    return ConditionalPostStopMemoryCheck(
+        stop_run_ids=sorted(stop.run_id for stop in stops)
+    )
+
+
 def _settings_view(settings: object) -> EffectiveSettingsSelection:
     resolution = resolve_effective_settings(settings)
     if resolution.settings is None:
@@ -557,46 +665,6 @@ def _resource_evidence_digest(revision_digest: str | None) -> str | None:
         if isinstance(revision_digest, str) and len(revision_digest) == 64
         else None
     )
-
-
-def _planned_stop_releases(
-    session: Session,
-    node_id: str,
-    reservation_kind: str | None,
-    stops: Sequence[StopImpact],
-    *,
-    memory_pool: MemoryPool | None,
-) -> tuple[PlannedStopRelease, ...]:
-    if reservation_kind is None or memory_pool is None:
-        return ()
-    releases: list[PlannedStopRelease] = []
-    for stop, kind in (
-        (stop, kind)
-        for stop in stops
-        for kind in (
-            ("host-memory", "gpu-memory")
-            if memory_pool == "separate" and reservation_kind == "unified-memory"
-            else (reservation_kind,)
-        )
-    ):
-        if node_id not in stop.node_ids:
-            continue
-        amount = sum(
-            claim.amount_bytes
-            for claim in reviewed_run_memory_reservations(session, node_id, stop)
-            if claim.kind in memory_reservation_kinds(kind, memory_pool)
-        )
-        releases.append(
-            PlannedStopRelease(
-                stop.run_id,
-                node_id,
-                kind,
-                int(amount or 0),
-                True,
-                stop.plan_digest,
-            )
-        )
-    return tuple(releases)
 
 
 def _capability_evidence_state(
@@ -1008,12 +1076,14 @@ class RecipeLifecyclePhaseExecutor:
         mappings: ClusterMappingService,
         clock: Any,
         artifact_executor: RunSwitchArtifactPhaseExecutor | None = None,
+        inventory_max_age_seconds: int = 300,
     ) -> None:
         self._lifecycle = lifecycle
         self._sessions = sessions
         self._mappings = mappings
         self._clock = clock
         self._artifact_executor = artifact_executor
+        self._inventory_max_age = inventory_max_age_seconds
         self._preflight = None
 
     def preflight(self, plan, phase, *, actor, request_key, progress):
@@ -1053,10 +1123,73 @@ class RecipeLifecyclePhaseExecutor:
             phase_index=phase.index,
             request_key=request_key,
             actor=actor,
-            previous=LifecyclePreflightCheckpoint.model_validate(previous)
+            previous=LifecyclePreflightCheckpoint.model_validate_json(
+                canonical_message(previous)
+            )
             if previous
             else None,
         )
+
+    def _require_post_stop_inventory(self, plan: RunSwitchPlan) -> None:
+        if not plan.stops:
+            return
+        now = _now(self._clock)
+        expected_pools = {
+            node.node_id: node.memory_pool for node in plan.fit_current.nodes
+        }
+        inventory = InventoryRepository(self._sessions, clock=lambda: now)
+        with self._sessions() as session:
+            for stop in plan.stops:
+                run = session.get(RecipeRun, stop.run_id)
+                if run is None or run.plan_digest != stop.run_plan_digest:
+                    raise RunSwitchOperationConflict(
+                        "run-switch.stopped-run-identity-changed"
+                    )
+                members = set(
+                    session.scalars(
+                        select(RunNode.node_id).where(RunNode.run_id == run.id)
+                    )
+                )
+                if members != set(stop.node_ids):
+                    raise RunSwitchOperationConflict(
+                        "run-switch.stopped-run-membership-changed"
+                    )
+                if run.state != "stopped" or run.stopped_at is None:
+                    raise RunSwitchPostStopEvidencePending(
+                        f"Stop receipt for {stop.run_id} is not complete"
+                    )
+                stopped_at = _aware(run.stopped_at)
+                for node_id in sorted(members & expected_pools.keys()):
+                    try:
+                        snapshot = inventory.latest(
+                            node_id,
+                            now=now,
+                            maximum_age=self._inventory_max_age,
+                            _session=session,
+                        )
+                    except KeyError:
+                        raise RunSwitchPostStopEvidencePending(
+                            f"Spark {node_id} has no post-stop inventory"
+                        ) from None
+                    if snapshot.memory_pool != expected_pools.get(node_id):
+                        raise RunSwitchOperationConflict(
+                            "run-switch.post-stop-memory-pool-changed"
+                        )
+                    # A sample received after the receipt can still have been
+                    # collected before the stop. Preserve the producer clock's
+                    # full admitted lead instead of treating receipt time as
+                    # collection time or a released promise as physical memory.
+                    if (
+                        snapshot.stale
+                        or _aware(snapshot.received_at) < stopped_at
+                        or snapshot.observed_at
+                        <= stopped_at + MAX_INVENTORY_FUTURE_SKEW
+                    ):
+                        raise RunSwitchPostStopEvidencePending(
+                            f"Spark {node_id} needs inventory collected after stop {stop.run_id} "
+                            f"({(stopped_at + MAX_INVENTORY_FUTURE_SKEW).isoformat()}; "
+                            f"latest {snapshot.observed_at.isoformat()})"
+                        )
 
     def _execute_container_build(
         self,
@@ -1135,6 +1268,7 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     "run-switch.container-build-plan-invalid"
                 ) from error
+        self._require_post_stop_inventory(plan)
         start_build = getattr(self._lifecycle, "build", None)
         if not callable(start_build):
             raise RunSwitchOperationConflict(
@@ -1556,6 +1690,7 @@ class RecipeLifecyclePhaseExecutor:
             )
             if adopted is not None:
                 return PhaseExecution(adopted.id, {"run_id": adopted.owner_id})
+            self._require_post_stop_inventory(plan)
             self._lifecycle.reconcile_superseded_unissued(
                 "recipe.uninstall", installation_id, ordinal
             )
@@ -1583,6 +1718,29 @@ class RecipeLifecyclePhaseExecutor:
             if installation_id is None:
                 raise RunSwitchOperationConflict(
                     "run-switch.uninstall_target_unavailable"
+                )
+            if plan.cleanup_disposition == "abandon":
+                # The installation's own assessment proved the plan never
+                # reached a node, so no agent order is queued.  The lifecycle
+                # re-checks that disposition under the row lock and records the
+                # disposal on the cleanup operation's receipt.
+                try:
+                    abandoned = self._lifecycle.abandon_never_installed(installation_id)
+                except (
+                    KeyError,
+                    RecipeOperationConflict,
+                    RuntimeError,
+                    TypeError,
+                    ValueError,
+                ) as error:
+                    raise RunSwitchOperationConflict(
+                        f"run-switch.uninstall-abandon-failed: {error}"
+                    ) from error
+                return PhaseExecution(
+                    result={
+                        **abandoned,
+                        "reason": "installation-not-installed",
+                    }
                 )
             uninstall_request_id = str(uuid.uuid5(uuid.UUID(request_key), "uninstall"))
             # Reconnect to the removal this operation already queued before
@@ -1893,6 +2051,7 @@ class RunSwitchOperationService:
         model_capability_summary: Any | None = None,
         model_cache: ModelCacheService | None = None,
         build_archive_available: Callable[[str, int], bool] | None = None,
+        published_image_receipt: PublishedImageReceiptLookup | None = None,
         inventory_max_age_seconds: int = 300,
         memory_floor_bytes: int = 0,
     ) -> None:
@@ -1908,6 +2067,7 @@ class RunSwitchOperationService:
         self._artifact_phase_executor = artifact_phase_executor
         self._model_capability_summary = model_capability_summary
         self._build_archive_available = build_archive_available
+        self._published_image_receipt = published_image_receipt
         self._custom_phase_executor = phase_executor is not None
         self._phase_executor = phase_executor or (
             RecipeLifecyclePhaseExecutor(
@@ -1916,6 +2076,7 @@ class RunSwitchOperationService:
                 self._mappings,
                 clock,
                 artifact_executor=artifact_phase_executor,
+                inventory_max_age_seconds=inventory_max_age_seconds,
             )
             if lifecycle is not None
             else None
@@ -1954,6 +2115,7 @@ class RunSwitchOperationService:
         *,
         actor: str,
         defer_source_build: bool = False,
+        expected_runtime_image: RuntimeImageIdentity | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
     ) -> RunSwitchPlan:
         """Read admission without authoring preparation work.
@@ -1967,6 +2129,7 @@ class RunSwitchOperationService:
             actor=actor,
             create_build=False,
             defer_source_build=defer_source_build,
+            reviewed_runtime_image=expected_runtime_image,
             excluded_profile_application_ids=excluded_profile_application_ids,
         )
 
@@ -2064,7 +2227,13 @@ class RunSwitchOperationService:
                 model_digest,
                 requested_recipe_digest=recipe_digest,
             )
-            freshness, fit_current, _fit_blockers, fit_warnings = self._fit(
+            (
+                freshness,
+                fit_current,
+                _fit_blockers,
+                fit_warnings,
+                _memory_shortfalls,
+            ) = self._fit(
                 session,
                 revision,
                 group,
@@ -2097,6 +2266,7 @@ class RunSwitchOperationService:
                     build_candidate,
                     group,
                     require_available=False,
+                    published_receipt_lookup=self._published_image_receipt,
                 )
             )
             stop_digest = self._stop_digest(run.id)
@@ -2270,7 +2440,13 @@ class RunSwitchOperationService:
                 model_digest,
                 requested_recipe_digest=recipe_digest,
             )
-            freshness, fit_current, _fit_blockers, fit_warnings = self._fit(
+            (
+                freshness,
+                fit_current,
+                _fit_blockers,
+                fit_warnings,
+                _memory_shortfalls,
+            ) = self._fit(
                 session,
                 revision,
                 group,
@@ -2311,11 +2487,13 @@ class RunSwitchOperationService:
                     build_candidate,
                     group,
                     require_available=False,
+                    published_receipt_lookup=self._published_image_receipt,
                 )
             )
             node_ids = [node.node_id for node in group.nodes]
             blockers: list[RunSwitchReason] = []
             warnings = [*document_warnings, *fit_warnings, *inspection.warnings]
+            cleanup_disposition: Literal["uninstall", "abandon"] = "uninstall"
             if self._lifecycle is None:
                 blockers.append(
                     _as_reason(
@@ -2375,6 +2553,21 @@ class RunSwitchOperationService:
                             warnings.append(reason)
                         else:
                             blockers.append(reason)
+                else:
+                    # The installation's own assessment decides whether this is
+                    # a removal or an abandonment; the phase executor reads the
+                    # same disposition rather than re-deriving it.
+                    cleanup_disposition = assessment.disposition
+                    for warning in assessment.warnings:
+                        warnings.append(
+                            _as_reason(
+                                f"run-switch.{warning.code}",
+                                warning.detail,
+                                scope="operation",
+                                node_ids=node_ids,
+                                severity="warning",
+                            )
+                        )
             phases = self._phases(
                 action="cleanup",
                 group=group,
@@ -2387,6 +2580,7 @@ class RunSwitchOperationService:
                 blockers=blockers,
                 stop_before_transfer=False,
                 stop_before_prepare=False,
+                cleanup_disposition=cleanup_disposition,
             )
             storage = self._storage(inspection, retention="retain-cached")
             preparation = self._preparation(
@@ -2412,6 +2606,7 @@ class RunSwitchOperationService:
                 "mapping": self._mapping_selection(mapping, mapping_nodes),
                 "installation_id": installation.id,
                 "installation_state": installation.state,
+                "cleanup_disposition": cleanup_disposition,
                 "recipe_build_id": installation.recipe_build_id,
                 "image_digest": installation.image_digest,
                 "start_plan_digest": None,
@@ -2704,10 +2899,42 @@ class RunSwitchOperationService:
                 raise RunSwitchOperationConflict(
                     "run-switch.superseded: retry belongs to an obsolete workload intent"
                 )
+            retry_plan = _load_plan(previous.payload["plan"])
+            prior_image_intent = current_progress.runtime_image_reference_intent
+            if prior_image_intent is not None:
+                try:
+                    validated_intent = _run_switch_runtime_image_intent(
+                        previous, retry_plan
+                    )
+                except ArtifactLifecycleError as error:
+                    raise RunSwitchOperationConflict(
+                        "run-switch retry runtime image reference is invalid"
+                    ) from error
+                if validated_intent != prior_image_intent:
+                    raise RunSwitchOperationConflict(
+                        "run-switch retry runtime image reference is invalid"
+                    )
+            now = _now(self._clock)
+            _reserve_run_switch_assets(session, retry_plan, now=now)
+            if prior_image_intent is not None:
+                try:
+                    require_reference_open(
+                        session,
+                        (
+                            ArtifactIdentity(
+                                "runtime-image", prior_image_intent.archive_sha256
+                            ),
+                        ),
+                        now=now,
+                    )
+                except ArtifactLifecycleError as error:
+                    raise RunSwitchOperationConflict(
+                        f"{error.code}: {error.detail}"
+                    ) from error
             try:
                 lock_run_switch_build_dependency(
                     session,
-                    _load_plan(previous.payload["plan"]),
+                    retry_plan,
                     phase_index=current_progress.phase_index,
                 )
             except BuildConsumerError as error:
@@ -2716,8 +2943,23 @@ class RunSwitchOperationService:
             for node in nodes:
                 node.workload_intent_ordinal = ordinal
             self.request_superseded_workload_cancellation_in_session(
-                session, tuple(previous.targets), ordinal, _now(self._clock)
+                session, tuple(previous.targets), ordinal, now
             )
+            retry_job_id = str(uuid.uuid4())
+            if prior_image_intent is not None:
+                rebound_intent = RunSwitchRuntimeImageReferenceIntent.model_validate(
+                    {
+                        **prior_image_intent.model_dump(mode="json"),
+                        "operation_id": retry_job_id,
+                        "request_key": request_key,
+                        "actor": actor,
+                        "workload_intent_ordinal": ordinal,
+                    },
+                    strict=True,
+                )
+                progress["runtime_image_reference_intent"] = rebound_intent.model_dump(
+                    mode="json"
+                )
             payload = dict(previous.payload)
             payload["workload_intent_ordinal"] = ordinal
             payload["progress"] = progress
@@ -2730,9 +2972,8 @@ class RunSwitchOperationService:
             progress["retryable"] = False
             progress.pop("failure_code", None)
             progress["workload_intent_ordinal"] = ordinal
-            now = _now(self._clock)
             job = Job(
-                id=str(uuid.uuid4()),
+                id=retry_job_id,
                 request_id=request_key,
                 kind=previous.kind,
                 state="queued",
@@ -2784,7 +3025,7 @@ class RunSwitchOperationService:
                 select(Job.id)
                 .where(
                     Job.kind.in_(_OPERATION_KINDS),
-                    Job.state.in_(("queued", "running")),
+                    Job.state.in_(("queued", "running", "waiting-for-operator")),
                     or_(due_at.is_(None), due_at <= _now(self._clock).isoformat()),
                 )
                 .order_by(Job.id)
@@ -2830,6 +3071,7 @@ class RunSwitchOperationService:
         *,
         actor: str,
         create_build: bool = True,
+        reviewed_runtime_image: RuntimeImageIdentity | None = None,
         defer_source_build: bool = False,
         excluded_profile_application_ids: tuple[str, ...] = (),
         profile_application_id: str | None = None,
@@ -2846,7 +3088,7 @@ class RunSwitchOperationService:
                     session, profile_application_id, revision.id, node_ids
                 )
                 if profile_application_id is not None
-                else None
+                else reviewed_runtime_image
             )
             blockers: list[RunSwitchReason] = []
             warnings: list[RunSwitchReason] = []
@@ -2951,8 +3193,14 @@ class RunSwitchOperationService:
                 mapping,
                 group,
             )
-            build = self._matching_build(session, revision.id, installation)
-            build_candidate = build or self._latest_build(session, revision.id)
+            build = self._matching_build(
+                session, revision.id, expected_image=expected_image
+            )
+            build_candidate = build or (
+                session.get(RecipeBuild, expected_image.build_id)
+                if expected_image is not None and expected_image.build_id is not None
+                else self._latest_build(session, revision.id)
+            )
             build_selection = self._select_build(
                 session,
                 revision,
@@ -3016,6 +3264,8 @@ class RunSwitchOperationService:
                     build_candidate,
                     group,
                     defer_source_build=defer_source_build,
+                    expected_image=expected_image,
+                    published_receipt_lookup=self._published_image_receipt,
                 )
             )
             blockers.extend(build_blockers)
@@ -3052,7 +3302,10 @@ class RunSwitchOperationService:
                 if build is not None
                 else build_candidate.id
                 if build_candidate is not None
-                and build_candidate.state in {"planned", "building"}
+                and (
+                    build_candidate.state in {"planned", "building"}
+                    or expected_image is not None
+                )
                 else None
             )
             image_digest = (
@@ -3062,7 +3315,7 @@ class RunSwitchOperationService:
                 if expected_image is not None
                 else runtime_storage.image_digest
             )
-            if expected_image is not None:
+            if expected_image is not None and profile_application_id is not None:
                 if recipe_build_id != expected_image.build_id:
                     raise RunSwitchOperationConflict(
                         "profile.runtime-image-changed: selected build differs from the accepted image; review and load the profile again"
@@ -3094,11 +3347,18 @@ class RunSwitchOperationService:
                 and installation.state == "installed"
                 and self._lifecycle is not None
             ):
+                # The runs this plan stops release their reservations in the
+                # Stop phase, so admission must not count that capacity against
+                # the replacement's own preview.  Counting it refused the plan
+                # for the workload it was replacing, and since the only release
+                # path is a successful stop, nothing could break the tie.
+                planned_stop_ids = frozenset(stop.run_id for stop in stops)
                 try:
                     low_level_plan = self._lifecycle.preview_run(
                         installation.id,
                         request.alias,
                         excluded_profile_application_ids=excluded_profile_application_ids,
+                        released_run_ids=planned_stop_ids,
                     )
                 except (
                     KeyError,
@@ -3123,6 +3383,14 @@ class RunSwitchOperationService:
                             if reason.code in PORT_ADMISSION_CODES:
                                 # The shared fit checks these for fresh and existing
                                 # installs and excludes only exact reviewed stops.
+                                continue
+                            if (
+                                reason.code == "run.insufficient_memory"
+                                and resource_fits.post_stop_memory_check is not None
+                            ):
+                                # The reviewed exact stops require a fresh
+                                # post-stop fit; this pre-stop result cannot
+                                # establish the later physical capacity.
                                 continue
                             remaining_admission_blockers = True
                             blockers.append(
@@ -3279,6 +3547,7 @@ class RunSwitchOperationService:
                 "freshness": freshness,
                 "fit_current": fit_current,
                 "fit_after_stop": fit_after_stop,
+                "post_stop_memory_check": resource_fits.post_stop_memory_check,
                 "fit": fit_current,
                 "effective_settings": effective_settings_view,
                 "storage": storage,
@@ -3566,44 +3835,46 @@ class RunSwitchOperationService:
         self,
         session: Session,
         revision_id: str,
-        installation: RecipeInstallation | None,
+        *,
+        expected_image: RuntimeImageIdentity | None,
     ) -> RecipeBuild | None:
-        available = self._build_is_available
-
         revision = session.get(CatalogDocumentRevision, revision_id)
         if revision is not None and not _is_source_build(revision.document):
             return None
-        if installation is not None:
+        if expected_image is not None:
+            # Accepted work remains bound to its approved receipt even when a
+            # newer completed build becomes available while it is waiting.
             build = (
-                session.get(RecipeBuild, installation.recipe_build_id)
-                if installation.recipe_build_id is not None
+                session.get(RecipeBuild, expected_image.build_id)
+                if expected_image.build_id is not None
                 else None
             )
-            if (
-                build is not None
-                and build.recipe_revision_id == revision_id
-                and available(build)
-            ):
-                return build
-        # A notes-only source-build revision may have a succeeded build whose
-        # original receipt belongs to an older revision.  Only reuse it when
-        # the current revision has an explicit authorization binding; this
-        # keeps execution/image changes from selecting a coincident build.
-        authorized_build_id = session.scalar(
-            select(RuntimeImageAuthorization.build_id)
-            .where(
-                RuntimeImageAuthorization.recipe_revision_id == revision_id,
-                RuntimeImageAuthorization.source == "controller-build",
-                RuntimeImageAuthorization.state == "authorized",
-                RuntimeImageAuthorization.build_id.is_not(None),
+            if build is None or not self._build_is_available(build):
+                return None
+            authorized = (
+                build.recipe_revision_id == revision_id
+                or session.scalar(
+                    select(RuntimeImageAuthorization.id)
+                    .where(
+                        RuntimeImageAuthorization.recipe_revision_id == revision_id,
+                        RuntimeImageAuthorization.source == "controller-build",
+                        RuntimeImageAuthorization.state == "authorized",
+                        RuntimeImageAuthorization.build_id == build.id,
+                        RuntimeImageAuthorization.oci_archive_sha256
+                        == expected_image.oci_layout_sha256,
+                    )
+                    .limit(1)
+                )
+                is not None
             )
-            .order_by(RuntimeImageAuthorization.authorized_at.desc())
-            .limit(1)
-        )
-        if isinstance(authorized_build_id, str):
-            build = session.get(RecipeBuild, authorized_build_id)
-            if build is not None and available(build):
-                return build
+            if not authorized:
+                raise RunSwitchOperationConflict(
+                    "profile.runtime-image-changed: accepted build is not authorized for this recipe"
+                )
+            return build
+
+        # A fresh review selects the current completed image, independently of
+        # the immutable build that an older installation still references.
         candidates = session.scalars(
             select(RecipeBuild)
             .where(
@@ -3612,11 +3883,29 @@ class RunSwitchOperationService:
                 RecipeBuild.image_digest.is_not(None),
                 RecipeBuild.image_bytes.is_not(None),
             )
-            .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id)
+            .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
         )
-        return next(
-            (candidate for candidate in candidates if available(candidate)), None
+        for candidate in candidates:
+            if self._build_is_available(candidate):
+                return candidate
+
+        # An editorial successor may reuse a build from another revision only
+        # through its explicit authorization binding.
+        authorized_build_ids = session.scalars(
+            select(RuntimeImageAuthorization.build_id)
+            .where(
+                RuntimeImageAuthorization.recipe_revision_id == revision_id,
+                RuntimeImageAuthorization.source == "controller-build",
+                RuntimeImageAuthorization.state == "authorized",
+                RuntimeImageAuthorization.build_id.is_not(None),
+            )
+            .order_by(RuntimeImageAuthorization.authorized_at.desc())
         )
+        for build_id in authorized_build_ids:
+            build = session.get(RecipeBuild, build_id)
+            if build is not None and self._build_is_available(build):
+                return build
+        return None
 
     @staticmethod
     def _latest_build(session: Session, revision_id: str) -> RecipeBuild | None:
@@ -3823,6 +4112,8 @@ class RunSwitchOperationService:
         *,
         require_available: bool = True,
         defer_source_build: bool = False,
+        published_receipt_lookup: PublishedImageReceiptLookup | None = None,
+        expected_image: RuntimeImageIdentity | None = None,
     ) -> tuple[
         RunSwitchBuildEvidence,
         RuntimeImageStorageImpact,
@@ -3831,11 +4122,15 @@ class RunSwitchOperationService:
     ]:
         blockers: list[RunSwitchReason] = []
         warnings: list[RunSwitchReason] = []
+        authorization: RuntimeImageAuthorization | None = None
         document = revision.document if revision is not None else {}
         execution = document.get("execution") if isinstance(document, Mapping) else None
         source_build = _is_source_build(document)
         published_digest = _published_manifest_digest(document)
         direct_receipt = None
+        direct_receipt_verified = False
+        direct_receipt_missing = False
+        direct_receipt_issue: str | None = None
         if not source_build and revision is not None and published_digest is not None:
             # Preview has not yet compiled mapping parameters into the
             # effective execution key. Reuse the same immutable published
@@ -3879,6 +4174,29 @@ class RunSwitchOperationService:
             if not source_build
             else "unknown"
         )
+        if authorization is not None:
+            if published_receipt_lookup is None:
+                direct_receipt_missing = True
+            else:
+                try:
+                    observed_receipt = published_receipt_lookup(
+                        published_digest or "",
+                        expected_architecture=expected_architecture,
+                        expected_runtime_interface=RUNTIME_INTERFACE,
+                    )
+                except RuntimeImagePreparationError as error:
+                    direct_receipt_issue = f"{error.code}: {error}"
+                else:
+                    if observed_receipt is None:
+                        direct_receipt_missing = True
+                    elif _published_receipt_matches_authorization(
+                        observed_receipt,
+                        authorization,
+                        expected_architecture=expected_architecture,
+                    ):
+                        direct_receipt_verified = True
+                    else:
+                        direct_receipt_issue = "managed published receipt does not match its durable authorization"
         source_digest = (
             candidate.source_bundle_sha256
             if candidate is not None
@@ -3981,25 +4299,52 @@ class RunSwitchOperationService:
                 else "The built image or selected Spark group does not match the recipe platform."
             ),
         )
+        # The accepted image is an execution constraint, never proof of bytes.
+        # Preserve a newly observed output so the caller can reject identity drift.
+        source_identity = build if build is not None else candidate
         image_digest = (
-            build.image_digest
+            source_identity.image_digest
+            if source_build
+            and source_identity is not None
+            and source_identity.image_digest is not None
+            else expected_image.image_digest
+            if source_build and build is None and expected_image is not None
+            else build.image_digest
             if build is not None
             else direct_receipt["platform_manifest_digest"]
             if direct_receipt is not None
-            else published_digest
+            else expected_image.image_digest
+            if not source_build and expected_image is not None
+            else None
         )
         image_bytes = (
-            build.image_bytes
+            source_identity.image_bytes
+            if source_build
+            and source_identity is not None
+            and source_identity.image_bytes is not None
+            else expected_image.image_bytes
+            if source_build and build is None and expected_image is not None
+            else build.image_bytes
             if build is not None
             else direct_receipt["image_bytes"]
             if direct_receipt is not None
+            else expected_image.image_bytes
+            if not source_build and expected_image is not None
             else None
         )
         oci_layout = (
-            build.oci_layout_sha256
+            source_identity.oci_layout_sha256
+            if source_build
+            and source_identity is not None
+            and source_identity.oci_layout_sha256 is not None
+            else expected_image.oci_layout_sha256
+            if source_build and build is None and expected_image is not None
+            else build.oci_layout_sha256
             if build is not None
             else direct_receipt["oci_archive_sha256"]
             if direct_receipt is not None
+            else expected_image.oci_layout_sha256
+            if not source_build and expected_image is not None
             else None
         )
         runtime_reused = 0
@@ -4050,6 +4395,13 @@ class RunSwitchOperationService:
                 if candidate is not None
                 else None
             ),
+            preparation_required=(
+                not source_build
+                and published_digest is not None
+                and direct_receipt_issue is None
+                and not direct_receipt_verified
+            ),
+            registry_manifest_digest=published_digest,
             image_digest=image_digest,
             oci_layout_sha256=oci_layout,
             image_bytes=image_bytes,
@@ -4058,13 +4410,29 @@ class RunSwitchOperationService:
             ),
             reused_bytes=runtime_reused,
             copied_bytes=runtime_missing,
-            missing_nas_bytes=None,
+            missing_nas_bytes=(
+                image_bytes
+                if direct_receipt_missing or (source_build and build is None)
+                else 0
+                if direct_receipt_verified
+                else None
+            ),
             missing_spark_bytes=(runtime_missing if image_bytes is not None else None),
             missing_image_distribution_bytes=(
                 runtime_missing if image_bytes is not None else None
             ),
             nas_coverage=(
-                "complete" if image_bytes is not None and oci_layout else "unknown"
+                "partial"
+                if direct_receipt_missing or (source_build and build is None)
+                else "complete"
+                if direct_receipt_verified
+                or (
+                    source_build
+                    and build is not None
+                    and image_bytes is not None
+                    and oci_layout is not None
+                )
+                else "unknown"
             ),
             spark_coverage=runtime_coverage,
             reclaimable_bytes=runtime_reclaimable,
@@ -4072,6 +4440,10 @@ class RunSwitchOperationService:
         )
         state = (
             "available"
+            if direct_receipt_verified
+            else "incompatible"
+            if direct_receipt_issue is not None
+            else "missing"
             if direct_receipt is not None
             else "missing"
             if candidate is None
@@ -4093,6 +4465,10 @@ class RunSwitchOperationService:
                 detail = candidate.error
         elif not source_build and direct_receipt is None:
             detail = "No verified published runtime image receipt is available for this recipe revision."
+        elif direct_receipt_issue is not None:
+            detail = direct_receipt_issue
+        elif direct_receipt_missing:
+            detail = "The authorized published runtime image archive is missing from Controller storage."
         if compatibility_state == "incompatible":
             state = "incompatible"
         if require_available:
@@ -4128,6 +4504,25 @@ class RunSwitchOperationService:
                             node_ids=[node.node_id for node in group.nodes],
                         )
                     )
+            elif direct_receipt_issue is not None:
+                blockers.append(
+                    _as_reason(
+                        "run-switch.runtime-image-authorization-mismatch",
+                        direct_receipt_issue,
+                        scope="artifact",
+                        node_ids=[node.node_id for node in group.nodes],
+                    )
+                )
+            elif direct_receipt_missing:
+                warnings.append(
+                    _as_reason(
+                        "run-switch.runtime-image-preparation-required",
+                        "The exact authorized published image archive is missing from Controller storage and will be restored before install admission.",
+                        scope="operation",
+                        severity="warning",
+                        node_ids=[node.node_id for node in group.nodes],
+                    )
+                )
             elif not source_build and direct_receipt is None:
                 warnings.append(
                     _as_reason(
@@ -4327,13 +4722,65 @@ class RunSwitchOperationService:
         ):
             return None
         runtime_controller = ControllerAssetState(
-            state="ready",
+            state=(
+                "ready"
+                if runtime_storage.nas_coverage == "complete"
+                and runtime_storage.missing_nas_bytes in (None, 0)
+                else "failed"
+                if any(
+                    reason.code == "run-switch.runtime-image-authorization-mismatch"
+                    for reason in reasons
+                )
+                else "missing"
+                if runtime_storage.missing_nas_bytes not in (None, 0)
+                else "unknown"
+            ),
             expected_bytes=image_bytes,
-            verified_bytes=image_bytes,
-            missing_bytes=0,
-            verified_sha256=layout_digest,
-            verified_at=now,
-            source=("controller-build" if build is not None else "published"),
+            verified_bytes=(
+                image_bytes
+                if runtime_storage.nas_coverage == "complete"
+                and runtime_storage.missing_nas_bytes in (None, 0)
+                else 0
+            ),
+            missing_bytes=(
+                0
+                if runtime_storage.nas_coverage == "complete"
+                and runtime_storage.missing_nas_bytes in (None, 0)
+                else image_bytes
+            ),
+            verified_sha256=(
+                layout_digest
+                if runtime_storage.nas_coverage == "complete"
+                and runtime_storage.missing_nas_bytes in (None, 0)
+                else None
+            ),
+            verified_at=(
+                now
+                if runtime_storage.nas_coverage == "complete"
+                and runtime_storage.missing_nas_bytes in (None, 0)
+                else None
+            ),
+            source=(
+                "controller-build"
+                if build is not None or build_candidate is not None
+                else "published"
+            ),
+            reason=(
+                None
+                if runtime_storage.nas_coverage == "complete"
+                and runtime_storage.missing_nas_bytes in (None, 0)
+                else next(
+                    (
+                        reason.detail[:256]
+                        for reason in reasons
+                        if reason.code
+                        == "run-switch.runtime-image-authorization-mismatch"
+                    ),
+                    "The exact OCI archive is missing from Controller storage."
+                    if runtime_storage.missing_nas_bytes not in (None, 0)
+                    else "Controller storage coverage for the exact OCI image is not proven.",
+                )
+            ),
         )
         runtime_targets = [
             TargetAssetState(
@@ -4383,7 +4830,11 @@ class RunSwitchOperationService:
             image_bytes=image_bytes,
             architecture="linux-arm64",
             runtime_interface=RUNTIME_INTERFACE,
-            build_id=build.id if build is not None else None,
+            build_id=build.id
+            if build is not None
+            else build_candidate.id
+            if build_candidate is not None
+            else None,
             controller=runtime_controller,
             targets=runtime_targets,
         )
@@ -4575,6 +5026,7 @@ class RunSwitchOperationService:
                 "blockers": blockers,
                 "fit_current": resources.current,
                 "fit_after_stop": resources.after_stop,
+                "post_stop_memory_check": resources.post_stop_memory_check,
                 "effective_settings": _settings_view(resolution.settings)
                 if resolution.settings is not None
                 else None,
@@ -4598,25 +5050,34 @@ class RunSwitchOperationService:
         artifact_bytes: int | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
     ) -> _ResourceFits:
-        freshness, current, current_blockers, warnings = self._fit(
-            session,
-            revision,
-            request.spark_group,
-            now=now,
-            excluded_run_ids=(),
-            effective_settings=effective_settings,
-            model_documents=model_documents,
-            serving=request.action != "install",
-            revision_digest=revision.content_digest,
-            image_bytes=image_bytes,
-            artifact_bytes=artifact_bytes,
-            excluded_profile_application_ids=excluded_profile_application_ids,
+        freshness, current, current_blockers, warnings, _current_memory_shortfalls = (
+            self._fit(
+                session,
+                revision,
+                request.spark_group,
+                now=now,
+                excluded_run_ids=(),
+                effective_settings=effective_settings,
+                model_documents=model_documents,
+                serving=request.action != "install",
+                revision_digest=revision.content_digest,
+                image_bytes=image_bytes,
+                artifact_bytes=artifact_bytes,
+                excluded_profile_application_ids=excluded_profile_application_ids,
+            )
         )
         current = self._placement_fit(current, placement_blockers)
         after_stop = None
         blockers = current_blockers
+        conditional = None
         if stops:
-            _, after_stop, blockers, warnings = self._fit(
+            (
+                _,
+                after_stop,
+                blockers,
+                warnings,
+                after_stop_memory_shortfalls,
+            ) = self._fit(
                 session,
                 revision,
                 request.spark_group,
@@ -4626,14 +5087,29 @@ class RunSwitchOperationService:
                 model_documents=model_documents,
                 serving=request.action != "install",
                 revision_digest=revision.content_digest,
-                planned_stops=stops,
                 image_bytes=image_bytes,
                 artifact_bytes=artifact_bytes,
                 excluded_profile_application_ids=excluded_profile_application_ids,
             )
             after_stop = self._placement_fit(after_stop, placement_blockers)
+            conditional = _conditional_post_stop_memory_check(
+                session,
+                stops,
+                after_stop,
+                after_stop.blockers,
+                after_stop_memory_shortfalls,
+            )
+            if conditional is not None:
+                after_stop = None
+                blockers = []
         return _ResourceFits(
-            freshness, current, after_stop, current_blockers, blockers, warnings
+            freshness,
+            current,
+            after_stop,
+            current_blockers,
+            blockers,
+            warnings,
+            conditional,
         )
 
     def _fit(
@@ -4648,18 +5124,22 @@ class RunSwitchOperationService:
         model_documents: Mapping[tuple[str, str, str], Mapping[str, object]]
         | None = None,
         revision_digest: str | None = None,
-        planned_stops: Sequence[StopImpact] = (),
         serving: bool = True,
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
     ) -> tuple[
-        list[FreshnessEvidence], SparkFit, list[RunSwitchReason], list[RunSwitchReason]
+        list[FreshnessEvidence],
+        SparkFit,
+        list[RunSwitchReason],
+        list[RunSwitchReason],
+        dict[str, frozenset[str]],
     ]:
         freshness: list[FreshnessEvidence] = []
         nodes: list[SparkFitNode] = []
         blockers: list[RunSwitchReason] = []
         warnings: list[RunSwitchReason] = []
+        insufficient_components_by_node: dict[str, frozenset[str]] = {}
         topology = revision.document.get("topology") if revision is not None else None
         roles = topology.get("roles") if isinstance(topology, Mapping) else None
         role_by_name = (
@@ -4752,6 +5232,7 @@ class RunSwitchOperationService:
             required_memory: int | None = None
             memory_kind = None
             memory_floor = None
+            memory_capacity: int | None = None
             memory_available: int | None = None
             memory_free_after: int | None = None
             required_disk: int | None = None
@@ -4824,6 +5305,18 @@ class RunSwitchOperationService:
                             if snapshot
                             else None,
                         )
+                        capacity_totals = [
+                            part.available_bytes for part in capacity.components
+                        ]
+                        known_capacity_totals = [
+                            value for value in capacity_totals if type(value) is int
+                        ]
+                        memory_capacity = (
+                            min(known_capacity_totals)
+                            if capacity_totals
+                            and len(known_capacity_totals) == len(capacity_totals)
+                            else capacity.available_bytes
+                        )
                         if (
                             capacity.available_bytes is not None
                             and capacity.occupied_bytes is not None
@@ -4831,21 +5324,21 @@ class RunSwitchOperationService:
                             memory_available = (
                                 capacity.available_bytes - capacity.occupied_bytes
                             )
-                        releases = _planned_stop_releases(
-                            session,
-                            item.node_id,
-                            memory_need.reservation_kind,
-                            planned_stops,
-                            memory_pool=snapshot.memory_pool if snapshot else None,
-                        )
                         fit_capacity = plan_capacity(
                             {item.node_id: demand},
                             [capacity],
-                            releases,
                             memory_floor_bytes=memory_need.floor_bytes,
                         )
                         fit_node = fit_capacity.nodes[0]
                         memory_free_after = fit_node.selected_free_after_bytes
+                        if fit_node.insufficient_components:
+                            insufficient_components_by_node[item.node_id] = frozenset(
+                                "shared"
+                                if snapshot is not None
+                                and snapshot.memory_pool == "shared"
+                                else component
+                                for component in fit_node.insufficient_components
+                            )
                         node_blockers.extend(
                             _resource_reason(reason, node_ids=(item.node_id,))
                             for reason in fit_node.reasons
@@ -4889,12 +5382,12 @@ class RunSwitchOperationService:
                     disk_free = (
                         snapshot.disk_free_bytes if snapshot is not None else None
                     )
-                    if disk_free is not None:
-                        reserved_disk = self._active_reservation_bytes(
+                    if snapshot is not None and disk_free is not None:
+                        reserved_disk = outstanding_disk_reservation_bytes(
                             session,
                             item.node_id,
-                            "disk",
-                            excluded,
+                            inventory_observed_at=snapshot.observed_at,
+                            excluded_run_ids=excluded,
                             excluded_profile_application_ids=excluded_profile_application_ids,
                         )
                         disk_free_after = disk_free - reserved_disk - required_disk
@@ -4921,6 +5414,7 @@ class RunSwitchOperationService:
                     memory_kind=memory_kind,
                     memory_pool=snapshot.memory_pool if snapshot else None,
                     memory_floor_bytes=memory_floor,
+                    memory_capacity_bytes=memory_capacity,
                     memory_available_bytes=memory_available,
                     memory_free_after_bytes=memory_free_after,
                     resource_demand=(
@@ -4955,6 +5449,7 @@ class RunSwitchOperationService:
             ),
             blockers,
             warnings,
+            insufficient_components_by_node,
         )
 
     def _active_reservation_bytes(
@@ -5137,21 +5632,29 @@ class RunSwitchOperationService:
         stop_before_prepare: bool,
         build_required: bool = False,
         build_on_target: bool = False,
+        cleanup_disposition: Literal["uninstall", "abandon"] = "uninstall",
     ) -> list[RunSwitchPhase]:
         node_ids = [node.node_id for node in group.nodes]
         phases: list[RunSwitchPhase] = []
         if action == "cleanup":
-            # Removal is authorized by the installation's own uninstall
+            # Disposal is authorized by the installation's own uninstall
             # assessment, so the phase sequence never consults launch
             # readiness: being unable to start work must not prevent removing
-            # work.
+            # work.  A plan that never reached a node has nothing to remove,
+            # so its first phase abandons the record instead of uninstalling it.
             phases.append(
                 RunSwitchPhase(
                     index=0,
                     kind="uninstall",
                     state="planned" if not blockers else "blocked",
                     node_ids=node_ids,
-                    detail="Remove the installation that is no longer desired, scoped to its authorized membership.",
+                    detail=(
+                        "Abandon the persisted plan that never reached a node; "
+                        "there are no installed bytes to remove."
+                        if cleanup_disposition == "abandon"
+                        else "Remove the installation that is no longer desired, "
+                        "scoped to its authorized membership."
+                    ),
                 )
             )
             phases.append(
@@ -5202,6 +5705,11 @@ class RunSwitchOperationService:
         # explicit preparation input for the same durable phase sequence.
         needs_runtime_image_prepare = (
             build_required
+            or (runtime_storage is not None and runtime_storage.preparation_required)
+            or (
+                runtime_storage is not None
+                and runtime_storage.missing_nas_bytes not in (None, 0)
+            )
             or (
                 runtime_storage is not None
                 and runtime_storage.missing_image_distribution_bytes not in (None, 0)
@@ -5452,6 +5960,7 @@ class RunSwitchOperationService:
                         "run-switch.request_key_reused_differently"
                     )
                 return self._operation_view(existing)
+            _reserve_run_switch_assets(session, plan, now=now)
             try:
                 lock_run_switch_build_dependency(session, plan)
             except BuildConsumerError as error:
@@ -5545,7 +6054,7 @@ class RunSwitchOperationService:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
                 return True
-            if job.state not in {"queued", "running"}:
+            if job.state not in {"queued", "running", "waiting-for-operator"}:
                 return False
             payload = job.payload
             raw_plan = payload.get("plan")
@@ -5604,6 +6113,13 @@ class RunSwitchOperationService:
             raw_phase_index = progress.get("phase_index", 0)
             raw_item_index = progress.get("item_index", 0)
             child_id = progress.get("child_operation_id")
+            if job.state == "waiting-for-operator":
+                if not child_id:
+                    return False
+                # Only observe the already-issued child. No new effect is
+                # authorized by reopening this parent's observation checkpoint.
+                job.state = "running"
+                session.commit()
             if progress.get("cancellation") and child_id is None:
                 _complete_cancellation(job, progress, now)
                 session.commit()
@@ -5808,9 +6324,15 @@ class RunSwitchOperationService:
                         ):
                             return False
                         job.state = "waiting-for-operator"
+                        due = now + timedelta(seconds=60)
+                        progress["observation_due_at"] = due.isoformat()
+                        job.result = _persisted_result(progress)
                         job.status_reason = (
-                            getattr(child, "status_reason", None)
-                            or "Lifecycle effect is uncertain; exact child remains pending"
+                            (
+                                getattr(child, "status_reason", None)
+                                or "Lifecycle effect is uncertain; exact child remains pending"
+                            )[:400]
+                            + f"; next exact observation at {due.isoformat()}"
                         )[:512]
                         job.updated_at = now
                     return True
@@ -6008,6 +6530,11 @@ class RunSwitchOperationService:
                     ):
                         return False
                     current["preflight"] = checkpoint.model_dump(mode="json")
+                    current["observation_due_at"] = (
+                        checkpoint.next_check_at.isoformat()
+                        if checkpoint.next_check_at is not None
+                        else None
+                    )
                     if blocked:
                         self._mark_failed(job, blocked, now=now, progress=current)
                         return True
@@ -6023,7 +6550,7 @@ class RunSwitchOperationService:
                         )
                     job.result = _persisted_result(current)
                     job.updated_at = now
-                if checkpoint.pending_job_id:
+                if checkpoint.pending_job_id or checkpoint.next_check_at is not None:
                     return True
         if phase.state in {"skipped", "retained"}:
             execution = PhaseExecution()
@@ -6057,6 +6584,14 @@ class RunSwitchOperationService:
                 return self._hold_capacity_writer(
                     operation_id, phase_index, item_index, reason=busy.code
                 )
+            except RunSwitchPostStopEvidencePending as pending:
+                return self._hold_capacity_writer(
+                    operation_id,
+                    phase_index,
+                    item_index,
+                    reason=pending.code,
+                    detail=str(pending),
+                )
             except RunSwitchIssuedWorkloadPending as pending:
                 return self._hold_issued_observation(
                     operation_id,
@@ -6068,6 +6603,16 @@ class RunSwitchOperationService:
                 fail(str(error))
                 return True
             except RuntimeImagePreparationError as error:
+                if error.code == _RUNTIME_IMAGE_OWNER_CHANGED:
+                    return False
+                if error.retryable and error.code.startswith("artifact."):
+                    return self._hold_capacity_writer(
+                        operation_id,
+                        phase_index,
+                        item_index,
+                        reason=error.code,
+                        detail=error.detail,
+                    )
                 fail(
                     f"{type(error).__name__}: {error}",
                     failure_code=error.code,
@@ -6119,12 +6664,13 @@ class RunSwitchOperationService:
                 progress["observation_due_at"] = None
                 progress["observation_deadline_at"] = None
                 job.status_reason = None
-                if progress.get("retry_reason") in (
-                    InstallAdmissionBusy.code,
-                    RunAdmissionBusy.code,
-                    RecipeBuildAdmissionBusy.code,
-                ):
-                    progress["retry_reason"] = None
+            if progress.get("retry_reason") in (
+                InstallAdmissionBusy.code,
+                RunAdmissionBusy.code,
+                RecipeBuildAdmissionBusy.code,
+                RunSwitchPostStopEvidencePending.code,
+            ):
+                progress["retry_reason"] = None
             _merge_progress_evidence(
                 progress,
                 plan,
@@ -6142,15 +6688,23 @@ class RunSwitchOperationService:
                     if (
                         isinstance(started, bool)
                         or not isinstance(started, (int, float))
-                        or not 0 <= now.timestamp() - started < 300
+                        or now.timestamp() < started
                     ):
                         self._mark_failed(
                             job,
-                            "run-switch.final-verification-timeout",
+                            "run-switch.final-verification-clock-invalid",
                             now=now,
                             progress=progress,
                         )
                         return True
+                    due = now + timedelta(
+                        seconds=60 if now.timestamp() - started >= 300 else 5
+                    )
+                    progress["observation_due_at"] = due.isoformat()
+                    job.status_reason = (
+                        "Waiting for exact run and route verification; "
+                        f"next observation at {due.isoformat()}"
+                    )
                     # Keep one current observation while awaiting route publication.
                     # Repeated polling must not grow durable phase receipts.
                     progress["final_observation"] = _phase_result(
@@ -6266,7 +6820,9 @@ class RunSwitchOperationService:
             select(AgentNode).where(AgentNode.node_id.in_(job.targets))
         )
         current = list(nodes)
-        if len(current) != len(job.targets):
+        if len(current) != len(job.targets) or any(
+            node.revoked_at is not None or node.state != "active" for node in current
+        ):
             return "invalid"
         if any(node.workload_intent_ordinal != ordinal for node in current):
             return "superseded"
@@ -6306,12 +6862,19 @@ class RunSwitchOperationService:
                     else now + timedelta(seconds=120)
                 )
             if now >= deadline:
-                self._mark_failed(
-                    job,
-                    "run-switch.start-observation-expired: runtime did not establish before its deadline",
-                    now=now,
-                    progress=progress,
+                # Expiry establishes an overdue observation, not a stopped or
+                # failed runtime. Preserve the exact child and reservations;
+                # its owner alone can reconcile or retry the uncertain effect.
+                progress["observation_deadline_at"] = deadline.isoformat()
+                due = now + timedelta(seconds=60)
+                progress["observation_due_at"] = due.isoformat()
+                job.state = "waiting-for-operator"
+                job.status_reason = (
+                    "run-switch.start-observation-expired: exact effect remains "
+                    f"unresolved; next observation at {due.isoformat()}"
                 )
+                job.result = _persisted_result(progress)
+                job.updated_at = now
                 return True
             progress["observation_deadline_at"] = deadline.isoformat()
             progress["observation_due_at"] = min(
@@ -6342,42 +6905,36 @@ class RunSwitchOperationService:
             if not _checkpoint_matches(job, progress, phase_index, item_index, None):
                 return False
             deadline = _aware(pending.observation_deadline)
-            if now >= deadline:
-                if pending.kind == "artifact-job-cancellation":
-                    job.state = "waiting-for-operator"
-                    job.status_reason = (
-                        "run-switch.artifact-cancellation-unresolved: "
-                        f"{pending.job_id} has no definitive cancellation receipt"
-                    )
-                    progress["observation_due_at"] = None
-                    progress["observation_deadline_at"] = deadline.isoformat()
-                    job.result = _persisted_result(progress)
-                    job.updated_at = now
-                else:
-                    self._mark_failed(
-                        job,
-                        "run-switch.issued-observation-expired: an older issued effect has no definitive outcome",
-                        now=now,
-                        progress=progress,
-                    )
-                return True
-            due = min(
-                deadline,
-                max(now + timedelta(seconds=5), _aware(pending.observe_due_at)),
+            # The lifecycle admission path already re-observes this exact
+            # dependency before issuing anything. A missing cancellation receipt
+            # cannot turn that safe observation into permanently parked intent.
+            due = (
+                now + timedelta(seconds=60)
+                if now >= deadline
+                else min(
+                    deadline,
+                    max(now + timedelta(seconds=5), _aware(pending.observe_due_at)),
+                )
             )
             progress["observation_due_at"] = due.isoformat()
             progress["observation_deadline_at"] = deadline.isoformat()
             job.state = "running"
             job.status_reason = (
-                f"Observing older issued lifecycle operation {pending.job_id}; "
-                "its effect has not been proven finished."
+                f"Observing older {pending.kind} operation {pending.job_id}; "
+                f"effect unresolved, next observation at {due.isoformat()}"
             )
             job.result = _persisted_result(progress)
             job.updated_at = now
         return True
 
     def _hold_capacity_writer(
-        self, operation_id: str, phase_index: int, item_index: int, *, reason: str
+        self,
+        operation_id: str,
+        phase_index: int,
+        item_index: int,
+        *,
+        reason: str,
+        detail: str | None = None,
     ) -> bool:
         """Retry an unchanged capacity handoff at most once per five seconds.
 
@@ -6402,9 +6959,8 @@ class RunSwitchOperationService:
                 progress["observation_deadline_at"] = due.isoformat()
                 job.state = "running"
                 job.status_reason = (
-                    "Admission is waiting for the Controller capacity writer; "
-                    f"admission will retry at {due.isoformat()}."
-                )
+                    detail or "Admission is waiting for the Controller capacity writer"
+                ) + f"; admission will retry at {due.isoformat()}."
                 job.result = _persisted_result(progress)
                 job.updated_at = now
         return True
@@ -6420,10 +6976,10 @@ class RunSwitchOperationService:
         Acceptance rolled its transaction back, so no installation, reservation
         or agent child exists.  Leaving ``phase_index`` and ``item_index``
         untouched sends the next tick back through ``LifecyclePreflight.ensure``.
-        Bound these retries independently: the gate's cached receipt may still
-        be fresh while admission selects a different, expired database receipt.
-        The existing typed retry fields retain the compilation attempt and its
-        cause even when the gate does not spend another probe attempt.
+        Back off even when the gate's cached receipt is still fresh while
+        admission selects a different, expired database receipt. The existing
+        typed retry fields retain the compilation attempt, cause and next time;
+        temporary freshness races cannot permanently abandon accepted intent.
 
         A hold never advances a cancelled operation into a subsequent
         acceptance.  Cancellation racing a successful acceptance is unchanged.
@@ -6454,25 +7010,14 @@ class RunSwitchOperationService:
                 {
                     "phase": "install-preflight-refresh",
                     "completed_items": attempt,
-                    "total_items": _MAX_RETRY_ATTEMPTS,
                     "completed_bytes": 0,
                     "total_bytes_known": False,
                 },
                 now,
             )
-            if attempt >= _MAX_RETRY_ATTEMPTS:
-                self._mark_failed(
-                    job,
-                    "run-switch.install-preflight-refresh-exhausted: "
-                    f"{attempt} install compilation attempts ended with expired preflight",
-                    now=now,
-                    progress=progress,
-                )
-                return True
-            progress["retry_attempt"] = attempt + 1
-            job.state = "running"
-            job.result = _persisted_result(progress)
-            job.updated_at = now
+            self._schedule_checkpoint_retry(
+                job, progress, _INSTALL_PREFLIGHT_REFRESH_REASON, now
+            )
         return True
 
     def _get_child_operation(self, operation_id: str) -> Any:
@@ -6519,6 +7064,19 @@ class RunSwitchOperationService:
                     _merge_progress_evidence(
                         progress, plan, plan.phases[checkpoint[0]], child_evidence, now
                     )
+            if progress.get("cancellation"):
+                if progress.get("child_operation_id") is None:
+                    _complete_cancellation(job, progress, now)
+                    return
+            elif retryable and checkpoint is not None and checkpoint[2] is None:
+                plan = _load_plan(job.payload["plan"])
+                phase = plan.phases[checkpoint[0]]
+                if phase.kind in {"prepare", "transfer", "verify"}:
+                    # The phase executor reuses its deterministic request key
+                    # and exact stored plan. Issued children keep their own
+                    # retry owner; never replace one with a parent-level replay.
+                    self._schedule_checkpoint_retry(job, progress, reason, now)
+                    return
             self._mark_failed(
                 job,
                 reason,
@@ -6527,6 +7085,23 @@ class RunSwitchOperationService:
                 failure_code=failure_code,
                 progress=progress,
             )
+
+    @staticmethod
+    def _schedule_checkpoint_retry(
+        job: Job, progress: dict[str, Any], reason: str, now: datetime
+    ) -> None:
+        """Wait at the exact checkpoint without replacing accepted intent."""
+        attempt = require_integer(progress.get("retry_attempt") or 1, "retry attempt")
+        due = RecoveryPolicy().next_attempt(job.id, attempt, now, ongoing_intent=True)
+        assert due is not None
+        progress["retry_attempt"] = attempt + 1
+        progress["retry_reason"] = reason[:512]
+        progress["observation_due_at"] = due.isoformat()
+        progress["retryable"] = False
+        job.state = "running"
+        job.status_reason = f"{reason[:400]}; next attempt at {due.isoformat()}"[:512]
+        job.result = _persisted_result(progress)
+        job.updated_at = now
 
     @staticmethod
     def _mark_failed(
@@ -6593,6 +7168,10 @@ class RunSwitchOperationProvider:
     def __init__(self, service: RunSwitchOperationService) -> None:
         self._service = service
 
+    @property
+    def represented_job_kinds(self) -> frozenset[str]:
+        return _OPERATION_KINDS
+
     def list_operations(self, query: OperationQuery) -> OperationListPage:
         limit = getattr(query, "limit", None)
         if type(limit) is not int or not 1 <= limit <= 101:
@@ -6603,31 +7182,48 @@ class RunSwitchOperationProvider:
         node_id = getattr(query, "node_id", None)
         if node_id is not None and not isinstance(node_id, str):
             raise ValueError("operation provider node filter is invalid")
+        request_id = getattr(query, "request_id", None)
+        if request_id is not None and not isinstance(request_id, str):
+            raise ValueError("operation provider request filter is invalid")
         after = getattr(query, "after", None)
         with self._service._sessions() as session:
-            statement = select(Job).where(Job.kind.in_(_OPERATION_KINDS))
+            base_filters: list[ColumnElement[bool]] = [Job.kind.in_(_OPERATION_KINDS)]
             if state is not None:
-                statement = statement.where(Job.state == state)
-            jobs = list(
-                session.scalars(
-                    statement.order_by(Job.created_at.desc(), Job.id.desc())
-                )
-            )
-        if node_id is not None:
-            jobs = [job for job in jobs if node_id in job.targets]
-        total = len(jobs)
-        if after is not None:
-            if (
+                base_filters.append(Job.state == state)
+            if request_id is not None:
+                base_filters.append(Job.request_id == request_id)
+            if node_id is not None:
+                base_filters.append(cast(Job.targets, String).contains(f'"{node_id}"'))
+            if after is not None and (
                 not isinstance(after, tuple)
                 or len(after) != 2
                 or not isinstance(after[0], datetime)
                 or not isinstance(after[1], str)
             ):
                 raise ValueError("operation provider cursor is invalid")
-            boundary = (_aware(after[0]), after[1])
-            jobs = [
-                job for job in jobs if (_aware(job.created_at), str(job.id)) < boundary
-            ]
+            filters = list(base_filters)
+            boundary = _activity_keyset_filter(
+                Job.created_at,
+                Job.id,
+                "",
+                None if after is None else (_aware(after[0]), after[1]),
+            )
+            if boundary is not None:
+                filters.append(boundary)
+            total = int(
+                session.scalar(
+                    select(func.count()).select_from(Job).where(*base_filters)
+                )
+                or 0
+            )
+            jobs = list(
+                session.scalars(
+                    select(Job)
+                    .where(*filters)
+                    .order_by(Job.created_at.desc(), Job.id.desc())
+                    .limit(limit)
+                )
+            )
         items = tuple(self._item(job) for job in jobs[:limit])
         return OperationListPage(items, None, total)
 
@@ -6639,8 +7235,39 @@ class RunSwitchOperationProvider:
             return self._item(job)
 
     def _item(self, job: Job) -> Mapping[str, object]:
-        operation = self._service._operation_view(job)
-        node_ids = [str(node_id) for node_id in job.targets]
+        try:
+            operation = self._service._operation_view(job)
+            if (
+                not isinstance(job.targets, list)
+                or not job.targets
+                or any(
+                    not isinstance(node_id, str)
+                    or re.fullmatch(r"spk_[0-9a-f]{32}", node_id) is None
+                    for node_id in job.targets
+                )
+            ):
+                raise ValueError("stored Run/Switch targets are malformed")
+            node_ids = list(job.targets)
+        except (AttributeError, KeyError, TypeError, ValueError, ValidationError):
+            return {
+                "id": job.id,
+                "job_id": job.id,
+                "parent_id": None,
+                "owner": {"kind": "job", "id": job.id, "request_id": job.request_id},
+                "node_ids": [],
+                "kind": "run-switch-unreadable",
+                "state": "unavailable",
+                "attempt": max(0, int(getattr(job, "current_attempt", 0) or 0)),
+                "progress": None,
+                "created_at": _aware(job.created_at).isoformat(),
+                "updated_at": _aware(job.updated_at).isoformat(),
+                "supported_actions": [],
+                "failure": {
+                    "error_code": "operation_history_unreadable",
+                    "summary": "Stored Run/Switch history is malformed",
+                    "retryable": False,
+                },
+            }
         endpoint_node = node_ids[0]
         raw_plan = job.payload.get("plan") if isinstance(job.payload, Mapping) else None
         if isinstance(raw_plan, Mapping):
@@ -6662,6 +7289,11 @@ class RunSwitchOperationProvider:
             "id": operation.operation_id,
             "job_id": operation.operation_id,
             "parent_id": None,
+            "owner": {
+                "kind": "job",
+                "id": job.id,
+                "request_id": job.request_id,
+            },
             # The singular field is retained for older Activity readers; the
             # complete group is authoritative in node_ids and progress.members.
             "node_id": endpoint_node,
@@ -7945,6 +8577,33 @@ def _published_manifest_digest(document: Mapping[str, object]) -> str | None:
     return None
 
 
+def _published_receipt_matches_authorization(
+    receipt: RuntimeImageReceiptDocument,
+    authorization: RuntimeImageAuthorization,
+    *,
+    expected_architecture: str,
+) -> bool:
+    """Match every durable published-image identity field to managed bytes."""
+
+    return (
+        receipt.source == "published"
+        and receipt.distribution_content_sha256 == authorization.original_content_digest
+        and receipt.registry_manifest_digest == authorization.registry_manifest_digest
+        and receipt.platform_manifest_digest == authorization.platform_manifest_digest
+        and receipt.image_digest == authorization.platform_manifest_digest
+        and receipt.local_image_config_id == authorization.local_image_config_id
+        and receipt.oci_archive_sha256 == authorization.oci_archive_sha256
+        and receipt.image_bytes == authorization.image_bytes
+        and receipt.build_id is None
+        and receipt.build_input_sha256 is None
+        and _normalise_architecture(receipt.architecture)
+        == _normalise_architecture(expected_architecture)
+        and receipt.runtime_interface == RUNTIME_INTERFACE
+        and receipt.runtime_adapter is None
+        and receipt.runtime_adapter_sha256 is None
+    )
+
+
 def _primary_model_digest(document: object) -> str | None:
     if not isinstance(document, Mapping):
         return None
@@ -8027,6 +8686,352 @@ def _load_plan(value: object) -> RunSwitchPlan:
         raise RunSwitchOperationConflict(
             "run-switch persisted plan is invalid"
         ) from error
+
+
+def _reserve_run_switch_assets(
+    session: Session, plan: RunSwitchPlan, *, now: datetime
+) -> None:
+    """Keep exact accepted plan identities open through the Job commit."""
+
+    model_set = plan.storage.artifact_set_sha256
+    image_archive = plan.runtime_storage.oci_layout_sha256
+    try:
+        if model_set is not None:
+            require_model_sets_open(
+                session,
+                (model_set,),
+                now=now,
+                object_digests=plan.storage.artifact_digests,
+            )
+        if image_archive is not None:
+            require_reference_open(
+                session,
+                (ArtifactIdentity("runtime-image", image_archive),),
+                now=now,
+            )
+    except ArtifactLifecycleError as error:
+        raise RunSwitchOperationConflict(f"{error.code}: {error.detail}") from error
+
+
+def _persist_run_switch_runtime_image_reference(
+    sessions: sessionmaker[Session],
+    plan: RunSwitchPlan,
+    phase: RunSwitchPhase,
+    *,
+    item_index: int,
+    actor: str,
+    request_key: str,
+    progress: Mapping[str, object],
+    execution_keys: Sequence[str],
+    receipt: RuntimeImageReceiptDocument,
+    clock: Any,
+) -> None:
+    """Commit this current phase's exact image reference before publication.
+
+    The caller holds the nonblocking lock for ``receipt.oci_archive_sha256``.
+    This transaction rechecks the durable RunSwitch checkpoint and current
+    workload claim, then commits the reference intent while that lock is
+    still held. It never waits for image work or storage from inside SQL.
+    """
+
+    def owner_changed(detail: str) -> RuntimeImagePreparationError:
+        return RuntimeImagePreparationError(_RUNTIME_IMAGE_OWNER_CHANGED, detail)
+
+    def identity_invalid(detail: str) -> RuntimeImagePreparationError:
+        return RuntimeImagePreparationError(
+            "run-switch.runtime-image-reference-identity-mismatch", detail
+        )
+
+    try:
+        parsed_receipt = RuntimeImageReceiptDocument.model_validate(
+            receipt, strict=True
+        )
+    except (TypeError, ValueError) as error:
+        raise identity_invalid("verified runtime image receipt is invalid") from error
+    try:
+        ordinal = _bound_workload_intent(progress)
+    except RunSwitchOperationConflict as error:
+        raise owner_changed("RunSwitch phase no longer has a workload claim") from error
+    profile_application_id = _string_or_none(progress.get("profile_application_id"))
+    target_nodes = tuple(sorted(node.node_id for node in plan.spark_group.nodes))
+    recipe_revision_id = plan.recipe_revision_id
+    if (
+        phase.kind != "prepare"
+        or phase.subphase != "runtime-image"
+        or item_index != 0
+        or phase.index >= len(plan.phases)
+        or plan.phases[phase.index] != phase
+        or not target_nodes
+        or not execution_keys
+        or recipe_revision_id is None
+    ):
+        raise identity_invalid("runtime image callback is outside its phase")
+    canonical_execution_keys = tuple(sorted(set(execution_keys)))
+    if len(canonical_execution_keys) != len(execution_keys):
+        raise identity_invalid("runtime image execution identities are not unique")
+
+    now = _now(clock)
+    with sessions.begin() as session:
+        try:
+            nodes = tuple(
+                session.scalars(
+                    select(AgentNode)
+                    .where(AgentNode.node_id.in_(target_nodes))
+                    .order_by(AgentNode.node_id)
+                    .with_for_update(nowait=True)
+                    .execution_options(populate_existing=True)
+                )
+            )
+        except DBAPIError as error:
+            state = getattr(error.orig, "sqlstate", None) or getattr(
+                error.orig, "pgcode", None
+            )
+            if state in {"55P03", "40P01", "40001"}:
+                raise RuntimeImagePreparationError(
+                    "artifact.reference_busy",
+                    "RunSwitch target ownership is changing; image publication will retry",
+                    retryable=True,
+                ) from error
+            raise
+        if len(nodes) != len(target_nodes) or any(
+            node.state != "active"
+            or node.revoked_at is not None
+            or node.workload_intent_ordinal != ordinal
+            for node in nodes
+        ):
+            raise owner_changed("RunSwitch Spark scope or workload claim changed")
+
+        try:
+            require_reference_open(
+                session,
+                (ArtifactIdentity("runtime-image", parsed_receipt.oci_archive_sha256),),
+                now=now,
+            )
+        except ArtifactLifecycleError as error:
+            raise RuntimeImagePreparationError(
+                error.code, error.detail, retryable=error.retryable
+            ) from error
+
+        try:
+            job = session.scalar(
+                select(Job)
+                .where(Job.request_id == request_key)
+                .with_for_update(nowait=True)
+                .execution_options(populate_existing=True)
+            )
+        except DBAPIError as error:
+            state = getattr(error.orig, "sqlstate", None) or getattr(
+                error.orig, "pgcode", None
+            )
+            if state in {"55P03", "40P01", "40001"}:
+                raise RuntimeImagePreparationError(
+                    "artifact.reference_busy",
+                    "RunSwitch operation ownership is changing; image publication will retry",
+                    retryable=True,
+                ) from error
+            raise
+        if (
+            job is None
+            or job.kind != "recipe.run-switch.v2"
+            or job.actor != actor
+            or job.state not in {"queued", "running"}
+            or tuple(sorted(job.targets)) != target_nodes
+            or job.payload.get("workload_intent_ordinal") != ordinal
+            or job.payload.get("plan_digest") != plan.plan_digest
+        ):
+            raise owner_changed("RunSwitch operation no longer owns image publication")
+        raw_plan = job.payload.get("plan")
+        try:
+            persisted_plan = _load_plan(raw_plan)
+        except RunSwitchOperationConflict as error:
+            raise identity_invalid("persisted RunSwitch plan is invalid") from error
+        if persisted_plan != plan:
+            raise identity_invalid("RunSwitch plan changed before image publication")
+
+        try:
+            current = _read_progress(job.result)
+            current_ordinal = _bound_workload_intent(current)
+        except RunSwitchOperationConflict as error:
+            raise owner_changed(
+                "RunSwitch progress no longer owns image publication"
+            ) from error
+        if (
+            current_ordinal != ordinal
+            or _string_or_none(current.get("profile_application_id"))
+            != profile_application_id
+            or current.get("cancellation") is not None
+            or not _checkpoint_matches(job, current, phase.index, item_index, None)
+            or RunSwitchOperationService._scope_intent_status(session, job) != "current"
+        ):
+            raise owner_changed("RunSwitch phase was cancelled or superseded")
+
+        revision = session.get(CatalogDocumentRevision, recipe_revision_id)
+        if (
+            revision is None
+            or revision.kind != "recipe"
+            or revision.state != "active"
+            or revision.content_digest != plan.recipe_content_sha256
+            or parsed_receipt.distribution_publisher != revision.publisher
+            or parsed_receipt.distribution_slug != revision.slug
+            or parsed_receipt.distribution_content_sha256 != revision.content_digest
+        ):
+            raise identity_invalid(
+                "runtime image no longer matches the approved recipe"
+            )
+        if plan.image_digest is not None and plan.image_digest not in {
+            parsed_receipt.image_digest,
+            parsed_receipt.registry_manifest_digest,
+        }:
+            raise identity_invalid(
+                "runtime image differs from the approved image digest"
+            )
+        if (
+            plan.runtime_storage.image_digest is not None
+            and plan.runtime_storage.image_digest != parsed_receipt.image_digest
+        ):
+            raise identity_invalid(
+                "runtime image differs from the approved platform digest"
+            )
+        if (
+            plan.runtime_storage.registry_manifest_digest is not None
+            and plan.runtime_storage.registry_manifest_digest
+            != parsed_receipt.registry_manifest_digest
+        ):
+            raise identity_invalid(
+                "runtime image differs from the approved registry digest"
+            )
+        expected_layout = (
+            plan.runtime_storage.oci_layout_sha256 or plan.build.oci_layout_sha256
+        )
+        if (
+            expected_layout is not None
+            and expected_layout != parsed_receipt.oci_archive_sha256
+        ):
+            raise identity_invalid(
+                "runtime image archive differs from the approved plan"
+            )
+        if (
+            plan.runtime_storage.image_bytes is not None
+            and plan.runtime_storage.image_bytes > 0
+            and plan.runtime_storage.image_bytes != parsed_receipt.image_bytes
+        ):
+            raise identity_invalid("runtime image size differs from the approved plan")
+        if (
+            plan.build.image_digest is not None
+            and plan.build.image_digest != parsed_receipt.image_digest
+        ):
+            raise identity_invalid(
+                "runtime image differs from the approved build digest"
+            )
+        if (
+            plan.build.oci_layout_sha256 is not None
+            and plan.build.oci_layout_sha256 != parsed_receipt.oci_archive_sha256
+        ):
+            raise identity_invalid(
+                "runtime image differs from the approved build archive"
+            )
+        if (
+            plan.build.image_bytes is not None
+            and plan.build.image_bytes > 0
+            and plan.build.image_bytes != parsed_receipt.image_bytes
+        ):
+            raise identity_invalid("runtime image size differs from the approved build")
+
+        expected_build_id = plan.recipe_build_id or plan.build.build_id
+        if parsed_receipt.source == "controller-build":
+            if (
+                expected_build_id is None
+                or parsed_receipt.build_id != expected_build_id
+                or plan.recipe_revision_id is None
+            ):
+                raise identity_invalid("runtime image is not the approved build result")
+            try:
+                build = _build_receipt_in_session(session, plan)
+            except RunSwitchOperationConflict as error:
+                raise identity_invalid(
+                    "approved recipe build is no longer available"
+                ) from error
+            if any(
+                parsed_receipt_value != build_value
+                for parsed_receipt_value, build_value in (
+                    (parsed_receipt.build_id, build["build_id"]),
+                    (parsed_receipt.build_input_sha256, build["build_input_sha256"]),
+                    (parsed_receipt.image_digest, build["image_digest"]),
+                    (parsed_receipt.oci_archive_sha256, build["oci_layout_sha256"]),
+                    (parsed_receipt.image_bytes, build["image_bytes"]),
+                    (parsed_receipt.build_input_sha256, plan.build.build_input_sha256),
+                )
+            ):
+                raise identity_invalid(
+                    "runtime image receipt differs from the approved build"
+                )
+        elif expected_build_id is not None:
+            raise identity_invalid(
+                "published runtime image conflicts with the selected build"
+            )
+
+        if profile_application_id is not None:
+            try:
+                expected_image = accepted_profile_runtime_image(
+                    session,
+                    profile_application_id,
+                    recipe_revision_id,
+                    target_nodes,
+                )
+                _require_profile_runtime_image(
+                    expected_image,
+                    {
+                        "image_digest": parsed_receipt.image_digest,
+                        "oci_layout_sha256": parsed_receipt.oci_archive_sha256,
+                        "image_bytes": parsed_receipt.image_bytes,
+                        "build_id": parsed_receipt.build_id,
+                        "architecture": parsed_receipt.architecture,
+                        "runtime_interface": parsed_receipt.runtime_interface,
+                    },
+                )
+            except (RunSwitchOperationConflict, ValueError) as error:
+                raise identity_invalid(
+                    "runtime image differs from the accepted Fleet profile"
+                ) from error
+
+        intent = RunSwitchRuntimeImageReferenceIntent(
+            owner_kind="run-switch-job",
+            operation_id=job.id,
+            request_key=job.request_id,
+            actor=job.actor,
+            plan_digest=plan.plan_digest,
+            phase_index=phase.index,
+            item_index=item_index,
+            workload_intent_ordinal=ordinal,
+            recipe_revision_id=recipe_revision_id,
+            profile_application_id=profile_application_id,
+            execution_keys=list(canonical_execution_keys),
+            source=parsed_receipt.source,
+            registry_manifest_digest=parsed_receipt.registry_manifest_digest,
+            image_digest=parsed_receipt.image_digest,
+            archive_sha256=parsed_receipt.oci_archive_sha256,
+            image_bytes=parsed_receipt.image_bytes,
+            build_id=parsed_receipt.build_id,
+            build_input_sha256=parsed_receipt.build_input_sha256,
+        )
+        prior_intent = current.get("runtime_image_reference_intent")
+        if prior_intent is not None:
+            try:
+                parsed_prior = RunSwitchRuntimeImageReferenceIntent.model_validate(
+                    prior_intent, strict=True
+                )
+            except (TypeError, ValueError) as error:
+                raise identity_invalid(
+                    "stored RunSwitch image reference is invalid"
+                ) from error
+            if parsed_prior != intent:
+                raise identity_invalid(
+                    "RunSwitch image reference changed during publication"
+                )
+        else:
+            current["runtime_image_reference_intent"] = intent.model_dump(mode="json")
+            job.result = _persisted_result(current)
+            job.updated_at = now
 
 
 def _reject_invalid_operation(job: Job, reason: str, now: datetime) -> None:

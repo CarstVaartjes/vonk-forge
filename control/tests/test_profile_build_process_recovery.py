@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import fields
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,10 +26,15 @@ from vonk_control.distribution_executor import CompositeDistributionPhaseExecuto
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import (
     AgentOperation,
     FleetProfileApplication,
     Job,
+    NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -103,6 +109,8 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
                             "recipe.build.v1",
                             "recipe.install",
                             "recipe.start",
+                            "recipe.stop",
+                            "recipe.uninstall",
                             "runtime.preflight.v1",
                         )
                     ),
@@ -151,6 +159,16 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
                 lifecycle.record_node_result(
                     job.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
                 )
+        elif job.kind in {"recipe.stop", "recipe.uninstall"}:
+            for node_id in job.targets:
+                lifecycle.record_node_result(
+                    job.id,
+                    node_id,
+                    succeeded=True,
+                    evidence={"stopped": True}
+                    if job.kind == "recipe.stop"
+                    else {"removed": True},
+                )
         elif job.kind == "runtime.preflight.v1":
             complete_preflight(
                 sessions, SimpleNamespace(pending_job_id=job.id), lifecycle._clock()
@@ -173,6 +191,7 @@ def _worker_process(config: dict, crash: str) -> None:
             build.build_input_sha256,
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
+            expected_archive_sha256=build.oci_layout_sha256,
         )
         assert receipt is not None, "the exact prepared image receipt is missing"
         return receipt
@@ -272,6 +291,28 @@ def _worker_process(config: dict, crash: str) -> None:
         # One synchronous worker serves parents and their children. A parent
         # that blocks instead of returning to the loop hits the process timeout.
         for _ in range(80):
+            if config.get("refresh_inventory"):
+                # Physical readings are deterministic fixture evidence; the
+                # inventory repository owns their actual receipt/time boundary.
+                with sessions() as session:
+                    samples = [
+                        {
+                            field.name: getattr(snapshot, field.name)
+                            for field in fields(InventorySnapshotInput)
+                        }
+                        for snapshot in {
+                            row.node_id: row
+                            for row in session.scalars(
+                                select(NodeInventorySnapshot).order_by(
+                                    NodeInventorySnapshot.observed_at
+                                )
+                            )
+                        }.values()
+                    ]
+                inventory = InventoryRepository(sessions, clock=lambda: now[0])
+                for sample in samples:
+                    sample["observed_at"] = now[0]
+                    inventory.record(InventorySnapshotInput(**sample))
             worker.tick()
             _complete_agent_work(sessions, lifecycle, root)
             application = profiles.application(config["application"])

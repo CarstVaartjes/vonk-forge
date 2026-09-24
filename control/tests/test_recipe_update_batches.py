@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -10,6 +11,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     Base,
     CatalogDocumentHead,
@@ -21,13 +23,15 @@ from vonk_control.operation_api import OperationQuery, operation_detail_response
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
+    RecipeImageAvailabilityView,
 )
+from vonk_control.recipe_update_contract import RecipeUpdateResponse
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     persist_runtime_image_receipt,
     prepare_runtime_image,
 )
-from vonk_forge_contracts import content_sha256
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .test_recipe_image_availability import (
     Transport,
@@ -601,6 +605,334 @@ def postgres_update_env(postgres_engine, tmp_path):
     return sessions, revision_id, recipe, now, fresh
 
 
+@pytest.fixture
+def postgres_multi_update_env(postgres_engine, tmp_path):
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine)
+    recipes: dict[str, RecipeDefinition] = {}
+    with sessions.begin() as session:
+        for index in range(2):
+            base = _recipe("recipe-image.json")
+            recipe = base.model_copy(
+                update={
+                    "identity": base.identity.model_copy(
+                        update={"slug": f"cancel-batch-{index}"}
+                    )
+                }
+            )
+            revision_id = str(uuid.uuid4())
+            revision = _add_revision(session, revision_id, recipe)
+            revision.document_id = str(uuid.uuid4())
+            _add_head(session, revision)
+            recipes[revision_id] = recipe
+        session.add(User(subject="operator", role="operator"))
+    now = [datetime.now(UTC)]
+    storage = FilesystemRuntimeImageStorage(tmp_path / "images")
+
+    def fresh():
+        return RecipeImageAvailabilityService(
+            sessions,
+            storage=storage,
+            authority=lambda recipe_revision_id, **_: (
+                recipes[recipe_revision_id],
+                _runtime(),
+            ),
+            transport=Transport(),
+            clock=lambda: now[0],
+            claim_lease_seconds=10,
+        )
+
+    return sessions, list(recipes), now, fresh
+
+
+def test_postgres_update_cancel_after_first_child_prevents_later_admission_after_restart(
+    postgres_multi_update_env,
+):
+    sessions, revisions, now, fresh = postgres_multi_update_env
+    service = fresh()
+    parent = _start(service, revisions)
+    assert len(parent.children) == 2
+
+    claim = service.claim_update(owner="first-update-worker")
+    assert claim is not None
+    service.run_update_claim(claim)
+
+    after_first_admission = service.get_operator_operation(parent.id)
+    first, second = after_first_admission.children
+    assert first.operation_id is not None
+    assert first.state == "queued"
+    assert second.operation_id is None
+    assert second.state == "pending"
+    with sessions() as session:
+        admitted = tuple(
+            session.scalars(select(Job).where(Job.request_id == first.request_key))
+        )
+        not_admitted = tuple(
+            session.scalars(select(Job).where(Job.request_id == second.request_key))
+        )
+    assert len(admitted) == 1 and admitted[0].id == first.operation_id
+    assert not not_admitted
+
+    cancellation_key = str(uuid.uuid4())
+    requested = service.cancel(
+        parent.id,
+        actor="operator",
+        request_id=cancellation_key,
+        reason="stop after the first recipe was admitted",
+    )
+    assert requested.state == "cancelling"
+    assert requested.cancellation is not None
+    assert requested.cancellation.cancel_request_id == cancellation_key
+
+    # Make the next normal observation due. A live parent would now be
+    # claimable; after process reconstruction, its durable cancellation must
+    # keep the second child from being admitted.
+    now[0] += timedelta(seconds=3)
+    restarted = fresh()
+    assert restarted.claim_update(owner="replacement-update-worker") is None
+    with sessions() as session:
+        not_admitted_after_restart = tuple(
+            session.scalars(select(Job).where(Job.request_id == second.request_key))
+        )
+    assert not not_admitted_after_restart
+
+    # The first child is exact durable work and must be cancelled before the
+    # parent can settle; the second child's absence is the durable unissued
+    # outcome. Reconcile through a reconstructed Controller owner.
+    restarted.reconcile_cancellations()
+    restarted.reconcile_cancellations()
+    settled = restarted.get_operator_operation(parent.id)
+    assert settled.state == "cancelled"
+    assert settled.cancellation is not None
+    assert settled.cancellation.cancel_request_id == cancellation_key
+    first_after = settled.children[0]
+    second_after = settled.children[1]
+    assert first_after.operation_id == first.operation_id
+    assert first_after.state == "cancelled"
+    assert second_after.operation_id is None
+    assert second_after.state == "cancelled"
+    assert restarted.claim_update(owner="after-settlement-worker") is None
+    with sessions() as session:
+        child_jobs = tuple(
+            session.scalars(
+                select(Job).where(
+                    Job.request_id.in_([first.request_key, second.request_key])
+                )
+            )
+        )
+        stored_parent = session.get(Job, parent.id)
+    assert len(child_jobs) == 1
+    assert child_jobs[0].id == first.operation_id
+    assert child_jobs[0].state == "cancelled"
+    assert stored_parent is not None and stored_parent.state == "cancelled"
+
+
+def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer(
+    postgres_multi_update_env, tmp_path: Path, request: pytest.FixtureRequest
+):
+    from typing import Any
+
+    sessions, revisions, now, _fresh = postgres_multi_update_env
+    base_recipe = _recipe("recipe-image.json")
+    recipes = {
+        revision_id: base_recipe.model_copy(
+            update={
+                "identity": base_recipe.identity.model_copy(
+                    update={"slug": f"cancel-batch-{index}"}
+                )
+            }
+        )
+        for index, revision_id in enumerate(revisions)
+    }
+    model = next(iter(recipes[revisions[0]].models)).model
+    model_digest = model.content_sha256
+    content = b"shared ModelCache artifact needed after update cancellation" * 32
+    source = tmp_path / "shared-model.source"
+    source.write_bytes(content)
+    artifact: dict[str, object] = {
+        "id": "weights",
+        "path": "weights.bin",
+        "kind": "file",
+        "source": source.as_uri(),
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "download_bytes": len(content),
+        "roles": ["weights"],
+        "model_content_sha256": model_digest,
+    }
+    cache = ModelCacheService(
+        sessions,
+        tmp_path / "models",
+        reserve_bytes=0,
+        clock=lambda: now[0],
+        fixture_sources=True,
+    )
+    request.addfinalizer(cache.close)
+
+    class CacheAdapter:
+        def download_preview(self, *, recipe_revision_id: str):
+            assert recipe_revision_id in recipes
+            return cache.download_preview(
+                model_content_sha256=model_digest, artifacts=[artifact]
+            )
+
+        def resolve_artifact_set(self, *, recipe_revision_id: str):
+            assert recipe_revision_id in recipes
+            return cache.resolve_artifact_set(
+                model_content_sha256=model_digest, artifacts=[artifact]
+            )
+
+        def list_operations(self, *, limit: int = 100):
+            return cache.list_operations(limit=limit)
+
+        def start_download(self, **kwargs: Any):
+            kwargs.pop("recipe_revision_id", None)
+            return cache.start_download(
+                model_content_sha256=model_digest,
+                artifacts=[artifact],
+                interrupt_after_bytes=1,
+                **kwargs,
+            )
+
+        def get_operation(self, operation_id: str):
+            return cache.get_operation(operation_id)
+
+        def cancel_operation_in_session(self, *args: Any, **kwargs: Any):
+            return cache.cancel_operation_in_session(*args, **kwargs)
+
+        def signal_cancelled_operation(self, operation_id: str):
+            return cache.signal_cancelled_operation(operation_id)
+
+    def authority(
+        recipe_revision_id: str, *, force: bool = False
+    ) -> tuple[RecipeDefinition, dict[str, object]]:
+        del force
+        return recipes[recipe_revision_id], _runtime()
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
+        authority=authority,
+        transport=Transport(),
+        model_cache=CacheAdapter(),
+        clock=lambda: now[0],
+        claim_lease_seconds=10,
+    )
+    batch = _start(service, revisions)
+    first_claim = service.claim_update(owner="shared-update-first")
+    assert first_claim is not None
+    service.run_update_claim(first_claim)
+    first_parent = service.get_operator_operation(batch.id)
+    assert isinstance(first_parent, RecipeUpdateResponse)
+    first = first_parent.children[0]
+    assert first.operation_id is not None
+    image_claim = service.claim_pending(limit=1, owner_id="shared-update-child-one")
+    assert len(image_claim) == 1 and image_claim[0].operation_id == first.operation_id
+    service.run_claim(image_claim[0])
+    first_view = service.get(first.operation_id)
+    assert isinstance(first_view, RecipeImageAvailabilityView)
+    assert first_view.state == "partial" and first_view.model_child is not None
+    shared_child_id = str(first_view.model_child["id"])
+    shared_child = cache.get_operation(shared_child_id)
+    assert shared_child.state == "partial"
+    shared_artifact_set = shared_child.artifact_set_sha256
+    assert isinstance(shared_artifact_set, str)
+    downloaded_bytes = shared_child.progress.get("downloaded_bytes")
+    assert isinstance(downloaded_bytes, int) and downloaded_bytes > 0
+
+    now[0] += timedelta(seconds=3)
+    second_claim = service.claim_update(owner="shared-update-second")
+    assert second_claim is not None
+    service.run_update_claim(second_claim)
+    admitted = service.get_operator_operation(batch.id)
+    assert isinstance(admitted, RecipeUpdateResponse)
+    second = admitted.children[1]
+    assert second.operation_id is not None
+    child_claims = service.claim_pending(limit=2, owner_id="shared-update-children")
+    assert {claim.operation_id for claim in child_claims} == {
+        first.operation_id,
+        second.operation_id,
+    }
+    for claim in child_claims:
+        service.run_claim(claim)
+    first_view = service.get(first.operation_id)
+    second_view = service.get(second.operation_id)
+    assert isinstance(first_view, RecipeImageAvailabilityView)
+    assert isinstance(second_view, RecipeImageAvailabilityView)
+    assert first_view.model_child is not None
+    assert second_view.model_child is not None
+    assert first_view.model_child["id"] == second_view.model_child["id"]
+    assert first_view.model_child["id"] == shared_child_id
+    assert first_view.model_child["artifact_set_sha256"] == shared_artifact_set
+    assert second_view.model_child["artifact_set_sha256"] == shared_artifact_set
+
+    unrelated = service.start(
+        revisions[0],
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+    )
+    unrelated_claim = service.claim_pending(
+        limit=1, owner_id="unrelated-shared-consumer"
+    )
+    assert len(unrelated_claim) == 1
+    assert unrelated_claim[0].operation_id == unrelated.id
+    service.run_claim(unrelated_claim[0])
+    unrelated_view = service.get(unrelated.id)
+    assert isinstance(unrelated_view, RecipeImageAvailabilityView)
+    assert unrelated_view.state == "partial"
+    assert unrelated_view.model_child is not None
+    assert unrelated_view.model_child["id"] == shared_child_id
+    assert unrelated_view.model_child["artifact_set_sha256"] == shared_artifact_set
+
+    partial_path = cache._partial_path(shared_artifact_set, str(artifact["sha256"]))
+    partial_bytes = partial_path.read_bytes()
+    assert partial_bytes and content.startswith(partial_bytes)
+    cancellation_key = str(uuid.uuid4())
+    accepted = service.cancel(
+        batch.id,
+        actor="operator",
+        request_id=cancellation_key,
+        reason="stop the multi-recipe update",
+    )
+    assert accepted.state == "cancelling"
+    service.reconcile_cancellations()
+    service.reconcile_cancellations()
+
+    settled = service.get_operator_operation(batch.id)
+    assert isinstance(settled, RecipeUpdateResponse)
+    assert settled.state == "cancelled"
+    assert settled.cancellation is not None
+    assert settled.cancellation.cancel_request_id == cancellation_key
+    assert [child.state for child in settled.children] == ["cancelled", "cancelled"]
+    unchanged = service.get(unrelated.id)
+    assert isinstance(unchanged, RecipeImageAvailabilityView)
+    assert unchanged.state == "partial"
+    assert unchanged.cancellation is None
+    assert unchanged.model_child is not None
+    assert unchanged.model_child["id"] == shared_child_id
+    assert unchanged.model_child["artifact_set_sha256"] == shared_artifact_set
+    shared_after_cancel = cache.get_operation(shared_child_id)
+    assert shared_after_cancel.state == "partial"
+    assert shared_after_cancel.cancellation is None
+    remaining_bytes = shared_after_cancel.progress.get("downloaded_bytes")
+    assert isinstance(remaining_bytes, int) and remaining_bytes >= downloaded_bytes
+    assert partial_path.read_bytes() == partial_bytes
+
+    assert cache.run_pending() == 1
+    assert cache.get_operation(shared_child_id).state == "succeeded"
+    assert cache._object_path(str(artifact["sha256"])).read_bytes() == content
+    now[0] += timedelta(seconds=3)
+    unrelated_claim = service.claim_pending(limit=1, owner_id="unrelated-resume")
+    assert len(unrelated_claim) == 1
+    assert unrelated_claim[0].operation_id == unrelated.id
+    service.run_claim(unrelated_claim[0])
+    completed_unrelated = service.get(unrelated.id)
+    assert completed_unrelated.state == "succeeded"
+    assert completed_unrelated.cancellation is None
+    assert completed_unrelated.model_child is not None
+    assert completed_unrelated.model_child["id"] == shared_child_id
+    assert completed_unrelated.model_child["artifact_set_sha256"] == shared_artifact_set
+
+
 @pytest.mark.parametrize("changed_scope", [False, True])
 def test_postgres_concurrent_parent_acceptance_reconciles_original_key(
     postgres_update_env, changed_scope
@@ -779,3 +1111,76 @@ def test_scheduler_keeps_image_slot_available_while_parent_admits_another_child(
     finally:
         release_metadata.set()
         scheduler.close()
+
+
+def test_cancelling_update_before_admission_settles_without_issuing_children(
+    update_env,
+):
+    sessions, recipes, _, fresh = update_env
+    service = fresh()
+    parent = _start(service, list(recipes))
+
+    accepted = service.cancel(
+        parent.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000911",
+        reason="stop this update",
+    )
+    assert accepted.state == "cancelling"
+    assert accepted.cancellation is not None
+    service.reconcile_cancellations()
+
+    observed = service.get_operator_operation(parent.id)
+    assert observed.state == "cancelled"
+    assert all(child.state == "cancelled" for child in observed.children)
+    assert all(child.operation_id is None for child in observed.children)
+    with sessions() as session:
+        jobs = list(session.scalars(select(Job)))
+        assert len(jobs) == 1 and jobs[0].id == parent.id
+
+
+def test_update_cancellation_recovers_child_committed_before_parent_checkpoint(
+    update_env,
+):
+    sessions, recipes, _, fresh = update_env
+    service = fresh()
+    revision_id = next(iter(recipes))
+    parent = _start(service, [revision_id])
+    claim = service.claim_update(owner="crash-window")
+    assert claim is not None
+    with sessions() as session:
+        parent_row = session.get(Job, parent.id)
+        assert parent_row is not None
+        document = service._updates._document(parent_row)
+        child_intent = service._updates._intent(document.children[0])
+        child_request_key = document.children[0].request_key
+
+    child = service._start_request(
+        child_intent,
+        actor="operator",
+        request_id=child_request_key,
+        update_claim=claim,
+    )
+    assert child.state == "queued"
+    assert service.get_operator_operation(parent.id).children[0].operation_id is None
+
+    service.cancel(
+        parent.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000912",
+        reason="stop after child acceptance",
+    )
+    service.reconcile_cancellations()
+    assert service.get(child.id).state == "cancelled"
+    # The child existed durably before the parent recorded its returned ID.
+    # Reconciliation binds that exact request and then settles the parent.
+    service.reconcile_cancellations()
+    observed = service.get_operator_operation(parent.id)
+    assert observed.state == "cancelled"
+    assert observed.children[0].operation_id == child.id
+    assert observed.children[0].state == "cancelled"
+    with sessions() as session:
+        matching = list(
+            session.scalars(select(Job).where(Job.request_id == child_request_key))
+        )
+        assert len(matching) == 1 and matching[0].id == child.id

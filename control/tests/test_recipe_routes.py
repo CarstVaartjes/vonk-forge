@@ -9,11 +9,15 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
+from vonk_control.fleet_profile_contract import (
+    FleetProfileEndpointAssignmentIntent,
+    FleetProfileEndpointIntent,
+)
 from vonk_control.litellm import (
     LiteLlmGeneration,
     LiteLlmPolicyError,
@@ -1183,37 +1187,7 @@ def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
         assert all(node.state == "failed" for node in nodes)
 
 
-def test_initial_exact_observation_deadline_fails_late_signed_ranks(
-    tmp_path: Path,
-) -> None:
-    service, _publisher, _applied, run_id = setup(tmp_path)
-    deadline = NOW + timedelta(seconds=60)
-    with service.sessions.begin() as session:
-        run = _recipe_run(session, run_id)
-        run.plan = {**run.plan, "observation_schema_version": 2}
-        run.route_state = "pending"
-        run.observation_deadline_at = deadline
-        for node in session.query(RunNode).filter_by(run_id=run_id):
-            node.observed_run_generation = run.run_generation
-            node.observation_receipt_sha256 = "a" * 64
-            node.observation_endpoint_ready = node.role == "entrypoint" or None
-            node.updated_at = deadline + timedelta(microseconds=1)
-
-    worker = RecipeOperationWorker(
-        service.sessions,
-        service,
-        clock=lambda: deadline + timedelta(seconds=1),
-    )
-    assert worker.tick() is True
-    with service.sessions() as session:
-        run = _recipe_run(session, run_id)
-        nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
-        assert run.route_state == "withdrawn"
-        assert run.route_error == "initial exact observation deadline elapsed"
-        assert all(node.state == "failed" for node in nodes)
-
-
-def test_direct_publication_rejects_exact_observation_after_deadline(
+def test_direct_publication_accepts_renewed_exact_observation_after_initial_deadline(
     tmp_path: Path,
 ) -> None:
     service, _publisher, _applied, run_id = setup(tmp_path)
@@ -1229,15 +1203,14 @@ def test_direct_publication_rejects_exact_observation_after_deadline(
             node.observation_endpoint_ready = node.role == "entrypoint" or None
             node.updated_at = deadline + timedelta(microseconds=1)
 
-    with pytest.raises(
-        RecipeRouteError,
-        match="recipe rank exact observation missed its deadline",
-    ):
-        service.publish_run(run_id)
+    # Signed ingress has already enforced the first-receipt deadline. The
+    # latest timestamp is a renewal and must retain its current health meaning.
+    generation = service.publish_run(run_id)
+    assert generation.generation == 1
 
 
 def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     service, _publisher, _applied, run_id = setup(tmp_path / "database")
     atomic = AtomicRouteBundlePublisher(
@@ -1287,15 +1260,146 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         assert publication is not None and publication.state == "completed"
         assert authority is not None and authority.authority_id == owner.authority_id
 
+    def profile_endpoint_intent(session, number):
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        published = run.route_state == "published"
+        return FleetProfileEndpointIntent(
+            number=number,
+            profile_id="00000000-0000-4000-8000-000000000101",
+            application_id="00000000-0000-4000-8000-000000000102",
+            application_state="succeeded",
+            assignments=(
+                FleetProfileEndpointAssignmentIntent(
+                    assignment_id="00000000-0000-4000-8000-000000000103",
+                    recipe_title="Qwen",
+                    desired_state="running",
+                    alias="qwen",
+                    state="not-published-yet" if published else "withdrawn",
+                    expected_run_id=run_id if published else None,
+                ),
+            ),
+        )
+
     projection = durable_operation_services(
         service.sessions,
         tmp_path / "live",
         clock=lambda: NOW,
         cursors=TokenCodec(b"k" * 32).cursor_codec(),
+        profile_endpoint_intent=profile_endpoint_intent,
     )
+    assert projection.profile_endpoint is not None
     endpoint = projection.endpoint("qwen")
     assert endpoint["api_base"] == "http://10.0.0.2:8000/v1"
     assert endpoint["node_id"] == "spk_" + "1".zfill(32)
+
+    profile_endpoint = projection.profile_endpoint(3, None)
+    assert profile_endpoint.assignments[0].state == "published"
+    assert profile_endpoint.assignments[0].endpoint is not None
+    assert profile_endpoint.assignments[0].endpoint.generation == 1
+    with pytest.raises(KeyError, match="other-profile"):
+        projection.profile_endpoint(3, "other-profile")
+
+    wrong_owner = durable_operation_services(
+        service.sessions,
+        tmp_path / "live",
+        clock=lambda: NOW,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+        profile_endpoint_intent=lambda _session, number: FleetProfileEndpointIntent(
+            number=number,
+            profile_id="00000000-0000-4000-8000-000000000101",
+            application_id="00000000-0000-4000-8000-000000000102",
+            application_state="succeeded",
+            assignments=(
+                FleetProfileEndpointAssignmentIntent(
+                    assignment_id="00000000-0000-4000-8000-000000000103",
+                    recipe_title="Qwen",
+                    desired_state="running",
+                    alias="qwen",
+                    state="not-published-yet",
+                    expected_run_id="00000000-0000-4000-8000-000000000104",
+                ),
+            ),
+        ),
+    )
+    assert wrong_owner.profile_endpoint is not None
+    wrong_owner_endpoint = wrong_owner.profile_endpoint(3, "qwen")
+    assert wrong_owner_endpoint.assignments[0].state == "withdrawn"
+    assert wrong_owner_endpoint.assignments[0].endpoint is None
+
+    expired = durable_operation_services(
+        service.sessions,
+        tmp_path / "live",
+        clock=lambda: NOW + timedelta(seconds=181),
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+        profile_endpoint_intent=profile_endpoint_intent,
+    )
+    assert expired.profile_endpoint is not None
+    expired_endpoint = expired.profile_endpoint(3, "qwen")
+    assert expired_endpoint.assignments[0].state == "expired"
+    assert expired_endpoint.assignments[0].endpoint is None
+
+    from vonk_control import operation_api
+
+    verify_bundle = operation_api.verify_active_route_bundle
+    renewed_during_verification = False
+    replacement_generation = None
+
+    def renew_after_bundle_verification(*args, **kwargs):
+        nonlocal renewed_during_verification, replacement_generation
+        bundle = verify_bundle(*args, **kwargs)
+        if not renewed_during_verification:
+            renewed_during_verification = True
+            with service.sessions.begin() as session:
+                for node in session.scalars(
+                    select(RunNode).where(RunNode.run_id == run_id)
+                ):
+                    node.evidence_digest = "7" * 64
+            replacement_generation = service.publish_run(run_id).generation
+        return bundle
+
+    # The alias and run remain valid, but the verified generation has changed.
+    # Checking membership or published state alone would return stale evidence.
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            operation_api, "verify_active_route_bundle", renew_after_bundle_verification
+        )
+        with pytest.raises(RuntimeError, match="ownership changed during projection"):
+            projection.profile_endpoint(3, "qwen")
+    assert renewed_during_verification
+    assert replacement_generation is not None
+    assert replacement_generation > generation.generation
+    current_endpoint = projection.profile_endpoint(3, "qwen")
+    assert current_endpoint.assignments[0].state == "published"
+    assert current_endpoint.assignments[0].endpoint is not None
+    assert current_endpoint.assignments[0].endpoint.generation == replacement_generation
+
+    withdrew_during_verification = False
+
+    def withdraw_after_bundle_verification(*args, **kwargs):
+        nonlocal withdrew_during_verification
+        bundle = verify_bundle(*args, **kwargs)
+        if not withdrew_during_verification:
+            withdrew_during_verification = True
+            service.withdraw_run(run_id)
+        return bundle
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            operation_api,
+            "verify_active_route_bundle",
+            withdraw_after_bundle_verification,
+        )
+        with pytest.raises(
+            RuntimeError,
+            match="active publication is unavailable|ownership changed during projection",
+        ):
+            projection.profile_endpoint(3, "qwen")
+    assert withdrew_during_verification
+
+    withdrawn = projection.profile_endpoint(3, "qwen")
+    assert withdrawn.assignments[0].state == "withdrawn"
+    assert withdrawn.assignments[0].endpoint is None
 
 
 def test_worker_renews_from_fresh_all_rank_evidence_and_recovers_owner(

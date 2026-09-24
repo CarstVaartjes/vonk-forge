@@ -111,7 +111,7 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         retry = next(row for row in applications if row.id != first.id)
         assert retry.progress["retry_of_application_id"] == first.id
         assert retry.progress["attempt"] == 2
-        assert retry.progress["workload_intent_ordinal"] == original_ordinal + 1
+        assert retry.progress["workload_intent_ordinal"] == original_ordinal
         retry_scope = require_mapping(retry.plan["scope"], "retry scope")
         assert tuple(require_sequence(retry_scope["node_ids"], "retry nodes")) == tuple(
             nodes
@@ -183,7 +183,9 @@ def test_cache_recovery_refuses_access_and_integrity_failures(tmp_path: Path) ->
             assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
 
 
-@pytest.mark.parametrize("recovery_blocker", [None, "contract", "capacity"])
+@pytest.mark.parametrize(
+    "recovery_blocker", [None, "contract", "capacity", "model-drift"]
+)
 def test_cache_recovery_replans_an_actually_missing_build_archive(
     tmp_path: Path,
     recovery_blocker: str | None,
@@ -276,6 +278,38 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
             after_build.image_bytes,
         ) == before
     _typed_cache_failure(sessions, first.id, child_id, "runtime_image.cache_missing")
+
+    if recovery_blocker == "model-drift":
+        original_inspector = run_switch._artifacts
+
+        class ChangedArtifactSet:
+            def inspect(self, *args, **kwargs):
+                return replace(
+                    original_inspector.inspect(*args, **kwargs),
+                    artifact_set_sha256="9" * 64,
+                )
+
+        run_switch._artifacts = ChangedArtifactSet()
+        # Image repair must not copy the old model projection over current
+        # evidence. A changed model set still requires a new operator review.
+        assert service.tick() is True
+        with sessions() as session:
+            applications = list(session.scalars(select(FleetProfileApplication)))
+            assert len(applications) == 1
+            assert "profile.recovery_artifact_changed" in (
+                applications[0].status_reason or ""
+            )
+            assert (
+                len(
+                    list(
+                        session.scalars(
+                            select(Job).where(Job.kind == "recipe.run-switch.v2")
+                        )
+                    )
+                )
+                == 1
+            )
+        return
 
     if recovery_blocker is not None:
         with sessions.begin() as session:

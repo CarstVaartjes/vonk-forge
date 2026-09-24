@@ -35,11 +35,24 @@ ModelCacheOperationState = Literal[
     "queued", "running", "partial", "succeeded", "failed", "cancelled"
 ]
 ModelCacheOperatorState = Literal[
-    "accepted", "queued", "running", "partial", "succeeded", "failed", "cancelled"
+    "accepted",
+    "queued",
+    "running",
+    "partial",
+    "cancelling",
+    "succeeded",
+    "failed",
+    "cancelled",
 ]
 ModelCacheOperatorAction = Literal["download", "remove"]
 ModelCacheOperationPhase = Literal[
-    "queued", "downloading", "verifying", "reclaiming", "completed", "failed"
+    "queued",
+    "downloading",
+    "verifying",
+    "reclaiming",
+    "cancelling",
+    "completed",
+    "failed",
 ]
 ModelCacheEntryState = Literal[
     "incomplete", "downloading", "verifying", "cached", "needs-repair", "failed"
@@ -146,12 +159,22 @@ class ModelCacheRemovalResult(StrictModel):
     cancelled_operations: list[str] = Field(default_factory=list, max_length=32)
 
 
+class ModelCacheCancellation(StrictModel):
+    """Durable record of the one accepted cancellation request."""
+
+    request_key: str = Field(pattern=UUID_PATTERN)
+    actor: str = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=1, max_length=512)
+    requested_at: str = Field(min_length=1, max_length=64)
+
+
 class _ModelCacheOperationPayload(StrictModel):
     schema_version: Literal[2]
     source_policy: Literal["nas-first"]
     claim: ModelCacheClaim | None = None
     access_recheck: ModelCacheAccessRecheck | None = None
     failure: AvailabilityOperationFailure | None = None
+    cancellation: ModelCacheCancellation | None = None
     retry_of: str | None = Field(default=None, pattern=UUID_PATTERN)
     resume_of: str | None = Field(default=None, pattern=UUID_PATTERN)
     # A removal fence is durable operation state.  Workers must observe it
@@ -284,6 +307,14 @@ class ModelCacheOperatorRequest(StrictModel):
     request_key: str = Field(pattern=UUID_PATTERN)
 
 
+class ModelCacheCancellationRequest(StrictModel):
+    """Stable identity and operator explanation for one cancellation request."""
+
+    schema_version: Literal[2] = 2
+    request_key: str = Field(pattern=UUID_PATTERN)
+    reason: str = Field(min_length=1, max_length=512)
+
+
 class ModelCacheOperatorResponse(StrictModel):
     """CLI-shaped result without exposing an internal plan/digest workflow."""
 
@@ -301,8 +332,20 @@ class ModelCacheOperatorResponse(StrictModel):
     preserved: list[str] = Field(default_factory=list, max_length=32)
     next_actions: list[str] = Field(default_factory=list, max_length=32)
     cancelled_operations: list[str] = Field(default_factory=list, max_length=32)
+    cancellation: ModelCacheCancellation | None = None
     result: ModelCacheDownloadResult | ModelCacheRemovalResult | None = None
     failure: AvailabilityOperationFailure | None = None
+
+    @model_validator(mode="after")
+    def cancellation_matches_state(self) -> ModelCacheOperatorResponse:
+        if self.state == "cancelling" and self.cancellation is None:
+            raise ValueError("cancelling model operation requires cancellation intent")
+        if self.cancellation is not None and self.state not in {
+            "cancelling",
+            "cancelled",
+        }:
+            raise ValueError("model cancellation intent requires a cancelling state")
+        return self
 
 
 class CacheStorageResponse(StrictModel):
@@ -422,13 +465,14 @@ class ModelCacheOperationResponse(StrictModel):
     id: str = Field(pattern=UUID_PATTERN)
     request_key: str = Field(pattern=UUID_PATTERN)
     kind: ModelCacheOperationKind
-    state: ModelCacheOperationState
+    state: ModelCacheOperationState | Literal["cancelling"]
     attempt: int = Field(ge=1)
     artifact_set_sha256: Digest | None
     plan_digest: Digest | None
     progress: ModelCacheOperationProgress
     result: ModelCacheOperationResult | None = None
     failure: AvailabilityOperationFailure | None = None
+    cancellation: ModelCacheCancellation | None = None
     created_at: str
     updated_at: str
     completed_at: str | None
@@ -448,6 +492,13 @@ class ModelCacheOperationResponse(StrictModel):
             raise ValueError("failed cache operation requires failure evidence")
         if self.state == "running" and self.failure is not None:
             raise ValueError("running cache operation cannot retain failure evidence")
+        if self.state == "cancelling" and self.cancellation is None:
+            raise ValueError("cancelling cache operation requires cancellation intent")
+        if self.cancellation is not None and self.state not in {
+            "cancelling",
+            "cancelled",
+        }:
+            raise ValueError("cache cancellation intent requires a cancelling state")
         return self
 
 
@@ -526,6 +577,8 @@ __all__ = [
     "CacheStorageResponse",
     "ModelCacheAccessRecheck",
     "ModelCacheAccessResumeRequest",
+    "ModelCacheCancellation",
+    "ModelCacheCancellationRequest",
     "ModelCacheClaim",
     "ModelCacheCoverage",
     "ModelCacheDownloadPayload",

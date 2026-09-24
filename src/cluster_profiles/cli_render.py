@@ -109,6 +109,31 @@ def _time(value: object) -> str:
     return parsed.isoformat(sep=" ")
 
 
+def _freshness(observed_at: object, projected_at: object) -> str:
+    if not isinstance(observed_at, str) or not isinstance(projected_at, str):
+        return "unavailable"
+    try:
+        observed = datetime.fromisoformat(observed_at)
+        projected = datetime.fromisoformat(projected_at)
+    except ValueError:
+        return "unavailable"
+    if observed.tzinfo is None or projected.tzinfo is None:
+        return "timezone unavailable"
+    age_seconds = (projected - observed).total_seconds()
+    if age_seconds < 0:
+        return "route observation is newer than the Controller projection"
+    age = int(age_seconds)
+    unit, count = (
+        ("hour", age // 3600)
+        if age >= 3600
+        else ("minute", age // 60)
+        if age >= 60
+        else ("second", age)
+    )
+    suffix = "" if count == 1 else "s"
+    return f"observed {count} {unit}{suffix} before this Controller read"
+
+
 def _width(value: str) -> int:
     return sum(
         0
@@ -443,6 +468,59 @@ def _profile(payload: Mapping[str, object]) -> None:
     _actions(payload.get("next_actions"))
 
 
+def _profile_endpoints(payload: Mapping[str, object]) -> None:
+    number = payload.get("number")
+    application_id = payload.get("application_id")
+    if application_id is None:
+        print(f"Profile {number} has no loaded application.")
+        print("Saved profile edits do not publish routes until the profile is loaded.")
+        return
+    _field("Loaded application", application_id)
+    _field("Application state", payload.get("application_state"))
+    assignments = _records(payload, "assignments")
+    if not assignments:
+        print("The loaded application has no endpoint assignments.")
+        return
+    for assignment in assignments:
+        print()
+        _field("Assignment", assignment.get("recipe_title"))
+        _field("Endpoint state", assignment.get("state"))
+        alias = assignment.get("alias")
+        endpoint = _optional(assignment.get("endpoint"), "endpoint")
+        if assignment.get("state") == "published":
+            _field("Client model identifier", alias)
+            api_base = endpoint.get("api_base")
+            _field("API base", api_base)
+            _field("Route generation", endpoint.get("generation"))
+            _field("Route observed at", _time(endpoint.get("observed_at")))
+            _field(
+                "Freshness",
+                _freshness(endpoint.get("observed_at"), payload.get("observed_at")),
+            )
+            _field("Route expires at", _time(endpoint.get("expires_at")))
+            if isinstance(api_base, str) and isinstance(alias, str):
+                print("Credential-free configuration example:")
+                print(
+                    "  API_BASE="
+                    + terminal_text(shlex.quote(api_base))
+                    + " MODEL="
+                    + terminal_text(shlex.quote(alias))
+                )
+            continue
+        if alias is not None:
+            _field("Client model identifier", alias)
+        messages = {
+            "installed-only": "Install-only assignment; no published endpoint was requested.",
+            "not-published-yet": "The current assignment route is not published yet.",
+            "expired": "The published route lease has expired.",
+            "withdrawn": "No current published route is associated with this assignment.",
+            "unavailable": "The Controller cannot verify a current route for this assignment.",
+        }
+        print(
+            messages.get(str(assignment.get("state")), "Endpoint state is unavailable.")
+        )
+
+
 def _preview(payload: Mapping[str, object]) -> None:
     print("Ready for review" if payload.get("allowed") is True else "Blocked")
     _field("Profile", payload.get("profile_name"))
@@ -482,6 +560,15 @@ def _preview(payload: Mapping[str, object]) -> None:
         runtime = _object(item.get("runtime_image"), "runtime identity")
         _field("Exact model set", model.get("artifact_set_sha256"))
         _field("Exact image", runtime.get("image_digest"))
+        _field("OCI archive SHA-256", runtime.get("oci_layout_sha256"))
+        _field("Image size", _bytes(runtime.get("image_bytes")))
+        _field("Architecture", runtime.get("architecture"))
+        _field("Runtime interface", runtime.get("runtime_interface"))
+        build_id = runtime.get("build_id")
+        _field(
+            "Build",
+            "published image" if build_id is None else build_id,
+        )
         _field("Reuse model on", _words(item.get("model_reuse_node_ids")))
         _field("Reuse image on", _words(item.get("image_reuse_node_ids")))
     for item in _records(payload, "assessments"):
@@ -497,12 +584,17 @@ def _preview(payload: Mapping[str, object]) -> None:
                 continue
             _field(label, "fits" if fit.get("allowed") is True else "blocked")
             for node in _records(fit, "nodes"):
-                _field("Spark", node.get("node_id"))
+                node_id = node.get("node_id")
+                _field("Spark", node_id)
                 _field("Ports required", _words(node.get("ports_required")))
                 _field("Memory demand kind", node.get("memory_kind"))
                 _field("Physical memory pool", node.get("memory_pool"))
                 _field("Memory required", _bytes(node.get("memory_required_bytes")))
                 _field("Memory reserve", _bytes(node.get("memory_floor_bytes")))
+                _field(
+                    "Physical memory capacity",
+                    _bytes(node.get("memory_capacity_bytes")),
+                )
                 _field(
                     "Available in limiting pool",
                     _bytes(node.get("memory_available_bytes")),
@@ -515,6 +607,23 @@ def _preview(payload: Mapping[str, object]) -> None:
                 _field(
                     "Disk after placement", _headroom(node.get("disk_free_after_bytes"))
                 )
+                for reason_kind, label in (
+                    ("blockers", "blocker"),
+                    ("warnings", "warning"),
+                ):
+                    _reasons(
+                        node.get(reason_kind),
+                        subject=f"{_text(node_id)} capacity {label}",
+                    )
+        condition = _optional(
+            assessment.get("post_stop_memory_check"), "post-stop memory check"
+        )
+        if condition:
+            _field(
+                "Conditional memory fit",
+                "stop the reviewed workloads, then recheck fresh capacity before preparing or starting",
+            )
+            _field("Required stops", _words(condition.get("stop_run_ids")))
         if assessment.get("stop_before_prepare") is True:
             print("Stop the reviewed workloads before preparing the replacement.")
         if assessment.get("stop_before_transfer") is True:
@@ -648,6 +757,258 @@ def _job(payload: Mapping[str, object]) -> None:
             print("Partial page; additional job evidence is available.")
 
 
+def _artifact_job_record(payload: Mapping[str, object], action: str) -> None:
+    _field("Artifact job", payload.get("id"))
+    _field("Command", action)
+    _field("Run", payload.get("run_id"))
+    _field("State", payload.get("state"))
+    _field("Interface", payload.get("interface"))
+    _field("Contract SHA-256", payload.get("contract_sha256"))
+    _field("Input manifest SHA-256", payload.get("input_manifest_sha256"))
+    _field("Input bytes", _bytes(payload.get("input_total_bytes")))
+    _field("Created", _time(payload.get("created_at")))
+    _field("Updated", _time(payload.get("updated_at")))
+    if payload.get("status_reason") is not None:
+        _field("Reason", payload.get("status_reason"))
+
+    operation_id = payload.get("operation_id")
+    if operation_id is not None:
+        _field("Operation", operation_id)
+        _field("Submit request", payload.get("submit_request_id"))
+
+    input_declarations = _records(payload, "input_declarations")
+    input_files = _records(payload, "input_files")
+    uploaded_names = {item.get("name") for item in input_files}
+    _field("Inputs", f"{len(input_declarations)} declared, {len(input_files)} uploaded")
+    for item in input_declarations:
+        name = item.get("name")
+        _field("Input", name)
+        _field("Input slot", item.get("slot"))
+        _field("Input state", "uploaded" if name in uploaded_names else "not uploaded")
+        _field("Input media type", item.get("media_type"))
+        _field("Input size", _bytes(item.get("size_bytes")))
+        _field("Input SHA-256", item.get("sha256"))
+
+    state = payload.get("state")
+    output_files = _records(payload, "output_files")
+    if state == "succeeded":
+        _field("Output manifest SHA-256", payload.get("output_manifest_sha256"))
+        if not output_files:
+            print("Result files: none (job succeeded with an empty result).")
+        else:
+            _field("Result files", len(output_files))
+            for item in output_files:
+                _field("Output file", item.get("name"))
+                _field("Output media type", item.get("media_type"))
+                _field("Output size", _bytes(item.get("size_bytes")))
+                _field("Output SHA-256", item.get("sha256"))
+    else:
+        _field(
+            "Result files", f"unavailable until job succeeds (state: {_text(state)})"
+        )
+
+    if isinstance(operation_id, str) and state in {"queued", "running", "cancelling"}:
+        _field(
+            "Reconnect",
+            f"vonkctl recipe job detail {shlex.quote(str(payload.get('id')))} --follow",
+        )
+
+
+def _artifact_job_list(payload: Mapping[str, object]) -> None:
+    jobs = _records(payload, "jobs")
+    _field("Artifact jobs", len(jobs))
+    if not jobs:
+        print("No artifact jobs for this run.")
+        return
+    for job in jobs:
+        print()
+        _field("Artifact job", job.get("id"))
+        _field("Run", job.get("run_id"))
+        _field("State", job.get("state"))
+        _field("Interface", job.get("interface"))
+        if job.get("status_reason") is not None:
+            _field("Reason", job.get("status_reason"))
+        inputs = _records(job, "input_declarations")
+        uploaded_inputs = _records(job, "input_files")
+        _field("Inputs", f"{len(inputs)} declared, {len(uploaded_inputs)} uploaded")
+        outputs = _records(job, "output_files")
+        if job.get("state") == "succeeded":
+            _field(
+                "Outputs",
+                "none (successful empty result)"
+                if not outputs
+                else f"{len(outputs)} verified result files",
+            )
+        else:
+            _field(
+                "Outputs",
+                f"unavailable until job succeeds (state: {_text(job.get('state'))})",
+            )
+        operation_id = job.get("operation_id")
+        if operation_id is not None:
+            _field("Operation", operation_id)
+        if isinstance(operation_id, str) and job.get("state") in {
+            "queued",
+            "running",
+            "cancelling",
+        }:
+            _field(
+                "Reconnect",
+                f"vonkctl recipe job detail {shlex.quote(str(job.get('id')))} --follow",
+            )
+
+
+def _artifact_job_download(payload: Mapping[str, object]) -> None:
+    _field("Artifact job", payload.get("job_id"))
+    state = payload.get("state")
+    _field("State", state)
+    _field("Output manifest SHA-256", payload.get("output_manifest_sha256"))
+    _field("Total output bytes", _bytes(payload.get("total_bytes")))
+    files = _records(payload, "files")
+    if state != "succeeded":
+        raise ValueError("artifact job download receipt is not successful")
+    if not files:
+        print("Result files: none (job succeeded with an empty result).")
+        return
+    _field("Verified output files", len(files))
+    for item in files:
+        _field("Output file", item.get("name"))
+        _field("File state", item.get("state"))
+        _field("Verified path", item.get("path"))
+        _field("Verified size", _bytes(item.get("size_bytes")))
+        _field("Verified SHA-256", item.get("sha256"))
+
+
+def _artifact_job(payload: Mapping[str, object], action: str) -> None:
+    if action == "list":
+        _artifact_job_list(payload)
+    elif action == "download":
+        _artifact_job_download(payload)
+    elif action in {"detail", "create", "upload", "submit", "cancel"}:
+        _artifact_job_record(payload, action)
+    else:
+        raise ValueError(f"no recipe job presentation for {action}")
+
+
+def _activity(
+    payload: Mapping[str, object], filters: Mapping[str, object] | None
+) -> None:
+    operations = _records(payload, "operations")
+    total = payload.get("total")
+    if type(total) is not int or total < 0:
+        raise ValueError("activity total is invalid")
+    _field("Activity", f"{len(operations)} of {total} references on this page")
+    if not operations:
+        print("No activity matches this request.")
+    for operation in operations:
+        _field("Operation", operation.get("id"))
+        _field("Kind", operation.get("kind"))
+        _field("State", operation.get("state"))
+        _field("Created", _time(operation.get("created_at")))
+        _field("Targets", _words(operation.get("node_ids")))
+        if operation.get("attempt") is not None:
+            _field("Attempt", operation.get("attempt"))
+        owner = _optional(operation.get("owner"), "operation owner")
+        if owner:
+            _field("Owner", f"{_text(owner.get('kind'))} {_text(owner.get('id'))}")
+            if owner.get("request_id") is not None:
+                _field("Request", owner.get("request_id"))
+            owner_kind = owner.get("kind")
+            owner_id = owner.get("id")
+            reconnect = None
+            if isinstance(owner_id, str) and owner_id:
+                if owner_kind == "job":
+                    reconnect = ["vonkctl", "fleet", "progress", owner_id, "--follow"]
+                elif owner_kind == "model-cache-operation":
+                    reconnect = ["vonkctl", "model", "progress", owner_id, "--follow"]
+                elif owner_kind == "fleet-profile-application":
+                    reconnect = [
+                        "vonkctl",
+                        "profile",
+                        "progress",
+                        "--application",
+                        owner_id,
+                        "--follow",
+                    ]
+                elif owner_kind == "audit-event" and isinstance(
+                    owner.get("request_id"), str
+                ):
+                    reconnect = [
+                        "vonkctl",
+                        "fleet",
+                        "activity",
+                        "--request-id",
+                        owner["request_id"],
+                    ]
+            _field(
+                "Reconnect",
+                "unavailable" if reconnect is None else shlex.join(reconnect),
+            )
+        cancellation = _optional(operation.get("cancellation"), "profile cancellation")
+        if cancellation:
+            _field(
+                "Cancellation",
+                f"{_text(cancellation.get('state'))} ({_text(cancellation.get('cause'))})",
+            )
+            _field("Cancellation request", cancellation.get("request_key"))
+            _field("Cancellation actor", cancellation.get("actor"))
+            if cancellation.get("owner") is not None:
+                _field("Cancellation owner", cancellation.get("owner"))
+            if cancellation.get("dependency") is not None:
+                _field("Cancellation dependency", cancellation.get("dependency"))
+            if cancellation.get("deadline_at") is not None:
+                _field("Cancellation deadline", _time(cancellation.get("deadline_at")))
+            for field, label in (
+                ("completed_effects", "Completed effect"),
+                ("pending_effects", "Pending effect"),
+                ("cancelled_effects", "Cancelled or unissued effect"),
+            ):
+                effects = _records(cancellation, field)
+                _field(label + " count", len(effects))
+                for effect in effects:
+                    _field(
+                        label,
+                        f"{_text(effect.get('outcome'))}: "
+                        f"{_text(effect.get('kind'))} "
+                        f"{_text(effect.get('effect_id'))}: "
+                        f"{_text(effect.get('label'))}",
+                    )
+        failure = _optional(operation.get("failure"), "operation failure")
+        if failure:
+            _warn(
+                "Blocker: "
+                + _text(failure.get("code", failure.get("error_code")))
+                + ": "
+                + _text(failure.get("detail", failure.get("summary")))
+            )
+        if operation.get("status_reason") is not None:
+            _warn(f"Reason: {_text(operation['status_reason'])}")
+        recovery = _optional(operation.get("recovery"), "operation recovery")
+        _actions(recovery.get("actions"))
+        print()
+
+    cursor = payload.get("next_cursor")
+    if cursor is None:
+        _field("More results", "no")
+        return
+    if not isinstance(cursor, str) or not cursor or len(cursor) > 512:
+        raise ValueError("activity continuation cursor is invalid")
+    command = ["vonkctl", "fleet", "activity"]
+    query_filters = filters or {}
+    limit = query_filters.get("limit", 20)
+    command.extend(("--limit", str(limit), "--cursor", cursor))
+    for key, flag in (
+        ("state", "--state"),
+        ("target", "--target"),
+        ("request_id", "--request-id"),
+    ):
+        value = query_filters.get(key)
+        if isinstance(value, str) and value:
+            command.extend((flag, value))
+    print("More results are available. Continue with:")
+    print(shlex.join(command))
+
+
 def _enrollment(payload: Mapping[str, object]) -> None:
     _field("Grant", payload.get("id"))
     delivery = _optional(payload.get("delivery"), "delivery")
@@ -718,6 +1079,8 @@ def render_payload(
     action: str | None = None,
     wide: bool = False,
     technical: bool = False,
+    activity_filters: Mapping[str, object] | None = None,
+    artifact_job_action: str | None = None,
 ) -> None:
     """Dispatch by the command's current response contract, never legacy shapes."""
     if "observation" in payload:
@@ -732,6 +1095,8 @@ def render_payload(
             action=action,
             wide=wide,
             technical=technical,
+            activity_filters=activity_filters,
+            artifact_job_action=artifact_job_action,
         )
         return
     if "delivery" in payload or (noun == "fleet" and action == "enrollment"):
@@ -773,6 +1138,8 @@ def render_payload(
             _node(payload, detail=True)
         elif action == "progress":
             _job(payload)
+        elif action == "activity":
+            _activity(payload, activity_filters)
         elif action == "loginfo":
             _field("Spark", payload.get("node_id"))
             entries = _records(payload, "entries")
@@ -798,13 +1165,17 @@ def render_payload(
                 )
         else:
             raise ValueError(f"no fleet presentation for {action}")
+    elif noun == "recipe" and artifact_job_action is not None:
+        _artifact_job(payload, artifact_job_action)
     elif noun in {"model", "recipe"}:
         if action in {None, "library", "detail"}:
             _library(payload, noun, detail=action == "detail", wide=wide)
         else:
             _operation(payload, noun)
     elif noun == "profile":
-        if action == "list":
+        if action == "endpoint":
+            _profile_endpoints(payload)
+        elif action == "list":
             rows = _records(payload, "profiles")
             if not rows:
                 print("No profiles saved.")

@@ -16,13 +16,15 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import re
 import stat
 import subprocess
 import uuid
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,26 +32,44 @@ from typing import IO, Annotated, Literal, Protocol
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.wire_model import Digest, WireModel
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
+from .artifact_lifecycle import (
+    ArtifactIdentity,
+    ArtifactLifecycleError,
+    require_reference_open,
+)
 from .cached_file_verification import verified_files
 from .catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
 )
+from .compiled_execution_plan import CompiledRuntimeImage
 from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
 from .runtime_adapters import (
     RuntimeAdapter,
     RuntimeAdapterError,
     resolve_runtime_adapter,
 )
+from .validation_detail import validation_error_detail
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_CACHE_DIRECTORY = "image-cache"
+_LOGGER = logging.getLogger(__name__)
+# One rejection detail is enough to name the rule; the document itself is
+# never recorded and the rendered detail is already bounded per issue.
+_MAX_RECEIPT_REJECTION_DETAIL = 512
+# RecipeImage.repository allows 512 ASCII characters; `@sha256:` plus its
+# 64-hex digest makes the largest canonical reference 584 bytes. The other
+# checkpoint values are fixed literals/digests or a 14-digit byte count, so
+# compact JSON at those maxima is 1,285 bytes. The 4 KiB read cap allows
+# bounded formatting headroom while covering every canonical checkpoint.
+_MAX_PUBLISHED_STAGE_CHECKPOINT_BYTES = 4 * 1024
 
 
 class RuntimeImagePreparationError(ValueError):
@@ -159,6 +179,115 @@ class SkopeoOCIImageTransport:
         expected_runtime_interface: str,
         progress: Callable[[str, int, int | None], None] | None = None,
     ) -> PulledImageEvidence:
+        cache = destination.parent / "registry-layers"
+        key = self._registry_layer_key(reference, expected_architecture)
+        with self._registry_layer_lock(cache, key, reference=reference):
+            return self._pull_and_export_locked(
+                reference,
+                destination,
+                cache=cache,
+                expected_architecture=expected_architecture,
+                expected_runtime_interface=expected_runtime_interface,
+                progress=progress,
+            )
+
+    def pull_and_export_checkpointed(
+        self,
+        reference: str,
+        *,
+        storage: FilesystemRuntimeImageStorage,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+        force: bool = False,
+        progress: Callable[[str, int, int | None], None] | None = None,
+    ) -> tuple[PulledImageEvidence, Path]:
+        """Reuse or publish a verified stage while owning the source lock.
+
+        The checkpoint and tar are storage-owned.  The existing OCI source
+        lock serializes both their use and replacement, then is released
+        before the caller takes the per-output publication lock or checks SQL
+        ownership.
+        """
+
+        cache = storage.root / "registry-layers"
+        key = self._registry_layer_key(reference, expected_architecture)
+        with self._registry_layer_lock(cache, key, reference=reference):
+            cached = (
+                None
+                if force
+                else storage.find_published_stage(
+                    reference,
+                    expected_architecture=expected_architecture,
+                    expected_runtime_interface=expected_runtime_interface,
+                )
+            )
+            if cached is not None:
+                checkpoint, staged = cached
+                evidence = checkpoint.to_evidence()
+                _validate_evidence(
+                    evidence,
+                    expected_architecture,
+                    _runtime_interface_label(expected_runtime_interface),
+                    expected_requested_manifest=_reference_digest(reference),
+                )
+                return evidence, staged
+
+            staged = storage.prepare_published_stage_export_path(
+                reference,
+                expected_architecture=expected_architecture,
+                expected_runtime_interface=expected_runtime_interface,
+            )
+            try:
+                evidence = self._pull_and_export_locked(
+                    reference,
+                    staged,
+                    cache=cache,
+                    expected_architecture=expected_architecture,
+                    expected_runtime_interface=expected_runtime_interface,
+                    progress=progress,
+                )
+                _validate_evidence(
+                    evidence,
+                    expected_architecture,
+                    _runtime_interface_label(expected_runtime_interface),
+                    expected_requested_manifest=_reference_digest(reference),
+                )
+                storage.publish_published_stage(
+                    reference,
+                    staged,
+                    evidence=evidence,
+                    expected_architecture=expected_architecture,
+                    expected_runtime_interface=expected_runtime_interface,
+                )
+                return evidence, storage.published_stage_path(evidence.archive_sha256)
+            finally:
+                _unlink_quietly(staged)
+
+    @staticmethod
+    def _registry_layer_key(reference: str, expected_architecture: str) -> str:
+        return hashlib.sha256(
+            f"{reference}\n{expected_architecture}".encode()
+        ).hexdigest()
+
+    @contextmanager
+    def _registry_layer_lock(
+        self, cache: Path, key: str, *, reference: str
+    ) -> Iterator[None]:
+        cache.mkdir(parents=True, exist_ok=True)
+        with (cache / f"{key}.lock").open("a+b") as lock:
+            _claim_registry_layer_lock(lock, reference=reference)
+            yield
+
+    def _pull_and_export_locked(
+        self,
+        reference: str,
+        destination: Path,
+        *,
+        cache: Path,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+        progress: Callable[[str, int, int | None], None] | None = None,
+    ) -> PulledImageEvidence:
         # Recipe/runtime projections carry the Controller wire contract
         # (``vonk.runtime.v1``), while the OCI label stores its short value
         # (``v1``).  Keep that translation at the OCI boundary so callers
@@ -214,86 +343,75 @@ class SkopeoOCIImageTransport:
         # across images. Streaming straight into a tar discards this reuse on
         # interruption. Skopeo owns concurrent layers and transient retries;
         # only the final local conversion creates the runnable archive.
-        cache = destination.parent / "registry-layers"
         cache.mkdir(parents=True, exist_ok=True)
-        key = hashlib.sha256(
-            f"{reference}\n{expected_architecture}".encode()
-        ).hexdigest()
+        key = self._registry_layer_key(reference, expected_architecture)
         layout = cache / key
         blobs = cache / "blobs"
         blobs.mkdir(exist_ok=True)
         staged_source = f"oci:{layout}:image"
-        # Different images can transfer concurrently. Only writers of the
-        # same OCI index are serialized, including across worker processes. The
-        # claim is nonblocking inside a bounded budget: this critical section
-        # covers a network transfer plus an export, so parking a preparation
-        # worker on it would hold a scarce slot with no deadline. Contention
-        # returns a retryable failure and the operation is rescheduled.
-        with (cache / f"{key}.lock").open("a+b") as lock:
-            _claim_registry_layer_lock(lock, reference=reference)
-            # Skopeo cleans failed writes itself. Remove leftovers after a
-            # killed worker once this image's exclusive lock proves no writer
-            # can still be using them; completed shared blobs remain reusable.
-            for abandoned in layout.glob("oci-put-blob*"):
-                abandoned.unlink(missing_ok=True)
-            metadata = SkopeoImageMetadata.model_validate_json(
-                _run_text(
-                    [
-                        self.executable,
-                        "inspect",
-                        *_platform_args(expected_architecture),
-                        source,
-                    ]
-                )
-            )
-            layer_paths = [
-                blobs / value.digest.replace(":", "/", 1)
-                for value in metadata.layers
-                if _IMAGE_DIGEST.fullmatch(value.digest)
-            ]
-            total = (
-                sum(value.size for value in metadata.layers)
-                if metadata.layers and all(value.size >= 0 for value in metadata.layers)
-                else None
-            )
-            _run_with_progress(
+        # Skopeo cleans failed writes itself. Remove leftovers after a killed
+        # worker once this image's exclusive lock proves no writer can still
+        # be using them; completed shared blobs remain reusable.
+        for abandoned in layout.glob("oci-put-blob*"):
+            abandoned.unlink(missing_ok=True)
+        metadata = SkopeoImageMetadata.model_validate_json(
+            _run_text(
                 [
                     self.executable,
-                    "copy",
+                    "inspect",
                     *_platform_args(expected_architecture),
-                    "--retry-times",
-                    "3",
-                    "--image-parallel-copies",
-                    "6",
-                    "--dest-oci-accept-uncompressed-layers",
-                    "--dest-shared-blob-dir",
-                    str(blobs),
                     source,
-                    staged_source,
-                ],
-                lambda: (
-                    _existing_bytes(layer_paths)
-                    + _existing_bytes(layout.glob("oci-put-blob*"))
-                ),
-                progress,
-                "download",
-                total,
+                ]
             )
-            _run_with_progress(
-                [
-                    self.executable,
-                    "copy",
-                    *_platform_args(expected_architecture),
-                    "--src-shared-blob-dir",
-                    str(blobs),
-                    staged_source,
-                    f"docker-archive:{destination}",
-                ],
-                lambda: _existing_bytes([destination]),
-                progress,
-                "prepare",
-                None,
-            )
+        )
+        layer_paths = [
+            blobs / value.digest.replace(":", "/", 1)
+            for value in metadata.layers
+            if _IMAGE_DIGEST.fullmatch(value.digest)
+        ]
+        total = (
+            sum(value.size for value in metadata.layers)
+            if metadata.layers and all(value.size >= 0 for value in metadata.layers)
+            else None
+        )
+        _run_with_progress(
+            [
+                self.executable,
+                "copy",
+                *_platform_args(expected_architecture),
+                "--retry-times",
+                "3",
+                "--image-parallel-copies",
+                "6",
+                "--dest-oci-accept-uncompressed-layers",
+                "--dest-shared-blob-dir",
+                str(blobs),
+                source,
+                staged_source,
+            ],
+            lambda: (
+                _existing_bytes(layer_paths)
+                + _existing_bytes(layout.glob("oci-put-blob*"))
+            ),
+            progress,
+            "download",
+            total,
+        )
+        _run_with_progress(
+            [
+                self.executable,
+                "copy",
+                *_platform_args(expected_architecture),
+                "--src-shared-blob-dir",
+                str(blobs),
+                staged_source,
+                f"docker-archive:{destination}",
+            ],
+            lambda: _existing_bytes([destination]),
+            progress,
+            "prepare",
+            None,
+        )
         archive_bytes, archive_sha = _file_digest(destination, 16 * 1024**4)
         # Registry pins may identify a multi-platform index. Docker's native
         # archive conversion also changes manifest representation. Inspect the
@@ -401,6 +519,55 @@ _RUNTIME_INTERFACE: RuntimeInterface = "vonk.runtime.v1"
 _RUNTIME_INTERFACE_LABEL: RuntimeInterfaceLabel = "v1"
 
 
+class RuntimeImagePublishedStageCheckpoint(WireModel):
+    """Storage-owned provenance for a verified published-image export."""
+
+    schema_version: Literal[2]
+    registry_reference: str = Field(
+        min_length=73,
+        max_length=584,
+        pattern=r"^[a-z0-9][a-z0-9._/-]{0,511}@sha256:[0-9a-f]{64}$",
+    )
+    registry_manifest_digest: ImageDigest
+    platform_manifest_digest: ImageDigest
+    image_digest: ImageDigest
+    local_image_config_id: ImageDigest
+    architecture: RuntimeArchitecture
+    runtime_interface: RuntimeInterface
+    runtime_interface_label: RuntimeInterfaceLabel
+    oci_archive_sha256: Digest
+    image_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
+    # Published OCI exports do not apply a local runtime adapter. Keeping the
+    # null identity explicit makes that part of this exact checkpoint contract.
+    runtime_adapter: None
+    runtime_adapter_sha256: None
+
+    @model_validator(mode="after")
+    def checkpoint_identity_is_consistent(
+        self,
+    ) -> RuntimeImagePublishedStageCheckpoint:
+        if (
+            _reference_digest(self.registry_reference) != self.registry_manifest_digest
+            or self.platform_manifest_digest != self.image_digest
+            or self.runtime_adapter is not None
+            or self.runtime_adapter_sha256 is not None
+        ):
+            raise ValueError("published runtime image checkpoint identity conflicts")
+        return self
+
+    def to_evidence(self) -> PulledImageEvidence:
+        return PulledImageEvidence(
+            manifest_digest=self.platform_manifest_digest,
+            requested_manifest_digest=self.registry_manifest_digest,
+            config_id=self.local_image_config_id,
+            local_reference=self.registry_reference,
+            architecture="linux/arm64",
+            runtime_interface=self.runtime_interface_label,
+            archive_sha256=self.oci_archive_sha256,
+            archive_bytes=self.image_bytes,
+        )
+
+
 class RuntimeImageReceipt(WireModel):
     """Strict schema-2 receipt persisted by the Controller image cache.
 
@@ -467,29 +634,53 @@ class RuntimeImageReceipt(WireModel):
         return self.model_dump(mode="json")
 
 
-def _receipt_validation_detail(error: Exception) -> str:
-    """Name the failing field and rule without carrying the document.
+class RuntimeImageReferenceIntent(WireModel):
+    """Exact SQL coordination identity for an image archive publication.
 
-    A stored receipt that will not validate was reported as one generic
-    sentence, so an operator could not tell which field or rule rejected it --
-    the same blind spot the agent result boundary had.  Bounded locations,
-    error types and the redactor-approved message are enough to identify the
-    rule; the document itself is never included.
+    This intent protects an archive while the existing availability owner is
+    publishing it. It is not evidence that managed bytes or a receipt exist;
+    those facts remain owned by ``RuntimeImageStorage``.
     """
 
-    if not isinstance(error, ValidationError):
-        return ""
-    from .logging import redact_text
+    schema_version: Literal[2]
+    operation_id: str = Field(min_length=1, max_length=128)
+    recipe_revision_id: str = Field(min_length=1, max_length=128)
+    attempt: int = Field(strict=True, ge=1)
+    claim_owner: str = Field(min_length=1, max_length=200)
+    oci_archive_sha256: Digest
+    image_digest: ImageDigest
+    image_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
 
-    rendered: list[str] = []
-    for issue in error.errors()[:2]:
-        location = ".".join(str(part) for part in issue.get("loc", ())) or "<root>"
-        kind = str(issue.get("type", "invalid"))
-        message = redact_text(str(issue.get("msg", "")))[:80]
-        rendered.append(
-            f"{location}:{kind}:{message}" if message else f"{location}:{kind}"
+    def belongs_to(
+        self,
+        *,
+        operation_id: str,
+        recipe_revision_id: str,
+        attempt: int,
+        claim_owner: str,
+    ) -> bool:
+        return (
+            self.operation_id == operation_id
+            and self.recipe_revision_id == recipe_revision_id
+            and self.attempt == attempt
+            and self.claim_owner == claim_owner
         )
-    return f" ({'; '.join(rendered)})" if rendered else ""
+
+
+def read_runtime_image_reference_intent(
+    value: object,
+) -> RuntimeImageReferenceIntent:
+    """Validate a decoded SQL JSON value through its canonical wire model."""
+
+    try:
+        return RuntimeImageReferenceIntent.model_validate_json(
+            canonical_message(value), strict=True
+        )
+    except (TypeError, ValueError, ValidationError) as error:
+        raise RuntimeImagePreparationError(
+            "runtime_image.reference_intent_invalid",
+            "runtime image reference intent is malformed",
+        ) from error
 
 
 def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
@@ -504,8 +695,72 @@ def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
         raise RuntimeImagePreparationError(
             "runtime_image.receipt_unavailable",
             "runtime image receipt identity is unavailable or malformed"
-            + _receipt_validation_detail(error),
+            + validation_error_detail(error),
         ) from error
+
+
+class _ReceiptDocumentRejected(Exception):
+    """A present receipt file the current contract cannot parse.
+
+    Deliberately not a ``RuntimeImagePreparationError``: a scan over all
+    receipts treats the file as one archive's stale metadata and skips it,
+    while an exact-identity read of that archive still reports it.  It carries
+    the contract code and bounded detail that rejected the document, never a
+    field read out of it.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        self.code = code
+        self.detail = detail
+        super().__init__(detail)
+
+
+def _load_receipt_document(path: Path) -> RuntimeImageReceipt:
+    """Read one stored receipt file under the current contract.
+
+    An unreadable file -- including a denied read -- raises
+    ``RuntimeImagePreparationError``: an access failure is never a scan miss
+    and remains an explicit blocker.  A document that is present but does not
+    satisfy the current contract raises ``_ReceiptDocumentRejected`` naming the
+    rule that rejected it.
+    """
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_unavailable",
+            "runtime image receipt could not be read",
+        ) from error
+    except UnicodeDecodeError as error:
+        raise _ReceiptDocumentRejected(
+            "runtime_image.receipt_unavailable",
+            "runtime image receipt is not valid UTF-8 JSON",
+        ) from error
+    try:
+        return _parse_runtime_image_receipt(json.loads(text))
+    except RuntimeImagePreparationError as error:
+        raise _ReceiptDocumentRejected(error.code, error.detail) from error
+    except (TypeError, ValueError) as error:
+        raise _ReceiptDocumentRejected(
+            "runtime_image.receipt_unavailable",
+            "runtime image receipt identity is unavailable or malformed",
+        ) from error
+
+
+def _log_rejected_receipt(path: Path, rejection: _ReceiptDocumentRejected) -> None:
+    """Record the bounded rule that rejected one stored receipt file.
+
+    The archive digest and the rejecting contract rule are diagnostic; the
+    unreadable document is never carried into the record.
+    """
+
+    _LOGGER.warning(
+        "runtime image receipt %s rejected by %s: %s",
+        path.name.removesuffix(".receipt.json"),
+        rejection.code,
+        rejection.detail[:_MAX_RECEIPT_REJECTION_DETAIL],
+    )
 
 
 def prefixed_image_digest(value: str | None) -> str | None:
@@ -522,7 +777,9 @@ def prefixed_image_digest(value: str | None) -> str | None:
     return value if value.startswith("sha256:") else f"sha256:{value}"
 
 
-def _receipt_identity(receipt: RuntimeImageReceipt) -> dict[str, object]:
+def _receipt_identity(
+    receipt: RuntimeImageReceipt | CompiledRuntimeImage,
+) -> dict[str, object]:
     """The immutable identity a re-preparation of the same archive must repeat."""
 
     return {
@@ -534,7 +791,11 @@ def _receipt_identity(receipt: RuntimeImageReceipt) -> dict[str, object]:
             receipt.platform_manifest_digest
         ),
         "local_image_config_id": prefixed_image_digest(receipt.local_image_config_id),
-        "oci_archive_sha256": receipt.oci_archive_sha256,
+        "oci_archive_sha256": (
+            receipt.oci_archive_sha256
+            if isinstance(receipt, RuntimeImageReceipt)
+            else receipt.oci_layout_sha256
+        ),
         "image_bytes": receipt.image_bytes,
         "build_id": receipt.build_id,
     }
@@ -597,6 +858,16 @@ def persist_runtime_image_receipt(
         )
         if original is not None and original.id != revision.id:
             _validate_revision_reuse_identity(revision, original)
+    try:
+        require_reference_open(
+            session,
+            (ArtifactIdentity("runtime-image", receipt.oci_archive_sha256),),
+            now=verified_at,
+        )
+    except ArtifactLifecycleError as error:
+        raise RuntimeImagePreparationError(
+            error.code, error.detail, retryable=error.retryable
+        ) from error
     _authorize_current_revision(
         session,
         recipe_revision_id=recipe_revision_id,
@@ -617,6 +888,32 @@ def resolve_persisted_runtime_image_receipt(
 ) -> RuntimeImageReceipt:
     """Require current-revision authorization for an immutable storage receipt."""
 
+    require_runtime_image_authorization(
+        session,
+        recipe_revision_id=recipe_revision_id,
+        current_content_digest=current_content_digest,
+        effective_execution_key=effective_execution_key,
+        receipt=receipt,
+    )
+    return receipt
+
+
+def require_runtime_image_authorization(
+    session: Session,
+    *,
+    recipe_revision_id: str,
+    current_content_digest: str,
+    receipt: RuntimeImageReceipt | CompiledRuntimeImage,
+    effective_execution_key: str | None = None,
+) -> None:
+    """Check SQL authority for exact prepared bytes, without accessing storage.
+
+    Launch admission requires its execution key. Distribution copies bytes
+    without launching them, so any current grant for that exact archive suffices.
+    Both consume this predicate; neither an image digest alone nor the build's
+    original recipe revision grants access to a current revision.
+    """
+
     revision = session.get(CatalogDocumentRevision, recipe_revision_id)
     if (
         revision is None
@@ -626,31 +923,28 @@ def resolve_persisted_runtime_image_receipt(
     ):
         raise ValueError("current recipe revision digest is not authorized")
     identity = _receipt_identity(receipt)
-    authorization = session.scalar(
-        select(RuntimeImageAuthorization).where(
-            RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
-            RuntimeImageAuthorization.original_content_digest
-            == receipt.distribution_content_sha256,
-            RuntimeImageAuthorization.effective_execution_key
-            == effective_execution_key,
-            RuntimeImageAuthorization.registry_manifest_digest
-            == identity["registry_manifest_digest"],
-            RuntimeImageAuthorization.platform_manifest_digest
-            == identity["platform_manifest_digest"],
-            RuntimeImageAuthorization.local_image_config_id
-            == identity["local_image_config_id"],
-            RuntimeImageAuthorization.oci_archive_sha256
-            == identity["oci_archive_sha256"],
-            RuntimeImageAuthorization.image_bytes == identity["image_bytes"],
-            RuntimeImageAuthorization.build_id == identity["build_id"],
-            RuntimeImageAuthorization.state == "authorized",
-        )
+    statement = select(RuntimeImageAuthorization).where(
+        RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id,
+        *(
+            getattr(RuntimeImageAuthorization, name) == value
+            for name, value in identity.items()
+        ),
+        RuntimeImageAuthorization.state == "authorized",
     )
+    if isinstance(receipt, RuntimeImageReceipt):
+        statement = statement.where(
+            RuntimeImageAuthorization.original_content_digest
+            == receipt.distribution_content_sha256
+        )
+    if effective_execution_key is not None:
+        statement = statement.where(
+            RuntimeImageAuthorization.effective_execution_key == effective_execution_key
+        )
+    authorization = session.scalar(statement)
     if authorization is None:
         raise ValueError(
             "current recipe revision is not authorized for runtime image receipt"
         )
-    return receipt
 
 
 def _authorize_current_revision(
@@ -835,6 +1129,10 @@ class RuntimeImageStorage(Protocol):
         """Return a private path for a new export."""
         ...
 
+    def publication_lock(self, archive_sha256: str) -> AbstractContextManager[None]:
+        """Claim the exact output archive's publication fence without waiting."""
+        ...
+
     def commit(
         self,
         staged: Path,
@@ -874,6 +1172,7 @@ class RuntimeImageStorage(Protocol):
         *,
         expected_architecture: str,
         expected_runtime_interface: str,
+        expected_archive_sha256: str | None = None,
     ) -> RuntimeImageReceipt | None:
         """Find and verify a prepared Controller build by its exact input identity."""
         ...
@@ -896,8 +1195,370 @@ class FilesystemRuntimeImageStorage:
         self.root.mkdir(parents=True, exist_ok=True)
         return self.root / f".runtime-image-{uuid.uuid4().hex}.part"
 
+    def _published_stage_key(
+        self,
+        registry_reference: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> str:
+        architecture = _wire_architecture(expected_architecture)
+        if architecture != _RUNTIME_ARCHITECTURE or (
+            expected_runtime_interface != _RUNTIME_INTERFACE
+        ):
+            raise RuntimeImagePreparationError(
+                "runtime_image.runtime_invalid",
+                "published image stage identity is unsupported",
+            )
+        identity = json.dumps(
+            {
+                "registry_reference": registry_reference,
+                "architecture": architecture,
+                "runtime_interface": expected_runtime_interface,
+                "runtime_adapter": None,
+                "runtime_adapter_sha256": None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(identity).hexdigest()
+
+    def published_stage_checkpoint_path(
+        self,
+        registry_reference: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> Path:
+        key = self._published_stage_key(
+            registry_reference,
+            expected_architecture=expected_architecture,
+            expected_runtime_interface=expected_runtime_interface,
+        )
+        return self.root / f".published-image-{key}.checkpoint.json"
+
+    def published_stage_path(self, archive_sha256: str) -> Path:
+        if _SHA256.fullmatch(archive_sha256) is None:
+            raise RuntimeImagePreparationError(
+                "runtime_image.identity_invalid",
+                "published image stage requires an exact archive SHA-256",
+            )
+        return self.root / f".published-image-stage-{archive_sha256}"
+
+    def prepare_published_stage_export_path(
+        self,
+        registry_reference: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> Path:
+        key = self._published_stage_key(
+            registry_reference,
+            expected_architecture=expected_architecture,
+            expected_runtime_interface=expected_runtime_interface,
+        )
+        return self.root / f".published-image-{key}.{uuid.uuid4().hex}.part"
+
+    def find_published_stage(
+        self,
+        registry_reference: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> tuple[RuntimeImagePublishedStageCheckpoint, Path] | None:
+        """Return an exact verified checkpoint while the caller owns its source lock."""
+
+        checkpoint_path = self.published_stage_checkpoint_path(
+            registry_reference,
+            expected_architecture=expected_architecture,
+            expected_runtime_interface=expected_runtime_interface,
+        )
+        try:
+            descriptor = os.open(
+                checkpoint_path,
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.stage_checkpoint_unavailable",
+                "published runtime image checkpoint could not be read",
+            ) from error
+        try:
+            observed = os.fstat(descriptor)
+            if not stat.S_ISREG(observed.st_mode):
+                raise RuntimeImagePreparationError(
+                    "runtime_image.stage_checkpoint_invalid",
+                    "published runtime image checkpoint is not a regular file",
+                )
+            if not 1 <= observed.st_size <= _MAX_PUBLISHED_STAGE_CHECKPOINT_BYTES:
+                raise RuntimeImagePreparationError(
+                    "runtime_image.stage_checkpoint_invalid",
+                    "published runtime image checkpoint size is "
+                    f"{observed.st_size} bytes; allowed range is 1.."
+                    f"{_MAX_PUBLISHED_STAGE_CHECKPOINT_BYTES} bytes",
+                )
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = -1
+                raw = stream.read(_MAX_PUBLISHED_STAGE_CHECKPOINT_BYTES + 1)
+                observed_bytes = os.fstat(stream.fileno()).st_size
+            if len(raw) > _MAX_PUBLISHED_STAGE_CHECKPOINT_BYTES:
+                raise RuntimeImagePreparationError(
+                    "runtime_image.stage_checkpoint_invalid",
+                    "published runtime image checkpoint size is "
+                    f"{observed_bytes} bytes; allowed maximum is "
+                    f"{_MAX_PUBLISHED_STAGE_CHECKPOINT_BYTES} bytes",
+                )
+        except RuntimeImagePreparationError:
+            raise
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.stage_checkpoint_unavailable",
+                "published runtime image checkpoint could not be read",
+            ) from error
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        try:
+            checkpoint = RuntimeImagePublishedStageCheckpoint.model_validate_json(
+                raw, strict=True
+            )
+        except (TypeError, ValueError, ValidationError) as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.stage_checkpoint_invalid",
+                "published runtime image checkpoint is malformed",
+            ) from error
+        if (
+            checkpoint.registry_reference != registry_reference
+            or checkpoint.architecture != _wire_architecture(expected_architecture)
+            or checkpoint.runtime_interface != expected_runtime_interface
+        ):
+            raise RuntimeImagePreparationError(
+                "runtime_image.stage_checkpoint_identity_conflict",
+                "published runtime image checkpoint names a different source",
+            )
+        stage = self.published_stage_path(checkpoint.oci_archive_sha256)
+        try:
+            observed = stage.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_unavailable",
+                "published runtime image checkpoint bytes could not be inspected",
+            ) from error
+        if not stat.S_ISREG(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch",
+                "published runtime image checkpoint is not a regular archive",
+            )
+        if observed.st_size > self.maximum_bytes:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch",
+                "published runtime image checkpoint exceeds the storage limit",
+            )
+        if not verified_files.verify_path(
+            stage, checkpoint.oci_archive_sha256, checkpoint.image_bytes
+        ):
+            _LOGGER.warning(
+                "repairing published runtime image checkpoint with invalid bytes "
+                "archive_sha256=%s",
+                checkpoint.oci_archive_sha256,
+            )
+            return None
+        return checkpoint, stage
+
+    def publish_published_stage(
+        self,
+        registry_reference: str,
+        staged: Path,
+        *,
+        evidence: PulledImageEvidence,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> RuntimeImagePublishedStageCheckpoint:
+        """Durably publish verified stage bytes, then their typed provenance."""
+
+        _validate_evidence(
+            evidence,
+            expected_architecture,
+            _runtime_interface_label(expected_runtime_interface),
+            expected_requested_manifest=_reference_digest(registry_reference),
+        )
+        architecture, interface, interface_label = _receipt_runtime_identity(
+            evidence, expected_runtime_interface
+        )
+        try:
+            observed = staged.lstat()
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_unavailable",
+                "verified published image stage is unavailable",
+            ) from error
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or stat.S_ISLNK(observed.st_mode)
+            or observed.st_size != evidence.archive_bytes
+            or observed.st_size > self.maximum_bytes
+        ):
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch",
+                "verified published image stage has invalid bytes",
+            )
+        try:
+            descriptor = os.open(
+                staged,
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_unavailable",
+                "verified published image stage could not be synchronized",
+            ) from error
+        checkpoint = RuntimeImagePublishedStageCheckpoint(
+            schema_version=2,
+            registry_reference=registry_reference,
+            registry_manifest_digest=_reference_digest(registry_reference),
+            platform_manifest_digest=evidence.manifest_digest,
+            image_digest=evidence.manifest_digest,
+            local_image_config_id=evidence.config_id,
+            architecture=architecture,
+            runtime_interface=interface,
+            runtime_interface_label=interface_label,
+            oci_archive_sha256=evidence.archive_sha256,
+            image_bytes=evidence.archive_bytes,
+            runtime_adapter=None,
+            runtime_adapter_sha256=None,
+        )
+        final_stage = self.published_stage_path(evidence.archive_sha256)
+        try:
+            if final_stage.exists():
+                existing = final_stage.lstat()
+                if not stat.S_ISREG(existing.st_mode) or stat.S_ISLNK(existing.st_mode):
+                    raise RuntimeImagePreparationError(
+                        "runtime_image.archive_mismatch",
+                        "published image stage is not a regular archive",
+                    )
+                if not verified_files.verify_path(
+                    final_stage, evidence.archive_sha256, evidence.archive_bytes
+                ):
+                    _LOGGER.warning(
+                        "repairing published runtime image stage with invalid bytes "
+                        "archive_sha256=%s",
+                        evidence.archive_sha256,
+                    )
+                    os.replace(staged, final_stage)
+                else:
+                    staged.unlink()
+            else:
+                os.replace(staged, final_stage)
+            _fsync_directory(self.root)
+            _atomic_json_replace(
+                self.published_stage_checkpoint_path(
+                    registry_reference,
+                    expected_architecture=expected_architecture,
+                    expected_runtime_interface=expected_runtime_interface,
+                ),
+                checkpoint.model_dump(mode="json"),
+            )
+        except RuntimeImagePreparationError:
+            raise
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.stage_checkpoint_write_failed",
+                "published runtime image checkpoint could not be recorded",
+            ) from error
+        return checkpoint
+
+    @contextmanager
+    def publication_lock(self, archive_sha256: str) -> Iterator[None]:
+        """Serialize reference fencing and atomic publication for one archive."""
+
+        if _SHA256.fullmatch(archive_sha256) is None:
+            raise RuntimeImagePreparationError(
+                "runtime_image.identity_invalid",
+                "publication lock requires an exact archive SHA-256",
+            )
+        lock_root = self.root / ".publication-locks"
+        try:
+            lock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            directory_fd = os.open(
+                lock_root,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.lock_unavailable",
+                "managed image publication lock directory is unavailable",
+            ) from error
+        try:
+            descriptor = os.open(
+                f"{archive_sha256}.lock",
+                os.O_CREAT
+                | os.O_RDWR
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=directory_fd,
+            )
+        except OSError as error:
+            os.close(directory_fd)
+            raise RuntimeImagePreparationError(
+                "runtime_image.lock_unavailable",
+                "managed image publication lock file is unavailable",
+            ) from error
+        os.close(directory_fd)
+        with os.fdopen(descriptor, "a+b") as lock:
+            if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+                raise RuntimeImagePreparationError(
+                    "runtime_image.lock_unavailable",
+                    "managed image publication lock is not a regular file",
+                )
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise RuntimeImagePreparationError(
+                    "runtime_image.publication_contended",
+                    "waiting for another owner to finish this image publication",
+                    retryable=True,
+                    recovery_actions=("retry",),
+                ) from error
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
     def commit(
         self, staged: Path, *, receipt: RuntimeImageReceipt
+    ) -> RuntimeImageReceipt:
+        return self._commit(staged, receipt=receipt, preserve_stage=False)
+
+    def commit_published_stage(
+        self, staged: Path, *, receipt: RuntimeImageReceipt
+    ) -> RuntimeImageReceipt:
+        """Publish a checkpoint archive without consuming its recovery link."""
+
+        return self._commit(staged, receipt=receipt, preserve_stage=True)
+
+    def _commit(
+        self,
+        staged: Path,
+        *,
+        receipt: RuntimeImageReceipt,
+        preserve_stage: bool,
     ) -> RuntimeImageReceipt:
         if not staged.is_file() or staged.is_symlink():
             raise RuntimeImagePreparationError(
@@ -915,19 +1576,63 @@ class FilesystemRuntimeImageStorage:
                 "runtime_image.archive_mismatch",
                 "OCI archive bytes or digest do not match the image receipt",
             )
+        if preserve_stage and not verified_files.verify_path(
+            staged, receipt.oci_archive_sha256, receipt.image_bytes
+        ):
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch",
+                "published image checkpoint failed content verification",
+            )
         final = self.root / receipt.oci_archive_sha256
         existing_receipt: RuntimeImageReceipt | None = None
-        if final.exists():
-            existing_size = final.stat().st_size
+        try:
+            final_stat = final.lstat()
+        except FileNotFoundError:
+            final_stat = None
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_unavailable",
+                "content-addressed OCI archive could not be inspected",
+            ) from error
+        if final_stat is not None:
+            if preserve_stage and not stat.S_ISREG(final_stat.st_mode):
+                raise RuntimeImagePreparationError(
+                    "runtime_image.archive_conflict",
+                    "content-addressed OCI archive is not a regular file",
+                )
+            existing_size = final_stat.st_size
             if existing_size != size:
                 raise RuntimeImagePreparationError(
                     "runtime_image.archive_conflict",
                     "content-addressed OCI archive conflicts",
                 )
+            same_verified_file = False
+            if preserve_stage:
+                try:
+                    same_verified_file = os.path.samefile(final, staged)
+                except OSError:
+                    same_verified_file = False
+                if not same_verified_file and not verified_files.verify_path(
+                    final, receipt.oci_archive_sha256, receipt.image_bytes
+                ):
+                    raise RuntimeImagePreparationError(
+                        "runtime_image.archive_conflict",
+                        "content-addressed OCI archive failed exact digest verification",
+                    )
             receipt_path = self.root / f"{receipt.oci_archive_sha256}.receipt.json"
             if receipt_path.exists():
                 try:
-                    existing_receipt = self.read_receipt(receipt.oci_archive_sha256)
+                    existing_receipt = _load_receipt_document(receipt_path)
+                except _ReceiptDocumentRejected as rejection:
+                    # The archive is content-addressed and its bytes were
+                    # verified before this receipt was derived, so a document
+                    # the current contract cannot parse is stale metadata about
+                    # those exact bytes -- not a conflicting identity.  Replace
+                    # it below from the freshly validated receipt and record
+                    # the rule that rejected the old file.  A read failure is
+                    # not a parse failure and stays a conflict.
+                    _log_rejected_receipt(receipt_path, rejection)
+                    existing_receipt = None
                 except RuntimeImagePreparationError as error:
                     raise RuntimeImagePreparationError(
                         "runtime_image.archive_conflict",
@@ -983,10 +1688,20 @@ class FilesystemRuntimeImageStorage:
                     )
                     _atomic_json_replace(receipt_path, backfilled.to_mapping())
                     existing_receipt = backfilled
-            if staged != final:
+            if staged != final and not preserve_stage:
                 staged.unlink()
         else:
-            os.replace(staged, final)
+            if preserve_stage:
+                try:
+                    os.link(staged, final, follow_symlinks=False)
+                    _fsync_directory(self.root)
+                except OSError as error:
+                    raise RuntimeImagePreparationError(
+                        "runtime_image.archive_publish_failed",
+                        "published image archive could not be linked into the cache",
+                    ) from error
+            else:
+                os.replace(staged, final)
         if existing_receipt is not None:
             return existing_receipt
         published = RuntimeImageReceipt(
@@ -1171,6 +1886,7 @@ class FilesystemRuntimeImageStorage:
         *,
         expected_architecture: str,
         expected_runtime_interface: str,
+        expected_archive_sha256: str | None = None,
     ) -> RuntimeImageReceipt | None:
         """Return the prepared Controller build for an exact input identity.
 
@@ -1187,7 +1903,12 @@ class FilesystemRuntimeImageStorage:
             )
         expected_architecture = _wire_architecture(expected_architecture)
         expected_label = _runtime_interface_label(expected_runtime_interface)
-        for receipt in self._iter_receipts():
+        receipts = (
+            self._iter_receipts()
+            if expected_archive_sha256 is None
+            else (self.read_receipt(expected_archive_sha256),)
+        )
+        for receipt in receipts:
             if receipt.source != "controller-build":
                 continue
             if receipt.build_input_sha256 != build_input_sha256:
@@ -1210,17 +1931,20 @@ class FilesystemRuntimeImageStorage:
         return None
 
     def _iter_receipts(self) -> Iterable[RuntimeImageReceipt]:
+        """Yield every receipt the current contract can parse.
+
+        A scan spans unrelated archives and recipes, so a file this contract
+        cannot parse is one archive's stale metadata: skip it with a bounded
+        warning naming its digest instead of failing every lookup that happens
+        to walk past it.  ``read_receipt`` for that exact digest stays strict.
+        An unreadable file is not a parse failure and still raises.
+        """
+
         for receipt_path in sorted(self.root.glob("*.receipt.json")):
             try:
-                value = json.loads(receipt_path.read_text(encoding="utf-8"))
-                yield _parse_runtime_image_receipt(value)
-            except RuntimeImagePreparationError:
-                raise
-            except (OSError, TypeError, ValueError, KeyError) as error:
-                raise RuntimeImagePreparationError(
-                    "runtime_image.receipt_unavailable",
-                    "runtime image receipt index is malformed",
-                ) from error
+                yield _load_receipt_document(receipt_path)
+            except _ReceiptDocumentRejected as rejection:
+                _log_rejected_receipt(receipt_path, rejection)
 
     def _archive_is_present(self, receipt: RuntimeImageReceipt) -> bool:
         """Report archive presence; clean absence is a miss, not a failure."""
@@ -1234,17 +1958,20 @@ class FilesystemRuntimeImageStorage:
         return True
 
     def read_receipt(self, archive_sha256: str) -> RuntimeImageReceipt:
+        """Read the exact receipt for one named archive; never a scan miss.
+
+        A document the current contract cannot parse is reported here rather
+        than skipped, so an exact-identity read cannot silently degrade into
+        "no receipt".
+        """
+
         path = self.root / f"{archive_sha256}.receipt.json"
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-            return _parse_runtime_image_receipt(value)
-        except RuntimeImagePreparationError:
-            raise
-        except (OSError, TypeError, ValueError, KeyError) as error:
+            return _load_receipt_document(path)
+        except _ReceiptDocumentRejected as rejection:
             raise RuntimeImagePreparationError(
-                "runtime_image.receipt_unavailable",
-                "runtime image receipt is unavailable or malformed",
-            ) from error
+                rejection.code, rejection.detail
+            ) from rejection
 
 
 def prepare_runtime_image(
@@ -1256,6 +1983,7 @@ def prepare_runtime_image(
     build_receipt: Mapping[str, object] | object | None = None,
     now: datetime | None = None,
     receipt_writer: Callable[[RuntimeImageReceipt], object] | None = None,
+    before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
     force: bool = False,
     progress: Callable[[str, int, int | None], None] | None = None,
 ) -> RuntimeImageReceipt:
@@ -1291,6 +2019,7 @@ def prepare_runtime_image(
             expected_interface=projection["interface"],
             adapter=resolved_adapter,
             now=now,
+            before_publish=before_publish,
         )
     else:
         expected_reference, expected_manifest = _recipe_image(parsed)
@@ -1307,6 +2036,7 @@ def prepare_runtime_image(
             now=now,
             force=force,
             progress=progress,
+            before_publish=before_publish,
         )
     if not source_build and receipt.registry_manifest_digest != expected_manifest:
         raise RuntimeImagePreparationError(
@@ -1326,6 +2056,100 @@ def prepare_runtime_image(
     return receipt
 
 
+class RuntimeImagePreparer(Protocol):
+    def __call__(
+        self,
+        document: Mapping[str, object],
+        runtime_spec: Mapping[str, object],
+        build: RecipeBuild | None,
+        *,
+        before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
+    ) -> RuntimeImageReceipt:
+        """Prepare and authorize a receipt, with optional owner fencing."""
+        ...
+
+
+def make_runtime_image_receipt_preparer(
+    sessions: sessionmaker[Session],
+    storage: RuntimeImageStorage,
+    transport: OCIImageTransport,
+    *,
+    clock: Callable[[], datetime],
+) -> RuntimeImagePreparer:
+    """Build the production callback that prepares and authorizes an image.
+
+    API and worker composition share this callback so published recovery and
+    source-build execution use the same receipt persistence boundary.
+    """
+
+    def prepare(
+        document: Mapping[str, object],
+        runtime_spec: Mapping[str, object],
+        build: RecipeBuild | None,
+        *,
+        before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
+    ) -> RuntimeImageReceipt:
+        parsed = _canonical_recipe(document)
+        runtime = runtime_spec.get("runtime")
+        if not isinstance(runtime, Mapping):
+            raise TypeError("compiled runtime projection is unavailable")
+        identity = runtime_spec.get("identity")
+        effective_execution_key = (
+            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
+        )
+        if not isinstance(effective_execution_key, str):
+            raise TypeError("compiled runtime execution identity is unavailable")
+
+        build_receipt = None
+        if parsed.execution.mode == "build":
+            if build is None:
+                raise ValueError("source build receipt is unavailable")
+            build_receipt = {
+                "state": build.state,
+                "build_id": build.id,
+                "build_input_sha256": build.build_input_sha256,
+                "image_digest": build.image_digest,
+                "oci_layout_sha256": build.oci_layout_sha256,
+                "image_bytes": build.image_bytes,
+            }
+
+        def write_receipt(receipt: RuntimeImageReceipt) -> None:
+            recipe_digest = content_sha256(parsed)
+            with sessions.begin() as session:
+                revision = session.scalar(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.content_digest == recipe_digest,
+                    )
+                )
+                if revision is None or revision.content_digest is None:
+                    raise ValueError(
+                        "active recipe revision for runtime receipt is unavailable"
+                    )
+                persist_runtime_image_receipt(
+                    session,
+                    recipe_revision_id=revision.id,
+                    original_content_digest=revision.content_digest,
+                    effective_execution_key=effective_execution_key,
+                    receipt=receipt,
+                    verified_at=clock(),
+                )
+
+        return prepare_runtime_image(
+            parsed,
+            runtime=runtime,
+            storage=storage,
+            transport=transport,
+            build_receipt=build_receipt,
+            now=clock(),
+            receipt_writer=write_receipt,
+            before_publish=before_publish,
+        )
+
+    return prepare
+
+
 def _prepare_from_registry(
     transport: OCIImageTransport,
     *,
@@ -1340,6 +2164,7 @@ def _prepare_from_registry(
     now: datetime | None,
     force: bool = False,
     progress: Callable[[str, int, int | None], None] | None = None,
+    before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
 ) -> RuntimeImageReceipt:
     if not force:
         cached = storage.find_published(
@@ -1348,17 +2173,37 @@ def _prepare_from_registry(
             expected_runtime_interface=expected_interface,
         )
         if cached is not None:
+            with storage.publication_lock(cached.oci_archive_sha256):
+                if before_publish is not None:
+                    before_publish(cached)
             return cached
-    staged = storage.prepare_path()
     expected_interface_label = _runtime_interface_label(expected_interface)
+    persistent_stage = isinstance(transport, SkopeoOCIImageTransport) and isinstance(
+        storage, FilesystemRuntimeImageStorage
+    )
+    staged: Path | None = None
     try:
-        evidence = transport.pull_and_export(
-            reference,
-            staged,
-            expected_architecture=expected_architecture,
-            expected_runtime_interface=expected_interface_label,
-            progress=progress,
-        )
+        if persistent_stage:
+            assert isinstance(transport, SkopeoOCIImageTransport)
+            assert isinstance(storage, FilesystemRuntimeImageStorage)
+            evidence, staged = transport.pull_and_export_checkpointed(
+                reference,
+                storage=storage,
+                expected_architecture=expected_architecture,
+                expected_runtime_interface=expected_interface,
+                force=force,
+                progress=progress,
+            )
+        else:
+            staged = storage.prepare_path()
+            evidence = transport.pull_and_export(
+                reference,
+                staged,
+                expected_architecture=expected_architecture,
+                expected_runtime_interface=expected_interface_label,
+                progress=progress,
+            )
+        assert staged is not None
         _validate_evidence(
             evidence,
             expected_architecture,
@@ -1392,12 +2237,20 @@ def _prepare_from_registry(
             archive_path=str(staged),
             recorded_at=_timestamp(now),
         )
-        return storage.commit(staged, receipt=receipt)
+        with storage.publication_lock(receipt.oci_archive_sha256):
+            if before_publish is not None:
+                before_publish(receipt)
+            if persistent_stage:
+                assert isinstance(storage, FilesystemRuntimeImageStorage)
+                return storage.commit_published_stage(staged, receipt=receipt)
+            return storage.commit(staged, receipt=receipt)
     except RuntimeImagePreparationError:
-        _unlink_quietly(staged)
+        if staged is not None and not persistent_stage:
+            _unlink_quietly(staged)
         raise
     except Exception as error:
-        _unlink_quietly(staged)
+        if staged is not None and not persistent_stage:
+            _unlink_quietly(staged)
         raise RuntimeImagePreparationError(
             "runtime_image.transport_failed", "OCI pull/export failed"
         ) from error
@@ -1415,6 +2268,7 @@ def _prepare_from_build(
     expected_interface: str,
     adapter: RuntimeAdapter,
     now: datetime | None,
+    before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
 ) -> RuntimeImageReceipt:
     value = _object_mapping(raw)
     if value.get("state") != "succeeded":
@@ -1468,6 +2322,9 @@ def _prepare_from_build(
         and cached.runtime_adapter_sha256 == adapter.digest
         and (raw_build_input is None or cached.build_input_sha256 == raw_build_input)
     ):
+        with storage.publication_lock(cached.oci_archive_sha256):
+            if before_publish is not None:
+                before_publish(cached)
         return cached
     observed = transport.inspect_archive(
         existing,
@@ -1527,7 +2384,10 @@ def _prepare_from_build(
     )
     # A build receipt already points at an immutable stored archive, but still
     # update the receipt atomically so direct and source-build paths converge.
-    return storage.commit(existing, receipt=receipt)
+    with storage.publication_lock(receipt.oci_archive_sha256):
+        if before_publish is not None:
+            before_publish(receipt)
+        return storage.commit(existing, receipt=receipt)
 
 
 def _canonical_recipe(
@@ -1542,7 +2402,10 @@ def _canonical_recipe(
             "canonical RecipeDefinition document is unavailable",
         )
     try:
-        return RecipeDefinition.model_validate(raw)
+        # Persisted JSON has already been decoded by the database driver. Run
+        # it back through the canonical JSON path so strict validation has the
+        # same semantics as validation of the stored wire document.
+        return RecipeDefinition.model_validate_json(canonical_message(raw))
     except Exception as error:
         raise RuntimeImagePreparationError(
             "runtime_image.recipe_invalid",
@@ -1907,6 +2770,14 @@ def _atomic_json_replace(path: Path, value: Mapping[str, object]) -> None:
         ) from error
 
 
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _unlink_quietly(path: Path) -> None:
     try:
         path.unlink(missing_ok=True)
@@ -1920,13 +2791,16 @@ __all__ = [
     "PulledImageEvidence",
     "RuntimeArchitecture",
     "RuntimeImagePreparationError",
+    "RuntimeImagePreparer",
     "RuntimeImageReceipt",
+    "RuntimeImageReferenceIntent",
     "RuntimeImageStorage",
     "RuntimeInterface",
     "RuntimeInterfaceLabel",
     "SkopeoOCIImageTransport",
     "persist_runtime_image_receipt",
     "prepare_runtime_image",
+    "read_runtime_image_reference_intent",
     "resolve_persisted_runtime_image_receipt",
     "runtime_image_expectations",
 ]

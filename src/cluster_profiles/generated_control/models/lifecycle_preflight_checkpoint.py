@@ -7,9 +7,11 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
+from dateutil.parser import isoparse
 from typing import cast
 from typing import cast, Union
 from typing import Union
+import datetime
 
 if TYPE_CHECKING:
   from ..models.lifecycle_preflight_checkpoint_receipts import LifecyclePreflightCheckpointReceipts
@@ -29,6 +31,7 @@ class LifecyclePreflightCheckpoint:
         Attributes:
             phase_index (int):
             attempts (Union[Unset, LifecyclePreflightCheckpointAttempts]):
+            next_check_at (Union[None, Unset, datetime.datetime]):
             pending_job_id (Union[None, Unset, str]):
             pending_node_id (Union[None, Unset, str]):
             receipts (Union[Unset, LifecyclePreflightCheckpointReceipts]):
@@ -36,6 +39,7 @@ class LifecyclePreflightCheckpoint:
 
     phase_index: int
     attempts: Union[Unset, 'LifecyclePreflightCheckpointAttempts'] = UNSET
+    next_check_at: Union[None, Unset, datetime.datetime] = UNSET
     pending_job_id: Union[None, Unset, str] = UNSET
     pending_node_id: Union[None, Unset, str] = UNSET
     receipts: Union[Unset, 'LifecyclePreflightCheckpointReceipts'] = UNSET
@@ -52,6 +56,14 @@ class LifecyclePreflightCheckpoint:
         attempts: Union[Unset, dict[str, Any]] = UNSET
         if not isinstance(self.attempts, Unset):
             attempts = self.attempts.to_dict()
+
+        next_check_at: Union[None, Unset, str]
+        if isinstance(self.next_check_at, Unset):
+            next_check_at = UNSET
+        elif isinstance(self.next_check_at, datetime.datetime):
+            next_check_at = self.next_check_at.isoformat()
+        else:
+            next_check_at = self.next_check_at
 
         pending_job_id: Union[None, Unset, str]
         if isinstance(self.pending_job_id, Unset):
@@ -77,6 +89,8 @@ class LifecyclePreflightCheckpoint:
         })
         if attempts is not UNSET:
             field_dict["attempts"] = attempts
+        if next_check_at is not UNSET:
+            field_dict["next_check_at"] = next_check_at
         if pending_job_id is not UNSET:
             field_dict["pending_job_id"] = pending_job_id
         if pending_node_id is not UNSET:
@@ -103,6 +117,26 @@ class LifecyclePreflightCheckpoint:
             attempts = LifecyclePreflightCheckpointAttempts.from_dict(_attempts)
 
 
+
+
+        def _parse_next_check_at(data: object) -> Union[None, Unset, datetime.datetime]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                next_check_at_type_0 = isoparse(data)
+
+
+
+                return next_check_at_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, Unset, datetime.datetime], data)
+
+        next_check_at = _parse_next_check_at(d.pop("next_check_at", UNSET))
 
 
         def _parse_pending_job_id(data: object) -> Union[None, Unset, str]:
@@ -138,6 +172,7 @@ class LifecyclePreflightCheckpoint:
         lifecycle_preflight_checkpoint = cls(
             phase_index=phase_index,
             attempts=attempts,
+            next_check_at=next_check_at,
             pending_job_id=pending_job_id,
             pending_node_id=pending_node_id,
             receipts=receipts,

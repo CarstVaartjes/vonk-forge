@@ -248,6 +248,44 @@ def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -
         assert run.alias == plan.alias == run.plan["alias"]
 
 
+def test_a_plan_does_not_count_the_capacity_of_the_run_it_stops(tmp_path) -> None:
+    """The capacity a plan's own Stop phase frees is not held against it.
+
+    Wrong implementation this catches: the preview summed every active
+    reservation, so a plan replacing a run that held the node's memory and
+    ports reported ``run.insufficient_memory`` on each rank.  The switch then
+    surfaced ``run-switch.run_admission_blocked``, and because the only release
+    path is a successful stop, no plan could ever stop that run -- the fleet
+    could only be unwedged by editing ``resource_reservations`` by hand.
+    """
+    sessions, now, _node, installation = setup(tmp_path, free_memory=300)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+    held = service.plan_run(installation, alias="qwen", now=now)
+    run_id = service.accept_run(held, actor="admin", now=now)
+
+    replaced = service.plan_run(installation, alias="qwen", now=now)
+    assert replaced.allowed is False
+    assert "run.insufficient_memory" in {
+        blocker.code for blocker in replaced.nodes[0].blockers
+    }
+
+    replacement = service.plan_run(
+        installation, alias="qwen", now=now, released_run_ids=(run_id,)
+    )
+    assert replacement.allowed is True
+    assert replacement.nodes[0].active_reserved_bytes == 0
+    assert replacement.nodes[0].free_after_bytes == 75
+
+    # Only the run the plan stops is released.  A run it does not stop still
+    # holds its capacity against the replacement.
+    untouched = service.plan_run(
+        installation, alias="qwen", now=now, released_run_ids=("run-not-planned",)
+    )
+    assert untouched.allowed is False
+
+
 def test_territorial_license_run_admission_is_informational(tmp_path) -> None:
     sessions, now, _node, installation = setup(
         tmp_path,

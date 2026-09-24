@@ -16,7 +16,7 @@ from typing import Literal
 from urllib.parse import quote
 
 from pydantic import ConfigDict, Field, TypeAdapter
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 
 from .bounded_json import BoundedJSONError, mapping, require_integer, sequence
@@ -44,16 +44,26 @@ _SENSITIVE = re.compile(
     r"password|secret|token|authorization|cookie|credential|private.?key|api.?key|environment",
     re.IGNORECASE,
 )
-# A line-level filter, so each alternative must name a credential *value*, not
+# A line-level filter, so every alternative must name a credential *value*, not
 # merely a topic.  A bare ``authorization`` alternative redacted any line that
-# mentioned a table such as ``runtime_image_authorizations`` -- exactly the
-# constraint violation an operator needs to read.  Header and assignment shapes
-# still match, and ``redact_text`` removes the credential inside them.
+# mentioned a table such as ``runtime_image_authorizations``, and a bare
+# ``token`` alternative redacted any line that mentioned
+# ``num_speculative_tokens`` -- both are exactly the configuration and history a
+# failed workload is diagnosed from.  Assignment and authentication shapes still
+# match, and ``redact_text`` removes the credential inside them.
 _SECRET_LINE = re.compile(
-    r"password|secret|token|authorization\s*[:=]|cookie|credential|private[ _-]?key|api[ _-]?key|-----BEGIN|-----END",
+    r"(?:password|passwd|secret|token|authorization|cookie|credential)\s*[:=]"
+    r"|private[ _-]?key|api[ _-]?key"
+    r"|(?:bearer|basic)\s+\S"
+    r"|-----BEGIN|-----END",
     re.IGNORECASE,
 )
-_OPAQUE_SECRET = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9+/=_-]{40,}(?![A-Za-z0-9])")
+# An opaque value is a whole token.  Matching a run inside a longer word cut the
+# module out of every Python frame path, so a traceback arrived as
+# ``python3.[redacted opaque value].py`` and named no frame at all.
+_OPAQUE_SECRET = re.compile(
+    r"(?<![A-Za-z0-9/.])([A-Za-z0-9+/=_-]{40,})(?![A-Za-z0-9/.])"
+)
 
 # The failure-evidence closed sets are named once here so the bundle fields and
 # the helpers that build them cannot disagree. ``FailureCategory`` mirrors the
@@ -118,10 +128,28 @@ class FailureEvidenceBundle(EvidenceModel):
     collector_errors: list[str] = Field(max_length=8)
 
 
+#: The Controller database budget for retained failure evidence.  The record
+#: count is not a second, independent cap: it is exactly the number of
+#: maximum-size bundles this budget holds, so the count can never refuse a
+#: bundle the byte budget still has room for.  Evidence is per attempt, so this
+#: one budget is what bounds a retried operation's whole attempt history.
+EVIDENCE_BYTE_BUDGET = 64 * 1024**2
+MAX_RETAINED_ENTRIES = EVIDENCE_BYTE_BUDGET // MAX_BUNDLE_BYTES
+
+#: The attempt states whose own terminal failure receipt must stay readable.
+#: ``expired`` is not among them by itself: a lease lapse or a supersession owns
+#: no receipt, and its operation-level reason may already describe a later
+#: attempt.  Only a receipt the attempt actually kept, or the park that still
+#: names it, qualifies.
+FAILED_ATTEMPT_STATES = ("failed", "waiting-for-operator")
+#: The one state a superseded or lapsed attempt keeps while owning no receipt.
+EXPIRED_ATTEMPT_STATE = "expired"
+
+
 class EvidenceRetention(EvidenceModel):
     days: int = Field(default=14, ge=1, le=365)
-    max_entries: int = Field(default=2000, ge=1, le=10000)
-    max_bytes: int = Field(default=64 * 1024**2, ge=MAX_BUNDLE_BYTES)
+    max_entries: int = Field(default=MAX_RETAINED_ENTRIES, ge=1, le=10000)
+    max_bytes: int = Field(default=EVIDENCE_BYTE_BUDGET, ge=MAX_BUNDLE_BYTES)
 
 
 def _aware(value: datetime) -> datetime:
@@ -151,6 +179,23 @@ def safe_text(value: str) -> str:
                 _OPAQUE_SECRET.sub("[redacted opaque value]", redact_text(line))
             )
     return "\n".join(lines)
+
+
+def _keep_end(text: str, limit: int) -> tuple[str, int]:
+    """Keep the end of ``text`` within ``limit`` bytes, and report what it dropped.
+
+    The end is what happened last, so a bound is applied from the front.  Cutting
+    the end of a tail keeps stale lines and discards the failure that ended it.
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text, 0
+    cut = len(encoded) - limit
+    candidate = encoded[cut:]
+    boundary = candidate.find(b"\n")
+    if boundary >= 0:
+        cut += boundary + 1
+    return encoded[cut:].decode("utf-8", errors="ignore"), cut
 
 
 def log_tail(value: str) -> FailureLogTail:
@@ -256,7 +301,17 @@ def sanitize_diagnostics(value: object) -> FailureDiagnostics:
     diagnostics = FailureDiagnostics.model_validate(value)
     document = diagnostics.model_dump(mode="json")
     for field in ("stdout", "stderr"):
-        document[field]["text"] = safe_text(document[field]["text"])[:MAX_LOG_BYTES]
+        # The agent already retained this tail from the whole stream, so the
+        # Controller only redacts it.  Re-selecting the window here would keep
+        # the head of a tail and discard the failure that ended it, and it would
+        # report a bound the agent had already reported.
+        cleaned, dropped = _keep_end(safe_text(document[field]["text"]), MAX_LOG_BYTES)
+        document[field]["text"] = cleaned
+        if dropped:
+            document[field]["truncated"] = True
+            document[field]["dropped_bytes"] = (
+                document[field]["dropped_bytes"] or 0
+            ) + dropped
     for field in ("versions", "sandbox", "storage", "preflight"):
         document[field] = [
             {
@@ -342,6 +397,36 @@ def collect_failure(
         diagnostics=diagnostics,
         receipt=receipt,
         collector_errors=errors,
+    )
+
+
+def failed_attempt_condition(operation, attempt):
+    """SQL predicate: this attempt's failure evidence must stay readable.
+
+    One owner for "which attempt is a failure attempt": the durable evidence
+    collector and the operator log projection both select attempts through this
+    predicate, so neither can drift into showing or hiding an attempt the other
+    disagrees about.  An attempt qualifies when its own state is a terminal
+    failure, when it lapsed its lease but kept the agent's late failure receipt,
+    or when it is the current attempt of a parked operation -- the one lapse
+    whose narrative the operation's own reason still owns.  A bare superseded
+    lapse qualifies on none of them: it kept no receipt, and the operation's
+    reason already describes a different attempt, so neither may be invented.
+    """
+
+    return or_(
+        attempt.state.in_(FAILED_ATTEMPT_STATES),
+        and_(
+            attempt.state == EXPIRED_ATTEMPT_STATE,
+            # A receipt is a JSON object.  An absent one is stored as the JSON
+            # ``null`` value rather than SQL NULL, so the plain ``IS NOT NULL``
+            # test would read every bare lapse as if it had kept a receipt.
+            cast(attempt.result, String) != "null",
+        ),
+        and_(
+            operation.state == "waiting-for-operator",
+            attempt.attempt == operation.current_attempt,
+        ),
     )
 
 
@@ -559,6 +644,14 @@ class FailureEvidenceService:
                 else model.current_attempt
             )
             state = AgentOperationAttempt.state if family == "agent" else model.state
+            # Agent operations keep one row per attempt, so they select through
+            # the shared attempt rule; the other families own a single attempt
+            # in place and are selected by their own state.
+            failures = (
+                failed_attempt_condition(model, AgentOperationAttempt)
+                if family == "agent"
+                else state.in_(FAILED_ATTEMPT_STATES)
+            )
             query = (
                 select(model, AgentOperationAttempt)
                 if family == "agent"
@@ -571,7 +664,7 @@ class FailureEvidenceService:
                 )
             query = (
                 query.where(
-                    state.in_(["failed", "waiting-for-operator"]),
+                    failures,
                     or_(
                         model.updated_at > after,
                         and_(model.updated_at == after, model.id > last_id),

@@ -20,6 +20,7 @@ PHASES = {
     "downloading": "download",
     "verifying": "verify",
     "reclaiming": "cleanup",
+    "cancelling": "waiting",
     "completed": "completed",
     "failed": "failed",
 }

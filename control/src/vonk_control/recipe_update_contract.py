@@ -11,6 +11,7 @@ from vonk_agent_protocol import OperationProgress
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
+from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .strict_json import StrictJSONModel
 
 UPDATE_KIND = "recipe.cache.update.v2"
@@ -24,7 +25,7 @@ RequestKey = Annotated[
 ]
 Selector = Annotated[str, Field(min_length=1, max_length=256)]
 UpdateState = Literal[
-    "queued", "running", "succeeded", "partial", "failed", "cancelled"
+    "queued", "running", "cancelling", "succeeded", "partial", "failed", "cancelled"
 ]
 
 
@@ -73,7 +74,14 @@ class RecipeUpdateChild(RecipeUpdateIdentity):
 
     operation_id: Identifier | None = None
     state: Literal[
-        "pending", "queued", "running", "succeeded", "partial", "failed", "cancelled"
+        "pending",
+        "queued",
+        "running",
+        "cancelling",
+        "succeeded",
+        "partial",
+        "failed",
+        "cancelled",
     ] = "pending"
     failure: RecipeUpdateFailure | None = None
     observed_at: AwareDatetime | None = None
@@ -90,6 +98,7 @@ class RecipeUpdateDocument(StrictJSONModel):
     kind: Literal["recipe.cache.update.v2"] = UPDATE_KIND
     request: RecipeUpdateScope
     children: list[RecipeUpdateChild]
+    cancellation: RecipeOperationCancellationResult | None = None
     next_child: int = Field(default=0, ge=0)
     claim_owner: str | None = Field(default=None, max_length=128)
     claim_until: AwareDatetime | None = None
@@ -127,6 +136,7 @@ class RecipeUpdateResponse(StrictJSONModel):
     state: UpdateState
     attempt: int = Field(ge=0)
     children: list[RecipeUpdateChild]
+    cancellation: RecipeOperationCancellationResult | None = None
     progress: OperationProgress
     waiting_on: str | None = Field(default=None, max_length=256)
     wait_owner: Literal["recipe-image-availability"] | None = None

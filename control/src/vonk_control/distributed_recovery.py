@@ -39,6 +39,7 @@ from .recipe_start_payloads import (
     RecipeStartPayloadError,
     RecipeStartPlacement,
     build_recipe_start_payload,
+    validate_distributed_start_timeout_seconds,
 )
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
@@ -151,6 +152,18 @@ class DistributedRecoveryCoordinator:
                 run.plan = run_plan_document(run_plan)
                 try:
                     authority = _recovery_authority(session, run, now, failed[0].rank)
+                    if authority is None:
+                        raise DistributedLifecycleError(
+                            "failed rank has no distributed recovery policy"
+                        )
+                    job = _enqueue_recovery_stop(
+                        session,
+                        self._agent_jobs,
+                        run,
+                        authority,
+                        failed_rank=failed[0].rank,
+                        now=now,
+                    )
                 except DistributedLifecycleError as error:
                     run.state = "failed"
                     run.route_state = "withdrawn"
@@ -158,21 +171,6 @@ class DistributedRecoveryCoordinator:
                     run.updated_at = now
                     worked = True
                     break
-                if authority is None:
-                    run.state = "failed"
-                    run.route_state = "withdrawn"
-                    run.route_error = "failed rank has no distributed recovery policy"
-                    run.updated_at = now
-                    worked = True
-                    break
-                job = _enqueue_recovery_stop(
-                    session,
-                    self._agent_jobs,
-                    run,
-                    authority,
-                    failed_rank=failed[0].rank,
-                    now=now,
-                )
                 run.route_state = "withdrawn"
                 run.route_error = f"distributed recovery queued: {job.id}"
                 run.updated_at = now
@@ -298,14 +296,8 @@ def _recovery_authority(
         or readiness.get("strategy") != "endpoint-owner-after-all-ranks"
     ):
         return None
-    readiness_timeout = readiness.get("timeout_seconds")
     stop_timeout = lifecycle.get("stop_timeout_seconds")
-    if (
-        type(readiness_timeout) is not int
-        or not 1 <= readiness_timeout <= 3600
-        or type(stop_timeout) is not int
-        or not 1 <= stop_timeout <= 600
-    ):
+    if type(stop_timeout) is not int or not 1 <= stop_timeout <= 600:
         raise DistributedLifecycleError("distributed recovery timeout is invalid")
     nodes = tuple(
         session.scalars(
@@ -377,8 +369,18 @@ def _recovery_authority(
                 "distributed recovery endpoint evidence is missing"
             )
         presences[node.node_id] = presence.management_address
+    start_job, startup_budget = _original_start_authority(
+        session, run, revision.content_digest
+    )
+    # Rank reload/JIT needs its accepted startup duration, not the short health
+    # probe timeout. Ordered stops have their own per-role execution budget.
+    # Persist the total once: phase advances, retries and route publication all
+    # retain this exact deadline instead of granting time again after each stop.
+    stop_order = topology.get("stop_order")
+    if not isinstance(stop_order, list) or not stop_order:
+        raise DistributedLifecycleError("distributed recovery order is invalid")
     start_deadline = (
-        now + timedelta(seconds=min(readiness_timeout, stop_timeout))
+        now + startup_budget + timedelta(seconds=stop_timeout * len(stop_order))
     ).isoformat()
     advertised = {
         node.node_id: set(node.capabilities or ())
@@ -405,12 +407,17 @@ def _recovery_authority(
         compiled_plan = compiled_plans.get(node.node_id)
         local_address = plan.get("fabric_address")
         endpoint_owner = plan.get("endpoint_owner")
+        memory_floor = plan.get("memory_floor_bytes")
+        memory_kind = plan.get("memory_kind")
         if (
             plan.get("node_id") != node.node_id
             or plan.get("rank") != node.rank
             or plan.get("role") != node.role
             or plan.get("port") != node.port
             or plan.get("required_memory_bytes") != node.reserved_memory_bytes
+            or type(memory_floor) is not int
+            or memory_floor < 0
+            or memory_kind not in {"unified", "host", "accelerator"}
             or not isinstance(local_address, str)
             or type(endpoint_owner) is not bool
             or not isinstance(compiled_plan, Mapping)
@@ -434,6 +441,8 @@ def _recovery_authority(
                     node.role,
                     node.port,
                     node.reserved_memory_bytes,
+                    memory_floor,
+                    memory_kind,
                     local_address,
                 ),
                 endpoint_address=(
@@ -473,6 +482,7 @@ def _recovery_authority(
     owner_node_id, owner_payload = start_payloads[owner_role]
     return {
         "deadline": start_deadline,
+        "workload_intent_ordinal": start_job.payload.get("workload_intent_ordinal"),
         "failed_rank": failed_rank,
         "recipe_content_sha256": revision.content_digest,
         "start_phases": [
@@ -561,24 +571,7 @@ def _enqueue_recovery_stop(
         },
     }
     targets = sorted(node_id for group in stop_phases for node_id, _payload in group)
-    start_jobs = tuple(
-        session.scalars(
-            select(Job)
-            .where(
-                Job.kind == "recipe.start",
-                Job.payload["owner_kind"].as_string() == "run",
-                Job.payload["owner_id"].as_string() == run.id,
-                Job.payload["recovery"].as_string().is_(None),
-            )
-            .order_by(Job.created_at, Job.id)
-            .limit(2)
-        )
-    )
-    if len(start_jobs) != 1:
-        raise DistributedLifecycleError(
-            "distributed recovery lacks its start authority"
-        )
-    start_ordinal = start_jobs[0].payload.get("workload_intent_ordinal")
+    start_ordinal = authority.get("workload_intent_ordinal")
     target_nodes = tuple(
         session.scalars(
             select(AgentNode)
@@ -623,6 +616,65 @@ def _enqueue_recovery_stop(
             operation_id=operation_id,
         )
     return job
+
+
+def _original_start_authority(
+    session: Session, run: RecipeRun, recipe_digest: str | None
+) -> tuple[Job, timedelta]:
+    """Read the exact accepted start's budget; configuration is not a fallback."""
+
+    starts = tuple(
+        session.scalars(
+            select(Job)
+            .where(
+                Job.kind == "recipe.start",
+                Job.payload["owner_kind"].as_string() == "run",
+                Job.payload["owner_id"].as_string() == run.id,
+                Job.payload["recovery"].as_string().is_(None),
+            )
+            .order_by(Job.created_at, Job.id)
+            .limit(2)
+        )
+    )
+    if len(starts) != 1:
+        raise DistributedLifecycleError(
+            "distributed recovery lacks its start authority"
+        )
+    start = starts[0]
+    deadline_value = start.payload.get("start_deadline")
+    ordinal = start.payload.get("workload_intent_ordinal")
+    targets = sorted(
+        session.scalars(select(RunNode.node_id).where(RunNode.run_id == run.id))
+    )
+    if (
+        start.state != "succeeded"
+        or start.authority_revision != recipe_digest
+        or type(ordinal) is not int
+        or ordinal < 1
+        or start.payload.get("plan_digest") != run.plan_digest
+        or start.targets != targets
+        or not isinstance(deadline_value, str)
+    ):
+        raise DistributedLifecycleError(
+            "distributed recovery start authority is invalid"
+        )
+    try:
+        deadline = _aware(datetime.fromisoformat(deadline_value))
+        # PostgreSQL returns an aware UTC value; SQLite's test adapter drops
+        # its timezone from this database-owned timestamp.
+        created = start.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        duration = deadline - _aware(created)
+        seconds = duration.total_seconds()
+        if not seconds.is_integer():
+            raise ValueError("startup budget must be whole seconds")
+        validate_distributed_start_timeout_seconds(int(seconds))
+    except (ValueError, DistributedLifecycleError) as error:
+        raise DistributedLifecycleError(
+            "distributed recovery start authority is invalid"
+        ) from error
+    return start, duration
 
 
 def _encode_phases(

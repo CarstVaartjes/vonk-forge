@@ -8,16 +8,18 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.job_resume_request import JobResumeRequest
 from ...models.job_resume_response import JobResumeResponse
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
+from typing import cast, Union
 
 
 
 def _get_kwargs(
     job_id: str,
     *,
-    body: None,
+    body: Union['JobResumeRequest', None],
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -32,7 +34,11 @@ def _get_kwargs(
         "url": "/api/jobs/{job_id}/resume".format(job_id=job_id,),
     }
 
-    _kwargs["json"] = body
+    _kwargs["json"]: Union[None, dict[str, Any]]
+    if isinstance(body, JobResumeRequest):
+        _kwargs["json"] = body.to_dict()
+    else:
+        _kwargs["json"] = body
 
 
     headers["Content-Type"] = "application/json"
@@ -111,14 +117,14 @@ def sync_detailed(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    body: None,
+    body: Union['JobResumeRequest', None],
 
 ) -> Response[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]:
     """ Resume Job
 
     Args:
         job_id (str):
-        body (None):
+        body (Union['JobResumeRequest', None]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -145,14 +151,14 @@ def sync(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    body: None,
+    body: Union['JobResumeRequest', None],
 
 ) -> Optional[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]:
     """ Resume Job
 
     Args:
         job_id (str):
-        body (None):
+        body (Union['JobResumeRequest', None]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -174,14 +180,14 @@ async def asyncio_detailed(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    body: None,
+    body: Union['JobResumeRequest', None],
 
 ) -> Response[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]:
     """ Resume Job
 
     Args:
         job_id (str):
-        body (None):
+        body (Union['JobResumeRequest', None]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -208,14 +214,14 @@ async def asyncio(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    body: None,
+    body: Union['JobResumeRequest', None],
 
 ) -> Optional[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]:
     """ Resume Job
 
     Args:
         job_id (str):
-        body (None):
+        body (Union['JobResumeRequest', None]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

@@ -5,14 +5,14 @@ import json
 import os
 import subprocess
 import uuid
-from collections.abc import Mapping, Sequence
-from datetime import UTC, timedelta
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import Engine, select
 from vonk_agent_protocol import (
     RecipeRunObservationsWire,
     RecipeRunObservationWire,
@@ -39,6 +39,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
+from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.source_bundles import SourceBundleStore
 
 from .test_recipe_operations import (
@@ -149,9 +150,16 @@ def host_helper_wire_probe() -> Path:
     return path
 
 
-def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
+def _production_controller_app(
+    tmp_path: Path,
+    *,
+    nodes: int,
+    producer: Path,
+    clock: Callable[[], datetime] = lambda: NOW,
+    engine: Engine | None = None,
+):
     sessions, service, _queue, mapping_id, build_id, node_ids = setup_services(
-        tmp_path, nodes=nodes, distributed_lifecycle=nodes > 1
+        tmp_path, nodes=nodes, distributed_lifecycle=nodes > 1, engine=engine
     )
     installation = installed_recipe(
         service, mapping_id, build_id, node_ids, request_id="1" * 36
@@ -261,13 +269,13 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
     grant_seed = ed25519.Ed25519PrivateKey.from_private_bytes(bytes([29]) * 32)
     authority = HostRuntimeAuthorityService(
         sessions,
-        HostHelperGrantIssuer(grant_seed, clock=lambda: NOW),
-        clock=lambda: NOW,
+        HostHelperGrantIssuer(grant_seed, clock=clock),
+        clock=clock,
     )
     presence = AgentPresenceService(
-        sessions, ManagementAddressPolicy.parse("10.0.0.0/24"), clock=lambda: NOW
+        sessions, ManagementAddressPolicy.parse("10.0.0.0/24"), clock=clock
     )
-    operations = AgentJobService(sessions, clock=lambda: NOW)
+    operations = AgentJobService(sessions, clock=clock)
     roots = {
         name: tmp_path / name
         for name in ("artifacts", "source-bundles", "tuf-metadata", "tuf-targets")
@@ -278,7 +286,7 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
         enrollment=None,
         operations=operations,
         sessions=sessions,
-        clock=lambda: NOW,
+        clock=clock,
         presence=presence,
         artifact_root=roots["artifacts"],
         source_bundles=SourceBundleStore(roots["source-bundles"]),
@@ -333,6 +341,102 @@ def _production_controller_app(tmp_path: Path, *, nodes: int, producer: Path):
         grant_seed.public_key().public_bytes_raw(),
         captured[node_ids[0]],
     )
+
+
+def _submit_signed_observation(
+    app,
+    sessions,
+    *,
+    identity,
+    grant_public_key,
+    recipe_observation_wire_probe,
+    host_helper_wire_probe,
+    observed_at,
+):
+    from fastapi.testclient import TestClient
+
+    run_id = identity["run_id"]
+    node_id = identity["node_id"]
+    operation_id = str(uuid.uuid4())
+    fence = str(uuid.uuid4())
+    request = {
+        **identity,
+        "job_id": run_id,
+        "operation_id": operation_id,
+        "attempt": identity["run_generation"],
+        "fence": fence,
+        "request_sha256": "d" * 64,
+        "expires_in_seconds": 10,
+    }
+    headers = {
+        "x-vonk-agent-node": node_id,
+        "x-vonk-agent-serial": "serial-0",
+        "x-vonk-agent-fingerprint": "fingerprint-0",
+        "x-vonk-agent-verified": "1",
+        "x-vonk-agent-proxy-auth": "p" * 32,
+        "x-vonk-agent-source": "10.0.0.42",
+    }
+    with TestClient(app) as client:
+        grant_response = client.post(
+            "/agent/recipe-runs/observation-grants", headers=headers, json=request
+        )
+        assert grant_response.status_code == 200, grant_response.text
+        grant = SignedHostHelperGrant.parse(grant_response.json()["grant"])
+        helper = subprocess.run(
+            [str(host_helper_wire_probe)],
+            input=canonical_message(grant.to_mapping()).decode() + "\n",
+            text=True,
+            capture_output=True,
+            env={
+                **os.environ,
+                "VONK_HOST_HELPER_GRANT_PUBLIC_KEY": grant_public_key.hex(),
+                "VONK_HOST_HELPER_WIRE_NOW": str(int(observed_at.timestamp()) - 1),
+            },
+            check=False,
+        )
+        assert helper.returncode == 0, helper.stderr
+        receipt = json.loads(helper.stdout)
+        payload = {
+            **identity,
+            "observed_at": observed_at.isoformat(),
+            "endpoint_ready": True if identity["role"] == "entrypoint" else None,
+            "observation_identity_sha256": grant_response.json()[
+                "observation_identity_sha256"
+            ],
+            "grant": grant.to_mapping(),
+            "helper_receipt": receipt,
+            "observation_receipt_public_key": bytes([0]) * 0,
+        }
+        with sessions() as session:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            payload["observation_receipt_public_key"] = (
+                node.observation_receipt_public_key
+            )
+        rust = subprocess.run(
+            [str(recipe_observation_wire_probe), "serialize"],
+            input=json.dumps(
+                {
+                    "node_id": node_id,
+                    "observed_at": observed_at.isoformat(),
+                    "runs": [payload],
+                },
+                separators=(",", ":"),
+            )
+            + "\n",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert rust.returncode == 0, rust.stderr
+        envelope = json.loads(rust.stdout)
+        parsed = RecipeRunObservationsWire.parse(envelope)
+        assert parsed.runs[0].world_size == identity["world_size"]
+        consumed = client.post(
+            "/agent/recipe-runs/observations", headers=headers, json=envelope
+        )
+        assert consumed.status_code == 204, consumed.text
+    return envelope, headers
 
 
 @pytest.mark.parametrize("nodes", [1, 2])
@@ -393,88 +497,16 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
                 session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
             )
             node.updated_at = NOW + timedelta(microseconds=500_000)
-    operation_id = str(uuid.uuid4())
-    fence = str(uuid.uuid4())
-    request = {
-        **identity,
-        "job_id": run_id,
-        "operation_id": operation_id,
-        "attempt": identity["run_generation"],
-        "fence": fence,
-        "request_sha256": "d" * 64,
-        "expires_in_seconds": 10,
-    }
-    headers = {
-        "x-vonk-agent-node": node_id,
-        "x-vonk-agent-serial": "serial-0",
-        "x-vonk-agent-fingerprint": "fingerprint-0",
-        "x-vonk-agent-verified": "1",
-        "x-vonk-agent-proxy-auth": "p" * 32,
-        "x-vonk-agent-source": "10.0.0.42",
-    }
-    with TestClient(app) as client:
-        grant_response = client.post(
-            "/agent/recipe-runs/observation-grants", headers=headers, json=request
-        )
-        assert grant_response.status_code == 200, grant_response.text
-        grant = SignedHostHelperGrant.parse(grant_response.json()["grant"])
-        helper = subprocess.run(
-            [str(host_helper_wire_probe)],
-            input=canonical_message(grant.to_mapping()).decode() + "\n",
-            text=True,
-            capture_output=True,
-            env={
-                **os.environ,
-                "VONK_HOST_HELPER_GRANT_PUBLIC_KEY": grant_public_key.hex(),
-                "VONK_HOST_HELPER_WIRE_NOW": str(
-                    int(NOW.timestamp()) - int(same_second)
-                ),
-            },
-            check=False,
-        )
-        assert helper.returncode == 0, helper.stderr
-        receipt = json.loads(helper.stdout)
-        observed_at = NOW + timedelta(seconds=0 if same_second else 1)
-        payload = {
-            **identity,
-            "observed_at": observed_at.isoformat(),
-            "endpoint_ready": True if identity["role"] == "entrypoint" else None,
-            "observation_identity_sha256": grant_response.json()[
-                "observation_identity_sha256"
-            ],
-            "grant": grant.to_mapping(),
-            "helper_receipt": receipt,
-            "observation_receipt_public_key": bytes([0]) * 0,
-        }
-        with sessions() as session:
-            node = session.get(AgentNode, node_id)
-            assert node is not None
-            payload["observation_receipt_public_key"] = (
-                node.observation_receipt_public_key
-            )
-        rust = subprocess.run(
-            [str(recipe_observation_wire_probe), "serialize"],
-            input=json.dumps(
-                {
-                    "node_id": node_id,
-                    "observed_at": observed_at.isoformat(),
-                    "runs": [payload],
-                },
-                separators=(",", ":"),
-            )
-            + "\n",
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert rust.returncode == 0, rust.stderr
-        envelope = json.loads(rust.stdout)
-        parsed = RecipeRunObservationsWire.parse(envelope)
-        assert parsed.runs[0].world_size == nodes
-        consumed = client.post(
-            "/agent/recipe-runs/observations", headers=headers, json=envelope
-        )
-        assert consumed.status_code == 204, consumed.text
+    observed_at = NOW + timedelta(seconds=0 if same_second else 1)
+    envelope, headers = _submit_signed_observation(
+        app,
+        sessions,
+        identity=identity,
+        grant_public_key=grant_public_key,
+        recipe_observation_wire_probe=recipe_observation_wire_probe,
+        host_helper_wire_probe=host_helper_wire_probe,
+        observed_at=observed_at,
+    )
     with sessions() as session:
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         assert node.observed_run_generation == identity["run_generation"]
@@ -506,6 +538,63 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         assert node.state == "failed"
         assert node.observation_receipt_sha256 is None
+
+
+@pytest.mark.parametrize("schedule", [(120,), (121,), (0, 60, 121)])
+def test_signed_observation_deadline_applies_to_first_receipt_not_renewal(
+    tmp_path: Path,
+    recipe_observation_wire_probe: Path,
+    host_helper_wire_probe: Path,
+    postgres_engine,
+    schedule: tuple[int, ...],
+) -> None:
+    # Wrong implementation: every renewal overwrites updated_at, so a healthy
+    # rank with timely signed evidence is killed at the initial grace deadline.
+    now = [NOW]
+    app, sessions, run_id, _job_id, node_id, public_key, produced = (
+        _production_controller_app(
+            tmp_path,
+            nodes=1,
+            producer=recipe_observation_wire_probe,
+            clock=lambda: now[0],
+            engine=postgres_engine,
+        )
+    )
+    binding = require_mapping(produced["binding"], "recipe run inspection binding")
+    identity = {"schema_version": 1, "node_id": node_id, **binding}
+    first_late = schedule[0] > 120
+    for elapsed in schedule:
+        now[0] = NOW + timedelta(seconds=elapsed)
+        _submit_signed_observation(
+            app,
+            sessions,
+            identity=identity,
+            grant_public_key=public_key,
+            recipe_observation_wire_probe=recipe_observation_wire_probe,
+            host_helper_wire_probe=host_helper_wire_probe,
+            observed_at=now[0],
+        )
+    with sessions() as session:
+        rank = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
+        assert rank.state == ("failed" if first_late else "running")
+        assert rank.observed_run_generation == identity["run_generation"]
+        assert rank.observation_receipt_sha256 is not None
+    # The worker re-reads PostgreSQL after a process restart; it must preserve
+    # timely, continuously renewed observations while publication is pending.
+    if not first_late:
+
+        class UnusedRoutes:
+            def publish_run(self, run_id: str) -> object:
+                raise AssertionError("expiry must not invoke route publication")
+
+            def maintain(self, *, renew_before_seconds=10):
+                raise AssertionError("expiry must not invoke route maintenance")
+
+        worker = RecipeOperationWorker(sessions, UnusedRoutes(), clock=lambda: now[0])
+        assert worker._expire_initial_observation_deadline() is False
+        with sessions() as session:
+            run = session.get(RecipeRun, run_id)
+            assert run is not None and run.route_state == "pending"
 
 
 @pytest.mark.parametrize("singleton", [False, True])

@@ -20,6 +20,7 @@ from .model_cache import (
 )
 from .model_cache_contract import (
     UUID_PATTERN,
+    ModelCacheCancellationRequest,
     ModelCacheOperatorAction,
     ModelCacheOperatorRequest,
     ModelCacheOperatorResponse,
@@ -40,6 +41,7 @@ MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/model/requests/{request_key}"): "getModelRequest",
     ("post", "/api/model/{selector}/download"): "downloadModel",
     ("post", "/api/model/{selector}/remove"): "removeModel",
+    ("post", "/api/model/operations/{operation_id}/cancel"): "cancelModelOperation",
 }
 
 
@@ -74,6 +76,7 @@ def _model_operator_response(
             ["retry"] if operation.state == "failed" and operation.retryable else []
         ),
         cancelled_operations=list(cancelled),
+        cancellation=getattr(operation, "cancellation", None),
         result=result,
         failure=(
             AvailabilityOperationFailure.model_validate(operation.failure)
@@ -232,6 +235,36 @@ def install_model_operator_routes(
         except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise failure(error) from None
 
+    @app.post(
+        "/api/model/operations/{operation_id}/cancel",
+        response_model=ModelCacheOperatorResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="cancelModelOperation",
+    )
+    def cancel_operation(
+        body: ModelCacheCancellationRequest,
+        request: Request,
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        route = "/api/model/operations/{operation_id}/cancel"
+        require_operator(actor, route)
+        try:
+            cache().cancel_operation(
+                operation_id,
+                actor=actor.subject,
+                request_key=body.request_key,
+                reason=body.reason,
+            )
+            operation, action, selector = cache().get_operator_operation(operation_id)
+            audit(request, actor, "model.cancel", selector, operation_id)
+            return _model_operator_response(operation, action=action, selector=selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise failure(error) from None
+
 
 class ModelCacheOperationProvider:
     """Current Activity provider for the Controller-owned cache family."""
@@ -247,18 +280,23 @@ class ModelCacheOperationProvider:
         after = getattr(query, "after", None)
         state = getattr(query, "state", None)
         node_id = getattr(query, "node_id", None)
+        request_id = getattr(query, "request_id", None)
         page = self._service.activity_operations(
             after=after,
             limit=min(limit, 101),
             state=state,
             node_id=node_id,
+            request_id=request_id,
         )
         items = [
             self._summary(item)
             for item in require_sequence(page["operations"], "page operations")
         ]
         next_cursor = self._next_cursor(
-            page.get("_next_boundary"), state=state, node_id=node_id
+            page.get("_next_boundary"),
+            state=state,
+            node_id=node_id,
+            request_id=request_id,
         )
         return OperationListPage(
             items=items,
@@ -272,6 +310,7 @@ class ModelCacheOperationProvider:
         *,
         state: object,
         node_id: object,
+        request_id: object,
     ) -> str | None:
         """Encode the page boundary, keeping absence distinct from corruption.
 
@@ -288,7 +327,7 @@ class ModelCacheOperationProvider:
         created_at, operation_id = boundary
         if not isinstance(created_at, str) or not isinstance(operation_id, str):
             raise OperationProjectionError("operation cursor boundary is invalid")
-        context = {"state": state, "node_id": node_id}
+        context = {"state": state, "node_id": node_id, "request_id": request_id}
         if self._cursors is not None:
             return self._cursors.encode(
                 resource="model-cache-operations",
@@ -328,6 +367,11 @@ class ModelCacheOperationProvider:
             "supported_actions": ["retry"] if retryable else [],
             "result": result,
             "failure": operation.failure,
+            "owner": {
+                "kind": "model-cache-operation",
+                "id": operation.id,
+                "request_id": operation.request_key,
+            },
         }
 
     @staticmethod

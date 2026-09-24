@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, ValidationError, model_validator
 
-from .compiled_execution_plan import CompiledExecutionPlan
+from .compiled_execution_plan import CompiledExecutionPlan, MemoryKind
 from .contracts import (
     AgentOperation,
     AgentProtocolError,
@@ -77,6 +77,8 @@ class RecipeStartPayload(_StrictPayload):
     role: Role
     port: Port
     reserved_memory_bytes: PositiveByteCount
+    memory_floor_bytes: ByteCount
+    memory_kind: MemoryKind
     endpoint_address: str = Field(json_schema_extra={"format": "ip"})
     world_size: PositiveInt
     compiled_execution_plan: CompiledExecutionPlan
@@ -115,6 +117,8 @@ class RecipeStartPayload(_StrictPayload):
             not endpoint_matches
             or self.port != placement.port
             or self.reserved_memory_bytes != placement.reserved_memory_bytes
+            or self.memory_floor_bytes != placement.memory_floor_bytes
+            or self.memory_kind != placement.memory_kind
             or self.local_address != placement.local_address
             or self.master_address != placement.master_address
             or self.master_port != placement.master_port
@@ -290,6 +294,10 @@ class RecipeOperationRequest(_StrictPayload):
     @property
     def reserved_memory_bytes(self) -> int | None:
         return getattr(self.payload, "reserved_memory_bytes", None)
+
+    @property
+    def memory_floor_bytes(self) -> int | None:
+        return getattr(self.payload, "memory_floor_bytes", None)
 
     @property
     def endpoint_address(self) -> str | None:

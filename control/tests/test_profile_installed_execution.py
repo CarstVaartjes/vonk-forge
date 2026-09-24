@@ -14,6 +14,7 @@ from vonk_control.fleet_profiles import (
 )
 from vonk_control.models import (
     CatalogDocumentRevision,
+    FleetProfileApplication,
     InstallationNode,
     Job,
     NodeInventorySnapshot,
@@ -99,7 +100,16 @@ def _drive_to_job(service, planner, sessions, kind: str):
             job = session.scalar(select(Job).where(Job.kind == kind))
             if job is not None:
                 return job.id
-    raise AssertionError(f"No {kind} job was created")
+    with sessions() as session:
+        receipts = [
+            (row.id, row.state, row.status_reason)
+            for row in session.scalars(select(FleetProfileApplication))
+        ]
+        jobs = [
+            (row.kind, row.state, row.status_reason)
+            for row in session.scalars(select(Job))
+        ]
+    raise AssertionError(f"No {kind} job was created; profiles={receipts}; jobs={jobs}")
 
 
 @pytest.mark.parametrize("node_count", [1, 2])

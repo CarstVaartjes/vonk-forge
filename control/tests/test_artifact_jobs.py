@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     AgentResult,
     RecipeJobFile,
     RecipeJobRunResult,
+    canonical_message,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
@@ -44,6 +45,7 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
 )
+from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeOperationConflict,
@@ -406,6 +408,23 @@ def test_artifact_job_create_idempotency_compares_canonical_semantics(
     assert replayed.id == first.id
 
 
+def test_artifact_job_create_request_lookup_recovers_the_original_draft(
+    tmp_path,
+) -> None:
+    _sessions, _operations, _queue, service, run_id, _node_id = (
+        running_artifact_service(tmp_path)
+    )
+    request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000154")
+    created = service.create(**request)
+
+    recovered = service.get_by_request_id(request["request_id"])
+
+    assert recovered.id == created.id
+    assert recovered.state == "draft"
+    with pytest.raises(KeyError):
+        service.get_by_request_id("00000000-0000-4000-8000-000000000155")
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -554,11 +573,34 @@ def test_artifact_job_create_exact_concurrent_replay_has_one_identity(
     assert len(set(identifiers)) == 1
 
 
-def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
-    tmp_path,
-) -> None:
+def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) -> None:
+    def configure_recipe(document: dict[str, object]) -> None:
+        topology = _mapping(document["topology"])
+        roles = _sequence(topology["roles"])
+        entrypoint = _mapping(roles[0])
+        resources = _mapping(entrypoint["resources"])
+        memory = _mapping(resources["memory"])
+        memory["system_reserve_bytes"] = 107
+        interfaces = _sequence(document["interfaces"])
+        image_interface = _mapping(interfaces[0])
+        output = _mapping(image_interface["output"])
+        slots = _sequence(output["slots"])
+        slots.append(
+            {
+                "id": "metadata",
+                "label": "Metadata",
+                "description": "Generated metadata",
+                "media_types": ["application/json"],
+                "extensions": [".json"],
+                "min_files": 1,
+                "max_files": 1,
+                "max_file_bytes": 1024,
+                "max_total_bytes": 4096,
+            }
+        )
+
     sessions, _recipe_operations, queue, service, run_id, node_id = (
-        running_artifact_service(tmp_path)
+        running_artifact_service(tmp_path, recipe_transform=configure_recipe)
     )
     input_content = b"png"
     input_digest = hashlib.sha256(input_content).hexdigest()
@@ -576,10 +618,10 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
             }
         ],
         output_limits={
-            "max_files": 1,
+            "max_files": 2,
             "max_file_bytes": 1024,
             "max_total_bytes": 4096,
-            "allowed_media_types": ["image/png"],
+            "allowed_media_types": ["application/json", "image/png"],
         },
         timeout_seconds=3600,
         actor="operator",
@@ -608,6 +650,21 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
         request_id="00000000-0000-4000-8000-000000000104",
     )
     assert submitted.state == "queued"
+    notifications_after_submit = queue.available
+    replayed = service.submit(
+        job.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000104",
+    )
+    assert replayed.operation_id == submitted.operation_id
+    with pytest.raises(ArtifactJobError, match="request identity"):
+        service.submit(
+            job.id,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000105",
+        )
+    assert replayed.submit_request_id == "00000000-0000-4000-8000-000000000104"
+    assert queue.available == notifications_after_submit
     assert queue.available > 0
     with sessions() as session:
         operation = session.scalar(
@@ -618,17 +675,40 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
         assert operation is not None
         assert operation.kind == "recipe.job.run.v1"
         assert operation.payload["reserved_memory_bytes"] == 225
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        planned_floor = next(
+            item.memory_floor_bytes
+            for item in parse_stored_run_plan(run.plan).nodes
+            if item.node_id == node_id
+        )
+        assert planned_floor == 107
+        assert operation.payload["memory_floor_bytes"] == planned_floor
+        planned_kind = next(
+            item.memory_kind
+            for item in parse_stored_run_plan(run.plan).nodes
+            if item.node_id == node_id
+        )
+        assert operation.payload["memory_kind"] == planned_kind
         assert operation.payload["input_manifest_sha256"] == job.input_manifest_sha256
         assert operation.payload["contract_sha256"] == job.contract_sha256
         compiled_plan = _mapping(operation.payload["compiled_execution_plan"])
         plan_runtime = _mapping(compiled_plan["runtime"])
+        plan_placement = _mapping(plan_runtime["placement"])
+        assert plan_placement["memory_floor_bytes"] == planned_floor
+        assert plan_placement["memory_kind"] == planned_kind
         assert "fox / meadow" in _sequence(plan_runtime["argv"])
         assert operation.payload["output_mappings"] == [
             {
                 "slot": "image",
                 "media_type": "image/png",
                 "extensions": [".png"],
-            }
+            },
+            {
+                "slot": "metadata",
+                "media_type": "application/json",
+                "extensions": [".json"],
+            },
         ]
     input_path, input_media_type, input_size = service.input_blob(
         job.id, input_digest, node_id=node_id
@@ -641,7 +721,7 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
     with pytest.raises(ArtifactJobError, match="authorized"):
         service.input_blob(job.id, input_digest, node_id="spk_" + "f" * 32)
 
-    output_content = b"done"
+    output_content = b"{}"
     output_digest = hashlib.sha256(output_content).hexdigest()
     service.put_output(
         job.id,
@@ -651,20 +731,35 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
         expected_sha256=output_digest,
         content=output_content,
     )
-    output = RecipeJobFile(
+    service.put_output(
+        job.id,
+        node_id=node_id,
+        name="metadata.json",
+        media_type="application/json",
+        expected_sha256=output_digest,
+        content=output_content,
+    )
+    image_output = RecipeJobFile(
         name="output.png",
         media_type="image/png",
-        size_bytes=4,
+        size_bytes=len(output_content),
         sha256=output_digest,
     )
+    metadata_output = RecipeJobFile(
+        name="metadata.json",
+        media_type="application/json",
+        size_bytes=len(output_content),
+        sha256=output_digest,
+    )
+    outputs = (metadata_output, image_output)
     result = {
         "schema_version": 1,
         "job_id": job.id,
         "run_id": run_id,
         "exit_code": 0,
         "output_manifest": {
-            **recipe_job_manifest_document((output,)),
-            "manifest_sha256": recipe_job_manifest_sha256((output,)),
+            **recipe_job_manifest_document(outputs),
+            "manifest_sha256": recipe_job_manifest_sha256(outputs),
         },
         "evidence": {"elapsed_milliseconds": 1234, "peak_memory_bytes": None},
     }
@@ -679,7 +774,7 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
         )
     completed = service.result_metadata(job.id)
     assert completed.state == "succeeded"
-    assert completed.output_manifest_sha256 == recipe_job_manifest_sha256((output,))
+    assert completed.output_manifest_sha256 == recipe_job_manifest_sha256(outputs)
     from vonk_control.artifact_job_api import _view
 
     response = _view(completed)
@@ -691,15 +786,29 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
         ArtifactJobResponse.model_validate(
             response.model_dump() | {"output_manifest_sha256": None}
         )
-    output_path, output_media_type, output_name, output_size = service.result_blob(
-        job.id, output_digest
+    image_path, image_media_type, image_name, image_size = service.result_blob(
+        job.id, "output.png", output_digest
     )
-    assert (output_path.read_bytes(), output_media_type, output_name, output_size) == (
+    metadata_path, metadata_media_type, metadata_name, metadata_size = (
+        service.result_blob(job.id, "metadata.json", output_digest)
+    )
+    assert (image_path.read_bytes(), image_media_type, image_name, image_size) == (
         output_content,
         "image/png",
         "output.png",
-        4,
+        len(output_content),
     )
+    assert (
+        metadata_path.read_bytes(),
+        metadata_media_type,
+        metadata_name,
+        metadata_size,
+    ) == (output_content, "application/json", "metadata.json", len(output_content))
+    assert image_path == metadata_path
+    with pytest.raises(KeyError):
+        service.result_blob(job.id, "missing.json", output_digest)
+    with pytest.raises(KeyError):
+        service.result_blob(job.id, "output.png", "0" * 64)
     with sessions() as session:
         run_row = session.get(RecipeRun, run_id)
         assert run_row is not None
@@ -710,6 +819,64 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
         row.output_manifest_sha256 = None
     with pytest.raises(ValidationError, match="requires output manifest"):
         service.result_metadata(job.id)
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    (
+        "non-object-payload",
+        "payload-digest",
+        "foreign-owner",
+        "malformed-request-id",
+        "null-request-id",
+    ),
+)
+def test_artifact_submission_receipt_fails_closed_on_corrupt_owner(
+    tmp_path, corruption: str
+) -> None:
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path
+    )
+    submitted = submitted_artifact_job(service, run_id, request_suffix=180)
+    assert submitted.operation_id is not None
+
+    if corruption == "null-request-id":
+        with sessions() as session:
+            artifact_job = session.get(ArtifactJob, submitted.id)
+            parent = session.get(Job, submitted.operation_id)
+            assert artifact_job is not None and parent is not None
+            object.__setattr__(parent, "request_id", None)
+            with pytest.raises(ArtifactJobError, match="submission request identity"):
+                service._view_in_session(session, artifact_job)
+        return
+
+    with sessions.begin() as session:
+        parent = session.get(Job, submitted.operation_id)
+        assert parent is not None
+        if corruption == "non-object-payload":
+            payload: object = ["malformed owner envelope"]
+            object.__setattr__(parent, "payload", payload)
+            parent.payload_digest = hashlib.sha256(
+                canonical_message(payload)
+            ).hexdigest()
+        elif corruption == "payload-digest":
+            parent.payload_digest = "0" * 64
+        elif corruption == "foreign-owner":
+            payload = {
+                **parent.payload,
+                "owner_id": "00000000-0000-4000-8000-000000000999",
+            }
+            parent.payload = payload
+            parent.payload_digest = hashlib.sha256(
+                canonical_message(payload)
+            ).hexdigest()
+        elif corruption == "malformed-request-id":
+            parent.request_id = "not-a-uuid"
+        else:
+            raise AssertionError(f"unexpected corruption: {corruption}")
+
+    with pytest.raises(ArtifactJobError):
+        service.get(submitted.id)
 
 
 def test_artifact_job_rejects_unsafe_names_and_timeout(tmp_path) -> None:

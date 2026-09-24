@@ -1,0 +1,52 @@
+{
+  "admission_decisions": [],
+  "allowed": true,
+  "assessments": [],
+  "assignments": [],
+  "effects": {
+    "installations": [],
+    "runs": [],
+    "superseded": []
+  },
+  "generated_at": "2026-09-10T00:00:00Z",
+  "plan_digest": "fe70c58845e90a866e018391222fb7cb8702a997b405da0ddea8eab69c4b2caf",
+  "preparation_decisions": [],
+  "preparations": [],
+  "profile_definition": {
+    "assignments": [],
+    "description": "",
+    "favorite": false,
+    "installation_policy": "keep-cached",
+    "labels": {},
+    "name": "Reviewed idle"
+  },
+  "profile_digest": "275baf7bb4315740b44cbe74dd7569659fe47bb4a35af5aa8b5d410eba4fc7f4",
+  "profile_id": "425bc8e8-4caf-4da6-a4f5-1f54c4e0a663",
+  "profile_name": "Reviewed idle",
+  "profile_revision": 1,
+  "reasons": [],
+  "resolved_assignments": [],
+  "schema_version": 2,
+  "scope": {
+    "idle_node_ids": [
+      "spk_11111111111111111111111111111111",
+      "spk_22222222222222222222222222222222"
+    ],
+    "node_ids": [
+      "spk_11111111111111111111111111111111",
+      "spk_22222222222222222222222222222222"
+    ]
+  },
+  "steps": [],
+  "summary": {
+    "already_correct": 0,
+    "blockers": 0,
+    "builds": 0,
+    "distributions": 0,
+    "installs": 0,
+    "placements": 0,
+    "starts": 0,
+    "stops": 0,
+    "uninstalls": 0
+  }
+}

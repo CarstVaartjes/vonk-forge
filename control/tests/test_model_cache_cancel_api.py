@@ -9,6 +9,7 @@ from vonk_control.auth import Actor
 from vonk_control.model_cache import CacheOperationView
 from vonk_control.model_cache_api import install_model_operator_routes
 from vonk_control.model_cache_contract import (
+    ModelCacheCancellation,
     ModelCacheOperatorResponse,
     ModelCacheRemovalResult,
 )
@@ -16,6 +17,7 @@ from vonk_control.model_cache_progress import cache_progress
 
 OPERATION_ID = "00000000-0000-4000-8000-000000000001"
 REQUEST_KEY = "00000000-0000-4000-8000-000000000002"
+CANCEL_KEY = "00000000-0000-4000-8000-000000000003"
 
 
 def _client(service, role="administrator"):
@@ -59,6 +61,7 @@ def test_remove_is_the_current_model_eviction_boundary():
     )
     operation.failure = None
     operation.retryable = False
+    operation.cancellation = None
     service = Mock()
     service.remove_model_selector.return_value = operation
     response = _client(service).post(
@@ -97,6 +100,7 @@ def test_model_operation_observation_is_readable_by_any_authenticated_actor():
     )
     operation.failure = None
     operation.retryable = False
+    operation.cancellation = None
     service = Mock()
     service.get_operator_operation.return_value = (operation, "remove", "model")
     response = _client(service, role="viewer").get(
@@ -109,6 +113,61 @@ def test_model_operation_observation_is_readable_by_any_authenticated_actor():
     )
 
 
+def test_cancel_route_requires_operator_and_returns_durable_intent():
+    operation = Mock(spec=CacheOperationView)
+    operation.id = OPERATION_ID
+    operation.request_key = REQUEST_KEY
+    operation.state = "cancelling"
+    operation.progress = cache_progress(
+        {
+            "phase": "cancelling",
+            "completed_artifacts": 0,
+            "total_artifacts": 1,
+            "downloaded_bytes": 12,
+            "expected_bytes": 20,
+        },
+        previous=None,
+        now=datetime(2026, 9, 10, tzinfo=UTC),
+    )
+    operation.result = None
+    operation.failure = None
+    operation.retryable = False
+    operation.cancellation = ModelCacheCancellation(
+        request_key=CANCEL_KEY,
+        actor="test",
+        reason="operator stopped this download",
+        requested_at="2026-09-10T00:00:00+00:00",
+    )
+    service = Mock()
+    service.cancel_operation.return_value = operation
+    service.get_operator_operation.return_value = (operation, "download", "model")
+    body = {
+        "schema_version": 2,
+        "request_key": CANCEL_KEY,
+        "reason": "operator stopped this download",
+    }
+
+    denied = _client(service, role="viewer").post(
+        f"/api/model/operations/{OPERATION_ID}/cancel", json=body
+    )
+    assert denied.status_code == 403
+    service.cancel_operation.assert_not_called()
+
+    response = _client(service, role="operator").post(
+        f"/api/model/operations/{OPERATION_ID}/cancel", json=body
+    )
+    assert response.status_code == 202, response.text
+    parsed = ModelCacheOperatorResponse.model_validate_json(response.content)
+    assert parsed.state == "cancelling"
+    assert parsed.cancellation == operation.cancellation
+    service.cancel_operation.assert_called_once_with(
+        OPERATION_ID,
+        actor="test",
+        request_key=CANCEL_KEY,
+        reason="operator stopped this download",
+    )
+
+
 def test_model_operator_routes_have_one_current_namespace():
     service = Mock()
     schema = _client(service).get("/openapi.json").json()
@@ -118,6 +177,10 @@ def test_model_operator_routes_have_one_current_namespace():
     assert (
         paths["/api/model/operations/{operation_id}"]["get"]["operationId"]
         == "getModelOperation"
+    )
+    assert (
+        paths["/api/model/operations/{operation_id}/cancel"]["post"]["operationId"]
+        == "cancelModelOperation"
     )
     assert all(path.startswith("/api/model/") for path in paths)
     assert not any(path.startswith("/api/model-cache") for path in paths)

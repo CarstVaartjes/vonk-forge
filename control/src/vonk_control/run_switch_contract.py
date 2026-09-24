@@ -13,6 +13,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_agent_protocol import DistributionAssignment, OperationProgress
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .lifecycle_preflight import LifecyclePreflightCheckpoint
@@ -32,7 +33,6 @@ UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 Digest = Annotated[str, StringConstraints(pattern=_DIGEST_PATTERN)]
 PortNumber = Annotated[int, Field(ge=1, le=65535)]
-MemoryKind = Literal["unified", "host", "accelerator"]
 Alias = Annotated[
     str,
     StringConstraints(
@@ -286,6 +286,7 @@ class SparkFitNode(_StrictModel):
     memory_kind: MemoryKind | None = None
     memory_pool: MemoryPool | None = None
     memory_floor_bytes: int | None = Field(default=None, ge=0)
+    memory_capacity_bytes: int | None = Field(default=None, ge=0)
     memory_available_bytes: int | None = Field(default=None, ge=0)
     memory_free_after_bytes: int | None = None
     resource_demand: ResourceDemandEvidence | None = None
@@ -342,6 +343,10 @@ class BuildCompatibilityEvidence(_StrictModel):
 
 class RuntimeImageStorageImpact(_StrictModel):
     build_id: UuidId | None
+    preparation_required: bool
+    registry_manifest_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    ) = None
     image_digest: (
         Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
     )
@@ -399,6 +404,20 @@ class StopImpact(_StrictModel):
     plan_digest: Digest
 
 
+class ConditionalPostStopMemoryCheck(_StrictModel):
+    """Fresh inventory and ordinary memory admission required after stops."""
+
+    stop_run_ids: list[UuidId] = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def ordered_unique_stops(self) -> ConditionalPostStopMemoryCheck:
+        if self.stop_run_ids != sorted(set(self.stop_run_ids)):
+            raise ValueError(
+                "post-stop memory check identities must be unique and ordered"
+            )
+        return self
+
+
 class RunSwitchPhase(_StrictModel):
     index: int = Field(ge=0, le=31)
     kind: RunSwitchPhaseKind
@@ -418,6 +437,7 @@ class RunSwitchAssessment(_StrictModel):
     alias: Alias | None
     fit_current: SparkFit
     fit_after_stop: SparkFit | None
+    post_stop_memory_check: ConditionalPostStopMemoryCheck | None = None
     effective_settings: EffectiveSettingsSelection | None = None
     preparation: RolloutPreparation | None = None
     stops: list[StopImpact] = Field(max_length=128)
@@ -442,6 +462,38 @@ class RunSwitchAssessment(_StrictModel):
             for reason in self.preparation.reasons
         ):
             raise ValueError("preparation blockers must be named by admission")
+        if self.post_stop_memory_check is not None:
+            expected_stops = sorted(stop.run_id for stop in self.stops)
+            if not expected_stops or (
+                self.post_stop_memory_check.stop_run_ids != expected_stops
+            ):
+                raise ValueError(
+                    "conditional memory check must bind the exact reviewed stops"
+                )
+            if self.fit_after_stop is not None:
+                raise ValueError(
+                    "conditional memory check cannot claim measured after-stop capacity"
+                )
+            if any(
+                node.memory_required_bytes is None
+                or node.memory_kind is None
+                or node.memory_pool is None
+                or node.memory_floor_bytes is None
+                or node.memory_capacity_bytes is None
+                or node.memory_available_bytes is None
+                or node.resource_demand is None
+                or node.memory_capacity_bytes
+                < node.memory_required_bytes + node.memory_floor_bytes
+                for node in self.fit_current.nodes
+            ):
+                raise ValueError(
+                    "conditional memory check requires known feasible demand and capacity"
+                )
+            fit_nodes = {node.node_id for node in self.fit_current.nodes}
+            if any(not set(stop.node_ids) <= fit_nodes for stop in self.stops):
+                raise ValueError(
+                    "conditional memory stops must stay within the reviewed target scope"
+                )
         return self
 
 
@@ -459,6 +511,10 @@ class RunSwitchPlan(RunSwitchAssessment):
     installation_state: (
         Annotated[str, StringConstraints(min_length=1, max_length=24)] | None
     )
+    # A scoped cleanup either removes installed bytes or abandons a persisted
+    # plan that never reached a node.  The assessment owns the decision; the
+    # phase executor reads it here instead of re-deriving it from state.
+    cleanup_disposition: Literal["uninstall", "abandon"] = "uninstall"
     recipe_build_id: UuidId | None
     image_digest: (
         Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
@@ -800,6 +856,10 @@ class RunSwitchUninstallResult(_RunSwitchPhaseBase):
     phase: Literal["uninstall"]
     subphase: RunSwitchSubphase | None = None
     installation_id: UuidId
+    # ``abandoned`` records a persisted plan that never reached a node, so the
+    # operator sees why the record was disposed of without node work.
+    disposition: Literal["uninstalled", "abandoned"] = "uninstalled"
+    reason: Annotated[str, StringConstraints(max_length=512)] | None = None
 
 
 class RunSwitchCleanupVerifyResult(_RunSwitchPhaseBase):
@@ -886,6 +946,52 @@ class RunSwitchCancellation(_StrictModel):
     requested_at: datetime
 
 
+class RunSwitchRuntimeImageReferenceIntent(_StrictModel):
+    """Exact image bytes provisionally protected by a current RunSwitch job."""
+
+    schema_version: Literal[2] = 2
+    owner_kind: Literal["run-switch-job"]
+    operation_id: UuidId
+    request_key: UuidId
+    actor: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    plan_digest: Digest
+    phase_index: int = Field(ge=0, le=31)
+    item_index: int = Field(ge=0, le=31)
+    workload_intent_ordinal: int = Field(ge=1)
+    recipe_revision_id: UuidId
+    profile_application_id: UuidId | None = None
+    execution_keys: list[Digest] = Field(min_length=1, max_length=32)
+    source: Literal["published", "controller-build"]
+    registry_manifest_digest: (
+        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    ) = None
+    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+    archive_sha256: Digest
+    image_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
+    build_id: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = (
+        None
+    )
+    build_input_sha256: Digest | None = None
+
+    @model_validator(mode="after")
+    def reference_identity_is_consistent(
+        self,
+    ) -> RunSwitchRuntimeImageReferenceIntent:
+        if self.execution_keys != sorted(set(self.execution_keys)):
+            raise ValueError("RunSwitch runtime execution keys are not canonical")
+        if self.source == "published" and (
+            self.registry_manifest_digest is None
+            or self.build_id is not None
+            or self.build_input_sha256 is not None
+        ):
+            raise ValueError("published RunSwitch image reference is inconsistent")
+        if self.source == "controller-build" and (
+            self.registry_manifest_digest is not None or self.build_id is None
+        ):
+            raise ValueError("built RunSwitch image reference is inconsistent")
+        return self
+
+
 class RunSwitchOperationResult(_StrictModel):
     """Exact durable result tree stored in ``Job.result``."""
 
@@ -899,6 +1005,7 @@ class RunSwitchOperationResult(_StrictModel):
         default_factory=list, max_length=16
     )
     child_operation_id: UuidId | None = None
+    runtime_image_reference_intent: RunSwitchRuntimeImageReferenceIntent | None = None
     phase_results: list[RunSwitchPhaseResult] = Field(default_factory=list)
     operation_phase_index: int | None = Field(default=None, ge=0, le=31)
     preflight: LifecyclePreflightCheckpoint | None = None
@@ -1024,6 +1131,7 @@ __all__ = [
     "RunSwitchReasonSeverity",
     "RunSwitchRetention",
     "RunSwitchRetryRequest",
+    "RunSwitchRuntimeImageReferenceIntent",
     "RunSwitchRuntimeImageResult",
     "RunSwitchRuntimeInstallResult",
     "RunSwitchRuntimePlanResult",

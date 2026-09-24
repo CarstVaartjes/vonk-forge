@@ -1,0 +1,18 @@
+{
+  "artifact_job_id": "cbe80d77-f606-4945-a2cd-86cdeb2b04fa",
+  "code": "http.409",
+  "decision": "exit",
+  "detail": "artifact job was submitted under another request identity",
+  "endpoint": "/api/artifact-jobs/cbe80d77-f606-4945-a2cd-86cdeb2b04fa/submit",
+  "error": "POST /api/artifact-jobs/cbe80d77-f606-4945-a2cd-86cdeb2b04fa/submit http.409 HTTP 409: artifact job was submitted under another request identity [exit]",
+  "error_type": "control_api",
+  "http_status": 409,
+  "operation": "POST /api/artifact-jobs/cbe80d77-f606-4945-a2cd-86cdeb2b04fa/submit",
+  "reconcile": {
+    "operation": "vonkctl recipe job detail cbe80d77-f606-4945-a2cd-86cdeb2b04fa"
+  },
+  "recovery_actions": [],
+  "request_key": "00000000-0000-4000-8000-000000000105",
+  "retryable": false,
+  "source": "remote_rejection"
+}

@@ -24,6 +24,7 @@ from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentResult,
     ExecuteContainerRuntimeRequestOperation,
     RecipeInstallPayload,
     RecipeRunObservationReceiptClaims,
@@ -82,6 +83,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import (
     RecipeInstallPreflightExpired,
@@ -115,6 +117,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 
 from .canonical_recipe_fixtures import canonical_example
 from .preflight_fixtures import record_passing_preflight
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
 
@@ -1727,6 +1730,155 @@ def test_distributed_start_launches_all_ranks_then_checks_collective(
             _required(session.get(RecipeRun, start.owner_id)).observation_deadline_at
             is None
         )
+
+
+def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
+    tmp_path: Path,
+) -> None:
+    """A slow engine launch must survive its own declared readiness budget.
+
+    The measured defect: the readiness phase declares an hour of budget, the
+    agent is blocked inside the launch and silent, and the Controller expired
+    the attempt after its short lease and parked the operation, so the eventual
+    success never published the route.  Driving the real agent claim and result
+    boundary, the still-current attempt must stay current inside the budget, its
+    success must complete the start, and the run must reach its published route.
+    """
+
+    now = [NOW]
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        distributed_start_timeout_seconds=3600,
+    )
+    service._clock = lambda: now[0]
+    with sessions.begin() as session:
+        for node in session.scalars(
+            select(AgentNode).where(AgentNode.node_id.in_(nodes))
+        ):
+            node.capabilities = sorted(set(node.capabilities or ()) | {"recipe.start"})
+    jobs = AgentJobService(sessions, clock=lambda: now[0])
+    jobs.set_result_consumer(service.consume_agent_result)
+
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="u" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "slow-launch")
+    start = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="v" * 36,
+    )
+
+    def children(phase: str) -> tuple[AgentOperation, ...]:
+        with sessions() as session:
+            rows = tuple(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == start.id)
+                    .order_by(AgentOperation.created_at, AgentOperation.id)
+                )
+            )
+        return tuple(row for row in rows if row.payload.get("phase") == phase)
+
+    def success(payload: Mapping[str, object]) -> dict[str, object]:
+        evidence = start_evidence(dict(payload))
+        return {"evidence": evidence, "evidence_digest": evidence["evidence_digest"]}
+
+    def claim(node_id: str):
+        with sessions() as session:
+            node = _required(session.get(AgentNode, node_id))
+            receipt_key = node.observation_receipt_public_key
+        runtime_identity = dict(PACKAGED_RUNTIME_IDENTITY)
+        if receipt_key is not None:
+            runtime_identity["observation_receipt_public_key"] = receipt_key
+        return claim_agent(
+            jobs,
+            node_id,
+            f"serial-{nodes.index(node_id)}",
+            30,
+            runtime_identity=runtime_identity,
+        )
+
+    def complete(claim, result: Mapping[str, object]) -> None:
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                canonical_message(
+                    {
+                        "schema_version": 1,
+                        "job_id": claim.job_id,
+                        "operation_id": claim.operation_id,
+                        "attempt": claim.attempt,
+                        "fence": claim.fence,
+                        "node_id": claim.node_id,
+                        "deadline": claim.deadline,
+                        "state": "succeeded",
+                        "result": result,
+                    }
+                )
+            )
+        )
+
+    for launch in children("rank-launch"):
+        launch_claim = claim(launch.node_id)
+        assert launch_claim is not None
+        complete(launch_claim, success(launch_claim.payload))
+
+    readiness = children("collective-readiness")
+    assert len(readiness) == 1
+    target = readiness[0]
+    readiness_claim = claim(target.node_id)
+    assert readiness_claim is not None
+
+    # The agent is blocked inside the launch: four times its accepted lease pass
+    # with no heartbeat, while the plan's own readiness budget stays open.
+    now[0] = NOW + timedelta(seconds=120)
+    complete(readiness_claim, success(readiness_claim.payload))
+
+    view = service.get(start.id)
+    assert view.state == "succeeded", view.status_reason
+    with sessions() as session:
+        run = _required(session.get(RecipeRun, start.owner_id))
+        assert run.state == "running"
+        assert run.route_state == "pending"
+        assert [
+            _required(node).state
+            for node in session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == start.owner_id)
+                .order_by(RunNode.rank)
+            )
+        ] == ["running", "running"]
+
+    publisher = ConcurrentPublisher()
+    _bound, routes = bind_route_publications(sessions, service, publisher)
+    with sessions.begin() as session:
+        owner = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id, RunNode.role == "entrypoint"
+                )
+            )
+        )
+        owner.observed_run_generation = 1
+        owner.observation_receipt_sha256 = "d" * 64
+        owner.observation_endpoint_ready = True
+        owner.updated_at = NOW
+        worker = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == start.owner_id, RunNode.role == "worker"
+                )
+            )
+        )
+        worker.observed_run_generation = 1
+        worker.observation_receipt_sha256 = "e" * 64
+        worker.observation_endpoint_ready = None
+        worker.updated_at = NOW
+    routes.publish_run(start.owner_id)
+    assert publisher.aliases[-1] == ("slow-launch",)
 
 
 def test_distributed_start_rejects_changed_launch_evidence(tmp_path: Path) -> None:
@@ -3456,7 +3608,18 @@ def test_new_uninstall_intent_replans_after_unissued_old_uninstall(
 
 
 def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    def declare_memory_floor(document: dict[str, object]) -> None:
+        topology = require_mapping(document["topology"], "recipe topology")
+        roles = require_sequence(topology["roles"], "recipe roles")
+        entrypoint = require_mapping(roles[0], "entrypoint role")
+        resources = require_mapping(entrypoint["resources"], "role resources")
+        memory = resources["memory"]
+        assert isinstance(memory, dict)
+        memory["system_reserve_bytes"] = 107
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, recipe_transform=declare_memory_floor
+    )
     install_plan = service.preview_install(mapping_id, build_id)
     install = service.install(
         install_plan,
@@ -3480,6 +3643,21 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
             select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
         )
         assert child is not None
+        run = _required(session.get(RecipeRun, start.owner_id))
+        expected_floor = parse_stored_run_plan(run.plan).nodes[0].memory_floor_bytes
+        expected_kind = parse_stored_run_plan(run.plan).nodes[0].memory_kind
+        assert expected_floor == 107
+        assert child.payload["memory_floor_bytes"] == expected_floor
+        start_payload = RecipeStartPayload.model_validate(child.payload)
+        assert start_payload.memory_kind == expected_kind
+        assert (
+            start_payload.compiled_execution_plan.runtime.placement.memory_kind
+            == expected_kind
+        )
+        assert (
+            start_payload.compiled_execution_plan.runtime.placement.memory_floor_bytes
+            == expected_floor
+        )
         assert child.payload["endpoint_address"] == "192.168.1.211"
         assert child.payload["world_size"] == 1
         assert child.payload["master_address"] is None
@@ -4523,9 +4701,23 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
         assert worker.endpoint is None
 
 
-def _queued_distributed_recovery_stop(tmp_path: Path, *, engine=None):
+def _recovery_deadline(job: Job) -> datetime:
+    marker = job.payload["recovery"]
+    assert isinstance(marker, dict)
+    deadline = marker["deadline"]
+    assert isinstance(deadline, str)
+    return datetime.fromisoformat(deadline)
+
+
+def _queued_distributed_recovery_stop(
+    tmp_path: Path, *, engine=None, startup_budget=60
+):
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True, engine=engine
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        engine=engine,
+        distributed_start_timeout_seconds=startup_budget,
     )
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="i" * 36
@@ -4559,7 +4751,9 @@ def _queued_distributed_recovery_stop(tmp_path: Path, *, engine=None):
     return sessions, service, routes, publisher, started, stop_job, nodes
 
 
-def _queued_distributed_recovery_restart(tmp_path: Path, *, engine=None):
+def _queued_distributed_recovery_restart(
+    tmp_path: Path, *, engine=None, startup_budget=60
+):
     (
         sessions,
         service,
@@ -4568,7 +4762,9 @@ def _queued_distributed_recovery_restart(tmp_path: Path, *, engine=None):
         started,
         stop_job,
         nodes,
-    ) = _queued_distributed_recovery_stop(tmp_path, engine=engine)
+    ) = _queued_distributed_recovery_stop(
+        tmp_path, engine=engine, startup_budget=startup_budget
+    )
     service.record_node_result(
         stop_job.id, nodes[0], succeeded=True, evidence={"stopped": True}
     )
@@ -4673,7 +4869,7 @@ def test_distributed_recovery_deadline_is_enforced_during_stop_phase_advance(
         stop_job,
         nodes,
     ) = _queued_distributed_recovery_stop(tmp_path)
-    service._clock = lambda: NOW + timedelta(seconds=31)
+    service._clock = lambda: _recovery_deadline(stop_job)
 
     service.record_node_result(
         stop_job.id, nodes[0], succeeded=True, evidence={"stopped": True}
@@ -4707,7 +4903,7 @@ def test_distributed_recovery_deadline_is_enforced_before_phase_advance(
         worker_start,
         nodes,
     ) = _queued_distributed_recovery_restart(tmp_path)
-    service._clock = lambda: NOW + timedelta(seconds=31)
+    service._clock = lambda: _recovery_deadline(restart)
 
     service.record_node_result(
         restart.id,
@@ -4782,7 +4978,7 @@ def test_distributed_recovery_deadline_is_rechecked_before_route_publication(
         evidence=start_evidence(readiness.payload),
     )
     mark_current_exact_observations(sessions, started.owner_id, NOW)
-    routes._clock = lambda: NOW + timedelta(seconds=31)
+    routes._clock = lambda: _recovery_deadline(restart)
     publications_before = list(publisher.aliases)
 
     with pytest.raises(RuntimeError, match="deadline"):
@@ -4839,7 +5035,7 @@ def test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock(
             blocked_pid=worker_pid["value"],
             blocker_pid=blocker_pid,
         )
-        current["now"] = NOW + timedelta(seconds=31)
+        current["now"] = _recovery_deadline(restart)
         transaction.commit()
         result.result(timeout=10)
     finally:
@@ -4902,7 +5098,7 @@ def test_recovery_publication_crossing_deadline_is_immediately_withdrawn(
     class DeadlineCrossingPublisher(ConcurrentPublisher):
         def publish(self, state, policy):
             generation = super().publish(state, policy)
-            current["now"] = NOW + timedelta(seconds=31)
+            current["now"] = _recovery_deadline(restart)
             return generation
 
     publisher = DeadlineCrossingPublisher()
@@ -4978,7 +5174,7 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
 
         def publish_recipe(self, candidate):
             generation = atomic.publish_recipe(candidate)
-            current["now"] = NOW + timedelta(seconds=31)
+            current["now"] = _recovery_deadline(restart)
             return generation
 
         def publish_empty(self, route_digest):
@@ -5015,7 +5211,7 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
         assert publication.state == "withdrawal-pending"
         assert publication.lease_expires_at is not None
         assert publication.lease_expires_at.replace(tzinfo=UTC) == (
-            NOW + timedelta(seconds=30)
+            _recovery_deadline(restart)
         )
     assert failing.withdrawal_attempts == 1
 
@@ -5063,7 +5259,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
     )
     complete_collective_readiness(sessions, service, restart.id, nodes[0])
 
-    current = {"now": NOW + timedelta(seconds=29)}
+    current = {"now": _recovery_deadline(restart) - timedelta(seconds=1)}
     live_root = tmp_path / "ack-routes"
     ack_path = tmp_path / "supervisor/ack.json"
     ack_path.parent.mkdir()
@@ -5085,7 +5281,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
 
         def acknowledge_at_exact_deadline(_seconds: float) -> None:
             ack_path.write_bytes(acknowledgement_bytes)
-            current["now"] = NOW + timedelta(seconds=30)
+            current["now"] = _recovery_deadline(restart)
 
         moments = iter((0.0, 0.1))
         FileSupervisorAcknowledger(
@@ -5146,7 +5342,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
         assert publication.state == "withdrawal-pending"
         assert publication.lease_expires_at is not None
         assert publication.lease_expires_at.replace(tzinfo=UTC) == (
-            NOW + timedelta(seconds=30)
+            _recovery_deadline(restart)
         )
     assert failing.withdrawal_attempts == 1
 

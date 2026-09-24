@@ -27,6 +27,9 @@ class Pages:
         self.calls.append((method, path, payload, kwargs))
         return next(self.pages)
 
+    def profile_endpoints(self, number, alias=None):
+        raise AssertionError("recipe selection must not inspect profile endpoints")
+
 
 def test_recipe_selection_checks_later_pages_before_accepting_a_title():
     client = Pages(

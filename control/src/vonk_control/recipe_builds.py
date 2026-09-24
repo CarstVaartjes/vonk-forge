@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Protocol
 
 from pydantic import TypeAdapter
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -28,6 +28,7 @@ from .catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
 )
+from .disk_reservations import outstanding_disk_reservation_bytes
 from .inventory_repository import InventoryRepository, InventorySnapshotView
 from .memory_reservations import memory_reservations, memory_reserve_floor
 from .models import (
@@ -53,6 +54,10 @@ from .runtime_adapters import (
     RuntimeAdapter,
     RuntimeAdapterError,
     resolve_runtime_adapter,
+)
+from .runtime_image_preparation import (
+    RuntimeImageReceipt,
+    require_runtime_image_authorization,
 )
 from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
 from .source_policy import (
@@ -502,6 +507,7 @@ class PreparedBuildLookup(Protocol):
         *,
         expected_architecture: str,
         expected_runtime_interface: str,
+        expected_archive_sha256: str | None = None,
     ) -> PreparedBuildReceipt | None: ...
 
 
@@ -847,7 +853,9 @@ class RecipeBuildService:
         processes = resources.processes
         capabilities = list(security.capabilities)
         with self._sessions() as session:
-            disk_reserved = _reserved(session, builder_node_id, "disk")
+            disk_reserved = outstanding_disk_reservation_bytes(
+                session, builder_node_id, inventory_observed_at=snapshot.observed_at
+            )
             memory_available = _available_build_memory(session, snapshot)
         # The rootless builder retains inputs while exporting the image. Treat
         # recipe storage as a generous peak envelope, not an exact quota over
@@ -1011,7 +1019,8 @@ class RecipeBuildService:
             policy = parse_stored_build_policy(policy_document)
         except RecipeExecutionContractError as error:
             raise RecipeBuildError(
-                "build.plan_invalid", "prepared source build policy is invalid"
+                "build.plan_invalid",
+                "prepared source build policy is invalid" + error.detail,
             ) from error
         if policy.builder_binary_digest != node.binary_digest:
             raise RecipeBuildError(
@@ -1030,12 +1039,7 @@ class RecipeBuildService:
             and _valid_succeeded_receipt(existing)
             and not self._succeeded_build_available(existing)
         ):
-            existing.state = "planned"
-            existing.image_digest = None
-            existing.oci_layout_sha256 = None
-            existing.image_bytes = None
-            existing.error = None
-            existing.updated_at = now
+            _reopen_build_attempt(existing, now=now)
         if existing is None:
             # Reusable image bytes are keyed by executable inputs, not by
             # editorial recipe provenance. Only a succeeded receipt may cross
@@ -1078,9 +1082,33 @@ class RecipeBuildService:
                 payload = build_plan_document(existing.plan)
                 parse_stored_build_policy(existing.policy_report)
             except RecipeExecutionContractError as error:
-                raise RecipeBuildError(
-                    "build.plan_invalid", "stored source build envelope is invalid"
-                ) from error
+                if existing.state == "building":
+                    # An in-flight attempt owns this row, so its stored
+                    # envelope is not stale metadata this planner may rewrite
+                    # underneath it.  Fail closed and name the bad field.
+                    raise RecipeBuildError(
+                        "build.plan_invalid",
+                        "stored source build envelope is invalid" + error.detail,
+                    ) from error
+                # The stored envelope no longer satisfies the current contract
+                # (an engine marker an older removal path wrote, or a field an
+                # older Controller wrote).  That makes this row unusable
+                # history, not a barrier for the build the operator asked for.
+                # Replace the damaged documents with the freshly prepared and
+                # already-validated envelope bound to this row's own build
+                # identity, and clear the stale result so a fresh attempt can
+                # start from current bytes rather than the damaged document.
+                payload["build_id"] = existing.id
+                existing.plan = copy.deepcopy(payload)
+                existing.policy_report = copy.deepcopy(policy_document)
+                _reopen_build_attempt(existing, now=now)
+            else:
+                if existing.state == "failed":
+                    # A cancelled or failed attempt must not block the rebuild
+                    # the operator asked for.  The stored envelope is still
+                    # exact, so keep it and return the row to a clean planned
+                    # attempt rather than reusing a terminal row.
+                    _reopen_build_attempt(existing, now=now)
         else:
             payload["build_id"] = existing.id
             payload["recipe_revision_id"] = plan.recipe_revision_id
@@ -1089,7 +1117,8 @@ class RecipeBuildService:
             payload = build_plan_document(payload)
         except RecipeExecutionContractError as error:
             raise RecipeBuildError(
-                "build.plan_invalid", "stored source build plan is invalid"
+                "build.plan_invalid",
+                "stored source build plan is invalid" + error.detail,
             ) from error
         return RecipeBuildPlan(
             build_id=existing.id,
@@ -1214,7 +1243,8 @@ class RecipeBuildService:
             requested_plan = parse_stored_build_plan(plan.agent_payload)
         except RecipeExecutionContractError as error:
             raise RecipeBuildError(
-                "build.plan_invalid", "stored source build envelope is invalid"
+                "build.plan_invalid",
+                "stored source build envelope is invalid" + error.detail,
             ) from error
         expected_binary_digest = stored_policy.builder_binary_digest
         expected_format = stored_policy.artifact_format
@@ -1270,8 +1300,8 @@ class RecipeBuildService:
             source_bytes=source_bytes,
             output_bytes=output_bytes,
         )
-        if snapshot.disk_free_bytes - _reserved(
-            session, plan.builder_node_id, "disk"
+        if snapshot.disk_free_bytes - outstanding_disk_reservation_bytes(
+            session, plan.builder_node_id, inventory_observed_at=snapshot.observed_at
         ) < disk_bytes + _build_disk_reserve(snapshot.disk_total_bytes):
             raise RecipeBuildError(
                 "build.insufficient_disk", "builder disk capacity changed"
@@ -1331,14 +1361,60 @@ class RecipeBuildService:
                 raise RecipeBuildError(
                     "build.result_unavailable", "successful OCI build is unavailable"
                 )
-            if (
-                mapping.state != "ready"
-                or mapping.generation != generation
-                or mapping.recipe_revision_id != build.recipe_revision_id
-            ):
+            if mapping.state != "ready" or mapping.generation != generation:
                 raise RecipeBuildError(
                     "build.mapping_mismatch",
                     "mapping generation does not match the build",
+                )
+            revision = session.get(CatalogDocumentRevision, mapping.recipe_revision_id)
+            if revision is None or revision.content_digest is None:
+                raise RecipeBuildError(
+                    "build.mapping_mismatch", "mapping recipe is unavailable"
+                )
+            # Snapshot SQL provenance, then consult its managed-storage owner
+            # with no transaction open. Select the bound archive, never another
+            # successful output for the same executable build inputs.
+            session.close()
+            receipt = (
+                self._prepared_builds(
+                    build.build_input_sha256,
+                    expected_architecture=_BUILD_RUNTIME_PLATFORM,
+                    expected_runtime_interface=_BUILD_RUNTIME_INTERFACE,
+                    expected_archive_sha256=build.oci_layout_sha256,
+                )
+                if self._prepared_builds is not None
+                else None
+            )
+            if (
+                not isinstance(receipt, RuntimeImageReceipt)
+                or receipt.build_id != build.id
+                or receipt.image_digest != build.image_digest
+                or receipt.oci_archive_sha256 != build.oci_layout_sha256
+                or receipt.image_bytes != build.image_bytes
+            ):
+                raise RecipeBuildError(
+                    "build.result_unavailable",
+                    "exact prepared build archive is unavailable",
+                )
+            try:
+                require_runtime_image_authorization(
+                    session,
+                    recipe_revision_id=revision.id,
+                    current_content_digest=revision.content_digest,
+                    receipt=receipt,
+                )
+            except ValueError as error:
+                raise RecipeBuildError("build.mapping_mismatch", str(error)) from error
+            current_mapping = session.get(ClusterMapping, mapping_id)
+            if (
+                current_mapping is None
+                or current_mapping.state != "ready"
+                or current_mapping.generation != generation
+                or current_mapping.recipe_revision_id != revision.id
+            ):
+                raise RecipeBuildError(
+                    "build.mapping_mismatch",
+                    "mapping changed during archive verification",
                 )
             nodes = tuple(
                 session.scalars(
@@ -1489,19 +1565,6 @@ def _available_build_memory(
     )
 
 
-def _reserved(session: Session, node_id: str, kind: str) -> int:
-    return int(
-        session.scalar(
-            select(func.coalesce(func.sum(ResourceReservation.amount_bytes), 0)).where(
-                ResourceReservation.node_id == node_id,
-                ResourceReservation.kind == kind,
-                ResourceReservation.state == "active",
-            )
-        )
-        or 0
-    )
-
-
 def _valid_succeeded_receipt(build: RecipeBuild) -> bool:
     """Require complete immutable evidence before considering a cache hit."""
     return build.state == "succeeded" and _has_build_receipt(build)
@@ -1516,6 +1579,23 @@ def _has_build_receipt(build: RecipeBuild) -> bool:
         and not isinstance(build.image_bytes, bool)
         and build.image_bytes > 0
     )
+
+
+def _reopen_build_attempt(build: RecipeBuild, *, now: datetime) -> None:
+    """Return one build row to a clean planned attempt.
+
+    A failed or cancelled row must not be a permanent barrier to the rebuild
+    the operator asked for, and a repaired row must not keep stale result
+    evidence.  This clears the terminal state and the recorded result while
+    leaving the contract documents to the caller.
+    """
+
+    build.state = "planned"
+    build.image_digest = None
+    build.oci_layout_sha256 = None
+    build.image_bytes = None
+    build.error = None
+    build.updated_at = now
 
 
 def _digest(value: object) -> str:

@@ -13,8 +13,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
-from pydantic import ConfigDict, Field
-from sqlalchemy import and_, or_, select
+from pydantic import ConfigDict, Field, model_serializer
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -39,6 +39,7 @@ from .failure_evidence import (
     EvidenceRetention,
     FailureEvidenceBundle,
     collect_failure,
+    failed_attempt_condition,
 )
 from .fleet_projection import (
     FleetNode,
@@ -109,9 +110,10 @@ class FleetReenrollRequest(StrictJSONModel):
 class FleetUpgradeRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    request_key: EnrollmentId
     selectors: list[str] | None = Field(default=None, min_length=1, max_length=64)
     all: bool = False
-    strategy: Literal["one-at-a-time", "all-at-once"] = "one-at-a-time"
+    strategy: Literal["one-at-a-time"] = "one-at-a-time"
 
 
 class FleetActionResponse(StrictJSONModel):
@@ -122,10 +124,18 @@ class FleetActionResponse(StrictJSONModel):
     node_id: str | None = Field(default=None, pattern=_NODE_PATTERN)
     display_name: str | None = Field(default=None, max_length=80)
     plan_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    request_key: EnrollmentId | None = None
     targets: list[str] = Field(default_factory=list, max_length=64)
     grant: EnrollmentGrantResponse | None = None
     provenance: DeploymentProvenance | None = None
     detail: str | None = Field(default=None, max_length=256)
+
+    @model_serializer(mode="wrap")
+    def _omit_unused_request_key(self, handler):
+        document = handler(self)
+        if self.request_key is None:
+            document.pop("request_key", None)
+        return document
 
 
 class FleetLogEntry(StrictJSONModel):
@@ -184,8 +194,21 @@ class FleetEnrollmentProvider(Protocol):
 class FleetUpgradeProvider(Protocol):
     def current_package(self) -> Mapping[str, object]: ...
 
+    def get_request(
+        self,
+        request_id: str,
+        *,
+        actor: str,
+        request_intent: Mapping[str, object],
+    ) -> Any | None: ...
+
     def preview(
-        self, node_ids: Sequence[str], package: Mapping[str, object], *, strategy: str
+        self,
+        node_ids: Sequence[str],
+        package: Mapping[str, object],
+        *,
+        strategy: Literal["one-at-a-time"],
+        request_intent: Mapping[str, object],
     ) -> Any: ...
 
     def apply(
@@ -196,7 +219,8 @@ class FleetUpgradeProvider(Protocol):
         plan_digest: str,
         actor: str,
         request_id: str,
-        strategy: str,
+        strategy: Literal["one-at-a-time"],
+        request_intent: Mapping[str, object],
     ) -> Any: ...
 
 
@@ -307,13 +331,9 @@ _JOB_LOG_SCAN_LIMIT = 512
 _AGENT_LOG_SCAN_LIMIT = 128
 #: A hard ceiling on projected agent entries before the caller's ``lines`` cut.
 _AGENT_LOG_ENTRY_LIMIT = 4_096
-#: The attempt states whose own narrative an operator must be able to read back.
-#: ``expired`` is deliberately absent: a lease lapse leaves the attempt
-#: ``expired`` while parking the whole operation, so the park is selected by the
-#: operation's state instead.  Resurrecting every expired attempt would also
-#: report the lapses of operations that have since been retried, whose current
-#: status reason and timestamps no longer describe that lapse at all.
-_FAILED_ATTEMPT_STATES = ("failed", "waiting-for-operator")
+#: Which attempts an operator must be able to read back is owned by
+#: ``failed_attempt_condition`` in the failure-evidence module, so this
+#: projection and the durable evidence collector cannot disagree about it.
 #: The headline and level one attempt state narrates.  A lapse and a wait are
 #: things an operator must act on, not errors that claim the start died.
 _ATTEMPT_OUTCOME: Mapping[str, tuple[str, LogLevel]] = {
@@ -587,14 +607,7 @@ class ControllerJobLogProvider:
                     )
                     .where(
                         AgentOperation.node_id == node_id,
-                        or_(
-                            AgentOperationAttempt.state.in_(_FAILED_ATTEMPT_STATES),
-                            and_(
-                                AgentOperation.state == "waiting-for-operator",
-                                AgentOperationAttempt.attempt
-                                == AgentOperation.current_attempt,
-                            ),
-                        ),
+                        failed_attempt_condition(AgentOperation, AgentOperationAttempt),
                         AgentOperation.updated_at >= cutoff,
                     )
                     .order_by(
@@ -1212,8 +1225,26 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet upgrades unavailable")
         if body.all == (body.selectors is not None):
             raise HTTPException(status_code=422, detail="choose all or selectors")
-        fleet_snapshot = snapshot()
+        request_intent = {"all": body.all, "selectors": body.selectors}
         try:
+            existing = fleet_services.upgrades.get_request(
+                body.request_key,
+                actor=actor.subject,
+                request_intent=request_intent,
+            )
+            if existing is not None:
+                result = FleetActionResponse(
+                    action="upgrade",
+                    state=str(getattr(existing, "state", "accepted")),
+                    operation_id=str(getattr(existing, "id", "")) or None,
+                    plan_digest=str(getattr(existing, "payload_digest", "")) or None,
+                    request_key=body.request_key,
+                    targets=list(getattr(existing, "targets", ())),
+                    provenance=provenance(),
+                )
+                audit(request, actor, "fleet.upgrade", tuple(result.targets))
+                return result
+            fleet_snapshot = snapshot()
             nodes = (
                 list(fleet_snapshot.nodes)
                 if body.all
@@ -1222,25 +1253,30 @@ def install_operator_projection_routes(
             node_ids = list(dict.fromkeys(node.id for node in nodes))
             package = fleet_services.upgrades.current_package()
             plan = fleet_services.upgrades.preview(
-                node_ids, package, strategy=body.strategy
+                node_ids,
+                package,
+                strategy=body.strategy,
+                request_intent=request_intent,
             )
             job = fleet_services.upgrades.apply(
                 node_ids,
                 package,
                 plan_digest=plan.plan_digest,
                 actor=actor.subject,
-                request_id=request.state.request_id,
+                request_id=body.request_key,
                 strategy=body.strategy,
+                request_intent=request_intent,
             )
             result = FleetActionResponse(
                 action="upgrade",
                 state=str(getattr(job, "state", "accepted")),
                 operation_id=str(getattr(job, "id", "")) or None,
-                plan_digest=plan.plan_digest,
-                targets=node_ids,
+                plan_digest=str(getattr(job, "payload_digest", plan.plan_digest)),
+                request_key=body.request_key,
+                targets=list(getattr(job, "targets", node_ids)),
                 provenance=provenance(),
             )
-            audit(request, actor, "fleet.upgrade", tuple(node_ids))
+            audit(request, actor, "fleet.upgrade", tuple(result.targets))
             return result
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None

@@ -1515,7 +1515,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         first_page.next_cursor,
         resource="model-cache-operations",
         order="created-at-desc/id-desc/v1",
-        context={"state": None, "node_id": None},
+        context={"state": None, "node_id": None, "request_id": None},
     )
     assert isinstance(decoded_cursor, list)
     assert len(decoded_cursor) == 2
@@ -1580,15 +1580,19 @@ def test_malformed_pagination_boundary_fails_instead_of_ending_the_page(cache) -
         service, TokenCodec(b"c" * 32).cursor_codec()
     )
 
-    assert provider._next_cursor(None, state=None, node_id=None) is None
+    assert (
+        provider._next_cursor(None, state=None, node_id=None, request_id=None) is None
+    )
     with pytest.raises(
         operation_api.OperationProjectionError, match="boundary is invalid"
     ):
-        provider._next_cursor(("only-one",), state=None, node_id=None)
+        provider._next_cursor(("only-one",), state=None, node_id=None, request_id=None)
     with pytest.raises(
         operation_api.OperationProjectionError, match="boundary is invalid"
     ):
-        provider._next_cursor((1, "operation-id"), state=None, node_id=None)
+        provider._next_cursor(
+            (1, "operation-id"), state=None, node_id=None, request_id=None
+        )
 
 
 def test_interrupted_download_checkpoint_resumes_after_service_restart(
@@ -2904,13 +2908,23 @@ def test_cancel_queued_download_is_durable_and_idempotent(cache, tmp_path):
         model_content_sha256="a" * 64,
         artifacts=[artifact],
     )
-    assert service.cancel_operation(operation.id).state == "cancelled"
+    cancellation = {
+        "actor": "test",
+        "request_key": "00000000-0000-4000-8000-000000001110",
+        "reason": "test request",
+    }
+    cancelled = service.cancel_operation(operation.id, **cancellation)
+    assert cancelled.state == "cancelled"
+    assert cancelled.progress["phase"] == "completed"
     restarted = ModelCacheService(
         sessions, service.root, reserve_bytes=0, fixture_sources=True
     )
     try:
         assert restarted.run_pending() == 0
-        assert restarted.cancel_operation(operation.id).state == "cancelled"
+        assert (
+            restarted.cancel_operation(operation.id, **cancellation).state
+            == "cancelled"
+        )
         assert not service._object_path(artifact["sha256"]).exists()
     finally:
         restarted.close()
@@ -2929,7 +2943,12 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
     class CancelStream(httpx.SyncByteStream):
         def __iter__(self):
             yield payload[:4096]
-            api.cancel_operation(operation_id[0])
+            api.cancel_operation(
+                operation_id[0],
+                actor="test",
+                request_key="00000000-0000-4000-8000-000000001111",
+                reason="cancel during transfer",
+            )
             # Another service instance owns cancellation; sampler reads its DB
             # state even when the network cannot supply a fragment yet.
             assert service._transfer_stop(operation_id[0]).wait(3)
@@ -3164,7 +3183,12 @@ def test_cancel_during_verification_does_not_publish(cache, tmp_path, monkeypatc
     def verify(path, spec):
         result = real_verify(path, spec)
         if path.suffix == ".part" and result:
-            api.cancel_operation(operation.id)
+            api.cancel_operation(
+                operation.id,
+                actor="test",
+                request_key="00000000-0000-4000-8000-000000001112",
+                reason="cancel during verification",
+            )
         return result
 
     monkeypatch.setattr(service, "_verify_file", verify)

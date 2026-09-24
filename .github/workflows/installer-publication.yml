@@ -35,7 +35,8 @@ concurrency:
   group: >-
     vonk-forge-installer-${{
       (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.event == 'push' &&
+       (github.event.workflow_run.event == 'push' ||
+        github.event.workflow_run.event == 'workflow_dispatch') &&
        github.event.workflow_run.head_sha) ||
       github.run_id
     }}
@@ -47,8 +48,17 @@ concurrency:
 jobs:
   authority:
     name: Accept one complete source generation
+    # A producer completion promotes only when it came from a push to main. The
+    # one exception is a producer an operator dispatched deliberately for main:
+    # GitHub has recorded a merge without emitting the matching
+    # `refs/heads/main` push event, which left a merged tree that no producer
+    # ever built and no generation could reference. The event is still checked,
+    # the branch is still required to be main, and the resolver below still binds
+    # the exact changed paths and the exact source commit, so a dispatched main
+    # producer can re-establish evidence for the current tip and nothing else.
     if: >-
-      github.event.workflow_run.event == 'push' &&
+      (github.event.workflow_run.event == 'push' ||
+       github.event.workflow_run.event == 'workflow_dispatch') &&
       ((github.event.workflow_run.name == 'Installer publication source' &&
        github.event.workflow_run.head_branch == 'main') ||
        github.event.workflow_run.name == 'CI' ||

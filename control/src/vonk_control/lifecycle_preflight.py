@@ -7,11 +7,18 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from pydantic import ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AwareDatetime,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 from sqlalchemy import select
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
+from .recovery_policy import RecoveryPolicy
 from .runtime_preflight import (
     admission_blockers,
     latest_result,
@@ -22,9 +29,11 @@ from .runtime_preflight import (
 from .strict_json import StrictJSONModel
 
 NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
-# The agent probe is bounded to 40 seconds. Allow claim delivery and reporting,
-# but never let a disconnected node hold a lifecycle checkpoint indefinitely.
-PENDING_PROBE_TIMEOUT = timedelta(seconds=180)
+# The agent bounds probe execution. After its normal delivery/reporting window,
+# observe less frequently while that same fenced operation owns recovery.
+PENDING_PROBE_NORMAL_WINDOW = timedelta(seconds=180)
+PROBE_OBSERVATION_INTERVAL = timedelta(seconds=5)
+DELAYED_PROBE_OBSERVATION_INTERVAL = timedelta(seconds=60)
 UuidId = Annotated[
     str,
     StringConstraints(
@@ -38,7 +47,8 @@ class LifecyclePreflightCheckpoint(StrictJSONModel):
     phase_index: int = Field(ge=0, le=31)
     pending_job_id: UuidId | None = None
     pending_node_id: NodeId | None = None
-    attempts: dict[NodeId, Annotated[int, Field(ge=1, le=3)]] = Field(
+    next_check_at: AwareDatetime | None = None
+    attempts: dict[NodeId, Annotated[int, Field(ge=1)]] = Field(
         default_factory=dict, max_length=33
     )
     receipts: dict[NodeId, RuntimePreflightResult] = Field(
@@ -60,6 +70,7 @@ class LifecyclePreflight:
         self._queue = queue
         self._clock = clock
         self._minimum_free_bytes = minimum_free_bytes
+        self._recovery = RecoveryPolicy()
 
     def ensure(
         self,
@@ -77,6 +88,8 @@ class LifecyclePreflight:
         finding must also pass for the current request, fingerprint and age.
         """
         now: datetime = self._clock()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
         checkpoint = (
             previous.model_copy(deep=True)
             if previous
@@ -86,6 +99,10 @@ class LifecyclePreflight:
             checkpoint = LifecyclePreflightCheckpoint(
                 phase_index=phase_index, receipts=checkpoint.receipts
             )
+        if checkpoint.pending_job_id is None:
+            if checkpoint.next_check_at is not None and now < checkpoint.next_check_at:
+                return checkpoint, None
+            checkpoint.next_check_at = None
         with self._sessions.begin() as session:
             # Consume the outstanding probe first, then recheck every other node.
             # A previously checked rank can change while its peer is probing.
@@ -128,37 +145,39 @@ class LifecyclePreflight:
                     child = session.get(Job, checkpoint.pending_job_id)
                     if child is None:
                         return checkpoint, "runtime_preflight.child_missing"
-                    if child.state in {"queued", "running"}:
-                        created_at = child.created_at
-                        if created_at.tzinfo is None:
-                            created_at = created_at.replace(tzinfo=UTC)
-                        observed_now = (
-                            now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-                        )
-                        if observed_now >= created_at + PENDING_PROBE_TIMEOUT:
-                            return checkpoint, "runtime_preflight.deadline_exceeded"
-                        return checkpoint, None
-                    if child.state != "succeeded":
-                        return (
-                            checkpoint,
-                            child.status_reason or "runtime_preflight.execution_failed",
-                        )
                     operation = session.scalar(
                         select(AgentOperation).where(
                             AgentOperation.parent_job_id == child.id,
                             AgentOperation.node_id == node_id,
                         )
                     )
-                    raw = (
-                        session.scalar(
-                            select(AgentOperationAttempt.result).where(
-                                AgentOperationAttempt.operation_id == operation.id,
-                                AgentOperationAttempt.attempt
-                                == operation.current_attempt,
+                    if operation is None:
+                        return checkpoint, "runtime_preflight.operation_missing"
+                    if child.state in {"queued", "running"}:
+                        created_at = child.created_at
+                        if created_at.tzinfo is None:
+                            created_at = created_at.replace(tzinfo=UTC)
+                        if (
+                            checkpoint.next_check_at is None
+                            or now >= checkpoint.next_check_at
+                        ):
+                            interval = (
+                                DELAYED_PROBE_OBSERVATION_INTERVAL
+                                if now >= created_at + PENDING_PROBE_NORMAL_WINDOW
+                                else PROBE_OBSERVATION_INTERVAL
                             )
+                            checkpoint.next_check_at = now + interval
+                        return checkpoint, None
+                    if child.state != "succeeded":
+                        return (
+                            checkpoint,
+                            child.status_reason or "runtime_preflight.execution_failed",
                         )
-                        if operation
-                        else None
+                    raw = session.scalar(
+                        select(AgentOperationAttempt.result).where(
+                            AgentOperationAttempt.operation_id == operation.id,
+                            AgentOperationAttempt.attempt == operation.current_attempt,
+                        )
                     )
                     if raw is None:
                         return checkpoint, "runtime_preflight.receipt_missing"
@@ -166,6 +185,7 @@ class LifecyclePreflight:
                     checkpoint.receipts[node_id] = result
                     checkpoint.pending_job_id = None
                     checkpoint.pending_node_id = None
+                    checkpoint.next_check_at = None
                     blockers = admission_blockers(
                         request,
                         result,
@@ -186,9 +206,14 @@ class LifecyclePreflight:
                         return checkpoint, "; ".join(item.detail for item in blockers)[
                             :512
                         ]
+                    checkpoint.next_check_at = self._recovery.next_attempt(
+                        f"{request_key}:{phase_index}:{node_id}",
+                        checkpoint.attempts[node_id],
+                        now,
+                        ongoing_intent=True,
+                    )
+                    return checkpoint, None
                 attempt = checkpoint.attempts.get(node_id, 0) + 1
-                if attempt > 3:
-                    return checkpoint, "runtime_preflight.retry_exhausted"
                 checkpoint.attempts[node_id] = attempt
                 key = str(
                     uuid.uuid5(
@@ -226,6 +251,7 @@ class LifecyclePreflight:
                     )
                 checkpoint.pending_job_id = child.id
                 checkpoint.pending_node_id = node_id
+                checkpoint.next_check_at = now + PROBE_OBSERVATION_INTERVAL
                 break
         if checkpoint.pending_job_id:
             self._queue.notify_available()

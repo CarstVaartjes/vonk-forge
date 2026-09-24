@@ -128,6 +128,8 @@ def main() -> None:
             "master_port": None,
             "port": 8000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
     output = Path(__file__).with_name("compiled_plan_751.json")

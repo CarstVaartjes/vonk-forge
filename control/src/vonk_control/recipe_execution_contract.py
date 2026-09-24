@@ -24,6 +24,7 @@ from vonk_agent_protocol.inventory import MemoryPool
 
 from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
 from .strict_json import StrictJSONModel
+from .validation_detail import validation_error_detail
 
 if TYPE_CHECKING:
     from .models import RecipeInstallation
@@ -35,7 +36,17 @@ DateTimeString = Annotated[
 
 
 class RecipeExecutionContractError(ValueError):
-    """A persisted recipe execution document is not the current contract."""
+    """A persisted recipe execution document is not the current contract.
+
+    ``detail`` is the bounded "field:rule:message" suffix derived where the
+    pydantic error was raised.  A caller that wraps this error into its own
+    operator-facing sentence can append it, so the failing rule survives even
+    though the wrapper replaces the message.
+    """
+
+    def __init__(self, message: str, *, detail: str = "") -> None:
+        self.detail = detail
+        super().__init__(message)
 
 
 class _PersistedModel(StrictJSONModel):
@@ -182,7 +193,10 @@ def _validate_json[ModelT: _PersistedModel](
         # subject to the same strict semantics as bytes received on the wire.
         return model.model_validate_json(canonical_message(value), context=context)
     except (TypeError, ValueError) as error:
-        raise RecipeExecutionContractError(f"{label} is invalid") from error
+        detail = validation_error_detail(error)
+        raise RecipeExecutionContractError(
+            f"{label} is invalid{detail}", detail=detail
+        ) from error
 
 
 def _document(model: _PersistedModel) -> dict[str, object]:
@@ -265,8 +279,9 @@ def parse_stored_build_plan(value: object) -> RecipeBuildRequest:
     try:
         return RecipeBuildRequest.model_validate_json(canonical_message(value))
     except (TypeError, ValueError) as error:
+        detail = validation_error_detail(error)
         raise RecipeExecutionContractError(
-            "stored recipe build plan is invalid"
+            "stored recipe build plan is invalid" + detail, detail=detail
         ) from error
 
 

@@ -10,6 +10,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .auth import MUTATION_ROLES
 from .bounded_json import integer, require_integer, require_sequence
+from .logging import redact_text
 from .model_cache_contract import UUID_PATTERN, Digest
 from .operation_api import bounded_error_responses
 from .operation_contract import (
@@ -23,6 +24,7 @@ from .recipe_image_availability import (
     RecipeImageAvailabilityService,
     RecipeImageAvailabilityView,
 )
+from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import RecipeUpdateRequest, RecipeUpdateResponse
 from .strict_json import StrictJSONModel
 
@@ -30,7 +32,7 @@ from .strict_json import StrictJSONModel
 # helper that produces the value, so the vocabulary cannot drift apart.
 RecipeImageAvailabilityKind = Literal["recipe.image.availability.v2"]
 RecipeImageAvailabilityState = Literal[
-    "queued", "running", "partial", "succeeded", "failed", "cancelled"
+    "queued", "running", "partial", "cancelling", "succeeded", "failed", "cancelled"
 ]
 RecipeImageAvailabilityChildKind = Literal["model-cache", "runtime-image"]
 RecipeOperatorState = Literal[
@@ -122,6 +124,7 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
     children: list[RecipeImageAvailabilityChild] = Field(default_factory=list)
     result: RecipeImageAvailabilityResult | None = None
     failure: AvailabilityOperationFailure | None = None
+    cancellation: RecipeOperationCancellationResult | None = None
     actions: list[RecipeImageAvailabilityAction] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -154,6 +157,10 @@ class RecipeOperatorRequest(RecipeDownloadRequest):
     with_model: bool = False
 
 
+class RecipeCancellationRequest(RecipeDownloadRequest):
+    reason: str = Field(min_length=1, max_length=512)
+
+
 class RecipeOperatorResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -163,6 +170,7 @@ class RecipeOperatorResponse(StrictJSONModel):
     request_key: str = Field(min_length=1, max_length=128)
     operation_id: str = Field(min_length=1, max_length=128)
     recipe_revision_id: str = Field(min_length=1, max_length=128)
+    with_model: bool
     state: RecipeOperatorState
     progress: OperationProgress
     reclaimed_bytes: int = Field(ge=0)
@@ -181,6 +189,7 @@ RecipeOperationResponse = (
 RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS = {
     ("get", "/api/recipe/operations/{operation_id}"): "getRecipeOperation",
     ("get", "/api/recipe/requests/{request_key}"): "getRecipeRequest",
+    ("post", "/api/recipe/operations/{operation_id}/cancel"): "cancelRecipeOperation",
     ("post", "/api/recipe/{selector}/download"): "downloadRecipe",
     ("post", "/api/recipe/{selector}/remove"): "removeRecipe",
     ("post", "/api/recipe/update"): "updateRecipes",
@@ -274,6 +283,7 @@ def _view_document(
                 if isinstance(failure, dict)
                 else None
             ),
+            "cancellation": view.cancellation,
             "actions": [
                 RecipeImageAvailabilityAction.model_validate({"key": item})
                 for item in require_sequence(
@@ -301,6 +311,34 @@ def _mutating(actor: Any, route: str) -> None:
         raise HTTPException(status_code=403, detail="insufficient role")
 
 
+# One refusal leaves the Controller as evidence, so its detail names the stable
+# code and an operator-facing message instead of a sentence that identifies
+# nothing.  The bound matches the one ``validation_detail`` puts on a single
+# contract error; the redactor runs first so a secret cannot survive truncation
+# in the middle of a token.
+_MAX_REFUSAL_DETAIL = 80
+
+
+def _refusal_detail(error: BaseException) -> str:
+    """Name one availability refusal, bounded and redacted.
+
+    Every failure outside the four special cases used to answer with the same
+    sentence, so the documented ``recipe download`` prepare-cache recovery step
+    left an operator with nothing to inspect and no durable operation record to
+    read.  The typed error already carries a stable code and an operator-facing
+    message; render both and never echo a stored document, a token, or an
+    unbounded value.
+    """
+
+    code = redact_text(str(getattr(error, "code", "") or type(error).__name__))
+    message = getattr(error, "detail", None)
+    if not isinstance(message, str) or not message.strip():
+        message = str(error)
+    named = code[:_MAX_REFUSAL_DETAIL]
+    message = redact_text(message)[:_MAX_REFUSAL_DETAIL]
+    return f"{named}: {message}" if message else named
+
+
 def _recipe_error(error: BaseException) -> HTTPException:
     if isinstance(error, KeyError):
         return HTTPException(status_code=404, detail="recipe operation was not found")
@@ -309,13 +347,20 @@ def _recipe_error(error: BaseException) -> HTTPException:
         return HTTPException(status_code=404, detail=str(error))
     if code.endswith("authority_denied"):
         return HTTPException(status_code=403, detail=str(error))
-    if code.endswith(("selector_ambiguous", "request_key_reused")):
+    if code.endswith(("selector_ambiguous", "request_key_reused", "not_cancellable")):
         return HTTPException(status_code=409, detail=str(error))
     if code.endswith("invalid"):
         return HTTPException(status_code=422, detail=str(error))
-    return HTTPException(
-        status_code=503, detail="recipe image availability is unavailable"
-    )
+    # A typed refusal outside those families is either a transient dependency
+    # failure that a later identical request can clear, or a terminal condition
+    # (stale metadata, a changed execution identity, an exhausted retry budget,
+    # an unrecoverable integrity failure) that it cannot.  The typed error
+    # already decided which one it is, so keep 503 Service Unavailable for the
+    # former and 409 Conflict for the latter: a client may retry the first and
+    # must not loop on the second.
+    if isinstance(error, RecipeImageAvailabilityError) and not error.retryable:
+        return HTTPException(status_code=409, detail=_refusal_detail(error))
+    return HTTPException(status_code=503, detail=_refusal_detail(error))
 
 
 def install_recipe_operator_routes(
@@ -332,6 +377,12 @@ def install_recipe_operator_routes(
     _ADMIN_OPERATION_IDS.update(RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS)
 
     def removal_document(result: Mapping[str, object]) -> RecipeOperatorResponse:
+        with_model = result.get("with_model")
+        if not isinstance(with_model, bool):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.operation_invalid",
+                "stored removal choice is malformed",
+            )
         reclaimed_bytes = integer(result.get("reclaimed_bytes"), default=0) or 0
         cancelled_operations = require_sequence(
             result.get("cancelled_operations", []), "cancelled operations"
@@ -344,6 +395,7 @@ def install_recipe_operator_routes(
                 "request_key": str(result["request_key"]),
                 "operation_id": str(result["operation_id"]),
                 "recipe_revision_id": str(result["recipe_revision_id"]),
+                "with_model": with_model,
                 "state": result["state"],
                 "progress": OperationProgress(
                     phase="completed",
@@ -424,6 +476,32 @@ def install_recipe_operator_routes(
             if isinstance(operation, RecipeImageAvailabilityView):
                 return _view_document(operation)
             return removal_document(operation)
+        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+            raise _recipe_error(error) from None
+
+    @app.post(
+        "/api/recipe/operations/{operation_id}/cancel",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=RecipeOperationResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="cancelRecipeOperation",
+    )
+    def cancel_operation(
+        body: RecipeCancellationRequest,
+        operation_id: Annotated[str, Path(min_length=1, max_length=128)],
+        actor: Any = actor_dependency,
+    ) -> RecipeOperationResponse:
+        _mutating(actor, "/api/recipe/operations/{operation_id}/cancel")
+        try:
+            operation = _service(service).cancel(
+                operation_id,
+                actor=actor.subject,
+                request_id=body.request_key,
+                reason=body.reason,
+            )
+            if isinstance(operation, RecipeUpdateResponse):
+                return operation
+            return _view_document(operation)
         except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
             raise _recipe_error(error) from None
 

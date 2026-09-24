@@ -73,6 +73,17 @@ thread_local! {
 fn distribution_hash_read_bytes() -> u64 {
     DISTRIBUTION_HASH_READ_BYTES.with(std::cell::Cell::get)
 }
+
+/// Release the page cache for a completed distribution object.
+///
+/// Best effort on purpose: the object is transferred, verified and receipted,
+/// and a failed hint must not turn that into a failed transfer.  A node that
+/// keeps the pages is the behaviour that shipped before this call.
+fn release_distribution_page_cache(path: &Path) {
+    if let Ok(file) = std::fs::File::open(path) {
+        let _ = rustix::fs::fadvise(&file, 0, None, rustix::fs::Advice::DontNeed);
+    }
+}
 /// Longest a single heartbeat request may spend before it is treated as lost.
 /// The renewal loop reserves lease margin against the same budget, so one
 /// slow or dropped request cannot consume the whole accepted lease.
@@ -1439,6 +1450,12 @@ impl AgentHttpClient {
                             destination.to_path_buf(),
                             DistributionObjectReceipt::new(sha256, &metadata),
                         );
+                    // Verifying an object already on disk reads all of it, so it
+                    // fills the page cache exactly as a transfer does. The live
+                    // observation that motivated this: a re-verified 199 GB
+                    // object left the device reporting about 2 GB free, and the
+                    // checkpoint loader refused its 1.27 GB staging buffer.
+                    release_distribution_page_cache(destination);
                     return Ok(());
                 }
                 // The object sits at its exact digest name with exact custody
@@ -1611,6 +1628,10 @@ impl AgentHttpClient {
                 destination.to_path_buf(),
                 DistributionObjectReceipt::new(sha256, &final_metadata),
             );
+        // The transfer and its verification both filled the page cache with an
+        // object of up to hundreds of gigabytes. It stays on disk and keeps its
+        // receipt; the resident pages do not need to stay with it.
+        release_distribution_page_cache(destination);
         Ok(())
     }
 

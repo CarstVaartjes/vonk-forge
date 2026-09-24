@@ -4,20 +4,25 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException, Path, Request, status
+from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 
 from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
 from .fleet_profile_contract import (
     FleetProfileApplicationView,
     FleetProfileDefinitionView,
+    FleetProfileEndpointsView,
     FleetProfileInput,
     FleetProfileList,
     FleetProfileLoadRequest,
     FleetProfilePreview,
     FleetProfileView,
 )
-from .fleet_profiles import FleetProfileConflict, FleetProfilePermissionDenied
+from .fleet_profiles import (
+    FleetProfileConflict,
+    FleetProfilePermissionDenied,
+    FleetProfileStalePlanConflict,
+)
 from .operation_api import bounded_error_responses
 
 #: The canonical lowercase UUID shape every durable identity in this API uses.
@@ -33,6 +38,7 @@ FLEET_PROFILE_OPERATION_IDS = {
     ("post", "/api/profile/{number}/preview"): "previewProfile",
     ("post", "/api/profile/{number}/load"): "loadProfile",
     ("get", "/api/profile/{number}/progress"): "getProfileProgress",
+    ("get", "/api/profile/{number}/endpoints"): "getProfileEndpoints",
     ("get", _APPLICATION_PATH): "getProfileApplication",
     ("get", _REQUEST_PATH): "getProfileApplicationByRequest",
 }
@@ -43,6 +49,7 @@ def install_fleet_profile_routes(
     *,
     actor_dependency: Any,
     profiles: Any | None,
+    operations: Any | None = None,
     audits: Any,
 ) -> None:
     from .operation_api import _ADMIN_OPERATION_IDS
@@ -114,6 +121,38 @@ def install_fleet_profile_routes(
         except (OSError, RuntimeError, TypeError, ValueError):
             raise HTTPException(
                 status_code=503, detail="Profile definition unavailable"
+            ) from None
+
+    @app.get(
+        "/api/profile/{number}/endpoints",
+        response_model=FleetProfileEndpointsView,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="getProfileEndpoints",
+    )
+    def profile_endpoints(
+        number: Annotated[int, Path(ge=1)],
+        alias: str | None = Query(
+            default=None,
+            pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$",
+            max_length=63,
+        ),
+        _actor: Actor = authenticated,
+    ) -> FleetProfileEndpointsView:
+        projection = getattr(operations, "profile_endpoint", None)
+        if not callable(projection):
+            raise HTTPException(
+                status_code=503, detail="Profile endpoint projection unavailable"
+            )
+        try:
+            return FleetProfileEndpointsView.model_validate(projection(number, alias))
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"endpoint alias is not part of profile {number}",
+            ) from None
+        except (OSError, RuntimeError, TypeError, ValueError):
+            raise HTTPException(
+                status_code=503, detail="Profile endpoint projection unavailable"
             ) from None
 
     @app.put(
@@ -190,6 +229,12 @@ def install_fleet_profile_routes(
             raise HTTPException(status_code=403, detail=str(error)) from None
         except KeyError:
             raise HTTPException(status_code=404, detail="Profile not found") from None
+        except FleetProfileStalePlanConflict as error:
+            raise HTTPException(
+                status_code=409,
+                detail=str(error)[:256],
+                headers={"x-vonk-error-code": error.code},
+            ) from None
         except FleetProfileConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):

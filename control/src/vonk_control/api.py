@@ -51,6 +51,7 @@ from .agent_api import (
     active_agent_identity,
     install_agent_routes,
 )
+from .agent_jobs import OperatorRetirementRefused, OperatorRetryExhausted
 from .artifact_blob_store import ArtifactBlobStore
 from .artifact_job_api import install_artifact_job_routes
 from .artifact_jobs import ArtifactJobService
@@ -73,6 +74,7 @@ from .cluster_mappings import ClusterMappingService
 from .deployment_provenance import DeploymentProvenanceService
 from .distribution_executor import CompositeDistributionPhaseExecutor
 from .download_contract import download_responses
+from .endpoint_contract import EndpointResponse
 from .failure_evidence import FailureEvidenceService
 from .failure_evidence_api import install_failure_evidence_routes
 from .fleet_profile_api import install_fleet_profile_routes
@@ -92,7 +94,6 @@ from .operation_api import (
     AuditEventResponse,
     AuditResponse,
     BoundedErrorResponse,
-    EndpointResponse,
     ErrorContextResponse,
     HealthzResponse,
     IdentityHistoryItem,
@@ -100,11 +101,13 @@ from .operation_api import (
     JobDetailResponse,
     JobLogsResponse,
     JobProgress,
+    JobResumeRequest,
     JobResumeResponse,
     JobsResponse,
     JobSummary,
     OperationApiServices,
     OperationDetailResponse,
+    OperationOwnerReference,
     OperationPage,
     OperationsResponse,
     ReadyzResponse,
@@ -117,11 +120,13 @@ from .operation_api import (
     job_response,
     operation_detail_response,
 )
+from .operation_contract import OperationFailureEvidence, OperationRecoveryAction
 from .operator_projection_api import (
     FleetOperatorServices,
     build_fleet_operator_services,
     install_operator_projection_routes,
 )
+from .profile_application_cancel_api import install_profile_application_cancel_route
 from .recipe_builds import RecipeBuildService
 from .recipe_library_types import RecipeLibraryError
 from .recipe_operations import RecipeOperationService
@@ -851,6 +856,13 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
+        operations=operations,
+        audits=audits,
+    )
+    install_profile_application_cancel_route(
+        app,
+        actor_dependency=authenticated_actor,
+        profiles=fleet_profiles,
         audits=audits,
     )
     install_failure_evidence_routes(
@@ -1028,11 +1040,69 @@ def create_app(
             total=total,
         )
 
-    def activity_detail(item: Mapping[str, object]) -> OperationDetailResponse:
+    def activity_detail(
+        item: Mapping[str, object], *, tolerate_unreadable: bool = False
+    ) -> OperationDetailResponse:
         """Expose recovery only when its family route is installed."""
-        if failure_evidence is not None:
-            item = failure_evidence.decorate(item)
-        return operation_detail_response(item, available_actions=())
+        try:
+            if failure_evidence is not None:
+                item = failure_evidence.decorate(item)
+            supported_actions = item.get("supported_actions")
+            available_actions = (
+                (OperationRecoveryAction.RESUME,)
+                if isinstance(supported_actions, (list, tuple))
+                and "resume" in supported_actions
+                else ()
+            )
+            return operation_detail_response(item, available_actions=available_actions)
+        except (BoundedJSONError, OSError, RuntimeError, TypeError, ValueError):
+            if not tolerate_unreadable:
+                raise
+            # A corrupt row keeps its durable identity and timestamp visible;
+            # its broken historical details do not hide other current work.
+            operation_id = item.get("id")
+            created_at = item.get("created_at")
+            if (
+                not isinstance(operation_id, str)
+                or not operation_id
+                or len(operation_id) > 128
+                or not isinstance(created_at, str)
+                or not created_at
+                or len(created_at) > 64
+            ):
+                raise
+            raw_nodes = item.get("node_ids")
+            node_ids = (
+                [
+                    node
+                    for node in raw_nodes
+                    if isinstance(node, str) and re.fullmatch(r"spk_[0-9a-f]{32}", node)
+                ][:1024]
+                if isinstance(raw_nodes, (list, tuple))
+                else []
+            )
+            raw_owner = item.get("owner")
+            owner = None
+            if isinstance(raw_owner, Mapping):
+                try:
+                    owner = OperationOwnerReference.model_validate(raw_owner)
+                except ValueError:
+                    owner = None
+            return OperationDetailResponse(
+                id=operation_id,
+                node_ids=node_ids,
+                kind="unreadable",
+                state="unavailable",
+                attempt=0,
+                created_at=created_at,
+                failure=OperationFailureEvidence(
+                    error_code="operation_history_unreadable",
+                    summary="Historical operation details are unavailable",
+                    retryable=False,
+                ),
+                owner=owner,
+                status_reason="Stored operation history is malformed.",
+            )
 
     @app.get(
         "/api/operations",
@@ -1049,6 +1119,13 @@ def create_app(
             pattern=r"^[a-z][a-z0-9-]{0,31}$",
         ),
         node_id: str | None = Query(default=None, pattern=r"^spk_[0-9a-f]{32}$"),
+        request_id: str | None = Query(
+            default=None,
+            pattern=(
+                r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+                r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            ),
+        ),
         _actor: Actor = authenticated_actor,
     ) -> OperationsResponse:
         if operations is None:
@@ -1057,7 +1134,7 @@ def create_app(
             )
         try:
             page = _global_list_operations(
-                operations, cursor, limit, operation_state, node_id
+                operations, cursor, limit, operation_state, node_id, request_id
             )
         except CursorError:
             raise HTTPException(
@@ -1070,17 +1147,7 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
-        try:
-            items = [activity_detail(item) for item in page.items]
-        except BoundedJSONError as error:
-            # A stored evidence decoration that no longer validates is the
-            # Controller's fault. It stays a declared server fault, and the
-            # message names the operation so the corrupt row can be found.
-            raise HTTPException(status_code=503, detail=str(error)[:256]) from None
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="operation projection unavailable"
-            ) from None
+        items = [activity_detail(item, tolerate_unreadable=True) for item in page.items]
         return OperationsResponse(
             operations=items,
             next_cursor=page.next_cursor,
@@ -1229,18 +1296,45 @@ def create_app(
     def resume_job(
         request: Request,
         job_id: str,
-        body: None = Body(default=None),
+        body: Annotated[JobResumeRequest | None, Body()] = None,
         authenticated: Actor = authenticated_actor,
     ) -> JobResumeResponse:
-        del body
         route = "/api/jobs/{job_id}/resume"
         require_mutation_role(authenticated, route)
         if operations is None:
             raise HTTPException(status_code=503, detail="job resume unavailable")
+        disposition = "resume" if body is None else body.disposition
+        if disposition == "retire":
+            if operations.retire_job is None:
+                raise HTTPException(
+                    status_code=503, detail="job retirement unavailable"
+                )
+            try:
+                operations.retire_job(job_id)
+            except KeyError:
+                raise HTTPException(status_code=404, detail="job not found") from None
+            except OperatorRetirementRefused as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
+            except ValueError:
+                raise HTTPException(
+                    status_code=409, detail="job is not waiting for operator"
+                ) from None
+            audits.append(
+                AuditRecord(
+                    request.state.request_id,
+                    authenticated.subject,
+                    "job.retire",
+                    None,
+                    (),
+                )
+            )
+            return JobResumeResponse(id=job_id, state="failed")
         try:
             operations.resume_job(job_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="job not found") from None
+        except OperatorRetryExhausted as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
         except ValueError:
             raise HTTPException(
                 status_code=409, detail="job is not waiting for operator"
@@ -1327,7 +1421,10 @@ def production_app() -> FastAPI:
     from .fleet_events import FleetEventRepository
     from .fleet_projection import FleetProjection
     from .fleet_stream import FleetStream
-    from .install_admission import InstallAdmissionService
+    from .install_admission import (
+        InstallAdmissionService,
+        authorize_installation_runtime_images,
+    )
     from .jobs import JobService
     from .library_projection import LibraryProjection
     from .logging import DatabaseJobLogStore
@@ -1343,8 +1440,7 @@ def production_app() -> FastAPI:
         FilesystemRuntimeImageStorage,
         RuntimeImageReceipt,
         SkopeoOCIImageTransport,
-        persist_runtime_image_receipt,
-        prepare_runtime_image,
+        make_runtime_image_receipt_preparer,
         resolve_persisted_runtime_image_receipt,
         runtime_image_expectations,
     )
@@ -1410,65 +1506,12 @@ def production_app() -> FastAPI:
         model_cache=model_cache,
     )
     runtime_image_transport = SkopeoOCIImageTransport()
-
-    def prepare_runtime_image_receipt(
-        document, runtime_spec, build
-    ) -> RuntimeImageReceipt:
-        runtime = runtime_spec.get("runtime")
-        if not isinstance(runtime, Mapping):
-            raise TypeError("compiled runtime projection is unavailable")
-        identity = runtime_spec.get("identity")
-        effective_execution_key = (
-            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
-        )
-        if not isinstance(effective_execution_key, str):
-            raise TypeError("compiled runtime execution identity is unavailable")
-        build_receipt = None
-        execution = document.get("execution")
-        if isinstance(execution, Mapping) and execution.get("mode") == "build":
-            if build is None:
-                raise ValueError("source build receipt is unavailable")
-            build_receipt = {
-                "state": build.state,
-                "build_id": build.id,
-                "build_input_sha256": build.build_input_sha256,
-                "image_digest": build.image_digest,
-                "oci_layout_sha256": build.oci_layout_sha256,
-                "image_bytes": build.image_bytes,
-            }
-
-        def write_receipt(receipt: RuntimeImageReceipt) -> None:
-            recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
-            with sessions.begin() as session:
-                revision = session.scalar(
-                    select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                        CatalogDocumentRevision.content_digest == recipe_digest,
-                    )
-                )
-                if revision is None or revision.content_digest is None:
-                    raise ValueError(
-                        "active recipe revision for runtime receipt is unavailable"
-                    )
-                persist_runtime_image_receipt(
-                    session,
-                    recipe_revision_id=revision.id,
-                    original_content_digest=revision.content_digest,
-                    effective_execution_key=effective_execution_key,
-                    receipt=receipt,
-                    verified_at=clock(),
-                )
-
-        return prepare_runtime_image(
-            document,
-            runtime=runtime,
-            storage=runtime_image_storage,
-            transport=runtime_image_transport,
-            build_receipt=build_receipt,
-            now=clock(),
-            receipt_writer=write_receipt,
-        )
+    prepare_runtime_image_receipt = make_runtime_image_receipt_preparer(
+        sessions,
+        runtime_image_storage,
+        runtime_image_transport,
+        clock=clock,
+    )
 
     def resolve_runtime_image_receipt(
         document, image_digest, runtime_spec
@@ -1562,6 +1605,7 @@ def production_app() -> FastAPI:
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=execution_plans.compile_installation,
+            runtime_image_authorizer=authorize_installation_runtime_images,
         ),
         run_admission=RunAdmissionService(
             sessions,
@@ -1581,6 +1625,7 @@ def production_app() -> FastAPI:
         mappings=ClusterMappingService(sessions),
         model_cache=model_cache,
         build_archive_available=runtime_image_storage.build_archive_available,
+        published_image_receipt=runtime_image_storage.find_published,
         artifact_phase_executor=CompositeDistributionPhaseExecutor(
             sessions,
             agent_services.operations,
@@ -1783,6 +1828,7 @@ def production_app() -> FastAPI:
                     run_switch_operations.activity_provider(),
                     recipe_image_production.service.update_activity_provider(),
                 ),
+                profile_endpoint_intent=fleet_profiles.endpoint_intent,
             ),
             model_cache,
         ),

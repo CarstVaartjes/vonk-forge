@@ -112,6 +112,7 @@ class RecipeImageAvailabilityScheduler:
         with self._lock:
             if self._closed:
                 return 0
+            self._service.reconcile_cancellations(limit=self._max_workers)
             submitted = 0
             if self._update_future is None or self._update_future.done():
                 update_claim = self._service.claim_update(self._owner_id)

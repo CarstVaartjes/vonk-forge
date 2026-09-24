@@ -232,3 +232,146 @@ def test_supersession_and_failed_dispatch_release_only_unassigned_claims(
                 )
             )
         )
+
+
+def test_profile_disk_handoff_preserves_materialized_install_headroom(
+    tmp_path, postgres_engine
+):
+    """A replacement inherits its claim without charging old bytes twice.
+
+    The old installation remains cached. Its observed bytes are physical disk
+    usage, its staging headroom remains promised, and the new profile's claim
+    is excluded only for its own child. A competing install must still fail.
+    """
+    from vonk_control.inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    from .test_disk_reservations import _record_disk
+    from .test_fleet_profile_recovery_identity import _complete_rebuild
+    from .test_recipe_operations import NOW, installed_recipe
+
+    sessions, profiles, planner, profile, _api, _headers, _, nodes = _capacity_profile(
+        tmp_path, postgres_engine
+    )
+    lifecycle = planner._lifecycle
+    assert lifecycle is not None
+    with sessions() as session:
+        mapping_id = session.scalar(select(ClusterMapping.id))
+        build_id = session.scalar(select(RecipeBuild.id))
+        assert mapping_id is not None and build_id is not None
+    original = lifecycle.preview_install(mapping_id, build_id)
+    old = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    )
+    old_requirement = original.nodes[0]
+    retained_headroom = (
+        old_requirement.required_bytes - old_requirement.required_download_bytes
+    )
+    assert retained_headroom > 0
+    storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
+    _complete_rebuild(
+        sessions,
+        storage,
+        archive=b"replacement OCI image with an exact new identity",
+        image_digest="sha256:" + "1" * 64,
+    )
+    later = NOW + MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=1)
+    profiles._clock = planner._clock = lifecycle._clock = lambda: later
+    _record_disk(sessions, nodes[0], at=later, free=8_000)
+    review = profiles.preview(profile.id)
+    assert review.allowed
+    required = review.assessments[0].assessment.fit_current.nodes[0].disk_required_bytes
+    assert required is not None
+    later += timedelta(seconds=1)
+    _record_disk(sessions, nodes[0], at=later, free=retained_headroom + required)
+    review = profiles.preview(profile.id)
+    assert review.allowed
+    application = profiles.apply(
+        profile.id,
+        plan_digest=review.plan_digest,
+        request_key=str(uuid4()),
+        actor="admin",
+    )
+    with sessions() as session:
+        parent_claim = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "fleet-profile",
+                ResourceReservation.owner_id == application.id,
+                ResourceReservation.kind == "disk",
+                ResourceReservation.state == "active",
+            )
+        )
+        assert parent_claim is not None
+        claim_id = parent_claim.id
+    assert not lifecycle.preview_install(mapping_id, build_id).allowed
+    install_plan = lifecycle.preview_install(
+        mapping_id, build_id, profile_application_id=application.id
+    )
+    assert install_plan.allowed
+    assert install_plan.nodes[0].active_reserved_bytes == retained_headroom
+    replacement_id = lifecycle.prepare_installation(
+        install_plan,
+        actor="admin",
+        profile_application_id=application.id,
+        workload_intent_ordinal=application.progress.workload_intent_ordinal,
+    )
+    with sessions() as session:
+        claim = session.get(ResourceReservation, claim_id)
+        assert claim is not None
+        assert (claim.owner_kind, claim.owner_id, claim.state) == (
+            "installation",
+            replacement_id,
+            "active",
+        )
+        assert replacement_id != old.owner_id
+        replacement = session.get(RecipeInstallation, replacement_id)
+        assert replacement is not None
+        assert replacement.plan_digest == install_plan.plan_digest
+        old_installation = session.get(RecipeInstallation, old.owner_id)
+        assert old_installation is not None and old_installation.state == "installed"
+
+
+@pytest.mark.parametrize("held_owner", ["mapping", "node", "build"])
+def test_install_admission_reschedules_contended_dependencies_without_partial_claims(
+    tmp_path, postgres_engine, held_owner
+):
+    """Contention before the reservation query is still a retryable admission wait."""
+    from sqlalchemy import text
+    from vonk_control.install_admission import InstallAdmissionBusy
+    from vonk_control.models import AgentNode
+
+    sessions, _profiles, planner, _profile, _api, _headers, _, nodes = (
+        _capacity_profile(tmp_path, postgres_engine)
+    )
+    lifecycle = planner._lifecycle
+    assert lifecycle is not None
+    with sessions() as session:
+        mapping_id = session.scalar(select(ClusterMapping.id))
+        build_id = session.scalar(select(RecipeBuild.id))
+        assert mapping_id is not None and build_id is not None
+    plan = lifecycle.preview_install(mapping_id, build_id)
+    assert plan.allowed
+    owner, identity = {
+        "mapping": (ClusterMapping, mapping_id),
+        "node": (AgentNode, nodes[0]),
+        "build": (RecipeBuild, build_id),
+    }[held_owner]
+    with sessions.begin() as holder:
+        assert holder.get(owner, identity, with_for_update=True) is not None
+        with pytest.raises(InstallAdmissionBusy), sessions.begin() as admission:
+            # The wrong implementation waits and raises a raw SQL error. Bound
+            # the regression itself; production configures this centrally.
+            admission.execute(text("SET LOCAL lock_timeout = '100ms'"))
+            lifecycle._install_admission.accept_install_in_session(
+                admission, plan, actor="admin", now=lifecycle._clock()
+            )
+        with sessions() as observer:
+            assert not tuple(observer.scalars(select(RecipeInstallation)))
+            assert not tuple(observer.scalars(select(ResourceReservation)))
+    # The same reviewed decision can be admitted once its dependency releases.
+    with sessions.begin() as admission:
+        installation_id = lifecycle._install_admission.accept_install_in_session(
+            admission, plan, actor="admin", now=lifecycle._clock()
+        )
+    with sessions() as observer:
+        assert observer.get(RecipeInstallation, installation_id) is not None

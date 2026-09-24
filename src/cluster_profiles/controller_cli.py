@@ -23,6 +23,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, cast, runtime_checkable
 
+from .cli_artifact_jobs import (
+    ArtifactJobClient,
+    add_artifact_job_commands,
+    run_artifact_job,
+)
 from .cli_files import PrivateOutput, read_json_document, write_private_document
 from .cli_outcome import (
     EnrollmentDeliveryError,
@@ -34,6 +39,7 @@ from .cli_render import render_payload, terminal_text
 from .cli_select import SelectorError
 from .control_client import (
     ControlClientError,
+    ControlConflict,
     ControlForbidden,
     ControlHTTPError,
     ControlMalformedResponse,
@@ -45,6 +51,9 @@ from .control_client import (
     validate_control_document,
 )
 from .error_reporting import ErrorContext, protocol_context, transport_context
+from .generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
+)
 
 FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
@@ -66,6 +75,10 @@ class ControllerClient(Protocol):
         query: Mapping[str, object] | None = None,
         timeout_seconds: float | None = None,
     ) -> dict[str, object]: ...
+
+    def profile_endpoints(
+        self, number: int, alias: str | None = None
+    ) -> FleetProfileEndpointsView: ...
 
 
 @runtime_checkable
@@ -165,6 +178,32 @@ def _line_limit(value: str) -> int:
     """Accept a log tail line count between 1 and 1000."""
 
     return _bounded_int(value, label="line count", minimum=1, maximum=MAX_LOG_LINES)
+
+
+def _activity_limit(value: str) -> int:
+    """Accept the Controller's bounded Activity page size."""
+
+    return _bounded_int(value, label="activity page size", minimum=1, maximum=100)
+
+
+def _activity_state(value: str) -> str:
+    if re.fullmatch(r"[a-z][a-z0-9-]{0,31}", value) is None:
+        raise argparse.ArgumentTypeError("activity state is invalid")
+    return value
+
+
+def _activity_target(value: str) -> str:
+    if re.fullmatch(r"spk_[0-9a-f]{32}", value) is None:
+        raise argparse.ArgumentTypeError("target must be an exact Spark ID")
+    return value
+
+
+def _activity_cursor(value: str) -> str:
+    if not value or len(value) > 512:
+        raise argparse.ArgumentTypeError(
+            "activity cursor must contain 1 to 512 characters"
+        )
+    return value
 
 
 def _selector(parser: argparse.ArgumentParser, name: str, *, help: str) -> None:
@@ -375,14 +414,18 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
             action.set_defaults(outcome_context="mutation")
             action.add_argument("--yes", action="store_true")
     upgrade = fleet_actions.add_parser(
-        "upgrade", help="Install the latest signed Spark client"
+        "upgrade", help="Roll out the signed Spark agent package through Controller"
     )
     upgrade.set_defaults(outcome_context="mutation")
     upgrade.add_argument("selector", nargs="?")
     upgrade.add_argument("--all", action="store_true")
     upgrade.add_argument(
-        "--strategy", choices=("one-at-a-time", "all-at-once"), default="one-at-a-time"
+        "--strategy", choices=("one-at-a-time",), default="one-at-a-time"
     )
+    upgrade.add_argument("--request-key", type=_uuid_argument)
+    upgrade.add_argument("--detach", action="store_true")
+    upgrade.add_argument("--yes", action="store_true")
+    _watch_controls(upgrade)
     _add_output(upgrade)
     loginfo = fleet_actions.add_parser(
         "loginfo", help="Read bounded Controller-collected logs"
@@ -410,6 +453,24 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _watch_controls(fleet_progress)
     _add_output(fleet_progress)
 
+    activity = fleet_actions.add_parser(
+        "activity", help="List durable operation history across owners"
+    )
+    activity.add_argument("--limit", type=_activity_limit, default=20)
+    activity.add_argument("--cursor", type=_activity_cursor)
+    activity.add_argument("--state", type=_activity_state)
+    activity.add_argument("--target", type=_activity_target)
+    activity.add_argument("--request-id", type=_uuid_argument)
+    _add_output(activity)
+
+    resume = fleet_actions.add_parser(
+        "resume", help="Resume one job only when its owner advertises permission"
+    )
+    resume.set_defaults(outcome_context="mutation")
+    resume.add_argument("job_id")
+    resume.add_argument("--yes", action="store_true", required=True)
+    _add_output(resume)
+
     model = commands.add_parser("model", help="Browse and manage model cache")
     model.add_argument("--watch", action="store_true")
     _watch_controls(model)
@@ -436,6 +497,16 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _selector(model_remove, "selector", help="Exact model selector or friendly name")
     _action_flags(model_remove, destructive=True, followable=True)
+    model_cancel = model_actions.add_parser(
+        "cancel", help="Cancel one model download while preserving resumable files"
+    )
+    model_cancel.add_argument("operation_id", type=_uuid_selector)
+    _action_flags(model_cancel, destructive=True, followable=True)
+    model_cancel.add_argument(
+        "--reason",
+        default="operator requested cancellation",
+        help="Short reason retained with the durable cancellation request",
+    )
 
     recipe = commands.add_parser("recipe", help="Browse and manage runnable recipes")
     recipe.add_argument("--watch", action="store_true")
@@ -494,6 +565,16 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _selector(recipe_remove, "selector", help="Exact recipe selector or friendly name")
     _action_flags(recipe_remove, destructive=True, recipe_remove=True, followable=True)
+    recipe_cancel = recipe_actions.add_parser(
+        "cancel", help="Cancel one accepted recipe preparation"
+    )
+    recipe_cancel.add_argument("operation_id")
+    _action_flags(recipe_cancel, destructive=True, followable=True)
+    recipe_cancel.add_argument("--reason", default="operator requested cancellation")
+
+    add_artifact_job_commands(
+        recipe_actions, add_output=_add_output, watch_controls=_watch_controls
+    )
 
     for noun, actions in (("model", model_actions), ("recipe", recipe_actions)):
         progress = actions.add_parser(
@@ -578,6 +659,16 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     profile_load.add_argument("--detach", action="store_true")
     _watch_controls(profile_load)
     _add_output(profile_load)
+    profile_cancel = profile_actions.add_parser(
+        "cancel", help="Cancel one profile application and reconcile its effects"
+    )
+    profile_cancel.set_defaults(outcome_context="mutation", requires_profile=True)
+    profile_cancel.add_argument("application_id", type=_uuid_selector)
+    profile_cancel.add_argument("--yes", action="store_true")
+    profile_cancel.add_argument("--request-key", type=_uuid_selector)
+    profile_cancel.add_argument("--detach", action="store_true")
+    _watch_controls(profile_cancel)
+    _add_output(profile_cancel)
     profile_progress = profile_actions.add_parser(
         "progress", help="Show the latest profile load"
     )
@@ -587,6 +678,14 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     profile_progress_selectors.add_argument("--request-key", type=_uuid_selector)
     _watch_controls(profile_progress)
     _add_output(profile_progress)
+    profile_endpoint = profile_actions.add_parser(
+        "endpoint",
+        help="Discover current published endpoints from the loaded profile",
+    )
+    profile_endpoint.add_argument(
+        "alias", nargs="?", help="Only show this endpoint alias from the profile"
+    )
+    _add_output(profile_endpoint)
 
 
 def _uuid_selector(value: str) -> str:
@@ -669,6 +768,39 @@ def _reconnect_command(args: argparse.Namespace, path: str) -> str:
             urllib.parse.unquote(parts[-1]),
             "--follow",
         ]
+    elif len(parts) == 5 and parts[1:3] == ["api", "fleet"] and parts[4] == "loginfo":
+        # Log observation has already resolved any friendly selector. Retain
+        # the caller's complete scope, but reconnect by the immutable node ID.
+        invocation: list[str] = list(getattr(args, "invocation", ()))
+        replaced = False
+        for index in range(len(invocation) - 2):
+            if invocation[index : index + 2] == ["fleet", "loginfo"]:
+                invocation[index + 2] = urllib.parse.unquote(parts[3])
+                replaced = True
+                break
+        if replaced:
+            command = ["vonkctl", *invocation]
+        else:
+            command = [
+                "vonkctl",
+                "fleet",
+                "loginfo",
+                urllib.parse.unquote(parts[3]),
+            ]
+            for name in ("since", "lines", "recipe", "source"):
+                value = getattr(args, name, None)
+                if value is not None:
+                    command.extend((f"--{name}", str(value)))
+            if getattr(args, "follow", False):
+                command.append("--follow")
+            command.extend(
+                (
+                    "--timeout-seconds",
+                    str(_bounded_timeout(args)),
+                    "--interval-seconds",
+                    str(_bounded_interval(args)),
+                )
+            )
     elif (
         len(parts) == 5 and parts[2] in {"model", "recipe"} and parts[3] == "operations"
     ):
@@ -819,6 +951,78 @@ def _submit_profile_load(
     )
 
 
+def _submit_fleet_upgrade(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    factory: Callable[[], str],
+) -> dict[str, object]:
+    """Submit or replay one exact Controller-authorized upgrade request."""
+
+    key = _request_key(args, factory)
+    body: dict[str, object] = {
+        "all": args.all,
+        "request_key": key,
+        "strategy": args.strategy,
+    }
+    if args.selector:
+        body["selectors"] = [args.selector]
+
+    def validate(result: Mapping[str, object]) -> str:
+        operation_id = result.get("operation_id")
+        plan_digest = result.get("plan_digest")
+        targets = result.get("targets")
+        if (
+            result.get("action") != "upgrade"
+            or result.get("request_key") != key
+            or not isinstance(operation_id, str)
+            or not operation_id
+            or not isinstance(plan_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", plan_digest) is None
+            or not isinstance(targets, list)
+            or len(targets) > 64
+            or not all(
+                isinstance(target, str)
+                and re.fullmatch(r"spk_[0-9a-f]{32}", target) is not None
+                for target in targets
+            )
+            or len(targets) != len(set(targets))
+        ):
+            raise ControlMalformedResponse(
+                "fleet upgrade receipt does not identify this request and plan"
+            )
+        return operation_id
+
+    scope = ["--all"] if args.all else [cast(str, args.selector)]
+    reconnect = shlex.join(
+        [
+            "vonkctl",
+            "fleet",
+            "upgrade",
+            *scope,
+            "--request-key",
+            key,
+            "--strategy",
+            args.strategy,
+            "--yes",
+        ]
+    )
+    path = "/api/fleet/upgrade"
+    return _submit_idempotent_request(
+        client,
+        args,
+        key=key,
+        path=path,
+        # The upgrade route is itself the request-key lookup. Reposting the
+        # identical body returns the original durable job.
+        lookup=path,
+        body=body,
+        noun="fleet",
+        action="upgrade",
+        validate=validate,
+        reconnect=reconnect,
+    )
+
+
 def _cache_operation_id(noun: str, result: Mapping[str, object]) -> str:
     if noun == "model":
         field = "operation_id"
@@ -837,13 +1041,52 @@ def _cache_operation_id(noun: str, result: Mapping[str, object]) -> str:
     return operation_id
 
 
+def _validate_cache_removal_receipt(
+    noun: str,
+    selector: str,
+    request_key: str,
+    result: Mapping[str, object],
+    *,
+    expected_with_model: bool | None,
+) -> str:
+    """Bind a removal receipt to its submitted noun, selector, and request key."""
+
+    contract = (
+        "ModelCacheOperatorResponse" if noun == "model" else "RecipeOperatorResponse"
+    )
+    try:
+        receipt = validate_control_document(contract, dict(result))
+    except ControlClientError:
+        raise ControlMalformedResponse(
+            f"{noun} removal receipt does not match its canonical contract"
+        ) from None
+    identity_matches = (
+        receipt.get("action") == "remove"
+        and receipt.get("selector") == selector
+        and receipt.get("request_key") == request_key
+    )
+    if noun == "recipe":
+        identity_matches = (
+            identity_matches
+            and expected_with_model is not None
+            and receipt.get("with_model") is expected_with_model
+        )
+    elif expected_with_model is not None:
+        identity_matches = False
+    if not identity_matches:
+        raise ControlMalformedResponse(
+            f"{noun} removal receipt identifies another request, selector, or model-retention choice"
+        )
+    return _cache_operation_id(noun, receipt)
+
+
 def _submit_cache_request(
     client: ControllerClient,
     noun: str,
     args: argparse.Namespace,
     factory: Callable[[], str],
 ) -> dict[str, object]:
-    """One POST, one original-key lookup, and at most one identical replay."""
+    """One POST, exact request reconciliation, and at most one identical replay."""
 
     key = _request_key(args, factory)
     action = getattr(args, f"{noun}_action")
@@ -906,6 +1149,187 @@ def _submit_cache_request(
     )
 
 
+def _submit_model_cancellation(
+    client: ControllerClient,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+) -> dict[str, object]:
+    """Cancel one operation through its durable identity and one safe replay."""
+
+    if not args.yes:
+        raise ValueError("model cancel requires --yes in noninteractive mode")
+    operation_id = str(uuid.UUID(args.operation_id))
+    key = _request_key(args, factory)
+    reason = args.reason.strip()
+    if not reason or len(reason) > 512:
+        raise ValueError("--reason must contain between 1 and 512 characters")
+    args.reason = reason
+    path = f"/api/model/operations/{_quoted(operation_id)}/cancel"
+    lookup = f"/api/model/operations/{_quoted(operation_id)}"
+    body: dict[str, object] = {
+        "schema_version": 2,
+        "request_key": key,
+        "reason": reason,
+    }
+
+    def validate(result: Mapping[str, object]) -> str:
+        if _cache_operation_id("model", result) != operation_id:
+            raise ControlMalformedResponse(
+                "model cancellation receipt identifies another operation"
+            )
+        cancellation = result.get("cancellation")
+        if (
+            not isinstance(cancellation, Mapping)
+            or cancellation.get("request_key") != key
+            or cancellation.get("reason") != reason
+            or result.get("state") not in {"cancelling", "cancelled"}
+        ):
+            raise ControlMalformedResponse(
+                "model cancellation receipt identifies another cancellation"
+            )
+        return operation_id
+
+    def validate_existing_cancellation(observed: Mapping[str, object]) -> str:
+        if _cache_operation_id("model", observed) != operation_id:
+            raise ControlMalformedResponse(
+                "model cancellation lookup identifies another operation"
+            )
+        cancellation = observed.get("cancellation")
+        if cancellation is None:
+            raise ControlNotFound(404, "no cancellation is recorded for this operation")
+        if not isinstance(cancellation, Mapping):
+            raise ControlMalformedResponse("model cancellation lookup is malformed")
+        if (
+            cancellation.get("request_key") != key
+            or cancellation.get("reason") != reason
+        ):
+            raise ControlConflict(
+                409, "operation already has a different cancellation request"
+            )
+        return validate(observed)
+
+    return _submit_idempotent_request(
+        client,
+        args,
+        key=key,
+        path=path,
+        lookup=lookup,
+        body=body,
+        noun="model",
+        action="cancel",
+        validate=validate,
+        lookup_validate=validate_existing_cancellation,
+        reconnect=shlex.join(
+            [
+                "vonkctl",
+                "model",
+                "cancel",
+                operation_id,
+                "--yes",
+                "--request-key",
+                key,
+                "--reason",
+                reason,
+            ]
+        ),
+    )
+
+
+def _submit_recipe_cancellation(
+    client: ControllerClient,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+) -> dict[str, object]:
+    """Cancel one operation through its durable identity and one safe replay."""
+
+    if not args.yes:
+        raise ValueError("recipe cancel requires --yes in noninteractive mode")
+    operation_id = args.operation_id
+    key = _request_key(args, factory)
+    reason = " ".join(args.reason.split())
+    if not reason or len(reason) > 512:
+        raise ValueError("--reason must contain between 1 and 512 characters")
+    args.reason = reason
+    path = f"/api/recipe/operations/{_quoted(operation_id)}/cancel"
+    lookup = f"/api/recipe/operations/{_quoted(operation_id)}"
+    body: dict[str, object] = {
+        "schema_version": 2,
+        "request_key": key,
+        "reason": reason,
+    }
+
+    def validate(result: Mapping[str, object]) -> str:
+        if _cache_operation_id("recipe", result) != operation_id:
+            raise ControlMalformedResponse(
+                "recipe cancellation receipt identifies another operation"
+            )
+        cancellation = result.get("cancellation")
+        if (
+            not isinstance(cancellation, Mapping)
+            or cancellation.get("cancel_request_id") != key
+            or cancellation.get("reason") != reason
+            or result.get("state") not in {"cancelling", "cancelled"}
+        ):
+            raise ControlMalformedResponse(
+                "recipe cancellation receipt identifies another cancellation"
+            )
+        return operation_id
+
+    def validate_existing_cancellation(observed: Mapping[str, object]) -> str:
+        if _cache_operation_id("recipe", observed) != operation_id:
+            raise ControlMalformedResponse(
+                "recipe cancellation lookup identifies another operation"
+            )
+        cancellation = observed.get("cancellation")
+        if cancellation is None:
+            raise ControlNotFound(404, "no cancellation is recorded for this operation")
+        if not isinstance(cancellation, Mapping):
+            raise ControlMalformedResponse("recipe cancellation lookup is malformed")
+        if (
+            cancellation.get("cancel_request_id") != key
+            or cancellation.get("reason") != reason
+        ):
+            raise ControlConflict(
+                409, "operation already has a different cancellation request"
+            )
+        return validate(observed)
+
+    return _submit_idempotent_request(
+        client,
+        args,
+        key=key,
+        path=path,
+        lookup=lookup,
+        body=body,
+        noun="recipe",
+        action="cancel",
+        validate=validate,
+        lookup_validate=validate_existing_cancellation,
+        reconnect=shlex.join(
+            [
+                "vonkctl",
+                "recipe",
+                "cancel",
+                operation_id,
+                "--yes",
+                "--request-key",
+                key,
+                "--reason",
+                reason,
+            ]
+        ),
+    )
+
+
+def _known_http_refusal_status(error: ControlClientError) -> int | None:
+    status = (
+        error.status_code
+        if isinstance(error, ControlHTTPError)
+        else (error.context.http_status if error.context else None)
+    )
+    return status if status is not None and 400 <= status <= 499 else None
+
+
 def _submit_idempotent_request(
     client: ControllerClient,
     args: argparse.Namespace,
@@ -917,9 +1341,10 @@ def _submit_idempotent_request(
     noun: str,
     action: str,
     validate: Callable[[Mapping[str, object]], str],
+    lookup_validate: Callable[[Mapping[str, object]], str] | None = None,
     reconnect: str,
 ) -> dict[str, object]:
-    """Bounded submission, original-key lookup, and one identical replay."""
+    """Bounded submission, exact-request reconciliation, and one identical replay."""
     normal_timeout = client.request_timeout_seconds
     if not math.isfinite(normal_timeout) or normal_timeout <= 0:
         raise ValueError("request timeout must be finite and positive")
@@ -931,7 +1356,13 @@ def _submit_idempotent_request(
             f"Request key: {key}\nReconnect: {reconnect}", file=sys.stderr, flush=True
         )
 
-    def request(method: str, target: str, stage: str) -> dict[str, object]:
+    def request(
+        method: str,
+        target: str,
+        stage: str,
+        *,
+        receipt_validator: Callable[[Mapping[str, object]], str] | None = None,
+    ) -> dict[str, object]:
         try:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -952,7 +1383,7 @@ def _submit_idempotent_request(
                 body if method == "POST" else None,
                 timeout_seconds=min(normal_timeout, remaining),
             )
-            operation_id = validate(result)
+            operation_id = (receipt_validator or validate)(result)
         except BrokenPipeError:
             raise
         except (ControlClientError, OSError) as error:
@@ -976,6 +1407,7 @@ def _submit_idempotent_request(
         return result
 
     retry_error: ControlHTTPError | ControlTransportError | None = None
+    submission_error: ControlClientError | None = None
     retry_not_before = 0.0
     submission.acceptance = "unknown"
     try:
@@ -985,12 +1417,9 @@ def _submit_idempotent_request(
     except OSError:
         may_replay = True
     except ControlClientError as error:
-        status = (
-            error.status_code
-            if isinstance(error, ControlHTTPError)
-            else (error.context.http_status if error.context else None)
-        )
-        if status is not None and 400 <= status <= 499:
+        submission_error = error
+        status = _known_http_refusal_status(error)
+        if status is not None:
             submission.acceptance = "refused"
             raise
         if isinstance(error, (ControlMalformedResponse, ControlResponseTooLarge)):
@@ -1016,11 +1445,17 @@ def _submit_idempotent_request(
         else:
             raise
 
-    try:
-        return request("GET", lookup, "lookup")
-    except ControlNotFound:
+    if lookup == path:
         if not may_replay:
-            raise
+            if submission_error is not None:
+                raise submission_error
+            raise ControlMalformedResponse(f"{action} receipt could not be confirmed")
+    else:
+        try:
+            return request("GET", lookup, "lookup", receipt_validator=lookup_validate)
+        except ControlNotFound:
+            if not may_replay:
+                raise
     if retry_error is not None:
         now = time.monotonic()
         delay = max(0.0, retry_not_before - now)
@@ -1028,7 +1463,7 @@ def _submit_idempotent_request(
             raise retry_error
         if delay:
             time.sleep(delay)
-    # Other lookup errors propagate with the original key and both safe
+    # A separate lookup's errors propagate with the original key and both safe
     # failure contexts. Neither a failed lookup nor a second lost POST loops.
     return request("POST", path, "replay")
 
@@ -1113,7 +1548,8 @@ def _watch_resource(
 
 def _log_follow_complete(observed: Mapping[str, object]) -> bool:
     return (
-        observed.get("complete") is True
+        observed.get("follow") is False
+        or observed.get("complete") is True
         or observed.get("closed") is True
         or _state(observed) in _TERMINAL_STATES
     )
@@ -1125,8 +1561,21 @@ def _follow_loginfo(
     result: dict[str, object],
     args: argparse.Namespace,
     query: Mapping[str, object],
+    node_id: str,
 ) -> dict[str, object]:
+    def same_node(observed: Mapping[str, object]) -> None:
+        if observed.get("node_id") != node_id:
+            raise ControlMalformedResponse(
+                "fleet log observation identifies another Spark"
+            )
+
+    same_node(result)
     if not getattr(args, "follow", False):
+        return result
+    # The owner says this is retained evidence rather than a live stream. Keep
+    # that snapshot as evidence without spending the caller's follow budget or
+    # presenting a local timeout as a remote log-follow failure.
+    if result.get("follow") is False:
         return result
     # The log tail is the same bounded observation as every other follow path;
     # keeping one loop means a dropped connection is tolerated identically here
@@ -1138,6 +1587,7 @@ def _follow_loginfo(
         args,
         query=query,
         terminal=_log_follow_complete,
+        validate=same_node,
     )
 
 
@@ -1280,12 +1730,20 @@ def _deliver_enrollment(
                 )
                 receipt["error_type"] = "enrollment_delivery"
                 receipt["cause"] = type(error).__name__
-                if (
-                    isinstance(error, (ControlForbidden, ControlUnauthorized))
-                    and not issued
-                ):
-                    receipt["error"] = "Controller authorization denied enrollment."
-                    receipt["reconciliation"] = "issuance denied"
+                refusal_status = (
+                    _known_http_refusal_status(error)
+                    if isinstance(error, ControlClientError)
+                    else None
+                )
+                if not issued and refusal_status is not None:
+                    if isinstance(error, (ControlForbidden, ControlUnauthorized)):
+                        receipt["error"] = "Controller authorization denied enrollment."
+                        receipt["reconciliation"] = "issuance denied"
+                    else:
+                        receipt["error"] = (
+                            f"Controller refused enrollment (HTTP {refusal_status})."
+                        )
+                        receipt["reconciliation"] = "issuance refused"
                 else:
                     try:
                         observed = validate_control_document(
@@ -1353,7 +1811,56 @@ def _fleet(
     if action == "progress":
         path = f"/api/jobs/{_quoted(args.job_id)}"
         result = client.request("GET", path)
-        return _poll_path(client, path, result, args) if args.follow else result
+
+        def same_job(observed: Mapping[str, object]) -> None:
+            if observed.get("id") != args.job_id:
+                raise ControlMalformedResponse(
+                    "fleet progress observation identifies another job"
+                )
+
+        same_job(result)
+        return (
+            _poll_path(client, path, result, args, validate=same_job)
+            if args.follow
+            else result
+        )
+    if action == "activity":
+        query = _query(
+            cursor=args.cursor,
+            limit=args.limit,
+            state=args.state,
+            node_id=args.target,
+            request_id=args.request_id,
+        )
+        return client.request("GET", "/api/operations", query=query or None)
+    if action == "resume":
+        job_id = args.job_id
+        path = f"/api/jobs/{_quoted(job_id)}"
+        current = client.request("GET", path)
+        recovery = current.get("recovery")
+        actions = recovery.get("actions") if isinstance(recovery, Mapping) else None
+        if (
+            current.get("id") != job_id
+            or current.get("state") != "waiting-for-operator"
+            or not isinstance(actions, list)
+            or "resume" not in actions
+        ):
+            raise ValueError(
+                f"job {job_id} has no currently advertised authorized resume action"
+            )
+        _confirm_action(
+            args, f"Resume job {job_id} using its advertised recovery action?"
+        )
+        accepted = client.request(
+            "POST",
+            f"{path}/resume",
+            {"disposition": "resume"},
+        )
+        if accepted.get("id") != job_id:
+            raise ControlMalformedResponse(
+                "fleet resume receipt identifies another job"
+            )
+        return accepted
     if action is None:
         return _watch_resource(
             client,
@@ -1407,26 +1914,123 @@ def _fleet(
     if action in {"enroll", "re-enroll"}:
         return _deliver_enrollment(args, client, factory)
     if action == "remove":
-        return client.request(
+        deadline = time.monotonic() + 30
+        node_id = _resolve_spark_selectors(
+            client, [_fleet_selector(args)], deadline=deadline
+        )[0]
+        if re.fullmatch(r"spk_[0-9a-f]{32}", node_id) is None:
+            raise ControlMalformedResponse(
+                "fleet removal target has no canonical Spark identity"
+            )
+        node = client.request(
+            "GET",
+            f"/api/fleet/{_quoted(node_id)}",
+            timeout_seconds=_selection_remaining(deadline),
+        )
+        _selection_remaining(deadline)
+        if node.get("id") != node_id:
+            raise ControlMalformedResponse(
+                "fleet removal detail identifies another Spark"
+            )
+        display_name = node.get("display_name")
+        if not isinstance(display_name, str) or not display_name.strip():
+            display_name = node_id
+        _confirm_action(
+            args,
+            f"Revoke and remove Spark {display_name} ({node_id}) from the fleet?",
+        )
+        result = client.request(
             "POST",
-            f"/api/fleet/{_quoted(_fleet_selector(args))}/remove",
+            f"/api/fleet/{_quoted(node_id)}/remove",
             None,
         )
+        if result.get("action") != "remove" or result.get("node_id") != node_id:
+            raise ControlMalformedResponse(
+                "fleet removal receipt identifies another Spark"
+            )
+        return result
     if action == "upgrade":
-        if not args.selector and not args.all:
-            raise ValueError("fleet upgrade requires a Spark selector or --all")
-        return client.request(
-            "POST",
-            "/api/fleet/upgrade",
-            {
-                **({"selectors": [args.selector]} if args.selector else {}),
-                "all": args.all,
-                "strategy": args.strategy,
-            },
+        if args.all == bool(args.selector):
+            raise ValueError("fleet upgrade requires either a Spark selector or --all")
+        if args.all:
+            scope = "all Sparks in the current fleet"
+        else:
+            resolved = _resolve_spark_selectors(
+                client,
+                [cast(str, args.selector)],
+                deadline=time.monotonic() + _bounded_timeout(args),
+            )
+            if len(resolved) != 1:
+                raise SelectorError(
+                    "fleet upgrade selector did not resolve to one Spark"
+                )
+            args.selector = resolved[0]
+            scope = f"Spark {args.selector}"
+        _confirm_action(args, f"Upgrade {scope} one at a time?")
+        result = _submit_fleet_upgrade(args, client, factory)
+        if args.detach:
+            return result
+        job_id = result.get("operation_id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ControlMalformedResponse("fleet upgrade has no durable job identity")
+
+        def same_job(observed: Mapping[str, object]) -> None:
+            if observed.get("action") == "upgrade":
+                if (
+                    observed.get("operation_id") != job_id
+                    or observed.get("request_key") != args.request_key
+                ):
+                    raise ControlMalformedResponse(
+                        "fleet upgrade receipt identifies another request"
+                    )
+                return
+            if (
+                observed.get("id") != job_id
+                or observed.get("kind") != "agent-upgrade"
+                or observed.get("targets") != result.get("targets")
+            ):
+                raise ControlMalformedResponse(
+                    "fleet upgrade observation identifies another job"
+                )
+            operations = observed.get("operations")
+            if isinstance(operations, list):
+                active = [
+                    item
+                    for item in operations
+                    if isinstance(item, Mapping)
+                    and item.get("state")
+                    in {"queued", "running", "waiting-for-operator"}
+                ]
+                if len(active) > 1:
+                    raise ControlMalformedResponse(
+                        "fleet upgrade job has more than one active Spark"
+                    )
+            progress = observed.get("progress")
+            if (
+                isinstance(progress, Mapping)
+                and type(progress.get("running")) is int
+                and progress["running"] > 1
+            ):
+                raise ControlMalformedResponse(
+                    "fleet upgrade job reports concurrent Spark upgrades"
+                )
+
+        args.follow = True
+        args.fleet_action = "progress"
+        return _poll_path(
+            client,
+            f"/api/jobs/{_quoted(job_id)}",
+            result,
+            args,
+            query={"limit": 100},
+            terminal=lambda observed: (
+                _state(observed) in _TERMINAL_STATES
+                or _state(observed) == "waiting-for-operator"
+            ),
+            validate=same_job,
         )
     if action == "loginfo":
         selector = _fleet_selector(args)
-        path = f"/api/fleet/{_quoted(selector)}/loginfo"
         query = _query(
             since=_log_since(args.since),
             lines=args.lines,
@@ -1434,8 +2038,14 @@ def _fleet(
             source=args.source,
             follow=args.follow,
         )
+        node_id = (
+            selector
+            if re.fullmatch(r"spk_[0-9a-f]{32}", selector) is not None
+            else _resolve_spark_selectors(client, [selector])[0]
+        )
+        path = f"/api/fleet/{_quoted(node_id)}/loginfo"
         result = client.request("GET", path, query=query or None)
-        return _follow_loginfo(client, path, result, args, query)
+        return _follow_loginfo(client, path, result, args, query, node_id)
     raise ValueError(f"unsupported fleet action: {action}")
 
 
@@ -1475,6 +2085,9 @@ def _model(
     action = getattr(args, "model_action", None)
     if action == "progress":
         return _cache_progress(client, "model", args, factory)
+    if action == "cancel":
+        result = _submit_model_cancellation(client, args, factory)
+        return _follow_mutation(client, "model", result, args)
     if action is None:
         return _watch_resource(
             client, "/api/model", _overview(client, "model", args), args
@@ -1504,13 +2117,17 @@ def _model(
     if action == "remove":
         if not args.yes:
             raise ValueError("model remove requires --yes in noninteractive mode")
+        request_key = _request_key(args, factory)
         result = client.request(
             "POST",
             f"/api/model/{_quoted(args.selector)}/remove",
             {
                 "schema_version": 2,
-                "request_key": _request_key(args, factory),
+                "request_key": request_key,
             },
+        )
+        _validate_cache_removal_receipt(
+            "model", args.selector, request_key, result, expected_with_model=None
         )
         return _follow_mutation(client, "model", result, args)
     raise ValueError(f"unsupported model action: {action}")
@@ -1524,6 +2141,19 @@ def _recipe(
     action = getattr(args, "recipe_action", None)
     if action == "progress":
         return _cache_progress(client, "recipe", args, factory)
+    if action == "job":
+        if not isinstance(client, ArtifactJobClient):
+            raise ControlClientError(
+                "artifact byte transfer is unavailable in this CLI client"
+            )
+        return run_artifact_job(
+            args,
+            client,
+            factory,
+            request_key=_request_key,
+            quote=_quoted,
+            poll=_poll_path,
+        )
     if action is None:
         return _watch_resource(
             client, "/api/recipe", _overview(client, "recipe", args), args
@@ -1560,15 +2190,29 @@ def _recipe(
             raise ValueError("recipe remove requires --yes in noninteractive mode")
         if not (args.with_model or args.keep_model):
             raise ValueError("recipe remove requires --with-model or --keep-model")
+        request_key = _request_key(args, factory)
+        with_model = args.with_model and not args.keep_model
         result = client.request(
             "POST",
             f"/api/recipe/{_quoted(args.selector)}/remove",
             {
                 "schema_version": 2,
-                "request_key": _request_key(args, factory),
-                "with_model": args.with_model and not args.keep_model,
+                "request_key": request_key,
+                "with_model": with_model,
             },
         )
+        _validate_cache_removal_receipt(
+            "recipe",
+            args.selector,
+            request_key,
+            result,
+            expected_with_model=with_model,
+        )
+        return _follow_mutation(client, "recipe", result, args)
+    if action == "cancel":
+        if not args.yes:
+            raise ValueError("recipe cancel requires --yes in noninteractive mode")
+        result = _submit_recipe_cancellation(client, args, factory)
         return _follow_mutation(client, "recipe", result, args)
     raise ValueError(f"unsupported recipe action: {action}")
 
@@ -1937,29 +2581,152 @@ def _profile(
         return _overview(client, "profile", args)
     if action == "list":
         return client.request("GET", "/api/profile")
+    if action == "endpoint":
+        result = validate_control_document(
+            "FleetProfileEndpointsView",
+            client.profile_endpoints(number, alias=args.alias).to_dict(),
+        )
+        assignments = result.get("assignments")
+        if args.alias is not None and (
+            not isinstance(assignments, list)
+            or not any(
+                isinstance(item, dict) and item.get("alias") == args.alias
+                for item in assignments
+            )
+        ):
+            raise ValueError(f"endpoint alias is not part of profile {number}")
+        return result
     if action == "progress":
         if args.application:
             path = f"/api/profile/applications/{args.application}"
+            selected_profile_id: str | None = None
+            if getattr(args, "profile_number", None) is not None:
+                selected_profile = client.request("GET", f"/api/profile/{number}")
+                selected_profile_id_value = selected_profile.get("id")
+                if (
+                    not isinstance(selected_profile_id_value, str)
+                    or not selected_profile_id_value
+                ):
+                    raise ControlMalformedResponse(
+                        "selected profile response has no canonical identity"
+                    )
+                selected_profile_id = selected_profile_id_value
         elif args.request_key:
             path = f"/api/profile/{number}/requests/{args.request_key}"
+            selected_profile_id = None
         else:
             path = f"/api/profile/{number}/progress"
+            selected_profile_id = None
         result = client.request("GET", path)
-        if args.application:
-            profile = client.request("GET", f"/api/profile/{number}")
-            if not isinstance(profile.get("id"), str) or profile["id"] != result.get(
-                "profile_id"
-            ):
-                raise ValueError("application does not belong to the selected profile")
-        if not args.follow:
-            return result
         application_id = result.get("id")
         if not isinstance(application_id, str) or not application_id:
-            raise ValueError("profile observation has no durable application identity")
+            raise ControlMalformedResponse(
+                "profile progress response has no durable application identity"
+            )
+        if args.application and application_id != args.application:
+            raise ControlMalformedResponse(
+                "profile application response identifies another application"
+            )
+        if selected_profile_id is not None:
+            application_profile_id = result.get("profile_id")
+            if (
+                not isinstance(application_profile_id, str)
+                or not application_profile_id
+            ):
+                raise ControlMalformedResponse(
+                    "profile application response has no canonical profile identity"
+                )
+            if application_profile_id != selected_profile_id:
+                raise ValueError(
+                    f"profile application does not belong to selected profile {number}"
+                )
+        if not args.follow:
+            return result
         path = f"/api/profile/applications/{_quoted(application_id)}"
-        return _poll_path(client, path, result, args)
+
+        def same_application(observed: Mapping[str, object]) -> None:
+            if observed.get("id") != application_id:
+                raise ControlMalformedResponse(
+                    "profile progress observation changed application identity"
+                )
+
+        return _poll_path(client, path, result, args, validate=same_application)
     if action in {"name", "add", "remove", "configure", "export", "import"}:
         return _profile_authoring(args, client)
+    if action == "cancel":
+        if not args.yes:
+            raise ValueError("profile cancel requires --yes")
+        _confirm_action(
+            args,
+            f"Cancel profile {number} application {args.application_id} and reconcile issued effects?",
+        )
+        request_key = _request_key(args, factory)
+        application_id = args.application_id
+        path = f"/api/profile/applications/{_quoted(application_id)}/cancel"
+        lookup = (
+            f"/api/profile/applications/{_quoted(application_id)}"
+            f"/cancellations/{_quoted(request_key)}"
+        )
+
+        def same_cancellation(receipt: Mapping[str, object]) -> str:
+            cancellation = receipt.get("cancellation")
+            cancellation_actor = (
+                cancellation.get("actor") if isinstance(cancellation, Mapping) else None
+            )
+            if (
+                receipt.get("id") != application_id
+                or not isinstance(cancellation, Mapping)
+                or cancellation.get("request_key") != request_key
+                or cancellation.get("cause") != "operator"
+                or not isinstance(cancellation_actor, str)
+                or not cancellation_actor
+            ):
+                raise ControlMalformedResponse(
+                    "profile cancellation receipt identifies another request or owner"
+                )
+            return application_id
+
+        result = _submit_idempotent_request(
+            client,
+            args,
+            key=request_key,
+            path=path,
+            lookup=lookup,
+            body={"profile_number": number, "request_key": request_key},
+            noun="profile",
+            action="cancel",
+            validate=same_cancellation,
+            reconnect=shlex.join(
+                [
+                    "vonkctl",
+                    "--profile",
+                    str(number),
+                    "profile",
+                    "cancel",
+                    application_id,
+                    "--yes",
+                    "--request-key",
+                    request_key,
+                    "--detach",
+                    "--json",
+                ]
+            ),
+        )
+        if args.detach:
+            return result
+
+        def validate_observed_cancellation(
+            observed: Mapping[str, object],
+        ) -> None:
+            same_cancellation(observed)
+
+        return _poll_path(
+            client,
+            f"/api/profile/applications/{_quoted(application_id)}",
+            result,
+            args,
+            validate=validate_observed_cancellation,
+        )
     if action == "load":
         if args.dry_run:
             if args.expected_plan is not None or args.yes or args.detach:
@@ -1982,6 +2749,27 @@ def _profile(
                 raise ValueError(
                     "--expected-plan requires the complete lowercase plan digest"
                 )
+            if interactive and not args.yes:
+                preview = client.request("POST", f"/api/profile/{number}/preview")
+                if preview.get("allowed") is not True:
+                    args.outcome_context = "preview"
+                    return preview
+                current_digest = preview.get("plan_digest")
+                if (
+                    not isinstance(current_digest, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", current_digest) is None
+                ):
+                    raise ControlMalformedResponse(
+                        "profile preview has no valid reviewed plan digest"
+                    )
+                with redirect_stdout(sys.stderr):
+                    render_payload(preview, "profile", action="preview")
+                if current_digest != expected_digest:
+                    raise ControlConflict(
+                        409,
+                        "profile review changed; inspect the current effects and "
+                        "rerun with the new plan digest",
+                    )
             _confirm_action(
                 args, f"Load profile {number} with reviewed plan {expected_digest}?"
             )
@@ -2005,7 +2793,48 @@ def _profile(
                     "profile preview has no valid reviewed plan digest"
                 )
             _confirm_action(args, f"Load profile {number} with these effects?")
-        result = _submit_profile_load(client, number, expected_digest, args, factory)
+        try:
+            result = _submit_profile_load(
+                client, number, expected_digest, args, factory
+            )
+        except ControlConflict as error:
+            if error.code != "profile.stale_plan":
+                raise
+            try:
+                current_review = client.request(
+                    "POST", f"/api/profile/{number}/preview"
+                )
+                if type(current_review.get("allowed")) is not bool:
+                    raise ControlMalformedResponse(
+                        "current profile review has no admission decision"
+                    )
+                current_digest = current_review.get("plan_digest")
+                if (
+                    not isinstance(current_digest, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", current_digest) is None
+                ):
+                    raise ControlMalformedResponse(
+                        "current profile review has no valid plan digest"
+                    )
+                with redirect_stdout(sys.stderr):
+                    render_payload(current_review, "profile", action="preview")
+                print(
+                    "The submitted load was refused. Review these current effects, "
+                    "then start a new load with the current plan digest.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            except (
+                ControlClientError,
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+            ):
+                # This follow-up is a read after a definitive stale refusal. Its
+                # failure must not replace the original admission error.
+                pass
+            raise
         if args.detach:
             return result
         application_id = result.get("id")

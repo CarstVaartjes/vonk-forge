@@ -288,7 +288,7 @@ def test_transport_preserves_streamed_artifact_upload_and_verified_download(
     state.update(body=content, media_type="image/png")
     destination = tmp_path / "result.png"
     client.download_file(
-        f"/api/artifact-jobs/job-1/results/{digest}",
+        f"/api/artifact-jobs/job-1/results/result.png/{digest}",
         destination,
         media_type="image/png",
         expected_sha256=digest,

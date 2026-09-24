@@ -1035,12 +1035,6 @@ class RecipeRouteService:
                 )
             endpoint_owner = endpoint_owners[0]
             if exact_observations:
-                observation_deadline = run.observation_deadline_at
-                normalized_deadline = (
-                    _aware(observation_deadline)
-                    if observation_deadline is not None
-                    else None
-                )
                 for node in nodes:
                     if (
                         node.observed_run_generation != run.run_generation
@@ -1049,14 +1043,6 @@ class RecipeRouteService:
                     ):
                         raise RecipeRouteNotReady(
                             "recipe rank is awaiting current exact observation",
-                            run_id=run.id,
-                        )
-                    if (
-                        normalized_deadline is not None
-                        and _aware(node.updated_at) > normalized_deadline
-                    ):
-                        raise RecipeRouteError(
-                            "recipe rank exact observation missed its deadline",
                             run_id=run.id,
                         )
                     if node is endpoint_owner:

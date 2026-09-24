@@ -155,6 +155,10 @@ def _fleet() -> dict[str, Any]:
 
 def _route_template(path: str) -> str:
     for pattern, template in (
+        (
+            r"^/api/model/operations/[^/]+/cancel$",
+            "/api/model/operations/{operation_id}/cancel",
+        ),
         (r"^/api/model/operations/[^/]+$", "/api/model/operations/{operation_id}"),
         (r"^/api/model/[^/]+/(download|remove)$", "/api/model/{selector}/\\1"),
         (

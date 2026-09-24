@@ -5,6 +5,7 @@ import io
 import json
 from datetime import UTC, datetime
 from email.message import Message
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -21,7 +22,9 @@ from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
 
 
-def _client(sessions=None, *, profiles=None) -> tuple[TestClient, TokenCodec]:
+def _client(
+    sessions=None, *, profiles=None, operations=None
+) -> tuple[TestClient, TokenCodec]:
     if sessions is None:
         engine = create_engine(
             "sqlite+pysqlite:///:memory:",
@@ -49,6 +52,7 @@ def _client(sessions=None, *, profiles=None) -> tuple[TestClient, TokenCodec]:
         or FleetProfileService(
             sessions, clock=lambda: datetime(2026, 9, 10, tzinfo=UTC)
         ),
+        operations=operations,
     )
     return TestClient(app), codec
 
@@ -79,6 +83,64 @@ def test_profile_request_lookup_is_authenticated_and_reports_missing_key() -> No
     path = "/api/profile/1/requests/11111111-1111-4111-8111-111111111111"
     assert client.get(path).status_code == 401
     assert client.get(path, headers=_headers(codec)).status_code == 404
+
+
+def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None:
+    from vonk_control.fleet_profile_contract import FleetProfileEndpointsView
+
+    calls: list[tuple[int, str | None]] = []
+
+    def profile_endpoint(number: int, alias: str | None) -> FleetProfileEndpointsView:
+        calls.append((number, alias))
+        if alias != "studio-chat":
+            raise KeyError(alias)
+        return FleetProfileEndpointsView.model_validate(
+            {
+                "number": number,
+                "profile_id": "11111111-1111-4111-8111-111111111111",
+                "application_id": "22222222-2222-4222-8222-222222222222",
+                "application_state": "succeeded",
+                "observed_at": datetime(2026, 9, 10, tzinfo=UTC),
+                "assignments": [
+                    {
+                        "assignment_id": "33333333-3333-4333-8333-333333333333",
+                        "recipe_title": "Example Model",
+                        "desired_state": "running",
+                        "alias": "studio-chat",
+                        "state": "published",
+                        "endpoint": {
+                            "alias": "studio-chat",
+                            "api_base": "http://10.0.0.10:8000/v1",
+                            "expires_at": "2026-09-10T00:03:00Z",
+                            "generation": 8,
+                            "node_id": "spk_" + "a" * 32,
+                            "observed_at": "2026-09-10T00:00:00Z",
+                            "plan_digest": "a" * 64,
+                            "state": "published",
+                        },
+                    }
+                ],
+            }
+        )
+
+    client, codec = _client(
+        operations=SimpleNamespace(profile_endpoint=profile_endpoint)
+    )
+    path = "/api/profile/3/endpoints"
+    assert client.get(path).status_code == 401
+
+    response = client.get(
+        path, params={"alias": "studio-chat"}, headers=_headers(codec)
+    )
+    assert response.status_code == 200
+    assert response.json()["assignments"][0]["endpoint"]["generation"] == 8
+
+    missing = client.get(
+        path, params={"alias": "another-profiles-model"}, headers=_headers(codec)
+    )
+    assert missing.status_code == 404
+    assert "not part of profile 3" in missing.json()["detail"]
+    assert calls == [(3, "studio-chat"), (3, "another-profiles-model")]
 
 
 def test_definition_roundtrip_keeps_metadata_and_enforces_the_observed_revision() -> (

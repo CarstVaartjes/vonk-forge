@@ -15,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-from .compiled_execution_plan import CompiledExecutionPlan
+from .compiled_execution_plan import CompiledExecutionPlan, MemoryKind
 from .contracts import AgentProtocolError, canonical_message
 from .failure_evidence import FailureDiagnostics
 from .wire_model import WireModel
@@ -259,6 +259,8 @@ class RecipeJobRunRequest(_RecipeJobModel):
     rank: Literal[0]
     role: Literal["entrypoint"]
     reserved_memory_bytes: int = Field(ge=1, le=16 * 1024**4)
+    memory_floor_bytes: int = Field(ge=0, le=16 * 1024**4)
+    memory_kind: MemoryKind
     contract_sha256: Digest
     input_manifest_sha256: Digest
     input_total_bytes: int = Field(ge=0, le=MAX_INPUT_TOTAL_BYTES)
@@ -285,8 +287,20 @@ class RecipeJobRunRequest(_RecipeJobModel):
             or plan.job.timeout_seconds != self.timeout_seconds
             or plan.identity.recipe_revision_sha256 != self.recipe_content_sha256
             or plan.runtime.image_digest != self.image_digest
-            or (placement.rank, placement.role, placement.reserved_memory_bytes)
-            != (self.rank, self.role, self.reserved_memory_bytes)
+            or (
+                placement.rank,
+                placement.role,
+                placement.reserved_memory_bytes,
+                placement.memory_floor_bytes,
+                placement.memory_kind,
+            )
+            != (
+                self.rank,
+                self.role,
+                self.reserved_memory_bytes,
+                self.memory_floor_bytes,
+                self.memory_kind,
+            )
         ):
             raise ValueError("job invocation does not match request authority")
         names = [item.name for item in self.inputs]

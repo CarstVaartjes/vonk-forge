@@ -364,6 +364,7 @@ class NodeCapacityPlan:
     stop_required: bool
     allowed: bool
     reasons: tuple[ResourceReason, ...] = ()
+    insufficient_components: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -883,6 +884,13 @@ def plan_capacity(
                             reason for part in parts for reason in part.reasons
                         )
                     ),
+                    tuple(
+                        dict.fromkeys(
+                            component
+                            for part in parts
+                            for component in part.insufficient_components
+                        )
+                    ),
                 )
             )
             continue
@@ -967,6 +975,7 @@ def plan_capacity(
                 not current_fit and after_fit and release > 0,
                 allowed,
                 tuple(node_reasons),
+                (capacity.memory_kind,) if not current_fit else (),
             )
         )
     reasons.extend(reason for node in nodes for reason in node.reasons)

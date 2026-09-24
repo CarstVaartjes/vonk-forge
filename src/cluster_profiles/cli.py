@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import cast, overload
 
 from .build_identity import current_build
+from .cli_artifact_jobs import _may_have_completed
 from .cli_completion import completion_script
 from .cli_outcome import (
     CommandOutcome,
@@ -177,41 +178,226 @@ def _control_error(
         result["submission"] = submission.document()
         if submission.acceptance == "unknown":
             result["error"] = f"{submission.action.capitalize()} acceptance is unknown"
+    if isinstance(submission, Submission):
+        acceptance_may_exist = submission.acceptance in {"unknown", "accepted"}
+    else:
+        acceptance_may_exist = _may_have_completed(error)
     result = {key: value for key, value in result.items() if value is not None}
     request_key = getattr(args, "request_key", None) if args is not None else None
-    if isinstance(request_key, str) and request_key:
+    profile_load_not_submitted = (
+        getattr(args, "command", None) == "profile"
+        and getattr(args, "profile_action", None) == "load"
+        and not isinstance(submission, Submission)
+    )
+    if isinstance(request_key, str) and request_key and not profile_load_not_submitted:
         result["request_key"] = request_key
         noun = getattr(args, "command", None)
-        result["reconcile"] = {
-            "operation": (
-                shlex.join(
+        fleet_upgrade_replay = None
+        if (
+            noun == "fleet"
+            and getattr(args, "fleet_action", None) == "upgrade"
+            and isinstance(submission, Submission)
+            and submission.acceptance == "unknown"
+        ):
+            selector = getattr(args, "selector", None)
+            scope = (
+                ["--all"]
+                if getattr(args, "all", False)
+                else [selector]
+                if isinstance(selector, str) and selector
+                else []
+            )
+            if scope:
+                fleet_upgrade_replay = shlex.join(
                     [
                         "vonkctl",
-                        noun,
-                        "progress",
+                        "fleet",
+                        "upgrade",
+                        *scope,
                         "--request-key",
                         request_key,
-                        "--follow",
+                        "--strategy",
+                        str(getattr(args, "strategy", "one-at-a-time")),
+                        "--yes",
                     ]
                 )
-                if noun in {"model", "recipe"}
-                else shlex.join(
+        if (
+            noun in {"model", "recipe"}
+            and getattr(args, f"{noun}_action", None) == "cancel"
+        ):
+            reconcile_operation = shlex.join(
+                [
+                    "vonkctl",
+                    noun,
+                    "cancel",
+                    str(getattr(args, "operation_id", "")),
+                    "--yes",
+                    "--request-key",
+                    request_key,
+                    "--reason",
+                    str(getattr(args, "reason", "operator requested cancellation")),
+                ]
+            )
+        elif noun in {"model", "recipe"}:
+            reconcile_operation = shlex.join(
+                [
+                    "vonkctl",
+                    noun,
+                    "progress",
+                    "--request-key",
+                    request_key,
+                    "--follow",
+                ]
+            )
+        elif noun == "profile":
+            reconcile_operation = shlex.join(
+                [
+                    "vonkctl",
+                    "--profile",
+                    str(getattr(args, "profile_number", 1)),
+                    "profile",
+                    "progress",
+                    "--request-key",
+                    request_key,
+                    "--follow",
+                ]
+            )
+        elif fleet_upgrade_replay is not None:
+            reconcile_operation = fleet_upgrade_replay
+        else:
+            reconcile_operation = (
+                "inspect the durable operation with the same request key"
+            )
+        result["reconcile"] = {
+            "operation": reconcile_operation,
+            "request_key": request_key,
+        }
+    artifact_job_id = getattr(args, "artifact_job_id", None)
+    if isinstance(artifact_job_id, str):
+        result["artifact_job_id"] = artifact_job_id
+    reconcile = getattr(args, "artifact_job_reconcile", None)
+    if isinstance(reconcile, str):
+        result["reconcile"] = {
+            "operation": reconcile,
+            **(
+                {"request_key": request_key}
+                if isinstance(request_key, str) and request_key
+                else {}
+            ),
+        }
+    uploaded = getattr(args, "artifact_job_uploaded", None)
+    if isinstance(uploaded, list):
+        result["uploaded_inputs"] = uploaded
+    upload_unknown = getattr(args, "artifact_job_upload_unknown", None)
+    if isinstance(upload_unknown, str):
+        result["upload_acceptance"] = "unknown"
+        result["input_name"] = upload_unknown
+    downloaded = getattr(args, "artifact_job_downloaded", None)
+    if isinstance(downloaded, list):
+        result["downloaded_files"] = downloaded
+        result["partial_collection"] = bool(downloaded)
+        total_files = getattr(args, "artifact_job_download_total", None)
+        if isinstance(total_files, int):
+            result["downloaded_file_count"] = len(downloaded)
+            result["expected_file_count"] = total_files
+    if (
+        getattr(args, "command", None) == "recipe"
+        and getattr(args, "recipe_action", None) == "job"
+        and isinstance(request_key, str)
+        and request_key
+        and getattr(args, "recipe_job_action", None) == "create"
+    ):
+        result["reconcile"] = {
+            "operation": shlex.join(
+                [
+                    "vonkctl",
+                    "recipe",
+                    "job",
+                    "create",
+                    "--run",
+                    str(getattr(args, "run", "")),
+                    "--file",
+                    str(getattr(args, "file", "")),
+                    "--request-key",
+                    request_key,
+                ]
+            ),
+            "request_key": request_key,
+            **(
+                {"artifact_job_id": artifact_job_id}
+                if isinstance(artifact_job_id, str)
+                else {}
+            ),
+        }
+    artifact_job_command = (
+        getattr(args, "command", None) == "recipe"
+        and getattr(args, "recipe_action", None) == "job"
+    )
+    artifact_job_action = (
+        getattr(args, "recipe_job_action", None) if artifact_job_command else None
+    )
+    artifact_job_id = getattr(args, "artifact_job_id", None)
+    artifact_reconcile = getattr(args, "artifact_job_reconcile", None)
+    command_noun = getattr(args, "command", None)
+    if artifact_job_command:
+        if acceptance_may_exist:
+            if isinstance(artifact_reconcile, str):
+                result["reconcile"] = {
+                    "operation": artifact_reconcile,
+                    **(
+                        {"request_key": request_key}
+                        if isinstance(request_key, str)
+                        and request_key
+                        and artifact_job_action in {"submit", "cancel"}
+                        else {}
+                    ),
+                }
+        elif artifact_job_action in {"create", "upload", "submit", "cancel"}:
+            if isinstance(artifact_job_id, str):
+                result["reconcile"] = {
+                    "operation": shlex.join(
+                        ["vonkctl", "recipe", "job", "detail", artifact_job_id]
+                    )
+                }
+            else:
+                result.pop("reconcile", None)
+    elif not acceptance_may_exist:
+        result.pop("reconcile", None)
+        if (
+            getattr(args, "command", None) == "profile"
+            and getattr(args, "profile_action", None) == "load"
+            and result.get("code") == "profile.stale_plan"
+        ):
+            result["reconcile"] = {
+                "operation": shlex.join(
                     [
                         "vonkctl",
                         "--profile",
                         str(getattr(args, "profile_number", 1)),
                         "profile",
-                        "progress",
-                        "--request-key",
-                        request_key,
-                        "--follow",
+                        "load",
+                        "--dry-run",
                     ]
                 )
-                if noun == "profile"
-                else "inspect the durable operation with the same request key"
-            ),
-            "request_key": request_key,
-        }
+            }
+        elif (
+            isinstance(command_noun, str)
+            and command_noun in {"model", "recipe"}
+            and getattr(args, f"{command_noun}_action", None) == "cancel"
+        ):
+            operation_id = getattr(args, "operation_id", None)
+            if isinstance(operation_id, str):
+                result["reconcile"] = {
+                    "operation": shlex.join(
+                        [
+                            "vonkctl",
+                            command_noun,
+                            "progress",
+                            operation_id,
+                            "--follow",
+                        ]
+                    )
+                }
     return result
 
 
@@ -229,7 +415,15 @@ def _emit(
     if args.global_json or getattr(args, "json", False):
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
         return
-    with redirect_stdout(sys.stderr if error else sys.stdout):
+    preview = (
+        getattr(args, "dry_run", False)
+        or getattr(args, "outcome_context", None) == "preview"
+    )
+    preview_only = (
+        not getattr(args, "dry_run", False)
+        and getattr(args, "outcome_context", None) == "preview"
+    )
+    with redirect_stdout(sys.stderr if error or preview_only else sys.stdout):
         render_payload(
             safe,
             getattr(args, "command", None) or "profile",
@@ -238,10 +432,27 @@ def _emit(
                 "connection"
                 if getattr(args, "check_connection", False)
                 else "preview"
-                if getattr(args, "dry_run", False)
+                if preview
                 else getattr(args, f"{getattr(args, 'command', '')}_action", None)
             ),
             technical=getattr(args, "technical", False),
+            activity_filters=(
+                {
+                    "limit": getattr(args, "limit", 20),
+                    "state": getattr(args, "state", None),
+                    "target": getattr(args, "target", None),
+                    "request_id": getattr(args, "request_id", None),
+                }
+                if getattr(args, "command", None) == "fleet"
+                and getattr(args, "fleet_action", None) == "activity"
+                else None
+            ),
+            artifact_job_action=(
+                getattr(args, "recipe_job_action", None)
+                if getattr(args, "command", None) == "recipe"
+                and getattr(args, "recipe_action", None) == "job"
+                else None
+            ),
         )
 
 
@@ -254,15 +465,18 @@ def main(
 ) -> int:
     """Run the API-backed CLI."""
     try:
-        status = _main(
-            argv,
-            root=root,
-            control_client=control_client,
-            request_id_factory=request_id_factory,
-        )
-        sys.stdout.flush()
-        sys.stderr.flush()
-        return status
+        try:
+            return _main(
+                argv,
+                root=root,
+                control_client=control_client,
+                request_id_factory=request_id_factory,
+            )
+        finally:
+            # Argparse help exits early; its buffered output still belongs to
+            # this process boundary rather than interpreter shutdown.
+            sys.stdout.flush()
+            sys.stderr.flush()
     except BrokenPipeError:
         # Avoid a second flush into the closed pipe during interpreter shutdown.
         for stream in (sys.stdout, sys.stderr):

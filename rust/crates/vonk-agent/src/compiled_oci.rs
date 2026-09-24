@@ -655,9 +655,11 @@ mod tests {
 
     #[test]
     fn a_many_artifact_runtime_command_is_framed() {
-        // Wrong implementation: `MAX_HOST_RUNTIME_ARGUMENTS = 512` refused the
-        // live GLM EXL3 dual command line, whose 149 model files alone project
-        // to 152 `--mount` pairs, before the helper was ever called.
+        // Wrong implementations this catches: the retired
+        // `MAX_HOST_RUNTIME_ARGUMENTS = 512` count cap refused the live GLM EXL3
+        // dual command line before the helper was ever called, and a request
+        // byte budget that merely equalled the helper frame budget could not
+        // carry the command line the plan itself admitted.
         use super::OciMount;
         use uuid::Uuid;
         use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest};
@@ -727,6 +729,12 @@ mod tests {
             installation_id: None,
         };
         assert_eq!(request.validate(), Ok(()));
+        let body = vonk_agent_protocol::canonical_json(&request).unwrap();
+        assert!(
+            body.len() <= vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES,
+            "the plan-admitted command line must fit one bounded helper exchange, got {} bytes",
+            body.len()
+        );
     }
 
     #[test]

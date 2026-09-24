@@ -19,6 +19,7 @@ use vonk_agent_protocol::{
 };
 
 use crate::client::{AgentHttpClient, ClientError};
+use crate::failure_evidence::{FailureProcessLogs, sanitize_tail};
 
 /// The frame ceiling is owned by the wire contract so the agent, the upgrade
 /// channel and the privileged helper cannot drift.
@@ -50,6 +51,9 @@ pub enum HostRuntimeError {
     HelperRejected {
         code: String,
         diagnostic: Option<String>,
+        /// The rejected container's own retained output, per stream, when the
+        /// helper could read it. Absence is reported, never read as empty.
+        process_logs: Option<Box<FailureProcessLogs>>,
     },
 }
 
@@ -87,9 +91,9 @@ pub enum HelperProtocolCause {
     /// The agent-built request carries an installation identity for the wrong
     /// action.
     RequestInstallationIdentity,
-    /// The agent-built request carries more arguments than the transport
-    /// accepts.
-    RequestArgumentCount,
+    /// The agent-built request carries a canonical document larger than the
+    /// bounded helper exchange reads.
+    RequestBytes,
     /// An agent-built request argument carries a NUL byte an exec argv cannot
     /// frame.
     RequestArgumentNulByte,
@@ -122,7 +126,7 @@ impl HelperProtocolCause {
             Self::RequestAttempt => "request_attempt_invalid",
             Self::RequestArgumentsPresence => "request_arguments_presence_invalid",
             Self::RequestInstallationIdentity => "request_installation_identity_invalid",
-            Self::RequestArgumentCount => "request_argument_count_invalid",
+            Self::RequestBytes => "request_bytes_invalid",
             Self::RequestArgumentNulByte => "request_argument_nul_byte",
             Self::RequestStorage => "request_storage_invalid",
             Self::SystemClock => "system_clock_invalid",
@@ -133,15 +137,16 @@ impl HelperProtocolCause {
     }
 
     /// Map one canonical request rule to the cause this agent reports. Every
-    /// argument-envelope rule keeps its own code so a refused Start names the
-    /// rule and, for a value, the kind of violation rather than one label.
+    /// envelope rule keeps its own code so a refused Start names the rule and,
+    /// for a measured bound, the limit and the observed value rather than one
+    /// opaque label.
     pub fn from_request_rule(rule: HostRuntimeRequestRule) -> Self {
         match rule {
             HostRuntimeRequestRule::SchemaVersion => Self::RequestSchemaVersion,
             HostRuntimeRequestRule::Attempt => Self::RequestAttempt,
             HostRuntimeRequestRule::ArgumentsPresence => Self::RequestArgumentsPresence,
             HostRuntimeRequestRule::InstallationIdentity => Self::RequestInstallationIdentity,
-            HostRuntimeRequestRule::ArgumentCount { .. } => Self::RequestArgumentCount,
+            HostRuntimeRequestRule::RequestBytes { .. } => Self::RequestBytes,
             HostRuntimeRequestRule::ArgumentNulByte { .. } => Self::RequestArgumentNulByte,
             // The observation binding is an inspection contract rather than one
             // of the argument-envelope rules, and it is unreachable from a
@@ -215,6 +220,14 @@ impl HostRuntimeError {
     pub fn diagnostic(&self) -> Option<&str> {
         match self {
             Self::HelperRejected { diagnostic, .. } => diagnostic.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// The rejected container's own retained output, when the helper read it.
+    pub fn process_logs(&self) -> Option<&FailureProcessLogs> {
+        match self {
+            Self::HelperRejected { process_logs, .. } => process_logs.as_deref(),
             _ => None,
         }
     }
@@ -527,6 +540,12 @@ fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> Ho
             .diagnostic
             .as_deref()
             .map(crate::failure_evidence::sanitize_text),
+        process_logs: response.process_logs.as_ref().map(|logs| {
+            Box::new(FailureProcessLogs {
+                stdout: sanitize_tail(&logs.stdout),
+                stderr: sanitize_tail(&logs.stderr),
+            })
+        }),
     }
 }
 
@@ -576,7 +595,7 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "request_attempt_invalid"
             | "request_arguments_presence_invalid"
             | "request_installation_identity_invalid"
-            | "request_argument_count_invalid"
+            | "request_bytes_invalid"
             | "request_argument_nul_byte"
             | "request_storage_invalid"
             | "system_clock_invalid"
@@ -932,6 +951,7 @@ mod tests {
                 HostRuntimeError::HelperRejected {
                     code: "operation_unsafe_path".to_owned(),
                     diagnostic: None,
+                    process_logs: None,
                 },
                 "helper_operation_unsafe_path",
             ),
@@ -941,6 +961,7 @@ mod tests {
                 HostRuntimeError::HelperRejected {
                     code: "grant_unauthorized".to_owned(),
                     diagnostic: None,
+                    process_logs: None,
                 },
                 "helper_grant_unauthorized",
             ),
@@ -948,6 +969,7 @@ mod tests {
                 HostRuntimeError::HelperRejected {
                     code: "grant_node_mismatch".to_owned(),
                     diagnostic: None,
+                    process_logs: None,
                 },
                 "helper_grant_node_mismatch",
             ),
@@ -955,6 +977,7 @@ mod tests {
                 HostRuntimeError::HelperRejected {
                     code: "request_replayed".to_owned(),
                     diagnostic: None,
+                    process_logs: None,
                 },
                 "helper_request_replayed",
             ),
@@ -962,6 +985,7 @@ mod tests {
                 HostRuntimeError::HelperRejected {
                     code: "untrusted response detail".to_owned(),
                     diagnostic: None,
+                    process_logs: None,
                 },
                 "helper_protocol_invalid",
             ),
@@ -1433,19 +1457,23 @@ mod tests {
         );
     }
 
-    #[test]
-    fn request_argument_count_refusal_names_the_count_rule() {
-        // Wrong implementation: one argument too many for the bounded transport
-        // collapsed into `helper_request_document_invalid`. The compiled plan
-        // bounds its own argv at 512 items before the four identity arguments
-        // and the podman envelope are added, so this rule is reachable on Start.
+    fn request_at_bytes(target: usize) -> super::HostRuntimeRequest {
         let mut request = start_request();
-        request.arguments =
-            vec!["x".to_owned(); vonk_agent_protocol::MAX_HOST_RUNTIME_ARGUMENTS + 1];
-        assert_eq!(
-            request_rule_code(&request),
-            "helper_request_argument_count_invalid"
-        );
+        let base = vonk_agent_protocol::canonical_json(&request)
+            .expect("a start request canonically encodes")
+            .len();
+        request.arguments.push("x".repeat(target - base - 3));
+        request
+    }
+
+    #[test]
+    fn request_bytes_refusal_names_the_request_bound() {
+        // Wrong implementation: a request whose canonical document outgrew the
+        // bounded helper exchange collapsed into
+        // `helper_request_document_invalid`, so a refused Start could not say
+        // which rule or which bound refused it.
+        let request = request_at_bytes(vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES + 1);
+        assert_eq!(request_rule_code(&request), "helper_request_bytes_invalid");
     }
 
     #[test]
@@ -1461,9 +1489,9 @@ mod tests {
 
     #[test]
     fn a_large_or_multiline_argument_is_admitted() {
-        // The authoritative size limit is the helper frame ceiling, not a
-        // per-argument round number: an inline engine configuration can exceed
-        // 4096 bytes, and CR/LF are legal bytes in an exec argv element.
+        // The authoritative size limit is the canonical request byte ceiling,
+        // not a per-argument round number: an inline engine configuration can
+        // exceed 4096 bytes, and CR/LF are legal bytes in an exec argv element.
         let mut long = start_request();
         long.arguments = vec![
             "sha256:image".to_owned(),
@@ -1489,25 +1517,34 @@ mod tests {
     }
 
     #[test]
-    fn a_count_refusal_carries_the_limit_and_the_observed_count() {
-        // Wrong implementation: the refusal named the rule but not the bound, so
-        // an operator could not tell one element over from a thousand without
-        // reading the constants.
-        let mut request = start_request();
-        request.arguments =
-            vec!["x".to_owned(); vonk_agent_protocol::MAX_HOST_RUNTIME_ARGUMENTS + 1];
-        let rule = request.validate().expect_err("the count must be refused");
-        let error = HostRuntimeError::request_refusal(rule);
-        assert_eq!(
-            error.preflight_code(),
-            "helper_request_argument_count_invalid"
+    fn a_request_at_the_byte_ceiling_is_admitted_and_one_byte_over_is_refused() {
+        // Wrong implementation: the request byte budget equalled the frame
+        // budget while its comment called it a backstop below it, and the
+        // helper read enforced a private 64 KiB round number, so a request the
+        // agent called valid could still be refused after a successful install.
+        let limit = vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES;
+        assert_eq!(request_at_bytes(limit).validate(), Ok(()));
+        assert!(
+            request_at_bytes(limit + 1).validate().is_err(),
+            "one canonical byte over the request ceiling must be refused"
         );
+    }
+
+    #[test]
+    fn a_request_bytes_refusal_carries_the_limit_and_the_observed_bytes() {
+        // Wrong implementation: the refusal named the rule but not the bound, so
+        // an operator could not tell one byte over from a thousand without
+        // reading the constants.
+        let limit = vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES;
+        let request = request_at_bytes(limit + 1);
+        let rule = request
+            .validate()
+            .expect_err("the byte bound must be refused");
+        let error = HostRuntimeError::request_refusal(rule);
+        assert_eq!(error.preflight_code(), "helper_request_bytes_invalid");
         assert_eq!(
             error.refusal_bound(),
-            Some((
-                Some(vonk_agent_protocol::MAX_HOST_RUNTIME_ARGUMENTS as u64),
-                vonk_agent_protocol::MAX_HOST_RUNTIME_ARGUMENTS as u64 + 1,
-            ))
+            Some((Some(limit as u64), limit as u64 + 1))
         );
     }
 
@@ -1680,7 +1717,7 @@ mod tests {
             HelperProtocolCause::RequestAttempt,
             HelperProtocolCause::RequestArgumentsPresence,
             HelperProtocolCause::RequestInstallationIdentity,
-            HelperProtocolCause::RequestArgumentCount,
+            HelperProtocolCause::RequestBytes,
             HelperProtocolCause::RequestArgumentNulByte,
             HelperProtocolCause::RequestStorage,
             HelperProtocolCause::SystemClock,

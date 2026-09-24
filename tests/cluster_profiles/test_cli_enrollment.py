@@ -1,11 +1,22 @@
 import json
 import os
+from email.message import Message
+from io import BytesIO
+from urllib.error import HTTPError
 
 import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.cli_files import PrivateOutput
-from cluster_profiles.control_client import ControlForbidden, ControlTransportError
+from cluster_profiles.control_client import (
+    MAX_CONTROL_DOCUMENT_BYTES,
+    ControlClient,
+    ControlForbidden,
+    ControlMalformedResponse,
+    ControlResponseTooLarge,
+    ControlTransportError,
+    ControlUnavailable,
+)
 
 IDENTITY = "11111111-1111-4111-8111-111111111111"
 TOKEN = "sensitive-enrollment-grant-" + "x" * 18
@@ -58,6 +69,23 @@ class EnrollmentClient:
             "consumed_at": None,
             "revoked_at": "2026-09-22T21:00:00Z" if self.state == "revoked" else None,
         }
+
+
+class EnrollmentHTTPResponse:
+    def __init__(self, status, body):
+        self.status = status
+        self.headers = Message()
+        self.headers["Content-Type"] = "application/json"
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def read(self, maximum):
+        return self._body[:maximum]
 
 
 def run(client, destination, *extra):
@@ -251,3 +279,83 @@ def test_denied_enrollment_is_not_retried_or_reclassified_as_pending(tmp_path, c
     assert result["cause"] == "ControlForbidden"
     assert TOKEN not in captured.out + captured.err
     assert [method for method, _, _ in client.calls] == ["POST"]
+
+
+@pytest.mark.parametrize(
+    ("response_kind", "status", "cause", "reconcile"),
+    [
+        ("malformed-422", 422, ControlMalformedResponse.__name__, False),
+        ("oversized-422", 422, ControlResponseTooLarge.__name__, False),
+        ("malformed-200", 200, ControlMalformedResponse.__name__, True),
+        ("server-503", 503, ControlUnavailable.__name__, True),
+    ],
+    ids=(
+        "malformed-json-refusal",
+        "oversized-json-refusal",
+        "malformed-success",
+        "server-error",
+    ),
+)
+def test_enrollment_refusal_skips_stale_lookup_but_ambiguous_response_reconciles(
+    tmp_path, capsys, response_kind, status, cause, reconcile
+):
+    destination = tmp_path / "grant.json"
+    token_path = tmp_path / "token"
+    token_path.write_text("private-control-token")
+    token_path.chmod(0o600)
+    calls = []
+
+    pending_status = {
+        "schema_version": 2,
+        "id": IDENTITY,
+        "state": "pending",
+        "purpose": "new-node",
+        "node_id": None,
+        "display_name": "Atlas",
+        "expires_at": GRANT["expires_at"],
+        "consumed_at": None,
+        "revoked_at": None,
+    }
+
+    def opener(request, *, timeout):
+        del timeout
+        method = request.get_method()
+        path = request.full_url.removeprefix("https://forge.example.test")
+        calls.append((method, path))
+        if method == "POST":
+            if response_kind == "oversized-422":
+                body = b"x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)
+            elif response_kind == "server-503":
+                body = b'{"detail":"temporarily unavailable"}'
+            else:
+                body = b"not-json"
+            if status >= 400:
+                headers = Message()
+                headers["Content-Type"] = "application/json"
+                raise HTTPError(
+                    request.full_url, status, "refused", headers, BytesIO(body)
+                )
+            return EnrollmentHTTPResponse(status, body)
+        return EnrollmentHTTPResponse(200, json.dumps(pending_status).encode())
+
+    client = ControlClient("https://forge.example.test", token_path, opener=opener)
+    assert (
+        cli.main(
+            ("fleet", "enroll", "Atlas", "--output", str(destination), "--json"),
+            control_client=client,
+            request_id_factory=lambda: IDENTITY,
+        )
+        == 2
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["cause"] == cause
+    if reconcile:
+        assert result["grant_status"]["state"] == "pending"
+        assert calls == [
+            ("POST", "/api/fleet/enroll"),
+            ("GET", f"/api/fleet/enrollments/{IDENTITY}"),
+        ]
+    else:
+        assert result["reconciliation"] == "issuance refused"
+        assert "grant_status" not in result
+        assert calls == [("POST", "/api/fleet/enroll")]

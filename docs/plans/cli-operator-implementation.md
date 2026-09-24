@@ -36,31 +36,22 @@ Use these entry points to review or execute the plan:
 - [Package records and operator acceptance](#8-starting-implementation-and-reporting-progress):
   the evidence required to finish the work and begin the web design.
 
-Planning refinement: 2026-09-23. The working tree already contains W00–W08
-foundations and part of W09/W10. Continue from the recorded evidence rather
-than restarting those packages. The next implementation sequence is
-[close admission](#w09-implementation-sequence) →
-[finish review and submission](#w10-implementation-sequence) → cancellation
-and recovery → results and maintenance → installed and operator acceptance.
-The dates above identify the design baseline and this refinement; they do not
-identify a released build.
+Execution checkpoint: 2026-09-24. Continue from the integrated evidence in the
+[package status](cli-operator-status.md#package-state), rather than restarting
+implemented packages. Remaining work is admission and asset lifetime (W09),
+its shared-removal dependencies (W12/W17), and the final connected handoff and
+independent operator walkthrough (W19). Definitive-refusal recovery guidance
+(W16) has been corrected and qualified. A package with passing local criteria can still depend on an open owner
+contract; the status table makes those dependencies explicit.
 
-The immediate execution brief is the
-[shared-build closure checklist](#shared-build-closure-checklist).
-Consumer-guard failure paths, durable availability-child observation and the
-availability service/composition's claim-fenced writes now have passing
-repository evidence, including transactional child admission. Complete the
-remaining dependency-writer and lock-order audit, qualification of
-producer/consumer ownership, unresolved-child adoption and connected
-cancellation/restart acceptance before exposing the public cancellation
-commands in W12/W13. Producer intent and Run/Switch parent detachment now have
-implementation in the working tree; their presence does not close these gates.
-The [cancellation and adoption checkpoint](cli-operator-status.md#w09d-shared-build-cancellation-and-unbound-adoption-checkpoint--2026-09-23)
-records the latest tests and qualification state; this batch's connected gate
-has passed. Continue with the remaining writer/identity audit and complete
-process-death acceptance. The [status record](cli-operator-status.md)
-separates this partial implementation
-from completed acceptance.
+The [shared-build closure checklist](#shared-build-closure-checklist) retains
+the detailed admission work. Its earlier checkpoints are historical evidence,
+not a direction to repeat completed cancellation or process-recovery work.
+Current parallel work prepares the remaining disposable walkthrough scenarios
+and corrects misleading recovery commands found in actual installed output.
+The retained-memory decision, common lock order and removal protocol remain
+open. Preserve the original acceptance cards: a test fixture or a queued
+request alone does not establish a usable recipe or human usability.
 
 ## 1. Scope and completion rule
 
@@ -170,31 +161,43 @@ Measure effort after M1 and M2 using completed packages; do not schedule this
 as twenty equally sized tasks. W18 process checks and documentation should grow
 with each package, followed by final qualification at M5.
 
-For the current working tree, use this execution order within those milestones:
+For the current working tree, use the [package-state table](cli-operator-status.md#package-state)
+and this remaining execution order. The detailed requirements below remain in
+scope; passing an individual package's own criteria does not close its open
+admission or storage dependency.
 
-1. Continue W09d E5 with exact consumer ownership and its cancellation races,
-   building on the recorded E5a/E5b attempt-ownership fixes and availability
-   observation checkpoint. Bound availability children now recover before
-   replanning and release their parent slot. Service callbacks and production
-   builder writes now check the owner, attempt and lease; child admission holds
-   the parent fence through its commit. Audit the remaining profile/RunSwitch
-   writers, close E4 for unresolved parents, then finish E5f/E6's
-   complete profile-to-runtime single-slot and process-restart scenarios.
-   Retain the passing E1–E3 evidence and add regression where behavior changes.
-2. Close W09d C/D measured memory and post-stop evidence, then F's common
-   acquisition order and presentation. Run their combined concurrency cases
-   with existing disk/port/build inheritance before closing W09d.
-3. Close W09e asset lifetime, W09f exact rebuilt-image consent, and W09g's
-   combined admission gate. Finish W10's effect review and full interaction
-   matrix against that boundary. This closes M3.
-4. Deliver W11, W12 and W13 through their existing operation owners; then W14
-   exposes their authorized recovery and reconnect paths. Each cancellation
-   command must ship with its real terminal condition and shared-work tests.
-5. Finish W15 serving results, W16 artifact jobs and W17 cleanup/maintenance,
-   including their human and scripted workflows. This closes M4.
-6. Finish W18 installed qualification and W19 connected acceptance and
-   operator walkthrough. Start web design from the resulting contracts and
-   evidence; record deployment and physical qualification separately.
+1. Resolve W09d C/D's retained-memory policy. Current aggregate free-memory
+   measurements and signed run liveness do not prove an atomic, attributed
+   snapshot. The pending choice between warning on uncertainty while retaining
+   actual capacity checks and conservative refusal must be explicit. Do not
+   claim both zero false refusals and zero overcommit from the current evidence.
+2. Complete W09d F's common SQL acquisition order across admission and all
+   competing writers. Retain the current PostgreSQL contention reproduction;
+   prove bounded refusal/retry, transaction release and preservation of the
+   exact reviewed request. The previously rejected production edit remains
+   behind its recorded approval boundary.
+3. Complete W09e's shared reference/removal protocol and W17's durable pre-effect
+   removal intent, first-submission arbitration and restart recovery. Move
+   producers, readers, cancellation and collection together. Prove actual
+   removal cannot invalidate an admitted reference, cancellation preserves
+   another consumer's assets, and unavailable reference scans never authorize
+   deletion. This also closes W12's remaining removal-race dependency. The
+   stored receipt validation already implemented does not replace these gates.
+4. Run W09g's combined concurrency and recovery acceptance at one integrated
+   revision, including the existing disk/port/build inheritance, exact rebuilt
+   image consent and post-stop evidence. Requalify affected W10 review and W13
+   cancellation boundaries against that completed admission/storage behavior.
+5. Finish W19's disposable U1–U8 scenario setup and independent operator
+   walkthrough, correct observed defects, then repeat the affected installed
+   and connected gates. U1/U3 and observer-only U5 setup now pass. U2 remains
+   partial until a usable later-page candidate exists; U4/U6/U7/U8 setup and
+   the independent human scorecard remain unfinished. Complete the W18/W19 handoff from the final
+   contracts and evidence, keeping repository, deployment and physical
+   qualification distinct. Web implementation remains outside this CLI scope.
+
+Completed increments and exact validation commands are recorded in the
+[current status record](cli-operator-status.md); historical checkpoints below
+must not be read as the current outstanding-work list.
 
 This is a continuation order for the same twenty packages, not another backlog.
 Record each closure in the status document; source inspection alone does not
@@ -1060,6 +1063,17 @@ Complete the remaining memory/builder ownership in the connected runtime slice:
    cancellation and resource reserve preservation. Then complete the common
    acquisition-order audit across all capacity writers and the corresponding
    concurrency cases. Passing handoff tests alone does not close these steps.
+5. Carry the accepted `memory_floor_bytes` through the canonical signed start
+   and artifact-job requests and their compiled placement. Validate equality
+   between request and placement, generate the Rust wire fields, and have the
+   local readiness check use demand plus that exact floor. Keep the container
+   limit at workload demand. The current helper instead adds a fixed 4 GB,
+   which can reject a reviewed fitting recipe: 120 GB demand plus a declared
+   2 GB reserve fits 123 GB free, but fails the helper's 124 GB threshold.
+   First reproduce that refusal, then test the exact declared boundary and one
+   byte below it, request/placement mismatch, and Controller-to-signed-request
+   propagation for both starts and jobs. Run native checks in the Linux lane;
+   Controller tests alone cannot close the runtime policy mismatch.
 
 The physical-pool prerequisite is now implemented in the working tree. Inspection of
 `rust/crates/vonk-agent/src/inventory.rs:parse_gpus` shows that a GB10 reporting
@@ -1398,18 +1412,22 @@ now covers the first-installation and installed-only paths after a changed
 source rebuild. Reuse checks the immutable image in every compiled rank, and
 review/admission share disk arithmetic using the actual rebuilt archive size.
 The accepted claim is handed to a replacement installation and the approved
-image reaches the agent's start payload and published route. This does not yet
-qualify replacing an already-running workload, choosing between distinct build
-records, published-image recovery or the reference/concurrency gates below.
+image reaches the agent's start payload and published route. The September 24
+integration checkpoint additionally exercises replacement of an already-running
+workload through a separate worker process with PostgreSQL and managed storage.
+Those cases retain both archives, cover both a replaced receipt and distinct
+old/new build records, and use deterministic Spark receipts and inventory.
+A changed-recency case also preserves the exact image after acceptance instead
+of silently reducing dispatch to a no-op. Published-image recovery and the
+reference/concurrency gates below remain open.
 
 Next, make these remaining cases concrete before changing their predicates:
 
-1. Extend the qualified changed-output case to an already-running workload and
-   to distinct old/new build records. Profile state, preparation selection,
-   disk reservation and Run/Switch installation reuse must choose the same
-   reviewed identity. Verify the exact stop/route replacement effects and
-   post-stop capacity evidence; the installed-only subprocess cases do not
-   prove those effects.
+1. Retain the September 24 running-workload and distinct-build regressions in
+   the combined gate. Profile state, preparation selection, disk reservation
+   and Run/Switch installation reuse must choose the same reviewed identity.
+   Verify exact stop/route replacement effects and post-stop capacity evidence;
+   the installed-only subprocess cases do not prove those effects.
 2. Cover missing **published** image receipts through the production preparation
    callback. A known registry reference without an available archive is not a
    newly observed different image. Preserve the original approved output while
@@ -1444,6 +1462,22 @@ before considering the CLI load workflow qualified:
    their request/fence. Lease expiry alone cannot authorize a stale worker to
    publish or a collector to delete. No transaction, artifact lock or execution
    slot remains held while waiting for another owner.
+
+Recipe removal must create its durable owner before deletion. Persist a typed,
+normalized immutable intent containing action, submitted selector, exact resolved
+revision and effective `with_model`; bind caller and request key through the
+existing Job owner. Reconcile an existing key before resolving today's mutable
+selector. Identical replay observes the original owner even after its catalog
+head disappears; changed caller, selector or model-removal choice conflicts
+before effects. POST and both operation/request reads project the same stored
+intent and current stage, including required `with_model`. A finished image
+unlink cannot imply success while model-removal children remain unsettled.
+
+Join these regressions to the resumable remover: replay after catalog-head loss;
+changed actor/selector/choice without effects; owner-scoped request lookup; and
+process death after image unlink and between model-child removals. Recovery must
+retain the original owner/fence and choice without duplicate releases or false
+success. An identity-only handler change does not close the shared removal gate.
 
 Use the existing storage-cutover owner if this protocol has landed there;
 otherwise implement the connected reference/removal slice in W09 and update
@@ -1712,8 +1746,11 @@ local receipt cache, manual ID guessing, or generic unqualified retry.
 
 1. Add `--profile N profile endpoint [ALIAS]`. Project the association from
    saved/loaded assignment to current endpoint alias through the Controller.
-   Without alias, list this profile's published assignments; with alias,
-   validate membership before using `/api/endpoints/{alias}`.
+   Use one scoped `/api/profile/{number}/endpoints?alias=...` response to bind
+   membership and endpoint ownership together. Without alias, list this
+   profile's assignments; with alias, validate membership in that same read.
+   Recheck loaded application, exact run and route generation before returning
+   a usable endpoint, closing the separate-check/use race.
 2. Show API base, client model identifier, route generation, freshness, and
    expiry when supplied. Print credential-free usage examples. Do not infer
    an endpoint from node IP, recipe name, successful install, or cached assets.
@@ -1800,6 +1837,18 @@ it must not introduce a second collector or postpone that prerequisite.
    rollout stop condition. Keep `fleet upgrade`, Controller-host deployment,
    and `update [--apply]` clearly separate. Preserve signed CLI update
    verification and explicit origin/channel behavior.
+5. Bind removal receipts to the submitted action, exact target, actor, request
+   key and recipe model-retention choice. Persist the canonical removal intent
+   before effects, compare it on replay, and project the stored choice through
+   the response contract. The integrated replay correction now stores a strict
+   current intent and binds selector, actor, key, revision and `with_model` to
+   its Job envelope. It refuses changed or malformed replays before mutable
+   catalog resolution; the API projects the stored choice and the CLI checks
+   it before following. Those deterministic replay/receipt tests pass. The
+   remover still creates its Job after effects: pre-effect persistence,
+   simultaneous first-submission arbitration and crash-safe resumption remain
+   required. Do not manufacture receipt proof by echoing an incoming request
+   or treat the completed replay check as proof of those pending guarantees.
 
 **Tests:** reference appears between inspection/removal, failed scan,
 keep-model semantics, active transfer, denied eviction, two-Spark sequential
@@ -2122,6 +2171,9 @@ design or introduce a new framework. If a decision changes visible scope,
 update its package and contract ledger before exposing the command.
 
 ### Operator walkthrough and acceptance scorecard
+
+Use the [facilitator protocol and U1–U8 scorecard](cli-operator-walkthrough.md)
+to prepare and record the independent walkthrough. Its current status is unrun.
 
 Run this at M5 using a disposable environment and the packaged executable.
 Include a regular operator and a CLI-literate operator unfamiliar with the

@@ -84,12 +84,11 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
     assert changed.status_code == 200
     assert api.post(path, headers=headers, json=body).json() == accepted.json()
     # A fresh request cannot use the review of the previous profile revision.
-    assert (
-        api.post(
-            path, headers=headers, json={**body, "request_key": str(uuid4())}
-        ).status_code
-        == 409
+    stale_review = api.post(
+        path, headers=headers, json={**body, "request_key": str(uuid4())}
     )
+    assert stale_review.status_code == 409, stale_review.text
+    assert stale_review.headers["x-vonk-error-code"] == "profile.stale_plan"
     assert (
         api.post(
             path, headers=headers, json={**body, "expected_plan_digest": "f" * 64}
@@ -104,7 +103,9 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
         "Authorization": "Bearer "
         + codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
     }
-    assert api.post(path, headers=other_headers, json=body).status_code == 409
+    other_actor_conflict = api.post(path, headers=other_headers, json=body)
+    assert other_actor_conflict.status_code == 409, other_actor_conflict.text
+    assert other_actor_conflict.headers["x-vonk-error-code"] == "controller.conflict"
     lookup = f"/api/profile/1/requests/{key}"
     assert api.get(lookup, headers=_headers(codec, "operator")).status_code == 404
     assert api.get(lookup, headers=headers).json() == accepted.json()
@@ -539,6 +540,7 @@ def test_workload_change_between_review_and_acceptance_is_refused(
         },
     )
     assert response.status_code == 409, response.text
+    assert response.headers["x-vonk-error-code"] == "profile.stale_plan"
     assert "effect" in response.json()["detail"].lower(), response.text
     with sessions() as session:
         assert session.scalar(select(FleetProfileApplication)) is None

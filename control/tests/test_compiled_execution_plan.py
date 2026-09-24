@@ -368,6 +368,8 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
             "master_port": None,
             "port": 8000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
     validated = validate_compiled_launch_payload(payload)
@@ -412,6 +414,8 @@ def test_compiled_launch_payload_preserves_missing_endpoint_for_jobs() -> None:
             "master_port": None,
             "port": None,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
 
@@ -437,6 +441,8 @@ def test_compiled_launch_payload_allows_distinct_serving_ports() -> None:
             "master_port": None,
             "port": 9000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
 
@@ -462,6 +468,8 @@ def test_compiled_launch_serving_port_is_required_and_in_range(port: object) -> 
                 "master_port": None,
                 "port": port,
                 "reserved_memory_bytes": 1,
+                "memory_floor_bytes": 0,
+                "memory_kind": "unified",
             },
         )
         validate_compiled_launch_payload(payload)
@@ -477,6 +485,8 @@ def test_compiled_launch_projection_requires_explicit_placement_fields() -> None
         "master_address": None,
         "master_port": None,
         "reserved_memory_bytes": 1,
+        "memory_floor_bytes": 0,
+        "memory_kind": "unified",
     }
     with pytest.raises(CompiledExecutionPlanError, match="runtime port is missing"):
         _compile().to_compiled_launch_payload(_spec(), placement=placement)
@@ -501,6 +511,8 @@ def test_compiled_launch_projection_validates_before_persisting() -> None:
                 "master_port": None,
                 "port": 8000,
                 "reserved_memory_bytes": 1,
+                "memory_floor_bytes": 0,
+                "memory_kind": "unified",
             },
         )
 
@@ -518,6 +530,8 @@ def test_compiled_launch_consumer_rejects_malformed_interface_document() -> None
             "master_port": None,
             "port": 8000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
     payload["endpoint"] = {"protocol": "openai", "port": 8000}
@@ -540,6 +554,8 @@ def test_compiled_launch_payload_rejects_document_over_dedicated_ceiling() -> No
             "master_port": None,
             "port": 8000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
     _mapping(payload["runtime"])["oversized_flat_field"] = (
@@ -580,6 +596,8 @@ def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() ->
             "master_port": None,
             "port": 8000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
     missing = copy.deepcopy(payload)
@@ -607,6 +625,8 @@ def test_compiled_launch_payload_rejects_mismatched_receipt() -> None:
             "master_port": None,
             "port": 8000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
     mismatched = copy.deepcopy(payload)
@@ -632,6 +652,8 @@ def test_compiled_launch_payload_rejects_non_isolated_network_mode() -> None:
             "master_port": None,
             "port": 8000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
     polluted = copy.deepcopy(payload)
@@ -661,6 +683,8 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
             "master_port": None,
             "port": 8000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
     started = _bind_compiled_execution_plan(
@@ -671,6 +695,8 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
             role="entrypoint",
             port=8000,
             reserved_memory_bytes=4096,
+            memory_floor_bytes=2048,
+            memory_kind="unified",
             fabric_address=None,
         ),
         endpoint_address="192.0.2.10",
@@ -681,6 +707,7 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
     placement = WireCompiledExecutionPlan.parse(started).runtime.placement
     assert placement.endpoint_address == "192.0.2.10"
     assert placement.reserved_memory_bytes == 4096
+    assert placement.memory_floor_bytes == 2048
     assert validate_compiled_launch_payload(started)["schema_version"] == 2
 
 
@@ -698,6 +725,8 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
             "master_port": None,
             "port": 8000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
     _mapping(payload["topology"]).update(
@@ -712,6 +741,8 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
             role="entrypoint" if rank == 0 else "worker",
             port=8000,
             reserved_memory_bytes=4096,
+            memory_floor_bytes=2048,
+            memory_kind="unified",
             fabric_address=f"192.168.100.{10 + rank}",
         ),
         endpoint_address="192.0.2.10" if rank == 0 else None,
@@ -781,6 +812,8 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
             "master_port": None,
             "port": 8000,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+            "memory_kind": "unified",
         },
     )
     installation_id = str(uuid4())
@@ -1018,6 +1051,14 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
     recipe = RecipeDefinition.model_validate(
         canonical_example("recipe-source-build.json")
     )
+    recipe_document = recipe.model_dump(mode="json")
+    topology = _mapping(recipe_document["topology"])
+    roles = _sequence(topology["roles"])
+    entrypoint = _mapping(roles[0])
+    resources = _mapping(entrypoint["resources"])
+    memory = _mapping(resources["memory"])
+    memory["system_reserve_bytes"] = 32_000_007
+    recipe = RecipeDefinition.model_validate(recipe_document)
     model = ModelDefinition.model_validate(canonical_example("model-definition.json"))
     recipe_document = recipe.model_dump(mode="json")
     model_document = model.model_dump(mode="json")
@@ -1145,6 +1186,7 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
     assert payload_wire.identity.model_artifact_set_sha256 == artifact_set_digest
     assert payload_wire.identity.model_artifact_bytes == 1024
     assert payload_wire.identity.build_input_sha256 == "b" * 64
+    assert payload_wire.runtime.placement.memory_floor_bytes == 32_000_007
     assert payload_wire.artifacts[0].path == "model.safetensors"
     assert payload_wire.runtime_image.source == "controller-build"
     assert "repository" not in json.dumps(payload, sort_keys=True)

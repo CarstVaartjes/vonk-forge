@@ -53,9 +53,30 @@ pub enum OciError {
         #[source]
         source: Box<OciError>,
     },
+    #[error("start {stage} failed: {source}")]
+    Start {
+        stage: &'static str,
+        #[source]
+        source: Box<OciError>,
+    },
 }
 
 impl OciError {
+    pub fn safe_start_context(&self) -> (&'static str, &'static str) {
+        let (stage, source) = match self {
+            Self::Start { stage, source } => (*stage, source.as_ref()),
+            error => ("unknown", error),
+        };
+        let category = match source {
+            Self::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                "storage-permission-denied"
+            }
+            Self::Io(error) if error.kind() == std::io::ErrorKind::NotFound => "storage-not-found",
+            error => error.safe_category(),
+        };
+        (stage, category)
+    }
+
     pub fn safe_install_context(&self) -> (&'static str, &'static str) {
         match self {
             Self::Install { stage, source } => (*stage, source.safe_category()),
@@ -74,7 +95,7 @@ impl OciError {
             Self::Io(_) => "storage",
             Self::Json(_) => "metadata",
             Self::Capacity => "capacity",
-            Self::Install { source, .. } => source.safe_category(),
+            Self::Install { source, .. } | Self::Start { source, .. } => source.safe_category(),
         }
     }
 }
@@ -147,6 +168,16 @@ fn install_error(stage: &'static str, source: OciError) -> OciError {
         stage,
         source: Box::new(source),
     }
+}
+
+fn start_stage<T>(
+    stage: &'static str,
+    work: impl FnOnce() -> Result<T, OciError>,
+) -> Result<T, OciError> {
+    work().map_err(|source| OciError::Start {
+        stage,
+        source: Box::new(source),
+    })
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -380,12 +411,15 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     pub fn ensure_memory_available(
         &self,
         required_bytes: u64,
+        memory_floor_bytes: u64,
+        memory_kind: &str,
         meminfo_path: &Path,
     ) -> Result<(), OciError> {
         let required = required_bytes
-            .checked_add(4_000_000_000)
+            .checked_add(memory_floor_bytes)
             .ok_or(OciError::Capacity)?;
-        if available_memory_bytes(self.runner, meminfo_path).map_err(|_| OciError::Capacity)?
+        if available_memory_bytes(self.runner, meminfo_path, memory_kind)
+            .map_err(|_| OciError::Capacity)?
             < required
         {
             return Err(OciError::Capacity);
@@ -649,33 +683,54 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         placement: &CompiledRuntimePlacement,
         identity: Option<&RecipeRunStartIdentity>,
     ) -> Result<RuntimeStartPlan, OciError> {
-        self.verify_image(spec)?;
-        let state = managed_path(self.data_root, "runs", run_id)?;
-        fs::create_dir_all(&state)?;
-        fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
-        let outputs = state.join("outputs");
-        fs::create_dir_all(&outputs)?;
-        fs::set_permissions(&outputs, fs::Permissions::from_mode(0o700))?;
-        reset_runtime_tmp(&outputs)?;
-        self.ensure_runtime_cache(installation_id)?;
-        if spec.job.is_some() {
-            let inputs = state.join("inputs");
-            let metadata = fs::symlink_metadata(&inputs)?;
-            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-                return Err(OciError::Artifact);
+        start_stage("image-verification", || self.verify_image(spec))?;
+        let state = start_stage("run-storage", || {
+            let state = managed_path(self.data_root, "runs", run_id)?;
+            fs::create_dir_all(&state)?;
+            fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
+            Ok(state)
+        })?;
+        start_stage("output-storage", || {
+            let outputs = state.join("outputs");
+            fs::create_dir_all(&outputs)?;
+            fs::set_permissions(&outputs, fs::Permissions::from_mode(0o700))?;
+            ensure_runtime_tmp(&outputs)
+        })?;
+        start_stage("runtime-cache", || {
+            self.ensure_runtime_cache(installation_id)
+        })?;
+        start_stage("job-inputs", || {
+            if spec.job.is_some() {
+                let inputs = state.join("inputs");
+                let metadata = fs::symlink_metadata(&inputs)?;
+                if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                    return Err(OciError::Artifact);
+                }
             }
-        }
-        let metadata = self.ensure_run_metadata(run_id)?;
-        self.write_runtime_contract(spec, run_id)?;
-        let main = self.start_arguments(spec, installation_id, run_id, placement)?;
+            Ok(())
+        })?;
+        let metadata = start_stage("runtime-metadata", || {
+            let metadata = self.ensure_run_metadata(run_id)?;
+            self.write_runtime_contract(spec, run_id)?;
+            // The first authorized helper invocation resets private runtime
+            // tmp. Keep the marker outside writable mounts so later hooks and
+            // the main process preserve temporary work from earlier hooks.
+            atomic_write(&metadata, "tmp-reset-required", b"")?;
+            File::open(&metadata)?.sync_all()?;
+            Ok(metadata)
+        })?;
+        let main = start_stage("runtime-projection", || {
+            self.start_arguments(spec, installation_id, run_id, placement)
+        })?;
         let runtime_image_digest = spec.runtime_image.image_digest.clone();
         let runtime_image_reference = spec.runtime_image.local_image_reference();
-        let pre_start = spec
-            .lifecycle
-            .pre_start
-            .iter()
-            .map(|hook| hook_arguments(&main, &runtime_image_reference, hook))
-            .collect::<Result<Vec<_>, _>>()?;
+        let pre_start = start_stage("start-hooks", || {
+            spec.lifecycle
+                .pre_start
+                .iter()
+                .map(|hook| hook_arguments(&main, &runtime_image_reference, hook))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
         let observation = identity
             .map(|identity| {
                 let (local_address, master_address, master_port) = if placement.world_size == 1 {
@@ -745,16 +800,22 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 binding.validate().map_err(|_| OciError::Artifact)?;
                 Ok(binding)
             })
-            .transpose()?;
-        atomic_write(
-            &metadata,
-            "lifecycle.json",
-            &serde_json::to_vec(&RunLifecycle {
-                installation_id: installation_id.to_owned(),
-                placement: placement.clone(),
-                observation,
-            })?,
-        )?;
+            .transpose()
+            .map_err(|source| OciError::Start {
+                stage: "observation-identity",
+                source: Box::new(source),
+            })?;
+        start_stage("lifecycle-metadata", || {
+            atomic_write(
+                &metadata,
+                "lifecycle.json",
+                &serde_json::to_vec(&RunLifecycle {
+                    installation_id: installation_id.to_owned(),
+                    placement: placement.clone(),
+                    observation,
+                })?,
+            )
+        })?;
         Ok(RuntimeStartPlan {
             image_digest: runtime_image_digest,
             registry_index_digest: spec
@@ -797,7 +858,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Runtime);
         }
         // Retained reconstruction is inspection/collective-readiness only.
-        // Reset writable state only in prepare_start_internal for a real start.
+        // Only the authorized helper may reset runtime-owned temporary files.
         Ok(RuntimeStartPlan {
             image_digest: spec.runtime_image.image_digest.clone(),
             registry_index_digest: spec
@@ -1600,6 +1661,26 @@ fn sync_parent(parent: &Path) -> Result<(), OciError> {
     Ok(())
 }
 
+/// Release the kernel's page cache for a file this agent has finished with.
+///
+/// A materialized model is hundreds of gigabytes.  Where the device's memory is
+/// the system's unified memory, the page cache holding those bytes is memory the
+/// GPU cannot allocate from: after one 199 GB installation the workload's own
+/// loader read about 950 MB of free device memory and refused the 1.27 GB
+/// staging buffer its checkpoint needs, on a node that reported 126 GB
+/// available.  The agent wrote those bytes, so releasing them is the agent's
+/// job, and it is a hint: the file's content is unaffected and the next read
+/// simply caches again.
+fn release_page_cache(path: &Path) -> Result<(), OciError> {
+    if !path.is_file() {
+        return Err(OciError::Artifact);
+    }
+    let file = File::open(path)?;
+    rustix::fs::fadvise(&file, 0, None, rustix::fs::Advice::DontNeed)
+        .map_err(std::io::Error::from)?;
+    Ok(())
+}
+
 struct TemporaryArtifact {
     path: PathBuf,
     retained: bool,
@@ -2046,6 +2127,12 @@ fn materialize_compiled_models(
         fs::rename(&temporary, &destination)?;
         temporary_guard.retain();
         sync_parent(parent)?;
+        // The copy just filled the page cache with the destination, and the
+        // read that verified it filled the same cache with the source object.
+        // Neither is needed once this artifact is complete, and the workload
+        // this installation exists for needs the memory more.
+        release_page_cache(&destination)?;
+        release_page_cache(&source)?;
         physical_by_path.insert(physical_key, (destination.clone(), physical));
         materialized.push(destination);
     }
@@ -2149,12 +2236,11 @@ fn atomic_write(root: &Path, name: &str, value: &[u8]) -> Result<(), OciError> {
     Ok(())
 }
 
-/// Reset the per-run temporary tree before handing the writable output mount
-/// to the container. The helper grants the compiled runtime UID access to this
-/// tree, while the agent owns its lifecycle and ensures stale temporary files
-/// cannot survive a retained or retried start. The persistent cache remains a
-/// separate bind mount and is deliberately untouched.
-fn reset_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
+/// Prepare the agent-owned temporary mount boundary without traversing its
+/// contents. The helper and workload create private directories below it;
+/// only the authorized helper can remove them after proving the old container
+/// absent. A retained start must never erase a live workload's temporary work.
+fn ensure_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
     let output_metadata = fs::symlink_metadata(outputs)?;
     if output_metadata.file_type().is_symlink() || !output_metadata.is_dir() {
         return Err(OciError::Artifact);
@@ -2165,8 +2251,6 @@ fn reset_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
                 return Err(OciError::Artifact);
             }
-            fs::remove_dir_all(&temporary)?;
-            fs::create_dir(&temporary)?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             fs::create_dir(&temporary)?;
@@ -2207,9 +2291,9 @@ fn canonical_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        OciError, OciRuntime, SHA256_OPEN_FILE_CALLS, materialize_compiled_models,
-        read_installation_metadata, reset_runtime_tmp, unique_plan_artifacts,
-        write_installation_metadata,
+        OciError, OciRuntime, SHA256_OPEN_FILE_CALLS, ensure_runtime_tmp,
+        materialize_compiled_models, read_installation_metadata, release_page_cache,
+        unique_plan_artifacts, write_installation_metadata,
     };
     use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
     use serde_json::{Value, json};
@@ -2223,6 +2307,26 @@ mod tests {
     use tempfile::tempdir;
     use uuid::Uuid;
 
+    #[test]
+    fn releasing_a_models_pages_keeps_its_bytes_and_refuses_a_directory() {
+        // The hint must be exactly that: the artifact stays on disk, unchanged,
+        // and only its resident pages are dropped. A directory is a caller
+        // mistake rather than a silently ignored no-op.
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("model.safetensors");
+        let content = vec![7_u8; 4 * 1024 * 1024];
+        fs::write(&path, &content).unwrap();
+        // Read it once so the pages are resident before the release.
+        let observed = fs::read(&path).unwrap();
+        assert_eq!(observed.len(), content.len());
+        release_page_cache(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), content);
+        assert!(matches!(
+            release_page_cache(directory.path()),
+            Err(OciError::Artifact)
+        ));
+    }
+
     struct NoProcess;
 
     impl ProcessRunner for NoProcess {
@@ -2233,6 +2337,188 @@ mod tests {
             _: Duration,
         ) -> Result<ProcessOutput, ProcessError> {
             panic!("OCI verification tests must not launch a process");
+        }
+    }
+
+    struct Gb10MemoryRunner;
+
+    impl ProcessRunner for Gb10MemoryRunner {
+        fn run(
+            &self,
+            program: Program,
+            _: &[String],
+            _: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            assert_eq!(program, Program::NvidiaSmi);
+            Ok(ProcessOutput {
+                success: true,
+                stdout: b"NVIDIA GB10, [N/A], [N/A], 590.44\n".to_vec(),
+                stderr: vec![],
+            })
+        }
+    }
+
+    struct SeparateMemoryRunner {
+        total_mib: u64,
+        free_mib: u64,
+    }
+
+    impl ProcessRunner for SeparateMemoryRunner {
+        fn run(
+            &self,
+            program: Program,
+            _: &[String],
+            _: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            assert_eq!(program, Program::NvidiaSmi);
+            Ok(ProcessOutput {
+                success: true,
+                stdout: format!(
+                    "NVIDIA RTX, {}, {}, 590.44\n",
+                    self.total_mib, self.free_mib
+                )
+                .into_bytes(),
+                stderr: vec![],
+            })
+        }
+    }
+
+    #[test]
+    fn declared_recipe_reserve_is_the_only_agent_memory_floor() {
+        let directory = tempdir().unwrap();
+        let meminfo = directory.path().join("meminfo");
+        // This is 122,999,999,488 bytes: enough for the 120 GB GLM demand and
+        // its declared 2 GB reserve, with almost 1 GB left over.
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 120117187 kB\n",
+        )
+        .unwrap();
+        let runtime = OciRuntime {
+            runner: &Gb10MemoryRunner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+
+        assert!(
+            runtime
+                .ensure_memory_available(120_000_000_000, 2_000_000_000, "unified", &meminfo)
+                .is_ok()
+        );
+
+        // 119,140,625 KiB is exactly 122,000,000,000 bytes: demand plus the
+        // declared reserve must fit at the inclusive boundary.
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 119140625 kB\n",
+        )
+        .unwrap();
+        assert!(
+            runtime
+                .ensure_memory_available(120_000_000_000, 2_000_000_000, "unified", &meminfo)
+                .is_ok()
+        );
+
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 119140624 kB\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            runtime.ensure_memory_available(120_000_000_000, 2_000_000_000, "unified", &meminfo),
+            Err(OciError::Capacity)
+        ));
+    }
+
+    #[test]
+    fn host_only_demand_fits_without_counting_separate_vram() {
+        let directory = tempdir().unwrap();
+        let meminfo = directory.path().join("meminfo");
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 50331648 kB\n",
+        )
+        .unwrap();
+        let runtime = OciRuntime {
+            runner: &SeparateMemoryRunner {
+                total_mib: 65_536,
+                free_mib: 8_192,
+            },
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+
+        assert!(
+            runtime
+                .ensure_memory_available(17 * 1024_u64.pow(3), 0, "host", &meminfo)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn accelerator_only_demand_fits_without_counting_separate_host_ram() {
+        let directory = tempdir().unwrap();
+        let meminfo = directory.path().join("meminfo");
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 8388608 kB\n",
+        )
+        .unwrap();
+        let runtime = OciRuntime {
+            runner: &SeparateMemoryRunner {
+                total_mib: 65_536,
+                free_mib: 49_152,
+            },
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+
+        assert!(
+            runtime
+                .ensure_memory_available(17 * 1024_u64.pow(3), 0, "accelerator", &meminfo)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn unified_separate_demand_needs_both_pools_and_shared_uses_host_capacity() {
+        let directory = tempdir().unwrap();
+        let meminfo = directory.path().join("meminfo");
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 8388608 kB\n",
+        )
+        .unwrap();
+        let separate_runner = SeparateMemoryRunner {
+            total_mib: 65_536,
+            free_mib: 49_152,
+        };
+        let separate = OciRuntime {
+            runner: &separate_runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+        assert!(matches!(
+            separate.ensure_memory_available(17 * 1024_u64.pow(3), 0, "unified", &meminfo),
+            Err(OciError::Capacity)
+        ));
+
+        fs::write(
+            &meminfo,
+            "MemTotal: 134217728 kB\nMemAvailable: 50331648 kB\n",
+        )
+        .unwrap();
+        let shared = OciRuntime {
+            runner: &Gb10MemoryRunner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        };
+        for memory_kind in ["host", "accelerator", "unified"] {
+            assert!(
+                shared
+                    .ensure_memory_available(17 * 1024_u64.pow(3), 0, memory_kind, &meminfo)
+                    .is_ok()
+            );
         }
     }
 
@@ -2272,7 +2558,9 @@ mod tests {
                     "master_address": null,
                     "master_port": null,
                     "port": 8000,
-                    "reserved_memory_bytes": 4096
+                    "reserved_memory_bytes": 4096,
+                    "memory_floor_bytes": 0,
+                    "memory_kind": "unified"
                 }
             },
             "artifacts": [
@@ -2485,6 +2773,14 @@ mod tests {
         first_agent
             .prepare_start(&plan, &installation_id, &run_id, &plan.runtime.placement)
             .unwrap();
+        let reset = data
+            .path()
+            .join("run-metadata")
+            .join(&run_id)
+            .join("tmp-reset-required");
+        // Stand in for the helper's completed cleanup. Retained recovery must
+        // not request a second cleanup after hooks or a workload have run.
+        fs::remove_file(&reset).unwrap();
         let marker = data
             .path()
             .join("runs")
@@ -2507,6 +2803,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(retained.pre_start.is_empty());
+        assert!(!reset.exists());
         assert_eq!(fs::read(marker).unwrap(), b"keep");
         let mut other_placement = plan.runtime.placement.clone();
         other_placement.reserved_memory_bytes += 1;
@@ -2921,16 +3218,89 @@ mod tests {
     }
 
     #[test]
-    fn runtime_tmp_is_reset_and_kept_private_between_starts() {
+    fn restart_preparation_leaves_private_runtime_tmp_for_the_authorized_helper() {
+        use std::os::unix::process::CommandExt;
+
+        const CHILD_ROOT: &str = "VONK_RESTART_TMP_TEST_ROOT";
+        if let Ok(root) = std::env::var(CHILD_ROOT) {
+            let root = Path::new(&root);
+            let installation_id = std::env::var("VONK_RESTART_TMP_INSTALLATION").unwrap();
+            let run_id = std::env::var("VONK_RESTART_TMP_RUN").unwrap();
+            let runner = NoProcess;
+            let runtime = runtime(root, &runner);
+            let plan = runtime.load_spec(&installation_id).unwrap();
+            runtime
+                .prepare_start(&plan, &installation_id, &run_id, &plan.runtime.placement)
+                .unwrap();
+            return;
+        }
+
+        let data = tempdir().unwrap();
+        let (installation_id, _, plan) = persisted_installation(data.path());
+        let run_id = Uuid::new_v4().to_string();
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        runtime
+            .prepare_start(&plan, &installation_id, &run_id, &plan.runtime.placement)
+            .unwrap();
+        runtime.complete_stop(&run_id).unwrap();
+        let private = data
+            .path()
+            .join("runs")
+            .join(&run_id)
+            .join("outputs/tmp")
+            .join(&run_id);
+        fs::create_dir(&private).unwrap();
+        fs::write(private.join("engine-owned"), b"temporary").unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child.args(["--exact", "oci::tests::restart_preparation_leaves_private_runtime_tmp_for_the_authorized_helper", "--nocapture"])
+            .env(CHILD_ROOT, data.path())
+            .env("VONK_RESTART_TMP_INSTALLATION", &installation_id)
+            .env("VONK_RESTART_TMP_RUN", &run_id);
+        if rustix::process::geteuid().is_root() {
+            fn agent_owns(path: &Path) {
+                rustix::fs::chown(path, Some(rustix::process::Uid::from_raw(65534)), None).unwrap();
+                if path.is_dir() {
+                    for entry in fs::read_dir(path).unwrap() {
+                        agent_owns(&entry.unwrap().path());
+                    }
+                }
+            }
+            agent_owns(data.path());
+            // The helper creates this directory as root and grants only the
+            // runtime UID access. The unprivileged agent cannot traverse it.
+            rustix::fs::chown(&private, Some(rustix::process::Uid::ROOT), None).unwrap();
+            child.uid(65534).gid(65534);
+        } else {
+            fs::set_permissions(&private, fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let result = child.output().unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            result.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            fs::read(private.join("engine-owned")).unwrap(),
+            b"temporary"
+        );
+    }
+
+    #[test]
+    fn runtime_tmp_boundary_is_kept_private_without_deleting_runtime_owned_content() {
         let data = tempdir().unwrap();
         let outputs = data.path().join("outputs");
         fs::create_dir_all(outputs.join("tmp")).unwrap();
         fs::write(outputs.join("tmp").join("stale.marker"), b"stale").unwrap();
 
-        reset_runtime_tmp(&outputs).unwrap();
+        ensure_runtime_tmp(&outputs).unwrap();
 
         let temporary = outputs.join("tmp");
-        assert!(!temporary.join("stale.marker").exists());
+        assert!(temporary.join("stale.marker").exists());
         let metadata = fs::symlink_metadata(temporary).unwrap();
         assert!(metadata.is_dir());
         assert!(!metadata.file_type().is_symlink());
@@ -2947,7 +3317,7 @@ mod tests {
         symlink(&target, outputs.join("tmp")).unwrap();
 
         assert!(matches!(
-            reset_runtime_tmp(&outputs),
+            ensure_runtime_tmp(&outputs),
             Err(OciError::Artifact)
         ));
         assert!(target.is_dir());

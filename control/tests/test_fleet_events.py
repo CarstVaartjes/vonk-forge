@@ -1,3 +1,4 @@
+import hashlib
 import json
 import threading
 import uuid
@@ -9,6 +10,7 @@ from sqlalchemy import CheckConstraint, Table, create_engine, event, func, selec
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import RecipeStopPayload, canonical_message
 from vonk_control import fleet_events as fleet_event_module
 from vonk_control import models
 from vonk_control.auth import TokenCodec
@@ -921,8 +923,31 @@ def test_durable_operation_projection_resume_records_waiting_then_queued(
     production_sessions = session_factory(engine)
     job = _job("operation-projection-resume")
     job.state = "waiting-for-operator"
+    job.payload = {"workload_intent_ordinal": 1}
+    job.payload_digest = hashlib.sha256(canonical_message(job.payload)).hexdigest()
     with production_sessions.begin() as session:
+        session.add(
+            models.AgentNode(
+                node_id=job.targets[0], state="active", workload_intent_ordinal=1
+            )
+        )
         session.add(job)
+        session.flush()
+        operation = _operation()
+        operation.parent_job_id = job.id
+        operation.kind = "recipe.stop"
+        operation.payload = RecipeStopPayload(
+            schema_version=1,
+            run_id="00000000-0000-4000-8000-000000000001",
+            plan_digest="a" * 64,
+        ).model_dump(mode="json")
+        operation.payload_digest = hashlib.sha256(
+            canonical_message(operation.payload)
+        ).hexdigest()
+        operation.workload_intent_ordinal = 1
+        operation.current_attempt = 1
+        operation.state = "waiting-for-operator"
+        session.add(operation)
     services = durable_operation_services(
         production_sessions,
         tmp_path / "routes",
@@ -932,8 +957,12 @@ def test_durable_operation_projection_resume_records_waiting_then_queued(
 
     services.resume_job(job.id)
 
-    rows = _event_rows(production_sessions)
-    assert [(row.id, row.event_type, row.payload["state"]) for row in rows] == [
-        (1, "operation-state", "waiting-for-operator"),
-        (2, "operation-state", "queued"),
+    rows = [
+        row
+        for row in _event_rows(production_sessions)
+        if row.payload["entity_id"] == job.id
+    ]
+    assert [(row.event_type, row.payload["state"]) for row in rows] == [
+        ("operation-state", "waiting-for-operator"),
+        ("operation-state", "queued"),
     ]

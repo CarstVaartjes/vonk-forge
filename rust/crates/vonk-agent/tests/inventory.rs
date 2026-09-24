@@ -99,7 +99,7 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
     );
     assert_eq!(runner.calls.borrow().len(), 4);
     assert_eq!(
-        available_memory_bytes(&runner, &meminfo).unwrap(),
+        available_memory_bytes(&runner, &meminfo, "unified").unwrap(),
         65432 * 1024
     );
     let wire = serde_json::to_value(&inventory).unwrap();
@@ -171,7 +171,7 @@ fn inventory_uses_host_memory_for_the_unified_memory_gb10() {
         "shared"
     );
     assert_eq!(
-        available_memory_bytes(&runner, &meminfo).unwrap(),
+        available_memory_bytes(&runner, &meminfo, "unified").unwrap(),
         65432 * 1024
     );
 }

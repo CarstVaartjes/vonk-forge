@@ -24,6 +24,8 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
+from cluster_profiles.cli_render import render_payload
+
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_installed_execution import _profile_service
 from .test_recipe_operations import installed_recipe, setup_services, started_recipe
@@ -271,7 +273,7 @@ def test_fresh_installation_review_refuses_an_occupied_runtime_port(
 
 
 def test_review_reuses_only_ports_owned_by_its_exact_planned_stop(
-    tmp_path, postgres_engine
+    tmp_path, postgres_engine, capsys
 ) -> None:
     sessions, profiles, planner, profile, _, _, _, nodes = _capacity_profile(
         tmp_path, postgres_engine, node_count=2
@@ -299,6 +301,7 @@ def test_review_reuses_only_ports_owned_by_its_exact_planned_stop(
     assert {stop.run_id for stop in assessment.stops} == {running.owner_id}
     assert not assessment.fit_current.allowed
     assert assessment.fit_after_stop is not None and assessment.fit_after_stop.allowed
+    assert assessment.post_stop_memory_check is None
     with sessions.begin() as session:
         reservations = tuple(
             session.scalars(
@@ -317,9 +320,48 @@ def test_review_reuses_only_ports_owned_by_its_exact_planned_stop(
             for port in node.ports_required
         }
         assert reviewed == claimed
+
+    first_node = assessment.fit_current.nodes[0]
+    assert first_node.memory_required_bytes is not None
+    assert first_node.memory_floor_bytes is not None
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        # Keep total capacity feasible while the existing aggregate free
+        # observation is too small. Review must bind the exact run stop and
+        # defer the real memory fit to fresh post-stop inventory.
+        snapshot.host_memory_free_bytes = (
+            first_node.memory_required_bytes + first_node.memory_floor_bytes - 1
+        )
+        snapshot.gpu_memory_free_bytes = snapshot.host_memory_free_bytes
+    conditional = profiles.preview(profile.id)
+    assert conditional.allowed, conditional.reasons
+    conditional_assessment = conditional.assessments[0].assessment
+    assert conditional_assessment.fit_after_stop is None
+    assert conditional_assessment.post_stop_memory_check is not None
+    assert conditional_assessment.post_stop_memory_check.stop_run_ids == [
+        running.owner_id
+    ]
+    assert conditional.admission_decisions[0].post_stop_memory_check == (
+        conditional_assessment.post_stop_memory_check
+    )
+    render_payload(conditional.model_dump(mode="json"), "profile", action="preview")
+    rendered = capsys.readouterr().out
+    assert "recheck fresh capacity before preparing or starting" in rendered
+    assert running.owner_id in rendered
+
+    with sessions.begin() as session:
         # A matching identifier on another kind of owner is not authority to
         # borrow its port. The stop only releases this exact run's claims.
-        rendezvous = next(row for row in reservations if row.resource_key == "29500")
+        rendezvous = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == running.owner_id,
+                ResourceReservation.resource_key == "29500",
+                ResourceReservation.state == "active",
+            )
+        )
+        assert rendezvous is not None
         rendezvous.owner_kind = "unrelated"
     changed = profiles.preview(profile.id)
     assert not changed.allowed

@@ -23,6 +23,7 @@ def _get_kwargs(
     limit: Union[Unset, int] = 20,
     state: Union[None, Unset, str] = UNSET,
     node_id: Union[None, Unset, str] = UNSET,
+    request_id: Union[None, Unset, str] = UNSET,
 
 ) -> dict[str, Any]:
 
@@ -53,6 +54,13 @@ def _get_kwargs(
     else:
         json_node_id = node_id
     params["node_id"] = json_node_id
+
+    json_request_id: Union[None, Unset, str]
+    if isinstance(request_id, Unset):
+        json_request_id = UNSET
+    else:
+        json_request_id = request_id
+    params["request_id"] = json_request_id
 
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
@@ -120,6 +128,7 @@ def sync_detailed(
     limit: Union[Unset, int] = 20,
     state: Union[None, Unset, str] = UNSET,
     node_id: Union[None, Unset, str] = UNSET,
+    request_id: Union[None, Unset, str] = UNSET,
 
 ) -> Response[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]:
     """ Operations View
@@ -129,6 +138,7 @@ def sync_detailed(
         limit (Union[Unset, int]):  Default: 20.
         state (Union[None, Unset, str]):
         node_id (Union[None, Unset, str]):
+        request_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -144,6 +154,7 @@ def sync_detailed(
 limit=limit,
 state=state,
 node_id=node_id,
+request_id=request_id,
 
     )
 
@@ -160,6 +171,7 @@ def sync(
     limit: Union[Unset, int] = 20,
     state: Union[None, Unset, str] = UNSET,
     node_id: Union[None, Unset, str] = UNSET,
+    request_id: Union[None, Unset, str] = UNSET,
 
 ) -> Optional[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]:
     """ Operations View
@@ -169,6 +181,7 @@ def sync(
         limit (Union[Unset, int]):  Default: 20.
         state (Union[None, Unset, str]):
         node_id (Union[None, Unset, str]):
+        request_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -185,6 +198,7 @@ cursor=cursor,
 limit=limit,
 state=state,
 node_id=node_id,
+request_id=request_id,
 
     ).parsed
 
@@ -195,6 +209,7 @@ async def asyncio_detailed(
     limit: Union[Unset, int] = 20,
     state: Union[None, Unset, str] = UNSET,
     node_id: Union[None, Unset, str] = UNSET,
+    request_id: Union[None, Unset, str] = UNSET,
 
 ) -> Response[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]:
     """ Operations View
@@ -204,6 +219,7 @@ async def asyncio_detailed(
         limit (Union[Unset, int]):  Default: 20.
         state (Union[None, Unset, str]):
         node_id (Union[None, Unset, str]):
+        request_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -219,6 +235,7 @@ async def asyncio_detailed(
 limit=limit,
 state=state,
 node_id=node_id,
+request_id=request_id,
 
     )
 
@@ -235,6 +252,7 @@ async def asyncio(
     limit: Union[Unset, int] = 20,
     state: Union[None, Unset, str] = UNSET,
     node_id: Union[None, Unset, str] = UNSET,
+    request_id: Union[None, Unset, str] = UNSET,
 
 ) -> Optional[Union[BoundedErrorResponse, OperationsResponse, RequestValidationProblem]]:
     """ Operations View
@@ -244,6 +262,7 @@ async def asyncio(
         limit (Union[Unset, int]):  Default: 20.
         state (Union[None, Unset, str]):
         node_id (Union[None, Unset, str]):
+        request_id (Union[None, Unset, str]):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -260,5 +279,6 @@ cursor=cursor,
 limit=limit,
 state=state,
 node_id=node_id,
+request_id=request_id,
 
     )).parsed

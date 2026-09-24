@@ -9,15 +9,17 @@ from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .cluster_mappings import validate_mapping_parameters
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
+    CompiledRuntimeImage,
     validate_compiled_launch_payload,
 )
+from .disk_reservations import outstanding_disk_reservation_bytes
 from .inventory_repository import InventoryRepository, InventorySnapshotView
 from .legal_admission import territorial_admission
 from .models import (
@@ -32,7 +34,7 @@ from .models import (
     RecipeInstallation,
     ResourceReservation,
 )
-from .profile_capacity import inherited_profile_disk, reservation_visible
+from .profile_capacity import inherited_profile_disk
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     installation_plan_document,
@@ -43,6 +45,7 @@ from .recipe_runtime_specs import (
     resolve_recipe_entities,
 )
 from .resource_planning import installation_disk_requirement
+from .runtime_image_preparation import require_runtime_image_authorization
 from .runtime_preflight import (
     admission_blockers,
     latest_result,
@@ -142,7 +145,7 @@ def _active_recipe_revision(
         CatalogDocumentRevision.state == "active",
     )
     if for_update:
-        statement = statement.with_for_update(of=CatalogDocumentRevision)
+        statement = statement.with_for_update(of=CatalogDocumentRevision, nowait=True)
     return session.scalar(statement)
 
 
@@ -155,12 +158,14 @@ class InstallAdmissionService:
         disk_floor_bytes: int = 10_000_000_000,
         compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]]
         | None = None,
+        runtime_image_authorizer: Callable[[Session, InstallPlan], None] | None = None,
     ) -> None:
         self._sessions = sessions
         self._inventory = InventoryRepository(sessions)
         self._inventory_max_age = inventory_max_age
         self._disk_floor = disk_floor_bytes
         self._compiled_plan_provider = compiled_plan_provider
+        self._runtime_image_authorizer = runtime_image_authorizer
 
     def plan_install(
         self,
@@ -200,18 +205,11 @@ class InstallAdmissionService:
                     raise ValueError(
                         "successful recipe build does not match the mapping"
                     )
-                canonical_build_revision = session.get(
-                    CatalogDocumentRevision, build.recipe_revision_id
-                )
                 if (
                     build.state != "succeeded"
                     or build.image_digest is None
                     or build.image_bytes is None
-                    or canonical_build_revision is None
-                    or canonical_build_revision.kind != "recipe"
-                    or canonical_build_revision.state != "active"
-                    or canonical_build_revision.content_digest
-                    != revision.content_digest
+                    or build.oci_layout_sha256 is None
                 ):
                     raise ValueError(
                         "successful recipe build does not match the mapping"
@@ -284,6 +282,10 @@ class InstallAdmissionService:
                     "exact model license authority is unavailable"
                 )
             compiled_plan_error: str | None = None
+            # The snapshot is complete. Production compilation consults managed
+            # storage, so release the read transaction before invoking it.
+            if _session is None:
+                session.close()
             if (
                 compiled_execution_plans is None
                 and self._compiled_plan_provider is not None
@@ -317,6 +319,20 @@ class InstallAdmissionService:
                 for node_id, value in (compiled_execution_plans or {}).items()
                 if isinstance(node_id, str) and isinstance(value, Mapping)
             }
+            # Build input identity belongs to build resolution; current-revision
+            # authorization and present verified bytes belong to the compiler's
+            # runtime-image resolver. The recipe that originally produced an
+            # archive is provenance, not the recipe allowed to consume it now.
+            # Bind that authorized receipt back to the exact selected result so
+            # reuse cannot silently select a different build or archive.
+            if build is not None and any(
+                not _compiled_build_matches(value, build, revision.content_digest)
+                for value in compiled_plan_by_node.values()
+            ):
+                compiled_plan_error = (
+                    "compiled runtime image differs from the selected build"
+                )
+                compiled_plan_by_node = {}
             legal_admission = territorial_admission(
                 model_document,
                 operation="install",
@@ -493,22 +509,13 @@ class InstallAdmissionService:
                         )
                     )
                 )
-                reserved = int(
-                    session.scalar(
-                        select(
-                            func.coalesce(func.sum(ResourceReservation.amount_bytes), 0)
-                        ).where(
-                            ResourceReservation.node_id == mapping_node.node_id,
-                            ResourceReservation.kind == "disk",
-                            ResourceReservation.state == "active",
-                            reservation_visible(
-                                (profile_application_id,)
-                                if profile_application_id
-                                else ()
-                            ),
-                        )
-                    )
-                    or 0
+                reserved = outstanding_disk_reservation_bytes(
+                    session,
+                    mapping_node.node_id,
+                    inventory_observed_at=snapshot.observed_at if snapshot else None,
+                    excluded_profile_application_ids=(profile_application_id,)
+                    if profile_application_id is not None
+                    else (),
                 )
             raw_image_digest = image_digest.removeprefix("sha256:")
             reused_image = (
@@ -617,8 +624,33 @@ class InstallAdmissionService:
         )
 
     def accept_install(self, plan: InstallPlan, *, actor: str, now: datetime) -> str:
+        self.refresh_install_receipts(plan, now=now)
         with self._sessions.begin() as session:
             return self.accept_install_in_session(session, plan, actor=actor, now=now)
+
+    def refresh_install_receipts(
+        self,
+        plan: InstallPlan,
+        *,
+        now: datetime,
+        profile_application_id: str | None = None,
+    ) -> None:
+        """Recheck managed bytes before entering the acceptance transaction."""
+        if self._compiled_plan_provider is None:
+            return
+        fresh = self.plan_install(
+            plan.mapping_id,
+            plan.recipe_build_id,
+            now=now,
+            profile_application_id=profile_application_id,
+        )
+        if fresh.plan_digest != plan.plan_digest or not fresh.allowed:
+            if (
+                fresh.plan_digest == plan.plan_digest
+                and _refreshable_preflight_is_the_only_blocker(plan, fresh)
+            ):
+                raise InstallPreflightExpired("install.plan_stale_or_blocked")
+            raise InstallPlanConflict("install.plan_stale_or_blocked")
 
     def accept_install_in_session(
         self,
@@ -630,9 +662,40 @@ class InstallAdmissionService:
         profile_application_id: str | None = None,
         workload_intent_ordinal: int | None = None,
     ) -> str:
-        mapping = session.get(ClusterMapping, plan.mapping_id, with_for_update=True)
+        try:
+            return self._accept_install_in_session(
+                session,
+                plan,
+                actor=actor,
+                now=now,
+                profile_application_id=profile_application_id,
+                workload_intent_ordinal=workload_intent_ordinal,
+            )
+        except OperationalError as error:
+            code = getattr(error.orig, "sqlstate", None) or getattr(
+                error.orig, "pgcode", None
+            )
+            if code in {"55P03", "40P01", "40001", "57014"}:
+                raise InstallAdmissionBusy("install.capacity_busy") from error
+            raise
+
+    def _accept_install_in_session(
+        self,
+        session: Session,
+        plan: InstallPlan,
+        *,
+        actor: str,
+        now: datetime,
+        profile_application_id: str | None = None,
+        workload_intent_ordinal: int | None = None,
+    ) -> str:
+        mapping = session.get(
+            ClusterMapping, plan.mapping_id, with_for_update={"nowait": True}
+        )
         build = (
-            session.get(RecipeBuild, plan.recipe_build_id, with_for_update=True)
+            session.get(
+                RecipeBuild, plan.recipe_build_id, with_for_update={"nowait": True}
+            )
             if plan.recipe_build_id is not None
             else None
         )
@@ -663,38 +726,33 @@ class InstallAdmissionService:
                 select(ClusterMappingNode)
                 .where(ClusterMappingNode.mapping_id == plan.mapping_id)
                 .order_by(ClusterMappingNode.rank)
-                .with_for_update()
+                .with_for_update(nowait=True)
             )
         )
         node_ids = tuple(node.node_id for node in mapping_nodes)
         session.scalars(
-            select(AgentNode).where(AgentNode.node_id.in_(node_ids)).with_for_update()
+            select(AgentNode)
+            .where(AgentNode.node_id.in_(node_ids))
+            .order_by(AgentNode.node_id)
+            .with_for_update(nowait=True)
         ).all()
         session.scalars(
             select(NodeArtifact)
             .where(NodeArtifact.node_id.in_(node_ids))
-            .with_for_update()
+            .order_by(NodeArtifact.id)
+            .with_for_update(nowait=True)
         ).all()
-        try:
-            session.scalars(
-                select(ResourceReservation)
-                .where(ResourceReservation.node_id.in_(node_ids))
-                .order_by(ResourceReservation.id)
-                .with_for_update(nowait=True)
-            ).all()
-        except OperationalError as error:
-            if getattr(error.orig, "sqlstate", None) in {
-                "55P03",
-                "40P01",
-                "40001",
-                "57014",
-            }:
-                raise InstallAdmissionBusy("install.capacity_busy") from error
-            raise
+        session.scalars(
+            select(ResourceReservation)
+            .where(ResourceReservation.node_id.in_(node_ids))
+            .order_by(ResourceReservation.id)
+            .with_for_update(nowait=True)
+        ).all()
         session.scalars(
             select(NodeInventorySnapshot)
             .where(NodeInventorySnapshot.node_id.in_(node_ids))
-            .with_for_update()
+            .order_by(NodeInventorySnapshot.id)
+            .with_for_update(nowait=True)
         ).all()
         claims = (
             inherited_profile_disk(
@@ -731,6 +789,13 @@ class InstallAdmissionService:
             != tuple((node.node_id, node.rank, node.role) for node in plan.nodes)
         ):
             raise InstallPlanConflict("install.plan_stale")
+        if self._runtime_image_authorizer is not None:
+            try:
+                self._runtime_image_authorizer(session, plan)
+            except (TypeError, ValueError) as error:
+                raise InstallPlanConflict(
+                    "install.runtime_image_authority_stale"
+                ) from error
         try:
             resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
@@ -769,30 +834,23 @@ class InstallAdmissionService:
             created_at=now,
             updated_at=now,
         )
-        for node in sorted(plan.nodes, key=lambda item: item.node_id):
+        for node in sorted(fresh.nodes, key=lambda item: item.node_id):
             if (
                 session.scalar(
                     select(AgentNode)
                     .where(AgentNode.node_id == node.node_id)
-                    .with_for_update()
+                    .with_for_update(nowait=True)
                 )
                 is None
             ):
                 raise InstallPlanConflict("installation node disappeared")
-            active = int(
-                session.scalar(
-                    select(
-                        func.coalesce(func.sum(ResourceReservation.amount_bytes), 0)
-                    ).where(
-                        ResourceReservation.node_id == node.node_id,
-                        ResourceReservation.kind == "disk",
-                        ResourceReservation.state == "active",
-                        reservation_visible(
-                            (profile_application_id,) if profile_application_id else ()
-                        ),
-                    )
-                )
-                or 0
+            active = outstanding_disk_reservation_bytes(
+                session,
+                node.node_id,
+                inventory_observed_at=node.inventory_observed_at,
+                excluded_profile_application_ids=(profile_application_id,)
+                if profile_application_id is not None
+                else (),
             )
             if (
                 node.free_bytes is None
@@ -973,6 +1031,42 @@ def _compiled_image_digest(
 def _compiled_plan_image_matches(plan: InstallPlan) -> bool:
     digest = _compiled_image_digest(plan.compiled_plan_by_node)
     return digest is not None and digest == plan.image_digest
+
+
+def _compiled_build_matches(
+    payload: Mapping[str, object], build: RecipeBuild, recipe_digest: str
+) -> bool:
+    identity = payload.get("identity")
+    image = payload.get("runtime_image")
+    return (
+        isinstance(identity, Mapping)
+        and identity.get("recipe_revision_sha256") == recipe_digest
+        and identity.get("build_input_sha256") == build.build_input_sha256
+        and isinstance(image, Mapping)
+        and image.get("source") == "controller-build"
+        and image.get("build_id") == build.id
+        and image.get("image_digest") == build.image_digest
+        and image.get("oci_layout_sha256") == build.oci_layout_sha256
+        and image.get("image_bytes") == build.image_bytes
+    )
+
+
+def authorize_installation_runtime_images(session: Session, plan: InstallPlan) -> None:
+    """Recheck current SQL grants while acceptance owns its short transaction."""
+    for payload in plan.compiled_plan_by_node.values():
+        identity = payload["identity"]
+        if not isinstance(identity, Mapping):
+            raise TypeError("compiled execution identity is unavailable")
+        execution_key = identity.get("execution_sha256")
+        if not isinstance(execution_key, str):
+            raise TypeError("compiled execution key is unavailable")
+        require_runtime_image_authorization(
+            session,
+            recipe_revision_id=plan.recipe_revision_id,
+            current_content_digest=plan.recipe_content_sha256,
+            effective_execution_key=execution_key,
+            receipt=CompiledRuntimeImage.model_validate(payload["runtime_image"]),
+        )
 
 
 def _node_document(node: InstallNodePlan) -> dict[str, object]:

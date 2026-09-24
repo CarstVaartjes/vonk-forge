@@ -51,9 +51,9 @@ atomic visibility, and rejection of stale writers. Keep coordinated job intent,
 leases, cancellation, and security decisions in PostgreSQL. File storage must
 not grow another implementation of a transactional job database.
 
-The [implementation plan](plans/resilient-artifact-storage.md) distinguishes
-existing SQL-backed artifact bookkeeping from this target. Complete one
-ownership change across producers and consumers and remove the retired path;
+The [implementation plan](plans/resilient-artifact-storage.md) records the
+completed model-availability and image-receipt ownership changes. Complete each
+future ownership change across producers and consumers and remove the retired path;
 do not maintain two authorities during a compatibility period.
 
 ## Stability comes from one current path

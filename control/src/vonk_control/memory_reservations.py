@@ -79,6 +79,7 @@ def memory_reservations(
     memory_pool: MemoryPool | None,
     excluded_profile_application_ids: Sequence[str] = (),
     excluded_profile_claim_ids: Sequence[str] = (),
+    excluded_run_ids: Sequence[str] = (),
 ) -> dict[str, int]:
     claims = tuple(
         session.scalars(
@@ -87,7 +88,9 @@ def memory_reservations(
                 ResourceReservation.node_id == node_id,
                 ResourceReservation.kind.in_(MEMORY_RESERVATION_KINDS),
                 ResourceReservation.state.in_(("active", "promised")),
-                reservation_visible(excluded_profile_application_ids),
+                reservation_visible(
+                    excluded_profile_application_ids, excluded_run_ids=excluded_run_ids
+                ),
                 ResourceReservation.id.not_in(excluded_profile_claim_ids),
             )
             .order_by(ResourceReservation.id)

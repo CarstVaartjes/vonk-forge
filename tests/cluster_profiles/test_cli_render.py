@@ -287,3 +287,111 @@ def test_recipe_update_progress_keeps_parent_child_failure_and_reconnect(capsys)
         payload | {"state": "succeeded", "children": []}, "recipe", action="update"
     )
     assert "No cached recipes to update" in capsys.readouterr().out
+
+
+def test_activity_renders_profile_cancellation_receipt_without_raw_json(capsys):
+    application_id = "11111111-1111-4111-8111-111111111111"
+    load_key = "22222222-2222-4222-8222-222222222222"
+    cancel_key = "33333333-3333-4333-8333-333333333333"
+    child_id = "44444444-4444-4444-8444-444444444444"
+    render_payload(
+        {
+            "operations": [
+                {
+                    "id": application_id,
+                    "kind": "fleet-profile.apply",
+                    "state": "cancelling",
+                    "created_at": "2026-09-24T10:00:00Z",
+                    "node_ids": ["spk_" + "a" * 32],
+                    "attempt": 1,
+                    "owner": {
+                        "kind": "fleet-profile-application",
+                        "id": application_id,
+                        "request_id": load_key,
+                    },
+                    "cancellation": {
+                        "request_key": cancel_key,
+                        "actor": "administrator",
+                        "requested_at": "2026-09-24T10:01:00Z",
+                        "state": "cancelling",
+                        "cause": "operator",
+                        "completed_effects": [],
+                        "pending_effects": [
+                            {
+                                "effect_id": child_id,
+                                "kind": "agent-operation",
+                                "label": "Issued agent effect awaiting its receipt",
+                                "operation_id": child_id,
+                                "outcome": "pending",
+                            }
+                        ],
+                        "cancelled_effects": [
+                            {
+                                "effect_id": "step:2",
+                                "kind": "profile-step",
+                                "label": "Not issued profile step 3: Start service",
+                                "operation_id": None,
+                                "outcome": "not-issued",
+                            }
+                        ],
+                        "owner": "agent-operation-reconciliation",
+                        "dependency": child_id,
+                        "deadline_at": "2026-09-24T10:10:00Z",
+                    },
+                }
+            ],
+            "total": 1,
+            "next_cursor": None,
+        },
+        "fleet",
+        action="activity",
+    )
+    output = capsys.readouterr().out
+    for evidence in (
+        "cancelling (operator)",
+        cancel_key,
+        load_key,
+        child_id,
+        "pending: agent-operation",
+        "not-issued: profile-step step:2",
+        "Cancellation deadline: 2026-09-24 10:10:00+00:00",
+    ):
+        assert evidence in output
+    assert "'pending_effects'" not in output
+    assert '"effect_id"' not in output
+
+
+def test_activity_omits_unsupplied_profile_cancellation_deadline(capsys):
+    render_payload(
+        {
+            "operations": [
+                {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "kind": "fleet-profile.apply",
+                    "state": "cancelled",
+                    "created_at": "2026-09-24T10:00:00Z",
+                    "node_ids": [],
+                    "cancellation": {
+                        "request_key": "33333333-3333-4333-8333-333333333333",
+                        "actor": "administrator",
+                        "requested_at": "2026-09-24T10:01:00Z",
+                        "state": "cancelled",
+                        "cause": "operator",
+                        "completed_effects": [],
+                        "pending_effects": [],
+                        "cancelled_effects": [],
+                        "owner": None,
+                        "dependency": None,
+                        "deadline_at": None,
+                    },
+                }
+            ],
+            "total": 1,
+            "next_cursor": None,
+        },
+        "fleet",
+        action="activity",
+    )
+    output = capsys.readouterr().out
+    assert "Cancellation: cancelled (operator)" in output
+    assert "Cancellation deadline" not in output

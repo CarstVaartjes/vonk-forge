@@ -17,10 +17,11 @@ from typing import Literal, Union, cast
 from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.model_cache_download_result import ModelCacheDownloadResult
-  from ..models.model_cache_removal_result import ModelCacheRemovalResult
   from ..models.availability_operation_failure import AvailabilityOperationFailure
+  from ..models.model_cache_removal_result import ModelCacheRemovalResult
+  from ..models.model_cache_cancellation import ModelCacheCancellation
   from ..models.operation_progress import OperationProgress
+  from ..models.model_cache_download_result import ModelCacheDownloadResult
 
 
 
@@ -42,6 +43,7 @@ class ModelCacheOperatorResponse:
             selector (str):
             state (ModelCacheOperatorResponseState):
             transferred_bytes (int):
+            cancellation (Union['ModelCacheCancellation', None, Unset]):
             cancelled_operations (Union[Unset, list[str]]):
             eta_seconds (Union[None, Unset, float]):
             failure (Union['AvailabilityOperationFailure', None, Unset]):
@@ -60,6 +62,7 @@ class ModelCacheOperatorResponse:
     selector: str
     state: ModelCacheOperatorResponseState
     transferred_bytes: int
+    cancellation: Union['ModelCacheCancellation', None, Unset] = UNSET
     cancelled_operations: Union[Unset, list[str]] = UNSET
     eta_seconds: Union[None, Unset, float] = UNSET
     failure: Union['AvailabilityOperationFailure', None, Unset] = UNSET
@@ -75,10 +78,11 @@ class ModelCacheOperatorResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.model_cache_download_result import ModelCacheDownloadResult
-        from ..models.model_cache_removal_result import ModelCacheRemovalResult
         from ..models.availability_operation_failure import AvailabilityOperationFailure
+        from ..models.model_cache_removal_result import ModelCacheRemovalResult
+        from ..models.model_cache_cancellation import ModelCacheCancellation
         from ..models.operation_progress import OperationProgress
+        from ..models.model_cache_download_result import ModelCacheDownloadResult
         action: str = self.action
 
         phase = self.phase
@@ -92,6 +96,14 @@ class ModelCacheOperatorResponse:
         state: str = self.state
 
         transferred_bytes = self.transferred_bytes
+
+        cancellation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.cancellation, Unset):
+            cancellation = UNSET
+        elif isinstance(self.cancellation, ModelCacheCancellation):
+            cancellation = self.cancellation.to_dict()
+        else:
+            cancellation = self.cancellation
 
         cancelled_operations: Union[Unset, list[str]] = UNSET
         if not isinstance(self.cancelled_operations, Unset):
@@ -161,6 +173,8 @@ class ModelCacheOperatorResponse:
             "state": state,
             "transferred_bytes": transferred_bytes,
         })
+        if cancellation is not UNSET:
+            field_dict["cancellation"] = cancellation
         if cancelled_operations is not UNSET:
             field_dict["cancelled_operations"] = cancelled_operations
         if eta_seconds is not UNSET:
@@ -186,10 +200,11 @@ class ModelCacheOperatorResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.model_cache_download_result import ModelCacheDownloadResult
-        from ..models.model_cache_removal_result import ModelCacheRemovalResult
         from ..models.availability_operation_failure import AvailabilityOperationFailure
+        from ..models.model_cache_removal_result import ModelCacheRemovalResult
+        from ..models.model_cache_cancellation import ModelCacheCancellation
         from ..models.operation_progress import OperationProgress
+        from ..models.model_cache_download_result import ModelCacheDownloadResult
         d = dict(src_dict)
         action = check_model_cache_operator_response_action(d.pop("action"))
 
@@ -213,6 +228,26 @@ class ModelCacheOperatorResponse:
 
 
         transferred_bytes = d.pop("transferred_bytes")
+
+        def _parse_cancellation(data: object) -> Union['ModelCacheCancellation', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                cancellation_type_0 = ModelCacheCancellation.from_dict(data)
+
+
+
+                return cancellation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['ModelCacheCancellation', None, Unset], data)
+
+        cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
+
 
         cancelled_operations = cast(list[str], d.pop("cancelled_operations", UNSET))
 
@@ -315,6 +350,7 @@ class ModelCacheOperatorResponse:
             selector=selector,
             state=state,
             transferred_bytes=transferred_bytes,
+            cancellation=cancellation,
             cancelled_operations=cancelled_operations,
             eta_seconds=eta_seconds,
             failure=failure,

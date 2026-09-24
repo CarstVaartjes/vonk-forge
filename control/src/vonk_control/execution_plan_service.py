@@ -28,6 +28,7 @@ from .recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
 )
+from .run_switch_contract import MemoryKind
 from .runtime_image_preparation import RuntimeImageReceipt
 
 
@@ -39,6 +40,8 @@ def compile_job_invocation(
     build: RecipeBuild | None,
     parameters: Mapping[str, object],
     timeout_seconds: int,
+    memory_floor_bytes: int,
+    memory_kind: MemoryKind,
 ) -> dict[str, object]:
     """Compile invocation settings against the installation's exact receipts."""
     from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
@@ -51,6 +54,22 @@ def compile_job_invocation(
     if content_sha256(recipe) != plan.identity.recipe_revision_sha256:
         raise ExecutionPlanCompilationError(
             "job recipe differs from the installed workload"
+        )
+    canonical_role = next(
+        (
+            item
+            for item in recipe.topology.roles
+            if item.name == plan.runtime.placement.role
+        ),
+        None,
+    )
+    if (
+        canonical_role is None
+        or canonical_role.resources.memory.kind != memory_kind
+        or plan.runtime.placement.memory_kind != memory_kind
+    ):
+        raise ExecutionPlanCompilationError(
+            "job memory kind differs from the accepted canonical workload"
         )
     resolved = resolve_recipe_entities(session, recipe.model_dump(mode="json"))
     models = _canonical_models(resolved["models"])
@@ -93,9 +112,10 @@ def compile_job_invocation(
         model_objects=tuple(objects.values()),
         runtime_image=plan.runtime_image.model_dump(mode="json"),
     )
-    return compiled.to_compiled_launch_payload(
-        runtime_spec, placement=plan.runtime.placement.model_dump(mode="json")
-    )
+    placement = plan.runtime.placement.model_dump(mode="json")
+    placement["memory_floor_bytes"] = memory_floor_bytes
+    placement["memory_kind"] = memory_kind
+    return compiled.to_compiled_launch_payload(runtime_spec, placement=placement)
 
 
 class ExecutionPlanCompilationError(ValueError):
@@ -413,6 +433,11 @@ def _placement(
     reserved = role.resources.memory.startup_peak_bytes
     if type(reserved) is not int or reserved <= 0:
         raise ExecutionPlanCompilationError("canonical recipe role memory is invalid")
+    memory_floor = role.resources.memory.system_reserve_bytes
+    if type(memory_floor) is not int or memory_floor < 0:
+        raise ExecutionPlanCompilationError(
+            "canonical recipe role memory floor is invalid"
+        )
     if recipe.interfaces[0].adapter == "openai":
         if not isinstance(endpoint, Mapping):
             raise ExecutionPlanCompilationError(
@@ -441,6 +466,8 @@ def _placement(
         "master_port": None,
         "port": port,
         "reserved_memory_bytes": reserved,
+        "memory_floor_bytes": memory_floor,
+        "memory_kind": role.resources.memory.kind,
     }
 
 

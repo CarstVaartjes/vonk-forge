@@ -324,6 +324,8 @@ fn authority_rejects_expiry_bad_signature_and_users_outside_agent_group() {
 
 #[derive(Clone, Default)]
 struct RecordingRunner {
+    deny_container_listing: Arc<Mutex<bool>>,
+    runtime_output: Arc<Mutex<Option<PathBuf>>>,
     calls: SharedCalls,
     runtime_container: Arc<Mutex<Option<(String, String)>>>,
     runtime_running: Arc<Mutex<bool>>,
@@ -409,6 +411,7 @@ impl CommandRunner for AdversarialPackageRunner {
                 success: true,
                 stdout,
                 exit_code: Some(0),
+                stderr: Vec::new(),
             });
         }
         let success = !*self.fail_dpkg.lock().unwrap();
@@ -416,6 +419,7 @@ impl CommandRunner for AdversarialPackageRunner {
             success,
             stdout: Vec::new(),
             exit_code: Some(if success { 0 } else { 1 }),
+            stderr: Vec::new(),
         })
     }
 }
@@ -447,6 +451,12 @@ impl CommandRunner for RecordingRunner {
             .push((executable.to_path_buf(), arguments.to_vec()));
         let mut success = true;
         let stdout = if executable == std::path::Path::new("/usr/bin/docker")
+            && arguments.get(..2) == Some(&["container".to_owned(), "ls".to_owned()])
+            && *self.deny_container_listing.lock().unwrap()
+        {
+            success = false;
+            Vec::new()
+        } else if executable == std::path::Path::new("/usr/bin/docker")
             && arguments.first().is_some_and(|value| value == "load")
         {
             self.docker_load_stdout
@@ -501,6 +511,9 @@ impl CommandRunner for RecordingRunner {
         } else if executable == std::path::Path::new("/usr/bin/docker")
             && arguments.first().is_some_and(|value| value == "run")
         {
+            if let Some(path) = self.runtime_output.lock().unwrap().take() {
+                fs::write(path, b"prepared").map_err(|error| error.to_string())?;
+            }
             let digest = arguments.windows(2).find_map(|pair| {
                 (pair[0] == "--label")
                     .then_some(pair[1].as_str())
@@ -542,6 +555,7 @@ impl CommandRunner for RecordingRunner {
             success,
             stdout,
             exit_code: Some(if success { 0 } else { 1 }),
+            stderr: Vec::new(),
         })
     }
 }
@@ -820,6 +834,14 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     let state = roots.agent_data.join("runs").join(run_id);
     let outputs = state.join("outputs");
     let metadata = roots.agent_data.join("run-metadata").join(run_id);
+    let mark_fresh_start = || {
+        fs::write(metadata.join("tmp-reset-required"), b"").unwrap();
+        fs::set_permissions(
+            metadata.join("tmp-reset-required"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+    };
     let model = roots
         .agent_data
         .join("installations")
@@ -832,6 +854,7 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     fs::create_dir_all(model.parent().unwrap()).unwrap();
     fs::write(&model, b"model artifact").unwrap();
     fs::write(metadata.join("runtime.json"), b"{}").unwrap();
+    mark_fresh_start();
     let archive_root = roots.agent_data.join("oci-archives");
     fs::create_dir_all(&archive_root).unwrap();
     let archive = archive_root.join(&archive_sha256);
@@ -955,12 +978,40 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     executor
         .execute(&runtime_operation(&request, digest))
         .unwrap();
+    let private_tmp = outputs.join("tmp").join(run_id).join("private");
+    fs::create_dir(&private_tmp).unwrap();
+    fs::write(private_tmp.join("old-engine-state"), b"temporary").unwrap();
+    let outside = roots.agent_data.join("outside-tmp");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("sentinel"), b"outside").unwrap();
+    symlink(&outside, private_tmp.join("outside-link")).unwrap();
+    fs::set_permissions(&private_tmp, fs::Permissions::from_mode(0o700)).unwrap();
+    if rustix::process::geteuid().is_root() {
+        rustix::fs::chown(
+            &private_tmp,
+            Some(rustix::process::Uid::from_raw(10001)),
+            None,
+        )
+        .unwrap();
+    }
+    let cache = roots
+        .agent_data
+        .join("installations/installation-1/runtime-cache");
+    fs::write(cache.join("compiled-kernel"), b"reuse").unwrap();
+    fs::write(outputs.join("result"), b"keep").unwrap();
+    // Even a pending cleanup request cannot erase an already active run.
+    mark_fresh_start();
     executor
         .execute(&runtime_operation(
             &request,
             hex_sha256(&canonical_json(&request).unwrap()),
         ))
         .unwrap();
+    assert!(
+        private_tmp.join("old-engine-state").is_file(),
+        "replayed start must preserve a live container's temporary work"
+    );
+    assert!(metadata.join("tmp-reset-required").is_file());
 
     for forbidden_target in ["/state", "/scratch"] {
         let mut forbidden = request.clone();
@@ -1040,17 +1091,27 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     let failure = executor
         .execute(&runtime_operation(&inspect, inspect_digest.clone()))
         .unwrap_err();
-    assert!(
-        failure.to_string().contains("fixture startup stderr"),
-        "{failure}"
-    );
+    // The container's own output crosses as its own per-stream document, not
+    // as a line of the rejection's text, and the capture window is the
+    // declared constant rather than a number written twice.
+    let OperationError::RuntimeProcessExited {
+        logs,
+        capture_error,
+    } = &failure
+    else {
+        panic!("expected a runtime exit, got {failure}");
+    };
+    assert_eq!(*capture_error, None);
+    let logs = logs.as_ref().expect("the fixture log is readable");
+    let retained = format!("{}{}", logs.stdout.text, logs.stderr.text);
+    assert!(retained.contains("fixture startup stderr"), "{retained}");
     assert!(runner.calls.lock().unwrap().iter().any(|(program, args)| {
         program == std::path::Path::new("/usr/bin/docker")
             && args
                 == &[
                     "logs".to_owned(),
                     "--tail".to_owned(),
-                    "32".to_owned(),
+                    vonk_agent_helper::runtime_logs::CAPTURE_LINES.to_owned(),
                     "e".repeat(64),
                 ]
     }));
@@ -1156,6 +1217,115 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         docker_removes,
         vec![vec!["rm".to_owned(), format!("vonk-{run_id}")]]
     );
+    drop(calls);
+    *runner.runtime_container.lock().unwrap() = None;
+    mark_fresh_start();
+    *runner.deny_container_listing.lock().unwrap() = true;
+    assert!(
+        executor
+            .execute(&runtime_operation(
+                &request,
+                hex_sha256(&canonical_json(&request).unwrap())
+            ))
+            .is_err()
+    );
+    assert!(
+        private_tmp.join("old-engine-state").is_file(),
+        "uncertain container absence must not authorize deletion"
+    );
+    assert!(metadata.join("tmp-reset-required").is_file());
+    *runner.deny_container_listing.lock().unwrap() = false;
+    executor
+        .execute(&runtime_operation(
+            &request,
+            hex_sha256(&canonical_json(&request).unwrap()),
+        ))
+        .unwrap();
+    assert!(
+        !private_tmp.exists(),
+        "fresh start must clear the stopped runtime's private temporary tree"
+    );
+    assert_eq!(fs::read(cache.join("compiled-kernel")).unwrap(), b"reuse");
+    assert_eq!(fs::read(outputs.join("result")).unwrap(), b"keep");
+    assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
+    // Foreground hooks consume the marker before the first process runs.
+    // Later hooks and main preserve the earlier hook's temporary work.
+    *runner.runtime_container.lock().unwrap() = None;
+    mark_fresh_start();
+    let old_tmp = outputs.join("tmp/old-state");
+    fs::write(&old_tmp, b"old").unwrap();
+    let inputs = state.join("inputs");
+    fs::create_dir(&inputs).unwrap();
+    let mut hook = request.clone();
+    let detached = hook
+        .arguments
+        .iter()
+        .position(|value| value == "--detach")
+        .unwrap();
+    hook.arguments.remove(detached);
+    for option in ["--name", "--restart"] {
+        let index = hook
+            .arguments
+            .iter()
+            .position(|value| value == option)
+            .unwrap();
+        hook.arguments.drain(index..index + 2);
+    }
+    hook.arguments.insert(5, "--rm".to_owned());
+    let image = hook
+        .arguments
+        .iter()
+        .rposition(|value| value == &image_reference)
+        .unwrap();
+    hook.arguments.splice(
+        image..image,
+        [
+            "--env".to_owned(),
+            "VONK_JOB_TIMEOUT_SECONDS=30".to_owned(),
+            "--mount".to_owned(),
+            format!("type=bind,src={},dst=/inputs,readonly", inputs.display()),
+        ],
+    );
+    let hook_digest = write_runtime_request(&roots, &hook);
+    for name in ["hook-one", "hook-two"] {
+        let path = outputs.join("tmp").join(name);
+        *runner.runtime_output.lock().unwrap() = Some(path.clone());
+        executor
+            .execute(&runtime_operation(&hook, hook_digest.clone()))
+            .unwrap();
+        assert!(
+            !old_tmp.exists(),
+            "the first hook must not see stale temporary work"
+        );
+        assert_eq!(fs::read(path).unwrap(), b"prepared");
+        assert_eq!(fs::read(outputs.join("tmp/hook-one")).unwrap(), b"prepared");
+    }
+    executor
+        .execute(&runtime_operation(
+            &request,
+            hex_sha256(&canonical_json(&request).unwrap()),
+        ))
+        .unwrap();
+    for name in ["hook-one", "hook-two"] {
+        assert_eq!(
+            fs::read(outputs.join("tmp").join(name)).unwrap(),
+            b"prepared"
+        );
+    }
+    // A writable mount cannot redirect privileged cleanup outside its scope.
+    *runner.runtime_container.lock().unwrap() = None;
+    mark_fresh_start();
+    fs::rename(outputs.join("tmp"), outputs.join("old-tmp")).unwrap();
+    symlink(&outside, outputs.join("tmp")).unwrap();
+    assert!(
+        executor
+            .execute(&runtime_operation(
+                &request,
+                hex_sha256(&canonical_json(&request).unwrap())
+            ))
+            .is_err()
+    );
+    assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
 }
 
 #[test]

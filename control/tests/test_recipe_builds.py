@@ -49,7 +49,11 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityError
+from vonk_control.recipe_execution_contract import parse_stored_build_plan
+from vonk_control.recipe_image_availability import (
+    RecipeImageAvailabilityError,
+    RecipeImageAvailabilityService,
+)
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
@@ -61,6 +65,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
     RuntimeImageReceipt,
+    persist_runtime_image_receipt,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -673,6 +678,136 @@ def test_present_archive_without_receipt_is_reprepared_not_rebuilt(
     production.close()
 
 
+def test_legacy_unreadable_build_receipt_is_replaced_from_verified_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-adapter receipt must not pin an already-built recipe forever.
+
+    The archive is content-addressed and verified before any receipt is
+    derived, so a receipt file the current contract cannot parse is stale
+    metadata about those same bytes.  The live download refused before any
+    durable operation with ``runtime_image.receipt_unavailable: ... lacks its
+    adapter`` because the scan over every receipt collected this one file
+    before the request could be queued; preparation must instead re-derive and
+    replace it.
+    """
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    artifact_root = tmp_path / "artifacts"
+    storage = FilesystemRuntimeImageStorage(artifact_root)
+    archive = b"cached source build archive"
+    archive_digest = hashlib.sha256(archive).hexdigest()
+    (storage.root / archive_digest).write_bytes(archive)
+    image_digest = "sha256:" + "b" * 64
+    builds = RecipeBuildService(
+        sessions,
+        bundles=bundles,
+        build_archive_available=storage.build_archive_available,
+        prepared_builds=storage.find_build,
+    )
+    plan = builds.plan(revision.id, node_id, now=now)
+    builds.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest=image_digest,
+        oci_layout_sha256=archive_digest,
+        image_bytes=len(archive),
+        now=now,
+    )
+    # Exactly what a Controller wrote before runtime_adapter existed: valid
+    # JSON and the verified archive identity, but no adapter identity.
+    (storage.root / f"{archive_digest}.receipt.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "source": "controller-build",
+                "distribution_publisher": "vonk",
+                "distribution_slug": "cached",
+                "distribution_content_sha256": revision.content_digest,
+                "registry_manifest_digest": None,
+                "platform_manifest_digest": image_digest,
+                "image_digest": image_digest,
+                "oci_archive_sha256": archive_digest,
+                "image_bytes": len(archive),
+                "local_image_config_id": "sha256:" + "c" * 64,
+                "local_image_reference": None,
+                "architecture": "linux-arm64",
+                "runtime_interface": "vonk.runtime.v1",
+                "runtime_interface_label": "v1",
+                "archive_path": str(storage.root / archive_digest),
+                "recorded_at": "2026-09-15T00:00:00Z",
+                "build_id": plan.build_id,
+                "build_input_sha256": plan.build_input_sha256,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # The scan that resolves a cached build must skip the file it cannot
+    # parse; the same bytes are still re-prepared below.
+    assert (
+        storage.find_build(
+            plan.build_input_sha256,
+            expected_architecture="linux-arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+
+    class Operations:
+        def build(self, *_args, **_kwargs):
+            raise AssertionError("verified bytes must be re-prepared, not rebuilt")
+
+    class Transport:
+        def inspect_archive(
+            self,
+            archive_path: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
+        ) -> PulledImageEvidence:
+            assert archive_path.read_bytes() == archive
+            return PulledImageEvidence(
+                manifest_digest=image_digest,
+                requested_manifest_digest=None,
+                config_id="sha256:" + "c" * 64,
+                local_reference="localhost/vonk/cached@" + image_digest,
+                architecture=expected_architecture,
+                runtime_interface="v1",
+                archive_sha256=expected_archive_sha256,
+                archive_bytes=expected_archive_bytes,
+            )
+
+    monkeypatch.setattr(
+        availability_production_module, "SkopeoOCIImageTransport", Transport
+    )
+    production = build_recipe_image_availability(
+        sessions,
+        artifact_root=artifact_root,
+        managed_catalog_sync=None,
+        recipe_builds=builds,
+        recipe_operations=Operations(),
+        clock=lambda: now,
+    )
+    operation = production.service.start(
+        revision.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000735",
+    )
+    assert operation.build_input_sha256 == plan.build_input_sha256
+
+    assert production.service.run_pending() == 1
+    completed = production.service.get(operation.id)
+    assert completed.state == "succeeded", completed.failure
+    repaired = storage.read_receipt(archive_digest)
+    assert repaired.runtime_adapter == _CACHED_ADAPTER.adapter_id
+    assert repaired.runtime_adapter_sha256 == _CACHED_ADAPTER.digest
+    assert repaired.build_input_sha256 == plan.build_input_sha256
+    production.close()
+
+
 def test_build_resolution_reports_stale_receipt_when_archive_is_gone(
     tmp_path: Path,
 ) -> None:
@@ -1043,6 +1178,186 @@ def test_build_reservation_rejects_changed_builder_runtime(tmp_path: Path) -> No
         pytest.raises(RecipeBuildError, match="runtime identity changed"),
     ):
         service.reserve_in_session(session, plan, now=now)
+
+
+def test_stored_build_envelope_names_the_field_that_invalidated_it(
+    tmp_path: Path,
+) -> None:
+    """The stored-envelope reader must name the field and rule it rejected.
+
+    Every contract failure was collapsed into "stored source build envelope is
+    invalid", so a live ``build.plan_invalid`` blocker could not say which
+    stored field an older Controller had written outside the current model.
+    The field path and error type are what make the blocker actionable.
+    """
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    with sessions.begin() as session:
+        stored = session.get(RecipeBuild, plan.build_id)
+        assert stored is not None
+        document = copy.deepcopy(stored.plan)
+        # Valid JSON that the current model still rejects: the limit must be
+        # strictly positive.  Corrupt the stored JSON directly so the real
+        # stored-envelope read boundary is what rejects it.
+        _json_object(document["limits"])["temporary_bytes"] = 0
+        table = RecipeBuild.__table__
+        assert isinstance(table, Table)
+        session.execute(
+            table.update().where(RecipeBuild.id == plan.build_id).values(plan=document)
+        )
+
+    with (
+        sessions.begin() as session,
+        pytest.raises(RecipeBuildError) as raised,
+    ):
+        service.reserve_in_session(session, plan, now=now)
+
+    assert raised.value.code == "build.plan_invalid"
+    message = str(raised.value)
+    assert "limits.temporary_bytes" in message, message
+    assert "greater_than" in message, message
+
+
+def test_removal_does_not_corrupt_the_stored_build_envelope(tmp_path: Path) -> None:
+    """A cache removal must not write engine keys into the build contract.
+
+    ``remove_selector`` marked cancelled builds by merging ``removal_fence``
+    and ``cancelled`` into ``RecipeBuild.plan``.  That column is the canonical
+    ``RecipeBuildRequest`` document, whose model forbids extra keys, so the row
+    could never be parsed again and every later plan failed with
+    ``build.plan_invalid``.  A removal cancels the build through state and
+    error; the fence belongs to the removal operation that owns it.
+    """
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    planned = builds.plan(revision.id, node_id, now=now)
+    recipe = RecipeDefinition.model_validate(revision.document)
+    availability = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path / "cache"),
+        authority=lambda *_args, **_kwargs: (
+            recipe,
+            {
+                "architecture": "linux/arm64",
+                "interface": "vonk.runtime.v1",
+                "image_bytes": 1,
+            },
+        ),
+        clock=lambda: now,
+    )
+
+    result = availability.remove_selector(
+        recipe.identity.slug,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000024",
+    )
+    assert result["cancelled_builds"] == [planned.build_id]
+
+    with sessions() as session:
+        stored = session.get(RecipeBuild, planned.build_id)
+        assert stored is not None
+        assert stored.state == "failed"
+        # The exact stored document still satisfies the canonical contract.
+        assert parse_stored_build_plan(stored.plan).build_id == planned.build_id
+
+    # The fence is recorded on the removal operation that owns the
+    # cancellation, not smuggled into the build contract document.
+    with sessions() as session:
+        removal = session.scalar(
+            select(Job).where(Job.request_id == "00000000-0000-4000-8000-000000000024")
+        )
+        assert removal is not None
+        assert isinstance(_json_object(removal.payload).get("removal_fence"), str)
+
+    # The planning path the operator runs next must return the cancelled row to
+    # a clean planned attempt with a usable envelope, not reject it.
+    replanned = builds.plan(revision.id, node_id, now=now)
+    assert replanned.build_id == planned.build_id
+    assert parse_stored_build_plan(replanned.agent_payload).build_id == planned.build_id
+    with sessions() as session:
+        rebuilt = session.get(RecipeBuild, planned.build_id)
+        assert rebuilt is not None
+        assert rebuilt.state == "planned"
+        assert rebuilt.error is None
+
+
+def test_planner_repairs_a_build_envelope_an_older_removal_fence_damaged(
+    tmp_path: Path,
+) -> None:
+    """The planner rebuilds a row whose stored envelope no longer parses.
+
+    An older Controller's removal merged ``removal_fence`` and ``cancelled``
+    into the stored ``RecipeBuildRequest``.  The row is damaged history, not a
+    live request, so the planner must replace its documents with a freshly
+    derived envelope instead of rejecting the operator's build with
+    ``build.plan_invalid``.  Repair derives new bytes; it never blesses the
+    damaged document.
+    """
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    planned = service.plan(revision.id, node_id, now=now)
+    damaged = copy.deepcopy(planned.agent_payload) | {
+        "removal_fence": "00000000-0000-4000-8000-0000000000ff",
+        "cancelled": True,
+    }
+    table = RecipeBuild.__table__
+    assert isinstance(table, Table)
+    with sessions.begin() as session:
+        session.execute(
+            table.update()
+            .where(RecipeBuild.id == planned.build_id)
+            .values(
+                plan=damaged,
+                state="failed",
+                error="recipe Controller cache removal cancelled the build",
+            )
+        )
+
+    repaired = service.plan(revision.id, node_id, now=now)
+
+    assert parse_stored_build_plan(repaired.agent_payload).build_id == planned.build_id
+    with sessions() as session:
+        stored = session.get(RecipeBuild, planned.build_id)
+        assert stored is not None
+        assert stored.state == "planned"
+        assert stored.error is None
+        repaired_document = _json_object(stored.plan)
+        # Repair replaces the damaged bytes; the forbidden engine keys are gone.
+        assert "removal_fence" not in repaired_document
+        assert "cancelled" not in repaired_document
+        assert parse_stored_build_plan(repaired_document).build_id == planned.build_id
+
+
+def test_planner_fails_closed_for_an_in_flight_build_with_a_damaged_envelope(
+    tmp_path: Path,
+) -> None:
+    """Repair is for stale history; an active attempt is not overwritten.
+
+    The tolerant read only applies to a row whose stored envelope is stale
+    metadata.  A row that a worker is currently building is still owned by that
+    attempt, so a damaged envelope there stays a named ``build.plan_invalid``
+    rejection rather than being rewritten under the running work.
+    """
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    planned = service.plan(revision.id, node_id, now=now)
+    damaged = copy.deepcopy(planned.agent_payload) | {"removal_fence": "x"}
+    with sessions.begin() as session:
+        stored = session.get(RecipeBuild, planned.build_id)
+        assert stored is not None
+        stored.state = "building"
+        stored.plan = damaged
+
+    with pytest.raises(RecipeBuildError) as raised:
+        service.plan(revision.id, node_id, now=now)
+
+    assert raised.value.code == "build.plan_invalid"
+    assert "removal_fence" in str(raised.value)
 
 
 def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
@@ -2020,11 +2335,55 @@ def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> 
         )
 
 
+def _authorize_distribution_fixture(sessions, plan, revision, now):
+    """Wire/import tests start after the image verifier has produced its receipt."""
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        assert build.image_digest is not None
+        assert build.oci_layout_sha256 is not None
+        assert build.image_bytes is not None
+        receipt = RuntimeImageReceipt(
+            schema_version=2,
+            source="controller-build",
+            distribution_publisher=revision.publisher,
+            distribution_slug=revision.slug,
+            distribution_content_sha256=revision.content_digest,
+            registry_manifest_digest=None,
+            image_digest=build.image_digest,
+            platform_manifest_digest=build.image_digest,
+            oci_archive_sha256=build.oci_layout_sha256,
+            image_bytes=build.image_bytes,
+            local_image_config_id="sha256:" + "c" * 64,
+            local_image_reference=None,
+            architecture="linux-arm64",
+            runtime_interface="vonk.runtime.v1",
+            runtime_interface_label="v1",
+            archive_path="/verified/fixture/archive",
+            recorded_at=now.isoformat(),
+            build_id=build.id,
+            build_input_sha256=build.build_input_sha256,
+            runtime_adapter=_CACHED_ADAPTER.adapter_id,
+            runtime_adapter_sha256=_CACHED_ADAPTER.digest,
+        )
+        persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=revision.id,
+            original_content_digest=revision.content_digest,
+            effective_execution_key="a" * 64,
+            receipt=receipt,
+            verified_at=now,
+        )
+    return receipt
+
+
 def test_distribution_reimports_one_build_digest_for_every_mapped_node(
     tmp_path: Path,
 ) -> None:
     sessions, bundles, now, builder, revision = setup(tmp_path)
-    service = RecipeBuildService(sessions, bundles=bundles)
+    service = RecipeBuildService(
+        sessions, bundles=bundles, prepared_builds=lambda *_args, **_kwargs: receipt
+    )
     plan = service.plan(revision.id, builder, now=now)
     service.record_success(
         plan.build_id,
@@ -2034,6 +2393,7 @@ def test_distribution_reimports_one_build_digest_for_every_mapped_node(
         image_bytes=500,
         now=now,
     )
+    receipt = _authorize_distribution_fixture(sessions, plan, revision, now)
     target = "spk_" + "2" * 32
     with sessions.begin() as session:
         session.add(
@@ -2107,7 +2467,9 @@ def test_image_distribution_requires_the_previewed_plan_digest(
     tmp_path: Path,
 ) -> None:
     sessions, bundles, now, builder, revision = setup(tmp_path)
-    builds = RecipeBuildService(sessions, bundles=bundles)
+    builds = RecipeBuildService(
+        sessions, bundles=bundles, prepared_builds=lambda *_args, **_kwargs: receipt
+    )
     build_plan = builds.plan(revision.id, builder, now=now)
     builds.record_success(
         build_plan.build_id,
@@ -2117,6 +2479,7 @@ def test_image_distribution_requires_the_previewed_plan_digest(
         image_bytes=500,
         now=now,
     )
+    receipt = _authorize_distribution_fixture(sessions, build_plan, revision, now)
     target = "spk_" + "2" * 32
     with sessions.begin() as session:
         session.add(

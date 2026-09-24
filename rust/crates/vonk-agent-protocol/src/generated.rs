@@ -1090,11 +1090,75 @@ pub struct CompiledPlacement {
     pub local_address: ::std::option::Option<::std::net::IpAddr>,
     pub master_address: ::std::option::Option<::std::net::IpAddr>,
     pub master_port: ::std::option::Option<u16>,
+    pub memory_floor_bytes: u64,
+    pub memory_kind: CompiledPlacementMemoryKind,
     pub port: ::std::option::Option<u16>,
     pub rank: u64,
     pub reserved_memory_bytes: u64,
     pub role: ::std::string::String,
     pub world_size: u64,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum CompiledPlacementMemoryKind {
+    #[serde(rename = "unified")]
+    Unified,
+    #[serde(rename = "host")]
+    Host,
+    #[serde(rename = "accelerator")]
+    Accelerator,
+}
+impl ::std::fmt::Display for CompiledPlacementMemoryKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Unified => f.write_str("unified"),
+            Self::Host => f.write_str("host"),
+            Self::Accelerator => f.write_str("accelerator"),
+        }
+    }
+}
+impl ::std::str::FromStr for CompiledPlacementMemoryKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "unified" => Ok(Self::Unified),
+            "host" => Ok(Self::Host),
+            "accelerator" => Ok(Self::Accelerator),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CompiledPlacementMemoryKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for CompiledPlacementMemoryKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CompiledPlacementMemoryKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -2083,6 +2147,13 @@ pub struct HostHelperGrantResponse {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct HostHelperProcessLogs {
+    pub stderr: FailureLogTail,
+    pub stdout: FailureLogTail,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct HostHelperResponse {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub diagnostic: ::std::option::Option<::std::string::String>,
@@ -2093,6 +2164,8 @@ pub struct HostHelperResponse {
     pub exit_code: ::std::option::Option<u32>,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub observation_receipt: ::std::option::Option<SignedRecipeRunObservationReceipt>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub process_logs: ::std::option::Option<HostHelperProcessLogs>,
     pub request_id: ::std::option::Option<::uuid::Uuid>,
     pub schema_version: u8,
     pub status: HostHelperResponseStatus,
@@ -4096,6 +4169,8 @@ pub struct RecipeJobRunRequest {
     pub installation_id: ::uuid::Uuid,
     pub interface: RecipeJobRunRequestInterface,
     pub job_id: ::uuid::Uuid,
+    pub memory_floor_bytes: u64,
+    pub memory_kind: RecipeJobRunRequestMemoryKind,
     pub output_limits: RecipeJobOutputLimits,
     pub output_mappings: ::std::vec::Vec<RecipeJobOutputMapping>,
     pub plan_digest: ::std::string::String,
@@ -4171,6 +4246,68 @@ impl ::std::convert::TryFrom<&::std::string::String> for RecipeJobRunRequestInte
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for RecipeJobRunRequestInterface {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum RecipeJobRunRequestMemoryKind {
+    #[serde(rename = "unified")]
+    Unified,
+    #[serde(rename = "host")]
+    Host,
+    #[serde(rename = "accelerator")]
+    Accelerator,
+}
+impl ::std::fmt::Display for RecipeJobRunRequestMemoryKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Unified => f.write_str("unified"),
+            Self::Host => f.write_str("host"),
+            Self::Accelerator => f.write_str("accelerator"),
+        }
+    }
+}
+impl ::std::str::FromStr for RecipeJobRunRequestMemoryKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "unified" => Ok(Self::Unified),
+            "host" => Ok(Self::Host),
+            "accelerator" => Ok(Self::Accelerator),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RecipeJobRunRequestMemoryKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for RecipeJobRunRequestMemoryKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RecipeJobRunRequestMemoryKind {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -4475,6 +4612,8 @@ pub struct RecipeStartPayload {
     pub mapping_id: ::uuid::Uuid,
     pub master_address: ::std::option::Option<::std::net::IpAddr>,
     pub master_port: ::std::option::Option<u16>,
+    pub memory_floor_bytes: u64,
+    pub memory_kind: RecipeStartPayloadMemoryKind,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub phase: ::std::option::Option<RecipeStartPayloadPhase>,
     pub plan_digest: ::std::string::String,
@@ -4491,6 +4630,68 @@ pub struct RecipeStartPayload {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub start_deadline: ::std::option::Option<::std::string::String>,
     pub world_size: u64,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum RecipeStartPayloadMemoryKind {
+    #[serde(rename = "unified")]
+    Unified,
+    #[serde(rename = "host")]
+    Host,
+    #[serde(rename = "accelerator")]
+    Accelerator,
+}
+impl ::std::fmt::Display for RecipeStartPayloadMemoryKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Unified => f.write_str("unified"),
+            Self::Host => f.write_str("host"),
+            Self::Accelerator => f.write_str("accelerator"),
+        }
+    }
+}
+impl ::std::str::FromStr for RecipeStartPayloadMemoryKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "unified" => Ok(Self::Unified),
+            "host" => Ok(Self::Host),
+            "accelerator" => Ok(Self::Accelerator),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RecipeStartPayloadMemoryKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<&::std::string::String> for RecipeStartPayloadMemoryKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RecipeStartPayloadMemoryKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(
     ::serde::Deserialize,
@@ -7460,6 +7661,8 @@ impl<'de> ::serde::Deserialize<'de> for CompiledPlacement {
             pub local_address: ::std::option::Option<::std::net::IpAddr>,
             pub master_address: ::std::option::Option<::std::net::IpAddr>,
             pub master_port: ::std::option::Option<u16>,
+            pub memory_floor_bytes: u64,
+            pub memory_kind: CompiledPlacementMemoryKind,
             pub port: ::std::option::Option<u16>,
             pub rank: u64,
             pub reserved_memory_bytes: u64,
@@ -7472,12 +7675,39 @@ impl<'de> ::serde::Deserialize<'de> for CompiledPlacement {
             local_address: raw.local_address,
             master_address: raw.master_address,
             master_port: raw.master_port,
+            memory_floor_bytes: raw.memory_floor_bytes,
+            memory_kind: raw.memory_kind,
             port: raw.port,
             rank: raw.rank,
             reserved_memory_bytes: raw.reserved_memory_bytes,
             role: raw.role,
             world_size: raw.world_size,
         })
+    }
+}
+impl CompiledPlacementMemoryKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unified => "unified",
+            Self::Host => "host",
+            Self::Accelerator => "accelerator",
+        }
+    }
+}
+impl ::std::ops::Deref for CompiledPlacementMemoryKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CompiledPlacementMemoryKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CompiledPlacementMemoryKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledRuntime {
@@ -8354,6 +8584,25 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperGrantResponse {
         Ok(Self { grant: raw.grant })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for HostHelperProcessLogs {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("HostHelperProcessLogs", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub stderr: FailureLogTail,
+            pub stdout: FailureLogTail,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            stderr: raw.stderr,
+            stdout: raw.stdout,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -8372,6 +8621,8 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             pub exit_code: ::std::option::Option<u32>,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub observation_receipt: ::std::option::Option<SignedRecipeRunObservationReceipt>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub process_logs: ::std::option::Option<HostHelperProcessLogs>,
             pub request_id: ::std::option::Option<::uuid::Uuid>,
             pub schema_version: u8,
             pub status: HostHelperResponseStatus,
@@ -8383,6 +8634,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             evidence_sha256: raw.evidence_sha256,
             exit_code: raw.exit_code,
             observation_receipt: raw.observation_receipt,
+            process_logs: raw.process_logs,
             request_id: raw.request_id,
             schema_version: raw.schema_version,
             status: raw.status,
@@ -10814,6 +11066,8 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
             pub installation_id: ::uuid::Uuid,
             pub interface: RecipeJobRunRequestInterface,
             pub job_id: ::uuid::Uuid,
+            pub memory_floor_bytes: u64,
+            pub memory_kind: RecipeJobRunRequestMemoryKind,
             pub output_limits: RecipeJobOutputLimits,
             pub output_mappings: ::std::vec::Vec<RecipeJobOutputMapping>,
             pub plan_digest: ::std::string::String,
@@ -10837,6 +11091,8 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
             installation_id: raw.installation_id,
             interface: raw.interface,
             job_id: raw.job_id,
+            memory_floor_bytes: raw.memory_floor_bytes,
+            memory_kind: raw.memory_kind,
             output_limits: raw.output_limits,
             output_mappings: raw.output_mappings,
             plan_digest: raw.plan_digest,
@@ -10874,6 +11130,31 @@ impl ::std::cmp::PartialEq<str> for RecipeJobRunRequestInterface {
     }
 }
 impl ::std::cmp::PartialEq<&str> for RecipeJobRunRequestInterface {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl RecipeJobRunRequestMemoryKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unified => "unified",
+            Self::Host => "host",
+            Self::Accelerator => "accelerator",
+        }
+    }
+}
+impl ::std::ops::Deref for RecipeJobRunRequestMemoryKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RecipeJobRunRequestMemoryKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RecipeJobRunRequestMemoryKind {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
     }
@@ -11358,6 +11639,8 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartPayload {
             pub mapping_id: ::uuid::Uuid,
             pub master_address: ::std::option::Option<::std::net::IpAddr>,
             pub master_port: ::std::option::Option<u16>,
+            pub memory_floor_bytes: u64,
+            pub memory_kind: RecipeStartPayloadMemoryKind,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub phase: ::std::option::Option<RecipeStartPayloadPhase>,
             pub plan_digest: ::std::string::String,
@@ -11387,6 +11670,8 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartPayload {
             mapping_id: raw.mapping_id,
             master_address: raw.master_address,
             master_port: raw.master_port,
+            memory_floor_bytes: raw.memory_floor_bytes,
+            memory_kind: raw.memory_kind,
             phase: raw.phase,
             plan_digest: raw.plan_digest,
             port: raw.port,
@@ -11401,6 +11686,31 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartPayload {
             start_deadline: raw.start_deadline,
             world_size: raw.world_size,
         })
+    }
+}
+impl RecipeStartPayloadMemoryKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unified => "unified",
+            Self::Host => "host",
+            Self::Accelerator => "accelerator",
+        }
+    }
+}
+impl ::std::ops::Deref for RecipeStartPayloadMemoryKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RecipeStartPayloadMemoryKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RecipeStartPayloadMemoryKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
     }
 }
 impl RecipeStartPayloadPhase {

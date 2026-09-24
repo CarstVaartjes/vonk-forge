@@ -16,6 +16,7 @@ if TYPE_CHECKING:
   from ..models.run_switch_reason import RunSwitchReason
   from ..models.rollout_preparation import RolloutPreparation
   from ..models.spark_fit import SparkFit
+  from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
   from ..models.stop_impact import StopImpact
 
 
@@ -39,6 +40,7 @@ class RunSwitchAssessment:
             stops (list['StopImpact']):
             warnings (list['RunSwitchReason']):
             effective_settings (Union['EffectiveSettingsSelection', None, Unset]):
+            post_stop_memory_check (Union['ConditionalPostStopMemoryCheck', None, Unset]):
             preparation (Union['RolloutPreparation', None, Unset]):
             stop_before_prepare (Union[Unset, bool]):  Default: False.
             stop_before_transfer (Union[Unset, bool]):  Default: False.
@@ -52,6 +54,7 @@ class RunSwitchAssessment:
     stops: list['StopImpact']
     warnings: list['RunSwitchReason']
     effective_settings: Union['EffectiveSettingsSelection', None, Unset] = UNSET
+    post_stop_memory_check: Union['ConditionalPostStopMemoryCheck', None, Unset] = UNSET
     preparation: Union['RolloutPreparation', None, Unset] = UNSET
     stop_before_prepare: Union[Unset, bool] = False
     stop_before_transfer: Union[Unset, bool] = False
@@ -65,6 +68,7 @@ class RunSwitchAssessment:
         from ..models.run_switch_reason import RunSwitchReason
         from ..models.rollout_preparation import RolloutPreparation
         from ..models.spark_fit import SparkFit
+        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
         from ..models.stop_impact import StopImpact
         alias: Union[None, str]
         alias = self.alias
@@ -108,6 +112,14 @@ class RunSwitchAssessment:
         else:
             effective_settings = self.effective_settings
 
+        post_stop_memory_check: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.post_stop_memory_check, Unset):
+            post_stop_memory_check = UNSET
+        elif isinstance(self.post_stop_memory_check, ConditionalPostStopMemoryCheck):
+            post_stop_memory_check = self.post_stop_memory_check.to_dict()
+        else:
+            post_stop_memory_check = self.post_stop_memory_check
+
         preparation: Union[None, Unset, dict[str, Any]]
         if isinstance(self.preparation, Unset):
             preparation = UNSET
@@ -134,6 +146,8 @@ class RunSwitchAssessment:
         })
         if effective_settings is not UNSET:
             field_dict["effective_settings"] = effective_settings
+        if post_stop_memory_check is not UNSET:
+            field_dict["post_stop_memory_check"] = post_stop_memory_check
         if preparation is not UNSET:
             field_dict["preparation"] = preparation
         if stop_before_prepare is not UNSET:
@@ -151,6 +165,7 @@ class RunSwitchAssessment:
         from ..models.run_switch_reason import RunSwitchReason
         from ..models.rollout_preparation import RolloutPreparation
         from ..models.spark_fit import SparkFit
+        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
         from ..models.stop_impact import StopImpact
         d = dict(src_dict)
         def _parse_alias(data: object) -> Union[None, str]:
@@ -236,6 +251,26 @@ class RunSwitchAssessment:
         effective_settings = _parse_effective_settings(d.pop("effective_settings", UNSET))
 
 
+        def _parse_post_stop_memory_check(data: object) -> Union['ConditionalPostStopMemoryCheck', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                post_stop_memory_check_type_0 = ConditionalPostStopMemoryCheck.from_dict(data)
+
+
+
+                return post_stop_memory_check_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['ConditionalPostStopMemoryCheck', None, Unset], data)
+
+        post_stop_memory_check = _parse_post_stop_memory_check(d.pop("post_stop_memory_check", UNSET))
+
+
         def _parse_preparation(data: object) -> Union['RolloutPreparation', None, Unset]:
             if data is None:
                 return data
@@ -269,6 +304,7 @@ class RunSwitchAssessment:
             stops=stops,
             warnings=warnings,
             effective_settings=effective_settings,
+            post_stop_memory_check=post_stop_memory_check,
             preparation=preparation,
             stop_before_prepare=stop_before_prepare,
             stop_before_transfer=stop_before_transfer,

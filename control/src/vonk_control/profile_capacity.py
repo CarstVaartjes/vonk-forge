@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from uuid import UUID, uuid5
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import canonical_message
@@ -35,11 +35,19 @@ from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan, StopIm
 
 def reservation_visible(
     excluded_profile_application_ids: Sequence[str] = (),
+    *,
+    excluded_run_ids: Sequence[str] = (),
 ) -> ColumnElement[bool]:
     """Only an explicit inherited or reviewed-superseded claim is discounted."""
-    return or_(
-        ResourceReservation.owner_kind != "fleet-profile",
-        ResourceReservation.owner_id.not_in(excluded_profile_application_ids),
+    return and_(
+        or_(
+            ResourceReservation.owner_kind != "fleet-profile",
+            ResourceReservation.owner_id.not_in(excluded_profile_application_ids),
+        ),
+        or_(
+            ResourceReservation.owner_kind != "run",
+            ResourceReservation.owner_id.not_in(excluded_run_ids),
+        ),
     )
 
 

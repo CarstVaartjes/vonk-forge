@@ -1,0 +1,130 @@
+{
+  "attempt": 1,
+  "cancellation": {
+    "actor": "administrator",
+    "cancelled_effects": [],
+    "cause": "operator",
+    "completed_effects": [],
+    "dependency": "33aa3154-5eb1-4927-89b8-753f37760995",
+    "owner": "run-switch",
+    "pending_effects": [
+      {
+        "effect_id": "33aa3154-5eb1-4927-89b8-753f37760995",
+        "kind": "run",
+        "label": "Active Run/Switch child",
+        "operation_id": "33aa3154-5eb1-4927-89b8-753f37760995",
+        "outcome": "pending"
+      }
+    ],
+    "request_key": "343a256e-2788-4684-a098-2ad15d99f13a",
+    "requested_at": "2026-08-07T12:00:00Z",
+    "state": "cancelling"
+  },
+  "created_at": "2026-08-07T12:00:00Z",
+  "current_operation_id": null,
+  "current_step": 0,
+  "id": "534153d8-2c40-44f8-9293-98f5981339f1",
+  "plan_digest": "da000eb015b05c0066dc401fba31ddb49cd459a9458667e71ef675322cba4be0",
+  "profile_digest": "50ede98d339d6f10c82a4b1540dc333f4f7f8f257d5ba21f1408a1ff23771749",
+  "profile_id": "cb0dd330-7fd1-4364-8e38-a1214b9970a6",
+  "progress": {
+    "attempt": 1,
+    "cancellation": {
+      "actor": "administrator",
+      "cause": "operator",
+      "pending_operation_ids": [],
+      "request_key": "343a256e-2788-4684-a098-2ad15d99f13a",
+      "requested_at": "2026-08-07T12:00:00Z",
+      "state": "cancelling",
+      "workload_intent_ordinal": 2
+    },
+    "completed_steps": 0,
+    "current_label": "Switch profile Cancellation boundary",
+    "intended_profile": {
+      "assignments": [
+        {
+          "alias": "cancel-boundary",
+          "desired_state": "running",
+          "id": "e91429fc-7932-547d-9e7e-8c3f440ebe04",
+          "model_title": "Synthetic Tiny",
+          "nodes": [
+            {
+              "endpoint_owner": true,
+              "node_id": "spk_00000000000000000000000000000001",
+              "rank": 0,
+              "role": "entrypoint"
+            }
+          ],
+          "recipe_id": "344f7cf4-0169-4df3-8723-01bfa549115f",
+          "recipe_revision_id": "d94c5aa4-4a11-4b7c-b85e-999968edd1a5",
+          "recipe_title": "Synthetic Tiny image",
+          "topology_name": "solo"
+        }
+      ],
+      "installation_policy": "keep-cached",
+      "profile_digest": "50ede98d339d6f10c82a4b1540dc333f4f7f8f257d5ba21f1408a1ff23771749",
+      "reviewed_application_id": "534153d8-2c40-44f8-9293-98f5981339f1",
+      "reviewed_plan_digest": "29b1898328a24ebb425771e1bba539edd4efbe92cf1743255f6af545ab0ea34b",
+      "scope": {
+        "node_ids": [
+          "spk_00000000000000000000000000000001"
+        ]
+      }
+    },
+    "operation_kind": "fleet-profile.apply",
+    "step_results": {},
+    "switch_adapter": {
+      "active_kind": "run",
+      "active_operation_id": "33aa3154-5eb1-4927-89b8-753f37760995",
+      "actor": "admin",
+      "assignment_ids": [
+        "e91429fc-7932-547d-9e7e-8c3f440ebe04"
+      ],
+      "assignments": [
+        {
+          "alias": "cancel-boundary",
+          "desired_state": "running",
+          "id": "e91429fc-7932-547d-9e7e-8c3f440ebe04",
+          "model_title": "Synthetic Tiny",
+          "nodes": [
+            {
+              "endpoint_owner": true,
+              "node_id": "spk_00000000000000000000000000000001",
+              "rank": 0,
+              "role": "entrypoint"
+            }
+          ],
+          "recipe_id": "344f7cf4-0169-4df3-8723-01bfa549115f",
+          "recipe_revision_id": "d94c5aa4-4a11-4b7c-b85e-999968edd1a5",
+          "recipe_title": "Synthetic Tiny image",
+          "topology_name": "solo"
+        }
+      ],
+      "child_id": "534153d8-2c40-44f8-9293-98f5981339f1",
+      "children": [],
+      "pending_operation_ids": [],
+      "position": 0,
+      "queue": [
+        {
+          "id": "e91429fc-7932-547d-9e7e-8c3f440ebe04",
+          "kind": "run"
+        }
+      ],
+      "request_id": "a1f2deee-f3b4-529a-8621-0c45e7c9f64c",
+      "schema_version": 2,
+      "scope_node_ids": [
+        "spk_00000000000000000000000000000001"
+      ],
+      "state": "queued"
+    },
+    "total_steps": 1,
+    "workload_intent_ordinal": 1
+  },
+  "request_key": "00000000-0000-4000-8000-0000000003d4",
+  "result": null,
+  "schema_version": 2,
+  "state": "running",
+  "status_reason": "Cancellation requested; reconciling issued profile effects.",
+  "total_steps": 1,
+  "updated_at": "2026-08-07T12:00:00Z"
+}

@@ -225,7 +225,9 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
             return match self.upgrades.execute(claim).await {
                 Ok(()) => ExecutionResult {
                     state: "waiting-for-operator",
-                    body: json!({"reason": "agent upgrade did not restart the service"}),
+                    body: json!({
+                        "reason": crate::agent_upgrade::UPGRADE_AWAITING_IDENTITY_REASON,
+                    }),
                 },
                 Err(error) => {
                     let reason = match error.diagnostic() {
@@ -258,8 +260,9 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
     }
 }
 
-/// A collection or transport failure is unknown evidence, never proof that no
-/// managed runs exist. Only a successfully collected empty set reports absence.
+/// A collection failure is unknown evidence for its run, not for another
+/// successfully inspected run. Nonempty partial reports preserve omitted ranks
+/// on the Controller. Only a successfully collected empty set reports absence.
 async fn report_complete_recipe_run_observations(
     client: &AgentHttpClient,
     results: Vec<Result<ExactRecipeRunObservation, RecipeObservationError>>,
@@ -279,23 +282,35 @@ async fn report_complete_recipe_run_observations(
             }
         }
     }
-    if let Some(error) = failure {
-        return Err(error);
-    }
-    // Bounded concurrent inspections can finish in different batches. Never
-    // submit an early receipt whose authorization expired while gathering the
-    // rest. The Controller still verifies receipt age and authorization.
+    // Bounded concurrent inspections can finish in different batches. Retain
+    // each still-authorized receipt even when another inspection expired.
+    // The Controller remains the authority for receipt age and authorization.
     let now = Utc::now().timestamp();
-    if observations
-        .iter()
-        .any(|observation| now > observation.grant.claims.expires_at)
-    {
-        return Err(RecipeObservationError::StaleSnapshot);
+    observations.retain(|observation| {
+        if now <= observation.grant.claims.expires_at {
+            return true;
+        }
+        eprintln!(
+            "vonk-agent: exact recipe run {} receipt expired during collection",
+            observation.run_id
+        );
+        if failure
+            .as_ref()
+            .is_none_or(RecipeObservationError::not_ready)
+        {
+            failure = Some(RecipeObservationError::StaleSnapshot);
+        }
+        false
+    });
+    if !observations.is_empty() || failure.is_none() {
+        client
+            .report_exact_recipe_run_observations(&observations)
+            .await?;
     }
-    client
-        .report_exact_recipe_run_observations(&observations)
-        .await?;
-    Ok(observations.len())
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(observations.len()),
+    }
 }
 
 impl<R> RecipeExecutor<'_, R> {
@@ -334,7 +349,21 @@ impl<R> RecipeExecutor<'_, R> {
                 let endpoint = plan.endpoint_address;
                 let outcome = boundary
                     .inspect_recipe_run(plan.binding.clone(), plan.arguments)
-                    .await?;
+                    .await
+                    .inspect_err(|error| {
+                        if !matches!(
+                            error,
+                            crate::host_runtime::HostRuntimeError::Controller(
+                                ClientError::ObservationNotReady
+                            )
+                        ) {
+                            eprintln!(
+                                "vonk-agent: exact recipe run {} inspection failed: {}",
+                                plan.binding.run_id,
+                                error.preflight_code()
+                            );
+                        }
+                    })?;
                 // This timestamp is part of the signed-grant freshness proof.
                 // Capture it immediately after the local privileged inspection;
                 // an owner-only HTTP probe follows and remains independently
@@ -508,22 +537,45 @@ impl<R> RecipeExecutor<'_, R> {
     }
 }
 
+/// Why a readiness wait ended.
+///
+/// The runtime guard exists so a start stops observing a workload the agent can
+/// no longer inspect.  Collapsing its error into `false` made that failure
+/// indistinguishable from an expired readiness deadline, so a start whose
+/// privileged inspection failed was reported as "the workload did not become
+/// ready before its deadline" and the Controller's existing
+/// `runtime_observation_unavailable` retry could never fire.  Observed live on
+/// 2026-09-17, a two-Spark GLM start ended 51 s in -- five ten-second inspection
+/// ticks -- with 30 s still on the attempt lease and an hour on the start budget.
+enum ReadinessOutcome {
+    Ready,
+    Deadline,
+    Cancelled,
+    GuardFailed(crate::host_runtime::HostRuntimeError),
+}
+
 async fn wait_ready_with_runtime_guard_and_cancellation<R, G>(
     readiness: R,
     runtime_guard: G,
     mut cancellation: tokio::sync::watch::Receiver<bool>,
-) -> bool
+) -> ReadinessOutcome
 where
     R: Future<Output = Result<(), crate::health::HealthError>>,
-    G: Future<Output = bool>,
+    G: Future<Output = Result<std::convert::Infallible, crate::host_runtime::HostRuntimeError>>,
 {
     if *cancellation.borrow() {
-        return false;
+        return ReadinessOutcome::Cancelled;
     }
     tokio::select! {
-        result = readiness => result.is_ok(),
-        running = runtime_guard => running,
-        _ = cancellation.changed() => false,
+        result = readiness => match result {
+            Ok(()) => ReadinessOutcome::Ready,
+            Err(_) => ReadinessOutcome::Deadline,
+        },
+        guard = runtime_guard => match guard {
+            Ok(never) => match never {},
+            Err(error) => ReadinessOutcome::GuardFailed(error),
+        },
+        _ = cancellation.changed() => ReadinessOutcome::Cancelled,
     }
 }
 
@@ -697,11 +749,7 @@ fn before_phase_deadline(
     lease_deadline: &tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
     start_deadline: Option<&DateTime<FixedOffset>>,
 ) -> bool {
-    let lease = lease_deadline.borrow().with_timezone(&Utc);
-    let effective = start_deadline
-        .map(|value| value.with_timezone(&Utc).min(lease))
-        .unwrap_or(lease);
-    Utc::now() < effective
+    Utc::now() < crate::health::phase_deadline(lease_deadline, start_deadline)
 }
 
 async fn wait_for_launch_stability(
@@ -717,11 +765,7 @@ async fn wait_for_launch_stability(
         {
             return false;
         }
-        let lease = lease_deadline.borrow().with_timezone(&Utc);
-        let effective = start_deadline
-            .as_ref()
-            .map(|value| value.with_timezone(&Utc).min(lease))
-            .unwrap_or(lease);
+        let effective = crate::health::phase_deadline(&lease_deadline, start_deadline.as_ref());
         let until_deadline = (effective - Utc::now()).to_std().unwrap_or(Duration::ZERO);
         tokio::select! {
             _ = tokio::time::sleep_until(stable_at) => {
@@ -1215,6 +1259,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .runtime
                     .ensure_memory_available(
                         request.reserved_memory_bytes,
+                        request.memory_floor_bytes,
+                        &request.memory_kind.to_string(),
                         Path::new("/proc/meminfo"),
                     )
                     .is_err()
@@ -1677,6 +1723,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     || spec.runtime.placement.world_size != request.world_size
                     || spec.runtime.placement.port != Some(request.port)
                     || spec.runtime.placement.reserved_memory_bytes != request.reserved_memory_bytes
+                    || spec.runtime.placement.memory_floor_bytes != request.memory_floor_bytes
+                    || spec.runtime.placement.memory_kind.to_string()
+                        != request.memory_kind.to_string()
                     || spec.runtime.placement.local_address != request.local_address
                     || spec.runtime.placement.master_address != request.master_address
                     || spec.runtime.placement.master_port != request.master_port
@@ -1787,6 +1836,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         .runtime
                         .ensure_memory_available(
                             request.reserved_memory_bytes,
+                            request.memory_floor_bytes,
+                            &request.memory_kind.to_string(),
                             Path::new("/proc/meminfo"),
                         )
                         .is_err()
@@ -1809,8 +1860,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         },
                     ) {
                         Ok(plan) => plan,
-                        Err(_) => {
-                            return failed("container runtime could not prepare the workload");
+                        Err(error) => {
+                            return runtime_preparation_failure(&error);
                         }
                     }
                 };
@@ -1905,6 +1956,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         .runtime
                         .ensure_memory_available(
                             request.reserved_memory_bytes,
+                            request.memory_floor_bytes,
+                            &request.memory_kind.to_string(),
                             Path::new("/proc/meminfo"),
                         )
                         .is_err()
@@ -2142,20 +2195,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let runtime_guard = async {
                     loop {
                         tokio::time::sleep(Duration::from_secs(10)).await;
-                        if self
-                            .execute_host_runtime(
-                                claim,
-                                HostRuntimeAction::RunInspect,
-                                runtime_guard_arguments.clone(),
-                            )
-                            .await
-                            .is_err()
-                        {
-                            return false;
-                        }
+                        self.execute_host_runtime(
+                            claim,
+                            HostRuntimeAction::RunInspect,
+                            runtime_guard_arguments.clone(),
+                        )
+                        .await?;
                     }
                 };
-                let ready = if collective_readiness {
+                let ready = match if collective_readiness {
                     wait_ready_with_runtime_guard_and_cancellation(
                         wait_ready_until(
                             request.endpoint_address,
@@ -2180,6 +2228,22 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         cancellation.clone(),
                     )
                     .await
+                } {
+                    ReadinessOutcome::Ready => true,
+                    ReadinessOutcome::Cancelled | ReadinessOutcome::Deadline => false,
+                    ReadinessOutcome::GuardFailed(error) => {
+                        // The runtime could not be inspected, so the effect cannot
+                        // be bound.  Name that instead of reporting a readiness
+                        // deadline the workload never reached: a temporary
+                        // inspection failure is the code the Controller already
+                        // retries for a start, so it becomes self-healing, and any
+                        // other rejection carries the captured container output
+                        // the inspection gate admits.
+                        if temporary_observation_error(&error) {
+                            return temporary_runtime_observation_failure();
+                        }
+                        return runtime_observation_failure(&error);
+                    }
                 };
                 if !ready {
                     if *cancellation.borrow() {
@@ -2499,6 +2563,36 @@ fn temporary_runtime_observation_failure() -> ExecutionResult {
     }
 }
 
+/// Refuse a start whose observation failed, carrying what the helper captured.
+///
+/// A rejection raised on the inspection path can carry the exact container's
+/// output -- the one case the diagnostic gate admits for a privileged action,
+/// admitted because the inspection already proved the container's identity and
+/// sanitized the text.  Reporting only the code left an operator with "the
+/// observation failed" when the answer was that the workload process had exited
+/// and printed why.
+fn runtime_observation_failure(error: &crate::host_runtime::HostRuntimeError) -> ExecutionResult {
+    let reason = match error.diagnostic() {
+        Some(detail) if !detail.is_empty() => {
+            format!("exact workload runtime observation failed: {error}: {detail}")
+        }
+        _ => format!("exact workload runtime observation failed: {error}"),
+    };
+    let mut body = json!({"reason": reason});
+    if let Some(logs) =
+        crate::failure_evidence::diagnostic_logs(error.process_logs(), error.diagnostic())
+    {
+        body["diagnostic_logs"] = logs;
+    }
+    if let crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } = error {
+        body["helper_error_code"] = json!(code);
+    }
+    ExecutionResult {
+        state: "failed",
+        body,
+    }
+}
+
 fn failed_owned(reason: String) -> ExecutionResult {
     ExecutionResult {
         state: "failed",
@@ -2653,6 +2747,8 @@ fn job_placement(
         || placement.world_size != 1
         || placement.port.is_some()
         || placement.reserved_memory_bytes != request.reserved_memory_bytes
+        || placement.memory_floor_bytes != request.memory_floor_bytes
+        || placement.memory_kind.to_string() != request.memory_kind.to_string()
     {
         return Err(WorkloadError::Invalid("job placement"));
     }
@@ -3150,13 +3246,19 @@ fn runtime_failure(reason: &str, error: &crate::host_runtime::HostRuntimeError) 
             "observed": observed,
         });
     }
-    if let Some(detail) = error.diagnostic() {
-        result.body["diagnostic_logs"] = json!({
-            "stdout": crate::failure_evidence::log_tail(&[]),
-            "stderr": crate::failure_evidence::log_tail(detail.as_bytes()),
-        });
+    if let Some(logs) =
+        crate::failure_evidence::diagnostic_logs(error.process_logs(), error.diagnostic())
+    {
+        result.body["diagnostic_logs"] = logs;
     }
     result
+}
+
+fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
+    let (stage, category) = error.safe_start_context();
+    failed_owned(format!(
+        "container runtime could not prepare the workload (stage={stage}; category={category})"
+    ))
 }
 
 fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> ExecutionResult {
@@ -3309,7 +3411,7 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "runtime_helper_request_attempt_invalid"
             | "runtime_helper_request_arguments_presence_invalid"
             | "runtime_helper_request_installation_identity_invalid"
-            | "runtime_helper_request_argument_count_invalid"
+            | "runtime_helper_request_bytes_invalid"
             | "runtime_helper_request_argument_nul_byte"
             | "runtime_helper_request_storage_invalid"
             | "runtime_helper_system_clock_invalid"
@@ -3509,13 +3611,15 @@ fn remaining_lease(deadline: DateTime<FixedOffset>) -> Duration {
 mod tests {
     use super::{
         ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, HeartbeatFailure, InterruptibleJob,
-        LoopClient, RecipeExecutor, RecipeObservationError, RejectingExecutor, RunOncePolicy,
-        classify_heartbeat_failure, controller_denial_diagnostic, distribution_failure_result,
-        distribution_success_evidence, normalize_execution_result, output_media_type,
-        parse_compiled_execution_plan, readiness_identity, recipe_install_success_body,
-        report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
-        run_once_with_heartbeat_interval, temporary_runtime_observation_failure,
-        wait_for_launch_stability, wait_ready_with_runtime_guard_and_cancellation,
+        LoopClient, ReadinessOutcome, RecipeExecutor, RecipeObservationError, RejectingExecutor,
+        RunOncePolicy, classify_heartbeat_failure, controller_denial_diagnostic,
+        distribution_failure_result, distribution_success_evidence, normalize_execution_result,
+        output_media_type, parse_compiled_execution_plan, readiness_identity,
+        recipe_install_success_body, report_complete_recipe_run_observations,
+        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
+        runtime_observation_failure, temporary_observation_error,
+        temporary_runtime_observation_failure, wait_for_launch_stability,
+        wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
         client::{AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence},
@@ -3604,12 +3708,18 @@ mod tests {
         let spec = request.compiled_execution_plan.clone();
         spec.validate().unwrap();
         let placement = super::job_placement(&spec, &request).unwrap();
-        for field in ["rank", "role", "reserved_memory_bytes"] {
+        for field in [
+            "rank",
+            "role",
+            "reserved_memory_bytes",
+            "memory_floor_bytes",
+        ] {
             let mut altered = claim["payload"].clone();
             altered[field] = match field {
                 "rank" => json!(1),
                 "role" => json!("worker"),
-                _ => json!(request.reserved_memory_bytes + 1024),
+                "reserved_memory_bytes" => json!(request.reserved_memory_bytes + 1024),
+                _ => json!(request.memory_floor_bytes + 1024),
             };
             if matches!(field, "rank" | "role") {
                 assert!(
@@ -3806,25 +3916,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exact_snapshot_inspection_failure_never_reports_partial_or_empty() {
+    async fn exact_snapshot_inspection_failure_preserves_other_runs_without_reporting_empty() {
+        // Wrong implementation: a denied or unavailable retained run discards
+        // current healthy receipts, eventually expiring that unrelated run.
         for error in [
             crate::host_runtime::HostRuntimeError::HelperProtocol(
                 crate::host_runtime::HelperProtocolCause::ObservationTimestamp,
             ),
             crate::host_runtime::HostRuntimeError::Controller(ClientError::ObservationNotReady),
+            crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(Box::new(
+                crate::client::ControllerError::from_status(403),
+            ))),
         ] {
             let server = ObservationServer::new(Some(204));
+            let current_run = Uuid::new_v4();
             let result = report_complete_recipe_run_observations(
                 &server.client,
                 vec![
-                    Ok(exact_observation(Uuid::new_v4())),
+                    Ok(exact_observation(current_run)),
                     Err(RecipeObservationError::Inspection(error)),
                 ],
             )
             .await;
             assert!(matches!(result, Err(RecipeObservationError::Inspection(_))));
-            assert!(server.finish().is_empty());
+            let reports = server.finish();
+            assert_eq!(reports.len(), 1);
+            let runs = reports[0]["runs"].as_array().unwrap();
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0]["run_id"], current_run.to_string());
         }
+    }
+
+    #[tokio::test]
+    async fn exact_snapshot_failed_inspection_is_not_proof_of_an_empty_node() {
+        let server = ObservationServer::new(Some(204));
+        let result = report_complete_recipe_run_observations(
+            &server.client,
+            vec![Err(RecipeObservationError::Inspection(
+                crate::host_runtime::HostRuntimeError::Controller(ClientError::ObservationNotReady),
+            ))],
+        )
+        .await;
+        assert!(matches!(result, Err(RecipeObservationError::Inspection(_))));
+        assert!(server.finish().is_empty());
     }
 
     #[tokio::test]
@@ -3838,6 +3972,22 @@ mod tests {
             .unwrap()
             .into();
         stale.validate().unwrap();
+        let fresh = exact_observation(Uuid::new_v4());
+        assert!(matches!(
+            report_complete_recipe_run_observations(
+                &server.client,
+                vec![Ok(stale.clone()), Ok(fresh.clone())]
+            )
+            .await,
+            Err(RecipeObservationError::StaleSnapshot)
+        ));
+        let reports = server.finish();
+        assert_eq!(reports.len(), 1);
+        let runs = reports[0]["runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0]["run_id"], fresh.run_id.to_string());
+
+        let server = ObservationServer::new(Some(204));
         assert!(matches!(
             report_complete_recipe_run_observations(&server.client, vec![Ok(stale)]).await,
             Err(RecipeObservationError::StaleSnapshot)
@@ -4227,45 +4377,99 @@ mod tests {
         let readiness = std::future::pending::<Result<(), crate::health::HealthError>>();
 
         let (_sender, cancellation) = tokio::sync::watch::channel(false);
-        assert!(
-            !wait_ready_with_runtime_guard_and_cancellation(
-                readiness,
-                async { false },
-                cancellation
-            )
-            .await
-        );
+        let outcome = wait_ready_with_runtime_guard_and_cancellation(
+            readiness,
+            async { Err(crate::host_runtime::HostRuntimeError::StopUncertain) },
+            cancellation,
+        )
+        .await;
+        assert!(matches!(outcome, ReadinessOutcome::GuardFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn a_failed_runtime_inspection_names_the_inspection_not_a_readiness_deadline() {
+        // Wrong implementation this catches: the guard collapsed every error into
+        // `false`, so a failed privileged inspection was reported as "the workload
+        // did not become ready before its deadline" and the Controller's existing
+        // `runtime_observation_unavailable` retry could never fire.  Observed live
+        // on 2026-09-17, a two-Spark GLM start ended 51 s in -- five ten-second
+        // inspection ticks -- with an hour of start budget unused.
+        let error = crate::host_runtime::HostRuntimeError::Io(std::io::Error::other(
+            "privileged inspection failed",
+        ));
+        assert!(temporary_observation_error(&error));
+        let (_sender, cancellation) = tokio::sync::watch::channel(false);
+        let outcome = wait_ready_with_runtime_guard_and_cancellation(
+            std::future::pending::<Result<(), crate::health::HealthError>>(),
+            async { Err(error) },
+            cancellation,
+        )
+        .await;
+        assert!(matches!(outcome, ReadinessOutcome::GuardFailed(_)));
     }
 
     #[tokio::test]
     async fn successful_readiness_ends_a_still_running_runtime_guard() {
-        let runtime_guard = std::future::pending::<bool>();
+        let runtime_guard = std::future::pending::<
+            Result<std::convert::Infallible, crate::host_runtime::HostRuntimeError>,
+        >();
 
         let (_sender, cancellation) = tokio::sync::watch::channel(false);
-        assert!(
-            wait_ready_with_runtime_guard_and_cancellation(
-                async { Ok(()) },
-                runtime_guard,
-                cancellation,
-            )
-            .await
-        );
+        let outcome = wait_ready_with_runtime_guard_and_cancellation(
+            async { Ok(()) },
+            runtime_guard,
+            cancellation,
+        )
+        .await;
+        assert!(matches!(outcome, ReadinessOutcome::Ready));
     }
 
+    #[test]
+    fn an_exited_workload_failure_carries_the_captured_container_output() {
+        // Wrong implementation this catches: the guard's rejection was reported as
+        // its code alone, so an operator read "the observation failed" when the
+        // answer was that the workload process had exited and printed why.  The
+        // inspection gate admits that text precisely because the inspection
+        // already proved the container's identity and sanitized it.
+        let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code: "runtime_process_exited".to_owned(),
+            diagnostic: None,
+            process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
+                stdout: crate::failure_evidence::log_tail(b"rank 0 listening on 8888\n"),
+                stderr: crate::failure_evidence::log_tail(b"ModuleNotFoundError: runtime module\n"),
+            })),
+        };
+        let result = runtime_observation_failure(&error);
+        assert_eq!(result.state, "failed");
+        let reason = result.body["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("runtime_process_exited"), "{reason}");
+        // Both streams arrive as themselves: merging them into one tail is what
+        // discarded the stream that was written first.
+        let stdout = result.body["diagnostic_logs"]["stdout"]["text"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(stdout.contains("listening on 8888"), "{stdout}");
+        let stderr = result.body["diagnostic_logs"]["stderr"]["text"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(stderr.contains("ModuleNotFoundError"), "{stderr}");
+    }
     #[tokio::test]
     async fn collective_readiness_exits_when_the_controller_cancels() {
         let (sender, cancellation) = tokio::sync::watch::channel(false);
         let wait = wait_ready_with_runtime_guard_and_cancellation(
             std::future::pending::<Result<(), crate::health::HealthError>>(),
-            std::future::pending::<bool>(),
+            std::future::pending::<
+                Result<std::convert::Infallible, crate::host_runtime::HostRuntimeError>,
+            >(),
             cancellation,
         );
         let trigger = async {
             tokio::task::yield_now().await;
             sender.send_replace(true);
         };
-        let (ready, ()) = tokio::join!(wait, trigger);
-        assert!(!ready);
+        let (outcome, ()) = tokio::join!(wait, trigger);
+        assert!(matches!(outcome, ReadinessOutcome::Cancelled));
     }
 
     #[tokio::test]
@@ -4662,14 +4866,43 @@ mod tests {
     }
 
     #[test]
+    fn preparation_failure_keeps_safe_stage_and_permission_boundary_in_controller_result() {
+        use crate::oci::OciError;
+
+        let mut start_claim = claim();
+        start_claim.operation = "recipe.start".parse().unwrap();
+        let error = OciError::Start {
+            stage: "output-storage",
+            source: Box::new(OciError::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "/private/secret-credential-value",
+            ))),
+        };
+        let failure = super::runtime_preparation_failure(&error);
+        let normalized = super::normalize_execution_result(&start_claim, failure);
+        let result: vonk_agent_protocol::generated::AgentFailureResult =
+            serde_json::from_value(normalized.body).unwrap();
+        assert_eq!(
+            result.reason.as_deref(),
+            Some(
+                "container runtime could not prepare the workload (stage=output-storage; category=storage-permission-denied)"
+            )
+        );
+    }
+
+    #[test]
     fn rank_launch_failure_keeps_sanitized_logs_in_the_controller_contract() {
         let mut start_claim = claim();
         start_claim.operation = "recipe.start".parse().unwrap();
         let error = crate::host_runtime::HostRuntimeError::HelperRejected {
             code: "runtime_process_exited".into(),
-            diagnostic: Some(
-                "ModuleNotFoundError: runtime module\nAPI_TOKEN=private-value\n".into(),
-            ),
+            diagnostic: None,
+            process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
+                stdout: crate::failure_evidence::log_tail(b"starting the engine core\n"),
+                stderr: crate::failure_evidence::log_tail(
+                    b"ModuleNotFoundError: runtime module\nAPI_TOKEN=private-value\n",
+                ),
+            })),
         };
         let failed =
             super::runtime_failure("rank process did not remain stable after launch", &error);
@@ -4684,6 +4917,7 @@ mod tests {
         );
         let diagnostics = body.diagnostics.as_ref().unwrap();
         diagnostics.validate().unwrap();
+        assert!(diagnostics.stdout.text.contains("starting the engine core"));
         assert!(diagnostics.stderr.text.contains("ModuleNotFoundError"));
         assert!(
             !serde_json::to_string(&body)
@@ -4768,10 +5002,11 @@ mod tests {
         // of 4096.
         let mut start_claim = claim();
         start_claim.operation = "recipe.start".parse().unwrap();
+        let limit = vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES as u64;
         let error = crate::host_runtime::HostRuntimeError::HelperProtocolBound {
-            cause: crate::host_runtime::HelperProtocolCause::RequestArgumentCount,
-            limit: Some(4096),
-            observed: 518,
+            cause: crate::host_runtime::HelperProtocolCause::RequestBytes,
+            limit: Some(limit),
+            observed: limit + 1,
         };
         let failed =
             super::runtime_failure("container runtime could not start the workload", &error);
@@ -4784,14 +5019,14 @@ mod tests {
             .iter()
             .find(|property| property.name == "request_refusal")
             .expect("the refusal bound must be reported");
-        assert!(refusal.value.contains("request_argument_count_invalid"));
-        assert!(refusal.value.contains("limit=4096"));
-        assert!(refusal.value.contains("observed=518"));
+        assert!(refusal.value.contains("request_bytes_invalid"));
+        assert!(refusal.value.contains(&format!("limit={limit}")));
+        assert!(refusal.value.contains(&format!("observed={}", limit + 1)));
         assert!(
             body.reason
                 .as_deref()
                 .unwrap()
-                .contains("helper_request_argument_count_invalid")
+                .contains("helper_request_bytes_invalid")
         );
     }
 
@@ -4814,7 +5049,7 @@ mod tests {
             crate::host_runtime::HelperProtocolCause::RequestAttempt,
             crate::host_runtime::HelperProtocolCause::RequestArgumentsPresence,
             crate::host_runtime::HelperProtocolCause::RequestInstallationIdentity,
-            crate::host_runtime::HelperProtocolCause::RequestArgumentCount,
+            crate::host_runtime::HelperProtocolCause::RequestBytes,
             crate::host_runtime::HelperProtocolCause::RequestArgumentNulByte,
             crate::host_runtime::HelperProtocolCause::RequestStorage,
             crate::host_runtime::HelperProtocolCause::SystemClock,
@@ -5597,14 +5832,18 @@ mod tests {
         // still healthy -- and ended the agent's ability to observe the
         // Controller's cancellation with it.
         let directory = tempdir().unwrap();
+        // Open the store before the lease is timed.  `state.begin` refuses an
+        // already-expired claim, so anything slow on the path to the loop is
+        // inside the lease's margin; a SQLite open plus schema creation is
+        // exactly that, and on a loaded two-core runner it was enough to make
+        // the claim expire before the loop started.
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
         let heartbeats = Arc::new(Mutex::new(Vec::new()));
         let accepted_at = Arc::new(Mutex::new(Vec::new()));
         let mut lease = claim();
         // The lease lapses in real time, because that is the condition under
-        // test.  The margins are wide enough to survive a loaded runner:
-        // `state.begin` refuses an already-expired claim, so the accepted lease
-        // must comfortably outlive loop startup, and the refusal window must
-        // comfortably outlive the lease.
+        // test.  The margin now covers only loop startup, and the refusal
+        // window comfortably outlives the lease.
         let lease_deadline = Utc::now() + ChronoDuration::milliseconds(500);
         lease.deadline = lease_deadline.with_timezone(&FixedOffset::east_opt(0).unwrap());
         let client = LeaseLapseClient {
@@ -5617,7 +5856,7 @@ mod tests {
             },
             // Comfortably past the accepted lease, so every renewal before this
             // instant is refused and the lease has certainly lapsed.
-            lapsed_after: Utc::now() + ChronoDuration::milliseconds(1000),
+            lapsed_after: Utc::now() + ChronoDuration::milliseconds(2000),
             accepted_at: accepted_at.clone(),
         };
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -5627,7 +5866,6 @@ mod tests {
             cap: Duration::from_secs(5),
             cancelled: cancelled.clone(),
         };
-        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
 
         run_once_with_heartbeat_interval(
             &client,
@@ -5684,6 +5922,8 @@ mod tests {
             "role": "entrypoint",
             "port": 29500,
             "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 2_000_000_000,
+            "memory_kind": "unified",
             "endpoint_address": "10.0.0.1",
             "world_size": 2,
             "compiled_execution_plan": serde_json::from_str::<Value>(include_str!(

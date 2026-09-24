@@ -16,8 +16,13 @@ from typing import cast
 
 def _get_kwargs(
     job_id: str,
+    *,
+    x_request_id: str,
 
 ) -> dict[str, Any]:
+    headers: dict[str, Any] = {}
+    headers["X-Request-ID"] = x_request_id
+
 
 
 
@@ -30,6 +35,7 @@ def _get_kwargs(
     }
 
 
+    _kwargs["headers"] = headers
     return _kwargs
 
 
@@ -103,12 +109,14 @@ def sync_detailed(
     job_id: str,
     *,
     client: AuthenticatedClient,
+    x_request_id: str,
 
 ) -> Response[Union[ArtifactJobResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Submit Job
 
     Args:
         job_id (str):
+        x_request_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -121,6 +129,7 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         job_id=job_id,
+x_request_id=x_request_id,
 
     )
 
@@ -134,12 +143,14 @@ def sync(
     job_id: str,
     *,
     client: AuthenticatedClient,
+    x_request_id: str,
 
 ) -> Optional[Union[ArtifactJobResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Submit Job
 
     Args:
         job_id (str):
+        x_request_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -153,6 +164,7 @@ def sync(
     return sync_detailed(
         job_id=job_id,
 client=client,
+x_request_id=x_request_id,
 
     ).parsed
 
@@ -160,12 +172,14 @@ async def asyncio_detailed(
     job_id: str,
     *,
     client: AuthenticatedClient,
+    x_request_id: str,
 
 ) -> Response[Union[ArtifactJobResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Submit Job
 
     Args:
         job_id (str):
+        x_request_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -178,6 +192,7 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         job_id=job_id,
+x_request_id=x_request_id,
 
     )
 
@@ -191,12 +206,14 @@ async def asyncio(
     job_id: str,
     *,
     client: AuthenticatedClient,
+    x_request_id: str,
 
 ) -> Optional[Union[ArtifactJobResponse, BoundedErrorResponse, RequestValidationProblem]]:
     """ Submit Job
 
     Args:
         job_id (str):
+        x_request_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -210,5 +227,6 @@ async def asyncio(
     return (await asyncio_detailed(
         job_id=job_id,
 client=client,
+x_request_id=x_request_id,
 
     )).parsed

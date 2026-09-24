@@ -104,6 +104,10 @@ class CommandOutcome:
             context = "preview"
         elif getattr(args, "follow", False):
             context = "await"
+        elif getattr(args, "model_action", None) == "cancel" and operation_state(
+            result
+        ) in {"cancelling", "cancelled"}:
+            context = "read"
         observation = getattr(args, "observation", None)
         return cls(
             result,
@@ -130,6 +134,12 @@ class CommandOutcome:
         state = operation_state(self.document)
         if state == "partial":
             return 1
-        if state in {"failed", "blocked", "cancelled", "rejected"}:
+        if state in {
+            "failed",
+            "blocked",
+            "cancelled",
+            "rejected",
+            "waiting-for-operator",
+        }:
             return 2
         return 0

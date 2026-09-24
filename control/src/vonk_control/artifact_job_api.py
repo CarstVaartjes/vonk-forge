@@ -110,7 +110,7 @@ def install_artifact_job_routes(
     )
     def create_job(
         body: ArtifactJobCreate,
-        request: Request,
+        request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
         run_id: str = Path(pattern=_UUID),
         actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
@@ -125,11 +125,27 @@ def install_artifact_job_routes(
                     output_limits=body.output_limits.model_dump(),
                     timeout_seconds=body.timeout_seconds,
                     actor=actor.subject,
-                    request_id=request.state.request_id,
+                    request_id=request_id,
                 )
             )
         except ArtifactJobError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
+
+    @app.get(
+        "/api/artifact-jobs/requests/{request_id}",
+        response_model=ArtifactJobResponse,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="getArtifactJobByRequestId",
+    )
+    def job_by_request_id(
+        request_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
+    ) -> ArtifactJobResponse:
+        try:
+            return _view(_service(service).get_by_request_id(request_id))
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="artifact job request not found"
+            ) from None
 
     @app.put(
         "/api/artifact-jobs/{job_id}/inputs/{name}",
@@ -210,7 +226,7 @@ def install_artifact_job_routes(
         openapi_extra={"x-vonk-request-body": "none"},
     )
     def submit_job(
-        request: Request,
+        request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
         job_id: str = Path(pattern=_UUID),
         actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
@@ -220,7 +236,7 @@ def install_artifact_job_routes(
                 _service(service).submit(
                     job_id,
                     actor=actor.subject,
-                    request_id=request.state.request_id,
+                    request_id=request_id,
                 )
             )
         except KeyError:
@@ -254,7 +270,7 @@ def install_artifact_job_routes(
     )
     def cancel_job(
         body: CancelRequest,
-        request: Request,
+        request_id: Annotated[str, Header(alias="X-Request-ID", pattern=_UUID)],
         job_id: str = Path(pattern=_UUID),
         actor: Actor = actor_dependency,
     ) -> ArtifactJobResponse:
@@ -264,7 +280,7 @@ def install_artifact_job_routes(
                 _service(service).cancel(
                     job_id,
                     actor=actor.subject,
-                    request_id=request.state.request_id,
+                    request_id=request_id,
                     reason=body.reason,
                 )
             )
@@ -294,7 +310,7 @@ def install_artifact_job_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.get(
-        "/api/artifact-jobs/{job_id}/results/{sha256}",
+        "/api/artifact-jobs/{job_id}/results/{name}/{sha256}",
         operation_id="downloadArtifactJobResult",
         response_class=StreamingResponse,
         responses={
@@ -307,12 +323,13 @@ def install_artifact_job_routes(
     )
     def download_result(
         job_id: str = Path(pattern=_UUID),
+        name: str = Path(pattern=_NAME),
         sha256: str = Path(pattern=_DIGEST),
         _actor: Actor = actor_dependency,
     ) -> Response:
         try:
-            path, media_type, name, size_bytes = _service(service).result_blob(
-                job_id, sha256
+            path, media_type, result_name, size_bytes = _service(service).result_blob(
+                job_id, name, sha256
             )
         except KeyError:
             raise HTTPException(
@@ -324,7 +341,7 @@ def install_artifact_job_routes(
             ArtifactBlobStore.iter_file(path),
             media_type=media_type,
             headers={
-                "Content-Disposition": f'attachment; filename="{name}"',
+                "Content-Disposition": f'attachment; filename="{result_name}"',
                 "Content-Length": str(size_bytes),
                 "X-Content-SHA256": sha256,
             },

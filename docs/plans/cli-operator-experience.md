@@ -1,6 +1,14 @@
 # CLI operator experience: design and delivery plan
 
-Status: design accepted for implementation; implementation is not complete.
+Status: accepted design baseline from 2026-09-22. Implementation is underway;
+see the [current package status](cli-operator-status.md) and
+[operator runbook](../runbooks/vonkctl.md) for implemented behavior and commands.
+
+The source inventory, “Proposed” labels and blocked-command descriptions below
+record the design baseline, not current command availability. They preserve the
+reasoning behind the work packages; use the detailed implementation plan and
+its status record to determine what remains. This document is not a second
+operator command reference.
 
 Reviewed 2026-09-22 against repository commit
 `49389f3dced50d2ecf7680e256dbe1827817eaee` and the primary interface references
@@ -50,9 +58,10 @@ The [engineering principles](../engineering-principles.md),
 [API contracts](../api-contracts.md), and
 [error policy](../error-reporting.md) remain authoritative.
 
-## 2. What exists, and what needs design work
+## 2. Source inventory at the design baseline
 
-These are source observations, not claims about the deployed Controller.
+These observations refer to the reviewed commit above, not the current checkout
+or deployed Controller.
 
 | Area | Current evidence | Design consequence |
 | --- | --- | --- |

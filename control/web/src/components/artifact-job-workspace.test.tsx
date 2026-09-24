@@ -76,6 +76,7 @@ function job(input: Partial<ArtifactJob> = {}): ArtifactJob {
     id: "00000000-0000-4000-8000-000000000020",
     run_id: run.run_id,
     operation_id: "operation-1",
+    submit_request_id: "00000000-0000-4000-8000-000000000099",
     interface: "image-job",
     state: "succeeded",
     contract_sha256: "8".repeat(64),
@@ -106,6 +107,7 @@ function job(input: Partial<ArtifactJob> = {}): ArtifactJob {
 
 function api(initialJobs: ArtifactJob[] = []) {
   const submitted = job({state: "succeeded"});
+  let storedDraft: ArtifactJob | undefined;
   return {
     artifactJobCapabilities: vi.fn().mockResolvedValue({
       schema_version: 1,
@@ -113,12 +115,26 @@ function api(initialJobs: ArtifactJob[] = []) {
       storage: {max_stored_bytes: 10_737_418_240, used_bytes: 1_073_741_824, remaining_bytes: 9_663_676_416},
     }),
     artifactJobsForRun: vi.fn().mockResolvedValue({jobs: initialJobs}),
-    createArtifactJob: vi.fn().mockResolvedValue(job({operation_id: null, state: "draft"})),
-    uploadArtifactJobInput: vi.fn().mockResolvedValue(job({operation_id: null, state: "draft"})),
-    finalizeArtifactJob: vi.fn().mockResolvedValue(job({operation_id: null, state: "ready"})),
-    submitArtifactJob: vi.fn().mockResolvedValue(submitted),
-    cancelArtifactJob: vi.fn().mockResolvedValue(job({state: "cancelled", status_reason: "Cancelled by operator"})),
-    artifactJobResultUrl: vi.fn((jobId: string, digest: string) => `/api/artifact-jobs/${jobId}/results/${digest}`),
+    artifactJobByRequestId: vi.fn().mockRejectedValue(Object.assign(new Error("artifact job request not found"), {status: 404})),
+    createArtifactJob: vi.fn().mockImplementation((runId: string, input: Parameters<LibraryApi["createArtifactJob"]>[1]) => {
+      storedDraft = job({run_id: runId, operation_id: null, submit_request_id: null, state: "draft", input_declarations: input.inputs ?? [], input_files: []});
+      return Promise.resolve(storedDraft);
+    }),
+    uploadArtifactJobInput: vi.fn().mockImplementation((_jobId: string, file: Parameters<LibraryApi["uploadArtifactJobInput"]>[1]) => {
+      storedDraft = job({...storedDraft, operation_id: null, submit_request_id: null, state: "draft", input_files: [...(storedDraft?.input_files ?? []), file]});
+      return Promise.resolve(storedDraft);
+    }),
+    finalizeArtifactJob: vi.fn().mockImplementation(() => {
+      storedDraft = job({...storedDraft, operation_id: null, submit_request_id: null, state: "ready"});
+      return Promise.resolve(storedDraft);
+    }),
+    artifactJob: vi.fn().mockResolvedValue(job()),
+    submitArtifactJob: vi.fn().mockImplementation((_jobId: string, requestId: string) => Promise.resolve({...submitted, submit_request_id: requestId})),
+    cancelArtifactJob: vi.fn().mockImplementation((_jobId: string, reason: string, requestId: string) => Promise.resolve(job({state: "cancelled", status_reason: reason, result_evidence: {elapsed_milliseconds: 1250, peak_memory_bytes: 1024, cancel_request_id: requestId, cancel_reason: reason}}))),
+    artifactJobResultUrl: vi.fn(
+      (jobId: string, name: string, digest: string) =>
+        `/api/artifact-jobs/${jobId}/results/${encodeURIComponent(name)}/${digest}`,
+    ),
   };
 }
 
@@ -163,6 +179,324 @@ test("derives prompt, parameter, and input constraints from the running recipe a
   );
   expect(client.finalizeArtifactJob.mock.calls[0][0]).toBe("00000000-0000-4000-8000-000000000020");
   expect(await screen.findByText("Succeeded")).toBeInTheDocument();
+});
+
+test("reuses the create identity across lost receipts, resumed upload, and exact submit recovery", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  const draft = job({operation_id: null, state: "draft", submit_request_id: null, input_files: []});
+  client.createArtifactJob.mockRejectedValueOnce(new Error("connection closed after create"));
+  client.artifactJobByRequestId.mockResolvedValueOnce(draft);
+  client.createArtifactJob
+    .mockResolvedValueOnce(draft)
+    .mockImplementationOnce((_runId, body) => Promise.resolve(job({
+      operation_id: null,
+      state: "draft",
+      submit_request_id: null,
+      input_files: body.inputs,
+    })))
+    .mockImplementationOnce((_runId, body) => Promise.resolve(job({
+      operation_id: null,
+      state: "ready",
+      submit_request_id: null,
+      input_files: body.inputs,
+    })));
+  client.uploadArtifactJobInput.mockRejectedValueOnce(new Error("upload receipt was lost"));
+  client.finalizeArtifactJob.mockRejectedValueOnce(new Error("finalize receipt was lost"));
+  client.submitArtifactJob.mockImplementationOnce((_jobId: string, requestId: string) => {
+    client.artifactJob.mockResolvedValueOnce(job({
+      state: "queued",
+      operation_id: "operation-accepted",
+      submit_request_id: requestId,
+    }));
+    return Promise.reject(new Error("connection closed after submit"));
+  });
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Retry the exact draft");
+  await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
+  expect(await screen.findByText("upload receipt was lost")).toBeInTheDocument();
+  const firstCreateKey = client.createArtifactJob.mock.calls[0]![2];
+  expect(firstCreateKey).toMatch(/^[0-9a-f-]{36}$/);
+  expect(client.artifactJobByRequestId).toHaveBeenCalledWith(firstCreateKey);
+  expect(client.createArtifactJob.mock.calls[1]![2]).toBe(firstCreateKey);
+
+  await user.click(screen.getByRole("button", {name: "Review and try again"}));
+  await user.click(screen.getByRole("button", {name: "Submit artifact job"}));
+  expect(await screen.findByText("finalize receipt was lost")).toBeInTheDocument();
+  expect(client.uploadArtifactJobInput).toHaveBeenCalledOnce();
+
+  await user.click(screen.getByRole("button", {name: "Review and try again"}));
+  await user.click(screen.getByRole("button", {name: "Submit artifact job"}));
+
+  expect(await screen.findByText("Queued")).toBeInTheDocument();
+  expect(client.createArtifactJob).toHaveBeenCalledTimes(4);
+  expect(client.createArtifactJob.mock.calls.map(call => call[2])).toEqual([
+    firstCreateKey,
+    firstCreateKey,
+    firstCreateKey,
+    firstCreateKey,
+  ]);
+  expect(client.finalizeArtifactJob).toHaveBeenCalledOnce();
+  expect(client.submitArtifactJob).toHaveBeenCalledOnce();
+  const submitKey = client.submitArtifactJob.mock.calls[0]![1];
+  expect(submitKey).toMatch(/^[0-9a-f-]{36}$/);
+  expect(client.artifactJob).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000020");
+});
+
+test("does not let a matching old submit receipt override an explicit permission denial", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.submitArtifactJob.mockImplementationOnce((_jobId: string, requestId: string) => {
+    client.artifactJob.mockResolvedValueOnce(job({state: "queued", operation_id: "old-operation", submit_request_id: requestId}));
+    return Promise.reject(Object.assign(new Error("permission denied"), {status: 403}));
+  });
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Do not bypass a denial");
+  await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("permission denied");
+  expect(client.artifactJob).not.toHaveBeenCalled();
+  expect(screen.queryByText("Queued")).not.toBeInTheDocument();
+});
+
+test("does not retry an aborted create after the exact request lookup returns not found", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.createArtifactJob.mockImplementationOnce((_runId: string, _body, _requestId: string, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+    signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), {once: true});
+  }));
+  client.artifactJobByRequestId.mockRejectedValueOnce(Object.assign(new Error("not found"), {status: 404}));
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Stop before retry");
+  await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
+  await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalledOnce());
+  await user.click(screen.getByRole("button", {name: "Cancel transfer"}));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("before a durable artifact job was created");
+  expect(client.artifactJobByRequestId).toHaveBeenCalledOnce();
+  expect(client.createArtifactJob).toHaveBeenCalledOnce();
+  expect(client.uploadArtifactJobInput).not.toHaveBeenCalled();
+  expect(client.cancelArtifactJob).not.toHaveBeenCalled();
+});
+
+test("cancels the exact draft found after an aborted create without replaying create", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  const acceptedDraft = job({id: "00000000-0000-4000-8000-000000000044", run_id: run.run_id, operation_id: null, state: "draft", submit_request_id: null, input_files: []});
+  client.createArtifactJob.mockImplementationOnce((_runId: string, _body, _requestId: string, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+    signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), {once: true});
+  }));
+  client.artifactJobByRequestId.mockResolvedValueOnce(acceptedDraft);
+  client.cancelArtifactJob.mockImplementationOnce((_jobId: string, reason: string, requestId: string) => Promise.resolve(job({
+    id: acceptedDraft.id,
+    run_id: acceptedDraft.run_id,
+    state: "cancelled",
+    status_reason: reason,
+    result_evidence: {elapsed_milliseconds: 1, peak_memory_bytes: 1, cancel_request_id: requestId, cancel_reason: reason},
+  })));
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Cancel the accepted create");
+  await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
+  await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalledOnce());
+  await user.click(screen.getByRole("button", {name: "Cancel transfer"}));
+
+  expect(await screen.findByRole("status")).toHaveTextContent(`Controller cancelled draft ${acceptedDraft.id}`);
+  expect(client.createArtifactJob).toHaveBeenCalledOnce();
+  expect(client.cancelArtifactJob).toHaveBeenCalledWith(
+    acceptedDraft.id,
+    "Cancelled by operator during browser transfer",
+    expect.stringMatching(/^[0-9a-f-]{36}$/),
+  );
+});
+
+test("does not replay submit after cancellation when the exact job is still ready", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.submitArtifactJob.mockImplementationOnce((_jobId: string, _requestId: string, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+    signal?.addEventListener("abort", () => {
+      client.artifactJob.mockResolvedValueOnce(job({state: "ready", operation_id: null, submit_request_id: null}));
+      reject(new DOMException("cancelled", "AbortError"));
+    }, {once: true});
+  }));
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Stop the submit retry");
+  await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
+  await screen.findByText("Submitting to the Spark…");
+  await user.click(screen.getByRole("button", {name: "Cancel transfer"}));
+
+  expect(await screen.findByText(/Controller cancelled draft/)).toBeInTheDocument();
+  expect(client.submitArtifactJob).toHaveBeenCalledOnce();
+  expect(client.cancelArtifactJob).toHaveBeenCalledOnce();
+});
+
+test("does not follow a create response that belongs to another run", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.createArtifactJob.mockResolvedValueOnce(job({run_id: "00000000-0000-4000-8000-000000000099", operation_id: null, state: "draft", submit_request_id: null, input_files: []}));
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Wrong run response");
+  await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("another recipe run");
+  expect(client.uploadArtifactJobInput).not.toHaveBeenCalled();
+  expect(client.finalizeArtifactJob).not.toHaveBeenCalled();
+});
+
+test("does not finalize an upload response for a different job", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.uploadArtifactJobInput.mockImplementationOnce((_jobId, file) => Promise.resolve(job({
+    id: "00000000-0000-4000-8000-000000000055",
+    run_id: run.run_id,
+    operation_id: null,
+    state: "draft",
+    submit_request_id: null,
+    input_files: [file],
+  })));
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Wrong job upload response");
+  await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Input upload returned another artifact job");
+  expect(client.finalizeArtifactJob).not.toHaveBeenCalled();
+  expect(client.submitArtifactJob).not.toHaveBeenCalled();
+});
+
+test("reconciles a malformed submit response only through the exact job identity", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.submitArtifactJob.mockImplementationOnce((_jobId: string, requestId: string) => {
+    client.artifactJob.mockResolvedValueOnce(job({
+      id: "00000000-0000-4000-8000-000000000020",
+      run_id: run.run_id,
+      state: "queued",
+      operation_id: "operation-accepted",
+      submit_request_id: requestId,
+    }));
+    return Promise.resolve(job({
+      id: "00000000-0000-4000-8000-000000000056",
+      run_id: run.run_id,
+      state: "queued",
+      operation_id: "operation-accepted",
+      submit_request_id: requestId,
+    }));
+  });
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Verify returned job identity");
+  await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
+
+  expect(await screen.findByText("Queued")).toBeInTheDocument();
+  expect(client.artifactJob).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000020");
+});
+
+test("refuses a submit lookup receipt from another run", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.submitArtifactJob.mockImplementationOnce((_jobId: string, requestId: string) => {
+    client.artifactJob.mockResolvedValueOnce(job({
+      id: "00000000-0000-4000-8000-000000000020",
+      run_id: "00000000-0000-4000-8000-000000000099",
+      state: "queued",
+      operation_id: "operation-accepted",
+      submit_request_id: requestId,
+    }));
+    return Promise.reject(new Error("connection closed after submit"));
+  });
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Reject foreign run receipt");
+  await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("another recipe run");
+  expect(screen.queryByText("Queued")).not.toBeInTheDocument();
+});
+
+test("does not reconcile an explicit cancellation denial from a matching old receipt", async () => {
+  const user = userEvent.setup();
+  const queued = job({state: "queued", result_evidence: null});
+  const client = api([queued]);
+  client.cancelArtifactJob.mockImplementationOnce((_jobId: string, reason: string, requestId: string) => {
+    client.artifactJob.mockResolvedValueOnce(job({
+      id: queued.id,
+      run_id: queued.run_id,
+      state: "cancelled",
+      status_reason: reason,
+      result_evidence: {elapsed_milliseconds: 1, peak_memory_bytes: 1, cancel_request_id: requestId, cancel_reason: reason},
+    }));
+    return Promise.reject(Object.assign(new Error("permission denied"), {status: 403}));
+  });
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.click(await screen.findByRole("button", {name: "Cancel job"}));
+  await user.click(screen.getByRole("button", {name: "Confirm cancel"}));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("permission denied");
+  expect(client.artifactJob).not.toHaveBeenCalled();
+  expect(screen.getByText("Queued")).toBeInTheDocument();
+});
+
+test("reconciles a malformed cancel response only through the requested job and run", async () => {
+  const user = userEvent.setup();
+  const queued = job({state: "queued", result_evidence: null});
+  const client = api([queued]);
+  client.cancelArtifactJob.mockImplementationOnce((jobId: string, reason: string, requestId: string) => {
+    const evidence = {elapsed_milliseconds: 1, peak_memory_bytes: 1, cancel_request_id: requestId, cancel_reason: reason};
+    client.artifactJob.mockResolvedValueOnce(job({id: jobId, run_id: queued.run_id, state: "cancelled", status_reason: reason, result_evidence: evidence}));
+    return Promise.resolve(job({id: jobId, run_id: "00000000-0000-4000-8000-000000000099", state: "cancelled", status_reason: reason, result_evidence: evidence}));
+  });
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.click(await screen.findByRole("button", {name: "Cancel job"}));
+  await user.click(screen.getByRole("button", {name: "Confirm cancel"}));
+
+  expect(await screen.findByText("Cancelled")).toBeInTheDocument();
+  expect(client.artifactJob).toHaveBeenCalledWith(queued.id);
+});
+
+test("does not accept a cancel lookup receipt for a different job", async () => {
+  const user = userEvent.setup();
+  const queued = job({state: "queued", result_evidence: null});
+  const client = api([queued]);
+  client.cancelArtifactJob.mockImplementationOnce((_jobId: string, reason: string, requestId: string) => {
+    client.artifactJob.mockResolvedValueOnce(job({
+      id: "00000000-0000-4000-8000-000000000055",
+      run_id: queued.run_id,
+      state: "cancelled",
+      status_reason: reason,
+      result_evidence: {elapsed_milliseconds: 1, peak_memory_bytes: 1, cancel_request_id: requestId, cancel_reason: reason},
+    }));
+    return Promise.reject(new Error("connection closed after cancel"));
+  });
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.click(await screen.findByRole("button", {name: "Cancel job"}));
+  await user.click(screen.getByRole("button", {name: "Confirm cancel"}));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("another artifact job");
+  expect(screen.getByText("Queued")).toBeInTheDocument();
+});
+
+test("ignores another job's pending cancellation when admitting a new independent draft", async () => {
+  const user = userEvent.setup();
+  const pending = job({state: "cancelling", result_evidence: {elapsed_milliseconds: 1, peak_memory_bytes: 1, cancel_request_id: "00000000-0000-4000-8000-000000000077", cancel_reason: "stop"}});
+  const client = api([pending]);
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Independent request");
+  const submit = await screen.findByRole("button", {name: "Submit artifact job"});
+  expect(submit).toBeEnabled();
+  await user.click(submit);
+
+  expect(await screen.findByText("Succeeded")).toBeInTheDocument();
+  expect(client.createArtifactJob).toHaveBeenCalledOnce();
 });
 
 test("infers recipe-declared mesh and video media types when the browser omits them", async () => {
@@ -244,18 +578,38 @@ test("renders every declared job interface as a native bounded form and clears l
 
 test("restores durable multi-output results with safe native previews and exact downloads", async () => {
   const image = {name: "frame.png", media_type: "image/png", size_bytes: 2048, sha256: "d".repeat(64)};
+  const metadata = {
+    name: "frame-metadata.json",
+    media_type: "application/json",
+    size_bytes: 2048,
+    sha256: image.sha256,
+  };
   const audio = {name: "sound.wav", media_type: "audio/wav", size_bytes: 4096, sha256: "e".repeat(64)};
   const video = {name: "clip.mp4", media_type: "video/mp4", size_bytes: 6144, sha256: "1".repeat(64)};
   const mesh = {name: "shape.glb", media_type: "model/gltf-binary", size_bytes: 8192, sha256: "f".repeat(64)};
-  const client = api([job({output_files: [image, audio, video, mesh]})]);
+  const client = api([job({output_files: [image, metadata, audio, video, mesh]})]);
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
 
   const history = await screen.findByRole("article", {name: /artifact job .* succeeded/i});
-  expect(within(history).getByRole("img", {name: "Generated output frame.png"})).toHaveAttribute("src", expect.stringContaining(image.sha256));
+  expect(
+    within(history).getByRole("img", {name: "Generated output frame.png"}),
+  ).toHaveAttribute(
+    "src",
+    `/api/artifact-jobs/00000000-0000-4000-8000-000000000020/results/${image.name}/${image.sha256}`,
+  );
   expect(within(history).getByLabelText(/Listen to sound.wav/)).toHaveAttribute("src", expect.stringContaining(audio.sha256));
   expect(within(history).getByLabelText(/Watch clip.mp4/)).toHaveAttribute("src", expect.stringContaining(video.sha256));
   expect(within(history).getByText("3D artifact ready")).toBeInTheDocument();
-  expect(within(history).getAllByRole("link", {name: "Download"})).toHaveLength(4);
+  const downloads = within(history).getAllByRole("link", {name: "Download"});
+  expect(downloads).toHaveLength(5);
+  expect(downloads[0]).toHaveAttribute(
+    "href",
+    `/api/artifact-jobs/00000000-0000-4000-8000-000000000020/results/${image.name}/${image.sha256}`,
+  );
+  expect(downloads[1]).toHaveAttribute(
+    "href",
+    `/api/artifact-jobs/00000000-0000-4000-8000-000000000020/results/${metadata.name}/${metadata.sha256}`,
+  );
 });
 
 test("lets the operator cancel an in-browser hash before any upload begins", async () => {
@@ -272,7 +626,7 @@ test("lets the operator cancel an in-browser hash before any upload begins", asy
   await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
   expect(await screen.findByText("10 B of 32 B")).toBeInTheDocument();
   await user.click(screen.getByRole("button", {name: "Cancel transfer"}));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Submission cancelled");
+  expect(await screen.findByRole("alert")).toHaveTextContent("before a durable artifact job was created");
   expect(screen.queryByRole("list", {name: "Selected input files"})).not.toBeInTheDocument();
   expect(client.createArtifactJob).not.toHaveBeenCalled();
   expect(client.uploadArtifactJobInput).not.toHaveBeenCalled();
@@ -293,11 +647,47 @@ test("aborts an active upload and cancels the durable draft on the controller", 
   expect(client.createArtifactJob).toHaveBeenCalledOnce();
   await user.click(screen.getByRole("button", {name: "Cancel transfer"}));
 
-  expect(await screen.findByRole("alert")).toHaveTextContent("Submission cancelled");
+  expect(await screen.findByText(/Controller cancelled draft/)).toBeInTheDocument();
   await waitFor(() => expect(client.cancelArtifactJob).toHaveBeenCalledWith(
     "00000000-0000-4000-8000-000000000020",
     "Cancelled by operator during browser transfer",
+    expect.stringMatching(/^[0-9a-f-]{36}$/),
   ));
+});
+
+test("surfaces an unconfirmed upload cancellation and retries with the same request identity", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.uploadArtifactJobInput.mockImplementationOnce((_jobId, _file, _blob, signal, onProgress) => new Promise((_resolve, reject) => {
+    onProgress?.({loaded: 5, total: 64});
+    signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), {once: true});
+  }));
+  client.cancelArtifactJob
+    .mockRejectedValueOnce(new Error("connection closed after cancel"))
+    .mockRejectedValueOnce(new Error("Controller still unreachable"));
+  client.artifactJob
+    .mockResolvedValueOnce(job({state: "draft", operation_id: null, submit_request_id: null}))
+    .mockResolvedValueOnce(job({state: "draft", operation_id: null, submit_request_id: null}));
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Cancel this durable draft");
+  await user.click(await screen.findByRole("button", {name: "Submit artifact job"}));
+  await screen.findByText(/^5 B of /);
+  await user.click(screen.getByRole("button", {name: "Cancel transfer"}));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Cancellation needs recovery");
+  expect(screen.getByRole("alert")).toHaveTextContent("without this cancellation receipt");
+  expect(screen.getByRole("button", {name: "Submit artifact job"})).toBeDisabled();
+  await user.click(screen.getByRole("button", {name: "Retry cancellation"}));
+  expect(await screen.findByText(/Controller cancelled draft/)).toBeInTheDocument();
+  const cancelCalls = client.cancelArtifactJob.mock.calls;
+  expect(cancelCalls).toHaveLength(3);
+  expect(cancelCalls.map(call => call[2])).toEqual([cancelCalls[0]![2], cancelCalls[0]![2], cancelCalls[0]![2]]);
+  expect(cancelCalls.map(call => call[1])).toEqual([
+    "Cancelled by operator during browser transfer",
+    "Cancelled by operator during browser transfer",
+    "Cancelled by operator during browser transfer",
+  ]);
 });
 
 test("keeps the contract visible without a run and provides explicit cancel confirmation and retry recovery", async () => {

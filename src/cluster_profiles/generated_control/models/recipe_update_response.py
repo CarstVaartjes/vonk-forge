@@ -20,6 +20,7 @@ import datetime
 if TYPE_CHECKING:
   from ..models.recipe_update_child import RecipeUpdateChild
   from ..models.operation_progress import OperationProgress
+  from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
   from ..models.recipe_update_scope import RecipeUpdateScope
 
 
@@ -44,6 +45,7 @@ class RecipeUpdateResponse:
             state (RecipeUpdateResponseState):
             updated_at (datetime.datetime):
             action (Union[Literal['update'], Unset]):  Default: 'update'.
+            cancellation (Union['RecipeOperationCancellationResult', None, Unset]):
             kind (Union[Literal['recipe.cache.update.v2'], Unset]):  Default: 'recipe.cache.update.v2'.
             next_attempt_at (Union[None, Unset, datetime.datetime]):
             resume_condition (Union[None, Unset, str]):
@@ -62,6 +64,7 @@ class RecipeUpdateResponse:
     state: RecipeUpdateResponseState
     updated_at: datetime.datetime
     action: Union[Literal['update'], Unset] = 'update'
+    cancellation: Union['RecipeOperationCancellationResult', None, Unset] = UNSET
     kind: Union[Literal['recipe.cache.update.v2'], Unset] = 'recipe.cache.update.v2'
     next_attempt_at: Union[None, Unset, datetime.datetime] = UNSET
     resume_condition: Union[None, Unset, str] = UNSET
@@ -77,6 +80,7 @@ class RecipeUpdateResponse:
     def to_dict(self) -> dict[str, Any]:
         from ..models.recipe_update_child import RecipeUpdateChild
         from ..models.operation_progress import OperationProgress
+        from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
         from ..models.recipe_update_scope import RecipeUpdateScope
         attempt = self.attempt
 
@@ -102,6 +106,14 @@ class RecipeUpdateResponse:
         updated_at = self.updated_at.isoformat()
 
         action = self.action
+
+        cancellation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.cancellation, Unset):
+            cancellation = UNSET
+        elif isinstance(self.cancellation, RecipeOperationCancellationResult):
+            cancellation = self.cancellation.to_dict()
+        else:
+            cancellation = self.cancellation
 
         kind = self.kind
 
@@ -149,6 +161,8 @@ class RecipeUpdateResponse:
         })
         if action is not UNSET:
             field_dict["action"] = action
+        if cancellation is not UNSET:
+            field_dict["cancellation"] = cancellation
         if kind is not UNSET:
             field_dict["kind"] = kind
         if next_attempt_at is not UNSET:
@@ -170,6 +184,7 @@ class RecipeUpdateResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.recipe_update_child import RecipeUpdateChild
         from ..models.operation_progress import OperationProgress
+        from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
         from ..models.recipe_update_scope import RecipeUpdateScope
         d = dict(src_dict)
         attempt = d.pop("attempt")
@@ -216,6 +231,26 @@ class RecipeUpdateResponse:
         action = cast(Union[Literal['update'], Unset] , d.pop("action", UNSET))
         if action != 'update' and not isinstance(action, Unset):
             raise ValueError(f"action must match const 'update', got '{action}'")
+
+        def _parse_cancellation(data: object) -> Union['RecipeOperationCancellationResult', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                cancellation_type_0 = RecipeOperationCancellationResult.from_dict(data)
+
+
+
+                return cancellation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['RecipeOperationCancellationResult', None, Unset], data)
+
+        cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
+
 
         kind = cast(Union[Literal['recipe.cache.update.v2'], Unset] , d.pop("kind", UNSET))
         if kind != 'recipe.cache.update.v2' and not isinstance(kind, Unset):
@@ -290,6 +325,7 @@ class RecipeUpdateResponse:
             state=state,
             updated_at=updated_at,
             action=action,
+            cancellation=cancellation,
             kind=kind,
             next_attempt_at=next_attempt_at,
             resume_condition=resume_condition,

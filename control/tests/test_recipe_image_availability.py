@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
+import uuid
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -12,14 +14,20 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_control.artifact_lifecycle import ArtifactLifecycleError
+from vonk_control.artifact_reference_scan import runtime_image_reference_reasons
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import _build_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.failure_evidence import failure_receipt
-from vonk_control.model_cache import ModelCacheError
+from vonk_control.model_cache import ModelCacheError, ModelCacheService
+from vonk_control.model_cache_contract import (
+    ModelCacheDownloadPayload,
+    ModelCacheOperationProgress,
+)
 from vonk_control.model_cache_progress import cache_progress
 from vonk_control.models import (
     AgentNode,
@@ -28,11 +36,15 @@ from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     Job,
+    ModelCacheOperation,
+    ModelCacheSet,
     RecipeBuild,
     RuntimeImageAuthorization,
+    User,
 )
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
+    SUPERSEDED_PREPARATION_CODE,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
 )
@@ -41,7 +53,10 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
     RuntimeImagePreparationError,
+    RuntimeImageReceipt,
+    RuntimeImageReferenceIntent,
     prepare_runtime_image,
+    read_runtime_image_reference_intent,
     resolve_persisted_runtime_image_receipt,
 )
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -70,6 +85,29 @@ def _runtime() -> dict[str, object]:
 
 def _build_runtime() -> dict[str, object]:
     return _runtime() | {"build_input_sha256": "f" * 64}
+
+
+def _reference_receipt() -> RuntimeImageReceipt:
+    return RuntimeImageReceipt(
+        schema_version=2,
+        source="published",
+        distribution_publisher="test-publisher",
+        distribution_slug="test-image",
+        distribution_content_sha256="a" * 64,
+        registry_manifest_digest=IMAGE_DIGEST,
+        platform_manifest_digest=PLATFORM_DIGEST,
+        image_digest=PLATFORM_DIGEST,
+        oci_archive_sha256=ARCHIVE_SHA,
+        image_bytes=len(ARCHIVE),
+        local_image_config_id=CONFIG_DIGEST,
+        local_image_reference=None,
+        architecture="linux-arm64",
+        runtime_interface="vonk.runtime.v1",
+        runtime_interface_label="v1",
+        archive_path="/managed/image-cache/" + ARCHIVE_SHA,
+        recorded_at=datetime.now(UTC).isoformat(),
+        build_id=None,
+    )
 
 
 def _progress_members(value: object) -> list[Mapping[str, object]]:
@@ -138,6 +176,118 @@ def _add_revision(
     return revision
 
 
+def _persist_fake_model_cache_child(
+    sessions: sessionmaker[Session],
+    *,
+    child: SimpleNamespace,
+    model_content_sha256: str,
+    now: datetime,
+) -> None:
+    """Give fake owner responses the same durable identity the service requires."""
+
+    operation_id = child.id
+    request_key = child.request_key
+    artifact_set_sha256 = child.artifact_set_sha256
+    plan_digest = child.plan_digest
+    state = child.state
+    failure = child.failure
+    progress_value = child.progress
+    assert isinstance(operation_id, str)
+    assert isinstance(request_key, str)
+    assert isinstance(artifact_set_sha256, str)
+    assert isinstance(plan_digest, str)
+    assert state in {"running", "succeeded", "failed"}
+    assert isinstance(progress_value, Mapping)
+    progress = ModelCacheOperationProgress.model_validate(progress_value)
+    expected_bytes = progress.expected_bytes
+    assert expected_bytes is not None
+    manifest = {
+        "schema_version": 2,
+        "source_policy": "nas-first",
+        "model_content_sha256": model_content_sha256,
+        "recipe_revision_sha256": None,
+        "model_definition_ref": None,
+        "model_content_digests": [model_content_sha256],
+        "artifacts": [],
+    }
+    payload = ModelCacheDownloadPayload.model_validate(
+        {
+            "schema_version": 2,
+            "source_policy": "nas-first",
+            "artifact_set_sha256": artifact_set_sha256,
+            "manifest": manifest,
+            "plan_digest": plan_digest,
+            "transfer": {
+                "schema_version": 2,
+                "total_bytes": expected_bytes,
+                "artifacts": {},
+            },
+            "retry": {"automatic_attempts": 1, "operator_retries": 0},
+            "failure": failure,
+            "result": (
+                {
+                    "schema_version": 2,
+                    "artifact_set_sha256": artifact_set_sha256,
+                    "coverage": "complete",
+                }
+                if state == "succeeded"
+                else None
+            ),
+        }
+    )
+    cache_set_state = {
+        "running": "downloading",
+        "succeeded": "cached",
+        "failed": "failed",
+    }[state]
+    with sessions.begin() as session:
+        cache_set = session.get(ModelCacheSet, artifact_set_sha256)
+        if cache_set is None:
+            session.add(
+                ModelCacheSet(
+                    artifact_set_sha256=artifact_set_sha256,
+                    model_content_sha256=model_content_sha256,
+                    recipe_revision_sha256=None,
+                    manifest=manifest,
+                    expected_bytes=expected_bytes,
+                    verified_bytes=min(progress.downloaded_bytes, expected_bytes),
+                    state=cache_set_state,
+                    created_at=now,
+                    updated_at=now,
+                    last_accessed_at=now,
+                )
+            )
+        else:
+            cache_set.state = cache_set_state
+            cache_set.expected_bytes = expected_bytes
+            cache_set.verified_bytes = min(progress.downloaded_bytes, expected_bytes)
+            cache_set.updated_at = now
+        operation = session.get(ModelCacheOperation, operation_id)
+        if operation is None:
+            operation = ModelCacheOperation(
+                id=operation_id,
+                request_key=request_key,
+                kind="download",
+                state=state,
+                artifact_set_sha256=artifact_set_sha256,
+                plan_digest=plan_digest,
+                payload=payload.model_dump(mode="json", exclude_none=True),
+                progress=progress.model_dump(mode="json"),
+                actor="operator",
+                created_at=now,
+                updated_at=now,
+                completed_at=now if state in {"succeeded", "failed"} else None,
+            )
+            session.add(operation)
+        else:
+            operation.state = state
+            operation.plan_digest = plan_digest
+            operation.payload = payload.model_dump(mode="json", exclude_none=True)
+            operation.progress = progress.model_dump(mode="json")
+            operation.updated_at = now
+            operation.completed_at = now if state in {"succeeded", "failed"} else None
+
+
 def _add_head(
     session: Session, revision: CatalogDocumentRevision
 ) -> CatalogDocumentHead:
@@ -163,6 +313,47 @@ def _add_head(
     )
     session.add(head)
     return head
+
+
+def _add_recipe_successors(
+    session: Session,
+    *,
+    older_id: str,
+    older: RecipeDefinition,
+    newer_id: str,
+    newer: RecipeDefinition,
+) -> tuple[CatalogDocumentRevision, CatalogDocumentRevision]:
+    """Two revisions of one recipe document with the head on the older one."""
+
+    older_revision = _add_revision(session, older_id, older)
+    newer_revision = _add_revision(session, newer_id, newer)
+    document_id = older_revision.document_id
+    newer_revision.document_id = document_id
+    newer_revision.revision_number = 2
+    _add_head(session, older_revision)
+    return older_revision, newer_revision
+
+
+def _set_active_head(session: Session, revision_id: str) -> None:
+    """Move the authoritative head, as a catalogue sync would."""
+
+    revision = session.get(CatalogDocumentRevision, revision_id)
+    assert revision is not None
+    head = session.scalar(
+        select(CatalogDocumentHead).where(
+            CatalogDocumentHead.kind == revision.kind,
+            CatalogDocumentHead.publisher == revision.publisher,
+            CatalogDocumentHead.slug == revision.slug,
+        )
+    )
+    assert head is not None
+    head.active_revision_id = revision_id
+
+
+def _successor(recipe: RecipeDefinition, title: str) -> RecipeDefinition:
+    return recipe.model_copy(
+        update={"metadata": recipe.metadata.model_copy(update={"title": title})}
+    )
 
 
 def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions(
@@ -365,7 +556,11 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
         execution_key = authorization.effective_execution_key
         if revoked is not None:
             authorization.state = "revoked"
-    service.remove_selector(recipe.identity.slug, actor="operator", request_id="2" * 36)
+    service.remove_selector(
+        recipe.identity.slug,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000022",
+    )
     # Removal takes the bytes and the managed-storage receipt with them; SQL
     # keeps the authorization decision, which a restore re-checks.
     assert not (storage.root / ARCHIVE_SHA).exists()
@@ -631,15 +826,12 @@ def test_database_integrity_failure_names_the_violated_constraint(
     assert view.failure is not None
     assert view.failure.code == "integrityerror"
     # The operator-facing evidence bundle reuses this contract, so it must
-    # carry the failure instead of a summary of "[]". Its own line sanitizer
-    # still redacts this particular line -- ``_SECRET_LINE`` matches the bare
-    # substring ``authorization`` inside the ``runtime_image_authorizations``
-    # table name -- which is a separate sanitizer decision, so only the
-    # persisted failure detail above is asserted to name the constraint.
+    # carry the failure instead of a summary of "[]" -- including the table
+    # name, which names the constraint the operator has to repair.
     receipt = failure_receipt(failure)
     assert receipt.error_code == "integrityerror"
     assert receipt.summary != "[]"
-    assert receipt.summary
+    assert "runtime_image_authorizations" in receipt.summary
 
 
 def test_model_cache_error_coerces_a_non_string_detail() -> None:
@@ -792,7 +984,7 @@ def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(
     result = service.remove_selector(
         recipe.identity.slug,
         actor="operator",
-        request_id="c" * 36,
+        request_id="00000000-0000-4000-8000-000000000023",
     )
     assert result["operation_id"]
     assert queued.id in require_sequence(
@@ -813,6 +1005,184 @@ def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(
         build = session.get(RecipeBuild, "00000000-0000-4000-8000-000000000901")
         assert build is not None and build.state == "failed"
         assert session.scalars(select(RuntimeImageAuthorization)).all() == []
+
+
+def _empty_recipe_removal_owner(
+    tmp_path: Path,
+) -> tuple[
+    sessionmaker[Session],
+    FilesystemRuntimeImageStorage,
+    RecipeImageAvailabilityService,
+    str,
+]:
+    image_recipe = _recipe("recipe-image.json")
+    job_recipe = _recipe("recipe-job.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_head(session, _add_revision(session, "revision-image", image_recipe))
+        _add_head(session, _add_revision(session, "revision-job", job_recipe))
+    storage = FilesystemRuntimeImageStorage(tmp_path / "cache")
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda *_args, **_kwargs: (image_recipe, _runtime()),
+        clock=lambda: datetime.now(UTC),
+    )
+    return (
+        sessions,
+        storage,
+        service,
+        "vonk-forge/synthetic-tiny-image",
+    )
+
+
+@pytest.mark.parametrize(
+    ("replay_selector", "replay_actor", "replay_with_model"),
+    [
+        ("vonk-forge/synthetic-image-job", "operator", False),
+        ("vonk-forge/synthetic-tiny-image", "different-operator", False),
+        ("vonk-forge/synthetic-tiny-image", "operator", True),
+    ],
+    ids=["selector", "actor", "with-model"],
+)
+def test_recipe_removal_request_key_rejects_changed_intent(
+    tmp_path: Path,
+    replay_selector: str,
+    replay_actor: str,
+    replay_with_model: bool,
+) -> None:
+    """A successful remove key must not authorize a different later intent.
+
+    The disposable database contains two catalog recipes and no cache
+    authorizations or managed artifacts, so this owner-boundary regression
+    cannot remove real or test artifact bytes.
+    """
+
+    sessions, storage, service, original_selector = _empty_recipe_removal_owner(
+        tmp_path
+    )
+    request_id = "00000000-0000-4000-8000-000000000016"
+    original = service.remove_selector(
+        original_selector,
+        actor="operator",
+        request_id=request_id,
+        with_model=False,
+    )
+    assert original["state"] == "succeeded"
+    with sessions() as session:
+        assert session.scalars(select(RuntimeImageAuthorization)).all() == []
+    assert not any(path.is_file() for path in storage.root.rglob("*"))
+
+    with pytest.raises(RecipeImageAvailabilityError) as refused:
+        service.remove_selector(
+            replay_selector,
+            actor=replay_actor,
+            request_id=request_id,
+            with_model=replay_with_model,
+        )
+    assert refused.value.code == "recipe_image.request_key_reused"
+
+
+def test_recipe_removal_request_key_replays_before_resolving_current_head(
+    tmp_path: Path,
+) -> None:
+    sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
+    request_id = "00000000-0000-4000-8000-000000000017"
+    original = service.remove_selector(
+        selector, actor="operator", request_id=request_id, with_model=False
+    )
+    with sessions.begin() as session:
+        head = session.scalar(
+            select(CatalogDocumentHead).where(
+                CatalogDocumentHead.slug == "synthetic-tiny-image"
+            )
+        )
+        assert head is not None
+        head.active_revision_id = None
+
+    replay = service.remove_selector(
+        selector, actor="operator", request_id=request_id, with_model=False
+    )
+
+    assert replay == original
+    assert replay["with_model"] is False
+
+
+def test_recipe_removal_replay_rejects_malformed_stored_intent(
+    tmp_path: Path,
+) -> None:
+    sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
+    request_id = "00000000-0000-4000-8000-000000000018"
+    service.remove_selector(
+        selector, actor="operator", request_id=request_id, with_model=False
+    )
+    with sessions.begin() as session:
+        operation = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert operation is not None
+        malformed_payload = dict(operation.payload)
+        malformed_payload.pop("with_model")
+        operation.payload = malformed_payload
+
+    with pytest.raises(RecipeImageAvailabilityError) as refused:
+        service.remove_selector(
+            selector, actor="operator", request_id=request_id, with_model=False
+        )
+
+    assert refused.value.code == "recipe_image.operation_invalid"
+
+
+def test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope(
+    tmp_path: Path,
+) -> None:
+    sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
+    request_id = "00000000-0000-4000-8000-000000000019"
+    service.remove_selector(
+        selector, actor="operator", request_id=request_id, with_model=False
+    )
+    with sessions.begin() as session:
+        operation = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert operation is not None
+        operation.actor = "another-issuer"
+
+    with pytest.raises(RecipeImageAvailabilityError) as refused:
+        service.remove_selector(
+            selector, actor="operator", request_id=request_id, with_model=False
+        )
+
+    assert refused.value.code == "recipe_image.operation_invalid"
+
+
+def test_recipe_removal_replay_rejects_integer_stored_model_choice(
+    tmp_path: Path,
+) -> None:
+    sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
+    request_id = "00000000-0000-4000-8000-000000000020"
+    service.remove_selector(
+        selector, actor="operator", request_id=request_id, with_model=False
+    )
+    with sessions.begin() as session:
+        operation = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert operation is not None and operation.result is not None
+        malformed_result = dict(operation.result) | {"with_model": 0}
+        session.execute(
+            update(Job)
+            .where(Job.request_id == request_id)
+            .values(result=malformed_result)
+        )
+    with sessions() as session:
+        operation = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert operation is not None and operation.result is not None
+        stored_choice = operation.result["with_model"]
+        assert isinstance(stored_choice, int) and not isinstance(stored_choice, bool)
+
+    with pytest.raises(RecipeImageAvailabilityError) as refused:
+        service.remove_selector(
+            selector, actor="operator", request_id=request_id, with_model=False
+        )
+
+    assert refused.value.code == "recipe_image.operation_invalid"
 
 
 @pytest.mark.parametrize(
@@ -1013,6 +1383,65 @@ def test_claim_identity_uses_authoritative_image_and_running_claim_is_not_repeat
     assert service.claim_pending(owner_id="worker-b") == ()
 
 
+def test_publication_contention_reschedules_without_spending_transfer_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = [datetime.now(UTC)]
+    with sessions.begin() as session:
+        _add_revision(session, "publication-contention", recipe)
+        session.add(User(subject="operator", role="operator"))
+    storage = FilesystemRuntimeImageStorage(tmp_path / "image-cache")
+    original_lock = storage.publication_lock
+    contended = False
+
+    def contend_once(archive_sha256: str):
+        nonlocal contended
+        if not contended:
+            contended = True
+            raise RuntimeImagePreparationError(
+                "runtime_image.publication_contended",
+                "another owner has the exact image publication lock",
+                retryable=True,
+                recovery_actions=("retry",),
+            )
+        return original_lock(archive_sha256)
+
+    monkeypatch.setattr(storage, "publication_lock", contend_once)
+    transport = Transport()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
+        transport=transport,
+        clock=lambda: now[0],
+    )
+    operation = service.start(
+        "publication-contention",
+        actor="operator",
+        request_id="publication-contention-request",
+    )
+    first_claim = service.claim_pending(owner_id="publication-worker")[0]
+    service.run_claim(first_claim)
+
+    assert service.get(operation.id).state == "queued"
+    with sessions() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        retry_state = row.payload["retry"]
+        assert isinstance(retry_state, Mapping)
+        assert retry_state["automatic_attempts"] == 0
+    now[0] += timedelta(seconds=6)
+    retry = service.claim_pending(owner_id="publication-worker")[0]
+    service.run_claim(retry)
+    assert service.get(operation.id).state == "succeeded"
+    assert transport.calls == 2
+    engine.dispose()
+
+
 def test_postgres_claims_are_fenced_and_respect_build_capacity(
     tmp_path: Path, postgres_engine
 ) -> None:
@@ -1156,6 +1585,154 @@ def test_same_immutable_image_reuses_preparation_across_recipe_revisions(
     assert transport.calls == 1
 
 
+def test_newer_preparation_intent_cancels_the_older_queued_preparation(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    successor = _successor(recipe, "Successor recipe revision")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_recipe_successors(
+            session,
+            older_id="revision-superseded",
+            older=recipe,
+            newer_id="revision-current",
+            newer=successor,
+        )
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe if recipe_revision_id == "revision-superseded" else successor,
+            _runtime(),
+        ),
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+        max_parallel=1,
+    )
+    older = service.start("revision-superseded", actor="operator", request_id="o" * 36)
+    newer = service.start("revision-current", actor="operator", request_id="n" * 36)
+
+    cancelled = service.get(older.id)
+    assert cancelled.state == "cancelled"
+    assert cancelled.result is None
+    failure = cancelled.failure
+    assert failure is not None
+    assert failure["code"] == SUPERSEDED_PREPARATION_CODE
+    detail = failure["detail"]
+    assert isinstance(detail, str)
+    assert "revision-current" in detail
+    with sessions() as session:
+        stored = session.get(Job, older.id)
+        assert stored is not None
+        assert stored.status_reason == (
+            "superseded by newer recipe revision revision-current"
+        )
+        supersession = stored.payload["supersession"]
+        assert isinstance(supersession, Mapping)
+        assert supersession["code"] == SUPERSEDED_PREPARATION_CODE
+        assert stored.result is None
+
+    # The newer intent is untouched, and the cancelled preparation released its
+    # single scheduler slot: the only claim available is the current revision.
+    assert service.get(newer.id).state == "queued"
+    claims = service.claim_pending(limit=1, owner_id="worker-a")
+    assert [claim.operation_id for claim in claims] == [newer.id]
+    assert service.resume_operations() == 1
+
+
+def test_active_head_advance_cancels_a_queued_older_preparation_at_dispatch(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    successor = _successor(recipe, "Successor recipe revision")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_recipe_successors(
+            session,
+            older_id="revision-superseded",
+            older=recipe,
+            newer_id="revision-current",
+            newer=successor,
+        )
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe if recipe_revision_id == "revision-superseded" else successor,
+            _runtime(),
+        ),
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+        max_parallel=1,
+    )
+    older = service.start("revision-superseded", actor="operator", request_id="o" * 36)
+    # A catalogue sync advances the active revision with no fresh download
+    # request.  The dispatch boundary must refuse to start the older build.
+    with sessions.begin() as session:
+        _set_active_head(session, "revision-current")
+
+    assert service.claim_pending(limit=1, owner_id="worker-a") == ()
+    cancelled = service.get(older.id)
+    assert cancelled.state == "cancelled"
+    assert cancelled.failure is not None
+    assert cancelled.failure["code"] == SUPERSEDED_PREPARATION_CODE
+    assert service.resume_operations() == 0
+
+
+def test_running_preparation_for_an_older_revision_is_not_cancelled(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    successor = _successor(recipe, "Successor source-build revision")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_recipe_successors(
+            session,
+            older_id="revision-running",
+            older=recipe,
+            newer_id="revision-current",
+            newer=successor,
+        )
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe if recipe_revision_id == "revision-running" else successor,
+            _build_runtime(),
+        ),
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+        max_parallel=1,
+        max_parallel_builds=1,
+        claim_lease_seconds=120,
+    )
+    running = service.start("revision-running", actor="operator", request_id="o" * 36)
+    claim = service.claim_pending(limit=1, owner_id="worker-a")
+    assert [item.operation_id for item in claim] == [running.id]
+    with sessions.begin() as session:
+        _set_active_head(session, "revision-current")
+
+    # The older attempt is already building with a live lease.  Its shared build
+    # inputs may still be reused by the active revision, so it is fail-closed
+    # and must keep running.
+    assert service.claim_pending(limit=1, owner_id="worker-b") == ()
+    retained = service.get(running.id)
+    assert retained.state == "running"
+    assert retained.failure is None
+    with sessions() as session:
+        stored = session.get(Job, running.id)
+        assert stored is not None
+        assert stored.state == "running"
+        assert stored.payload["claim_owner"] == "worker-a"
+
+
 def test_request_replay_returns_original_before_metadata_refresh(
     tmp_path: Path,
 ) -> None:
@@ -1224,10 +1801,11 @@ def test_model_child_and_image_complete_through_one_sql_operation(
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
         _add_revision(session, "revision-model-image", recipe)
+    now = datetime.now(UTC)
 
     child = SimpleNamespace(
-        id="model-operation",
-        request_key="model-request",
+        id="00000000-0000-4000-8000-000000000101",
+        request_key="00000000-0000-4000-8000-000000000102",
         state="succeeded",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
@@ -1240,9 +1818,17 @@ def test_model_child_and_image_complete_through_one_sql_operation(
                 "total_artifacts": 1,
             },
             previous=None,
-            now=datetime.now(UTC),
+            now=now,
         ),
         failure=None,
+    )
+    _persist_fake_model_cache_child(
+        sessions,
+        child=child,
+        model_content_sha256=next(
+            model.model.content_sha256 for model in recipe.models
+        ),
+        now=now,
     )
 
     class ModelCache:
@@ -1281,7 +1867,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
         transport=Transport(),
         model_cache=model_cache,
-        clock=lambda: datetime.now(UTC),
+        clock=lambda: now,
     )
     queued = service.start(
         "revision-model-image", actor="operator", request_id="m" * 36
@@ -1327,9 +1913,10 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
         _add_revision(session, "revision-overlap", recipe)
+    now = datetime.now(UTC)
     child = SimpleNamespace(
-        id="model-overlap",
-        request_key="model-overlap-request",
+        id="00000000-0000-4000-8000-000000000201",
+        request_key="00000000-0000-4000-8000-000000000202",
         state="running",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
@@ -1342,9 +1929,17 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
                 "total_artifacts": 1,
             },
             previous=None,
-            now=datetime.now(UTC),
+            now=now,
         ),
         failure=None,
+    )
+    _persist_fake_model_cache_child(
+        sessions,
+        child=child,
+        model_content_sha256=next(
+            model.model.content_sha256 for model in recipe.models
+        ),
+        now=now,
     )
 
     class ModelCache:
@@ -1377,7 +1972,7 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
         transport=transport,
         model_cache=ModelCache(),
-        clock=lambda: datetime.now(UTC),
+        clock=lambda: now,
     )
     queued = service.start("revision-overlap", actor="operator", request_id="q" * 36)
     assert service.run_pending() == 1
@@ -1505,8 +2100,8 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         _add_revision(session, "revision-integrity-repair", recipe)
 
     failed = SimpleNamespace(
-        id="model-download",
-        request_key="model-download-request",
+        id="00000000-0000-4000-8000-000000000301",
+        request_key="00000000-0000-4000-8000-000000000302",
         state="running",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
@@ -1524,8 +2119,8 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         failure=None,
     )
     repaired = SimpleNamespace(
-        id="model-repair",
-        request_key="model-repair-request",
+        id="00000000-0000-4000-8000-000000000303",
+        request_key="00000000-0000-4000-8000-000000000304",
         state="succeeded",
         artifact_set_sha256="c" * 64,
         plan_digest="e" * 64,
@@ -1541,6 +2136,14 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
             now=datetime.now(UTC),
         ),
         failure=None,
+    )
+    now = datetime.now(UTC)
+    model_content_sha256 = next(model.model.content_sha256 for model in recipe.models)
+    _persist_fake_model_cache_child(
+        sessions,
+        child=failed,
+        model_content_sha256=model_content_sha256,
+        now=now,
     )
 
     class ModelCache:
@@ -1584,6 +2187,12 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
                     "free_bytes": 100,
                     "shortfall_bytes": 0,
                 }
+                _persist_fake_model_cache_child(
+                    sessions,
+                    child=failed,
+                    model_content_sha256=model_content_sha256,
+                    now=datetime.now(UTC),
+                )
             return failed
 
         def repair_preview(self, artifact_set_sha256: str) -> dict[str, object]:
@@ -1592,6 +2201,12 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
 
         def start_repair(self, **kwargs: object) -> SimpleNamespace:
             self.repair_calls.append(kwargs)
+            _persist_fake_model_cache_child(
+                sessions,
+                child=repaired,
+                model_content_sha256=model_content_sha256,
+                now=datetime.now(UTC),
+            )
             return repaired
 
     model_cache = ModelCache()
@@ -1602,7 +2217,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
         transport=transport,
         model_cache=model_cache,
-        clock=lambda: datetime.now(UTC),
+        clock=lambda: now,
     )
     parent = service.start(
         "revision-integrity-repair",
@@ -1641,6 +2256,373 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         == repaired.id
     )
     assert transport.calls == 1
+
+
+def test_accepted_cancellation_is_idempotent_and_prevents_queued_dispatch(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine(f"sqlite:///{tmp_path / 'cancel-queued.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "cancel-queued-revision", recipe)
+        session.add(User(subject="operator", role="operator"))
+    transport = Transport()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
+        authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
+        transport=transport,
+        clock=lambda: datetime.now(UTC),
+    )
+    operation = service.start(
+        "cancel-queued-revision", actor="operator", request_id="cancel-queued"
+    )
+    cancel_key = "00000000-0000-4000-8000-000000000901"
+
+    accepted = service.cancel(
+        operation.id,
+        actor="operator",
+        request_id=cancel_key,
+        reason="stop queued preparation",
+    )
+    assert accepted.state == "cancelling"
+    assert accepted.cancellation is not None
+    replay = service.cancel(
+        operation.id,
+        actor="operator",
+        request_id=cancel_key,
+        reason="stop queued preparation",
+    )
+    assert replay.cancellation == accepted.cancellation
+    with pytest.raises(RecipeImageAvailabilityError) as reused:
+        service.cancel(
+            operation.id,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000902",
+            reason="another cancellation intent",
+        )
+    assert reused.value.code == "recipe_image.cancel_request_key_reused"
+
+    assert service.run_pending() == 0
+    assert service.get(operation.id).state == "cancelled"
+    assert transport.calls == 0
+    engine.dispose()
+
+
+def test_late_verified_image_result_cannot_publish_after_cancellation(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine(
+        f"sqlite+pysqlite:///{tmp_path / 'cancel-late.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "cancel-late-revision", recipe)
+        session.add(User(subject="operator", role="operator"))
+    now = datetime.now(UTC)
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingTransport(Transport):
+        def pull_and_export(self, reference: str, destination: Path, **kwargs):
+            entered.set()
+            if not release.wait(timeout=10):
+                raise TimeoutError("test transport was not released")
+            return super().pull_and_export(reference, destination, **kwargs)
+
+    transport = BlockingTransport()
+    storage = FilesystemRuntimeImageStorage(tmp_path / "image-cache")
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
+        transport=transport,
+        clock=lambda: now,
+        claim_lease_seconds=30,
+    )
+    operation = service.start(
+        "cancel-late-revision", actor="operator", request_id="cancel-late"
+    )
+    claim = service.claim_pending(owner_id="late-image-result")[0]
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        worker = executor.submit(service.run_claim, claim)
+        assert entered.wait(timeout=5), "worker did not reach the issued image pull"
+        accepted = service.cancel(
+            operation.id,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000903",
+            reason="stop image preparation",
+        )
+        assert accepted.state == "cancelling"
+        service.reconcile_cancellations()
+        assert service.get(operation.id).state == "cancelling"
+        release.set()
+        worker.result(timeout=10)
+
+    observed = service.get(operation.id)
+    assert observed.state == "cancelled"
+    assert observed.result is None
+    assert observed.cancellation is not None
+    retained = storage.verify_existing(ARCHIVE_SHA, len(ARCHIVE))
+    assert retained.read_bytes() == ARCHIVE
+    with sessions() as session:
+        assert session.scalar(select(RuntimeImageAuthorization)) is None
+        row = session.get(Job, operation.id)
+        assert row is not None and row.state == "cancelled"
+        assert "image_result" not in row.payload
+        assert "image_reference_intent" not in row.payload
+    engine.dispose()
+
+
+def test_cancelling_image_reference_intent_is_counted_until_claim_release(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'cancel-reference.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        revision = _add_revision(session, "cancel-reference-revision", recipe)
+        revision_id = revision.id
+        session.add(User(subject="operator", role="operator"))
+    now = datetime.now(UTC)
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
+        authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
+        transport=Transport(),
+        clock=lambda: now,
+    )
+    operation = service.start(
+        revision_id, actor="operator", request_id="cancel-reference"
+    )
+    claim = service.claim_pending(owner_id="cancel-reference-writer")[0]
+    accepted = service.cancel(
+        operation.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000904",
+        reason="stop image preparation",
+    )
+    assert accepted.state == "cancelling"
+
+    service._persist_provisional_image_reference(
+        claim,
+        receipt=_reference_receipt(),
+    )
+    with sessions() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        reference = read_runtime_image_reference_intent(
+            row.payload["image_reference_intent"]
+        )
+        assert reference == RuntimeImageReferenceIntent(
+            schema_version=2,
+            operation_id=operation.id,
+            recipe_revision_id=revision_id,
+            attempt=claim.execution_attempt,
+            claim_owner=claim.claim_owner,
+            oci_archive_sha256=ARCHIVE_SHA,
+            image_digest=PLATFORM_DIGEST,
+            image_bytes=len(ARCHIVE),
+        )
+        assert runtime_image_reference_reasons(session, [ARCHIVE_SHA]) == {
+            ARCHIVE_SHA: (f"image publication operation {operation.id}",)
+        }
+        persisted_reference = reference.model_dump(mode="json")
+
+    with sessions.begin() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        payload = dict(row.payload)
+        payload["image_reference_intent"] = persisted_reference | {
+            "unrecognized": "must be rejected"
+        }
+        row.payload = payload
+    with pytest.raises(RuntimeImagePreparationError):
+        service._persist_provisional_image_reference(
+            claim,
+            receipt=_reference_receipt(),
+        )
+    with sessions() as session, pytest.raises(ArtifactLifecycleError) as malformed:
+        runtime_image_reference_reasons(session, [ARCHIVE_SHA])
+    assert malformed.value.code == "artifact.reference_scan_failed"
+    with sessions.begin() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        payload = dict(row.payload)
+        payload["image_reference_intent"] = persisted_reference
+        row.payload = payload
+
+    with service._storage.publication_lock(ARCHIVE_SHA):
+        service.reconcile_cancellations()
+        assert service.get(operation.id).state == "cancelling"
+        with sessions() as session:
+            row = session.get(Job, operation.id)
+            assert row is not None
+            assert row.payload["claim_owner"] == claim.claim_owner
+            assert "image_reference_intent" in row.payload
+
+    assert service._release_cancelled_claim(claim)
+    assert service._reconcile_availability_cancellation(operation.id)
+    assert service.get(operation.id).state == "cancelled"
+    engine.dispose()
+
+
+@pytest.mark.parametrize("mutation", ["stale-owner", "removal-fence"])
+def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
+    tmp_path: Path, mutation: str
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine(
+        f"sqlite+pysqlite:///{tmp_path / f'cancel-reference-{mutation}.sqlite'}"
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        revision = _add_revision(session, f"cancel-reference-{mutation}", recipe)
+        revision_id = revision.id
+        session.add(User(subject="operator", role="operator"))
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
+        authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+    )
+    operation = service.start(
+        revision_id, actor="operator", request_id=f"cancel-reference-{mutation}"
+    )
+    claim = service.claim_pending(owner_id="cancel-reference-writer")[0]
+    accepted = service.cancel(
+        operation.id,
+        actor="operator",
+        request_id=(
+            "00000000-0000-4000-8000-000000000905"
+            if mutation == "stale-owner"
+            else "00000000-0000-4000-8000-000000000906"
+        ),
+        reason="stop image preparation",
+    )
+    assert accepted.state == "cancelling"
+    with sessions.begin() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        payload = dict(row.payload)
+        if mutation == "stale-owner":
+            payload["claim_owner"] = "replacement-writer"
+        else:
+            payload["removal_fence"] = "reserved-for-removal"
+        row.payload = payload
+
+    with pytest.raises(RuntimeImagePreparationError):
+        service._persist_provisional_image_reference(
+            claim,
+            receipt=_reference_receipt(),
+        )
+    with sessions() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        assert "image_reference_intent" not in row.payload
+    engine.dispose()
+
+
+def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine(
+        f"sqlite+pysqlite:///{tmp_path / 'cancel-shared-model.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    revision_id = "cancel-shared-revision"
+    with sessions.begin() as session:
+        _add_revision(session, revision_id, recipe)
+        session.add(User(subject="operator", role="operator"))
+    cache = ModelCacheService(
+        sessions,
+        tmp_path / "model-cache",
+        reserve_bytes=0,
+        fixture_sources=True,
+    )
+    source = tmp_path / "weights.source"
+    source.write_bytes(b"shared model weights")
+    model_digest = "a" * 64
+    artifact = {
+        "id": "weights",
+        "path": "weights.bin",
+        "kind": "file",
+        "source": source.as_uri(),
+        "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "download_bytes": source.stat().st_size,
+        "roles": ["weights"],
+        "model_content_sha256": model_digest,
+    }
+    parent_request_id = "first-model-consumer"
+    child_request_key = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"vonk:recipe-availability-model:{revision_id}:{parent_request_id}",
+        )
+    )
+    preview = cache.download_preview(
+        model_content_sha256=model_digest, artifacts=[artifact]
+    )
+    child = cache.start_download(
+        actor="operator",
+        request_key=child_request_key,
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256=model_digest,
+        artifacts=[artifact],
+        interrupt_after_bytes=1,
+    )
+    assert child.state == "partial"
+    before_bytes = child.progress["downloaded_bytes"]
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
+        authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
+        transport=Transport(),
+        model_cache=cache,
+        clock=lambda: datetime.now(UTC),
+    )
+    first = service.start(revision_id, actor="operator", request_id=parent_request_id)
+    second = service.start(
+        revision_id, actor="operator", request_id="second-model-consumer"
+    )
+    with sessions.begin() as session:
+        for operation_id in (first.id, second.id):
+            row = session.get(Job, operation_id)
+            assert row is not None
+            row.payload = dict(row.payload) | {
+                "model_child": {
+                    "id": child.id,
+                    "artifact_set_sha256": child.artifact_set_sha256,
+                }
+            }
+
+    service.cancel(
+        first.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000904",
+        reason="stop one preparation",
+    )
+    service.reconcile_cancellations()
+
+    assert service.get(first.id).state == "cancelled"
+    assert service.get(second.id).state == "queued"
+    still_shared = cache.get_operation(child.id)
+    assert still_shared.state == "partial"
+    assert still_shared.progress["downloaded_bytes"] == before_bytes
+    cache.close()
+    engine.dispose()
 
 
 def test_force_download_is_a_distinct_operation_for_same_revision(

@@ -358,14 +358,19 @@ export class ApiClient implements ControlApi {
     return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, {signal});
   }
 
+  artifactJobByRequestId(requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
+    return this.request(`/api/artifact-jobs/requests/${encodeURIComponent(requestId)}`, {signal});
+  }
+
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities> {
     return this.request("/api/artifact-jobs/capabilities", {signal});
   }
 
-  createArtifactJob(runId: string, input: ArtifactJobCreateInput, signal?: AbortSignal): Promise<ArtifactJob> {
+  createArtifactJob(runId: string, input: ArtifactJobCreateInput, requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, {
       method: "POST",
       body: JSON.stringify(input),
+      headers: {"X-Request-ID": requestId},
       signal,
     });
   }
@@ -408,18 +413,19 @@ export class ApiClient implements ControlApi {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/finalize`, {method: "POST", signal});
   }
 
-  submitArtifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/submit`, {method: "POST", signal});
+  submitArtifactJob(jobId: string, requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
+    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/submit`, {method: "POST", headers: {"X-Request-ID": requestId}, signal});
   }
 
   artifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}`, {signal});
   }
 
-  cancelArtifactJob(jobId: string, reason: string, signal?: AbortSignal): Promise<ArtifactJob> {
+  cancelArtifactJob(jobId: string, reason: string, requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: "POST",
       body: JSON.stringify({reason}),
+      headers: {"X-Request-ID": requestId},
       signal,
     });
   }
@@ -428,9 +434,14 @@ export class ApiClient implements ControlApi {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/result`, {signal});
   }
 
-  artifactJobResultUrl(jobId: string, sha256: string): string {
+  artifactJobResultUrl(jobId: string, name: string, sha256: string): string {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) {
+      throw new Error("Unsafe artifact result name");
+    }
     if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error("Unsafe artifact result digest");
-    return `/api/artifact-jobs/${encodeURIComponent(jobId)}/results/${sha256}`;
+    const encodedJobId = encodeURIComponent(jobId);
+    const encodedName = encodeURIComponent(name);
+    return `/api/artifact-jobs/${encodedJobId}/results/${encodedName}/${sha256}`;
   }
 
   async jobs(cursor?: string): Promise<JobsResponse> {

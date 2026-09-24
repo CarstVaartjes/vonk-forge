@@ -41,10 +41,14 @@ from .error_reporting import (
 from .generated_control.api.default import (
     get_fleet_status,
     get_job,
+    get_profile_endpoints,
     get_published_endpoint,
 )
 from .generated_control.client import AuthenticatedClient
 from .generated_control.models.endpoint_response import EndpointResponse
+from .generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
+)
 from .generated_control.models.fleet_snapshot import FleetSnapshot
 from .generated_control.models.job_detail_response import JobDetailResponse
 from .generated_control.types import Response as GeneratedResponse
@@ -1144,7 +1148,10 @@ class ControlClient:
         if not 0 <= expected_size <= _MAX_ARTIFACT_INPUT:
             raise ControlClientError("artifact input size is invalid")
         flags = (
-            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOINHERIT", 0)
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOINHERIT", 0)
+            | getattr(os, "O_NONBLOCK", 0)
         )
         no_follow = getattr(os, "O_NOFOLLOW", None)
         if no_follow is None:
@@ -1215,65 +1222,82 @@ class ControlClient:
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
-        if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
-            raise ControlResponseTooLarge("control API response exceeds safety limit")
-        if not 200 <= status < 300:
-            error_media_type = response_headers.get("content-type", "").split(";", 1)[0]
+        try:
+            if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
+                raise ControlResponseTooLarge(
+                    "control API response exceeds safety limit"
+                )
+            if not 200 <= status < 300:
+                error_media_type = response_headers.get("content-type", "").split(
+                    ";", 1
+                )[0]
+                _response_media_contract(
+                    path,
+                    "PUT",
+                    status,
+                    error_media_type.strip().lower(),
+                    has_content=bool(content),
+                )
+                try:
+                    problem = json.loads(content)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    if error_media_type.strip().lower() == "application/json":
+                        raise ControlMalformedResponse(
+                            "control API returned invalid JSON error"
+                        ) from None
+                    problem = None
+                if error_media_type.strip().lower() == "application/json":
+                    if not isinstance(problem, dict):
+                        raise ControlMalformedResponse(
+                            "control API error does not match the OpenAPI schema"
+                        )
+                    _response_contract(path, "PUT", status, problem)
+                detail = problem.get("detail") if isinstance(problem, dict) else None
+                error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
+                fields, body_retry_after = _structured_http_error_fields(problem)
+                if fields.get("code") is None:
+                    fields["code"] = response_headers.get("x-vonk-error-code")
+                retry_after = _retry_after_seconds(response_headers.get("retry-after"))
+                if retry_after is None and type(body_retry_after) is int:
+                    retry_after = body_retry_after
+                raise error_type(
+                    status,
+                    detail if isinstance(detail, str) else "control API request failed",
+                    retry_after,
+                    **fields,
+                    sensitive_values=(self._token,),
+                    operation=f"PUT {path}",
+                    endpoint=path,
+                    request_id=response_headers.get("x-request-id"),
+                )
+            try:
+                decoded = json.loads(content)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise ControlMalformedResponse(
+                    "control API returned invalid JSON"
+                ) from None
+            if not isinstance(decoded, dict):
+                raise ControlMalformedResponse("control API response must be an object")
+            response_media_type = response_headers.get("content-type", "").split(
+                ";", 1
+            )[0]
             _response_media_contract(
                 path,
                 "PUT",
                 status,
-                error_media_type.strip().lower(),
-                has_content=bool(content),
+                response_media_type.strip().lower(),
+                has_content=True,
             )
-            try:
-                problem = json.loads(content)
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                if error_media_type.strip().lower() == "application/json":
-                    raise ControlMalformedResponse(
-                        "control API returned invalid JSON error"
-                    ) from None
-                problem = None
-            if error_media_type.strip().lower() == "application/json":
-                if not isinstance(problem, dict):
-                    raise ControlMalformedResponse(
-                        "control API error does not match the OpenAPI schema"
-                    )
-                _response_contract(path, "PUT", status, problem)
-            detail = problem.get("detail") if isinstance(problem, dict) else None
-            error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
-            fields, body_retry_after = _structured_http_error_fields(problem)
-            if fields.get("code") is None:
-                fields["code"] = response_headers.get("x-vonk-error-code")
-            retry_after = _retry_after_seconds(response_headers.get("retry-after"))
-            if retry_after is None and type(body_retry_after) is int:
-                retry_after = body_retry_after
-            raise error_type(
-                status,
-                detail if isinstance(detail, str) else "control API request failed",
-                retry_after,
-                **fields,
-                sensitive_values=(self._token,),
-                operation=f"PUT {path}",
-                endpoint=path,
-                request_id=response_headers.get("x-request-id"),
-            )
-        try:
-            decoded = json.loads(content)
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ControlClientError("control API returned invalid JSON") from None
-        if not isinstance(decoded, dict):
-            raise ControlClientError("control API response must be an object")
-        response_media_type = response_headers.get("content-type", "").split(";", 1)[0]
-        _response_media_contract(
-            path,
-            "PUT",
-            status,
-            response_media_type.strip().lower(),
-            has_content=True,
-        )
-        _response_contract(path, "PUT", status, decoded)
-        return decoded
+            _response_contract(path, "PUT", status, decoded)
+            return decoded
+        except (ControlMalformedResponse, ControlResponseTooLarge) as error:
+            if error.context is None:
+                error.context = replace(
+                    protocol_context(operation=f"PUT {path}", endpoint=path),
+                    http_status=status,
+                    request_id=safe_request_id(response_headers.get("x-request-id")),
+                )
+            raise
 
     def download_file(
         self,
@@ -1511,3 +1535,10 @@ class ControlClient:
 
     def endpoint(self, alias: str) -> EndpointResponse:
         return self._call_generated(get_published_endpoint.sync_detailed, alias)  # type: ignore[return-value]
+
+    def profile_endpoints(
+        self, number: int, alias: str | None = None
+    ) -> FleetProfileEndpointsView:
+        return self._call_generated(
+            get_profile_endpoints.sync_detailed, number, alias=alias
+        )  # type: ignore[return-value]

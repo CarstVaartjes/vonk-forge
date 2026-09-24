@@ -12,6 +12,7 @@ from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
     FleetProfileService,
+    FleetProfileStalePlanConflict,
     build_production_fleet_profile_service,
 )
 from vonk_control.models import (
@@ -136,10 +137,17 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
         RunSwitchAssessment.model_validate_json(json.dumps(dropped_reasons))
     render_payload(blocked.model_dump(mode="json"), "profile", action="preview")
     assert "short by" in capsys.readouterr().out
-    with pytest.raises(FleetProfileConflict, match="blocked"):
+    with pytest.raises(FleetProfileStalePlanConflict):
         service.apply(
             profile.id,
             plan_digest=reviewed.plan_digest,
+            request_key=str(uuid4()),
+            actor="admin",
+        )
+    with pytest.raises(FleetProfileConflict, match="blocked"):
+        service.apply(
+            profile.id,
+            plan_digest=blocked.plan_digest,
             request_key=str(uuid4()),
             actor="admin",
         )

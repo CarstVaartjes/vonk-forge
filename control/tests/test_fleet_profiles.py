@@ -477,6 +477,7 @@ class _SwitchAdapter:
         self._operations: dict[str, list[FleetProfileChildOperation]] = {}
         self._by_request: dict[str, str] = {}
         self.cancellations: list[tuple[tuple[str, ...], int]] = []
+        self.cancellation_requests: list[tuple[str, str, str]] = []
 
     def validate_resources_in_session(self, session, assignments, reviewed) -> None:
         # This deterministic adapter owns the isolated service-test boundary.
@@ -487,6 +488,11 @@ class _SwitchAdapter:
         self, session: Session, targets: tuple[str, ...], ordinal: int, now: datetime
     ) -> None:
         self.cancellations.append((targets, ordinal))
+
+    def request_cancellation(
+        self, application_id: str, *, request_key: str, actor: str
+    ) -> None:
+        self.cancellation_requests.append((application_id, request_key, actor))
 
     def recoverable_cache_loss(self, application_id: str, *, session: Session) -> bool:
         del application_id, session
@@ -846,6 +852,59 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
     assert item["node_ids"] == [_node_id(1)]
     assert item["kind"] == "fleet-profile.apply"
     assert item["progress"] == {"phase": "prepare"}
+
+
+def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        switch_adapter=_SwitchAdapter(),
+        assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
+            _assessment(_exact_preparation(node_ids))
+        ),
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    with sessions() as session:
+        saved_only = service.endpoint_intent(session, profile.number)
+    assert saved_only.assignments == ()
+
+    preview = service.preview(profile.id)
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(440),
+        actor="admin",
+    )
+
+    with sessions.begin() as session:
+        saved = session.get(FleetProfile, profile.id)
+        assert saved is not None
+        saved.assignments = []
+
+    with sessions() as session:
+        intent = service.endpoint_intent(session, profile.number)
+
+    assert intent.application_id == application.id
+    assert intent.application_state == "queued"
+    assert len(intent.assignments) == 1
+    assert intent.assignments[0].alias == "studio-chat"
+    assert intent.assignments[0].state == "not-published-yet"
+
+    # A completed application cannot make a missing run look merely pending.
+    # The saved definition is still empty; the immutable assignment remains
+    # visible with truthful withdrawal and no usable run identity.
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.state = "succeeded"
+    with sessions() as session:
+        withdrawn = service.endpoint_intent(session, profile.number)
+    assert withdrawn.application_id == application.id
+    assert len(withdrawn.assignments) == 1
+    assert withdrawn.assignments[0].state == "withdrawn"
+    assert withdrawn.assignments[0].expected_run_id is None
 
 
 def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progress() -> (
@@ -3154,6 +3213,7 @@ def test_switch_queue_removes_an_installation_the_profile_no_longer_references(
             tuple(nodes),
             installation_policy="exact",
             reviewed_effects=reviewed.effects,
+            expected_images={},
         )
         retained = adapter._plan_queue(
             session,
@@ -3161,6 +3221,7 @@ def test_switch_queue_removes_an_installation_the_profile_no_longer_references(
             tuple(nodes),
             installation_policy="keep-cached",
             reviewed_effects=reviewed.effects,
+            expected_images={},
         )
 
     assert {"kind": "cleanup", "id": installed.owner_id} in exact
@@ -3189,6 +3250,113 @@ def test_profile_preview_delegates_removal_to_the_orchestrator(
     assert installed.owner_id in delegated[0].detail
     assert preview.summary.starts == 0
     assert preview.summary.uninstalls == 1
+
+
+def _exact_planned_cleanup_profile(tmp_path: Path):
+    """A production-wired exact profile whose only leftover is a persisted plan."""
+
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    admission = lifecycle._install_admission
+    plan = admission.plan_install(mapping_id, build_id, now=lifecycle._clock())
+    assert plan.allowed, [
+        (node.node_id, reason.code) for node in plan.nodes for reason in node.blockers
+    ]
+    planned = admission.accept_install(plan, actor="admin", now=lifecycle._clock())
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions, clock=lifecycle._clock, switch_adapter=adapter
+    )
+    profile = service.create(
+        FleetProfileInput(
+            name="Exact planned cleanup",
+            installation_policy="exact",
+            assignments=[],
+        ),
+        actor="admin",
+    )
+    return sessions, lifecycle, adapter, run_switch, service, profile, planned, nodes
+
+
+def test_exact_profile_switch_abandons_a_never_installed_leftover(
+    tmp_path: Path,
+) -> None:
+    """A switch must not be blocked by a plan that was never installed.
+
+    The cleanup candidate set still hands the superseded installation to
+    Run/Switch, but the installation's own assessment resolves it as an
+    abandonment, so the switch is admitted and the leftover is disposed of
+    without node work.  Before the disposition existed this exact load failed
+    with ``run-switch.plan_blocked: run-switch.uninstall-blocked``.
+    """
+
+    sessions, _lifecycle, _adapter, run_switch, service, profile, planned, _nodes = (
+        _exact_planned_cleanup_profile(tmp_path)
+    )
+
+    preview = service.preview(profile.id)
+    assert preview.allowed is True
+    assert [step.kind for step in preview.steps] == ["switch"]
+
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(910),
+        actor="admin",
+    )
+    for _ in range(12):
+        run_switch.tick()
+        service.tick()
+        if service.application(application.id).state in {"succeeded", "failed"}:
+            break
+
+    completed = service.application(application.id)
+    assert completed.state == "succeeded", completed.status_reason
+    # The profile application keeps the Run/Switch receipt, so the operator
+    # sees the abandonment and its reason rather than a silent disappearance.
+    from vonk_control.run_switch_contract import RunSwitchUninstallResult
+
+    receipts = [
+        item.result.run_switch
+        for item in completed.progress.step_results.values()
+        if isinstance(item.result, FleetProfileSwitchChildResult)
+    ]
+    dispositions = [
+        phase
+        for receipt in receipts
+        for phase in receipt.phase_results
+        if isinstance(phase, RunSwitchUninstallResult)
+    ]
+    assert [phase.disposition for phase in dispositions] == ["abandoned"]
+    assert [phase.reason for phase in dispositions] == ["installation-not-installed"]
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, planned)
+        assert installation is not None and installation.state == "uninstalled"
+        assert all(
+            node.state == "uninstalled"
+            for node in session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == planned
+                )
+            )
+        )
 
 
 def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(

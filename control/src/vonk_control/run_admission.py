@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
@@ -12,6 +12,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .install_admission import AdmissionReason
@@ -143,17 +144,15 @@ def run_port_blockers(
             ResourceReservation.node_id == node_id,
             ResourceReservation.kind == "port",
             ResourceReservation.state.in_(("active", "promised")),
-            reservation_visible(excluded_profile_application_ids),
+            reservation_visible(
+                excluded_profile_application_ids, excluded_run_ids=excluded_run_ids
+            ),
             ResourceReservation.resource_key.in_(
                 tuple(str(port) for port in demand.required_ports)
             ),
         )
     )
-    occupied = {
-        item.resource_key
-        for item in reservations
-        if not (item.owner_kind == "run" and item.owner_id in excluded_run_ids)
-    }
+    occupied = {item.resource_key for item in reservations}
     blockers = []
     for kind, port in (
         ("service", demand.service_port),
@@ -212,7 +211,7 @@ class RunNodePlan:
     port: int
     allowed: bool
     inventory_observed_at: datetime | None
-    memory_kind: str
+    memory_kind: MemoryKind
     required_memory_bytes: int
     available_memory_bytes: int | None
     active_reserved_bytes: int
@@ -257,10 +256,21 @@ class RunAdmissionService:
         alias: str,
         *,
         now: datetime,
+        released_run_ids: Collection[str] = (),
         _session: Session | None = None,
         profile_application_id: str | None = None,
         excluded_profile_application_ids: Sequence[str] = (),
     ) -> RunPlan:
+        """Build the admission plan for one run.
+
+        ``released_run_ids`` names runs that a reviewed plan stops before it
+        starts this one.  Their Stop phase releases their reservations, so
+        counting those bytes here refuses the replacement for the workload it
+        replaces -- the deadlock an operator can only break by hand.  This is a
+        preview-only relaxation: accepting the run still re-derives the plan
+        without it and refuses when the Stop did not really release the
+        capacity (``run.plan_stale_or_blocked``).
+        """
         with (
             nullcontext(_session) if _session is not None else self._sessions()
         ) as session:
@@ -383,6 +393,9 @@ class RunAdmissionService:
             raise TypeError("mapping endpoint owner is missing")
         plans: list[RunNodePlan] = []
         fabric_addresses: list[str] = []
+        released = tuple(released_run_ids)
+        # Both shared ledger projections apply the same owner-scoped visibility
+        # predicate; reviewed stops never discount an unrelated owner's claim.
         for placement in ordered:
             blockers = [] if topology_reason is None else [topology_reason]
             warnings: list[AdmissionReason] = []
@@ -474,6 +487,7 @@ class RunAdmissionService:
                     session,
                     placement.node_id,
                     memory_pool=snapshot.memory_pool if snapshot else None,
+                    excluded_run_ids=released,
                     excluded_profile_application_ids=(
                         *excluded_profile_application_ids,
                         *((profile_application_id,) if profile_application_id else ()),
@@ -489,6 +503,7 @@ class RunAdmissionService:
                         session,
                         placement.node_id,
                         port_demand,
+                        excluded_run_ids=released,
                         excluded_profile_application_ids=(
                             *excluded_profile_application_ids,
                             *(

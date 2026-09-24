@@ -26,13 +26,27 @@ pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934c
 // values from creating an unbounded launch request.
 /// The element ceiling for one compiled argv vector.
 ///
-/// The argv size authority is `MAX_ARGV_BYTES` (1 MiB); this item count is a
-/// backstop aligned with the plan's own 4096-element artifact ceiling. The
-/// largest argv in the recipe library is 45 elements, so a 512 ceiling was a
-/// round number rather than a derived one.
+/// The generated wire schema declares this vector's `maxItems` from the Python
+/// `MAX_ARGV_ITEMS`, so this is a structural mirror of the schema, not the size
+/// authority. The size authority is `MAX_ARGV_BYTES`, derived below from the
+/// ceiling on the whole host-runtime request.
 const MAX_ARGV_ITEMS: usize = 4096;
 const MAX_ARGV_ITEM_BYTES: usize = 65_536;
-const MAX_ARGV_BYTES: usize = 1024 * 1024;
+/// The byte ceiling on one compiled argv vector, derived from the ceiling on
+/// the whole [`HostRuntimeRequest`](crate::MAX_HOST_RUNTIME_REQUEST_BYTES).
+///
+/// The request the agent sends is this argv plus the four image identities, the
+/// `podman run` options, one `--mount` pair per mounted file and the recipe
+/// environment, inside one bounded helper exchange. An argv budget equal to the
+/// request ceiling therefore claimed headroom the request does not have: the
+/// earlier comment described `1024 * 1024` as a backstop "below" the frame
+/// budget while the two were the same number. Subtracting the measured maximum
+/// non-argument envelope puts this budget strictly below the request ceiling.
+/// The whole request, not this component, is still the authority, and
+/// `HostRuntimeRequest::validate` names its limit and the observed byte count
+/// instead of an opaque `invalid`.
+const MAX_ARGV_BYTES: usize =
+    crate::MAX_HOST_RUNTIME_REQUEST_BYTES - crate::HOST_RUNTIME_REQUEST_ENVELOPE_BYTES;
 // A canonical launch can project one mount for each selected model artifact,
 // plus the fixed input and output mounts.  This reuses the existing compiled
 // artifact ceiling rather than imposing a small engine-specific cap.
@@ -54,6 +68,8 @@ pub fn same_installed_workload(
         && installed.runtime.env == requested.runtime.env
         && installed.runtime.telemetry == requested.runtime.telemetry
         && installed.runtime.image_digest == requested.runtime.image_digest
+        && installed.runtime.placement.memory_kind
+            == requested.runtime.placement.memory_kind
         && installed.runtime_image == requested.runtime_image
         && installed.security.devices == requested.security.devices
         && installed.security.capabilities == requested.security.capabilities
@@ -762,12 +778,15 @@ fn validate_distribution_object(
 
 #[cfg(test)]
 mod argv_bound_tests {
-    use super::{MAX_ARGV_ITEMS, valid_argv, valid_opaque_argv};
+    use super::{
+        CompiledExecutionPlan, MAX_ARGV_BYTES, MAX_ARGV_ITEM_BYTES, MAX_ARGV_ITEMS,
+        same_installed_workload, valid_argv, valid_opaque_argv,
+    };
 
     #[test]
     fn a_long_command_is_admitted_and_an_absurd_one_is_refused() {
         // Wrong implementation: MAX_ARGV_ITEMS = 512 refused a 600-element
-        // engine command while the argv byte ceiling (1 MiB) was nowhere near.
+        // engine command while the derived argv byte ceiling was nowhere near.
         let long: Vec<String> = (0..600).map(|index| format!("--flag-{index}")).collect();
         assert!(valid_opaque_argv(&long));
         let mut with_executable = vec!["/opt/vonk/bin/vllm".to_owned()];
@@ -778,5 +797,33 @@ mod argv_bound_tests {
             .map(|index| format!("--flag-{index}"))
             .collect();
         assert!(!valid_opaque_argv(&absurd));
+    }
+
+    #[test]
+    fn the_argv_byte_budget_is_admitted_exactly_and_refused_one_byte_over() {
+        // Wrong implementation: this budget was `1024 * 1024`, exactly the
+        // helper frame budget, while its comment called it a backstop *below*
+        // that budget -- so an argv the plan admitted could still be
+        // unframeable by the request that has to carry it. The envelope test in
+        // `lib.rs` proves the budget still derives below that request ceiling.
+        // The item ceiling is separate, so reach this total in item-sized
+        // pieces.
+        let mut exact = vec!["x".repeat(MAX_ARGV_ITEM_BYTES); MAX_ARGV_BYTES / MAX_ARGV_ITEM_BYTES];
+        exact.push("x".repeat(MAX_ARGV_BYTES % MAX_ARGV_ITEM_BYTES));
+        assert_eq!(exact.iter().map(String::len).sum::<usize>(), MAX_ARGV_BYTES);
+        assert!(valid_opaque_argv(&exact));
+        exact.push("x".to_owned());
+        assert!(!valid_opaque_argv(&exact));
+    }
+
+    #[test]
+    fn installed_workload_identity_binds_the_physical_memory_pool() {
+        let installed: CompiledExecutionPlan = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+        ))
+        .unwrap();
+        let mut requested = installed.clone();
+        requested.runtime.placement.memory_kind = "host".parse().unwrap();
+        assert!(!same_installed_workload(&installed, &requested));
     }
 }

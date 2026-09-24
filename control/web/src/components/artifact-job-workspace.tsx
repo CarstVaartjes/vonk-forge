@@ -28,6 +28,76 @@ type RecipeOutputSlot = JobRecipeInterface["output"]["slots"][number];
 type Scalar = NonNullable<Extract<JobRecipeDocument["settings"], {kind: "job"}>["knobs"]>[string]["value"];
 type RecipeParameter = {name: string; description: string; type: "boolean" | "integer" | "string"; default: Scalar};
 type InputPayload = {declaration: ArtifactJobInputFile; blob: Blob};
+type CancelRecovery = {jobId: string; runId: string; reason: string; requestId: string; source: "upload" | "history"; message: string};
+
+function responseStatus(value: unknown): number | undefined {
+  if (typeof value !== "object" || value === null || !("status" in value)) return undefined;
+  return typeof value.status === "number" ? value.status : undefined;
+}
+
+function mayHaveBeenAccepted(value: unknown): boolean {
+  const status = responseStatus(value);
+  return status === undefined || status === 0 || status >= 500;
+}
+
+function isDefinitiveHttpRefusal(value: unknown): boolean {
+  const status = responseStatus(value);
+  return status !== undefined && status >= 400 && status < 500;
+}
+
+function isAbort(value: unknown): boolean {
+  return (typeof DOMException !== "undefined" && value instanceof DOMException && value.name === "AbortError")
+    || (value instanceof Error && value.name === "AbortError");
+}
+
+function assertJobIdentity(job: ArtifactJob, expectedJobId: string | undefined, expectedRunId: string, source: string): void {
+  if (expectedJobId && job.id !== expectedJobId) {
+    throw new Error(`${source} returned another artifact job; expected ${expectedJobId}`);
+  }
+  if (job.run_id !== expectedRunId) {
+    throw new Error(`${source} belongs to another recipe run; expected ${expectedRunId}`);
+  }
+}
+
+function errorText(value: unknown, fallback: string): string {
+  return value instanceof Error ? value.message.slice(0, 256) : fallback;
+}
+
+function cancelReceipt(job: ArtifactJob): {requestId: string; reason: string} | undefined {
+  const evidence = job.result_evidence;
+  if (!evidence || typeof evidence !== "object") return undefined;
+  const requestId = evidence.cancel_request_id;
+  const reason = evidence.cancel_reason;
+  return typeof requestId === "string" && typeof reason === "string"
+    ? {requestId, reason}
+    : undefined;
+}
+
+function isCancelReceipt(job: ArtifactJob, requestId: string, reason: string): boolean {
+  const receipt = cancelReceipt(job);
+  return receipt?.requestId === requestId && receipt.reason === reason
+    && (job.state === "cancelling" || job.state === "cancelled");
+}
+
+function recoveredInputIndexes(job: ArtifactJob, prepared: InputPayload[]): Set<number> {
+  const matched = new Set<number>();
+  for (const uploaded of job.input_files) {
+    const index = prepared.findIndex(({declaration}) => declaration.slot === uploaded.slot && declaration.name === uploaded.name);
+    const expected = index < 0 ? undefined : prepared[index]?.declaration;
+    if (!expected || matched.has(index)
+      || expected.media_type !== uploaded.media_type
+      || expected.size_bytes !== uploaded.size_bytes
+      || expected.sha256 !== uploaded.sha256) {
+      throw new Error(`Durable job ${job.id} has an input that does not match the selected files; its exact draft cannot be reused.`);
+    }
+    matched.add(index);
+  }
+  return matched;
+}
+
+function abortError(): DOMException {
+  return new DOMException("Artifact job submission was cancelled", "AbortError");
+}
 
 const outputMedia: Record<ArtifactJobInterface, string[]> = {
   "image-job": ["image/png", "image/jpeg", "image/webp"],
@@ -106,7 +176,7 @@ function recipeParameters(document: JobRecipeDocument): RecipeParameter[] {
 }
 
 function OutputPreview({api, file, job}: {api: LibraryApi; file: ArtifactJobFile; job: ArtifactJob}) {
-  const url = api.artifactJobResultUrl(job.id, file.sha256);
+  const url = api.artifactJobResultUrl(job.id, file.name, file.sha256);
   const label = `${file.name}, ${file.media_type}, ${formatBytes(file.size_bytes)}`;
   return <li className="artifact-output-row">
     <div className="artifact-output-heading"><div><strong>{file.name}</strong><span>{file.media_type} · {formatBytes(file.size_bytes)}</span></div><a className="button secondary" href={url} download={file.name}>Download</a></div>
@@ -138,9 +208,10 @@ function JobHistory({api, busyJobId, cancelCandidate, job, onCancel, onConfirmCa
     </dl>}
     {job.state === "succeeded" && job.output_files.length === 0 && <p className="artifact-job-reason">This job succeeded without downloadable outputs.</p>}
     {job.state === "succeeded" && job.output_files.length > 0 && <ul className="artifact-output-list" aria-label={`${job.output_files.length} generated outputs`}>{job.output_files.map(file => <OutputPreview api={api} file={file} job={job} key={`${file.name}:${file.sha256}`}/>)}</ul>}
+    {job.state === "cancelling" && <p className="artifact-job-notice" role="status">Cancellation was accepted and is waiting for the Controller to report a settled result.</p>}
     <div className="artifact-job-row-actions">
-      {active && cancelCandidate !== job.id && <button type="button" className="button secondary" disabled={busyJobId === job.id} onClick={() => onCancel(job.id)}>Cancel job</button>}
-      {active && cancelCandidate === job.id && <><p>Cancel this job and keep its audit history?</p><button type="button" className="danger" disabled={busyJobId === job.id} onClick={() => onConfirmCancel(job)}>{busyJobId === job.id ? "Cancelling…" : "Confirm cancel"}</button><button type="button" className="button secondary" onClick={() => onCancel(undefined)}>Keep running</button></>}
+      {active && job.state !== "cancelling" && cancelCandidate !== job.id && <button type="button" className="button secondary" disabled={busyJobId === job.id} onClick={() => onCancel(job.id)}>Cancel job</button>}
+      {active && job.state !== "cancelling" && cancelCandidate === job.id && <><p>Cancel this job and keep its audit history?</p><button type="button" className="danger" disabled={busyJobId === job.id} onClick={() => onConfirmCancel(job)}>{busyJobId === job.id ? "Cancelling…" : "Confirm cancel"}</button><button type="button" className="button secondary" onClick={() => onCancel(undefined)}>Keep running</button></>}
       {(job.state === "failed" || job.state === "cancelled") && <button type="button" className="button secondary" onClick={() => onPrepareRetry(job)}>Prepare retry</button>}
     </div>
     <TechnicalDetails compact items={[
@@ -194,10 +265,15 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   const [busyJobId, setBusyJobId] = useState<string>();
   const [cancelCandidate, setCancelCandidate] = useState<string>();
   const [retryNotice, setRetryNotice] = useState("");
+  const [cancellationNotice, setCancellationNotice] = useState("");
+  const [cancelRecovery, setCancelRecovery] = useState<CancelRecovery>();
   const [compactMobile, setCompactMobile] = useState(() => typeof window !== "undefined" && window.matchMedia?.("(max-width: 520px)").matches === true);
   const [expandedArchiveIds, setExpandedArchiveIds] = useState<Set<string>>(() => new Set());
   const heading = useRef<HTMLHeadingElement>(null);
   const submissionController = useRef<AbortController | undefined>(undefined);
+  const createIntent = useRef<{fingerprint: string; requestId: string} | undefined>(undefined);
+  const submitIntents = useRef(new Map<string, string>());
+  const cancelIntents = useRef(new Map<string, string>());
 
   useEffect(() => {
     if (interfaceIndex >= jobInterfaces.length) setInterfaceIndex(0);
@@ -208,6 +284,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
     setFilesBySlot({});
     setSubmitError("");
     setRetryNotice("");
+    setCancellationNotice("");
   }, [jobInterface, parameters]);
   const loadCapabilities = useCallback(async (signal?: AbortSignal) => {
     setCapabilitiesLoading(true);
@@ -303,7 +380,8 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   const outputContractReady = output?.path === "/outputs" && outputSlots.length > 0 && typeof output.max_total_bytes === "number";
   if (!outputContractReady) inputErrors.push("This recipe revision has no complete artifact output contract.");
   const preflightErrors = [...parameterErrors.map(item => `${item.name}: ${item.error}`), ...inputErrors];
-  const canSubmit = Boolean(activeRun && capabilities) && !phase && preflightErrors.length === 0;
+  const canSubmit = Boolean(activeRun && capabilities) && !phase && preflightErrors.length === 0
+    && cancelRecovery?.source !== "upload";
   const exactOutputMedia = [...new Set(outputSlots.flatMap(slot => slot.media_types))];
   const outputLimits = {
     max_files: Math.min(outputSlots.reduce((total, slot) => total + slot.max_files, 0) || 1, capabilities?.transport.max_output_files ?? 32),
@@ -326,6 +404,203 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
       completed += source.blob.size;
     }
     return prepared;
+  }
+
+  function createRequestId(runId: string, body: ArtifactJobCreateInput): string {
+    const fingerprint = JSON.stringify({runId, body});
+    if (!createIntent.current || createIntent.current.fingerprint !== fingerprint) {
+      createIntent.current = {fingerprint, requestId: crypto.randomUUID()};
+    }
+    return createIntent.current.requestId;
+  }
+
+  function submitRequestId(job: ArtifactJob): string {
+    const existing = submitIntents.current.get(job.id);
+    if (job.submit_request_id) {
+      if (existing && existing !== job.submit_request_id) {
+        throw new Error(`Job ${job.id} carries a submit receipt for a different request identity`);
+      }
+      if (!existing && job.operation_id) {
+        throw new Error(`Job ${job.id} is already submitted, but this page has no matching submit intent to recover`);
+      }
+      return job.submit_request_id;
+    }
+    if (existing) return existing;
+    const requestId = crypto.randomUUID();
+    submitIntents.current.set(job.id, requestId);
+    return requestId;
+  }
+
+  function cancelRequestId(job: ArtifactJob, reason: string): string {
+    const receipt = cancelReceipt(job);
+    if (receipt?.reason === reason) return receipt.requestId;
+    const identity = `${job.id}\n${reason}`;
+    const existing = cancelIntents.current.get(identity);
+    if (existing) return existing;
+    const requestId = crypto.randomUUID();
+    cancelIntents.current.set(identity, requestId);
+    return requestId;
+  }
+
+  async function createWithRecovery(
+    runId: string,
+    body: ArtifactJobCreateInput,
+    requestId: string,
+    signal: AbortSignal,
+  ): Promise<ArtifactJob> {
+    let created: ArtifactJob | undefined;
+    try {
+      created = await api.createArtifactJob(runId, body, requestId, signal);
+    } catch (error) {
+      if (!mayHaveBeenAccepted(error)) throw error;
+      let existing: ArtifactJob | undefined;
+      try {
+        existing = await api.artifactJobByRequestId(requestId);
+      } catch (lookupError) {
+        if (responseStatus(lookupError) !== 404) {
+          if (isDefinitiveHttpRefusal(lookupError)) throw lookupError;
+          throw new Error(`Create outcome for request ${requestId} is unknown: ${errorText(lookupError, "the request lookup failed")}`);
+        }
+      }
+      if (existing) assertJobIdentity(existing, undefined, runId, "Create request lookup");
+      if (signal.aborted || isAbort(error)) {
+        if (existing) return existing;
+        throw abortError();
+      }
+      // Replaying the exact body with the original key asks the owner to verify
+      // the stored intent as well as returning its durable draft identity.
+      try {
+        created = await api.createArtifactJob(runId, body, requestId);
+      } catch (replayError) {
+        if (isDefinitiveHttpRefusal(replayError)) throw replayError;
+        throw new Error(`Create request ${requestId} could not be recovered: ${errorText(replayError, "the exact request replay failed")}`);
+      }
+    }
+    if (!created) throw new Error(`Create request ${requestId} returned no artifact job`);
+    assertJobIdentity(created, undefined, runId, "Create response");
+    return created;
+  }
+
+  async function readJobForRecovery(jobId: string, runId: string, action: string): Promise<ArtifactJob> {
+    let observed: ArtifactJob;
+    try {
+      observed = await api.artifactJob(jobId);
+    } catch (error) {
+      if (isDefinitiveHttpRefusal(error)) throw error;
+      throw new Error(`${action} outcome for job ${jobId} is unknown: ${errorText(error, "the job receipt lookup failed")}`);
+    }
+    assertJobIdentity(observed, jobId, runId, `${action} receipt lookup`);
+    return observed;
+  }
+
+  async function submitWithRecovery(
+    job: ArtifactJob,
+    expectedRunId: string,
+    requestId: string,
+    signal: AbortSignal,
+  ): Promise<ArtifactJob> {
+    try {
+      const submitted = await api.submitArtifactJob(job.id, requestId, signal);
+      assertJobIdentity(submitted, job.id, expectedRunId, "Submit response");
+      if (!submitted.operation_id || submitted.submit_request_id !== requestId) {
+        throw new Error("Submit response does not carry this request's operation receipt");
+      }
+      return submitted;
+    } catch (error) {
+      if (!mayHaveBeenAccepted(error)) throw error;
+      const observed = await readJobForRecovery(job.id, expectedRunId, "Submit");
+      if (observed.operation_id) {
+        if (observed.submit_request_id === requestId) return observed;
+        throw new Error(`Job ${job.id} was submitted under a different request identity`);
+      }
+      if (observed.state !== "ready") throw error;
+      if (signal.aborted || isAbort(error)) throw abortError();
+      try {
+        const replayed = await api.submitArtifactJob(job.id, requestId, signal);
+        assertJobIdentity(replayed, job.id, expectedRunId, "Submit replay");
+        if (!replayed.operation_id || replayed.submit_request_id !== requestId) {
+          throw new Error("Submit replay does not carry this request's operation receipt");
+        }
+        return replayed;
+      } catch (replayError) {
+        if (!mayHaveBeenAccepted(replayError)) throw replayError;
+        const latest = await readJobForRecovery(job.id, expectedRunId, "Submit");
+        if (latest.operation_id && latest.submit_request_id === requestId) return latest;
+        if (latest.operation_id) throw new Error(`Job ${job.id} was submitted under a different request identity`);
+        if (signal.aborted || isAbort(replayError)) throw abortError();
+        throw new Error(`Submit request for job ${job.id} could not be recovered: ${errorText(replayError, "the exact request replay failed")}`);
+      }
+    }
+  }
+
+  async function cancelWithRecovery(
+    jobId: string,
+    expectedRunId: string,
+    reason: string,
+    requestId: string,
+  ): Promise<ArtifactJob> {
+    try {
+      const cancelled = await api.cancelArtifactJob(jobId, reason, requestId);
+      assertJobIdentity(cancelled, jobId, expectedRunId, "Cancel response");
+      if (!isCancelReceipt(cancelled, requestId, reason)) {
+        throw new Error("Cancel response does not carry this request's cancellation receipt");
+      }
+      return cancelled;
+    } catch (error) {
+      if (!mayHaveBeenAccepted(error)) throw error;
+      const observed = await readJobForRecovery(jobId, expectedRunId, "Cancellation");
+      if (isCancelReceipt(observed, requestId, reason)) return observed;
+      if (observed.state === "cancelling" || TERMINAL_STATES.has(observed.state)) {
+        throw new Error(`Controller reports job ${jobId} as ${observed.state}, without this cancellation receipt`);
+      }
+      try {
+        const replayed = await api.cancelArtifactJob(jobId, reason, requestId);
+        assertJobIdentity(replayed, jobId, expectedRunId, "Cancel replay");
+        if (isCancelReceipt(replayed, requestId, reason)) return replayed;
+      } catch (replayError) {
+        if (!mayHaveBeenAccepted(replayError)) throw replayError;
+      }
+      const latest = await readJobForRecovery(jobId, expectedRunId, "Cancellation");
+      if (isCancelReceipt(latest, requestId, reason)) return latest;
+      throw new Error(`Controller reports job ${jobId} as ${latest.state}, without this cancellation receipt`);
+    }
+  }
+
+  async function completeCancellation(
+    jobId: string,
+    runId: string,
+    reason: string,
+    requestId: string,
+    source: CancelRecovery["source"],
+  ): Promise<void> {
+    if (activeRun?.run_id !== runId) {
+      setCancelRecovery({jobId, runId, reason, requestId, source, message: "The active recipe run changed; select the original run before retrying cancellation"});
+      return;
+    }
+    try {
+      const updated = await cancelWithRecovery(jobId, runId, reason, requestId);
+      setJobs(current => current.map(item => item.id === updated.id ? updated : item));
+      setCancelRecovery(undefined);
+      setCancelCandidate(undefined);
+      cancelIntents.current.delete(`${jobId}\n${reason}`);
+      if (source === "upload") {
+        createIntent.current = undefined;
+        setSubmitError("");
+        setCancellationNotice(updated.state === "cancelling"
+          ? `Local upload stopped. Cancellation is pending for draft ${updated.id}.`
+          : `Local upload stopped. Controller cancelled draft ${updated.id}.`);
+      }
+    } catch (value) {
+      if (source === "upload") setSubmitError("");
+      setCancelRecovery({
+        jobId,
+        runId,
+        reason,
+        requestId,
+        source,
+        message: errorText(value, "The Controller did not confirm cancellation"),
+      });
+    }
   }
 
   async function submit() {
@@ -351,34 +626,78 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
         output_limits: outputLimits,
         timeout_seconds: timeoutSeconds,
       };
+      const createKey = createRequestId(activeRun.run_id, body);
       setPhase("Creating durable job…");
-      let job = await api.createArtifactJob(activeRun.run_id, body, controller.signal);
+      let job = await createWithRecovery(activeRun.run_id, body, createKey, controller.signal);
       createdJob = job;
+      if (controller.signal.aborted) throw abortError();
+      const uploadedIndexes = recoveredInputIndexes(job, prepared);
+      if (job.operation_id) {
+        const submitIntent = submitIntents.current.get(job.id);
+        if (!submitIntent || job.submit_request_id !== submitIntent) {
+          throw new Error(`Job ${job.id} is already submitted under a request identity this page cannot verify`);
+        }
+      } else if (job.state !== "draft" && job.state !== "ready") {
+        throw new Error(`Job ${job.id} is ${job.state}; its inputs cannot be resumed safely`);
+      }
       setJobs(current => [job, ...current.filter(item => item.id !== job.id)]);
+      const uploadTotal = prepared.reduce((total, current) => total + current.blob.size, 0);
+      let completed = prepared.reduce((total, item, index) => total + (uploadedIndexes.has(index) ? item.blob.size : 0), 0);
+      setTransfer({loaded: completed, total: uploadTotal});
       for (const [index, item] of prepared.entries()) {
+        if (uploadedIndexes.has(index)) continue;
+        if (job.state !== "draft") {
+          throw new Error(`Job ${job.id} is ${job.state} but is missing a declared input; it cannot be resumed safely`);
+        }
         setPhase(`Uploading input ${index + 1} of ${prepared.length}…`);
-        const completed = prepared.slice(0, index).reduce((total, previous) => total + previous.blob.size, 0);
-        const uploadTotal = prepared.reduce((total, current) => total + current.blob.size, 0);
+        const alreadyUploaded = completed;
+        const uploadJobId = job.id;
+        const uploadedJob = await api.uploadArtifactJobInput(uploadJobId, item.declaration, item.blob, controller.signal, progress => setTransfer({loaded: alreadyUploaded + progress.loaded, total: uploadTotal}));
+        assertJobIdentity(uploadedJob, uploadJobId, activeRun.run_id, "Input upload");
+        job = uploadedJob;
+        if (controller.signal.aborted) throw abortError();
+        completed += item.blob.size;
+        if (!recoveredInputIndexes(job, prepared).has(index)) {
+          throw new Error(`Controller did not confirm that input ${item.declaration.name} was attached to job ${job.id}`);
+        }
+        uploadedIndexes.add(index);
         setTransfer({loaded: completed, total: uploadTotal});
-        job = await api.uploadArtifactJobInput(job.id, item.declaration, item.blob, controller.signal, progress => setTransfer({loaded: completed + progress.loaded, total: uploadTotal}));
         setJobs(current => current.map(existing => existing.id === job.id ? job : existing));
       }
-      setPhase("Finalizing immutable inputs…");
-      job = await api.finalizeArtifactJob(job.id, controller.signal);
+      if (job.state === "draft") {
+        setPhase("Finalizing immutable inputs…");
+        const finalizeJobId = job.id;
+        const finalizedJob = await api.finalizeArtifactJob(finalizeJobId, controller.signal);
+        assertJobIdentity(finalizedJob, finalizeJobId, activeRun.run_id, "Finalize response");
+        job = finalizedJob;
+        if (controller.signal.aborted) throw abortError();
+        if (job.state !== "ready") throw new Error(`Controller did not confirm that job ${job.id} is ready for submission`);
+      }
       setPhase("Submitting to the Spark…");
-      job = await api.submitArtifactJob(job.id, controller.signal);
+      const submitKey = submitRequestId(job);
+      job = await submitWithRecovery(job, activeRun.run_id, submitKey, controller.signal);
+      if (controller.signal.aborted) throw abortError();
+      submitIntents.current.delete(job.id);
+      if (createIntent.current?.requestId === createKey) createIntent.current = undefined;
       setJobs(current => [job, ...current.filter(existing => existing.id !== job.id)]);
       setFilesBySlot({});
       setPhase("");
       setTransfer(undefined);
+      setCancellationNotice("");
       queueMicrotask(() => heading.current?.focus());
     } catch (value) {
       setPhase("");
       setTransfer(undefined);
-      if (value instanceof DOMException && value.name === "AbortError") {
+      if (isAbort(value)) {
         setFilesBySlot({});
-        setSubmitError("Submission cancelled. Selected files were released and no more bytes will be sent.");
-        if (createdJob) void api.cancelArtifactJob(createdJob.id, "Cancelled by operator during browser transfer").then(cancelled => setJobs(current => current.map(item => item.id === cancelled.id ? cancelled : item))).catch(() => undefined);
+        if (createdJob) {
+          const reason = "Cancelled by operator during browser transfer";
+          const requestId = cancelRequestId(createdJob, reason);
+          setSubmitError(`Local transfer stopped. Checking cancellation of durable draft ${createdJob.id}…`);
+          void completeCancellation(createdJob.id, activeRun.run_id, reason, requestId, "upload");
+        } else {
+          setSubmitError("Input preparation was cancelled before a durable artifact job was created.");
+        }
       } else setSubmitError(value instanceof Error ? value.message.slice(0, 256) : "Unable to submit artifact job");
       void loadJobs(undefined);
     } finally {
@@ -389,13 +708,35 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
 
   async function confirmCancel(job: ArtifactJob) {
     setBusyJobId(job.id);
-    try {
-      const next = await api.cancelArtifactJob(job.id, "Cancelled by operator from Library");
-      setJobs(current => current.map(item => item.id === next.id ? next : item));
-      setCancelCandidate(undefined);
-    } catch (value) {
-      setJobsError(value instanceof Error ? value.message.slice(0, 256) : "Unable to cancel artifact job");
-    } finally { setBusyJobId(undefined); }
+    const reason = "Cancelled by operator from Library";
+    const runId = activeRun?.run_id;
+    if (!runId || job.run_id !== runId) {
+      setCancelRecovery({
+        jobId: job.id,
+        runId: job.run_id,
+        reason,
+        requestId: cancelRequestId(job, reason),
+        source: "history",
+        message: "This job does not belong to the active recipe run",
+      });
+      setBusyJobId(undefined);
+      return;
+    }
+    await completeCancellation(job.id, runId, reason, cancelRequestId(job, reason), "history");
+    setBusyJobId(undefined);
+  }
+
+  async function retryCancellation() {
+    if (!cancelRecovery) return;
+    setBusyJobId(cancelRecovery.jobId);
+    await completeCancellation(
+      cancelRecovery.jobId,
+      cancelRecovery.runId,
+      cancelRecovery.reason,
+      cancelRecovery.requestId,
+      cancelRecovery.source,
+    );
+    setBusyJobId(undefined);
   }
 
   function prepareRetry(job: ArtifactJob) {
@@ -408,6 +749,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
 
   return <section className="artifact-job-workspace" aria-labelledby="artifact-job-heading">
     <header className="artifact-job-heading"><div><h4 id="artifact-job-heading" ref={heading} tabIndex={-1}>Create artifacts</h4><p>Send a bounded, durable {humanizeIdentifier(adapter)} request to this running recipe.</p></div><StatusPill tone={activeRun ? "healthy" : "warning"}>{activeRun ? "Run ready for jobs" : "Start this recipe first"}</StatusPill></header>
+    {cancellationNotice && <p className="artifact-job-notice" role="status">{cancellationNotice}</p>}
     {!activeRun && <div className="artifact-job-empty"><strong>No running recipe</strong><p>Install and load this recipe before submitting an artifact job. The form remains visible so you can inspect its exact contract.</p></div>}
     <div className="artifact-job-layout">
       <form className="artifact-job-form" onSubmit={event => { event.preventDefault(); void submit(); }} noValidate>
@@ -440,7 +782,8 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
           <details><summary>Output boundary</summary><p>{formatBytes(outputLimits.max_total_bytes)} total · {formatBytes(outputLimits.max_file_bytes)} per file · {outputLimits.allowed_media_types.join(" · ")}</p></details>
         </section>
         {retryNotice && <p className="artifact-job-notice" role="status">{retryNotice}</p>}
-        {submitError && <div className="artifact-job-error" role="alert"><strong>Job was not submitted</strong><p>{submitError}</p><button type="button" className="button secondary" onClick={() => setSubmitError("")}>Review and try again</button></div>}
+        {submitError && <div className="artifact-job-error" role="alert"><strong>Submission needs recovery</strong><p>{submitError}</p><button type="button" className="button secondary" onClick={() => setSubmitError("")}>Review and try again</button></div>}
+        {cancelRecovery && <div className="artifact-job-error" role="alert"><strong>Cancellation needs recovery</strong><p>Job {cancelRecovery.jobId}, request {cancelRecovery.requestId}: {cancelRecovery.message}</p><button type="button" className="button secondary" disabled={busyJobId === cancelRecovery.jobId} onClick={() => void retryCancellation()}>{busyJobId === cancelRecovery.jobId ? "Retrying cancellation…" : "Retry cancellation"}</button></div>}
         {phase && <div className="artifact-transfer" role="status" aria-live="polite"><div><strong>{phase}</strong><span>{transfer ? `${formatBytes(transfer.loaded)} of ${formatBytes(transfer.total)}` : "Preparing…"}</span></div>{transfer && <progress value={transfer.loaded} max={Math.max(transfer.total, 1)}/>}<button type="button" className="button secondary" onClick={() => submissionController.current?.abort()}>Cancel transfer</button></div>}
         <button type="submit" disabled={!canSubmit}>{capabilities ? "Submit artifact job" : capabilitiesError ? "Storage preflight required" : "Checking controller capacity…"}</button>
       </form>

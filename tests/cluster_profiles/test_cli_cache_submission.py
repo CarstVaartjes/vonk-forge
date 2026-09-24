@@ -387,3 +387,38 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
     document = json.loads(capsys.readouterr().out)
     assert document["submission"]["acceptance"] == "unknown"
     assert document["request_key"] == KEY
+
+
+@pytest.mark.parametrize("noun", ["model", "recipe"])
+def test_uncertain_cancellation_reconnect_preserves_cancellation_identity(noun):
+    operation_id = "00000000-0000-4000-8000-000000000015"
+    path = f"/api/{noun}/operations/{operation_id}"
+    client = SubmissionClient(
+        {
+            ("POST", path + "/cancel"): ControlTransportError("answer lost"),
+            ("GET", path): ControlUnavailable(503, "observation unavailable"),
+        }
+    )
+    status, result = run(
+        (
+            noun,
+            "cancel",
+            operation_id,
+            "--yes",
+            "--detach",
+            "--request-key",
+            KEY,
+            "--reason",
+            "Stop this request",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 2 and acceptance(result) == "unknown"
+    reconcile = result["reconcile"]
+    assert isinstance(reconcile, dict)
+    assert reconcile["operation"] == (
+        f"vonkctl {noun} cancel {operation_id} --yes --request-key {KEY} "
+        "--reason 'Stop this request'"
+    )
+    assert [call[0] for call in client.calls] == ["POST", "GET"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
@@ -105,7 +106,16 @@ def test_operator_routes_use_singular_namespaces_and_shared_mutation_roles() -> 
             ).status_code
             == 403
         )
-        assert client.post("/api/fleet/upgrade", json={"all": True}).status_code == 403
+        assert (
+            client.post(
+                "/api/fleet/upgrade",
+                json={
+                    "all": True,
+                    "request_key": "11111111-1111-4111-8111-111111111111",
+                },
+            ).status_code
+            == 403
+        )
         paths = set(app.openapi()["paths"])
         assert "/api/model/library" in paths
         assert "/api/model/{selector}" in paths
@@ -436,6 +446,9 @@ class _RefusingUpgrade:
     def current_package(self) -> dict[str, object]:
         raise self._error
 
+    def get_request(self, *args: object, **kwargs: object) -> object | None:
+        return None
+
     def preview(self, *args: object, **kwargs: object) -> object:
         raise AssertionError("preview must not run once the authority refused")
 
@@ -465,11 +478,93 @@ def test_a_refused_upgrade_names_the_authority_reason(reason: str) -> None:
             upgrades=_RefusingUpgrade(AgentUpgradeConflict(reason))
         ),
     )
-    response = TestClient(app).post("/api/fleet/upgrade", json={"all": True})
+    response = TestClient(app).post(
+        "/api/fleet/upgrade",
+        json={
+            "all": True,
+            "request_key": "11111111-1111-4111-8111-111111111111",
+        },
+    )
 
     assert response.status_code == 409, response.text
     assert response.headers["x-vonk-error-code"] == "controller.fleet.upgrade_conflict"
     assert response.json()["detail"] == reason
+
+
+def test_retired_upgrade_strategy_is_rejected_before_dispatch() -> None:
+    app = _action_app(
+        Actor("admin", "administrator"),
+        services=FleetOperatorServices(
+            upgrades=_RefusingUpgrade(AgentUpgradeConflict("must not dispatch"))
+        ),
+    )
+
+    response = TestClient(app).post(
+        "/api/fleet/upgrade",
+        json={
+            "all": True,
+            "request_key": "11111111-1111-4111-8111-111111111111",
+            "strategy": "all-at-once",
+        },
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_upgrade_request_replay_returns_the_same_durable_job() -> None:
+    class ReplayUpgrade:
+        def __init__(self) -> None:
+            self.lookup_calls: list[tuple[str, str, dict[str, object]]] = []
+
+        def get_request(
+            self,
+            request_id: str,
+            *,
+            actor: str,
+            request_intent: Mapping[str, object],
+        ) -> object:
+            self.lookup_calls.append((request_id, actor, dict(request_intent)))
+            return SimpleNamespace(
+                id="existing-job",
+                state="running",
+                payload_digest="d" * 64,
+                targets=[_NODE],
+            )
+
+        def current_package(self) -> dict[str, object]:
+            raise AssertionError("a replay must not resolve a new package")
+
+        def preview(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("a replay must not build a new plan")
+
+        def apply(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("a replay must not enqueue another job")
+
+    upgrades = ReplayUpgrade()
+    app = _action_app(
+        Actor("admin", "administrator"),
+        services=FleetOperatorServices(upgrades=upgrades),
+    )
+
+    response = TestClient(app).post(
+        "/api/fleet/upgrade",
+        json={
+            "all": False,
+            "selectors": [_NODE],
+            "request_key": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["operation_id"] == "existing-job"
+    assert response.json()["request_key"] == "11111111-1111-4111-8111-111111111111"
+    assert upgrades.lookup_calls == [
+        (
+            "11111111-1111-4111-8111-111111111111",
+            "admin",
+            {"all": False, "selectors": [_NODE]},
+        )
+    ]
 
 
 class _RefusingEnrollment(_Enrollment):

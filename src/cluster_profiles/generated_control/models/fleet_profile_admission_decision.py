@@ -6,13 +6,16 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
+from typing import Union
 
 if TYPE_CHECKING:
   from ..models.effective_settings_selection import EffectiveSettingsSelection
   from ..models.run_switch_reason import RunSwitchReason
   from ..models.fleet_profile_resource_requirement import FleetProfileResourceRequirement
+  from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
   from ..models.stop_impact import StopImpact
 
 
@@ -36,6 +39,7 @@ class FleetProfileAdmissionDecision:
             stop_before_prepare (bool):
             stop_before_transfer (bool):
             stops (list['StopImpact']):
+            post_stop_memory_check (Union['ConditionalPostStopMemoryCheck', None, Unset]):
      """
 
     alias: Union[None, str]
@@ -47,6 +51,7 @@ class FleetProfileAdmissionDecision:
     stop_before_prepare: bool
     stop_before_transfer: bool
     stops: list['StopImpact']
+    post_stop_memory_check: Union['ConditionalPostStopMemoryCheck', None, Unset] = UNSET
 
 
 
@@ -56,6 +61,7 @@ class FleetProfileAdmissionDecision:
         from ..models.effective_settings_selection import EffectiveSettingsSelection
         from ..models.run_switch_reason import RunSwitchReason
         from ..models.fleet_profile_resource_requirement import FleetProfileResourceRequirement
+        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
         from ..models.stop_impact import StopImpact
         alias: Union[None, str]
         alias = self.alias
@@ -95,6 +101,14 @@ class FleetProfileAdmissionDecision:
 
 
 
+        post_stop_memory_check: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.post_stop_memory_check, Unset):
+            post_stop_memory_check = UNSET
+        elif isinstance(self.post_stop_memory_check, ConditionalPostStopMemoryCheck):
+            post_stop_memory_check = self.post_stop_memory_check.to_dict()
+        else:
+            post_stop_memory_check = self.post_stop_memory_check
+
 
         field_dict: dict[str, Any] = {}
 
@@ -109,6 +123,8 @@ class FleetProfileAdmissionDecision:
             "stop_before_transfer": stop_before_transfer,
             "stops": stops,
         })
+        if post_stop_memory_check is not UNSET:
+            field_dict["post_stop_memory_check"] = post_stop_memory_check
 
         return field_dict
 
@@ -119,6 +135,7 @@ class FleetProfileAdmissionDecision:
         from ..models.effective_settings_selection import EffectiveSettingsSelection
         from ..models.run_switch_reason import RunSwitchReason
         from ..models.fleet_profile_resource_requirement import FleetProfileResourceRequirement
+        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
         from ..models.stop_impact import StopImpact
         d = dict(src_dict)
         def _parse_alias(data: object) -> Union[None, str]:
@@ -185,6 +202,26 @@ class FleetProfileAdmissionDecision:
             stops.append(stops_item)
 
 
+        def _parse_post_stop_memory_check(data: object) -> Union['ConditionalPostStopMemoryCheck', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                post_stop_memory_check_type_0 = ConditionalPostStopMemoryCheck.from_dict(data)
+
+
+
+                return post_stop_memory_check_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['ConditionalPostStopMemoryCheck', None, Unset], data)
+
+        post_stop_memory_check = _parse_post_stop_memory_check(d.pop("post_stop_memory_check", UNSET))
+
+
         fleet_profile_admission_decision = cls(
             alias=alias,
             allowed=allowed,
@@ -195,6 +232,7 @@ class FleetProfileAdmissionDecision:
             stop_before_prepare=stop_before_prepare,
             stop_before_transfer=stop_before_transfer,
             stops=stops,
+            post_stop_memory_check=post_stop_memory_check,
         )
 
         return fleet_profile_admission_decision

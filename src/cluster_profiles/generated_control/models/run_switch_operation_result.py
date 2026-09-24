@@ -23,6 +23,7 @@ import datetime
 
 if TYPE_CHECKING:
   from ..models.run_switch_model_download_result import RunSwitchModelDownloadResult
+  from ..models.run_switch_runtime_image_reference_intent import RunSwitchRuntimeImageReferenceIntent
   from ..models.operation_progress import OperationProgress
   from ..models.lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
   from ..models.run_switch_start_result import RunSwitchStartResult
@@ -92,6 +93,7 @@ class RunSwitchOperationResult:
             retry_attempt (Union[None, Unset, int]):
             retry_reason (Union[None, Unset, str]):
             retryable (Union[Unset, bool]):  Default: False.
+            runtime_image_reference_intent (Union['RunSwitchRuntimeImageReferenceIntent', None, Unset]):
             start_deadline (Union[None, Unset, datetime.datetime]):
             startup_budget_seconds (Union[None, Unset, int]):
             subphase (Union[None, RunSwitchOperationResultSubphaseType0, Unset]):
@@ -122,6 +124,7 @@ class RunSwitchOperationResult:
     retry_attempt: Union[None, Unset, int] = UNSET
     retry_reason: Union[None, Unset, str] = UNSET
     retryable: Union[Unset, bool] = False
+    runtime_image_reference_intent: Union['RunSwitchRuntimeImageReferenceIntent', None, Unset] = UNSET
     start_deadline: Union[None, Unset, datetime.datetime] = UNSET
     startup_budget_seconds: Union[None, Unset, int] = UNSET
     subphase: Union[None, RunSwitchOperationResultSubphaseType0, Unset] = UNSET
@@ -135,6 +138,7 @@ class RunSwitchOperationResult:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.run_switch_model_download_result import RunSwitchModelDownloadResult
+        from ..models.run_switch_runtime_image_reference_intent import RunSwitchRuntimeImageReferenceIntent
         from ..models.operation_progress import OperationProgress
         from ..models.lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
         from ..models.run_switch_start_result import RunSwitchStartResult
@@ -368,6 +372,14 @@ class RunSwitchOperationResult:
 
         retryable = self.retryable
 
+        runtime_image_reference_intent: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.runtime_image_reference_intent, Unset):
+            runtime_image_reference_intent = UNSET
+        elif isinstance(self.runtime_image_reference_intent, RunSwitchRuntimeImageReferenceIntent):
+            runtime_image_reference_intent = self.runtime_image_reference_intent.to_dict()
+        else:
+            runtime_image_reference_intent = self.runtime_image_reference_intent
+
         start_deadline: Union[None, Unset, str]
         if isinstance(self.start_deadline, Unset):
             start_deadline = UNSET
@@ -453,6 +465,8 @@ class RunSwitchOperationResult:
             field_dict["retry_reason"] = retry_reason
         if retryable is not UNSET:
             field_dict["retryable"] = retryable
+        if runtime_image_reference_intent is not UNSET:
+            field_dict["runtime_image_reference_intent"] = runtime_image_reference_intent
         if start_deadline is not UNSET:
             field_dict["start_deadline"] = start_deadline
         if startup_budget_seconds is not UNSET:
@@ -473,6 +487,7 @@ class RunSwitchOperationResult:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.run_switch_model_download_result import RunSwitchModelDownloadResult
+        from ..models.run_switch_runtime_image_reference_intent import RunSwitchRuntimeImageReferenceIntent
         from ..models.operation_progress import OperationProgress
         from ..models.lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
         from ..models.run_switch_start_result import RunSwitchStartResult
@@ -1110,6 +1125,26 @@ class RunSwitchOperationResult:
 
         retryable = d.pop("retryable", UNSET)
 
+        def _parse_runtime_image_reference_intent(data: object) -> Union['RunSwitchRuntimeImageReferenceIntent', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                runtime_image_reference_intent_type_0 = RunSwitchRuntimeImageReferenceIntent.from_dict(data)
+
+
+
+                return runtime_image_reference_intent_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['RunSwitchRuntimeImageReferenceIntent', None, Unset], data)
+
+        runtime_image_reference_intent = _parse_runtime_image_reference_intent(d.pop("runtime_image_reference_intent", UNSET))
+
+
         def _parse_start_deadline(data: object) -> Union[None, Unset, datetime.datetime]:
             if data is None:
                 return data
@@ -1205,6 +1240,7 @@ class RunSwitchOperationResult:
             retry_attempt=retry_attempt,
             retry_reason=retry_reason,
             retryable=retryable,
+            runtime_image_reference_intent=runtime_image_reference_intent,
             start_deadline=start_deadline,
             startup_budget_seconds=startup_budget_seconds,
             subphase=subphase,

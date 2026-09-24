@@ -5,7 +5,10 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import delete, select
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
-from vonk_control.lifecycle_preflight import LifecyclePreflight
+from vonk_control.lifecycle_preflight import (
+    LifecyclePreflight,
+    LifecyclePreflightCheckpoint,
+)
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -250,21 +253,43 @@ def test_changed_earlier_rank_is_reprobed_after_pending_peer_completes(tmp_path)
     assert refreshed.attempts[nodes[0]] == 2
 
 
-def test_repeated_host_changes_exhaust_bounded_probe_attempts(tmp_path):
-    sessions, _, clock, _, service, arguments = _setup(tmp_path)
-    checkpoint = None
-    for _ in range(3):
-        checkpoint, error = service.ensure(**arguments, previous=checkpoint)
-        assert error is None and checkpoint.pending_job_id
+def test_repeated_host_changes_recover_after_restart_beyond_previous_attempt_limit(
+    tmp_path,
+):
+    sessions, queue, clock, node_id, service, arguments = _setup(tmp_path)
+    checkpoint, error = service.ensure(**arguments, previous=None)
+    assert error is None and checkpoint.pending_job_id
+    for _ in range(5):
         _finish(sessions, checkpoint, clock.now, fingerprint="b" * 64)
+        checkpoint, error = service.ensure(**arguments, previous=checkpoint)
+        assert error is None
+        assert checkpoint.pending_job_id is None
+        due_at = checkpoint.next_check_at
+        assert due_at is not None
+        assert clock.now < due_at <= clock.now + timedelta(seconds=60)
+        checkpoint = LifecyclePreflightCheckpoint.model_validate_json(
+            checkpoint.model_dump_json()
+        )
+        service = LifecyclePreflight(sessions, queue, lambda: clock.now, 10)
+        early, error = service.ensure(**arguments, previous=checkpoint)
+        assert error is None and early.pending_job_id is None
+        assert early.next_check_at == due_at
+        clock.now = due_at
+        checkpoint, error = service.ensure(**arguments, previous=early)
+        assert error is None and checkpoint.pending_job_id
+    _finish(sessions, checkpoint, clock.now)
     checkpoint, error = service.ensure(**arguments, previous=checkpoint)
-    assert error == "runtime_preflight.retry_exhausted"
-    assert len(checkpoint.receipts) == 1
+    assert error is None and checkpoint.pending_job_id is None
+    assert checkpoint.next_check_at is None
+    assert checkpoint.attempts[node_id] == 6
+    assert checkpoint.receipts[node_id].fingerprint == "a" * 64
 
 
 @pytest.mark.parametrize("state", ["queued", "running"])
-def test_pending_probe_deadline_survives_restart_and_progress_updates(tmp_path, state):
-    sessions, queue, clock, _, service, arguments = _setup(tmp_path)
+def test_disconnected_probe_keeps_exact_child_until_recovery_after_restart(
+    tmp_path, state
+):
+    sessions, queue, clock, node_id, service, arguments = _setup(tmp_path)
     checkpoint, error = service.ensure(**arguments, previous=None)
     assert error is None
     clock.now += timedelta(seconds=179)
@@ -277,10 +302,72 @@ def test_pending_probe_deadline_survives_restart_and_progress_updates(tmp_path, 
     pending, error = restarted.ensure(**arguments, previous=checkpoint)
     assert error is None and pending.pending_job_id == checkpoint.pending_job_id
     clock.now += timedelta(seconds=1)
-    timed_out, error = restarted.ensure(**arguments, previous=pending)
-    assert error == "runtime_preflight.deadline_exceeded"
-    assert timed_out.attempts == checkpoint.attempts
-    assert timed_out.receipts == {}
+    waiting, error = restarted.ensure(**arguments, previous=pending)
+    assert error is None
+    assert waiting.pending_job_id == checkpoint.pending_job_id
+    assert waiting.attempts == checkpoint.attempts
+    assert waiting.receipts == {}
+    assert waiting.next_check_at is not None
+    assert clock.now < waiting.next_check_at <= clock.now + timedelta(seconds=60)
+    clock.now += timedelta(days=1)
+    waiting, error = restarted.ensure(**arguments, previous=waiting)
+    assert error is None and waiting.pending_job_id == checkpoint.pending_job_id
+    _finish(sessions, waiting, clock.now)
+    completed, error = restarted.ensure(**arguments, previous=waiting)
+    assert error is None and completed.pending_job_id is None
+    assert completed.next_check_at is None
+    assert node_id in completed.receipts
+    with sessions() as session:
+        assert len(list(session.scalars(select(AgentOperation)))) == 1
+
+
+@pytest.mark.parametrize(
+    ("state", "reason"),
+    [("failed", "permission_denied"), ("cancelled", "operator_cancelled")],
+)
+def test_terminal_probe_failure_remains_an_explicit_blocker(tmp_path, state, reason):
+    sessions, _, clock, _, service, arguments = _setup(tmp_path)
+    checkpoint, _ = service.ensure(**arguments, previous=None)
+    with sessions.begin() as session:
+        child = session.get(Job, checkpoint.pending_job_id)
+        assert child is not None
+        child.state = state
+        child.status_reason = reason
+    clock.now += timedelta(days=1)
+    blocked, error = service.ensure(**arguments, previous=checkpoint)
+    assert error == reason
+    assert blocked.pending_job_id == checkpoint.pending_job_id
+    assert blocked.attempts == checkpoint.attempts
+
+
+def test_successful_probe_without_receipt_remains_an_explicit_blocker(tmp_path):
+    sessions, _, clock, _, service, arguments = _setup(tmp_path)
+    checkpoint, _ = service.ensure(**arguments, previous=None)
+    with sessions.begin() as session:
+        child = session.get(Job, checkpoint.pending_job_id)
+        assert child is not None
+        child.state = "succeeded"
+    clock.now += timedelta(days=1)
+    blocked, error = service.ensure(**arguments, previous=checkpoint)
+    assert error == "runtime_preflight.receipt_missing"
+    assert blocked.pending_job_id == checkpoint.pending_job_id
+    assert blocked.attempts == checkpoint.attempts
+
+
+def test_pending_probe_without_recovery_owner_remains_an_explicit_blocker(tmp_path):
+    sessions, _, clock, _, service, arguments = _setup(tmp_path)
+    checkpoint, _ = service.ensure(**arguments, previous=None)
+    with sessions.begin() as session:
+        session.execute(
+            delete(AgentOperation).where(
+                AgentOperation.parent_job_id == checkpoint.pending_job_id
+            )
+        )
+    clock.now += timedelta(days=1)
+    blocked, error = service.ensure(**arguments, previous=checkpoint)
+    assert error == "runtime_preflight.operation_missing"
+    assert blocked.pending_job_id == checkpoint.pending_job_id
+    assert blocked.attempts == checkpoint.attempts
 
 
 def test_completed_probe_is_consumed_even_when_controller_resumes_after_deadline(
@@ -354,7 +441,12 @@ def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(
     restarted.tick()
     active = restarted.get(operation.operation_id)
     if not probe_completed:
-        assert active.state == "failed"
+        assert active.state == "running"
+        assert active.result is not None
+        assert active.result.preflight is not None
+        assert (
+            active.result.preflight.pending_job_id == pending_preflight.pending_job_id
+        )
         assert not artifacts.children
         return
     active_result = active.result

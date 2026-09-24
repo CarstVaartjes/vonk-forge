@@ -37,6 +37,7 @@ class RecipeOperatorResponse:
             request_key (str):
             selector (str):
             state (RecipeOperatorResponseState):
+            with_model (bool):
             cancelled_builds (Union[Unset, list[str]]):
             cancelled_operations (Union[Unset, list[str]]):
             model_removals (Union[Unset, list[str]]):
@@ -53,6 +54,7 @@ class RecipeOperatorResponse:
     request_key: str
     selector: str
     state: RecipeOperatorResponseState
+    with_model: bool
     cancelled_builds: Union[Unset, list[str]] = UNSET
     cancelled_operations: Union[Unset, list[str]] = UNSET
     model_removals: Union[Unset, list[str]] = UNSET
@@ -81,6 +83,8 @@ class RecipeOperatorResponse:
         selector = self.selector
 
         state: str = self.state
+
+        with_model = self.with_model
 
         cancelled_builds: Union[Unset, list[str]] = UNSET
         if not isinstance(self.cancelled_builds, Unset):
@@ -126,6 +130,7 @@ class RecipeOperatorResponse:
             "request_key": request_key,
             "selector": selector,
             "state": state,
+            "with_model": with_model,
         })
         if cancelled_builds is not UNSET:
             field_dict["cancelled_builds"] = cancelled_builds
@@ -172,6 +177,8 @@ class RecipeOperatorResponse:
 
 
 
+        with_model = d.pop("with_model")
+
         cancelled_builds = cast(list[str], d.pop("cancelled_builds", UNSET))
 
 
@@ -200,6 +207,7 @@ class RecipeOperatorResponse:
             request_key=request_key,
             selector=selector,
             state=state,
+            with_model=with_model,
             cancelled_builds=cancelled_builds,
             cancelled_operations=cancelled_operations,
             model_removals=model_removals,

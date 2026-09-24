@@ -61,36 +61,51 @@ use uuid::Uuid;
 
 /// The authoritative ceiling on one privileged-helper frame, in bytes.
 ///
-/// This is the resource bound for the whole host-runtime exchange: the agent
-/// canonicalizes the request body, writes the owner-only request file and
-/// frames the message, and the helper allocates exactly the framed length
-/// before it parses. The basis is the largest legitimate request, not taste:
-/// the compiled plan admits 4096 artifacts, and at one `--mount` pair per
-/// mounted file the container command line can reach roughly 0.6 MiB, so a
-/// 256 KiB ceiling was one larger model away from refusing a valid start. 1 MiB
-/// carries the plan-admitted maximum with margin. The worst case is one body
-/// plus one request file plus one helper frame and its parsed form -- a few
-/// MiB, acceptable on a node that already stages multi-gigabyte images.
-///
-/// `MAX_HOST_RUNTIME_ARGUMENTS` and `MAX_ARGV_BYTES` are backstops below this.
+/// A frame is one signed helper message: the agent canonicalizes the signed
+/// grant, frames it, and the helper allocates exactly the framed length before
+/// it parses. This is the bound on the *grant*, not on the runtime request the
+/// grant authorizes. The grant carries the four identities and the request
+/// digest; the request document itself is never framed (see
+/// [`MAX_HOST_RUNTIME_REQUEST_BYTES`]). The worst case is one framed grant plus
+/// one framed reply and their parsed forms -- a few MiB, acceptable on a node
+/// that already stages multi-gigabyte images.
 pub const MAX_HELPER_FRAME_BYTES: usize = 1024 * 1024;
-/// The most arguments one bounded helper request may carry.
+/// The authoritative ceiling on one canonical [`HostRuntimeRequest`], in bytes.
 ///
-/// This count is a coarse sanity bound, not the payload authority. The
-/// authoritative size limit is the `MAX_HELPER_FRAME_BYTES` frame ceiling on
-/// the canonical request body. One request frames the whole container command
-/// line --
-/// four image identities, the `podman run` options and one `--mount` pair per
-/// mounted model file -- so a legitimate many-artifact recipe needs far more
-/// than 512 elements: the GLM EXL3 dual recipe mounts 149 model files, which
-/// alone project to 152 mount pairs. 4096 leaves that shape room while still
-/// refusing an absurd count, and for realistic argument lengths the frame
-/// ceiling binds first.
+/// This, not [`MAX_HELPER_FRAME_BYTES`], is the budget that actually constrains
+/// a runtime request. The request document is never framed and never sent to
+/// the Controller: the agent canonicalizes it, writes it to the owner-only
+/// request file, and sends only its digest, and the privileged helper reads and
+/// parses that file. Before this constant the helper bounded that read with a
+/// private `64 * 1024` round number and refused an over-long document with the
+/// opaque `helper.unsafe_path`, so a legitimate many-shard command line the
+/// plan admits failed after a successful install and blamed the path.
 ///
-/// There is deliberately no per-argument byte ceiling: an inline engine
-/// configuration is a legal, possibly large, single element, and the frame
-/// ceiling already bounds the whole payload.
-pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 4096;
+/// The ceiling shares the frame basis deliberately, because the frame and the
+/// request document are the two large allocations of one host-runtime exchange:
+/// bounding the document by one frame keeps that exchange's largest allocation
+/// at two frames. The basis is the largest legitimate command line, not taste.
+/// The compiled plan admits 4096 artifacts, and at one `--mount` pair per
+/// mounted file the container command line can reach roughly 0.6 MiB, so a
+/// 64 KiB document ceiling was one larger model away from refusing a valid
+/// start; 1 MiB carries the plan-admitted maximum with margin. There is
+/// deliberately no per-argument ceiling beyond this: an inline engine
+/// configuration is a legal, possibly large, single element, and an empty or
+/// newline-bearing element is legal too.
+pub const MAX_HOST_RUNTIME_REQUEST_BYTES: usize = MAX_HELPER_FRAME_BYTES;
+/// The bytes a canonical [`HostRuntimeRequest`] spends on everything but its
+/// argument payload: field names, the seven identity and version fields, the
+/// `installation_id`, the largest legal inspection `observation` binding, and
+/// the argument array's brackets and separators.
+///
+/// The compiled plan's `MAX_ARGV_BYTES` is derived by subtracting this from
+/// [`MAX_HOST_RUNTIME_REQUEST_BYTES`], so the plan's own argv budget sits
+/// strictly below the request budget instead of exactly on it. The value
+/// is a margin above a measured maximum, never merely equal to one:
+/// `the_declared_envelope_covers_the_largest_contract_permitted_request`
+/// re-measures the largest contract-permitted envelope and fails if it
+/// outgrows this constant.
+pub const HOST_RUNTIME_REQUEST_ENVELOPE_BYTES: usize = 16 * 1024;
 /// The ceiling on one generic claim payload or progress document.
 ///
 /// The load-bearing case is an `artifact.distribution.v1` claim, whose
@@ -216,9 +231,12 @@ pub enum HostRuntimeRequestRule {
     /// An installation identity is present or absent for the wrong action.
     #[error("host runtime request installation identity is invalid")]
     InstallationIdentity,
-    /// There are more arguments than the bounded transport accepts.
-    #[error("host runtime request argument count is invalid")]
-    ArgumentCount { limit: u64, observed: u64 },
+    /// The canonical request document is larger than the bounded helper
+    /// exchange reads. The budget is a byte budget, so a count ceiling is
+    /// deliberately absent: every argument costs at least three canonical
+    /// bytes, so this rule always fires before any derived count could.
+    #[error("host runtime request document exceeds the bounded exchange")]
+    RequestBytes { limit: u64, observed: u64 },
     /// An argument carries a NUL byte, which an exec argv cannot frame.
     #[error("host runtime request argument carries a NUL byte")]
     ArgumentNulByte { observed: u64 },
@@ -240,7 +258,7 @@ impl HostRuntimeRequestRule {
     /// with no numeric ceiling (a refused byte, not a refused length).
     pub fn bound(self) -> Option<(Option<u64>, u64)> {
         match self {
-            Self::ArgumentCount { limit, observed } => Some((Some(limit), observed)),
+            Self::RequestBytes { limit, observed } => Some((Some(limit), observed)),
             Self::ArgumentNulByte { observed } => Some((None, observed)),
             _ => None,
         }
@@ -267,10 +285,11 @@ impl HostRuntimeRequest {
         {
             return Err(HostRuntimeRequestRule::InstallationIdentity);
         }
-        if self.arguments.len() > MAX_HOST_RUNTIME_ARGUMENTS {
-            return Err(HostRuntimeRequestRule::ArgumentCount {
-                limit: MAX_HOST_RUNTIME_ARGUMENTS as u64,
-                observed: self.arguments.len() as u64,
+        let encoded = canonical_json(self).map_err(|_| HostRuntimeRequestRule::Encoding)?;
+        if encoded.len() > MAX_HOST_RUNTIME_REQUEST_BYTES {
+            return Err(HostRuntimeRequestRule::RequestBytes {
+                limit: MAX_HOST_RUNTIME_REQUEST_BYTES as u64,
+                observed: encoded.len() as u64,
             });
         }
         for value in &self.arguments {
@@ -365,6 +384,151 @@ mod installation_cleanup_contract_tests {
             let parsed: HostRuntimeRequest = serde_json::from_value(raw).unwrap();
             assert!(parsed.validate().is_err());
         }
+    }
+}
+
+/// The bounds that decide whether a Start is framed at all.
+///
+/// Every test here names the wrong implementation it refuses to accept, so a
+/// future change cannot quietly restore a round-number cap beside the byte
+/// budget.
+#[cfg(test)]
+mod host_runtime_request_bound_tests {
+    use super::{
+        HOST_RUNTIME_REQUEST_ENVELOPE_BYTES, HostRuntimeAction, HostRuntimeRequest,
+        HostRuntimeRequestRule, MAX_HOST_RUNTIME_REQUEST_BYTES, RecipeRunInspectionBinding,
+        canonical_json,
+    };
+    use uuid::Uuid;
+
+    fn start(arguments: Vec<String>) -> HostRuntimeRequest {
+        HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::Start,
+            job_id: Uuid::new_v4(),
+            operation_id: Uuid::new_v4(),
+            attempt: 1,
+            fence: Uuid::new_v4(),
+            arguments,
+            observation: None,
+            installation_id: None,
+        }
+    }
+
+    fn canonical_length(request: &HostRuntimeRequest) -> usize {
+        canonical_json(request)
+            .expect("a host runtime request must canonically encode")
+            .len()
+    }
+
+    #[test]
+    fn the_declared_envelope_covers_the_largest_contract_permitted_request() {
+        // Wrong implementation: `MAX_ARGV_BYTES` was set equal to the request
+        // ceiling while its comment called it a backstop "below" that ceiling,
+        // so an argv inside the plan's own budget could still be unframeable.
+        // Re-measure the envelope rather than restating the subtraction.
+        let binding = RecipeRunInspectionBinding {
+            artifact_set_digest: "a".repeat(64),
+            image_digest: "b".repeat(64),
+            installation_id: Uuid::new_v4(),
+            local_address: None,
+            // The largest value the Rust wire type can carry, not merely the
+            // Pydantic maximum, so the envelope cannot be undershot by a
+            // document this validator admits.
+            mapping_generation: u64::MAX,
+            mapping_id: Uuid::new_v4(),
+            master_address: None,
+            master_port: None,
+            // 1024 single-byte control characters escape to six bytes each in
+            // JSON, which is the widest a legal `model_identity` can render.
+            model_identity: "\u{1}".repeat(1024),
+            port: u16::MAX,
+            rank: 0,
+            recipe_content_sha256: "c".repeat(64),
+            recipe_revision_id: Uuid::new_v4(),
+            role: "a".to_owned(),
+            run_generation: u32::MAX,
+            run_id: Uuid::new_v4(),
+            runtime_arguments_sha256: "d".repeat(64),
+            world_size: 1,
+        };
+        assert!(binding.validate().is_ok());
+        let request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::RunInspect,
+            job_id: binding.run_id,
+            operation_id: Uuid::new_v4(),
+            attempt: binding.run_generation,
+            fence: Uuid::new_v4(),
+            arguments: Vec::new(),
+            observation: Some(binding),
+            installation_id: None,
+        };
+        let measured = canonical_length(&request);
+        assert!(
+            measured <= HOST_RUNTIME_REQUEST_ENVELOPE_BYTES,
+            "the measured envelope {measured} outgrew the declared \
+             HOST_RUNTIME_REQUEST_ENVELOPE_BYTES {HOST_RUNTIME_REQUEST_ENVELOPE_BYTES}, \
+             so the derived MAX_ARGV_BYTES no longer leaves room for the request around it"
+        );
+    }
+
+    #[test]
+    fn the_exchange_ceiling_is_admitted_and_one_byte_over_is_refused_with_both_numbers() {
+        // Wrong implementation: the request had no byte bound at all, so the
+        // helper's private `64 * 1024` read cap refused it opaquely as
+        // `helper.unsafe_path` after the agent had called it valid.
+        let base = start(vec!["sha256:image".to_owned()]);
+        let base_length = canonical_length(&base);
+        let filler = MAX_HOST_RUNTIME_REQUEST_BYTES - base_length - 3;
+
+        let mut at_limit = base.clone();
+        at_limit.arguments.push("x".repeat(filler));
+        assert_eq!(canonical_length(&at_limit), MAX_HOST_RUNTIME_REQUEST_BYTES);
+        assert_eq!(at_limit.validate(), Ok(()));
+
+        let mut over_limit = base;
+        over_limit.arguments.push("x".repeat(filler + 1));
+        assert_eq!(
+            canonical_length(&over_limit),
+            MAX_HOST_RUNTIME_REQUEST_BYTES + 1
+        );
+        assert_eq!(
+            over_limit.validate(),
+            Err(HostRuntimeRequestRule::RequestBytes {
+                limit: MAX_HOST_RUNTIME_REQUEST_BYTES as u64,
+                observed: MAX_HOST_RUNTIME_REQUEST_BYTES as u64 + 1,
+            })
+        );
+    }
+
+    #[test]
+    fn a_command_line_above_the_retired_count_ceiling_is_admitted() {
+        // Wrong implementation: `MAX_HOST_RUNTIME_ARGUMENTS = 4096` refused a
+        // legitimate command line of 6000 short elements while the canonical
+        // request was tens of kilobytes inside the byte budget. The plan
+        // projects two arguments per mounted file at an artifact ceiling of
+        // 4096, so a count this large is admitted by the plan contract.
+        let arguments = (0..6000)
+            .map(|index| format!("--mount=type=bind,src={index:05}"))
+            .collect();
+        let request = start(arguments);
+        assert!(canonical_length(&request) < MAX_HOST_RUNTIME_REQUEST_BYTES);
+        assert_eq!(request.validate(), Ok(()));
+    }
+
+    #[test]
+    fn an_empty_argument_and_a_multiline_argument_are_legal_bytes() {
+        // Wrong implementation: an argument an exec argv can carry -- empty, or
+        // one with CR/LF -- was refused for carrying it, though the plan's own
+        // opaque-argv contract permits it byte for byte.
+        let request = start(vec![
+            "sha256:image".to_owned(),
+            String::new(),
+            "line one\nline two\r\n".to_owned(),
+            String::new(),
+        ]);
+        assert_eq!(request.validate(), Ok(()));
     }
 }
 
@@ -1189,6 +1353,20 @@ impl RecipeOperationRequest {
                     }
                     && valid_alias(&value.alias)
                     && value.compiled_execution_plan.schema_version == 2
+                    && value.memory_floor_bytes <= 16 * 1024_u64.pow(4)
+                    && value.memory_floor_bytes
+                        == value
+                            .compiled_execution_plan
+                            .runtime
+                            .placement
+                            .memory_floor_bytes
+                    && value.memory_kind.to_string()
+                        == value
+                            .compiled_execution_plan
+                            .runtime
+                            .placement
+                            .memory_kind
+                            .to_string()
             }
             Self::Stop(value) => valid_common(value.schema_version, &value.plan_digest),
             Self::Uninstall(value) => {
@@ -1281,6 +1459,8 @@ mod recipe_start_tests {
             "recipe_content_sha256": "c".repeat(64),
             "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
             "reserved_memory_bytes": 1024,
+            "memory_floor_bytes": 2 * 1024_u64.pow(3),
+            "memory_kind": "unified",
             "role": if rank == 0 { "entrypoint" } else { "worker" },
             "run_id": "00000000-0000-4000-8000-000000000004",
             "schema_version": 2,
@@ -1358,6 +1538,30 @@ mod recipe_start_tests {
         assert_eq!(distributed.phase, None);
         assert_eq!(distributed.start_deadline, None);
         assert_eq!(distributed.run_generation, None);
+    }
+
+    #[test]
+    fn start_request_memory_floor_must_match_compiled_placement() {
+        let mut request = start_payload(1, 0, None, None, None);
+        request["memory_floor_bytes"] = Value::from(1);
+        assert!(parsed_start(request).is_err());
+
+        let mut request = start_payload(1, 0, None, None, None);
+        request["compiled_execution_plan"]["runtime"]["placement"]["memory_floor_bytes"] =
+            Value::from(1);
+        assert!(parsed_start(request).is_err());
+    }
+
+    #[test]
+    fn start_request_memory_kind_must_match_compiled_placement() {
+        let mut request = start_payload(1, 0, None, None, None);
+        request["memory_kind"] = Value::String("host".to_owned());
+        assert!(parsed_start(request).is_err());
+
+        let mut request = start_payload(1, 0, None, None, None);
+        request["compiled_execution_plan"]["runtime"]["placement"]["memory_kind"] =
+            Value::String("host".to_owned());
+        assert!(parsed_start(request).is_err());
     }
 
     #[test]
@@ -1649,6 +1853,20 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
         })
         && (1..=3600).contains(&value.timeout_seconds)
         && (1..=16 * 1024_u64.pow(4)).contains(&value.reserved_memory_bytes)
+        && value.memory_floor_bytes <= 16 * 1024_u64.pow(4)
+        && value.memory_floor_bytes
+            == value
+                .compiled_execution_plan
+                .runtime
+                .placement
+                .memory_floor_bytes
+        && value.memory_kind.to_string()
+            == value
+                .compiled_execution_plan
+                .runtime
+                .placement
+                .memory_kind
+                .to_string()
 }
 
 fn valid_job_slot(value: &str) -> bool {
@@ -2123,6 +2341,8 @@ mod recipe_job_tests {
             },
             timeout_seconds: 3600,
             reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
+            memory_floor_bytes: 2 * 1024 * 1024 * 1024,
+            memory_kind: "unified".parse().unwrap(),
         }
     }
 
@@ -2142,6 +2362,14 @@ mod recipe_job_tests {
         let mut invalid_slot = valid.clone();
         invalid_slot.inputs[0].slot = "0input".to_owned();
         assert!(!validate_recipe_job(&invalid_slot));
+
+        let mut mismatched_floor = valid.clone();
+        mismatched_floor.memory_floor_bytes += 1;
+        assert!(!validate_recipe_job(&mismatched_floor));
+
+        let mut mismatched_kind = valid.clone();
+        mismatched_kind.memory_kind = "host".parse().unwrap();
+        assert!(!validate_recipe_job(&mismatched_kind));
 
         let mut reserved_manifest = valid.clone();
         reserved_manifest.inputs[0].name = "manifest.json".to_owned();
@@ -2241,6 +2469,20 @@ mod recipe_job_tests {
             serde_json::to_value(unavailable_peak).unwrap()["evidence"]["peak_memory_bytes"]
                 .is_null()
         );
+    }
+
+    #[test]
+    fn payload_digest_valid_claim_cannot_change_the_compiled_memory_pool() {
+        let mut document: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ))
+        .unwrap();
+        document["payload"]["memory_kind"] = Value::String("host".to_owned());
+        let payload = canonical_json(&document["payload"]).unwrap();
+        document["payload_digest"] = Value::String(hex_sha256(&payload));
+        let claim: AgentClaim = serde_json::from_value(document).unwrap();
+        claim.validate().unwrap();
+        assert!(RecipeOperationRequest::parse(&claim).is_err());
     }
 
     #[test]

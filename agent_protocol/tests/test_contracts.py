@@ -735,7 +735,7 @@ def test_parse_and_shared_schema_validator_reject_bogus_utc_dates(
 def test_shared_schema_validator_and_parser_reject_oversized_canonical_documents(
     name: str,
 ) -> None:
-    document = {"x": "x" * MAX_DOCUMENT_BYTES}
+    document = {"x": "x" * (MAX_DOCUMENT_BYTES + 1)}
     if name == "agent-job.schema.json":
         raw = valid_claim() | {
             "payload": document,
@@ -799,6 +799,8 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
             "role": placement["role"],
             "port": placement["port"],
             "reserved_memory_bytes": placement["reserved_memory_bytes"],
+            "memory_floor_bytes": placement["memory_floor_bytes"],
+            "memory_kind": placement["memory_kind"],
             "endpoint_address": placement["endpoint_address"],
             "world_size": placement["world_size"],
             "compiled_execution_plan": compiled_plan,

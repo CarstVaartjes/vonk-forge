@@ -331,7 +331,10 @@ def assemble_production_worker(
     from .distribution_executor import CompositeDistributionPhaseExecutor
     from .failure_evidence import FailureEvidenceService
     from .fleet_profiles import build_production_fleet_profile_service
-    from .install_admission import InstallAdmissionService
+    from .install_admission import (
+        InstallAdmissionService,
+        authorize_installation_runtime_images,
+    )
     from .recipe_builds import RecipeBuildService
     from .recipe_operation_worker import RecipeOperationWorker
     from .recipe_operations import RecipeOperationService
@@ -402,6 +405,7 @@ def assemble_production_worker(
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=compiled_plan_provider,
+            runtime_image_authorizer=authorize_installation_runtime_images,
         ),
         run_admission=RunAdmissionService(
             sessions,
@@ -421,6 +425,11 @@ def assemble_production_worker(
         mappings=ClusterMappingService(sessions),
         model_cache=model_cache,
         build_archive_available=runtime_archive_available,
+        published_image_receipt=(
+            runtime_archive_storage.find_published
+            if runtime_archive_storage is not None
+            else None
+        ),
         artifact_phase_executor=artifact_phase_executor,
     )
     recipe_operations = RecipeOperationWorker(
@@ -428,6 +437,7 @@ def assemble_production_worker(
         recipe_routes,
         clock=clock,
         build_cleanup=lifecycle.reconcile_cancelled_builds,
+        retirement_cleanup=lifecycle.reconcile_retired_operations,
         fleet_profiles=build_production_fleet_profile_service(
             sessions,
             clock=clock,
@@ -521,8 +531,7 @@ if __name__ == "__main__":
     from .runtime_image_preparation import (
         FilesystemRuntimeImageStorage,
         SkopeoOCIImageTransport,
-        persist_runtime_image_receipt,
-        prepare_runtime_image,
+        make_runtime_image_receipt_preparer,
         resolve_persisted_runtime_image_receipt,
     )
     from .settings import WorkerSettings
@@ -566,63 +575,12 @@ if __name__ == "__main__":
     )
     model_cache.resume_operations()
     runtime_image_transport = SkopeoOCIImageTransport()
-
-    def prepare_runtime_image_receipt(document, runtime_spec, build):
-        runtime = runtime_spec.get("runtime")
-        if not isinstance(runtime, Mapping):
-            raise TypeError("compiled runtime projection is unavailable")
-        build_receipt = None
-        execution = document.get("execution")
-        if isinstance(execution, Mapping) and execution.get("mode") == "build":
-            if build is None:
-                raise ValueError("source build receipt is unavailable")
-            build_receipt = {
-                "state": build.state,
-                "build_id": build.id,
-                "build_input_sha256": build.build_input_sha256,
-                "image_digest": build.image_digest,
-                "oci_layout_sha256": build.oci_layout_sha256,
-                "image_bytes": build.image_bytes,
-            }
-        identity = runtime_spec.get("identity")
-        effective_execution_key = (
-            identity.get("execution_sha256") if isinstance(identity, Mapping) else None
-        )
-        if not isinstance(effective_execution_key, str):
-            raise TypeError("compiled runtime execution identity is unavailable")
-
-        def write_receipt(receipt):
-            recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
-            with sessions.begin() as session:
-                revision = session.scalar(
-                    select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                        CatalogDocumentRevision.content_digest == recipe_digest,
-                    )
-                )
-                if revision is None or revision.content_digest is None:
-                    raise ValueError(
-                        "active recipe revision for runtime receipt is unavailable"
-                    )
-                persist_runtime_image_receipt(
-                    session,
-                    recipe_revision_id=revision.id,
-                    original_content_digest=revision.content_digest,
-                    effective_execution_key=effective_execution_key,
-                    receipt=receipt,
-                    verified_at=clock(),
-                )
-
-        return prepare_runtime_image(
-            document,
-            runtime=runtime,
-            storage=runtime_image_storage,
-            transport=runtime_image_transport,
-            build_receipt=build_receipt,
-            now=clock(),
-            receipt_writer=write_receipt,
-        )
+    prepare_runtime_image_receipt = make_runtime_image_receipt_preparer(
+        sessions,
+        runtime_image_storage,
+        runtime_image_transport,
+        clock=clock,
+    )
 
     def resolve_runtime_image_receipt(document, image_digest, runtime_spec):
         runtime = (

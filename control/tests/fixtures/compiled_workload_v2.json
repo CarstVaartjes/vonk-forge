@@ -92,7 +92,9 @@
       "master_address": null,
       "master_port": null,
       "port": 8000,
-      "reserved_memory_bytes": 80000000
+      "reserved_memory_bytes": 80000000,
+      "memory_floor_bytes": 0,
+      "memory_kind": "unified"
     },
     "telemetry": {
       "engine": "vllm",

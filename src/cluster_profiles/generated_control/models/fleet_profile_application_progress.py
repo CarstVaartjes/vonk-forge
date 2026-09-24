@@ -13,10 +13,11 @@ from typing import Literal, cast
 from typing import Union
 
 if TYPE_CHECKING:
+  from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
   from ..models.fleet_profile_child_progress import FleetProfileChildProgress
   from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
-  from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
   from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
+  from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
 
 
 
@@ -32,6 +33,7 @@ class FleetProfileApplicationProgress:
 
         Attributes:
             attempt (Union[Unset, int]):  Default: 1.
+            cancellation (Union['FleetProfileApplicationCancellationIntent', None, Unset]):
             child_progress (Union['FleetProfileChildProgress', None, Unset]):
             child_source (Union[Literal['switch-adapter'], None, Unset]):
             completed_steps (Union[Unset, int]):  Default: 0.
@@ -46,6 +48,7 @@ class FleetProfileApplicationProgress:
      """
 
     attempt: Union[Unset, int] = 1
+    cancellation: Union['FleetProfileApplicationCancellationIntent', None, Unset] = UNSET
     child_progress: Union['FleetProfileChildProgress', None, Unset] = UNSET
     child_source: Union[Literal['switch-adapter'], None, Unset] = UNSET
     completed_steps: Union[Unset, int] = 0
@@ -63,11 +66,20 @@ class FleetProfileApplicationProgress:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
         from ..models.fleet_profile_child_progress import FleetProfileChildProgress
         from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
-        from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
         from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
+        from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
         attempt = self.attempt
+
+        cancellation: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.cancellation, Unset):
+            cancellation = UNSET
+        elif isinstance(self.cancellation, FleetProfileApplicationCancellationIntent):
+            cancellation = self.cancellation.to_dict()
+        else:
+            cancellation = self.cancellation
 
         child_progress: Union[None, Unset, dict[str, Any]]
         if isinstance(self.child_progress, Unset):
@@ -138,6 +150,8 @@ class FleetProfileApplicationProgress:
         })
         if attempt is not UNSET:
             field_dict["attempt"] = attempt
+        if cancellation is not UNSET:
+            field_dict["cancellation"] = cancellation
         if child_progress is not UNSET:
             field_dict["child_progress"] = child_progress
         if child_source is not UNSET:
@@ -167,12 +181,33 @@ class FleetProfileApplicationProgress:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
         from ..models.fleet_profile_child_progress import FleetProfileChildProgress
         from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
-        from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
         from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
+        from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
         d = dict(src_dict)
         attempt = d.pop("attempt", UNSET)
+
+        def _parse_cancellation(data: object) -> Union['FleetProfileApplicationCancellationIntent', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                cancellation_type_0 = FleetProfileApplicationCancellationIntent.from_dict(data)
+
+
+
+                return cancellation_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['FleetProfileApplicationCancellationIntent', None, Unset], data)
+
+        cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
+
 
         def _parse_child_progress(data: object) -> Union['FleetProfileChildProgress', None, Unset]:
             if data is None:
@@ -308,6 +343,7 @@ class FleetProfileApplicationProgress:
 
         fleet_profile_application_progress = cls(
             attempt=attempt,
+            cancellation=cancellation,
             child_progress=child_progress,
             child_source=child_source,
             completed_steps=completed_steps,

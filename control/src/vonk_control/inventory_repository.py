@@ -7,7 +7,7 @@ import json
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -15,6 +15,10 @@ from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.inventory import InventoryRequest, MemoryPool
 
 from .models import NodeInventorySnapshot
+
+# Agent inventory may lead the Controller clock by this much. Consumers that
+# order it against Controller-owned events must retain the same uncertainty.
+MAX_INVENTORY_FUTURE_SKEW = timedelta(seconds=30)
 
 
 @dataclass(frozen=True, slots=True)

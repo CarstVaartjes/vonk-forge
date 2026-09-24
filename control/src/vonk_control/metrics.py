@@ -312,9 +312,9 @@ class MetricsRegistry:
             safe_leases[safe_key] = max(safe_leases.get(safe_key, 0.0), safe_age)
         safe_stalled: dict[str, int] = defaultdict(int)
         for operation, count in stalled.items():
-            safe_stalled[
-                operation if operation in _AGENT_OPERATIONS else "other"
-            ] += int(self._number(count, "stalled operation count"))
+            safe_stalled[operation if operation in _AGENT_OPERATIONS else "other"] += (
+                int(self._number(count, "stalled operation count"))
+            )
         with self._lock:
             self._agent_nodes = safe_nodes
             self._agent_operations = dict(safe_operations)

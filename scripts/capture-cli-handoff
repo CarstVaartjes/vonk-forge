@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Retain real installed-CLI output from the disposable acceptance scenarios."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+SCENARIOS = (
+    "control/tests/test_profile_load_review_installed_cli.py",
+    "control/tests/test_profile_load_stale_admission_installed_cli.py",
+    "control/tests/test_profile_cancel_activity_installed_cli.py",
+    "control/tests/test_artifact_job_installed_cli.py",
+)
+
+
+class Capture:
+    def __init__(self) -> None:
+        self.records: list[dict[str, object]] = []
+
+    def retain(self, case, command, environment, code, stdout, stderr, *, terminal):
+        token_path = environment.get("VONK_CONTROL_TOKEN_FILE")
+        if not token_path:
+            raise RuntimeError("capture requires the fixture's private token file")
+        token = Path(token_path).read_text(encoding="utf-8").strip()
+        if not token:
+            raise RuntimeError("capture credential is empty")
+        output = json.dumps([command, stdout, stderr], ensure_ascii=False)
+        if token in output or "Bearer " in output:
+            raise RuntimeError("credential detected; refusing to retain CLI output")
+        fixture_root = str(Path(token_path).parent)
+
+        def sanitize(value: str) -> str:
+            return value.replace(fixture_root, "/disposable-fixture")
+
+        self.records.append(
+            {
+                "scenario": case,
+                "command": [
+                    "vonkctl",
+                    *[sanitize(str(value)) for value in command[1:]],
+                ],
+                "exit_code": code,
+                "stdout": sanitize(stdout),
+                "terminal" if terminal else "stderr": sanitize(stderr),
+            }
+        )
+
+    @pytest.fixture(autouse=True)
+    def capture_installed_cli(self, request, monkeypatch):
+        original_run = subprocess.run
+
+        def recorded_run(*args, **kwargs):
+            result = original_run(*args, **kwargs)
+            command = args[0] if args else kwargs.get("args")
+            if (
+                isinstance(command, (tuple, list))
+                and command
+                and Path(command[0]).name == "vonkctl"
+            ):
+                if not isinstance(result.stdout, str) or not isinstance(
+                    result.stderr, str
+                ):
+                    raise RuntimeError("capture requires text output on both streams")
+                self.retain(
+                    request.node.nodeid,
+                    command,
+                    kwargs.get("env", {}),
+                    result.returncode,
+                    result.stdout,
+                    result.stderr,
+                    terminal=False,
+                )
+            return result
+
+        monkeypatch.setattr(subprocess, "run", recorded_run)
+        original_pty = getattr(request.module, "_run_pty", None)
+        if original_pty is not None:
+
+            def recorded_pty(executable, arguments, environment, cwd, **kwargs):
+                result = original_pty(executable, arguments, environment, cwd, **kwargs)
+                code, stdout, terminal_output = result
+                self.retain(
+                    request.node.nodeid,
+                    [str(executable), *arguments],
+                    environment,
+                    code,
+                    stdout,
+                    terminal_output,
+                    terminal=True,
+                )
+                return result
+
+            monkeypatch.setattr(request.module, "_run_pty", recorded_pty)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-snapshot", required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    output = args.output.resolve()
+    if output.exists():
+        parser.error("output must be a new directory; existing evidence is preserved")
+    snapshot = subprocess.check_output(
+        ["git", "rev-parse", "--verify", f"{args.source_snapshot}^{{commit}}"],
+        cwd=ROOT,
+        text=True,
+    ).strip()
+    # Documentation/capture tooling may change, but the executable, owners,
+    # schemas and scenario bodies must still match the named source checkpoint.
+    inputs = (
+        "src",
+        "control/src",
+        "control/tests",
+        "agent_protocol",
+        "schemas",
+        "pyproject.toml",
+        "control/pyproject.toml",
+        "control/uv.lock",
+        "uv.lock",
+        "tools/hatch_build.py",
+        "control/packaging/public-contracts.lock",
+        "inventory/wheels",
+    )
+    entries = subprocess.check_output(
+        ["git", "ls-tree", "-rz", snapshot, "--", *inputs], cwd=ROOT
+    )
+    expected_paths = set()
+    for entry in entries.split(b"\0"):
+        if not entry:
+            continue
+        metadata, raw_path = entry.split(b"\t", 1)
+        mode, kind, expected_hash = metadata.split()
+        if kind != b"blob":
+            raise RuntimeError("capture source must contain regular Git blobs")
+        relative = os.fsdecode(raw_path)
+        expected_paths.add(relative)
+        path = ROOT / relative
+        content = (
+            os.fsencode(os.readlink(path)) if mode == b"120000" else path.read_bytes()
+        )
+        observed_hash = (
+            hashlib.sha1(b"blob " + str(len(content)).encode() + b"\0" + content)
+            .hexdigest()
+            .encode()
+        )
+        if observed_hash != expected_hash:
+            raise RuntimeError(f"capture source differs from checkpoint: {relative}")
+    current = subprocess.check_output(
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            *inputs,
+        ],
+        cwd=ROOT,
+    )
+    for raw_path in current.split(b"\0"):
+        if raw_path:
+            relative = os.fsdecode(raw_path)
+            if (ROOT / relative).exists() and relative not in expected_paths:
+                raise RuntimeError(
+                    f"capture source is absent from checkpoint: {relative}"
+                )
+    os.chdir(ROOT)
+    capture = Capture()
+    result = pytest.main(["-q", *SCENARIOS], plugins=[capture])
+    if result != pytest.ExitCode.OK:
+        return int(result)
+    if not capture.records:
+        raise RuntimeError("acceptance passed without capturing installed CLI output")
+    output.mkdir(parents=True)
+    (output / "capture.json").write_text(
+        json.dumps(
+            {
+                "source_snapshot": snapshot,
+                "captured_at": datetime.now(UTC).isoformat(),
+                "scenario_files": SCENARIOS,
+                "boundary": "disposable PostgreSQL, registered HTTPS API, installed wheel",
+                "not_proven": ["human usability", "deployment", "physical Spark"],
+                "normalization": (
+                    "executable path replaced by vonkctl; fixture-root paths "
+                    "replaced by /disposable-fixture; other stream content unchanged"
+                ),
+                "records": capture.records,
+            },
+            indent=2,
+            ensure_ascii=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"Retained {len(capture.records)} installed CLI observations in {output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

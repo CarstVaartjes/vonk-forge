@@ -41,6 +41,7 @@ class SparkFitNode:
             disk_free_bytes (Union[None, Unset, int]):
             disk_required_bytes (Union[None, Unset, int]):
             memory_available_bytes (Union[None, Unset, int]):
+            memory_capacity_bytes (Union[None, Unset, int]):
             memory_floor_bytes (Union[None, Unset, int]):
             memory_free_after_bytes (Union[None, Unset, int]):
             memory_kind (Union[None, SparkFitNodeMemoryKindType0, Unset]):
@@ -60,6 +61,7 @@ class SparkFitNode:
     disk_free_bytes: Union[None, Unset, int] = UNSET
     disk_required_bytes: Union[None, Unset, int] = UNSET
     memory_available_bytes: Union[None, Unset, int] = UNSET
+    memory_capacity_bytes: Union[None, Unset, int] = UNSET
     memory_floor_bytes: Union[None, Unset, int] = UNSET
     memory_free_after_bytes: Union[None, Unset, int] = UNSET
     memory_kind: Union[None, SparkFitNodeMemoryKindType0, Unset] = UNSET
@@ -119,6 +121,12 @@ class SparkFitNode:
             memory_available_bytes = UNSET
         else:
             memory_available_bytes = self.memory_available_bytes
+
+        memory_capacity_bytes: Union[None, Unset, int]
+        if isinstance(self.memory_capacity_bytes, Unset):
+            memory_capacity_bytes = UNSET
+        else:
+            memory_capacity_bytes = self.memory_capacity_bytes
 
         memory_floor_bytes: Union[None, Unset, int]
         if isinstance(self.memory_floor_bytes, Unset):
@@ -191,6 +199,8 @@ class SparkFitNode:
             field_dict["disk_required_bytes"] = disk_required_bytes
         if memory_available_bytes is not UNSET:
             field_dict["memory_available_bytes"] = memory_available_bytes
+        if memory_capacity_bytes is not UNSET:
+            field_dict["memory_capacity_bytes"] = memory_capacity_bytes
         if memory_floor_bytes is not UNSET:
             field_dict["memory_floor_bytes"] = memory_floor_bytes
         if memory_free_after_bytes is not UNSET:
@@ -274,6 +284,16 @@ class SparkFitNode:
             return cast(Union[None, Unset, int], data)
 
         memory_available_bytes = _parse_memory_available_bytes(d.pop("memory_available_bytes", UNSET))
+
+
+        def _parse_memory_capacity_bytes(data: object) -> Union[None, Unset, int]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, int], data)
+
+        memory_capacity_bytes = _parse_memory_capacity_bytes(d.pop("memory_capacity_bytes", UNSET))
 
 
         def _parse_memory_floor_bytes(data: object) -> Union[None, Unset, int]:
@@ -387,6 +407,7 @@ class SparkFitNode:
             disk_free_bytes=disk_free_bytes,
             disk_required_bytes=disk_required_bytes,
             memory_available_bytes=memory_available_bytes,
+            memory_capacity_bytes=memory_capacity_bytes,
             memory_floor_bytes=memory_floor_bytes,
             memory_free_after_bytes=memory_free_after_bytes,
             memory_kind=memory_kind,

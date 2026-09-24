@@ -15,6 +15,7 @@ if TYPE_CHECKING:
   from ..models.job_progress import JobProgress
   from ..models.job_operation_response import JobOperationResponse
   from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
+  from ..models.operation_recovery import OperationRecovery
 
 
 
@@ -40,6 +41,7 @@ class JobDetailResponse:
             targets (list[str]):
             agent_upgrade_diagnostics (Union['AgentUpgradeDiagnosticsResponse', None, Unset]):
             operation_next_cursor (Union[None, Unset, str]):
+            recovery (Union['OperationRecovery', None, Unset]):
             status_reason (Union[None, Unset, str]):
             target_next_cursor (Union[None, Unset, str]):
      """
@@ -56,6 +58,7 @@ class JobDetailResponse:
     targets: list[str]
     agent_upgrade_diagnostics: Union['AgentUpgradeDiagnosticsResponse', None, Unset] = UNSET
     operation_next_cursor: Union[None, Unset, str] = UNSET
+    recovery: Union['OperationRecovery', None, Unset] = UNSET
     status_reason: Union[None, Unset, str] = UNSET
     target_next_cursor: Union[None, Unset, str] = UNSET
 
@@ -67,6 +70,7 @@ class JobDetailResponse:
         from ..models.job_progress import JobProgress
         from ..models.job_operation_response import JobOperationResponse
         from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
+        from ..models.operation_recovery import OperationRecovery
         authority_revision = self.authority_revision
 
         current_attempt = self.current_attempt
@@ -108,6 +112,14 @@ class JobDetailResponse:
         else:
             operation_next_cursor = self.operation_next_cursor
 
+        recovery: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.recovery, Unset):
+            recovery = UNSET
+        elif isinstance(self.recovery, OperationRecovery):
+            recovery = self.recovery.to_dict()
+        else:
+            recovery = self.recovery
+
         status_reason: Union[None, Unset, str]
         if isinstance(self.status_reason, Unset):
             status_reason = UNSET
@@ -139,6 +151,8 @@ class JobDetailResponse:
             field_dict["agent_upgrade_diagnostics"] = agent_upgrade_diagnostics
         if operation_next_cursor is not UNSET:
             field_dict["operation_next_cursor"] = operation_next_cursor
+        if recovery is not UNSET:
+            field_dict["recovery"] = recovery
         if status_reason is not UNSET:
             field_dict["status_reason"] = status_reason
         if target_next_cursor is not UNSET:
@@ -153,6 +167,7 @@ class JobDetailResponse:
         from ..models.job_progress import JobProgress
         from ..models.job_operation_response import JobOperationResponse
         from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
+        from ..models.operation_recovery import OperationRecovery
         d = dict(src_dict)
         authority_revision = d.pop("authority_revision")
 
@@ -216,6 +231,26 @@ class JobDetailResponse:
         operation_next_cursor = _parse_operation_next_cursor(d.pop("operation_next_cursor", UNSET))
 
 
+        def _parse_recovery(data: object) -> Union['OperationRecovery', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                recovery_type_0 = OperationRecovery.from_dict(data)
+
+
+
+                return recovery_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['OperationRecovery', None, Unset], data)
+
+        recovery = _parse_recovery(d.pop("recovery", UNSET))
+
+
         def _parse_status_reason(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -249,6 +284,7 @@ class JobDetailResponse:
             targets=targets,
             agent_upgrade_diagnostics=agent_upgrade_diagnostics,
             operation_next_cursor=operation_next_cursor,
+            recovery=recovery,
             status_reason=status_reason,
             target_next_cursor=target_next_cursor,
         )

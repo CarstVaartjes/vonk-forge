@@ -63,6 +63,7 @@ class RecipeOperationWorker:
         fleet_profiles: _FleetProfileCoordinator | None = None,
         run_switches: _RunSwitchCoordinator | None = None,
         build_cleanup: Callable[[], bool] | None = None,
+        retirement_cleanup: Callable[[], bool] | None = None,
     ) -> None:
         self._sessions = sessions
         self._routes = routes
@@ -71,11 +72,14 @@ class RecipeOperationWorker:
         self._fleet_profiles = fleet_profiles
         self._run_switches = run_switches
         self._build_cleanup = build_cleanup
+        self._retirement_cleanup = retirement_cleanup
 
     def tick(self) -> bool:
         progressed = False
         if self._build_cleanup is not None:
             progressed = self._build_cleanup()
+        if self._retirement_cleanup is not None:
+            progressed = self._retirement_cleanup() or progressed
         # Parent operations depend on lifecycle observations and published routes.
         # Give each coordinator a turn before servicing those dependencies.
         for coordinator in (self._fleet_profiles, self._run_switches, self._recoveries):
@@ -206,20 +210,6 @@ class RecipeOperationWorker:
                     or not isinstance(node.observation_receipt_sha256, str)
                     or re.fullmatch(r"[0-9a-f]{64}", node.observation_receipt_sha256)
                     is None
-                    or (
-                        deadline is not None
-                        and (
-                            node.updated_at.replace(tzinfo=UTC)
-                            if node.updated_at.tzinfo is None
-                            or node.updated_at.utcoffset() is None
-                            else node.updated_at.astimezone(UTC)
-                        )
-                        > (
-                            deadline.replace(tzinfo=UTC)
-                            if deadline.tzinfo is None or deadline.utcoffset() is None
-                            else deadline.astimezone(UTC)
-                        )
-                    )
                 )
                 if not missing:
                     continue

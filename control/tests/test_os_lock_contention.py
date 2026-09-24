@@ -147,3 +147,40 @@ def test_publication_lock_claim_is_bounded_when_another_publisher_holds_it(
 
     with publisher._locked():
         pass
+
+
+def test_runtime_image_publication_lock_is_bounded_and_released_on_process_death(
+    tmp_path: Path,
+) -> None:
+    """Image publication cannot park a worker and kernel death frees its fence."""
+
+    storage = runtime_image_preparation.FilesystemRuntimeImageStorage(tmp_path)
+    archive_sha256 = "a" * 64
+    lock_root = storage.root / ".publication-locks"
+    lock_root.mkdir(parents=True)
+    lock_path = lock_root / f"{archive_sha256}.lock"
+    holder = _hold(lock_path)
+    try:
+        started = time.monotonic()
+        with (
+            pytest.raises(
+                runtime_image_preparation.RuntimeImagePreparationError,
+                match="another owner to finish this image publication",
+            ) as failure,
+            storage.publication_lock(archive_sha256),
+        ):
+            pass
+        assert failure.value.code == "runtime_image.publication_contended"
+        assert failure.value.retryable is True
+        assert failure.value.recovery_actions == ("retry",)
+        assert time.monotonic() - started < 0.1, (
+            "image publication contention parked a worker"
+        )
+    finally:
+        holder.terminate()
+        holder.wait(timeout=10)
+
+    # The kernel releases flock when the publisher process dies. The next
+    # owner can fence and reconcile the exact archive without a lease guess.
+    with storage.publication_lock(archive_sha256):
+        pass

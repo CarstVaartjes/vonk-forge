@@ -12,6 +12,7 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.cli_completion import completion_script
+from cluster_profiles.control_client import ControlClient
 
 
 class Observations:
@@ -181,8 +182,13 @@ def test_human_terminal_text_cannot_inject_cursor_or_hyperlink_controls(capsys):
     assert "\x07" not in captured.out + captured.err
 
 
-def test_json_preserves_validated_remote_strings(capsys):
-    payload: dict[str, object] = {"name": "Atlas\nBoreal", "description": "x" * 2048}
+def test_json_preserves_remote_strings_and_collections(capsys):
+    # JSON must bypass human-display clipping for both text and collections.
+    payload: dict[str, object] = {
+        "name": "Atlas\nBoreal",
+        "description": "x" * 2048,
+        "loaded": [{"alias": f"model-{index}"} for index in range(2048)],
+    }
     client = Observations(payload)
     assert cli.main(("fleet", "detail", "Atlas", "--json"), control_client=client) == 0
     actual = json.loads(capsys.readouterr().out)
@@ -400,6 +406,39 @@ def test_connection_check_rejects_a_fifo_without_waiting_for_a_writer(tmp_path):
     assert not result.stderr
 
 
+@pytest.mark.parametrize("credential_case", ["missing", "symlink", "insecure-mode"])
+def test_connection_check_rejects_unsafe_token_file_before_api_request(
+    tmp_path, credential_case, monkeypatch, capsys
+):
+    token = tmp_path / "controller-token"
+    raw_token = "private-controller-token-never-print-this"
+    if credential_case == "symlink":
+        target = tmp_path / "actual-token"
+        target.write_text(raw_token, encoding="utf-8")
+        target.chmod(0o600)
+        token.symlink_to(target)
+    elif credential_case == "insecure-mode":
+        token.write_text(raw_token, encoding="utf-8")
+        token.chmod(0o644)
+
+    monkeypatch.setenv("VONK_CONTROL_URL", "https://forge.example.test")
+    monkeypatch.setenv("VONK_CONTROL_TOKEN_FILE", str(token))
+    requests: list[tuple[str, str]] = []
+
+    def unexpected_request(self, method, path, payload=None, **kwargs):
+        requests.append((method, path))
+        raise AssertionError("invalid local credentials reached the Controller")
+
+    monkeypatch.setattr(ControlClient, "request", unexpected_request)
+    assert cli.main(("--check-connection", "--json")) == 2
+    captured = capsys.readouterr()
+    document = json.loads(captured.out)
+    assert "token" in document["error"].lower()
+    assert raw_token not in captured.out + captured.err
+    assert not captured.err
+    assert not requests
+
+
 @pytest.mark.parametrize(
     ("noun", "path"),
     [
@@ -424,3 +463,28 @@ def test_progress_uses_its_owner_and_distinguishes_read_from_await(noun, path, c
         )
         assert client.calls == [("GET", path)]
         assert json.loads(capsys.readouterr().out)["state"] == "failed"
+
+
+@pytest.mark.parametrize("arguments", [("--help",), ("fleet", "--help")])
+def test_argparse_help_handles_a_closed_result_pipe(arguments) -> None:
+    """Argparse's early SystemExit still flushes within the CLI pipe boundary."""
+
+    read_fd, write_fd = os.pipe()
+    os.close(read_fd)
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from cluster_profiles.cli import main; raise SystemExit(main())",
+                *arguments,
+            ],
+            stdout=write_fd,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+    finally:
+        os.close(write_fd)
+    assert result.returncode == 141, result.stderr.decode()
+    assert not result.stderr

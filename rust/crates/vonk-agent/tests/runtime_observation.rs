@@ -30,7 +30,8 @@ fn schema2_dual_plan() -> CompiledExecutionPlan {
     value["runtime"]["placement"] = json!({
         "endpoint_address": null, "rank": 1, "role": "worker", "world_size": 2,
         "local_address": "192.168.100.11", "master_address": "192.168.100.10",
-        "master_port": 29500, "port": 8000, "reserved_memory_bytes": 68719476736_u64
+        "master_port": 29500, "port": 8000, "reserved_memory_bytes": 68719476736_u64,
+        "memory_floor_bytes": 0, "memory_kind": "unified"
     });
     value["security"]["network_mode"] = json!("host");
     value["security"]["host_network"] = json!(true);
@@ -147,7 +148,7 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
 }
 
 #[test]
-fn retained_inspection_preserves_live_tmp_and_cache_but_actual_start_resets_tmp() {
+fn retained_inspection_and_agent_preparation_leave_private_tmp_cleanup_to_helper() {
     let root = tempdir().unwrap();
     let plan = schema2_dual_plan();
     persist_plan(root.path(), &plan);
@@ -211,7 +212,7 @@ fn retained_inspection_preserves_live_tmp_and_cache_but_actual_start_resets_tmp(
     runtime
         .prepare_start_with_inspection_identity(&plan, INSTALLATION, RUN, &placement, &identity)
         .unwrap();
-    assert!(!marker.exists());
+    assert_eq!(fs::read(marker).unwrap(), b"live kernel workspace");
     assert_eq!(fs::read(cache).unwrap(), b"persistent cache");
 }
 

@@ -6,6 +6,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+import vonk_control.recipe_image_availability as availability_module
 from sqlalchemy import select
 from vonk_control import fleet_profiles as profile_module
 from vonk_control.models import (
@@ -14,7 +15,9 @@ from vonk_control.models import (
     Job,
     NodeInventorySnapshot,
     RecipeBuild,
+    User,
 )
+from vonk_control.recipe_availability_intent import RecipeBuildDependency
 from vonk_control.recipe_build_cancellation import (
     BuildConsumerError,
     lock_build_dependency,
@@ -95,6 +98,95 @@ def test_build_cancellation_preserves_each_accepted_availability_consumer(
         reason="no remaining preparation consumer",
     )
     assert cancelled.state == "cancelled"
+
+
+def test_recipe_parent_cancellation_detaches_one_shared_build_consumer(
+    tmp_path, postgres_engine
+):
+    sessions, _builds, operations, storage, now, _node, revision, plan = _services(
+        tmp_path, postgres_engine
+    )
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
+    availability = _availability(sessions, storage, now, revision, plan)
+    first, second = [
+        availability.start(revision.id, actor="operator", request_id=str(uuid.uuid4()))
+        for _ in range(2)
+    ]
+    claim = availability.claim_pending(limit=1, owner_id="cancel-shared-build")[0]
+    claimed_parent, other_parent = next(
+        (parent, other)
+        for parent, other in ((first, second), (second, first))
+        if parent.id == claim.operation_id
+    )
+    child_key = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"vonk:recipe-image-build:{claimed_parent.id}:{claim.execution_attempt}",
+        )
+    )
+    build = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="recipe-image-availability",
+        request_id=child_key,
+    )
+    first_dependency = RecipeBuildDependency(
+        request_key=uuid.UUID(child_key), operation_id=uuid.UUID(build.id)
+    )
+    second_dependency = RecipeBuildDependency(
+        request_key=uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"vonk:recipe-image-build:{other_parent.id}:1",
+        ),
+        operation_id=uuid.UUID(build.id),
+    )
+    with sessions.begin() as session:
+        for operation_id, dependency in (
+            (claimed_parent.id, first_dependency),
+            (other_parent.id, second_dependency),
+        ):
+            parent = session.get(Job, operation_id)
+            assert parent is not None
+            parent.payload = dict(parent.payload) | {
+                "build_dependency": dependency.model_dump(
+                    mode="json", exclude_none=True
+                )
+            }
+
+    availability.cancel(
+        claimed_parent.id,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+        reason="stop first image preparation",
+    )
+    availability._release_cancelled_claim(claim)
+    availability.reconcile_cancellations()
+    assert availability.get(claimed_parent.id).state == "cancelled"
+    assert availability.get(other_parent.id).state == "queued"
+    with sessions() as session:
+        job = session.get(Job, build.id)
+        assert job is not None and job.result is None
+
+    # The second accepted parent binds the exact shared child by its operation
+    # ID even though the build was originally admitted with the first key.
+    availability.cancel(
+        other_parent.id,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+        reason="stop final image preparation",
+    )
+    availability.reconcile_cancellations()
+    assert availability.get(other_parent.id).state == "cancelling"
+    with sessions() as session:
+        job = session.get(Job, build.id)
+        assert job is not None and job.result is not None
+        assert job.result["cancel_requested"] is True
+        assert job.result["cancel_actor"] == "operator"
+    assert operations.reconcile_cancelled_builds()
+    availability.reconcile_cancellations()
+    assert availability.get(other_parent.id).state == "cancelled"
+    assert operations.get(build.id).state == "cancelled"
 
 
 @pytest.mark.parametrize("checkpoint", ["saved", "lost"])
@@ -322,6 +414,181 @@ def test_availability_acceptance_cannot_pass_a_busy_build_cancellation_boundary(
         )
     accepted = availability.start(revision.id, actor="operator", request_id=request_id)
     assert accepted.state == "queued"
+
+
+def test_new_availability_consumer_committing_before_cancellation_keeps_shared_build(
+    tmp_path, postgres_engine, monkeypatch
+):
+    sessions, _builds, operations, storage, now, _node, revision, plan = _services(
+        tmp_path, postgres_engine
+    )
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
+    availability = _availability(sessions, storage, now, revision, plan)
+    first = availability.start(
+        revision.id, actor="operator", request_id=str(uuid.uuid4())
+    )
+    claim = availability.claim_pending(limit=1, owner_id="cancel-race-first")[0]
+    child_key = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"vonk:recipe-image-build:{first.id}:{claim.execution_attempt}",
+        )
+    )
+    build = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="recipe-image-availability",
+        request_id=child_key,
+    )
+    dependency = RecipeBuildDependency(
+        request_key=uuid.UUID(child_key), operation_id=uuid.UUID(build.id)
+    )
+    with sessions.begin() as session:
+        parent = session.get(Job, first.id)
+        assert parent is not None
+        parent.payload = dict(parent.payload) | {
+            "build_dependency": dependency.model_dump(mode="json", exclude_none=True)
+        }
+    availability.cancel(
+        first.id,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+        reason="detach the first preparation",
+    )
+    availability._release_cancelled_claim(claim)
+
+    locked = threading.Event()
+    resume = threading.Event()
+    original_lock = availability._lock_build_consumer
+
+    def hold_accepted_consumer(session, payload):
+        original_lock(session, payload)
+        locked.set()
+        assert resume.wait(10), "new consumer acceptance barrier was not released"
+
+    monkeypatch.setattr(availability, "_lock_build_consumer", hold_accepted_consumer)
+    request_id = str(uuid.uuid4())
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        acceptance = pool.submit(
+            availability.start,
+            revision.id,
+            actor="operator",
+            request_id=request_id,
+        )
+        try:
+            assert locked.wait(10), "new consumer did not lock the shared build"
+            # The accepted-request transaction owns the build row. Cancellation
+            # must remain durable and pending instead of cancelling its child.
+            availability.reconcile_cancellations()
+            assert availability.get(first.id).state == "cancelling"
+        finally:
+            resume.set()
+        second = acceptance.result(timeout=10)
+
+    assert second.state == "queued"
+    availability.reconcile_cancellations()
+    assert availability.get(first.id).state == "cancelled"
+    with sessions() as session:
+        child = session.get(Job, build.id)
+        assert child is not None and child.result is None
+        accepted = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert accepted is not None and accepted.state == "queued"
+
+
+@pytest.mark.parametrize("linked", [True, False])
+def test_new_availability_consumer_cannot_join_after_cancellation_fences_shared_build(
+    tmp_path, postgres_engine, monkeypatch, linked
+):
+    sessions, _builds, operations, storage, now, _node, revision, plan = _services(
+        tmp_path, postgres_engine
+    )
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
+    availability = _availability(sessions, storage, now, revision, plan)
+    parent = availability.start(
+        revision.id, actor="operator", request_id=str(uuid.uuid4())
+    )
+    claim = availability.claim_pending(limit=1, owner_id="cancel-race-last")[0]
+    child_key = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"vonk:recipe-image-build:{parent.id}:{claim.execution_attempt}",
+        )
+    )
+    build = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="recipe-image-availability",
+        request_id=child_key,
+    )
+    dependency = RecipeBuildDependency(
+        request_key=uuid.UUID(child_key), operation_id=uuid.UUID(build.id)
+    )
+    if linked:
+        with sessions.begin() as session:
+            current = session.get(Job, parent.id)
+            assert current is not None
+            current.payload = dict(current.payload) | {
+                "build_dependency": dependency.model_dump(
+                    mode="json", exclude_none=True
+                )
+            }
+    availability.cancel(
+        parent.id,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+        reason="cancel the final preparation consumer",
+    )
+
+    fenced = threading.Event()
+    resume = threading.Event()
+    original_request = availability_module.request_build_cancellation
+
+    def hold_cancelled_child(job, **kwargs):
+        original_request(job, **kwargs)
+        fenced.set()
+        assert resume.wait(10), "build cancellation barrier was not released"
+
+    monkeypatch.setattr(
+        availability_module, "request_build_cancellation", hold_cancelled_child
+    )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        reconciliation = pool.submit(availability.reconcile_cancellations)
+        try:
+            assert fenced.wait(10), "last-consumer cancellation did not fence the build"
+            blocked_request_id = str(uuid.uuid4())
+            with pytest.raises(RecipeImageAvailabilityError) as busy:
+                availability.start(
+                    revision.id,
+                    actor="operator",
+                    request_id=blocked_request_id,
+                )
+            assert busy.value.code == "build.consumer_busy"
+        finally:
+            resume.set()
+        reconciliation.result(timeout=10)
+
+    retry_request_id = str(uuid.uuid4())
+    with pytest.raises(RecipeImageAvailabilityError) as pending:
+        availability.start(
+            revision.id,
+            actor="operator",
+            request_id=retry_request_id,
+        )
+    assert pending.value.code == "build.cancellation_pending"
+    with sessions() as session:
+        child = session.get(Job, build.id)
+        assert child is not None and child.result is not None
+        assert child.result["cancel_requested"] is True
+        assert (
+            session.scalar(
+                select(Job.id).where(
+                    Job.request_id.in_((blocked_request_id, retry_request_id))
+                )
+            )
+            is None
+        )
 
 
 def test_existing_build_identity_mismatch_cannot_be_treated_as_an_unbound_consumer(

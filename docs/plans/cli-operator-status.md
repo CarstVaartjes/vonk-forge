@@ -1,7 +1,8 @@
 # CLI implementation status
 
-Implementation is active on `codex/cli-operator-experience`, based on
-`49389f3dced50d2ecf7680e256dbe1827817eaee`. The full objective remains the
+Implementation is integrated in the isolated `codex/cli-integration` candidate.
+The initial `codex/cli-operator-experience` checkout and its unrelated dirty work
+remain preserved. The full objective remains the
 [twenty-package implementation plan](cli-operator-implementation.md).
 This record distinguishes implemented pieces from completed packages; nothing
 below claims deployment, hardware acceptance, or complete web parity.
@@ -12,39 +13,1622 @@ Existing unrelated `.tmp/` files and `docs/handover-spark-canary.md` are preserv
 
 ## Package state
 
+Sixteen packages currently have evidence for their own repository/installed criteria.
+Four remain open: W09 admission and asset lifetime, W12's removal race
+prerequisite, W17 cleanup/receipt ownership, and W19 final connected handoff and
+independent operator acceptance. The W16 definitive-refusal guidance defect is
+corrected and qualified in the source and installed CLI. This is a package
+count, not an estimate of remaining effort; open dependencies still block the
+full CLI handoff.
+
 | Package | State | Current evidence / remaining work |
 | --- | --- | --- |
-| W00 | Inventory established | Current command/route map below; initial 75 focused tests passed in 7.74s. Node-profile owner identified; its missing command belongs to W05. |
-| W01 | Implemented process foundation; package open | Contextual exits, human streams, JSON, explicit profile selection, finite timing, no-input, Ctrl-C and pipe handling. Remaining: apply the consent policy to newly delivered consequential workflows. |
-| W02 | Implemented current task views; final installed qualification in W18 | Explicit Fleet/Library/Profile/review/application/job/error views; complete identifiers, truthful unknown/zero values, adaptive widths, ASCII-safe text, and append-only resource snapshots. New workflow contracts add their presentations in the owning later package. |
-| W03 | Implemented; final qualification pending | Offline orientation/help/version, parser-derived Bash/Zsh completion, connection check, nonblocking rejection of nonregular credential files. Operator walkthrough remains W19. |
-| W04 | Implemented; final process qualification in W19 | Exclusive private grant file, original request identity, owner-authorized status/revoke, and lost-response/disk-failure recovery. Enrollment/consumption authority remains server-owned. |
-| W05 | Implemented; final installed qualification in W18/W19 | Complete bounded selection, canonical identity priority, typed ambiguity candidates, catalog-change cursor refusal, read-only owner-derived fleet-fit/cache assessments, and grouped distributed placement display. |
-| W06 | Implemented observation foundation; package open | Exact profile ID pinning; profile request/application selectors; noun-owned model/recipe/fleet-job progress; bounded sleep/request budget; distinct timeout/interruption documents and reconnect commands. Receipt/recovery integration for later workflows remains. |
-| W07 | Implemented | Canonical definition read, preserving edits/configure, installed/running intent, private export and bounded import; stale and concurrent writes refused. |
-| W08 | Implemented and repository-qualified | Original-key recovery, HTTPS deadlines, durable update parents, process restart adoption, and real storage recovery are verified. Busy model/image writers release execution slots and reschedule without consuming transfer retries; eligible work remains reachable. Final installed and combined operator acceptance remain W18/W19. |
-| W09 | In progress: reviewed decision and resource ownership; admission still incomplete | W09d evidence below adds one effect projection, PostgreSQL workload/capacity fences, physical-pool memory accounting, durable disk/port/memory claims and child handoff. Exact preparation builds inherit parent memory, preserve declared reserves and reconnect before mutable capacity checks. Build cancellation now belongs to the exact attempt, preserving valid requests and verified images; new intent can proceed after cleanup without reviving cancellation. Installed intent no longer succeeds with an empty queue. Measured usage, post-stop evidence, shared-consumer cancellation/replanning, common lock order, asset lifetime and exact rebuilt-image admission remain open; follow W09d–W09g. |
-| W10 | In progress: consent, headroom and submission recovery verified | Interactive review, explicit scripted digest/consent, capacity display, bounded original-key recovery and the required web load body have affected tests. Complete route/effect presentation and qualify the whole W09/W10 boundary before closing M3. |
-| W11 | In progress in isolated branch; not integrated | Model cancellation separate from eviction. |
-| W12 | Planned | Recipe cancellation with shared-child ownership. |
-| W13 | Planned | Profile cancellation and issued-effect reconciliation. |
-| W14 | In progress in isolated branch; not integrated | Canonical activity pagination and authorized resume. |
-| W15 | In progress in isolated branch; not integrated | Profile-to-published-endpoint discovery. |
-| W16 | In progress in isolated branch; not integrated | Complete artifact-job input, execution, and verified-output flow. |
-| W17 | Fleet maintenance in progress in isolated branch; not integrated | Sequential signed fleet maintenance is independent. Reviewed removal still requires W09's reference protocol. |
-| W18 | Started | Real entry-point and shell tests; wheel build and existing signed updater installation verified. Final installed surface and all implementation checks remain. |
-| W19 | Planned | Actual service/PostgreSQL/storage acceptance and operator walkthrough; no deployed or physical claim. |
+| W00 | Current inventory and reproducible baseline recorded | Current command/owner and web-boundary maps below; snapshot, environment, commands and logs are recorded in the current baseline. The historical 75-test summary lacks its original invocation and is not independent qualification evidence. Node-profile is implemented under its node owner. |
+| W01 | Repository and installed process criteria proven | Contextual exits, human streams, JSON, explicit profile selection, finite timing, no-input, Ctrl-C and pipe handling. Consent now covers the delivered consequential workflows; the independent operator walkthrough remains W19. |
+| W02 | Repository and installed presentation criteria proven | Explicit Fleet/Library/Profile/review/application/job/error views; complete identifiers, truthful unknown/zero values, adaptive widths, ASCII-safe text, and append-only resource snapshots. Source tests cover the delivered views; installed terminal checks qualify the common entry point. Artifact-specific views now have entrypoint and installed-process coverage. W02 calls for targeted width fixtures, not an exhaustive installed view-by-width cross-product. Artifact jobs now use their parsed subcommand to show exact job identity, file/path information, empty-result state and the correct reconnect command. |
+| W03 | Repository and installed criteria proven | Offline orientation/help/version, parser-derived Bash/Zsh completion, connection check, nonblocking rejection of nonregular credential files. Operator walkthrough remains W19. |
+| W04 | Repository and installed criteria proven | Exclusive private grant file, original request identity, owner-authorized status/revoke, and lost-response/disk-failure recovery. Installed re-enrollment now checks exact identity and consequence before consent, decline/EOF/no-input without mutation, and canonical target/private grant delivery. Enrollment/consumption authority remains server-owned. |
+| W05 | Source/owner and installed selection criteria proven | Complete bounded selection, canonical identity priority, typed ambiguity candidates, catalog-change cursor refusal, read-only owner-derived fleet-fit/cache assessments, and grouped distributed placement display. |
+| W06 | Repository and installed observation criteria proven | Exact profile ID pinning; profile request/application selectors; noun-owned model/recipe/fleet-job progress; bounded sleep/request budget; distinct timeout/interruption documents and reconnect commands. Later workflow receipts, timeout/newer-application pinning, process restart, exact logs and resume now have connected and installed coverage. |
+| W07 | Repository and installed authoring criteria proven | Canonical definition read, preserving edits/configure, installed/running intent, private export and bounded import; stale and concurrent writes refused. |
+| W08 | Source/storage-owner and installed workflow criteria proven | Original-key recovery, HTTPS deadlines, durable update parents, process restart adoption, and real storage recovery are verified. Busy model/image writers release execution slots and reschedule without consuming transfer retries; eligible work remains reachable. Installed Find-and-prepare and combined gates pass; the unassisted journey remains W19. |
+| W09 | In progress: reviewed decision and resource ownership; admission still incomplete | W09d evidence below adds one effect projection, PostgreSQL workload/capacity fences, physical-pool memory accounting, durable disk/port/memory claims and child handoff. Exact preparation builds inherit parent memory, preserve declared reserves and reconnect before mutable capacity checks. Build cancellation now belongs to the exact attempt, preserving valid requests and verified images; new intent can proceed after cleanup without reviving cancellation. Installed intent no longer succeeds with an empty queue. Fresh post-stop checks, exact rebuilt-image identity and declared runtime reserve/pool propagation have recorded evidence. Retained-memory policy, common lock order, the shared reference/removal protocol and their final combined concurrency acceptance remain open; follow W09d–W09g. |
+| W10 | Repository and installed review criteria proven; admission dependency remains W09 | Interactive review, explicit scripted digest/consent, capacity display and bounded original-key recovery are integrated. Typed stale refusal triggers one current review without automatic resubmission. Representative installed whole-fleet review now covers affected and idle Sparks, exact asset reuse, replacement effects, interruption and per-node capacity reasons. W09 still blocks overall admission completion. |
+| W11 | Repository and installed criteria proven | Durable model cancellation, exact-key recovery, publication fencing, shared transfer/verification settlement and process recovery pass connected and installed tests plus current combined gates. |
+| W12 | Owner settlement, installed recovery and partial update admission pass; shared removal dependency remains | Recipe cancellation commits exact model-child intent before signalling and waits for active writers; restart and shared-consumer PostgreSQL checks pass. The connected multi-recipe cancellation case now proves that a restarted parent does not admit later children. The connected update-parent/shared-consumer case now preserves exact partial bytes and completes the unrelated consumer; cache-removal races still depend on W09/W17’s unfinished shared removal protocol. |
+| W13 | Repository and connected cancellation criteria proven; admission dependency remains W09 | Explicit cancellation retains claims until issued-effect reconciliation; typed progress is its authority. One due cancellation is observed separately from ordinary advancement, preserving parked recovery. Exact-key receipt recovery and installed cancellation/Activity visibility pass; partial multi-target stop, real worker process death and newer-intent ownership now pass connected PostgreSQL tests. The newer-intent case now settles the exact late agent receipt without reviving the old application or changing the replacement ordinal. |
+| W14 | Repository and installed criteria proven | Operation/job/audit history has owner-bound filters and keyset pagination. Resume checks complete target intent and revocation; cancellation projects exact owner/effects and uses one pending-state predicate for display/filtering. Existing bounded retry/retirement remains intact. Connected and installed resume/Activity checks and current combined gates pass. |
+| W15 | Repository and installed criteria proven | Profile-scoped endpoint projection binds loaded assignment, exact run and route generation. Connected PostgreSQL qualification covers installed-only, foreign-profile alias refusal, expiry and generation replacement through the real profile intent owner. Installed output verifies expiry and the credential-free usage example; withdrawal is observed through the installed client. |
+| W16 | Repository and installed criteria proven | Draft/upload/submit/detail/cancel/verified-download and request recovery pass CLI/API, real byte-route and installed checks. Exact named output identity, atomic verified publication and partial recovery are covered; current combined gates pass. Optional-output recipes now accept a canonical empty manifest; required-output minima are enforced both during result consumption and successful response validation. Installed human and JSON checks distinguish queued/unavailable, empty success and required-output failure, and show verified local files. Definitive refusals now offer read-only inspection or a new review; ambiguous and already-accepted requests retain exact recovery guidance. |
+| W17 | Fleet consent/maintenance and CLI receipt checks integrated; removal protocol open | Upgrade/removal consent, one-at-a-time maintenance, exact-key replay and durable following pass focused checks. Stored recipe-removal replays now bind exact target, actor and model-retention choice with strict receipt validation. Reviewed impact, concurrent first-submission ownership and durable pre-effect intent still require W09’s reference/removal protocol. |
+| W18 | Own repository and installed criteria proven; dependent delivery remains open | Real entry-point, shell, signed updater, terminal contexts and installed runbook/parser checks pass. Actual wheel/TLS/PostgreSQL tests cover delivered workflows. Combined source, generated contract, wire, build and supply-chain checks now pass. W09/W17/W19 completion is still required for the full handoff. |
+| W19 | In progress | Installed load, authoring, consent and closed-output acceptance exercise actual services/PostgreSQL; endpoint, connection, artifact-job, recipe cancellation and profile cancellation/Activity journeys also pass; interrupted update-batch, Find-and-prepare, sequential-upgrade and exact-resume acceptance pass. Current combined source/installed gates pass. Outstanding cancellation/removal boundary cases and the independent operator walkthrough still block handoff. No deployed or physical claim. |
 
-The user authorized six GPT-6 Luna agents at maximum reasoning on 2026-09-23.
-Five isolated branches cover W11, W14, W15, W16 and W17's fleet-maintenance
-slice. A sixth audits W09 admission and upstream overlap, then implements the
-bounded published-image storage-recovery gate. The shared checkout qualifies
-source-image reapproval and coordinates integration. The isolation baseline is `9708f54c`,
-recorded on current `origin/main` (`9e2e166b`) with the ongoing task's files
-overlaid. This is a collaboration snapshot, not evidence that all upstream
-changes have been reconciled. Integrate only each agent's incremental work,
-resolve overlaps deliberately, regenerate shared contracts once, and qualify
-the combined result before changing these states to implemented.
+The six GPT-6 Luna agents at maximum reasoning are reused for bounded work.
+Memory-kind, enrollment refusal, lifecycle consumer, packaging, re-enrollment,
+whole-fleet review, partial/process/newer-intent profile cancellation,
+shared-consumer update cancellation, endpoint human output and the walkthrough
+protocol are integrated and checked. The disposable U1/U3 and observer-only U5
+facilitators, verified U2 cache-readiness setup and actual U8 JSON pipeline now
+pass. Definitive-refusal guidance is qualified. U4, U6, U7 and the U8 upgrade
+facilitators are integrated with passing connected smoke evidence. The runnable
+U2 prerequisite and U8 cleanup remain open. W09 policy, lock-order and removal
+remain separately open. This audit does not add scope.
+Integrate incremental feature patches only, preserving current upstream and the
+other agents' changes. The base checkpoint for the latest facilitator integration is
+`9ca56aff7b2e49944c88bcc23b2a7a3eea53b7f3`; the U6 cancellation and U8 upgrade
+increments are recorded below. The local current snapshot pointer is
+`/private/tmp/vonk-cli-current-snapshot.txt`.
+Actual-output examples retain their exact earlier source `872d639a`. Active facilitator
+increments are based on `bf323989`; earlier increments used `324d5c48` plus the
+`7f5b74bb` facilitator prerequisite. Older
+patches may still name `b5fb8354`, `fff2634b`, `383712fc`, `57bea464`, `802bab02` or `a25f3f17`. These snapshots record source,
+not completion or deployment evidence.
+
+The integration candidate is on `codex/cli-integration`. Snapshot `a1ce4439`
+preserves the original shared CLI tree, followed by a pending genuine merge
+with `origin/main` (`9e2e166b`). All textual conflicts are now resolved, including
+the regenerated lock and supply-chain files. The merge is not committed yet.
+The shared source checkout and unrelated work remain preserved.
+
+### U6 cancellation facilitator integrated — 2026-09-24
+
+Patch `/private/tmp/vonk-cli-u6-facilitator.patch`, based on `bf323989`, adds
+the disposable cancellation launcher. The parent added its
+[facilitator guide](cli-cancellation-walkthrough.md). The registered API and
+PostgreSQL owners expose an actual blocked recipe preparation action, completed
+stop, issued start and unissued later effect. Cancellation survives worker
+process death, retains exact identities and reconciles the outstanding agent
+receipt. A fresh installed CLI read verifies terminal cancellation and effect
+history; the real managed model cache retains reusable verified bytes.
+
+The agent's PTY run issued cancellation, kept the shell open through worker
+restart and queried terminal progress from that shell. Independent read-only
+review found no remaining blocking mismatch. Both cache and HTTP client close
+on normal completion and setup exceptions. Execution and image prerequisites
+remain explicit deterministic fixtures; no physical runtime/model claim is made.
+
+Parent integration validation with U8 upgrade, existing installed sequential
+upgrade and JSON pipeline: **4 passed, 2 interactive-mode skips in 26.60s**.
+Both new modules pass pinned Ruff lint/format and integration diff checks.
+The full Python type check passes with one existing reviewed exception and no
+unlisted errors.
+This does not close the independent human scorecard, U2's runnable-candidate
+prerequisite or W09/W17 removal/admission gates.
+
+### U8 upgrade facilitator integrated — 2026-09-24
+
+The scoped patch `/private/tmp/vonk-u8-upgrade-facilitator.patch`, based on
+`9ca56aff`, adds the disposable upgrade launcher and
+[facilitator guide](cli-upgrade-walkthrough.md). It reuses the real registered
+API, PostgreSQL upgrade/agent-job owners, installed wheel and loopback HTTPS.
+The private shell resolves the temporary wheel first, isolates HOME and disables
+history. External current-package publication and source loading use explicit
+fixtures; no publisher-signature, package-installation or physical claim is made.
+
+Parent integration validation: **3 passed, 1 interactive-mode skip in 16.74s**
+for the new smoke, existing installed sequential upgrade and JSON pipeline.
+An additional parent PTY run submitted an upgrade from the live shell, read the
+exact operation as `waiting-for-operator`, then exited: **1 passed in 55.09s**.
+The post-shell check proves one first-node child and no second-node dispatch;
+teardown verifies temporary resources are removed. Focused Ruff check/format,
+the integration diff check and the full Python type check pass (one existing
+reviewed exception, no unlisted errors). These are automated fixture results, not
+independent participant acceptance. The full U8 card remains unchanged; cleanup
+still depends on W09/W17 and the human scorecard remains unrun.
+
+### Removal pre-effect intent failure is now executable — 2026-09-24
+
+One isolated test-only W09e regression is available at
+`/private/tmp/vonk-w09e-pre-effect-intent.patch`, based on `9ca56aff`. It invokes
+the actual recipe-image removal service against disposable PostgreSQL and
+its own temporary archive/receipt. At the first managed unlink, a separate
+database session requires committed, nonterminal intent for the exact request.
+Current code fails because no removal owner exists at that boundary. The guard
+raises before the filesystem effect and verifies both files remain intact.
+Result: **1 failed in 3.42s**; log:
+`/private/tmp/vonk-w09e-pre-effect-intent-failure.txt`.
+
+The regression is intentionally separate from the qualified candidate, is not
+marked xfail, and changes no production code. It proves the missing pre-effect
+owner boundary only; cross-process arbitration, accepted-reference fencing,
+post-unlink death, model-child recovery and the final removal protocol remain
+open. It does not replace those original requirements or retry the rejected
+remover implementation.
+
+### Remaining admission failure reproduced on current source — 2026-09-24
+
+The existing W09d held-node regression was rerun against current source
+`9ca56aff` and disposable PostgreSQL. It failed at the intended assertion:
+lifecycle start did not return while an `AgentNode FOR UPDATE` holder remained
+active; after the holder released it returned a running `recipe.start` instead
+of the expected prompt domain refusal. **1 failed in 5.00s**. Evidence:
+`/private/tmp/vonk-admission-current-reproduction.log`; original test delta:
+`/private/tmp/vonk-admission-busy-review.patch`. The temporary test copy was
+removed after execution; production source and the candidate test suite were
+unchanged. The prior production-edit approval boundary was not retried.
+
+This is concrete current evidence for that bounded contention defect, not proof
+of the entire cross-writer lock-order or rollback contract. W09d remains open.
+The green fast-suite record below excludes this PostgreSQL lane and must not
+be used as evidence that admission is complete.
+
+Read-only W09e inspection also confirms that removal still unlinks storage
+before its durable removal Job is inserted, with model-child removal after a
+succeeded parent. Existing sequential replay and busy-owner tests cannot prove
+cross-process first-submission ownership, deletion/reference fencing, or crash
+recovery. Those original acceptance cases remain required; no replacement
+criterion or production edit was introduced.
+
+The U2 local-image inventory found a cached arm64 vLLM runtime with the required
+interface label, but no exact manifest or compatible local model was qualified.
+Its config ID is not a manifest digest. Both stalled read-only Skopeo inspections
+were terminated through their exact sessions (exit 130). No image was pulled,
+built, copied or run; the runnable-candidate prerequisite remains open.
+
+### Combined qualification after the six-agent batch — 2026-09-24
+
+The integrated candidate passed the complete Controller fast suite:
+**2,420 passed, 3 skipped in 99.66s**. The standalone root environment passed
+**1,038 tests, 12 skipped and 45 subtests in 39.98s**. Logs are
+`/private/tmp/vonk-cli-control-guidance-final.log` and
+`/private/tmp/vonk-cli-root-guidance-final.log`. The production web build passed
+(`/private/tmp/vonk-cli-web-guidance-final.log`). Full Python types retain one
+reviewed exception and no unlisted errors; Ruff passed, all **689** files were
+formatted, coordination boundaries held at **0** reviewed sites, and diff
+whitespace checks passed. The curated supply map regenerated and verified with
+no digest change. Focused installed tests and actual-output capture are recorded
+below. The U6 draft was excluded from all integration claims.
+
+This qualifies the reviewed batch, not the full objective: W09, W12's removal
+dependency, W17 and W19 remain open. No merge, publication, deployment, physical
+Spark execution or independent human acceptance occurred.
+
+### Earlier U6 draft was not qualified — 2026-09-24
+
+The isolated U6 draft was not integrated: no smoke test had run, exact build
+identity was guessed instead of propagated from the setup owner, and the
+claimed issued/unissued effect combination was not demonstrated. The draft
+remains at `/private/tmp/vonk-cli-u6-facilitator` for inspection; its existence
+is not implementation evidence. Repeating the already-qualified U2 cache
+blocker would not satisfy U6. Preserve the original U6 card and build a bounded
+fixture around exact owner identities and demonstrated effect states before
+scheduling a participant. Existing cancellation qualification is unchanged.
+
+### Whole-Fleet review and result facilitators — 2026-09-24
+
+The separate [U4 facilitator](cli-u4-whole-fleet-facilitator.md) presents the
+complete affected/idle review, changes saved intent through the registered API
+before admission, and confirms that a stale digest creates no application or
+execution changes. A new explicit consent admits only the refreshed digest and
+leaves execution queued. Parent corrected its workspace lifecycle to remove
+wheel, credentials and files through a private TemporaryDirectory, instead of
+relying on pytest's retained temporary paths. Integrated smoke passed **1 test,
+1 interactive case skipped in 8.01s**.
+
+The separate [U7 facilitator](cli-results-walkthrough.md) exposes a Profile-owned
+published route and three artifact outcomes: unavailable, verified file, and
+successful empty result. Its deterministic executor consumes a real issued
+agent claim and submits a canonical result through the real result owner;
+artifact storage/publication and installed download checks remain active. Two
+disposable databases isolate fixture identities behind one local app. Parent
+reused the common credential-redaction helper and qualified the integrated
+smoke: **1 test passed, 1 interactive case skipped in 12.02s**. The agent also
+checked normal interactive exit and cleanup. Neither run is an independent
+participant result or a physical Spark claim. W19 remains open.
+
+### Corrected recovery guidance and actual handoff examples — 2026-09-24
+
+Source checkpoint: `872d639aa48da2aabbe5d67676a15ed21a548da6`. The central CLI
+error builder uses the existing ambiguity rule and known submission acceptance:
+definitive artifact refusal offers exact job detail, stale profile refusal
+offers a fresh read-only review, and accepted/uncertain operations retain their
+reconciliation guidance. The failure-first wrong-key regression reproduced the
+old command before correction. Parent review removed an unused override argument
+so callers cannot independently redefine the acceptance decision.
+
+Parent qualification: **136 source CLI tests passed in 5.37s**; all **7 installed
+capture scenarios passed in 26.08s**, retaining **32 actual process observations**.
+The [handoff examples](../examples/cli-operator/README.md) include full capture,
+canonical JSON examples and actual human review/progress/error/result output.
+They explicitly distinguish deterministic fixtures, no-effect idle receipts,
+expected refusals, and unperformed human/deployment/hardware acceptance.
+W16's own criteria are qualified again; W19 remains open.
+
+Full Ruff and Python types passed (one existing reviewed exception, no unlisted
+errors); changed-file formatting passed. The regenerated and verified supply
+map remains `7b71776c6ac65297bb347258aa0bf35756b230924a0976d7c44a072f411c31dc`.
+The source snapshot preserves the pending merge, branch and working index.
+
+### Verified cache-readiness fixture and real JSON pipeline — 2026-09-24
+
+The U2 fixture now prepares exact model bytes through the catalog-backed
+ModelCacheService, and converts and inspects a local OCI archive with Skopeo
+before publication through the existing image-availability and storage owners.
+The installed CLI sees a later-page candidate with ready fit/cache/readiness,
+plus a separate missing-asset candidate whose advertised preparation queues
+real durable work. The empty OCI fixture does not establish engine startup;
+the original runnable-candidate prerequisite remains open. No physical or human
+acceptance is claimed.
+
+The [U8 read-only pipeline](cli-operator-u8-readonly.md) now has an installed
+regression with a real downstream process, closed input, no-input mode, both
+exit statuses, one JSON document, empty error streams and unchanged operation
+counts. It grants no cleanup authorization. Parent qualification of U1/partial
+U2/U3, U5 and this pipeline passed **3 tests, 2 interactive cases skipped in
+20.87s**. The pipeline also passed independently before integration in **6.70s**.
+Pinned Ruff passed for both fixture increments and the capture helper.
+
+### Actual transcript capture exposed refused-request guidance — 2026-09-24
+
+The [capture helper and procedure](cli-output-capture.md) ran seven existing
+installed acceptance scenarios against
+source `bf323989`, preserving 31 actual process observations with credentials
+excluded. Review of the real wrong-key artifact-submit refusal found a concrete
+recovery defect: HTTP 409 reports that the job belongs to another submit request
+and marks the error nonretryable, but `reconcile.operation` repeats the rejected
+new-key submit. Human output labels that same command `Next`. This does not
+perform another mutation automatically, but it is misleading recovery guidance.
+
+A bounded correction is in isolated implementation. Known jobs should offer
+read-only inspection after definitive refusal; same-key mutation replay remains
+appropriate only when acceptance is ambiguous. W16 is reopened until the
+connected regression and both output forms pass. The capture will be regenerated
+from the corrected source before it becomes the handoff sample bundle. No
+invented layout or failed response is being presented as a passing example.
+
+### Artifact corrections and walkthrough qualification — 2026-09-24
+
+Source checkpoint: `bf32398908fa4d87b32eb33589f75e63f698c125`. The temporary
+index snapshot preserves the branch, pending merge and working index and
+excludes environment symlinks.
+
+Integrated the explicit artifact subcommand renderer and contract-valid empty
+results. Human views show the artifact job ID, state/reason, inputs/results,
+verified local files and exact `recipe job detail ID --follow` reconnect.
+Successful empty results are distinct from unavailable results. The owner uses
+the existing compiled output-slot validator both when consuming a terminal
+result and when projecting success, preserving required-output refusal without
+maintaining a second rule. Native producer/protocol inspection required no Rust
+change. Schema regeneration left the full and packaged API schemas unchanged.
+
+Parent checks from the integrated candidate:
+
+- Artifact service/API plus installed wheel: **65 passed in 23.37s**. Parent
+  extended installed checks to include human queued/detail/download output,
+  verified file reuse, successful empty results and required-output failure.
+- Source artifact entrypoint/renderer: **42 passed in 0.92s**, after the original
+  wrong identity/reconnect had been reproduced before the fix.
+- Combined U1/U3, partial U2 and U5 smoke plus existing installed-load helper:
+  **4 passed, 2 interactive cases skipped in 23.81s**. U5's request wrapper was
+  subsequently corrected to match TestClient's `url` parameter name for typing;
+  its final focused rerun passed **1 test, 1 interactive case skipped in 7.59s**.
+  No baseline exception was added.
+- Full Controller fast suite: **2,420 passed, 3 skipped in 126.47s**,
+  `/private/tmp/vonk-cli-control-artifact-final.log`.
+- Standalone root fast suite: **1,037 passed, 12 skipped, 45 subtests in 38.01s**,
+  `/private/tmp/vonk-cli-root-artifact-network-final.log`. The initial sandboxed
+  run had 14 local-server bind permission failures; this complete rerun used
+  loopback networking. Those failures were not treated as product regressions.
+
+Full Python types pass with one existing reviewed exception and no unlisted
+errors. Pinned Ruff lint and formatting pass (681 files); the web production
+build and coordination scanner pass. Supply-chain regeneration and verification
+pass with manifest digest
+`7b71776c6ac65297bb347258aa0bf35756b230924a0976d7c44a072f411c31dc`.
+The fast suites exclude their lane cases; the installed/PostgreSQL results
+above are separate evidence, not physical Spark or deployment acceptance.
+
+The discovery fixture proves later-page fit, exact missing model/image blockers
+and one durable queued prepare request. It does not yet provide the original
+U2 card's usable later-page candidate; that requirement remains unchanged.
+Managed fixture files now live under the launcher's temporary cleanup root.
+The separate [U5 setup](cli-observer-walkthrough.md) uses real queued Profile
+owners and installed SIGINT/fresh-process observation; it shares U1's private
+session environment helper. No human scorecard has been completed. W09, W12's
+removal dependency, W17 and W19 remain open.
+
+### Artifact acceptance gaps reopened — 2026-09-24
+
+Current source inspection found unconditional nonempty-output checks in
+`ArtifactJobService.consume_agent_result`, `ArtifactJobResponse` and CLI
+artifact download, while the wire manifest allows an empty file list and
+compiled output slots have explicit minimum counts. The isolated correction
+must prove optional-output success and preserve required-output refusal through
+the real result consumer and installed CLI. This is not permission to insert a
+synthetic succeeded row or weaken manifest/identity validation.
+
+Parent reproduction also sent the current download receipt to the command's
+actual renderer dispatch (`recipe`, action `job`). It printed only
+`Operation: unavailable`, `Request: unavailable`, `State: succeeded` and
+`Progress: succeeded | progress unavailable`; the exact job ID and downloaded
+file/path were absent. Dedicated command-aware artifact views are now in
+isolated implementation. W02/W16 are reopened until connected fixes and
+meaningful source/installed checks pass; earlier package counts are historical.
+
+### Disposable U1/U3 walkthrough setup — 2026-09-24
+
+Integrated the opt-in facilitator from `vonk-w19-disposable-facilitator.patch`.
+It builds an independent CLI wheel and connects it through loopback HTTPS to
+registered routes with disposable PostgreSQL service owners. Smoke covers
+first connection, Fleet read and installed-only Profile edit/export/import;
+Job, application and run counts remain unchanged. Credentials and exports are
+private files. No Profile-load, Fleet-remove or upgrade providers are supplied.
+The shell uses ordinary host networking; no network sandbox is claimed.
+
+Parent verification in the integrated candidate:
+
+```bash
+VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes \
+UV_CACHE_DIR=/private/tmp/vonk-forge-cli-implementation-cache \
+VONK_WALKTHROUGH_MODE=smoke \
+/private/tmp/vonk-cli-integration-env/bin/python -m pytest -q \
+  control/tests/test_cli_operator_walkthrough.py \
+  control/tests/test_profile_load_installed_cli.py
+```
+
+**3 passed, 1 skipped in 14.36s**, including existing installed load helper
+regressions. Full Python types pass with one reviewed exception and no unlisted
+errors; pinned Ruff passes. Agent verification also exercised a bounded shell
+stub exiting 17 and fixture cleanup; that is not an actual human walkthrough
+or terminal-signal qualification. Documented normal shutdown is `exit`/Ctrl-D.
+Local temporary assets are removed, and PostgreSQL teardown is scoped to the
+fixture's own database/container. Forced process death is not a supported stop.
+
+The [facilitator protocol](cli-operator-walkthrough.md) has launch instructions.
+U2 and U4–U8 scenario setup and the independent human scorecard remain open.
+The U2 real-owner discovery extension is in isolated implementation. This
+increment does not close W19 or the W09/W17 boundaries.
+
+### Combined receipt-contract qualification — 2026-09-24
+
+Source snapshot: `324d5c4875916c305511a3e1824ab2410b00b645` (temporary index;
+branch, working index and pending merge preserved). This includes the receipt
+fix, regenerated contracts/clients, final W13 settlement assertion and prior
+integrated acceptance increments. It excludes environment symlinks.
+
+From the integrated candidate with `UV_CACHE_DIR=/private/tmp/vonk-forge-cli-implementation-cache`
+and `VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes`:
+
+| Invocation | Result and log |
+| --- | --- |
+| `/private/tmp/vonk-cli-integration-env/bin/python -m pytest -q control/tests -m 'not lane' -n auto --dist loadfile` | **2,420 passed, 3 skipped in 98.88s**; `/private/tmp/vonk-cli-control-receipt-final.log` |
+| `uv run --offline --python 3.14 --frozen --with pytest==9.1.1 --with pytest-xdist==3.8.0 --with-editable /opt/vonk-forge-recipes/contracts pytest -q tests -m 'not lane' -n auto` | **1,029 passed, 12 skipped, 45 subtests in 40.81s**; `/private/tmp/vonk-cli-root-receipt-final.log` |
+
+Full lint/format, Python types (one reviewed exception), web build, regenerated
+client checks, supply-chain verification and coordination scan pass. These fast
+runs exclude their lane tests; they are not complete PostgreSQL/Linux, deployed
+or physical qualification. The targeted connected/installed evidence remains
+recorded separately. W09, the W12 removal dependency, W17's removal protocol,
+and W19 remain open. The disposable U1/U3 human-session launcher is now integrated and separately
+verified above; the walkthrough itself has not run.
+
+### Removal replay and receipt identity correction — 2026-09-24
+
+Integrated the bounded non-destructive validation correction. A strict current
+removal intent is stored on the existing Job, with its issuer, request key,
+revision and payload digest checked against the Job envelope. An identical
+accepted request replays before mutable catalog resolution. A changed selector,
+actor or model-retention choice is refused; missing/malformed current intent
+and inconsistent stored results fail closed without legacy inference. Stored
+integer values cannot masquerade as boolean choices. The API projects required
+`with_model` from that accepted stored result, and the CLI validates it before
+following the operation.
+
+The original three changed-intent regressions failed against snapshot `2047a4cf`.
+Parent focused verification after integration passes **125 Controller tests,
+1 lane case deselected in 7.90s**, and **107 source CLI/generated-contract tests
+in 5.02s**. These are not installed-process tests. All API schemas and generated
+Python/TypeScript clients were regenerated together. Full Python types pass
+with one reviewed exception and no unlisted errors; pinned Ruff lint/format
+passes (678 files); web production build and supply-chain regeneration/check
+pass. The current curated manifest digest is
+`5c1a7847febe3ca88c696d3e57aff58ddd4acce347ced51b606bfd2af4d45b70`.
+
+This change does not alter unlink, cancellation, SQL membership removal,
+artifact locking or effect sequencing. First concurrent submissions are not
+arbitrated by a replay read, and the existing remover still persists its Job
+after effects. Crash-safe pre-effect intent, shared lifetime protection and
+resumable removal remain unfinished. No previously rejected destructive-remover
+implementation was retried, and this correction does not close W17.
+
+### Late cancellation receipt preserves newer intent — 2026-09-24
+
+The W13 newer-load case now receives the original issued stop's exact late
+cancellation result, confirms its cancellation directive, and observes the
+AgentOperation settle. The superseded application remains cancelled; the new
+application remains queued and retains every target's newer workload ordinal.
+Parent targeted verification passes **1 test, 9 deselected in 4.71s** in
+`test_fleet_profile_cancel.py`; pinned Ruff lint/format pass. The preceding full
+module passed ten tests before this assertion extension. Together these close
+the identified W13 partial-stop, process-death and newer-intent acceptance gaps,
+without making any claim that the remaining W09 admission invariants are done.
+
+### Integrated acceptance source checkpoint — 2026-09-24
+
+Snapshot `7f5b74bbf999b3752c0511008bd7be5b70e3fa27` preserves the integrated
+review rendering fix, installed re-enrollment and endpoint checks, partial and
+shared update cancellation, profile cancellation process tests, and full U1–U8
+walkthrough protocol. It was created with a temporary Git index and the existing
+HEAD/MERGE_HEAD parents. The working index, branch, pending merge and original
+shared checkout remain unchanged. Environment symlinks are excluded.
+
+This is a source checkpoint, not a release or completion claim. Its targeted
+qualification is recorded at the immediately preceding package checkpoints;
+the broad source baseline remains explicitly tied to `2047a4cf`. Receipt replay
+validation and final newer-intent cleanup assertions are still in isolated
+work. The independent operator walkthrough and W09/W17 completion remain open.
+
+### Profile cancellation process and partial-effect acceptance — 2026-09-24
+
+Integrated three real PostgreSQL cases for partial two-target stopping, worker
+process death while cancellation is pending, and newer profile intent arriving
+during pending cancellation. The process case starts a separate worker that
+reconstructs the production owners, exits through `os._exit(23)`, then starts a
+fresh worker after the exact authenticated agent result arrives. Pending intent
+and reservations survive, and the original cleanup identity settles without
+a duplicate stop job. Parent full-module verification passes **10 tests in
+15.03s** in `control/tests/test_fleet_profile_cancel.py`.
+
+Review checked the native stop-result contract before accepting the partial
+effect assertion: Rust emits `cancelled` only after exact host STOP and local
+cleanup complete; the Controller therefore records the corresponding node as
+stopped. The test supplies that canonical result, not hardware evidence.
+The newer-load case proves that the latest node ordinal belongs to the new
+request and the original issued stop retains its owner. Its final lower-child
+cleanup settlement is being added before treating this remaining boundary as
+fully qualified. No production defect was reproduced by this increment.
+
+### Shared update cancellation preserves unrelated work — 2026-09-24
+
+Two admitted recipe-update children and an unrelated accepted request now
+exercise the same real `ModelCacheService` child through PostgreSQL. Cancelling
+the update settles its two children while leaving the unrelated request and
+shared model operation active. Parent review strengthened the regression to
+read the actual partial file before cancellation and compare the exact bytes
+afterward; positive progress counters alone would not prove preservation.
+The surviving request then resumes that same child, verifies the final bytes
+and completes image preparation.
+
+The integrated `control/tests/test_recipe_update_batches.py` module passes
+**24 tests in 10.40s** with the populated task cache and isolated Controller
+Python against disposable PostgreSQL. Pinned Ruff corrected import order and
+formatting is clean. No production change was required. W12's separate cache
+removal race still depends on the unfinished W09/W17 removal protocol.
+
+### Current removal replay failure evidence — 2026-09-24
+
+A test-only regression was rerun against source snapshot `2047a4cf` after
+rejecting its original obsolete `a1ce4439` base as current evidence. Each of
+three changed-intent replays (selector, actor, and `with_model`) returns the
+old successful receipt instead of refusing the reused key: **3 failed in
+1.07s**, all at the expected refusal assertion. Inspection of the integrated
+`remove_selector` confirms the same unconditional stored-result return.
+
+The corrected review patch is
+`/private/tmp/vonk-w17-recipe-removal-intent-2047.patch`. It uses only temporary
+SQLite catalog rows, with no image authorizations or managed artifact files.
+This proves the deterministic request-key contract defect; it supplies no
+concurrency, deletion-lifetime or PostgreSQL-locking qualification. Pinned Ruff
+and diff checks pass. The deliberately failing patch is not integrated, and no
+destructive remover change has been retried.
+
+### Whole-fleet review capacity reasons — 2026-09-24
+
+A real PostgreSQL preview supplied a per-node port blocker that the CLI omitted:
+the old run holds port 8000, while the accepted replacement fits after the
+reviewed stop. Parent failure-first qualification installed the current wheel
+and failed at the missing Spark-specific capacity reason (**1 failed in 6.71s**).
+The rendering fix now prints per-node blockers and warnings alongside the
+existing resource figures and Spark identity.
+
+With the fix, the representative installed review and existing installed load
+module pass **3 tests in 12.56s**. They use a real Controller preview/owner and
+HTTPS client; the review scenario supplies deterministic artifact availability
+and does not claim physical artifact or hardware execution. The displayed review
+includes the complete two-node group, idle Spark, exact reused model/image,
+stop/start effects, current blocker, fit after stopping and interruption warning.
+Declining consent issues no load request. Renderer/profile-load source checks
+pass **34 tests in 0.39s**.
+
+Full pinned Ruff lint/format passes (676 files); Python types pass with one
+reviewed exception and no unlisted errors; the web production build and
+supply-chain verifier pass. No generated contract change was needed. W09's
+admission-policy, lock-order and removal dependencies remain open.
+
+### Installed re-enrollment and endpoint presentation — 2026-09-24
+
+The re-enrollment acceptance uses the independently installed CLI, a PTY,
+HTTPS and the real PostgreSQL owner. It observes the complete display name,
+canonical node ID and replacement consequence before sending consent, and
+checks that only the read has occurred at that point. Decline, EOF and
+`--no-input` create no grant; confirmation targets the canonical node and writes
+the secret only to the private output file. Parent verification of
+`control/tests/test_enrollment_reenroll_installed_cli.py` passes **4 tests in
+11.35s**.
+
+The endpoint installed journey now derives expiry and configuration-example
+expectations from the registered API's real owner projection. The complete
+`control/tests/test_cli_first_connection_endpoints_installed.py` passes
+**3 tests in 10.69s** after this addition, including the connected owner matrix.
+Both parent invocations use the isolated Controller Python, populated task uv
+cache, sibling recipe-library environment, disposable PostgreSQL and local
+HTTPS listeners described in the baseline. Pinned Ruff lint/format pass.
+
+Whole-fleet review acceptance exposed a separate W10 presentation defect:
+per-node capacity blockers are not rendered even though the preview supplies
+them. The current case shows a live run's port reservation blocking current
+capacity, with capacity fitting after the reviewed stop. A focused rendering
+correction is in progress; these W04/W15 results do not close that defect.
+
+### Connected update cancellation and endpoint ownership — 2026-09-24
+
+Integrated two test-only increments after reviewing their owner boundaries.
+The multi-recipe update test admits the first child, cancels the parent,
+reconstructs the service and reconciles twice: the later child never receives
+a job, while the parent and issued child settle cancellation. The endpoint
+test uses PostgreSQL, the registered route and `FleetProfileService.endpoint_intent`
+to check installed-only state, foreign-profile alias refusal, route generation
+replacement and expiry. Neither increment required a production change.
+
+Parent validation from the integrated candidate, using the isolated Controller
+environment and disposable OrbStack PostgreSQL:
+
+```bash
+UV_CACHE_DIR=/private/tmp/vonk-forge-cli-implementation-cache \
+VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes \
+/private/tmp/vonk-cli-integration-env/bin/python -m pytest -q \
+  control/tests/test_recipe_update_batches.py \
+  control/tests/test_cli_first_connection_endpoints_installed.py \
+  -k 'not installed_cli'
+```
+
+Result: **24 passed, 2 deselected in 10.68s**. Pinned Ruff 0.16.1 lint and
+format checks and `git diff --check` pass. The excluded installed CLI cases
+are not claimed by this invocation. A subsequent parent invocation of the
+same endpoint module with `-k installed_cli` passed **2 tests, 1 deselected in
+9.88s**, exercising the independently installed wheel and actual HTTPS API.
+Full Python types pass with one reviewed exception and no unlisted errors.
+W12's cache-removal race remains a
+W09/W17 dependency; these tests do not qualify the unfinished remover.
+
+### W09d current busy-node failure evidence — 2026-09-24
+
+A test-only regression on snapshot `2047a4cf` confirms that lifecycle start
+still waits on a held PostgreSQL AgentNode row. An execution hook establishes
+that start reached the row-lock query; it does not return during the holder
+window. Once the unchanged holder releases its lock, start accepts a
+`recipe.start` operation instead of returning the required prompt domain
+refusal. No node state or capability mutation is used to manufacture a later
+refusal. The regression fails at the intended early-return assertion.
+
+This is a confirmed implementation gap, not a missing test alone. The test-only
+patch is `/private/tmp/vonk-admission-busy-review.patch`; captured failure is
+`/private/tmp/vonk-admission-busy-review-failure.txt` (**1 failed in 4.16s**).
+Its lint/format/diff checks pass. It remains outside the integrated candidate
+because the production lock-order correction is still behind the previously
+recorded automatic-approval rejection. No blocked production edit was retried.
+The passing combined suites do not qualify this unimplemented invariant.
+
+### Reproducible current qualification baseline — 2026-09-24
+
+Source snapshot: `2047a4cfc5e58c89c8ae08d1b68b16e714ac08a2`. Host: Darwin
+arm64, Python 3.14.7, uv 0.12.9. The isolated Controller environment uses the
+rebuilt protocol wheel and an editable candidate CLI, matching source-suite
+requirements. Installed CLI tests separately build/install a wheel. Disposable
+HTTP/TLS listeners are enabled; PostgreSQL/process tests use their stated lane.
+The original 75-test/7.74s pre-edit summary is retained as history, but its exact
+invocation/environment has not been recovered and is not treated as a complete
+evidence record.
+
+All commands below run from `/private/tmp/vonk-cli-integration` with:
+
+```bash
+export UV_CACHE_DIR=/private/tmp/vonk-forge-cli-implementation-cache
+export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
+```
+
+| Exact current command | Result and retained log |
+| --- | --- |
+| `/private/tmp/vonk-cli-integration-env/bin/python -m pytest -q control/tests -m 'not lane' -n auto --dist loadfile` | 2,412 passed, 3 skipped, 86.38s; `/private/tmp/vonk-cli-control-kind-final.log` |
+| `uv run --offline --python 3.14 --frozen --with pytest==9.1.1 --with pytest-xdist==3.8.0 --with-editable /opt/vonk-forge-recipes/contracts pytest -q tests -m 'not lane' -n auto` | 1,028 passed, 12 skipped, 45 subtests, 42.10s; `/private/tmp/vonk-cli-root-packaged-kind.log` |
+| `/private/tmp/vonk-cli-integration-env/bin/python -m pytest -q control/tests/test_artifact_job_installed_cli.py control/tests/test_profile_load_installed_cli.py control/tests/test_cli_runbook_parser_installed.py` | 4 passed, 28.51s; `/private/tmp/vonk-cli-kind-installed.log` |
+
+These commands prove their named source/installed boundaries. They do not run
+the complete PostgreSQL/Linux lane, an independent operator walkthrough,
+publication, Controller deployment, or physical Spark acceptance. Specific
+connected/process/Linux evidence remains recorded at its owning checkpoint.
+
+### Package-specific completion audit — 2026-09-24
+
+Read-only review confirms W11, W14, W16 and W18's own repository/installed
+criteria have current evidence. Passing them does not close their outstanding
+delivery dependencies or W19 usability acceptance. W10 still needs a
+representative installed whole-fleet review to demonstrate visible effect
+presentation. W12 needs cancellation between child admissions in a multi-recipe
+update. W13 needs partial multi-target stop, process death during pending
+cancellation, and newer-intent overlap cases. W15's projection race tests use
+a supplied intent provider; the missing cases must exercise the real profile
+intent owner rather than duplicate those tests. These are existing plan
+criteria, not new features. Bounded connected tests are being added in isolated
+worktrees; production fixes will follow only if those tests establish a defect.
+
+W17 removal and W19's independent operator walkthrough remain incomplete.
+The destructive removers still have replay/intent/lifetime gaps; passing CLI
+receipt tests cannot substitute for fixing their owning services. W09's common
+lock-order edit and resumable deletion remain behind their recorded approval
+boundary. The retained-memory policy question remains unanswered.
+
+### Typed runtime memory pool and rebuilt package — 2026-09-24
+
+Compiled placement and signed start/job requests now require the canonical
+memory kind. Controller compilation, normal start, artifact jobs and distributed
+recovery carry the accepted value; Python and Rust reject mismatches with the
+compiled plan. On separate-memory hardware, host demand checks host capacity,
+accelerator demand checks accelerator capacity, and unified demand checks both.
+Shared-memory hardware continues to use its single host-backed pool. The
+previous minimum-of-both check falsely refused legitimate host-only and
+accelerator-only plans; failure-first native tests cover both directions.
+
+Integration retained the newer canonical test parsing and added the required
+kind to the install-admission fixture. Run/Switch reuses the canonical type;
+RunNodePlan's annotation preserves that validated type instead of widening it
+to an arbitrary string. Recovery tests use the canonical payload parser and
+compare the accepted kind through the actual child, replacing a duplicated
+literal field-list assertion.
+
+Parent focused Controller checks pass **221 tests in 22.49s**, with seven lane
+cases deselected; the recovery producer check passes **1 test in 4.70s**.
+Full Python types pass with one reviewed exception and no unlisted errors.
+Agent Linux Rust package suites pass (one existing ignored test), and its
+Python protocol selection passes **423 tests**. The two previously macOS-limited
+Python/Rust probes were then run in OrbStack against the integrated candidate,
+mounted read-only: **2 passed in 0.89s**, including both wire directions.
+
+The protocol wheel was rebuilt from current source. `uv lock --upgrade-package
+vonk-agent-protocol --offline` refreshed only its lock hash to
+`519484690b626f03e27efabad787ad1040a7d527404f2dd4faa3e2d84c40d116`;
+a plain lock/refresh invocation had correctly been checked and did not update
+that hash. The isolated environment now imports the actual protocol wheel.
+OpenAPI/Python/TypeScript clients and the supply-chain artifacts were regenerated.
+Wire verification, supply-chain verification and public-image inputs pass; the
+web production build passes. Standalone root checks pass **1,028 tests, with
+12 skips and 45 subtests, in 42.10s**.
+
+The first combined Controller run after sync found eight CLI-schema failures
+because sync replaced the editable CLI with a pre-regeneration packaged copy.
+Installed and source schema hashes differed. Restoring the documented editable
+root test setup while retaining the actual protocol wheel makes all **91 tests
+in the affected modules pass in 10.99s**. One further recovery assertion used
+a wrapper property that does not exist; it now reads the canonical typed
+payload. The final combined Controller fast suite passes **2,412 tests, with 3 skips,
+in 86.38s**. Freshly installed artifact/profile-load/runbook checks pass
+**4 tests in 28.51s** against actual PostgreSQL/TLS services where applicable.
+Full Python types again pass with the single reviewed exception. Logs:
+`/private/tmp/vonk-cli-control-kind-final.log`,
+`/private/tmp/vonk-cli-kind-installed.log`, and
+`/private/tmp/vonk-cli-kind-final-types.log`.
+This does not close retained-memory policy, common lock-order, removal, or
+operator walkthrough gates.
+
+### Pre-integration consistency gates — 2026-09-24
+
+After the enrollment and lifecycle corrections, full pinned Ruff lint passes,
+all **674 Python files** pass formatting, the full Python type gate has one
+reviewed exception and no unlisted errors, and the coordination scan reports
+**zero reviewed exceptions**. Diff checks pass. This is the current candidate
+before the pending memory-kind increment, not its final package qualification.
+
+### Retained-memory policy needs a product decision — 2026-09-24
+
+Read-only native/Controller review confirms that aggregate inventory and signed
+run liveness do not provide an atomic attributed memory snapshot. Reading
+aggregate free and owner usage into one authenticated message does not prevent
+allocation/free races between kernel reads. Podman's host-memory limit is not
+a separate accelerator-memory quota. The current runtime therefore cannot
+prove both exact fit without false refusal and strict physical non-overcommit
+for retained accelerator workloads.
+
+For total 100/free 70/retained peak 15/new demand 60, a retained run using 10
+would leave 65 bytes after its remaining growth, while a run using 0 leaves
+55. The current aggregate evidence cannot safely distinguish them. The earlier
+measurement prototype remains excluded. A user question is pending: present
+uncertain estimates as warnings while retaining actual capacity checks, or
+retain conservative refusal of uncertain cases. No answer is inferred from
+elapsed time, and no package is closed by this finding. Typed memory-kind and
+floor propagation remain independently necessary and continue.
+
+### Enrollment refusal preserves received HTTP evidence — 2026-09-24
+
+Enrollment and the generic submission path now share one known-4xx classifier.
+A malformed or oversized 422 response remains an explicit issuance refusal,
+without a GET that could attach an older pending grant. Malformed 200 and 503
+responses still reconcile the original request identity. Integration preserves
+the newer generic submission error/retry handling; the older agent patch's
+context was not substituted for it. Parent regressions use the real
+`ControlClient` and raise `HTTPError` for HTTP failures, matching the opener's
+production behavior.
+
+Parent enrollment, profile-load, cache-submission and Controller CLI checks:
+**146 passed in 4.72s**. Pinned Ruff lint/format and diff checks pass. Log:
+`/private/tmp/vonk-cli-enrollment-4xx-parent.log`. The installed-wheel
+PostgreSQL/TLS enrollment module also passes **3 tests in 19.02s**, including
+process-death recovery; log:
+`/private/tmp/vonk-cli-enrollment-4xx-installed.log`. The full Python type gate
+passes with one reviewed exception and no unlisted errors after integration.
+
+### Lifecycle harness follows the accepted identity — 2026-09-24
+
+The acceptance harness now polls the exact submitted profile application and
+refuses a different returned identity, instead of following numbered-profile
+latest progress. Its four stale test callers now supply the required node ID;
+its synthetic receipt uses the current required request key and progress shape.
+The corrected tests exposed diagnostic starvation: a large early section could
+consume the entire output budget and hide worker/journal evidence. Allocation
+now reserves space for each remaining section within the existing 8,400-character
+budget. Test length bounds derive from that budget plus the exact error prefix.
+
+Parent module acceptance: **49 passed in 1.15s**. Log:
+`/private/tmp/vonk-cli-lifecycle-runner-parent.log`. This is harness behavior,
+not a claim that physical Spark acceptance ran. The full Python type gate
+also passes with one reviewed exception and no unlisted errors (before the
+subsequent enrollment classifier increment).
+
+### Combined Controller floor-consumer correction — 2026-09-24
+
+The combined fast Controller run reported **2,396 passed, 3 skipped and 16
+failed in 80.85s**. All failures shared one test producer: install-admission's
+compiled-plan fixture omitted the now-required memory floor. It now parses the
+canonical recipe and passes the mapped role's declared reserve into the compiled
+placement. No compatibility default was added to production. The complete
+corrected module passes **22 tests in 2.08s**; scoped lint and formatting pass.
+Logs: `/private/tmp/vonk-cli-control-latest-combined.log` and
+`/private/tmp/vonk-cli-install-floor-fixture.log`. A final combined run remains
+pending the memory-kind producer/consumer increment.
+
+The existing installed runbook/parser gate also passes (**1 test**), validating
+the current command examples against the built candidate wheel without
+dispatching mutations. No stale digest-only artifact URL appears in the runbook.
+
+### Standalone root qualification refresh — 2026-09-24
+
+The root tree passes in its standalone CI-shaped environment: **1,024 passed,
+11 skipped, 45 subtests passed in 22.59s**. Local HTTP/TLS fixtures ran with
+listener access. Log: `/private/tmp/vonk-cli-root-standalone-latest.log`.
+A separate control-environment run exposed four stale lifecycle harness test
+callers that standalone execution skips; their current-contract correction is
+in progress. Its local-listener permission errors are environment failures,
+not substituted passing evidence. This checkpoint predates the memory-kind
+increment and does not close final packaging or combined Controller gates.
+The full candidate web suite also passes: **163 tests across 23 files**, using
+`npm test -- --run`; no source or lockfile changes were made for that run.
+
+### Installed timeout retains the original application — 2026-09-24
+
+A newer same-profile application is admitted through the registered save,
+preview and load routes on a second test Spark while the installed observer is
+following the original application. The first read resolves the original ID;
+all later reads use its exact application endpoint. At the two-second deadline,
+the CLI emits one JSON `timed_out` result and the original reconnect command,
+with no cancellation or mutation of the original owner. The profile's latest
+progress now points to the newer application, proving the test would catch a
+regression to polling latest progress. The longer deadline allows real database
+admission in the initial-read hook before exact-ID polling begins.
+
+Parent PostgreSQL/TLS acceptance: **2 passed in 11.09s**, including the existing
+SIGINT case. Log: `/private/tmp/vonk-cli-observe-timeout-parent.log`.
+
+### Installed observer across Controller process restart — 2026-09-24
+
+The parent ran the installed-wheel observer against a real HTTPS Uvicorn
+Controller process and PostgreSQL. After the first process was killed, a second
+process reused the database, URL, socket and certificate. Its request trace
+proves that the existing observer read the same application from the new
+process. SIGINT then ended local observation with exit 130 and an interrupted
+result; a fresh installed request-key lookup reconnected to that same owner.
+The database retained its queued state, digests, progress and timestamps, with
+one load POST and no cancellation or replacement. This tests API-process
+recovery; the deterministic execution adapter is not physical Spark evidence.
+
+Parent acceptance: **1 passed in 21.55s**. Scoped lint, formatting and diff
+checks pass. The full Python type gate also passes with one reviewed exception
+and no unlisted errors. Log: `/private/tmp/vonk-cli-controller-restart-parent.log`.
+
+### Exact artifact output identity integration — 2026-09-24
+
+Artifact downloads now select the exact job, output name and digest. The old
+digest-only route is removed. Two legal output rows sharing bytes but declaring
+different names/media types remain independently addressable. The registered
+route, service lookup, operation map, web preview/helper, CLI, qualification
+consumer and transfer fixtures now use this one current identity. The shared
+service test retains the previously integrated nonzero runtime-reserve assertion
+while exercising both same-digest outputs; neither change was discarded.
+
+The CLI probes output names in a private temporary directory on the destination
+filesystem before transfer, so case aliases are refused on case-insensitive
+storage while case-sensitive destinations can retain both names. Temporary
+probes are removed; no output download begins after a collision refusal.
+
+Parent checks so far: **62 service/API tests passed in 7.33s**, **26 focused
+web tests passed in 2.81s**. Full OpenAPI and Python/TypeScript client regeneration
+completed against the combined memory-floor and output-identity source. The
+CLI/transport/generated-client selection passes **70 tests in 1.51s**, and the
+actual installed-wheel/PostgreSQL/TLS artifact journey passes **1 test in 8.10s**,
+including corrupt-output refusal and verified publication through the new route.
+The production web build and full Python type gate pass (one reviewed exception,
+no unlisted errors). Full lint, formatting across 672 files, and diff checks pass.
+Linux case-sensitive filename acceptance also passes: the isolated agent ran
+the actual alias test in a cached Python 3.14 OrbStack Linux/ARM64 container
+with read-only source mounts and networking disabled (**1 passed, 19 deselected**).
+A filesystem probe confirmed that `A.png` and `a.png` are distinct there. The
+parent real HTTPS transport selection passes **12 tests in 8.29s**. Logs:
+`/private/tmp/vonk-cli-artifact-name-parent.log`,
+`/private/tmp/vonk-cli-artifact-name-web.log`, and
+`/private/tmp/vonk-cli-artifact-name-generate.log`.
+
+The checkpoint single-scan experiment was rejected: rename changes ctime, so
+reusing its prior hash across that identity transition could hide an intervening
+write. No prototype was integrated. The existing verifier retains the second
+scan as an integrity check; eliminating it would require a separate staging
+layout change. This performance follow-up does not waive required checkpoint
+cleanup/reference coordination.
+
+### Declared runtime reserve integration — 2026-09-24
+
+The combined Controller fast suite passed **2,412 tests, 3 skipped** in 143.29s
+before the memory-floor integration. It includes the checkpoint/FIFO repairs,
+Run/Switch image references and earlier shared-controller changes. Log:
+`/private/tmp/vonk-cli-control-checkpoint-combined.log`.
+
+The candidate now carries the accepted memory reserve through canonical compiled
+placement, start/job requests, recovery producers, signed payload validation and
+Rust execution. The agent no longer silently adds a fixed 4 GB. The reserve
+remains separate from the workload's OCI memory limit. Exact mismatch between
+signed request and compiled placement is refused. The Linux boundary test proves
+120 GB demand plus 2 GB reserve passes at exactly 122 GB free and fails one KiB
+below, as well as the original 123 GB counterexample.
+
+The isolated agent passed full Rust agent/protocol tests, 72 connected wire
+cases, and its focused Controller checks. Parent integration passes **306
+Controller cases** (7 lane cases deselected, 28.10s), the generated Rust wire
+check, and the full Python type gate with one reviewed exception and no unlisted
+errors. Test typing was corrected by reading stored plans through their canonical
+parser and validating compiled payloads, without widening the baseline. The
+changed assertions passed again (**10 passed, 1 skipped, 148 deselected**, plus
+one explicit artifact producer case). Logs:
+`/private/tmp/vonk-cli-memory-floor-parent.log`,
+`/private/tmp/vonk-cli-memory-floor-wire.log`, and
+`/private/tmp/vonk-cli-memory-floor-types-corrected.log`.
+
+The local verification environment now imports the candidate protocol source.
+The bundled protocol wheel, combined OpenAPI clients and final supply-chain
+manifest still require regeneration before package qualification. The independent
+host/GPU pool-selection audit, retained-workload accounting and physical Spark
+acceptance remain open; this patch proves reserve propagation only.
+
+The HTTP-refusal tests were also corrected to raise `HTTPError` like a real
+urllib opener; both CLI/artifact and transport modules pass again (**49 tests
+in 1.16s**). This correction restores full type validation and does not weaken
+malformed-4xx refusal behavior.
+
+### Enrollment hard death and checkpoint review — 2026-09-24
+
+The installed enrollment test now holds the TLS response after the registered
+Controller route commits its grant, then SIGKILLs the real installed CLI. The
+fsynced mode-0600 receipt retains the original request identity without the
+one-time secret. A fresh CLI reads the same pending grant; exactly one grant
+POST occurred. All three enrollment cases and the existing accepted-load
+closed-pipe regression pass together: **4 passed in 14.07s**. This verifies
+client process death; the separately assigned actual Controller HTTP-process
+restart case remains open. Log: `/private/tmp/vonk-cli-enroll-death-parent.log`.
+
+The checkpoint corrective increment preserves the named source-cache lock,
+accepts the maximum canonical 584-byte image reference, and distinguishes
+nonregular records from out-of-budget records with observed/allowed bytes.
+Two missing type narrowings in tests are fixed. Parent checks pass **64 fast
+cases** (2 lane cases deselected, 2.88s) and the full Python type gate with one
+reviewed exception and no unlisted errors. Logs:
+`/private/tmp/vonk-cli-checkpoint-review-tests.log` and
+`/private/tmp/vonk-cli-checkpoint-review-types.log`.
+
+Review found an additional concrete wait hazard: opening a checkpoint FIFO can
+block before its type check because the open lacks nonblocking mode. A bounded
+subprocess regression and fix are now integrated. The agent reproduced the
+pre-fix FIFO hang with a one-second subprocess deadline; nonblocking open now
+reaches the explicit nonregular-file refusal. Parent checkpoint boundary tests
+pass **4 cases in 1.27s** (61 deselected), including FIFO, directory, byte limit
+and maximum canonical image reference. Log:
+`/private/tmp/vonk-cli-checkpoint-fifo-parent.log`.
+Repeated hashing is still unresolved: a new export is hashed by transport and again at commit,
+and creating a hardlink invalidates the verifier's stat-based cache. Do not
+claim the current patch eliminates all repeated hashing or closes cleanup.
+
+### Artifact HTTP refusal preservation — 2026-09-24
+
+The CLI now treats malformed or oversized 4xx artifact responses as definitive
+refusals, using the actual HTTP status retained by the transport. Byte-upload
+response validation also preserves that status. Malformed successful responses
+and 5xx failures remain ambiguous and follow existing exact-key recovery.
+The agent confirmed the malformed/oversized 409 regression before fixing it.
+Parent verification: **49 CLI/artifact/transport tests passed in 0.95s**;
+changed-file lint and diff checks pass. Log:
+`/private/tmp/vonk-cli-http-refusal-parent.log`.
+
+The output download contract still needs exact filename plus digest selection:
+valid outputs may share bytes but have different names/media types. Destination
+filesystem-name collision protection is also under implementation. These remain
+W16 requirements; this refusal fix does not close the whole artifact workflow.
+
+### Acceptance audit corrections — 2026-09-24
+
+Direct source inspection confirms `test_profile_load_closed_pipe.py` already
+uses the installed wheel, real PostgreSQL/TLS, an accepted load with a lost
+response, exit 141, and a fresh-process reconnect to the original request. Its
+prior parent run passed in 7.14s; the read-only audit's claim that this was only
+a source-entrypoint test was incorrect. No duplicate test was added. Installed
+observation timeout/newer-application pinning and hard-death enrollment delivery
+are being addressed separately. Actual Controller HTTP-process restart and the
+independent operator walkthrough remain distinct open requirements.
+
+The existing profile endpoint-intent regression now also transitions a completed
+application with no current run to `withdrawn`, retaining its immutable assignment
+and returning no run identity. It passes (**1 passed, 49 deselected in 0.84s**);
+changed-file lint/format and diff checks pass. This covers the missing-run edge
+without claiming any current serving endpoint.
+
+A read-only removal audit confirms the current recipe handler resolves mutable
+selectors before replay and does not bind `with_model` or actor in that replay.
+It writes its terminal Job after unlink and can report success before model
+children finish. The implementation plan now specifies the exact stored-intent,
+projection and crash/replay regressions that must land with W09e's resumable
+remover. No destructive owner changes were made by this audit.
+
+### Published-image export checkpoint integration — 2026-09-24
+
+The candidate now records a strict storage-owned checkpoint for a verified
+registry export under the existing source lock. Its identity binds the immutable
+registry reference, platform image/configuration, architecture/interface and
+archive bytes. The source lock is released before publication ownership checks;
+final publication retains the checkpoint via a hardlink. Recovery verifies a
+receiptless final archive against exact checkpoint provenance. Process-death
+coverage exercises both completed checkpoint and final-link-before-receipt
+windows. Current owner cancellation still prevents publication.
+
+Parent verification passes **62 fast tests** (2 lane cases deselected, 7.24s)
+and **13 PostgreSQL/process tests** (7.58s) across published-image recovery,
+Run/Switch references and OS locks. Coordination reports zero reviewed sites;
+changed-file lint passes. The full type gate found four missing union narrowings
+in two new tests; correction is pending with a small review follow-up for source
+cache ownership and explicit checkpoint size diagnostics. Logs:
+`/private/tmp/vonk-cli-checkpoint-parent.log`,
+`/private/tmp/vonk-cli-checkpoint-pg.log`, and
+`/private/tmp/vonk-cli-checkpoint-types.log`.
+
+The retained link does not duplicate archive blocks, but keeps those blocks
+allocated after removing the published name. Checkpoint garbage collection must
+join the existing reference/removal owner; it is not implemented by this patch.
+Do not infer complete removal coordination or unlimited recoverability from
+these focused crash-boundary results.
+
+The W02 JSON preservation regression now also includes a 2,048-item collection
+alongside long text. The parsed output preserves the entire document (**1
+passed, 32 deselected in 0.89s**), guarding against human-display clipping leaking
+into JSON output. This extends the existing test, not a new redundant test path.
+
+### Combined Python style gate — 2026-09-24
+
+The full candidate passes pinned Ruff lint. The full format check initially
+identified twelve integrated files with formatting drift; the formatter changed
+only those files. Lint and format then pass across all **672 Python files**, and
+`git diff --check` passes. This is a source-style gate, not new behavioral,
+publication, or hardware evidence. Pending agent integrations must rerun the
+appropriate combined gates.
+
+### Installed fleet removal consent — 2026-09-24
+
+The new installed-wheel test uses local TLS, the actual registered fleet routes,
+`FleetProjection`, and PostgreSQL-backed `EnrollmentService`. Both JSON and
+no-input invocations without `--yes` exit 2 without a removal request or changes
+to either node's enrollment. Confirmed removal resolves `Atlas` to its canonical
+node ID, posts once with the route's bodyless contract, and retires/revokes only
+that node and certificate. The peer remains unchanged.
+
+Parent integration verification: **1 passed in 7.56s**; pinned Ruff formatting
+and lint pass. The full Python type gate passes with one reviewed exception
+and no unlisted errors. Log: `/private/tmp/vonk-cli-fleet-remove-installed-parent.log`.
+This qualifies CLI consent and exact enrollment removal in a disposable
+Controller. It neither exercises live fleet removal nor closes cache artifact
+removal coordination or owner-bound removal replay.
+
+### Exact web receipts and remaining consent audit — 2026-09-24
+
+The existing artifact web caller now preserves definitive HTTP refusals instead
+of accepting an older receipt after denial. Mutation and recovery receipts must
+match the requested job and recipe run. Cancellation during creation or submit
+never starts a fresh replay; an already accepted draft is cancelled by its exact
+identity. An unrelated historical cancelling job no longer blocks new work.
+This is compatibility repair for the shared CLI/API contract, not a web redesign.
+
+The two-file follow-up was integrated atop the original request-key patch.
+The complete web suite passes **162 tests across 23 files in 4.69s**; the
+production build and `git diff --check` pass. Logs:
+`/private/tmp/vonk-web-receipt-followup-suite.log` and
+`/private/tmp/vonk-web-receipt-followup-build.log`.
+
+A separate read-only W01 audit found no concrete consent bypass in enrollment,
+re-enrollment/revocation, profile load/cancel/save/import, model/recipe/artifact
+cancellation, explicit artifact submission, or `update --apply`. Four existing
+focused fake-client cases passed in the agent checkout. Profile definition edits
+and imports do not load workloads; the signed updater's explicit apply remains
+its authorization. This audit does not close the remaining owner-bound removal
+protocol or replace final combined qualification.
+
+### Build cancellation after process death — 2026-09-24
+
+The integrated `test_build_cancellation_process_recovery.py` exercises actual
+PostgreSQL, managed storage, cancellation admission and a reconstructed worker.
+The first process exits immediately after committing cancellation and exact
+cleanup ownership. A fresh process finds the same cleanup child and retains
+capacity until its exact receipt arrives. Late success cannot publish cancelled
+output; replayed old success and cleanup cannot release a fresh request's claims.
+The new regression and existing cancellation recovery module pass together:
+**12 passed in 11.55s** in the integration candidate.
+
+This supplies the E5e process-restart evidence. Agent cleanup results remain
+deterministic test inputs, so it does not establish physical Spark acceptance.
+Common admission lock order, removal coordination, publication cancellation,
+memory accounting and the full combined gates remain open. The preceding
+combined Python type check passed with one reviewed exception and no unlisted
+errors; it preceded this test-only integration.
+
+The integrated runtime authorization regression also passes against PostgreSQL
+(**1 passed in 4.13s**). It uses the real application and signed viewer/operator
+tokens: missing authentication and viewer permissions refuse artifact create,
+submit and cancel before durable owner effects. An operator then succeeds with
+the same request keys. This closes the runtime authorization test gap; the
+existing web caller's request-key repair and final W16 gates remain open.
+
+### Image publication guard integration — 2026-09-24
+
+The candidate now guards exact archive publication with a nonblocking managed
+storage lock. The availability owner records a canonical, attempt-bound
+reference before publication, and cancellation recovery reacquires the same
+guard before releasing that reference. Cached and source-build publication use
+the same callback boundary. Contention retains the durable Skopeo blob cache
+and waits without consuming transfer retries.
+
+The four focused fast modules pass (**96 passed, 16 lane cases deselected**,
+2.60s), including the prior late-cancellation regression. The coordination
+scanner passes with zero reviewed sites. The broader PostgreSQL/process pair
+reported **13 passed, 1 failed**: replacing an expired claim after publication
+leaves its prior attempt's reference attached, preventing the new owner from
+adopting verified bytes. This is a real recovery gap under repair, so the new
+publication boundary is not fully qualified. Three type-narrowing issues found
+by the combined gate were corrected; the full Python type gate then passed
+with one existing reviewed exception and no unlisted errors. Changed-file
+Ruff/format checks and `git diff --check` pass.
+
+The takeover defect was then corrected: under the exact archive publication
+guard, a current claim can transfer an older reference only when operation,
+recipe revision, archive/image digests and byte count all match. Other identity
+mismatches remain refusals. The full PostgreSQL/process pair now passes
+**14 tests in 6.27s**, including the formerly failing receipt boundary and an
+assertion that reference ownership moves before authorization. The combined
+Python type gate and changed-file lint/format checks pass after integration.
+
+Abrupt death can also leave an anonymous temporary export file. Durable blobs
+remain reusable, but this increment does not prove recovery or cleanup of that
+temporary file. Run/Switch reference binding and removal coordination remain
+separate unfinished work.
+
+### Conditional memory admission integration — 2026-09-24
+
+Run/Switch review no longer feeds a stopped workload's peak reservation into
+the capacity planner as measured released memory. When only known memory
+capacity blocks a placement, each insufficient target/pool must have an exact
+reviewed active stop claim and demand must fit physical total capacity. The
+review then carries a canonical conditional check with the exact stop IDs,
+without claiming after-stop headroom. The CLI explains that fresh capacity
+must pass after these authorized stops, before preparation or start. The
+existing exact-stop inventory gate and lifecycle admission remain in force.
+
+The seven-file increment was merged against its original base, preserving the
+current stale-review handling, published-image recovery and post-stop gates.
+OpenAPI and Python/TypeScript clients were regenerated together. Parent
+verification passed **124 fast tests** (17 lane cases deselected), **17
+PostgreSQL cases** (124 fast cases deselected), and **50 resource/claim/build/
+post-stop cases** in separate runs. The web production build passed.
+Python types pass with the one reviewed exception; coordination checks report
+zero reviewed sites. OpenAPI/client checks pass (**20 tests**). Formatting and
+lint pass after preserving and formatting the merged current-source changes.
+
+W09d C/D remain open: retained workloads can still be charged both their actual
+physical use and their full peak promise. Neither sequential telemetry nor
+unverified memory attribution is integrated. The next design audit must identify
+real enforcement and ownership capable of admitting fitting work without
+overcommit. The conditional check is truthful replacement sequencing; it does
+not resolve this retained-workload accounting requirement.
+
+### Installed observer interrupt and reconnect — 2026-09-24
+
+`test_profile_follow_interrupt_installed.py` sends a real SIGINT to the built
+wheel's executable after it has observed a pending PostgreSQL-backed
+application. It verifies exit 130, one JSON interruption receipt with the exact
+request/application identity and reconnect command, then reads the same owner
+from a fresh process. Every observer request is GET and the durable owner state
+is unchanged. Parent verification: **1 passed in 6.79s**. An initial test used
+an empty profile, which correctly finished before interruption; the fixture was
+changed to an actual pending application. No product defect was reproduced.
+This is process-behavior evidence, not the still-unperformed operator walkthrough.
+
+The subsequent full Controller fast tier passed **2,404 tests, 3 skipped** in
+106.19s with the combined conditional-memory and publication-takeover source.
+Log: `/private/tmp/vonk-cli-control-conditional-checkpoint.log`. This replaces
+the earlier failing fast checkpoint for these integrated changes; it precedes
+the pending Run/Switch publication-reference and existing web request-key
+increments. PostgreSQL/process results remain the separately named runs above.
+
+The standalone root/CLI environment also passed **1,005 tests, 11 skipped,
+45 subtests** in 22.88s. Log:
+`/private/tmp/vonk-cli-root-conditional-checkpoint.log`. It uses the standalone
+recipe-contract dependency environment, rather than relying on Controller
+dependencies to mask missing CLI packaging requirements.
+
+### Run/Switch image publication references — 2026-09-24
+
+The current Run/Switch producer now records an exact canonical image reference
+in its owning job progress before managed publication. The short, nonblocking
+transaction checks current target/workload ownership, phase checkpoint,
+cancellation, approved recipe/image/build identities and accepted profile
+intent while the exact archive publication guard is held. Reference scanning
+validates this owner-bound record; availability's separate current-attempt
+reference path is preserved. The normal phase writeback reloads durable progress
+and retains the reference instead of overwriting it with the earlier snapshot.
+
+Parent verification passed **13 PostgreSQL/execution-path tests in 7.78s**,
+covering prepublication intent, cancellation, supersession, a removal fence and
+retry after contention. Complete OpenAPI and Python/TypeScript clients were
+regenerated; web build, Python types (one reviewed exception), generated-client
+round trips, lint and coordination checks pass. A follow-up audit found that
+explicit operation retry copies the prior job's reference owner identities;
+its regression and correction are still in progress. This publication seam is
+therefore integrated but not yet fully qualified. Removal and orphan-stage
+recovery remain open, as do the maintenance-consent and receipt-binding fixes
+identified by the current CLI audit.
+
+The explicit retry follow-up is now integrated: validate the previous canonical
+reference, reopen the exact archive reference gate in the new admission
+transaction, and rebind operation/request/actor/workload ordinal to the new
+job while preserving artifact identity. The three connected modules pass
+**16 tests in 8.13s**. Coverage includes the reproduced stale-owner retry,
+phase-writeback preservation, interruption followed by a reconstructed service,
+and cancellation after publication. Combined Python types and coordination
+checks pass; removal and storage-stage recovery remain separate open gates.
+
+### Fleet upgrade consent — 2026-09-24
+
+`fleet upgrade` now requires explicit consent within the same command. A
+terminal prompts for the selected scope; noninteractive/JSON use requires
+`--yes`. Single-Spark friendly selectors resolve to the canonical identity
+before submission. `--all` preserves the existing all-current-Sparks request
+intent, and the accepted receipt binds the actual target list. Original-key
+recovery guidance includes the required consent flag.
+
+The combined CLI/process group passes **111 tests in 7.86s**. Installed
+upgrade, resume and runbook-parser acceptance pass **3 tests in 10.10s**;
+the installed upgrade case now first proves refusal without `--yes`, no API
+call and no durable job, before testing authorized submission and response
+loss. Python types, changed-file lint/format and coordination checks pass.
+Fleet removal confirmation and cache-removal identity/impact remain separate
+unfinished parts of W17.
+
+The fleet-removal and cache-receipt CLI increment is now integrated. Fleet
+removal resolves and validates a stable Spark ID before confirmation, sends
+the mutation to that exact ID and checks the receipt's action/identity.
+Model/recipe removal validates the canonical response and submitted action,
+selector and request key before following its operation. Parent CLI/process
+verification passes **119 tests in 7.39s**, and the full Python type gate passes
+with one reviewed exception. Current runbook and agent-guide noninteractive
+upgrade examples include `--yes`. Reviewed removal impact and backend
+actor/selector/model-retention replay binding remain open; this CLI fix does
+not establish the missing owner contract.
+
+After both consent increments, the standalone CLI/root fast suite passes
+**1,016 tests, 11 skipped, 45 subtests** in 22.81s. Log:
+`/private/tmp/vonk-cli-root-consent-checkpoint.log`. This is the current root
+checkpoint; storage-checkpoint and signed-memory-floor changes are still in
+isolated agent work and are not covered by this result.
+
+### Existing artifact web caller contract repair — 2026-09-24
+
+The existing artifact workspace and client now pass caller-owned create,
+submit and cancel request keys, use exact request lookup, retain keys across
+ambiguous retries, and skip inputs already attached with matching file evidence.
+Upload cancellation no longer swallows an uncertain Controller response. This
+is the minimal existing caller integration for the shared CLI/API contract;
+the broader web redesign remains deferred.
+
+Parent verification: **13 targeted web tests passed**, and the production
+TypeScript/Vite build passed. Review identified three follow-ups before this
+slice can be qualified: reject mismatched job/run identities on every receipt;
+preserve explicit authorization refusal rather than report an old receipt as
+success; and do not create a new draft after local abort when the original
+request lookup definitively reports not found. These corrections are in
+progress. The current passing tests alone do not establish these properties.
+
+The complete web component/client suite at this checkpoint also passes:
+**150 tests across 23 files** in 10.40s. Log:
+`/private/tmp/vonk-web-artifact-keys-suite.log`. This precedes the identified
+receipt/denial/abort corrections and does not close those gaps.
+
+### Runtime reserve propagation gap — 2026-09-24
+
+The source audit found the Spark helper adds a literal 4 GB to each run/job's
+reserved demand, while Controller admission derives the recipe's declared
+reserve. The accepted plan records `memory_floor_bytes`, but current signed
+start/job requests and compiled placement omit it. A 120 GB workload with a
+declared 2 GB reserve and 123 GB free is admitted by the Controller and refused
+by the helper. The implementation plan now names the producer/consumer and
+boundary-test changes required to propagate the same accepted floor. This fix
+is underway; it is distinct from unresolved retained-workload accounting and
+does not establish hardware enforcement of memory budgets.
+
+The removal audit also confirmed an owner-side replay gap: recipe removal
+returns a same-key result without comparing selector, actor or model-retention
+choice, and its stored payload does not contain `with_model`. W17 now records
+the canonical intent/response change and regression required to close that
+gap. The pending CLI-only fix checks the identity fields already supplied;
+it cannot prove the missing choice. The destructive remover remains unchanged
+and unqualified, with its earlier approval boundary still unresolved.
+
+Combined recovery now carries the original approved runtime identity through
+missing-source repair while deriving current model evidence; model or image
+drift still refuses replacement. Read-only recovery evidence grants no active
+capacity authority. The existing receipt refresh also preserves the exact
+parent claim exclusion, so a child does not compete against its own reserved
+disk. Settled capacity contention no longer remains displayed as a live blocker.
+An unissued build removed from cache is retired with a canonical, re-plannable
+request, while issued work retains cancellation/cleanup ownership.
+
+Evidence for this candidate (not deployment or physical acceptance):
+- Protocol tests: 340 passed before the feature integrations.
+- Full Controller fast tier after W11 and current generated contracts: **2,371
+  passed, 3 skipped**, 78.47 seconds. The earlier four packaging failures are
+  resolved. This precedes the pending W10/W12/W13/W14 increments.
+- Standalone root fast tier after W11: **961 passed, 11 skipped, 45 subtests
+  passed**, 25.16 seconds, using the pinned root environment and recipe contracts.
+- Combined source/published recovery and identity group: 29 passed; an added
+  model-artifact drift case passed separately.
+- Fleet, removal and owning API/service group: 155 passed, 1 lane case deselected.
+- Resource/parked PostgreSQL group on verified OrbStack: 46 passed, 3 failed;
+  fixes then passed all 4 disk-claim tests, including all three failing cases.
+  The dedicated combined materialized-install/inherited-claim case then passed
+  on PostgreSQL, preserving old installation headroom and the exact child claim.
+- Integrated CLI/artifact/client group: 107 passed; after endpoint integration,
+  the CLI/client/OpenAPI group passed 100 and Controller endpoint/packaging group
+  passed 95 with 2 environment failures later resolved by the packaging rerun.
+- Integrated W11 cancellation: 62 CLI/artifact tests and 78 Controller tests
+  passed (one process lane deselected). The agent separately passed the actual
+  PostgreSQL/process/storage case on OrbStack. Regenerated schemas and restored
+  the candidate editable installation after an older installed wheel was found
+  in its test environment.
+- Standalone built wheel: 21 offline help/version/completion combinations at
+  60/80/120 columns with `TERM=dumb` and no color; Bash/Zsh syntax and closed
+  pipe contract passed. Packaged cancellation schema present; no Controller or
+  Pydantic dependency. Interactive and full operator acceptance remain open.
+- API/Python/TypeScript clients regenerated together. Root-pinned Ruff and the
+  coordination scanner pass. W15 type issues are being corrected; web and Rust
+  generation checks still need the final combined source.
+
+The candidate's isolated pinned environment is
+`/private/tmp/vonk-cli-integration-env`; `control/.venv` links only to that
+candidate environment. Do not commit environment/node_modules links. Integration
+decisions, logs and remaining checks are recorded in
+`/private/tmp/vonk-cli-integration-notes.md`.
+
+Automatic approval review refused adding a database `cancelling` constraint for
+W13 because of fresh-schema reset risk. W13 proceeds through the existing typed
+progress document as the single cancellation authority, projecting cancelling
+from that state. No rejected schema edit is being retried or bypassed.
+
+## Integration checkpoint — 2026-09-24
+
+Latest bounded acceptance increments:
+
+- Credential-file regressions exercise the actual connection-check path for a
+  missing path, a symlink and overly broad permissions. Each refuses before
+  networking and keeps token contents out of output. The integrated process
+  module passes 33 cases (3.20 seconds); pinned Ruff/format checks pass.
+- Profile endpoint qualification now changes the real published generation
+  during bundle verification while retaining the same alias and run. The
+  projection refuses stale evidence; a fresh read returns the replacement
+  generation. The existing route test passes (0.69 seconds). An unchanged
+  republish deliberately reuses its generation, so the test changes readiness
+  evidence to cause an actual replacement; no production defect was found.
+- Memory work remains open. Sequential aggregate/owner reads cannot justify
+  subtracting measured owner bytes: free=96 with owner use=4 can be followed by
+  owner use=10, wrongly granting 96 alongside a peak claim of 10. The pending
+  replacement path therefore binds exact stops and requires a fresh post-stop
+  fit before dispatch, without claiming released bytes. The separate retained
+  workload requirement still needs closure: free=70 with peak claim=15 and
+  actual use=10 has 65 bytes of growth-adjusted headroom, while subtracting the
+  full claim yields only 55. Neither an unsafe credit nor this false refusal
+  closes W09d; the measurement prototype is not integrated acceptance evidence.
+
+- Artifact submission receipt reads now validate the canonical owner-payload
+  digest, exact artifact ownership and request UUID before producing a view.
+  Corrupt or foreign owner state raises an explicit domain error instead of an
+  attribute/validation failure or an apparently valid receipt. Five corruption
+  regressions and the normal installed lost-response/replay journey pass in the
+  parent service/API/installed group (63 cases, 14.99 seconds). Pinned Ruff passes.
+
+- The Controller fast tier after artifact request identity and installed
+  qualification ran 2,390 passing cases, three skips and two failures
+  (83.46 seconds). One failure was the stale-plan review test's former generic
+  blocked expectation: it now checks stale consent separately from a current
+  blocked digest, and all nine module cases pass. The late verified image
+  cancellation-retention failure remains open with the publication-lock/recovery
+  work. This is not a clean full-suite gate. The log is
+  `/private/tmp/vonk-cli-control-artifact-checkpoint.log`.
+
+- The installed-wheel runbook regression passes (one case, 2.70 seconds). It
+  discovers the current executable shell examples directly from the runbook,
+  substitutes valid identity placeholders, and parses them with the wheel's
+  isolated Python without dispatching commands or accessing the Controller.
+  This upgrades the earlier source-only check of 75 examples. Pinned Ruff and
+  formatting checks pass; no production behavior changed in this increment.
+
+- Installed fleet resume passed against the actual registered route, upgrade
+  owner, PostgreSQL and TLS (one case, 7.09 seconds). Two failed attempts expose
+  the owner's resume action; a role downgrade at submission is refused without
+  changing the job or attempts, and an administrator resumes the original job
+  with its request, revision, digest and history intact. The injected clock
+  crosses the actual 960-second recovery fence; no physical package is installed.
+- Installed terminal qualification passed at 60, 80 and 120 columns (three
+  cases, 10.00 seconds) with a long Unicode profile name, `TERM=dumb`, `NO_COLOR`,
+  and redirected JSON. The real wheel reads the PostgreSQL-owned profile via
+  TLS; output stays within the terminal width and JSON preserves the exact name.
+  Repository-pinned Ruff and formatting checks pass after an unused fixture
+  variable was marked intentionally unused. The independent walkthrough is open.
+
+- Artifact submission receipts expose the original durable submit request key.
+  Same-key retries recover one operation; a different key is refused, and the
+  CLI checks the request identity after direct responses and lost-response
+  lookups. Run-filtered job lists refuse a different run. Regenerated contracts
+  pass 42 CLI/client tests and 58 service/API/installed PostgreSQL tests
+  (13.54 seconds), including lost response, same-key replay and changed-key
+  refusal. The web type/build gate also passes. Broader final gates remain open.
+
+- Fleet resume validates its accepted job identity. Log observation resolves
+  names once, pins the stable Spark ID for every response and reconnect command,
+  and returns retained `follow:false` snapshots immediately. Agent regressions
+  failed before the fixes; parent CLI and profile-load modules passed 95 cases.
+  The process module passed 30 cases after restoring the candidate's editable
+  root package (an older wheel had been loaded by subprocesses). These results
+  are distinct from the preceding broader root-suite checkpoint.
+
+- The current root fast tier passed 980 cases and 45 subtests; 14 local HTTP/TLS
+  cases initially could not bind their test sockets in the sandbox and all 14
+  passed on the permission-enabled retry (2.73 seconds). Eleven lane/platform
+  cases were skipped. This checkpoint predates pending identity and memory
+  increments. All 75 executable runbook examples also parse against current
+  source after substituting concrete UUID/digest placeholders; no mutations
+  were executed by this documentation check.
+
+- Stale load admission now returns the exact `profile.stale_plan` refusal for
+  changed reviewed inputs, including the final transaction fences. The CLI
+  reads and displays one current review, preserves the refusal, and never
+  resubmits automatically. Unrelated conflicts do not trigger a refresh. The
+  integrated CLI module passed 20 tests; actual PostgreSQL API/race and installed
+  CLI/TLS acceptance passed 17 tests (21.54 seconds). Full pinned Ruff passes;
+  final combined qualification remains open.
+
+- Installed Find-and-prepare acceptance passes against the candidate wheel, TLS,
+  actual catalog/cache services and PostgreSQL (one case, 7.68 seconds). It finds
+  a later-page model, exposes the precise repair action after verified files are
+  lost, accepts preparation and reconnects by the original request key. Source
+  transfer and publication are outside this case.
+- W06 review found remaining unchecked resume receipts, alias-based log polling,
+  retained-log termination, and artifact-job run/request identity. These fixes
+  are assigned and remain open until integrated regressions pass.
+
+- Published-image missing-cache recovery now preserves the exact approved
+  platform image/layout identity and reports the registry digest separately.
+  Unknown coverage remains unknown; explicit preparation intent invokes the
+  shared production callback without inventing measured bytes. Changed complete
+  output is refused before target copy/install. The parent focused service group
+  passed 177 cases (12.97 seconds); clients were regenerated, types pass with
+  one reviewed exception, and 44 rendering/client checks pass. Final combined
+  qualification remains open. The accepted-profile changed-output case was
+  subsequently moved onto real PostgreSQL and passed (3.72 seconds); preparation
+  cannot dispatch a target when the restored output differs from approved intent.
+- Installed model cancellation now passes against the integrated wheel and
+  actual PostgreSQL/cache owner: an accepted cancel response is lost, exact-key
+  lookup recovers it, a worker dies with verified staged bytes, and the restarted
+  owner settles cancellation without publishing or losing the partial file.
+  A fresh installed process reconnects by the original operation key. The case
+  passed in the parent combined run. The maintenance fixture was corrected
+  separately and its installed acceptance now also passes (6.55 seconds):
+  an accepted upgrade response is lost, same-key recovery returns one job,
+  first-target failure stays visible and prevents dispatch to the second Spark.
+  External release selection is deterministic; no package was installed on hardware.
+- Fleet progress now rejects a different job ID on either its first response or
+  subsequent poll. Both regressions first returned incorrect success; the
+  integrated CLI/process group now passes 99 cases (7.32 seconds).
+- Installed profile cancellation now also covers an issued Run/Switch child:
+  the worker's response is delayed after real child commit, the CLI cancels and
+  reconnects while effects remain pending, and a reconstructed owner reconciles
+  the late response to the same cancelled child without duplicate dispatch.
+  Resource claims remain held while reconciliation is pending. Both installed
+  profile cases passed on PostgreSQL (9.59 seconds). Child creation and service
+  reconciliation are real; the executor is deterministic, not a Spark run.
+- Installed recipe-update batch recovery passed against the integrated wheel,
+  TLS and PostgreSQL (one case, 8.59 seconds). Killing the submitting CLI after
+  acceptance and the worker after child commit preserves the original complete
+  cache scope and adopts each child once. Recovery reconstructs the actual
+  durable service; it is not a deployed Controller restart or Spark run.
+- Explicit profile/application observation now verifies membership and pins the
+  application identity across every poll. The agent reproduced both previous
+  incorrect successes, then passed 67 CLI and 30 process cases; parent combined
+  CLI/process checks passed 97 cases in 7.12 seconds.
+- Profile cancellation is now visible in Activity with its exact request key,
+  actor and effect reconciliation. Display and SQL filtering share the same
+  pending-state predicate. The integrated API/profile group passed 47 cases and
+  CLI-render/OpenAPI group passed 34; three PostgreSQL recipe/profile cases passed
+  in 8.92 seconds. A separate installed CLI/TLS/PostgreSQL journey lost an accepted
+  cancellation response, recovered its receipt and reconnected through Activity
+  until settlement (one case, 7.53 seconds). These cases cancel before dispatch;
+  they do not establish physical Spark cancellation.
+- Non-destructive artifact reference gates are integrated across reference
+  producers. A stale ORM-session read regression is covered by the agent's
+  PostgreSQL tests. Parent combined qualification is running. The existing
+  destructive remover does not yet participate, so W09e/W17 remain open and no
+  safe removal or garbage-collection completion is claimed.
+  The shared Run/Switch image preparer also authorizes its receipt after
+  storage commit and currently has no exact operation-owned reference before
+  that commit for a previously unknown output. This producer handoff must join
+  the same lifetime protocol before W09e can close; a passing availability
+  cancellation check alone will not close it.
+- Combined Controller fast tier at snapshot `802bab02`: 2,387 passed, three
+  skipped and one outdated scheduler-double failure (105.67 seconds). The double
+  now implements the required cancellation reconciliation seam; its whole module
+  passes ten cases with two lane skips. The standalone root/CLI fast tier passed
+  983 cases, 11 skips and 45 subtests (27.01 seconds), including socket-dependent
+  checks with local networking available. These precede pending memory/lifetime/
+  Activity integrations and are not the final combined gate.
+- Installed first connection and profile endpoint publication/withdrawal now
+  pass together against the current packaged schema (two cases, 9.62 seconds).
+  Withdrawal is validated through the authoritative typed response, which
+  permits omission of an unused optional endpoint; no production change was
+  needed for that fixture correction.
+- Distinct-build replacement exposed two selection defects. Fresh Run/Switch
+  review preferred the old installed build over the newer completed receipt;
+  after acceptance, changing build recency could make profile dispatch incorrectly
+  become a no-op. Fresh selection now chooses the current completed receipt,
+  while accepted dispatch and recovery compare the exact reviewed image. Both
+  running-replacement cases passed (16.79 seconds); the subsequent accepted-pin
+  regression passed (11.12 seconds). The affected profile/RunSwitch fast group
+  passed 124 cases, and profile/recovery checks after the dispatch fix passed
+  65 cases. Ten process-recovery cases also passed during this increment; final
+  combined validation remains pending.
+- Installed artifact-job acceptance is integrated: a dropped committed submit
+  response recovers the same job/request; corrupt output is not published locally,
+  and verified retry succeeds. The PostgreSQL/TLS/wheel case passed (9.68 seconds).
+  The result producer is simulated through the service boundary; this is not
+  agent or Spark execution evidence. Shared TLS changes also passed four existing
+  enrollment/load cases.
+- Recipe/model cancellation now shares W11's durable owner path. The parent
+  waits while its child writer holds the artifact lock, a new request cannot
+  attach to that fenced child, and process death/restart settles the original
+  intent without deleting partial bytes. The combined real PostgreSQL seam and
+  shared-build consumer group passed sixteen cases (20.46 seconds). The three
+  older fixtures now provide canonical durable child records; their full module
+  passed 36 cases with one lane case deselected. Type narrowing is repaired and
+  the whole candidate type gate again has only the existing reviewed exception.
+- Exact profile-cancellation receipt lookup is integrated and generated into
+  the complete API/clients. Current role and original actor authorize recovery;
+  lost responses retain the application and cancellation key. Three service/API
+  cases and 86 CLI/cache-submission cases passed. Activity projection and installed recovery now pass the subsequent checkpoint below.
+- Independently installed enrollment passed two real TLS/PostgreSQL cases
+  (9.31 seconds), including a committed grant whose response is lost. The grant
+  stays private, issuance occurs once, and a new process observes/revokes the
+  original identity without printing the secret. Certificate issuance and
+  physical Spark enrollment are outside these checks.
+- Installed CLI load/authoring/consent: six PostgreSQL/TLS cases passed in
+  16.58 seconds. Preserving edits and concurrent-write refusal, redirected input,
+  EOF and Ctrl-C are exercised through the independently installed executable.
+- Closing stdout after an accepted load and dropping its response exits 141;
+  a new process reconnects with the original key to the single application.
+  The PostgreSQL case passed in 7.14 seconds.
+- A late parked-application race reproduced cancellation being overtaken by
+  ordinary parked observation. Pending cancellation now stays with its dedicated
+  observer; twenty related fast cases passed with two lane cases deselected.
+  These fairness tests do not claim PostgreSQL concurrency qualification.
+- A running-image replacement review binds the current receipt, stops the exact
+  old run, and a separate worker process installs and publishes the replacement
+  while retaining both cached archives. The PostgreSQL/storage case passed in
+  13.83 seconds. Spark effects and physical inventory are deterministic fixtures;
+  distinct build-record and concurrent lifetime cases remain open.
+- All ten existing build-process recovery cases passed after the shared harness
+  changes (82.50 seconds). Python types still report one reviewed exception and
+  no unlisted errors. Full final combined gates remain pending.
+
+The candidate now includes W10, W11, W13, W14, W15, W16 and the fleet-maintenance
+part of W17, with W12 partially integrated. Measured memory, artifact lifetime, cancellation fairness,
+remaining lock-order work and installed end-to-end workflows remain active.
+No package closure, deployment or hardware acceptance is implied.
+
+- Installation admission now maps contention on all its dependency locks to
+  the existing retryable `InstallAdmissionBusy` boundary. Held mapping/node/build
+  tests first failed with raw SQL errors, then all eight PostgreSQL disk/claim
+  tests passed. Multi-node lock sets are ordered; the full writer audit remains.
+- Run/Switch waits for physical inventory collected after the exact stopped
+  run, retaining the admitted agent-clock uncertainty. The PostgreSQL regression
+  first queued a replacement using old inventory; it now survives service
+  restart, refuses the exact skew boundary, resumes on fresh evidence, and
+  retains the original child identity. Build adoption precedes this check.
+  The one- and two-node PostgreSQL cases now both pass (5.44 seconds); updating
+  only one node keeps a two-node replacement waiting. Broader preparation/process
+  cases and measured-use accounting remain.
+- W14 integration retained newer upstream launch-budget/retirement logic.
+  Added failing cases for another target's newer intent and node revocation;
+  both now remove/refuse resume. Combined Activity/API/agent tests: 148 passed.
+- W10/W14 combined CLI group: 86 passed. W15 route/API group: 39 passed,
+  5 skipped. W13 profile/API group: 56 passed, 3 lane cases deselected;
+  the isolated W13 real PostgreSQL late-start race also passed.
+- Python type gate now passes with exactly one existing reviewed exception and
+  no new errors. Pinned Ruff and the coordination scanner pass. Combined broad
+  Controller run reported 2,378 passed, 3 skipped and two integration regressions.
+  Both were repaired, and their two modules then passed all 66 tests; a final
+  combined rerun subsequently passed 2,377 tests with three skips; its three
+  packaging subprocess failures all passed when rerun with the required writable
+  task-specific cache (3 passed in 3.61 seconds). The standalone root run passed
+  959 tests with 11 skips
+  and 45 subtests; its 14 socket-restricted cases subsequently all passed with
+  local networking enabled. The TypeScript production build passed.
+- Automatic review rejected the separate run-admission production lock-order
+  edit as insufficiently authorized. That agent is producing a test-only
+  regression and read-only dependency audit; the rejected edit was not retried.
+
+W12 integration retained the newer model cancellation settlement boundary and
+Activity projections. The independent patch passed 83 PostgreSQL-backed tests
+and 46 CLI cases; the candidate's combined CLI file now passes 59 cases. Current
+recipe/API/batch checks passed 39 cases with five lane skips. Generated clients
+were refreshed. The W11/W12 transactional model-child seam remains open, and
+Python types now pass with the one existing reviewed exception and no new
+errors; these are not final combined gates. A failure-first PostgreSQL race also exposed
+build cancellation losing the parent identity before its child link was saved.
+The corrected lookup passes all 15 shared-consumer tests, including both linked
+and unlinked children (16.87 seconds).
+
+Further integration evidence: W13's bounded cancellation observer retains the
+newer parked-observation and cache-recovery deferral paths; 19 related fast tests
+pass (two lane cases deselected). The independently built CLI's real TLS/API/
+PostgreSQL review, refusal and lost-answer scenarios plus profile cancellation
+pass together: five tests, 10.50 seconds. A refused interactive load no longer
+prints reconnect guidance before a submission exists. W09f review now exposes
+archive SHA, size, architecture, runtime interface and build identity alongside
+the image digest; a stale interactive review displays the changed archive and
+submits nothing. The combined process/review/render group passes all 60 tests.
+
+Cancellation recovery follow-up: a failure-first CLI case proved recipe
+cancellation's uncertain-response guidance used the cancellation key to look up
+the original preparation request. Guidance now retains the exact operation ID,
+cancellation key and reason. The 26 cache-submission/profile-cancel checks pass
+(one lane deselected), including another administrator's refused key replay and
+the original actor's refused replay after revocation. Python types passed after
+the fairness and installed-harness integration; the final full gate remains.
+
+W18 documentation/packaging checkpoint: the refreshed runbook includes explicit
+model/recipe/profile cancellation, Activity/resume, endpoint discovery, and the
+sequential upgrade boundary. All 75 shell examples parse with the independently
+installed wheel (UUID placeholders replaced, no mutations executed). The wheel
+passes 27 offline entry-point checks across 60/80/120 columns and has no
+Controller/Pydantic dependency. Bash/Zsh completion scripts pass shell syntax.
+An actual closed pipe reproduced help exiting 120 during interpreter shutdown;
+help now flushes inside the CLI's pipe boundary. Both top-level and subcommand
+help in the rebuilt wheel exit 141 without stderr; all 30 process tests pass.
+Connected and final combined qualification remain open.
 
 ## Current surface and owners
 
@@ -59,15 +1643,25 @@ response structures are validated from the generated current OpenAPI.
 | `fleet rename` | `POST /api/fleet/{selector}/rename` | Exact enrolled node; changes friendly name |
 | `fleet enroll`, `re-enroll` | `POST /api/fleet/enroll`, `/api/fleet/{selector}/re-enroll` | Required private output; caller UUID4 is durable grant identity; re-enrollment resolves and confirms the exact node |
 | `fleet enrollment status`, `revoke` | `GET /api/fleet/enrollments/{id}`, `POST .../{id}/revoke` | Administrator and original issuer only; status contains no secret; revoke refuses a consumed grant |
-| `fleet remove` | `POST /api/fleet/{selector}/remove` | Node revocation/removal; final consent treatment W17 |
-| `fleet upgrade` | `POST /api/fleet/upgrade`; AgentUpgradeService | Signed upgrade; receipt's current `operation_id` identifies a job; W17 will complete following and remove all-at-once |
+| `fleet remove` | `POST /api/fleet/{selector}/remove` | Node revocation/removal; exact resolved identity and explicit scripted/interactive consent; receipt identity checked |
+| `fleet upgrade` | `POST /api/fleet/upgrade`; AgentUpgradeService | One-at-a-time signed upgrade; stable UUID request replay reconnects to the original job and follows its exact ID |
 | `fleet progress JOB_ID` | `GET /api/jobs/{job_id}` | Exact job snapshot; `--follow` awaits its outcome |
-| `fleet loginfo` | `GET /api/fleet/{selector}/loginfo` | Bounded collected diagnostic read; no SSH |
+| `fleet loginfo` | Resolve friendly selector once, then `GET /api/fleet/{node_id}/loginfo`; fleet log owner | Exact node checked on every response; bounded follow/reconnect by stable ID; retained snapshots return immediately; no SSH |
+| `fleet activity` | `GET /api/operations`; durable operation projection | Authenticated read; owner-derived state/actions and complete identities; keyset cursor retains request/state/target filters |
+| `fleet resume JOB_ID` | Exact `GET /api/jobs/{id}`, then `POST /api/jobs/{id}/resume`; owning recovery service | Operator/administrator; advertised action and current authority rechecked; explicit consent; returned ID must match; follow separately with `fleet progress` |
 | `model`, `recipe` | `GET /api/model`, `/api/recipe` | Controller cache/operation views; bounded watch |
 | `model library`, `recipe library` | Singular noun `/library`; LibraryProjection | Page/cursor and task facets; public catalog differs from cached availability |
 | `model detail`, `recipe detail` | Singular noun `/{selector}` | Exact selector/detail; technical option and bounded watch |
 | `model download`, `recipe download` | Singular noun `/{selector}/download` | Schema-2 request key; follows noun operation or detaches |
 | `recipe update SELECTOR` / `--all` | `POST /api/recipe/update`, recipe request/operation reads | Durable frozen scope; follows by default; original-key recovery and explicit empty success |
+| `model cancel ID`, `recipe cancel ID` | `POST /api/{noun}/operations/{id}/cancel`, exact operation/cancellation receipt lookup; cache owner | Operator/administrator plus owner rules; consent and original cancellation key/reason; accepted cancellation may retain pending effects and usable assets |
+| `recipe job list --run` | `GET /api/recipe/runs/{run_id}/artifact-jobs`; ArtifactJobService | Authenticated read; every returned job must belong to the requested run |
+| `recipe job create` | Run-scoped artifact-job POST plus exact request lookup; ArtifactJobService | Operator/administrator; durable create key and exact declared inputs; reserves/uploads/finalizes a draft, never submits execution |
+| `recipe job upload` | Job GET, input PUT, `/finalize` POST; managed input owner | Operator/administrator; exact draft/binding; reuse completed verified files and upload missing files |
+| `recipe job submit` | Job `/submit` POST, job GET for uncertain receipt | Operator/administrator; original durable submit key and operation must match; changed key refused |
+| `recipe job detail` | `GET /api/artifact-jobs/{id}` | Authenticated exact-job read; optional bounded follow |
+| `recipe job cancel` | Job `/cancel` POST and exact receipt read | Operator/administrator; explicit consent/key/reason; cancellation remains distinct from output cleanup |
+| `recipe job download` | Job `/result` metadata and `/results/{name}/{sha256}` bytes | Authenticated read plus local file writes; bounded manifest/path/digest validation before publishing result files |
 | `model remove`, `recipe remove` | Singular noun `/{selector}/remove` | Explicit cache eviction; recipe dependency choice; not cancel-only |
 | `model progress ID`, `recipe progress ID` | Singular noun `/operations/{operation_id}` | Read succeeds independently of remote state; follow awaits terminal result |
 | `model progress --request-key`, `recipe progress --request-key` | Singular noun `/requests/{request_key}`, then the exact operation route | Original issuer plus current read access; key resolves once; no authority or ID visibility change |
@@ -77,15 +1671,29 @@ response structures are validated from the generated current OpenAPI.
 | `profile load --dry-run` | `POST /api/profile/{number}/preview` | Read-only review; blocked preview exits 2 |
 | `profile load` | `POST /api/profile/{number}/load` | Required reviewed digest and request key; current authority and original-request replay; remaining workload/resource/storage coordination in W09 |
 | `profile progress` | Numbered latest/request lookup, then `/api/profile/applications/{id}` | Resolves latest once; follows exact identity; direct application checks profile membership |
+| `profile cancel APPLICATION_ID` | `POST /api/profile/applications/{id}/cancel` and `/cancellations/{key}`; FleetProfileService | Explicit profile membership, operator/administrator and original intent; exact cancellation receipt; pending effects remain visible |
+| `profile endpoint [ALIAS]` | `GET /api/profile/{number}/endpoints`; profile endpoint projection over published routes | Authenticated current membership and publication; alias narrows scope; exact run/generation/expiry retained, no cache inference |
 | `--check-connection` | Local token/origin checks, then `GET /api/fleet` | Read only; no configuration or credential issuance |
 | No command, help/version, `completion` | Local parser/build metadata | No credentials, remote lookup, or update check |
 | `update`, `update --apply` | Signed installer publication; CLI updater | Checks or installs the CLI wheel, independently of Controller/fleet upgrade |
 
-The web's profile save/load, library/cache, fleet, activity/resume, and
-artifact-job methods were checked in `control/web/src/api/client.ts`. Activity,
-artifact jobs and endpoint discovery remain assigned to their packages above.
-Browser authentication/token issuance remains the
-explicit bootstrap dependency; it is not silently labelled CLI parity.
+The live parser owns flag names and defaults; `vonkctl <command> --help` and
+parser-generated completion expose them offline. The installed runbook check
+verifies the documented examples against that parser without dispatching work.
+The table maps behavior and authority, rather than maintaining another parser.
+
+Web methods in `control/web/src/api/client.ts` map to the CLI as follows:
+
+| Web operator task | CLI mapping / explicit boundary |
+| --- | --- |
+| Fleet state, profile list/detail/save/preview/load/progress | Fleet and Profile commands above; browser session/CSRF differs from bearer authentication |
+| Model/recipe library, status, detail, prepare, remove, update and progress | Matching singular Model/Recipe commands; same owning contracts |
+| Activity and resumable job detail | `fleet activity`, `fleet progress`, `fleet resume`; CLI has no separate raw audit-export or generic operation-detail command |
+| Artifact draft, inputs, submit, cancel and results | Seven `recipe job` leaves above; existing web callers now pass stable request-key headers and reconcile receipts. Exact receipt identity, explicit denial and abort-recovery checks pass, including the full 163-test web suite. |
+| Published profile endpoints | `profile endpoint`; current web API wrapper has no equivalent profile-scoped method, so no completed web parity is claimed |
+| Browser sign-in/out and CLI token download | Explicit bootstrap dependency, not CLI session/password administration |
+
+The CLI implementation does not claim the later web redesign is delivered.
 
 `AgentNodeProfile` and `FleetProjection._node_profiles` own the node identity
 and lifecycle projection. They do not represent a whole-fleet workload profile.

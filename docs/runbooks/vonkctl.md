@@ -89,10 +89,12 @@ vonkctl fleet re-enroll Atlas --output atlas-replacement.json --yes
 vonkctl fleet enrollment status GRANT_UUID
 vonkctl fleet enrollment revoke GRANT_UUID --yes
 vonkctl fleet remove Atlas --yes
-vonkctl fleet upgrade Atlas
-vonkctl fleet upgrade --all
+vonkctl fleet upgrade Atlas --yes
+vonkctl fleet upgrade --all --yes
 vonkctl fleet loginfo Atlas --since 15m --lines 100 --follow
 vonkctl fleet progress JOB_ID --follow
+vonkctl fleet activity --state waiting-for-operator --limit 20
+vonkctl fleet resume JOB_ID --yes
 ```
 
 Friendly Spark names and exact stable selectors are accepted. Mutations are
@@ -101,11 +103,22 @@ Profile loads follow to a terminal response by default. Use `fleet progress`
 to inspect or follow the job identity returned by a fleet upgrade.
 Use `--detach` on an asynchronous Model or Recipe
 mutation to return the accepted operation immediately. `--yes` is required for
-removals; there is no obsolete `fleet profile` alias. `detail` retains
-stale/unsupported measurements as explicit states, and `--watch` reports
+Model and Recipe cache removals. `fleet remove` resolves and displays the
+stable Spark ID before interactive confirmation; JSON, redirected input, or
+`--no-input` requires `--yes`. There is no obsolete `fleet profile` alias.
+`detail` retains stale/unsupported measurements as explicit states, and
+`--watch` reports
 bounded observations until a terminal state or timeout. `loginfo` reads
 bounded sanitized logs through the authenticated Controller path and never
-falls back to SSH.
+falls back to SSH. It resolves a friendly name once, then follows and reconnects
+using that Spark's stable ID. A response identifying another Spark is refused.
+Fleet upgrades require consent after the selected scope is identified. Interactive
+use asks once; scripts, JSON output, redirected input, and `--no-input` must pass
+`--yes`. A friendly single-Spark selector is resolved to its stable node ID
+before submission. `--all` keeps the Controller's all-current-Sparks request
+intent, and the accepted receipt binds the exact target list and plan.
+When the Controller returns retained logs with no live follow support, the CLI
+returns that snapshot immediately instead of waiting for a local timeout.
 
 `fleet node-profile` resolves an exact enrolled node and shows its identity,
 hostname, lifecycle, and labels. `--json` retains the full canonical Fleet
@@ -154,6 +167,26 @@ use the enrolled Spark's management flow for those effects. Existing paths,
 symlinks, denied authority, expired grants, and consumed grants remain explicit
 failures or terminal states, never reasons to bypass enrollment checks.
 
+Activity lists durable operations with their complete identities and current
+owner-provided actions. Keep the same filters when continuing with `--cursor`;
+`--target` takes an exact Spark ID and `--request-id` takes the original request
+UUID. An unreadable historical row is labelled unavailable instead of hiding
+unrelated operations. Inspect its exact operation for the detailed failure.
+Pending profile cancellation appears as `cancelling`, with its cancellation
+request key, actor, and completed, pending, or unissued effects. Filtering Activity
+by `--state cancelling` uses that same owner state.
+
+`fleet resume JOB_ID --yes` first checks the owner's advertised resume action.
+The Controller rechecks current authorization and the intent of every target
+before accepting it. Resume does not grant permission to replay superseded or
+revoked work. Already authorized retries retain their original retry budget.
+
+Fleet upgrades use `--strategy one-at-a-time`; this is the only accepted
+strategy. The receipt identifies the exact job to follow. A failure stops
+consequential rollout to later Sparks. This command upgrades enrolled Sparks;
+Controller deployment and the signed local CLI `update` command have separate
+owners.
+
 ## Model
 
 ```bash
@@ -165,6 +198,7 @@ vonkctl model download qwen-3.8-nvfp4
 vonkctl model download qwen-3.8-nvfp4 --detach
 vonkctl model progress OPERATION_ID --follow
 vonkctl model progress --request-key REQUEST_UUID --follow
+vonkctl model cancel OPERATION_UUID --yes --request-key CANCEL_UUID --reason "No longer needed"
 vonkctl model download qwen-3.8-nvfp4   # repeat to refresh a completed copy
 vonkctl model remove qwen-3.8-nvfp4 --yes
 ```
@@ -172,10 +206,20 @@ vonkctl model remove qwen-3.8-nvfp4 --yes
 The overview combines downloading, cached, and running variants. Reusing the
 same download request key returns its original operation. A new request has
 its own identity; the cache owner reuses verified assets and compatible partial
-work and refreshes completed work when requested. Removing a model cancels
-Controller preparation and
-removes its Controller cache while preserving Profile assignments and
-Spark-local running copies.
+work and refreshes completed work when requested.
+
+Cancel an exact download with `model cancel`; use `--detach` to return after
+acceptance. The cancellation has its own request UUID and reason. Retain both
+for recovery after response or process loss. The same cancellation request is
+idempotent; a different request cannot replace it. Cancellation may remain
+`cancelling` while an issued writer settles. Verified assets and compatible
+partial files are retained; cancellation does not evict them. Reconnect with
+`model progress OPERATION_ID --follow` to observe settlement.
+
+Removal requests eviction from the Controller cache. It does not authorize
+stopping a Spark workload or erasing a saved profile. Reviewed removal and
+concurrent-reference protection are still being completed in W09/W17; do not
+use removal as a substitute for the explicit cancellation command.
 
 ## Recipe
 
@@ -191,6 +235,7 @@ vonkctl recipe download qwen-code       # repeat to refresh a completed copy
 vonkctl recipe download qwen-code --detach
 vonkctl recipe progress OPERATION_ID --follow
 vonkctl recipe progress --request-key REQUEST_UUID --follow
+vonkctl recipe cancel OPERATION_UUID --yes --request-key CANCEL_UUID --reason "No longer needed"
 vonkctl recipe update publisher/recipe
 vonkctl recipe update --all
 vonkctl recipe remove qwen-code --keep-model --yes
@@ -284,8 +329,14 @@ Worker restart reconciles saved child request keys before creating missing
 work. Newly revoked authority prevents new child admission; already-issued
 work remains observable. Each failure stays attached to its recipe while
 other children continue. Activity shows the parent; `recipe progress` shows
-its complete child detail. Cancellation and broader storage recovery
-acceptance remain tracked separately in the implementation plan.
+its complete child detail. `recipe cancel OPERATION_ID --yes` targets this exact
+preparation or update parent; retain its cancellation request key and reason.
+Shared children needed by another accepted request must survive cancellation.
+The command follows by default, or returns the accepted receipt with `--detach`.
+When preparation owns a model download, cancellation waits for that exact
+child and any active writer to settle. Restart retains the cancellation intent
+and compatible partial work. An accepted cancellation does not prove every
+issued effect has settled.
 
 A model download waiting for another cache writer reports
 `model_cache.object_busy`, the exact object, and its next retry time. Image
@@ -297,12 +348,123 @@ releases its lock. Compatible partial model files survive worker termination
 and are resumed from their retained length before verification and publication.
 
 Recipe library defaults to exact model variants that are cached, downloading,
-or running locally. `--all-models` broadens that view. Recipe removal keeps
-the model cache by default; choose `--keep-model` explicitly to preserve it or
+or running locally. `--all-models` broadens that view. Recipe removal requires an explicit model-cache choice: use `--keep-model` to preserve it or
 `--with-model` to request dependent model removal. A removal without an
 explicit choice fails closed rather than prompting or guessing. Cached updates
 are automatically used by the next Profile load; there is no Profile update
 command.
+
+### Artifact jobs
+
+Artifact jobs collect files for an existing recipe run and make its verified
+outputs available for download. Use the run UUID to list jobs and the job UUID
+to inspect, resume, submit, cancel, or retrieve one job:
+
+```bash
+vonkctl recipe job list --run RUN_UUID
+vonkctl recipe job detail JOB_UUID
+vonkctl recipe job detail JOB_UUID --follow
+```
+
+`recipe job create` takes a bounded JSON binding file. Its top-level keys are
+exactly `create` and `input_paths`. The `create` object contains the canonical
+artifact-job request fields: `interface`, optional `parameters`, optional
+`inputs`, `output_limits`, and `timeout_seconds`. Each input declaration has
+exactly `slot`, `name`, and `media_type`. `input_paths` maps every declared
+input's safe file name to one local path. The local JSON document is limited to
+1 MiB and can declare at most 32 inputs; each local path is limited to 4,096
+characters. The Controller's advertised per-file, combined-byte, timeout,
+storage, and output limits may be lower. Use values allowed by this run's
+compiled recipe contract and the current Controller capabilities.
+
+For example, save a binding beside an `inputs/` directory as
+`artifact-job.json`:
+
+```json
+{
+  "create": {
+    "interface": "image-job",
+    "parameters": {},
+    "inputs": [
+      {"slot": "input", "name": "source.png", "media_type": "image/png"}
+    ],
+    "output_limits": {
+      "max_files": 1,
+      "max_file_bytes": 1048576,
+      "max_total_bytes": 1048576,
+      "allowed_media_types": ["image/png"]
+    },
+    "timeout_seconds": 300
+  },
+  "input_paths": {
+    "source.png": "inputs/source.png"
+  }
+}
+```
+
+Replace the sample interface, slot, parameters, and limits with values accepted
+by the run's recipe contract. Relative input paths are resolved from the
+binding file's directory; absolute paths are also accepted. Input files must be
+readable regular non-symlink files. The CLI computes each file's size and
+SHA-256 before creating the draft and rechecks the bytes before upload, so keep
+the binding and its input files unchanged when retrying.
+
+```bash
+vonkctl recipe job create --run RUN_UUID --file artifact-job.json --request-key REQUEST_UUID
+vonkctl recipe job upload JOB_UUID --file artifact-job.json
+vonkctl recipe job submit JOB_UUID --request-key SUBMIT_UUID
+```
+
+Create reserves a draft using the request key, uploads declared files, and
+finalizes the inputs. It does not submit the job. Submit is a separate,
+explicit command; only use it after inspecting the ready draft. For scripted
+work or recovery after process loss, choose and save a caller UUID with
+`--request-key` before creating or submitting. Human create output prints the
+generated key before sending the create request, but JSON output is emitted
+only when the command returns.
+
+If create's response is uncertain, retry the identical create command with the
+same run, binding, input bytes, and request key. The CLI looks up that key and
+reconciles the original intent before replaying it. Do not start a replacement
+job with a new key while the original create is uncertain. If input delivery
+fails after draft creation, retain the draft UUID and binding file, then run
+`recipe job upload` for that UUID. It verifies the binding against the draft,
+skips complete inputs already accepted by the Controller, uploads missing
+files, and finalizes when they are all present. Recovery is at complete-file
+granularity; the CLI does not promise byte-offset or range resume for an
+interrupted file transfer.
+
+Submit and cancel also accept a caller `--request-key` for stable retries; keep
+the same job, key, and intent when retrying. The CLI checks the same job after
+an uncertain submit response and verifies both its operation identity and
+original submit request key. Reusing that key reconnects to the original
+submission; a different key cannot replace it. A job list scoped with `--run`
+also refuses results belonging to another run. Cancellation requires `--yes`; `--reason` is optional and defaults to
+`Operator requested cancellation with vonkctl`:
+
+```bash
+vonkctl recipe job cancel JOB_UUID --yes --reason "No longer needed" --request-key CANCEL_UUID
+vonkctl recipe job detail JOB_UUID --follow
+```
+
+Cancellation can remain `cancelling` while the worker or agent settles already
+issued work. A cancellation receipt is not proof that remote execution has
+already stopped; follow the same job until it reaches a settled state. A
+bounded follow timeout or Ctrl-C ends local observation only.
+
+Download only works for a succeeded job. The destination must already be an
+existing, non-symlink directory. The CLI checks result names and declared
+limits, then verifies each file's size and SHA-256 and publishes it atomically.
+It reuses an existing file only when that file matches the result manifest;
+symlinks, mismatched files, and overwrites are refused. If a collection fails
+partway through, already verified files remain and are reported; rerun the
+download after resolving the failure to reuse matching files and fetch the
+rest.
+
+```bash
+mkdir -p artifact-results
+vonkctl recipe job download JOB_UUID --output artifact-results
+```
 
 ## Profile
 
@@ -328,6 +490,9 @@ vonkctl --profile 2 profile load --detach
 vonkctl --profile 2 profile progress --follow
 vonkctl --profile 2 profile progress --application APPLICATION_UUID --follow
 vonkctl --profile 2 profile progress --request-key REQUEST_UUID --follow
+vonkctl --profile 2 profile cancel APPLICATION_UUID --yes --request-key CANCEL_UUID
+vonkctl --profile 2 profile endpoint
+vonkctl --profile 2 profile endpoint coding
 ```
 
 In an interactive terminal, load shows the current review and asks for one
@@ -341,9 +506,13 @@ vonkctl --profile 2 --json profile load --dry-run > reviewed-plan.json
 vonkctl --profile 2 --json profile load --expected-plan "$REVIEWED_DIGEST" --yes --detach
 ```
 
-A blocked dry-run exits 2 and submits nothing. A stale review is refused;
-the CLI does not refresh and approve a replacement automatically. Do not
-combine `--dry-run` with `--expected-plan`, `--yes`, or `--detach`.
+A blocked dry-run exits 2 and submits nothing. When the Controller refuses a
+load because its reviewed plan changed, the CLI displays one fresh review on
+stderr and stops with the original refusal. Review the new effects before
+starting another load with its current digest; the CLI never resubmits that
+replacement automatically. If the fresh review cannot be read, the original
+refusal remains. Do not combine `--dry-run` with `--expected-plan`, `--yes`, or
+`--detach`.
 
 Profile authoring stores the canonical recipe identity (`publisher/slug`), sorted
 Spark IDs, optional assignment name, optional exact model variant, and desired
@@ -375,7 +544,12 @@ also distinguishes the recipe's memory demand kind from the Spark's physical
 memory pool. Host, accelerator and unified reservations compete on a shared
 pool; separate host/GPU pools retain independent limits. A changed physical
 pool requires a new review. Available memory refers to the current limiting
-pool; after-stop headroom still checks every required pool.
+pool. A conditional memory fit names the exact workloads that must stop before
+the Controller checks fresh capacity in every required pool. Reserved peak
+memory is not a measurement of what stopping a workload will free. Accepting
+this review authorizes those stops; preparation or start can still wait or be
+refused if the subsequent capacity check does not pass. Unknown capacity and
+demand beyond physical capacity remain blockers before any stop.
 
 An accepted application's intended configuration retains `reviewed_plan_digest`
 and its original `reviewed_application_id`, separately from the execution-attempt
@@ -403,6 +577,9 @@ considering a bounded identical replay. A changed profile does not redirect that
 lookup to a newer application. An unavailable or denied lookup does not authorize
 a new request. Keep the key from the accepted or uncertain-submission receipt and
 reconnect with `vonkctl --profile 2 profile progress --request-key REQUEST_UUID --follow`.
+When combining `--profile` with `profile progress --application`, the application
+must belong to that profile. An application ID alone supports a direct reconnect;
+following remains pinned to that exact ID even if a newer application starts.
 
 Edits read the complete saved definition and preserve fields that were not
 explicitly changed, including metadata, desired state, and model variant.
@@ -429,6 +606,21 @@ for piped JSON, within the 1 MiB control-document budget. It validates the
 definition and requires an explicit `--expected-revision`: use `0` to create
 an unused profile number, or the current saved revision to replace it.
 Exported files carry no revision precondition; importing never loads a profile.
+
+Cancel a profile application by its exact application ID and explicit Profile
+number. Cancellation retains resource claims while already issued effects are
+reconciled; it cannot pretend a late start never happened. Use `--detach` to
+return the accepted receipt and reconnect with the same application ID. Pending
+cancellation appears in Activity with its effect reconciliation. A lost
+cancellation response is recovered using the original application and
+cancellation request key; retrying does not create another cancellation intent.
+This receipt does not mean issued effects have already stopped.
+
+`profile endpoint` shows only routes belonging to the selected Profile's loaded
+assignments, with their exact run identity and publication state. An optional
+alias narrows the result. An absent, stale, revoked, or unpublished route is not
+replaced with a guessed address. Endpoint discovery does not issue credentials
+or prove physical model quality.
 
 ## Output and recovery
 

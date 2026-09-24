@@ -17,7 +17,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::generated::{
     ConfirmPackageActivationOperation, ExecuteContainerRuntimeRequestOperation,
-    InstallVonkDebOperation, RestartVonkUnitOperation, ScheduleRebootOperation,
+    HostHelperProcessLogs, InstallVonkDebOperation, RestartVonkUnitOperation,
+    ScheduleRebootOperation,
 };
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeRunObservationOutcome,
@@ -30,7 +31,14 @@ use crate::protocol::{ContainerRuntimeAction, HostOperation, RestartUnit, artifa
 const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
-const MAX_RUNTIME_REQUEST_BYTES: u64 = 64 * 1024;
+/// The byte ceiling on one canonical runtime-request document. Owned by the
+/// wire contract, not by this helper: the agent enforces the same ceiling
+/// before it writes the request file, so the helper's read cannot be stricter
+/// than the request the agent was willing to send. A private `64 * 1024`
+/// round number here once refused a legitimate many-mount command line with
+/// the opaque `helper.unsafe_path`, after a successful install and after the
+/// agent had admitted the same bytes.
+const MAX_RUNTIME_REQUEST_BYTES: u64 = vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES as u64;
 const MAX_RUNTIME_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 const MAX_COMPILED_MODEL_FILES: usize = 4096;
 const MAX_COMPILED_MODEL_PATH_CHARS: usize = 512;
@@ -67,8 +75,14 @@ pub enum OperationError {
     RuntimeImageIdentityInvalid,
     #[error("runtime image receipt could not be written")]
     RuntimeImageReceiptFailed,
-    #[error("runtime process exited: {diagnostic}")]
-    RuntimeProcessExited { diagnostic: String },
+    /// The exact inspected container had already exited.
+    #[error("runtime process exited")]
+    RuntimeProcessExited {
+        /// The container's own retained output, per stream. Absent when the
+        /// log could not be read; the reason is then reported instead.
+        logs: Option<Box<HostHelperProcessLogs>>,
+        capture_error: Option<&'static str>,
+    },
     #[error("exact runtime container is absent")]
     RuntimeRunMissing,
     #[error("native fabric is unavailable or ambiguous")]
@@ -169,6 +183,9 @@ impl ManagedRoots {
 pub struct CommandOutput {
     pub success: bool,
     pub stdout: Vec<u8>,
+    /// The retained standard error of the same command, kept apart so a
+    /// container failure can report both streams instead of one merged tail.
+    pub stderr: Vec<u8>,
     pub exit_code: Option<i32>,
 }
 
@@ -280,7 +297,8 @@ impl CommandRunner for ProcessCommandRunner {
             let result = crate::package_command::run(&mut command, timeout)?;
             return Ok(CommandOutput {
                 success: result.status.success() && !result.timed_out,
-                stdout: result.diagnostic,
+                stdout: result.diagnostic(),
+                stderr: Vec::new(),
                 exit_code: result.status.code(),
             });
         }
@@ -290,7 +308,8 @@ impl CommandRunner for ProcessCommandRunner {
             let result = crate::package_command::run_quiet(&mut command, timeout)?;
             return Ok(CommandOutput {
                 success: result.status.success() && !result.timed_out,
-                stdout: result.diagnostic,
+                stdout: result.stdout,
+                stderr: result.stderr,
                 exit_code: result.status.code(),
             });
         }
@@ -328,6 +347,7 @@ impl CommandRunner for ProcessCommandRunner {
         Ok(CommandOutput {
             success: status.success(),
             stdout,
+            stderr: Vec::new(),
             exit_code: status.code(),
         })
     }
@@ -1479,24 +1499,27 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let semantic_digest = hex_sha256(
             &canonical_json(&validated.arguments).map_err(|_| OperationError::InvalidOperation)?,
         );
-        if validated.detached {
-            let existing = self.run_docker(&[
-                "container".to_owned(),
-                "inspect".to_owned(),
-                "--format".to_owned(),
-                "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
-                format!("vonk-{}", validated.run_id),
-            ])?;
-            if existing.success {
-                let expected = format!("true\t{semantic_digest}\ttrue\t{}", validated.run_id);
-                if std::str::from_utf8(&existing.stdout).ok().map(str::trim)
+        let existing = self.run_docker(&[
+            "container".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
+            format!("vonk-{}", validated.run_id),
+        ])?;
+        if existing.success {
+            let expected = format!("true\t{semantic_digest}\ttrue\t{}", validated.run_id);
+            if !validated.detached
+                || std::str::from_utf8(&existing.stdout).ok().map(str::trim)
                     != Some(expected.as_str())
-                {
-                    return Err(OperationError::InvalidArtifact);
-                }
-                return Ok(None);
+            {
+                return Err(OperationError::InvalidArtifact);
             }
+            return Ok(None);
         }
+        if !self.prove_container_absent(&format!("vonk-{}", validated.run_id), &existing)? {
+            return Err(OperationError::CommandFailed);
+        }
+        self.reset_runtime_tmp_if_requested(&validated.run_id)?;
         self.prepare_runtime_access(&validated)?;
         // The signed wire shape carries the executable once after the image as
         // an explicit marker for validation. Docker already receives that
@@ -1602,6 +1625,92 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(())
     }
 
+    /// The agent cannot traverse private directories created by root or the
+    /// workload UID. Reset only this authorized run's disposable tmp tree,
+    /// after exact container absence, without following any path component or
+    /// descendant symlink. Outputs and the installation cache are untouched.
+    fn reset_runtime_tmp_if_requested(&self, run_id: &str) -> Result<(), OperationError> {
+        if uuid::Uuid::parse_str(run_id)
+            .ok()
+            .map(|value| value.to_string())
+            .as_deref()
+            != Some(run_id)
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        let flags = rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC;
+        let root: std::os::fd::OwnedFd = OpenOptions::new()
+            .read(true)
+            .custom_flags(flags.bits() as i32)
+            .open(&self.roots.agent_data)?
+            .into();
+        let metadata_root =
+            rustix::fs::openat(&root, "run-metadata", flags, rustix::fs::Mode::empty())
+                .map_err(errno_io)?;
+        let metadata = rustix::fs::openat(&metadata_root, run_id, flags, rustix::fs::Mode::empty())
+            .map_err(errno_io)?;
+        let marker = match rustix::fs::openat(
+            &metadata,
+            "tmp-reset-required",
+            // Inspect the descriptor before accepting its type. A malformed
+            // FIFO must not block the helper while open waits for a writer.
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::NONBLOCK
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        ) {
+            Ok(marker) => marker,
+            Err(rustix::io::Errno::NOENT) => return Ok(()),
+            Err(error) => return Err(errno_io(error).into()),
+        };
+        let marker_state = rustix::fs::fstat(&marker).map_err(errno_io)?;
+        if rustix::fs::FileType::from_raw_mode(marker_state.st_mode)
+            != rustix::fs::FileType::RegularFile
+            || marker_state.st_mode & 0o777 != 0o600
+            || marker_state.st_size != 0
+            || marker_state.st_nlink != 1
+            || self
+                .runtime_request_owner_uid
+                .is_some_and(|owner| marker_state.st_uid != owner)
+        {
+            return Err(OperationError::UnsafePath);
+        }
+        let device = rustix::fs::fstat(&root).map_err(errno_io)?.st_dev;
+        let mut directory = Some(root);
+        for component in ["runs", run_id, "outputs", "tmp"] {
+            let Some(parent) = directory.take() else {
+                break;
+            };
+            directory =
+                match rustix::fs::openat(&parent, component, flags, rustix::fs::Mode::empty()) {
+                    Ok(directory) => Some(directory),
+                    Err(rustix::io::Errno::NOENT) => None,
+                    Err(error) => return Err(errno_io(error).into()),
+                };
+            if let Some(directory) = &directory
+                && rustix::fs::fstat(directory).map_err(errno_io)?.st_dev != device
+            {
+                return Err(OperationError::UnsafePath);
+            }
+        }
+        if let Some(directory) = &directory {
+            remove_directory_contents(directory, device)?;
+            rustix::fs::fsync(directory).map_err(errno_io)?;
+        }
+        rustix::fs::unlinkat(
+            &metadata,
+            "tmp-reset-required",
+            rustix::fs::AtFlags::empty(),
+        )
+        .map_err(errno_io)?;
+        rustix::fs::fsync(&metadata).map_err(errno_io)?;
+        Ok(())
+    }
+
     fn runtime_run_inspect(
         &self,
         arguments: &[String],
@@ -1687,16 +1796,30 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 &[
                     "logs".into(),
                     "--tail".into(),
-                    "32".into(),
+                    crate::runtime_logs::CAPTURE_LINES.into(),
                     (*container_id).into(),
                 ],
-                Duration::from_secs(5),
+                Duration::from_secs(30),
             );
-            let diagnostic = match logs {
-                Ok(logs) if logs.success => String::from_utf8_lossy(&logs.stdout).into_owned(),
-                _ => "container log capture unavailable".into(),
-            };
-            return Err(OperationError::RuntimeProcessExited { diagnostic });
+            return Err(match logs {
+                Ok(logs) if logs.success => OperationError::RuntimeProcessExited {
+                    logs: Some(Box::new(crate::runtime_logs::retain_container(
+                        &logs.stdout,
+                        &logs.stderr,
+                    ))),
+                    capture_error: None,
+                },
+                // An unread log is reported as unread; it never becomes an
+                // empty tail that reads like a container with nothing to say.
+                Ok(_) => OperationError::RuntimeProcessExited {
+                    logs: None,
+                    capture_error: Some("the container log command failed"),
+                },
+                Err(_) => OperationError::RuntimeProcessExited {
+                    logs: None,
+                    capture_error: Some("the container log command did not run"),
+                },
+            });
         }
         Ok(false)
     }
@@ -3598,10 +3721,11 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        CommandOutput, CommandRunner, JobCancellationFence, MAX_COMPILED_MODEL_PATH_CHARS,
-        ManagedRoots, OperationError, OperationExecutor, RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
-        RuntimeImageReceipt, bounded_container_exit_code, finish_timed_out_job, hex_sha256,
-        loaded_image_source, parse_publication, parse_runtime_stop, validate_docker_run,
+        CommandOutput, CommandRunner, HostRuntimeAction, HostRuntimeRequest, JobCancellationFence,
+        MAX_COMPILED_MODEL_PATH_CHARS, ManagedRoots, OperationError, OperationExecutor,
+        RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION, RuntimeImageReceipt, bounded_container_exit_code,
+        finish_timed_out_job, hex_sha256, loaded_image_source, parse_publication,
+        parse_runtime_stop, validate_docker_run,
     };
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
@@ -3618,6 +3742,7 @@ mod tests {
             Ok(CommandOutput {
                 success: daemon_probe || missing_listing,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
                 exit_code: Some(if daemon_probe || missing_listing {
                     0
                 } else {
@@ -3637,6 +3762,7 @@ mod tests {
             Ok(CommandOutput {
                 success: daemon_probe,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
                 exit_code: Some(if daemon_probe { 0 } else { 1 }),
             })
         }
@@ -3654,6 +3780,7 @@ mod tests {
             Ok(CommandOutput {
                 success: true,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
                 exit_code: Some(0),
             })
         }
@@ -3682,6 +3809,7 @@ mod tests {
                 } else {
                     Vec::new()
                 },
+                stderr: Vec::new(),
                 exit_code: Some(if digest_lookup { 1 } else { 0 }),
             })
         }
@@ -3710,6 +3838,7 @@ mod tests {
                     success: false,
                     stdout: b"\n".to_vec(),
                     exit_code: Some(1),
+                    stderr: Vec::new(),
                 });
             }
             if inspect_compiled && self.wrong_image.load(SeqCst) {
@@ -3718,6 +3847,7 @@ mod tests {
                     stdout: format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "c".repeat(64))
                         .into_bytes(),
                     exit_code: Some(0),
+                    stderr: Vec::new(),
                 });
             }
             if inspect_compiled && self.malformed_image.load(SeqCst) {
@@ -3725,6 +3855,7 @@ mod tests {
                     success: true,
                     stdout: b"malformed\n".to_vec(),
                     exit_code: Some(0),
+                    stderr: Vec::new(),
                 });
             }
             if arguments.first().map(String::as_str) == Some("image")
@@ -3741,6 +3872,7 @@ mod tests {
                         format!("sha256:{}\n", "b".repeat(64)).into_bytes()
                     },
                     exit_code: Some(0),
+                    stderr: Vec::new(),
                 });
             }
             if arguments.first().map(String::as_str) == Some("load") {
@@ -3774,6 +3906,7 @@ mod tests {
             Ok(CommandOutput {
                 success: true,
                 stdout: Vec::new(),
+                stderr: Vec::new(),
                 exit_code: Some(0),
             })
         }
@@ -3824,6 +3957,7 @@ mod tests {
                     success: true,
                     stdout: Vec::new(),
                     exit_code: Some(0),
+                    stderr: Vec::new(),
                 });
             }
             RuntimeImportRunner.run(executable, arguments)
@@ -4012,6 +4146,7 @@ mod tests {
                 success: false,
                 stdout: Vec::new(),
                 exit_code: Some(37),
+                stderr: Vec::new(),
             }),
             37
         );
@@ -4021,6 +4156,7 @@ mod tests {
                     success: false,
                     stdout: Vec::new(),
                     exit_code,
+                    stderr: Vec::new(),
                 }),
                 1
             );
@@ -4664,6 +4800,7 @@ mod tests {
                     success: true,
                     stdout: b"enp1s0f1np1\n".to_vec(),
                     exit_code: Some(0),
+                    stderr: Vec::new(),
                 })
             }
         }
@@ -5510,6 +5647,66 @@ mod tests {
     }
 
     #[test]
+    fn runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer() {
+        use std::os::unix::fs::FileTypeExt;
+        use wait_timeout::ChildExt;
+
+        const CHILD_ROOT: &str = "VONK_TMP_RESET_FIFO_TEST_ROOT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            let roots = ManagedRoots::under(Path::new(&root));
+            let executor =
+                OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+            assert!(matches!(
+                executor.reset_runtime_tmp_if_requested(RUN_ID),
+                Err(OperationError::UnsafePath)
+            ));
+            return;
+        }
+
+        let (_temp, roots) = runtime_fixture();
+        let marker = roots
+            .agent_data
+            .join("run-metadata")
+            .join(RUN_ID)
+            .join("tmp-reset-required");
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            &marker,
+            rustix::fs::FileType::Fifo,
+            rustix::fs::Mode::from_raw_mode(0o600),
+            0,
+        )
+        .unwrap();
+        let temporary = roots
+            .agent_data
+            .join("runs")
+            .join(RUN_ID)
+            .join("outputs/tmp");
+        fs::create_dir(&temporary).unwrap();
+        fs::write(temporary.join("sentinel"), b"keep").unwrap();
+        // Run the real open/fstat boundary in another process so the wrong
+        // blocking open fails this test within a deadline rather than hanging
+        // the suite indefinitely on a FIFO with no writer.
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "operations::tests::runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer",
+            ])
+            .env(CHILD_ROOT, &roots.agent_data)
+            .spawn()
+            .unwrap();
+        let status = child.wait_timeout(Duration::from_secs(5)).unwrap();
+        if status.is_none() {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("runtime tmp cleanup blocked on a FIFO marker with no writer");
+        }
+        assert!(status.unwrap().success());
+        assert!(fs::symlink_metadata(marker).unwrap().file_type().is_fifo());
+        assert_eq!(fs::read(temporary.join("sentinel")).unwrap(), b"keep");
+    }
+
+    #[test]
     fn installation_cleanup_removes_only_private_runtime_cache_and_is_retryable() {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(&temp.path().join("agent-data"));
@@ -5580,6 +5777,55 @@ mod tests {
             Err(OperationError::Io(_))
         ));
         assert_eq!(fs::read(cache.join("sentinel")).unwrap(), b"outside");
+    }
+
+    #[test]
+    fn a_request_document_between_the_retired_private_cap_and_the_exchange_ceiling_is_read() {
+        // Wrong implementation: the helper read the request file under a
+        // private `MAX_RUNTIME_REQUEST_BYTES = 64 * 1024` round number, so a
+        // legitimate many-mount command line the plan admits -- and the agent
+        // admitted under the same byte budget -- was refused as
+        // `helper.unsafe_path` after a successful install, blaming the path
+        // rather than the bound.
+        let temp = tempfile::tempdir().unwrap();
+        let requests = temp.path().join("runtime-requests");
+        fs::create_dir_all(&requests).unwrap();
+        let request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::Start,
+            job_id: uuid::Uuid::new_v4(),
+            operation_id: uuid::Uuid::new_v4(),
+            attempt: 1,
+            fence: uuid::Uuid::new_v4(),
+            arguments: (0..3000)
+                .map(|index| format!("--mount=type=bind,src=/run/vonk/models/{index:05}"))
+                .collect(),
+            observation: None,
+            installation_id: None,
+        };
+        let body = vonk_agent_protocol::canonical_json(&request).unwrap();
+        assert!(
+            body.len() > 64 * 1024,
+            "this document must exceed the retired private cap, got {} bytes",
+            body.len()
+        );
+        assert!(body.len() <= vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES);
+        let digest = hex_sha256(&body);
+        let path = requests.join(format!("{digest}.json"));
+        fs::write(&path, &body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()).with_runtime_requests(&requests),
+            &[0; 32],
+            MissingContainerRunner,
+            None,
+        )
+        .unwrap();
+        let read = executor
+            .read_runtime_request(&digest)
+            .expect("a request inside the exchange ceiling must be read");
+        assert_eq!(read.arguments.len(), 3000);
     }
 
     #[test]
