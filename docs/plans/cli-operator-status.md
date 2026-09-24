@@ -24,7 +24,9 @@ is `0.1.1~dev.611+gf2be83c2f165`; it does not replace the publication source ide
 
 The independent human U1–U8 scorecard remains unperformed. W19 and the CLI
 handoff therefore remain open. The locally qualified Qwen CPU fixture and
-connected same-Profile journey are ready for that walkthrough. CI installer
+connected same-Profile journey have local execution evidence; the walkthrough
+protocol and fixture corrections identified in review must also pass before
+the session can be called ready. CI installer
 acceptance does not establish deployment on the user's NAS/Sparks, physical
 frontier-model qualification, or the every-model campaign.
 
@@ -307,10 +309,11 @@ qualifies W12's combined cancellation/removal race and adds W19's cleanup
 facilitator. Their local combined checks and full PR CI pass at `ab25b1d7`.
 W09's admission and durable asset-ownership implementation and this
 continuation have passing combined CI evidence at `ab25b1d7`, with the latest
-upstream/recovery integration qualified at `023466cf`. W19 still requires a
-genuine runnable U2 candidate, the same-profile author-to-endpoint journey,
-and an independent human scorecard. Passing an automated scenario does not
-fill that scorecard.
+upstream/recovery integration qualified at `023466cf`. The runnable U2 candidate
+and same-profile author-to-endpoint journey subsequently passed at `b1eee312`.
+W19 still requires the corrected acceptance protocol, explicit evidence records
+for all 13 scenarios, and an independent human scorecard. Passing an automated
+scenario does not fill that scorecard.
 
 | Package | State | Current evidence / remaining work |
 | --- | --- | --- |
@@ -333,7 +336,7 @@ fill that scorecard.
 | W16 | Repository and installed criteria proven | Draft/upload/submit/detail/cancel/verified-download and request recovery pass CLI/API, real byte-route and installed checks. Exact named output identity, atomic verified publication and partial recovery are covered; current combined gates pass. Optional-output recipes now accept a canonical empty manifest; required-output minima are enforced both during result consumption and successful response validation. Installed human and JSON checks distinguish queued/unavailable, empty success and required-output failure, and show verified local files. Definitive refusals now offer read-only inspection or a new review; ambiguous and already-accepted requests retain exact recovery guidance. |
 | W17 | Durable removal, pre-consent impact review and maintenance criteria proven | Upgrade/removal consent, one-at-a-time maintenance, exact-key replay and durable following pass focused checks. Stored recipe-removal replays now bind exact target, actor and model-retention choice with strict receipt validation. Concurrent first-submission ownership and durable pre-effect intent now pass connected and installed checks. The Controller now exposes exact pre-consent impact, current clients bind its digest, changed scope is refused, and installed replay and cleanup checks pass locally. |
 | W18 | Own repository and installed criteria proven; dependent delivery remains open | Real entry-point, shell, signed updater, terminal contexts and installed runbook/parser checks pass. Actual wheel/TLS/PostgreSQL tests cover delivered workflows. Combined source, generated contract, wire, build and supply-chain checks now pass. W19 remains required for the full handoff. |
-| W19 | In progress | Installed load, authoring, consent and closed-output acceptance exercise actual services/PostgreSQL; endpoint, connection, artifact-job, recipe cancellation and profile cancellation/Activity journeys also pass; interrupted update-batch, Find-and-prepare, sequential-upgrade and exact-resume acceptance pass. Current combined source/installed gates pass. The connected cancellation/removal case and U8 cleanup smoke now pass. A real runnable U2 candidate, the connected same-profile author-to-endpoint journey, and the independent operator walkthrough still block handoff. No deployed or physical claim. |
+| W19 | In progress | Installed load, authoring, consent and closed-output acceptance exercise actual services/PostgreSQL; endpoint, connection, artifact-job, recipe cancellation and profile cancellation/Activity journeys also pass; interrupted update-batch, Find-and-prepare, sequential-upgrade and exact-resume acceptance pass. Current combined source/installed gates pass. The connected cancellation/removal case and U8 cleanup smoke now pass. The real runnable U2 candidate and connected same-profile author-to-endpoint journey passed at `b1eee312`. The reviewed protocol corrections, all 13 scenario evidence records, and independent operator walkthrough still block handoff. No deployed or physical claim. |
 
 ## Historical checkpoints
 

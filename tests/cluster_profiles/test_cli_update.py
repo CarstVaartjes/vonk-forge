@@ -247,6 +247,9 @@ def test_update_installs_only_changed_signed_wheel(
         download=download,
     )
     assert applied["updated"] is True and len(seen) == 1
+    assert applied["previous"] == checked["current"]
+    assert applied["current"] == {"version": "1.2.3", "source_sha": source_sha}
+    assert applied["update_available"] is False
 
     monkeypatch.setattr(
         cli_update,
@@ -386,6 +389,8 @@ def test_signed_update_installs_real_wheel_into_uv_venv(
         text=True,
     )
     assert json.loads(after.stdout) == {"version": "1.2.3", "source_sha": "b" * 40}
+    assert result["current"] == json.loads(after.stdout)
+    assert result["previous"] == json.loads(before.stdout)
 
 
 def test_interactive_notice_never_fetches_on_ordinary_command(
