@@ -15,11 +15,14 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
+from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.route_activation import (
     ROUTE_EVIDENCE_MAX_AGE_SECONDS,
+    ROUTE_MAXIMUM_LEASE_SECONDS,
     recipe_route_lease_expiry,
 )
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -309,23 +312,45 @@ class AtomicRecipeRoutePublisher:
         self._clock = clock
 
     def publish_recipe(self, candidate: _RecipeCandidate) -> LiteLlmGeneration:
-        return self._activate(
+        generation = self._activate(
             candidate.state.digest,
             LiteLlmPublisher.render(candidate.state, candidate.policy),
             endpoints=candidate.endpoints,
             expires_at=candidate.expires_at,
             state="published",
         )
+        assert generation is not None
+        return generation
 
     def publish_empty(
         self, route_digest: str, *, expires_at: datetime
     ) -> LiteLlmGeneration:
+        generation = self._activate(
+            route_digest,
+            LiteLlmPublisher.render_empty(),
+            endpoints={},
+            expires_at=expires_at,
+            state="maintenance",
+        )
+        assert generation is not None
+        return generation
+
+    def renew_empty_if_current(
+        self,
+        route_digest: str,
+        *,
+        expires_at: datetime,
+        expected_activation: ActivationMarker,
+    ) -> LiteLlmGeneration | None:
+        """Renew an empty lease only while its exact activation still owns the file."""
+
         return self._activate(
             route_digest,
             LiteLlmPublisher.render_empty(),
             endpoints={},
             expires_at=expires_at,
             state="maintenance",
+            expected_activation=expected_activation,
         )
 
     def _activate(
@@ -336,7 +361,8 @@ class AtomicRecipeRoutePublisher:
         endpoints: dict[str, _RecipeEndpoint],
         expires_at: datetime,
         state: str,
-    ) -> LiteLlmGeneration:
+        expected_activation: ActivationMarker | None = None,
+    ) -> LiteLlmGeneration | None:
         required = (
             "_activate",
             "_identity",
@@ -374,6 +400,32 @@ class AtomicRecipeRoutePublisher:
                 return (
                     json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
                 ).encode()
+
+            if expected_activation is not None:
+                if current is None:
+                    return None
+                exact_expected = current.digest == expected_activation.digest
+                try:
+                    current_issued = _aware(datetime.fromisoformat(current.issued_at))
+                    current_expires = _aware(datetime.fromisoformat(current.expires_at))
+                except (TypeError, ValueError):
+                    return None
+                recoverable_newer_empty = (
+                    current.generation > expected_activation.generation
+                    and current.state == "maintenance"
+                    and current.authority_id == self._AUTHORITY_ID
+                    and current.plan_digest == route_digest
+                    and current.evidence_set_digest == route_digest
+                    and current.routes_sha256
+                    == hashlib.sha256(route_bytes(current.generation)).hexdigest()
+                    and current.litellm_sha256 == hashlib.sha256(litellm).hexdigest()
+                    and current_issued <= issued
+                    and current_expires > current_issued
+                    and current_expires - current_issued
+                    <= timedelta(seconds=ROUTE_MAXIMUM_LEASE_SECONDS)
+                )
+                if not exact_expected and not recoverable_newer_empty:
+                    return None
 
             # Activation is durable before the supervisor acknowledgement and
             # before the database projection. After a lost acknowledgement,
@@ -770,7 +822,7 @@ class RecipeRouteService:
                     continue
                 return True
             if not published:
-                return False
+                return self._maintain_empty_routes(session, renew_before_seconds)
             not_running = frozenset(
                 run.id for run in published if run.state != "running"
             )
@@ -853,6 +905,99 @@ class RecipeRouteService:
                         run.updated_at = self._clock()
                 return True
             return False
+
+    def _maintain_empty_routes(
+        self, session: Session, renew_before_seconds: int
+    ) -> bool:
+        if not isinstance(self._publisher, AtomicRecipeRoutePublisher):
+            return False
+        candidate = self.candidate_in_session(
+            session,
+            include_run_id=None,
+            exclude_run_ids=frozenset(),
+            lock=True,
+        )
+        if candidate.included or candidate.endpoints or candidate.state.aliases:
+            return False
+        current = self._current_empty_publication(
+            session,
+            route_digest=candidate.state.digest,
+            now=_aware(self._clock()),
+        )
+        if current is None:
+            return False
+        marker, current_expiry = current
+        now = _aware(self._clock())
+        if (
+            current_expiry - now > timedelta(seconds=renew_before_seconds)
+            or candidate.expires_at <= current_expiry
+        ):
+            return False
+        generation = self._publisher.renew_empty_if_current(
+            candidate.state.digest,
+            expires_at=candidate.expires_at,
+            expected_activation=marker,
+        )
+        if generation is None:
+            return False
+        self.projection_in_session(session, generation, state="routes-withdrawn")
+        return True
+
+    @staticmethod
+    def _current_empty_publication(
+        session: Session, *, route_digest: str, now: datetime
+    ) -> tuple[ActivationMarker, datetime] | None:
+        owner = session.get(RoutePublicationOwner, 1)
+        if owner is None or owner.authority_id != RECIPE_ROUTE_AUTHORITY_ID:
+            return None
+        authority = session.get(RecipeRouteAuthority, RECIPE_ROUTE_AUTHORITY_ID)
+        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+        if (
+            authority is None
+            or publication is None
+            or publication.state != "routes-withdrawn"
+            or publication.generation is None
+            or publication.generation != owner.owner_generation
+            or publication.plan_digest is None
+            or publication.evidence_digest != route_digest
+            or publication.activation_marker is None
+            or publication.activation_marker_digest is None
+            or publication.route_digest is None
+            or publication.litellm_digest is None
+            or publication.bundle_digest is None
+            or publication.lease_issued_at is None
+            or publication.lease_expires_at is None
+        ):
+            return None
+        try:
+            marker = ActivationMarker.model_validate_json(
+                canonical_message(publication.activation_marker)
+            )
+            issued_at = _aware(datetime.fromisoformat(marker.issued_at))
+            expires_at = _aware(datetime.fromisoformat(marker.expires_at))
+            lease_issued_at = _aware(publication.lease_issued_at)
+            lease_expires_at = _aware(publication.lease_expires_at)
+        except (TypeError, ValueError, ValidationError):
+            return None
+        if (
+            marker.authority_id != RECIPE_ROUTE_AUTHORITY_ID
+            or marker.generation != publication.generation
+            or marker.state != "maintenance"
+            or marker.plan_digest != publication.plan_digest
+            or marker.evidence_set_digest != publication.evidence_digest
+            or marker.routes_sha256 != publication.route_digest
+            or marker.litellm_sha256 != publication.litellm_digest
+            or marker.manifest_sha256 != publication.bundle_digest
+            or marker.digest != publication.activation_marker_digest
+            or issued_at != lease_issued_at
+            or expires_at != lease_expires_at
+            or issued_at > now
+            or expires_at <= issued_at
+            or expires_at - issued_at
+            > timedelta(seconds=ROUTE_MAXIMUM_LEASE_SECONDS)
+        ):
+            return None
+        return marker, lease_expires_at
 
     def _publish(self, candidate: _RecipeCandidate) -> LiteLlmGeneration:
         publisher = self._publisher
