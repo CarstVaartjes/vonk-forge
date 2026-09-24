@@ -800,7 +800,10 @@ def test_manifest_loads_confined_parent_references_and_binds_all_local_inputs(
     assert manifest.authority.authority_id == "test-authority"
     assert len(manifest.authority.rows) == 1
     assert manifest.authority.rows[0].interface == "openai-service"
-    assert fixtures.manifest_sha256 == manifest.authority.catalog["qualification_index_sha256"]
+    assert (
+        fixtures.manifest_sha256
+        == manifest.authority.catalog["qualification_index_sha256"]
+    )
 
 
 def test_repository_binding_rejects_a_swapped_valid_recipe_package(
@@ -1374,15 +1377,18 @@ def test_cleanup_preview_stop_scope_must_match_exact_campaign_run() -> None:
         "profile_digest": "b" * 64,
         "assignments": [],
     }
-    assert campaign_cli._check_preview(
-        preview,
-        profile=profile_view,
-        fleet=fleet,
-        row=_row(),
-        node_ids=[NODE_A],
-        cleanup=True,
-        owned_run_ids={RUN_ID},
-    )["plan_digest"] == "a" * 64
+    assert (
+        campaign_cli._check_preview(
+            preview,
+            profile=profile_view,
+            fleet=fleet,
+            row=_row(),
+            node_ids=[NODE_A],
+            cleanup=True,
+            owned_run_ids={RUN_ID},
+        )["plan_digest"]
+        == "a" * 64
+    )
 
     wrong_scope = {
         **preview,
@@ -1484,7 +1490,11 @@ def test_offline_restart_requires_observed_downtime_and_changed_live_boot_id(
         "host-restart.baseline",
         plan_digest=CAMPAIGN_ID,
         recipe=RECIPE_KEY,
-        payload={"nodes": {NODE_A: "boot-before"}, "route_alias": "test-alias", "run_id": RUN_ID},
+        payload={
+            "nodes": {NODE_A: "boot-before"},
+            "route_alias": "test-alias",
+            "run_id": RUN_ID,
+        },
     )
     common = {
         "row": row,
@@ -1531,7 +1541,11 @@ def test_offline_restart_refuses_an_unrelated_whole_fleet_workload(
         "host-restart.baseline",
         plan_digest=CAMPAIGN_ID,
         recipe=RECIPE_KEY,
-        payload={"nodes": {NODE_A: "boot-before"}, "route_alias": "test-alias", "run_id": RUN_ID},
+        payload={
+            "nodes": {NODE_A: "boot-before"},
+            "route_alias": "test-alias",
+            "run_id": RUN_ID,
+        },
     )
     foreign = {"run_id": "other-run"}
 

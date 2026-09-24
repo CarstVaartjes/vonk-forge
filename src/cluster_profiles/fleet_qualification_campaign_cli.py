@@ -137,9 +137,7 @@ def _strict_read(
     except OSError as error:
         raise QualificationError(f"{label} cannot be read: {path}") from error
     if len(raw) > maximum_bytes:
-        raise QualificationError(
-            f"{label} exceeds its {maximum_bytes}-byte read bound"
-        )
+        raise QualificationError(f"{label} exceeds its {maximum_bytes}-byte read bound")
     try:
         value = json.loads(
             raw.decode("utf-8"),
@@ -211,9 +209,7 @@ def _bounded_number(
         or isinstance(value, bool)
         or not minimum <= value <= maximum
     ):
-        raise QualificationError(
-            f"{label} must be between {minimum:g} and {maximum:g}"
-        )
+        raise QualificationError(f"{label} must be between {minimum:g} and {maximum:g}")
     return float(value)
 
 
@@ -341,7 +337,9 @@ def _load_authority(path: Path) -> CampaignAuthority:
         sequence = _integer(row["sequence"], f"recipe {position} sequence", 1, 1000)
         key = _string(row["key"], f"recipe {position} key")
         if sequence != position or _RECIPE_KEY.fullmatch(key) is None or key in seen:
-            raise QualificationError(f"authority recipe order/identity is invalid: {key}")
+            raise QualificationError(
+                f"authority recipe order/identity is invalid: {key}"
+            )
         seen.add(key)
         digest = _string(row["content_sha256"], f"{key} recipe digest")
         if _SHA256.fullmatch(digest) is None:
@@ -356,7 +354,10 @@ def _load_authority(path: Path) -> CampaignAuthority:
             label=f"{key} package",
         )
         _string(package["path"], f"{key} package path")
-        if _SHA256.fullmatch(_string(package["sha256"], f"{key} package sha256")) is None:
+        if (
+            _SHA256.fullmatch(_string(package["sha256"], f"{key} package sha256"))
+            is None
+        ):
             raise QualificationError(f"{key} package sha256 is invalid")
         _integer(package["expected_bytes"], f"{key} package bytes", 1, 2**63 - 1)
         _string(package["media_type"], f"{key} package media type")
@@ -389,7 +390,9 @@ def _load_authority(path: Path) -> CampaignAuthority:
 
         raw_models = row["model_license_refs"]
         if not isinstance(raw_models, list) or not raw_models:
-            raise QualificationError(f"{key} must bind at least one exact Model license")
+            raise QualificationError(
+                f"{key} must bind at least one exact Model license"
+            )
         model_refs: list[Mapping[str, object]] = []
         model_identities: set[tuple[str, str]] = set()
         model_acceptance = False
@@ -410,7 +413,10 @@ def _load_authority(path: Path) -> CampaignAuthority:
             )
             model_key = _string(model["key"], f"{key} Model selector")
             model_digest = _string(model["content_sha256"], f"{key} Model digest")
-            if _RECIPE_KEY.fullmatch(model_key) is None or _SHA256.fullmatch(model_digest) is None:
+            if (
+                _RECIPE_KEY.fullmatch(model_key) is None
+                or _SHA256.fullmatch(model_digest) is None
+            ):
                 raise QualificationError(f"{key} Model identity is invalid")
             identity = (model_key, model_digest)
             if identity in model_identities:
@@ -418,20 +424,26 @@ def _load_authority(path: Path) -> CampaignAuthority:
             model_identities.add(identity)
             _string(model["spdx"], f"{key} Model SPDX")
             _string(model["url"], f"{key} Model license URL")
-            attribution = _string_array(model["attribution"], f"{key} Model attribution")
+            attribution = _string_array(
+                model["attribution"], f"{key} Model attribution"
+            )
             del attribution
             accepted = model["operator_acceptance_required"]
             if not isinstance(accepted, bool):
                 raise QualificationError(f"{key} Model acceptance flag is invalid")
             model_acceptance = model_acceptance or accepted
             if "territorial_restrictions" in model:
-                _object(model["territorial_restrictions"], f"{key} territorial restrictions")
+                _object(
+                    model["territorial_restrictions"], f"{key} territorial restrictions"
+                )
             model_refs.append(dict(model))
         acceptance = row["operator_acceptance_required"]
         if not isinstance(acceptance, bool) or acceptance != model_acceptance:
             raise QualificationError(f"{key} Model acceptance gate does not close")
         if acceptance != ("operator-acceptance-required" in gate_kinds):
-            raise QualificationError(f"{key} operator review gate does not match its Models")
+            raise QualificationError(
+                f"{key} operator review gate does not match its Models"
+            )
         expected_disposition = (
             "operator-acceptance-required"
             if acceptance
@@ -440,7 +452,9 @@ def _load_authority(path: Path) -> CampaignAuthority:
             else "actionable"
         )
         if disposition != expected_disposition:
-            raise QualificationError(f"{key} disposition does not match its review gates")
+            raise QualificationError(
+                f"{key} disposition does not match its review gates"
+            )
         if expected_disposition != "actionable" and "disposition_reason" not in row:
             raise QualificationError(f"{key} non-actionable disposition lacks a reason")
 
@@ -497,7 +511,9 @@ def load_manifest(path: Path, library_root: Path) -> CampaignManifest:
     library_root = library_root.resolve(strict=True)
     campaign_path = path.resolve(strict=True)
     if not campaign_path.is_relative_to(library_root):
-        raise QualificationError("campaign manifest must be inside the recipe repository")
+        raise QualificationError(
+            "campaign manifest must be inside the recipe repository"
+        )
     campaign_path = _relative_path(
         library_root,
         str(campaign_path.relative_to(library_root)),
@@ -517,10 +533,12 @@ def load_manifest(path: Path, library_root: Path) -> CampaignManifest:
         allow_parent=True,
         base=campaign_path.parent,
     )
-    if not authority_path.is_relative_to(library_root) or not fixtures_path.is_relative_to(
+    if not authority_path.is_relative_to(
         library_root
-    ):
-        raise QualificationError("campaign inputs must remain inside the recipe repository")
+    ) or not fixtures_path.is_relative_to(library_root):
+        raise QualificationError(
+            "campaign inputs must remain inside the recipe repository"
+        )
     authority = _load_authority(authority_path)
     options = _object(root.get("options", {}), "campaign options")
     _exact_keys(
@@ -956,7 +974,9 @@ def _fixture_bindings(
         )
     if artifact is not None:
         if artifact.interface != row.interface:
-            raise QualificationError(f"{row.key} fixture interface differs from authority")
+            raise QualificationError(
+                f"{row.key} fixture interface differs from authority"
+            )
         if artifact.content_sha256 != row.content_sha256:
             raise QualificationError(f"{row.key} fixture digest differs from authority")
         cases = artifact.all_cases
@@ -971,9 +991,13 @@ def _fixture_bindings(
     else:
         assert service is not None
         if row.interface != "openai-service":
-            raise QualificationError(f"{row.key} service interface differs from authority")
+            raise QualificationError(
+                f"{row.key} service interface differs from authority"
+            )
         if service.content_sha256 != row.content_sha256:
-            raise QualificationError(f"{row.key} service fixture digest differs from authority")
+            raise QualificationError(
+                f"{row.key} service fixture digest differs from authority"
+            )
         case_ids = tuple(case.case_id for case in service.cases)
         inputs = []
         for case in service.cases:
@@ -988,7 +1012,9 @@ def _fixture_bindings(
     return kind, preview
 
 
-def _model_license_rows(detail: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
+def _model_license_rows(
+    detail: Mapping[str, object],
+) -> tuple[Mapping[str, object], ...]:
     raw_models = detail.get("model_documents")
     if not isinstance(raw_models, list):
         raise QualificationError("Controller recipe detail lacks exact Model documents")
@@ -1002,7 +1028,9 @@ def _model_license_rows(detail: Mapping[str, object]) -> tuple[Mapping[str, obje
         reference = _object(selection.get("model"), "recipe Model reference")
         license_value = _object(definition.get("license"), "Model license")
         key = f"{_string(reference.get('publisher'), 'Model publisher')}/{_string(reference.get('slug'), 'Model slug')}"
-        content_sha256 = _string(reference.get("content_sha256"), "Model content digest")
+        content_sha256 = _string(
+            reference.get("content_sha256"), "Model content digest"
+        )
         if (
             _SHA256.fullmatch(content_sha256) is None
             or identity.get("publisher") != reference.get("publisher")
@@ -1051,7 +1079,9 @@ def _validate_current_recipe(
 
         typed = RecipeDetailResponse.from_dict(detail)
     except (KeyError, TypeError, ValueError) as error:
-        raise QualificationError(f"{row.key} current Controller recipe is invalid") from error
+        raise QualificationError(
+            f"{row.key} current Controller recipe is invalid"
+        ) from error
     definition = typed.document.to_dict()
     identity = typed.identity.to_dict()
     current_digest = identity.get("content_sha256")
@@ -1075,9 +1105,7 @@ def _validate_current_recipe(
     }
     if observed_by_identity != expected_by_identity:
         raise QualificationError(f"{row.key} exact Model license facts changed")
-    model_digests = {
-        str(item["content_sha256"]) for item in row.model_license_refs
-    }
+    model_digests = {str(item["content_sha256"]) for item in row.model_license_refs}
     selected_digests = {
         str(model.get("content_sha256"))
         for item in definition.get("models", [])
@@ -1115,12 +1143,16 @@ def _nodes(fleet: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
 
 def _online(node: Mapping[str, object]) -> bool:
     connection = node.get("connection")
-    return isinstance(connection, Mapping) and connection.get("online_state") == "online"
+    return (
+        isinstance(connection, Mapping) and connection.get("online_state") == "online"
+    )
 
 
 def _offline(node: Mapping[str, object]) -> bool:
     connection = node.get("connection")
-    return isinstance(connection, Mapping) and connection.get("online_state") == "offline"
+    return (
+        isinstance(connection, Mapping) and connection.get("online_state") == "offline"
+    )
 
 
 def _boot_id(node: Mapping[str, object], *, require_live: bool = True) -> str | None:
@@ -1136,7 +1168,9 @@ def _boot_id(node: Mapping[str, object], *, require_live: bool = True) -> str | 
     return candidate if isinstance(candidate, str) and candidate else None
 
 
-def _run_presences(fleet: Mapping[str, object], run_id: str) -> list[tuple[str, Mapping[str, object]]]:
+def _run_presences(
+    fleet: Mapping[str, object], run_id: str
+) -> list[tuple[str, Mapping[str, object]]]:
     result: list[tuple[str, Mapping[str, object]]] = []
     for node_id, node in _nodes(fleet).items():
         loaded = node.get("loaded")
@@ -1458,13 +1492,13 @@ def _save_profile(
         "expected_revision": profile.get("revision"),
         "assignments": [dict(item) for item in assignments],
     }
-    result = client.request(
-        "PUT", f"/api/profile/{profile['number']}", body
-    )
+    result = client.request("PUT", f"/api/profile/{profile['number']}", body)
     try:
         return FleetProfileView.from_dict(result).to_dict()
     except (KeyError, TypeError, ValueError) as error:
-        raise QualificationError("Controller did not return a valid saved profile") from error
+        raise QualificationError(
+            "Controller did not return a valid saved profile"
+        ) from error
 
 
 def _validate_preparations(
@@ -1689,19 +1723,23 @@ def _check_preview(
         raise QualificationError("Controller profile preview is invalid") from error
     if preview.get("allowed") is not True:
         reasons = preview.get("reasons")
-        raise QualificationError(
-            f"whole-fleet profile preview is blocked: {reasons}"
-        )
+        raise QualificationError(f"whole-fleet profile preview is blocked: {reasons}")
     expected_scope = sorted(_nodes(fleet))
     scope = _object(preview.get("scope"), "profile preview scope")
     if scope.get("node_ids") != expected_scope:
-        raise QualificationError("profile preview does not bind the complete current Fleet")
+        raise QualificationError(
+            "profile preview does not bind the complete current Fleet"
+        )
     if cleanup:
         if scope.get("idle_node_ids") != expected_scope:
-            raise QualificationError("cleanup preview does not leave the complete Fleet idle")
+            raise QualificationError(
+                "cleanup preview does not leave the complete Fleet idle"
+            )
         summary = _object(preview.get("summary"), "cleanup preview summary")
         if summary.get("uninstalls") != 0:
-            raise QualificationError("cleanup would uninstall assets instead of keeping cache")
+            raise QualificationError(
+                "cleanup would uninstall assets instead of keeping cache"
+            )
         steps = preview.get("steps")
         if not isinstance(steps, list):
             raise QualificationError("cleanup preview steps are invalid")
@@ -1720,12 +1758,16 @@ def _check_preview(
             summary.get("starts"),
         )
         if any(value != 0 for value in step_summary):
-            raise QualificationError("cleanup preview contains effects beyond stopping the campaign run")
+            raise QualificationError(
+                "cleanup preview contains effects beyond stopping the campaign run"
+            )
         loaded_nodes: set[str] = set()
         for node_id, node in _nodes(fleet).items():
             loaded = node.get("loaded")
             if not isinstance(loaded, list):
-                raise QualificationError(f"Fleet loaded-run list is invalid for {node_id}")
+                raise QualificationError(
+                    f"Fleet loaded-run list is invalid for {node_id}"
+                )
             if any(
                 _object(raw_presence, "Fleet run presence").get("run_id")
                 in owned_run_ids
@@ -1734,7 +1776,9 @@ def _check_preview(
                 loaded_nodes.add(node_id)
         if owned_run_ids:
             if summary.get("stops") != len(owned_run_ids) or not steps:
-                raise QualificationError("cleanup preview does not stop the exact campaign run")
+                raise QualificationError(
+                    "cleanup preview does not stop the exact campaign run"
+                )
             stepped_nodes: set[str] = set()
             for raw_step in steps:
                 step = _object(raw_step, "cleanup plan step")
@@ -1755,15 +1799,21 @@ def _check_preview(
                     "cleanup plan stop scope differs from the exact campaign run's Sparks"
                 )
         elif summary.get("stops") != 0 or steps:
-            raise QualificationError("cleanup preview contains an unowned whole-Fleet stop effect")
+            raise QualificationError(
+                "cleanup preview contains an unowned whole-Fleet stop effect"
+            )
         if _profile_assignments_equal(profile, []):
             return preview
         raise QualificationError("cleanup preview profile is not empty")
     idle = scope.get("idle_node_ids")
     expected_idle = sorted(set(expected_scope) - set(node_ids))
     if idle != expected_idle:
-        raise QualificationError("profile preview does not leave all unassigned Sparks idle")
-    if preview.get("profile_id") != profile.get("id") or preview.get("profile_digest") != profile.get("profile_digest"):
+        raise QualificationError(
+            "profile preview does not leave all unassigned Sparks idle"
+        )
+    if preview.get("profile_id") != profile.get("id") or preview.get(
+        "profile_digest"
+    ) != profile.get("profile_digest"):
         raise QualificationError("profile preview is bound to another saved profile")
     summary = _object(preview.get("summary"), "profile preview summary")
     replacement_interruption = _check_replacement_preview(
@@ -1776,13 +1826,17 @@ def _check_preview(
         raise QualificationError("profile preview would uninstall cached assets")
     assignments = preview.get("assignments")
     if not isinstance(assignments, list) or len(assignments) != 1:
-        raise QualificationError("profile preview must contain one exact recipe assignment")
+        raise QualificationError(
+            "profile preview must contain one exact recipe assignment"
+        )
     assignment = _object(assignments[0], "profile assignment preview")
     if (
         assignment.get("node_ids") != sorted(node_ids)
         or assignment.get("desired_state") != "running"
     ):
-        raise QualificationError("profile preview changed the exact Spark/desired-state binding")
+        raise QualificationError(
+            "profile preview changed the exact Spark/desired-state binding"
+        )
     preparations = _validate_preparations(preview, row, node_ids)
     checked = {**preview, "exact_preparations": preparations}
     if replacement_interruption is not None:
@@ -1790,7 +1844,9 @@ def _check_preview(
     return checked
 
 
-def _run_id_from_application(application: Mapping[str, object], node_count: int) -> tuple[str, Mapping[str, object]]:
+def _run_id_from_application(
+    application: Mapping[str, object], node_count: int
+) -> tuple[str, Mapping[str, object]]:
     progress = _object(application.get("progress"), "profile application progress")
     step_results = progress.get("step_results")
     if not isinstance(step_results, Mapping):
@@ -1799,7 +1855,9 @@ def _run_id_from_application(application: Mapping[str, object], node_count: int)
 
     def visit(value: object) -> None:
         if isinstance(value, Mapping):
-            if value.get("phase") == "final_verify" and isinstance(value.get("run_id"), str):
+            if value.get("phase") == "final_verify" and isinstance(
+                value.get("run_id"), str
+            ):
                 final_verifications.append(value)
             for child in value.values():
                 visit(child)
@@ -1810,7 +1868,9 @@ def _run_id_from_application(application: Mapping[str, object], node_count: int)
     visit(step_results)
     distinct = {str(item["run_id"]) for item in final_verifications}
     if len(distinct) != 1 or len(final_verifications) != 1:
-        raise QualificationError("profile application lacks one exact run final-verification receipt")
+        raise QualificationError(
+            "profile application lacks one exact run final-verification receipt"
+        )
     final = final_verifications[0]
     ranks = final.get("ranks")
     if (
@@ -1837,13 +1897,19 @@ def _run_id_from_application(application: Mapping[str, object], node_count: int)
         ):
             raise QualificationError("recipe run rank receipts are incomplete or stale")
         ranks_by_node[node_id] = rank
-    if len(ranks_by_node) != node_count or set(ranks_by_node.values()) != set(range(node_count)):
+    if len(ranks_by_node) != node_count or set(ranks_by_node.values()) != set(
+        range(node_count)
+    ):
         raise QualificationError("recipe run rank receipts are not contiguous")
     return str(final["run_id"]), final
 
 
 def _request_key(campaign_id: str, key: str, phase: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"vonk-qualification:{campaign_id}:{key}:{phase}"))
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL, f"vonk-qualification:{campaign_id}:{key}:{phase}"
+        )
+    )
 
 
 def _application_plan_digest(
@@ -1943,7 +2009,9 @@ def _submit_load(
         or not isinstance(profile_id, str)
         or not profile_id
     ):
-        raise QualificationError("profile load intent lacks an exact request or preview identity")
+        raise QualificationError(
+            "profile load intent lacks an exact request or preview identity"
+        )
 
     path = f"/api/profile/{number}/load"
     payload = {"plan_digest": plan_digest, "request_key": request_key}
@@ -2014,7 +2082,9 @@ def _await_application(
         try:
             application = FleetProfileApplicationView.from_dict(value).to_dict()
         except (KeyError, TypeError, ValueError) as error:
-            raise QualificationError("Controller profile application is invalid") from error
+            raise QualificationError(
+                "Controller profile application is invalid"
+            ) from error
         state = application.get("state")
         signature = (state, application.get("current_step"))
         if signature != last_signature:
@@ -2046,9 +2116,7 @@ def _await_application(
 
 def _endpoint_exists(client: Any, alias: str) -> bool:
     try:
-        client.request(
-            "GET", f"/api/endpoints/{urllib.parse.quote(alias, safe='')}"
-        )
+        client.request("GET", f"/api/endpoints/{urllib.parse.quote(alias, safe='')}")
     except ControlNotFound:
         return False
     return True
@@ -2093,7 +2161,9 @@ def _check_serving_fleet(
             or not isinstance(present_ranks, list)
             or set(present_ranks) != expected_ranks
         ):
-            raise QualificationError("Fleet lacks fresh healthy evidence from every rank")
+            raise QualificationError(
+                "Fleet lacks fresh healthy evidence from every rank"
+            )
         rows.append(dict(presence))
     if observed_nodes != set(node_ids):
         raise QualificationError("Fleet run presence node set differs from assignment")
@@ -2133,11 +2203,15 @@ def _record_restart_baseline(
         nodes = existing.get("nodes")
         if isinstance(nodes, Mapping) and set(nodes) == set(node_ids):
             return existing
-        raise QualificationError("existing restart baseline is bound to another Spark group")
+        raise QualificationError(
+            "existing restart baseline is bound to another Spark group"
+        )
     fleet = _typed_fleet(client)
     _assert_no_campaign_run(client, fleet, run_id, alias)
     if _all_loaded_runs(fleet):
-        raise QualificationError("restart baseline requires an otherwise idle whole Fleet")
+        raise QualificationError(
+            "restart baseline requires an otherwise idle whole Fleet"
+        )
     baselines: dict[str, str] = {}
     for node_id in node_ids:
         node = _nodes(fleet).get(node_id)
@@ -2217,7 +2291,9 @@ def _profile_cleanup(
             or existing_cleanup.get("route_withdrawn") is not True
             or existing_cleanup.get("run_absent_from_fleet") is not True
         ):
-            raise QualificationError("existing cleanup receipt is not bound to this exact canary")
+            raise QualificationError(
+                "existing cleanup receipt is not bound to this exact canary"
+            )
         _record_restart_baseline(
             client=client,
             row=row,
@@ -2229,11 +2305,17 @@ def _profile_cleanup(
         )
         return existing_cleanup
 
-    load_intent = _latest_payload(ledger, campaign_id, row.key, "profile.load.requested")
-    load_submitted = _latest_payload(ledger, campaign_id, row.key, "profile.load.submitted")
+    load_intent = _latest_payload(
+        ledger, campaign_id, row.key, "profile.load.requested"
+    )
+    load_submitted = _latest_payload(
+        ledger, campaign_id, row.key, "profile.load.submitted"
+    )
     canary = _latest_payload(ledger, campaign_id, row.key, "canary.completed")
     if load_intent is None or load_submitted is None or canary is None:
-        raise QualificationError("cleanup requires the durable reviewed load and canary receipts")
+        raise QualificationError(
+            "cleanup requires the durable reviewed load and canary receipts"
+        )
     load_request_key = load_intent.get("request_key")
     load_plan_digest = load_intent.get("plan_digest")
     load_profile_digest = load_intent.get("profile_digest")
@@ -2266,20 +2348,27 @@ def _profile_cleanup(
         or set(_ordered_rank_nodes(canary.get("node_to_rank"), row.node_count))
         != set(node_ids)
     ):
-        raise QualificationError("canary receipt differs from the exact durable profile load")
+        raise QualificationError(
+            "canary receipt differs from the exact durable profile load"
+        )
     if (
         load_intent.get("node_ids") != sorted(node_ids)
         or load_intent.get("alias") != alias
-        or load_intent.get("operator_gate_accepted") is not row.operator_acceptance_required
+        or load_intent.get("operator_gate_accepted")
+        is not row.operator_acceptance_required
         or load_intent.get("capacity_review_accepted")
         is not any(gate.get("kind") == "capacity-review" for gate in row.review_gates)
     ):
-        raise QualificationError("durable profile load intent does not authorize this cleanup")
+        raise QualificationError(
+            "durable profile load intent does not authorize this cleanup"
+        )
 
     cleanup_request = _latest_payload(
         ledger, campaign_id, row.key, "profile.cleanup.requested"
     )
-    submitted = _latest_payload(ledger, campaign_id, row.key, "profile.cleanup.submitted")
+    submitted = _latest_payload(
+        ledger, campaign_id, row.key, "profile.cleanup.submitted"
+    )
     if submitted is not None and cleanup_request is None:
         raise QualificationError("cleanup submission lacks its durable reviewed intent")
 
@@ -2296,7 +2385,9 @@ def _profile_cleanup(
             or cleanup_request.get("source_request_key") != load_request_key
             or cleanup_request.get("source_plan_digest") != load_plan_digest
         ):
-            raise QualificationError("durable cleanup intent differs from the exact canary")
+            raise QualificationError(
+                "durable cleanup intent differs from the exact canary"
+            )
         plan_digest = cleanup_request.get("plan_digest")
         profile_id = cleanup_request.get("profile_id")
         profile_digest = cleanup_request.get("profile_digest")
@@ -2313,7 +2404,9 @@ def _profile_cleanup(
             or not isinstance(profile_digest, str)
             or _SHA256.fullmatch(profile_digest) is None
         ):
-            raise QualificationError("durable cleanup intent lacks its exact reviewed preview")
+            raise QualificationError(
+                "durable cleanup intent lacks its exact reviewed preview"
+            )
         accepted = _lookup_load_request(
             client,
             profile_number,
@@ -2330,10 +2423,14 @@ def _profile_cleanup(
                 or submitted.get("profile_digest") != profile_digest
                 or submitted.get("profile_id") != profile_id
             ):
-                raise QualificationError("cleanup submission differs from its durable intent")
+                raise QualificationError(
+                    "cleanup submission differs from its durable intent"
+                )
             submitted_id = submitted.get("application_id")
             if accepted is not None and accepted.get("id") != submitted_id:
-                raise QualificationError("cleanup request lookup differs from the submitted application")
+                raise QualificationError(
+                    "cleanup request lookup differs from the submitted application"
+                )
             accepted = {"id": submitted_id}
         elif accepted is None:
             profile = _profile_view(client, profile_number)
@@ -2352,7 +2449,9 @@ def _profile_cleanup(
                 _check_serving_fleet(
                     fleet,
                     run_id=run_id,
-                    revision_id=_string(canary.get("recipe_revision_id"), "canary revision ID"),
+                    revision_id=_string(
+                        canary.get("recipe_revision_id"), "canary revision ID"
+                    ),
                     alias=alias,
                     node_ids=node_ids,
                     expected_run_state="running",
@@ -2373,7 +2472,9 @@ def _profile_cleanup(
                 owned_run_ids={run_id} if _run_presences(fleet, run_id) else set(),
             )
             if checked_preview.get("plan_digest") != plan_digest:
-                raise QualificationError("cleanup preview changed before its exact retry")
+                raise QualificationError(
+                    "cleanup preview changed before its exact retry"
+                )
             accepted = _submit_load(
                 client,
                 profile_number,
@@ -2390,7 +2491,9 @@ def _profile_cleanup(
             _check_serving_fleet(
                 fleet,
                 run_id=run_id,
-                revision_id=_string(canary.get("recipe_revision_id"), "canary revision ID"),
+                revision_id=_string(
+                    canary.get("recipe_revision_id"), "canary revision ID"
+                ),
                 alias=alias,
                 node_ids=node_ids,
                 expected_run_state="running",
@@ -2398,7 +2501,9 @@ def _profile_cleanup(
                 expected_health=True,
             )
         elif _endpoint_exists(client, alias):
-            raise QualificationError("campaign route remains published without its exact Fleet run")
+            raise QualificationError(
+                "campaign route remains published without its exact Fleet run"
+            )
         profile = _profile_view(client, profile_number)
         _assert_profile_owner(profile, authority_id, ledger_id)
         assignments = profile.get("assignments")
@@ -2407,7 +2512,9 @@ def _profile_cleanup(
         if assignments and not _profile_assignments_equal(
             profile, [_profile_assignment(row, node_ids, alias)]
         ):
-            raise QualificationError("dedicated profile contains a non-campaign assignment")
+            raise QualificationError(
+                "dedicated profile contains a non-campaign assignment"
+            )
         if assignments:
             profile = _save_profile(
                 client,
@@ -2425,7 +2532,9 @@ def _profile_cleanup(
             _check_serving_fleet(
                 fleet,
                 run_id=run_id,
-                revision_id=_string(canary.get("recipe_revision_id"), "canary revision ID"),
+                revision_id=_string(
+                    canary.get("recipe_revision_id"), "canary revision ID"
+                ),
                 alias=alias,
                 node_ids=node_ids,
                 expected_run_state="running",
@@ -2433,7 +2542,9 @@ def _profile_cleanup(
                 expected_health=True,
             )
         elif _endpoint_exists(client, alias):
-            raise QualificationError("campaign route remains published without its exact Fleet run")
+            raise QualificationError(
+                "campaign route remains published without its exact Fleet run"
+            )
         raw_preview = client.request("POST", f"/api/profile/{profile_number}/preview")
         preview = _check_preview(
             raw_preview,
@@ -2448,8 +2559,12 @@ def _profile_cleanup(
         if summary.get("uninstalls") != 0:
             raise QualificationError("cleanup preview would uninstall cached assets")
         profile_id = _string(preview.get("profile_id"), "cleanup profile ID")
-        profile_digest = _string(preview.get("profile_digest"), "cleanup profile digest")
-        plan_digest = _string(preview.get("plan_digest"), "reviewed cleanup plan digest")
+        profile_digest = _string(
+            preview.get("profile_digest"), "cleanup profile digest"
+        )
+        plan_digest = _string(
+            preview.get("plan_digest"), "reviewed cleanup plan digest"
+        )
         cleanup_request = {
             "request_key": request_key,
             "run_id": run_id,
@@ -2478,7 +2593,9 @@ def _profile_cleanup(
         )
 
     if accepted is None:
-        raise QualificationError("cleanup request has no durable Controller application")
+        raise QualificationError(
+            "cleanup request has no durable Controller application"
+        )
     application_id = accepted.get("id")
     if not isinstance(application_id, str) or not application_id:
         raise QualificationError("cleanup load did not return a durable application")
@@ -2525,11 +2642,15 @@ def _profile_cleanup(
         or application.get("plan_digest")
         != _application_plan_digest(request_plan_digest, request_key)
     ):
-        raise QualificationError("cleanup application differs from its reviewed request identity")
+        raise QualificationError(
+            "cleanup application differs from its reviewed request identity"
+        )
     fleet_after = _typed_fleet(client)
     _assert_no_campaign_run(client, fleet_after, run_id, alias)
     if _all_loaded_runs(fleet_after):
-        raise QualificationError("cleanup left another run active across the whole Fleet")
+        raise QualificationError(
+            "cleanup left another run active across the whole Fleet"
+        )
     receipt = {
         "application_id": application.get("id"),
         "application_state": application.get("state"),
@@ -2593,7 +2714,9 @@ def _resolve_ledger_path(path: Path, library_root: Path) -> Path:
             raise QualificationError("evidence ledger path must name a regular file")
     resolved = candidate.resolve(strict=False)
     if resolved.is_relative_to(library_root.resolve(strict=True)):
-        raise QualificationError("evidence ledger must be outside the recipe-controlled repository")
+        raise QualificationError(
+            "evidence ledger must be outside the recipe-controlled repository"
+        )
     return resolved
 
 
@@ -2614,12 +2737,18 @@ def _current_row(
     requested: str | None,
 ) -> RecipeAuthorityRow | None:
     complete = _completed_keys(ledger, campaign_id)
-    next_row = next((row for row in manifest.authority.rows if row.key not in complete), None)
+    next_row = next(
+        (row for row in manifest.authority.rows if row.key not in complete), None
+    )
     if requested is None:
         return next_row
-    row = next((item for item in manifest.authority.rows if item.key == requested), None)
+    row = next(
+        (item for item in manifest.authority.rows if item.key == requested), None
+    )
     if row is None:
-        raise QualificationError(f"recipe is not in the reviewed authority: {requested}")
+        raise QualificationError(
+            f"recipe is not in the reviewed authority: {requested}"
+        )
     if next_row is None or row.key != next_row.key:
         raise QualificationError(
             "recipes must run in the authority's sequence; "
@@ -2636,15 +2765,21 @@ def _evidence_lock_nodes(
         ranks = canary.get("node_to_rank")
         result = _ordered_rank_nodes(ranks, row.node_count)
     else:
-        request = _latest_payload(ledger, campaign_id, row.key, "profile.load.requested")
+        request = _latest_payload(
+            ledger, campaign_id, row.key, "profile.load.requested"
+        )
         if request is None:
             return []
         raw_nodes = request.get("node_ids")
-        if not isinstance(raw_nodes, list) or any(not isinstance(item, str) for item in raw_nodes):
+        if not isinstance(raw_nodes, list) or any(
+            not isinstance(item, str) for item in raw_nodes
+        ):
             raise QualificationError("profile load intent has invalid Spark identities")
         result = list(raw_nodes)
-    if len(result) != row.node_count or len(set(result)) != row.node_count or any(
-        _NODE_ID.fullmatch(node_id) is None for node_id in result
+    if (
+        len(result) != row.node_count
+        or len(set(result)) != row.node_count
+        or any(_NODE_ID.fullmatch(node_id) is None for node_id in result)
     ):
         raise QualificationError("durable evidence has invalid Spark lock identities")
     return sorted(result)
@@ -2668,7 +2803,10 @@ def _ordered_rank_nodes(raw_ranks: object, node_count: int) -> list[str]:
 
 
 def _exact_nodes(
-    client: Any, fleet: Mapping[str, object], row: RecipeAuthorityRow, supplied: Sequence[str]
+    client: Any,
+    fleet: Mapping[str, object],
+    row: RecipeAuthorityRow,
+    supplied: Sequence[str],
 ) -> list[str]:
     if len(supplied) != row.node_count or len(set(supplied)) != len(supplied):
         raise QualificationError(
@@ -2678,27 +2816,37 @@ def _exact_nodes(
         raise QualificationError("--spark requires exact Controller Spark IDs")
     nodes = _nodes(fleet)
     if not set(supplied) <= set(nodes):
-        raise QualificationError("selected Spark is not in current Controller Fleet authority")
+        raise QualificationError(
+            "selected Spark is not in current Controller Fleet authority"
+        )
     if any(not _online(nodes[node_id]) for node_id in supplied):
-        raise QualificationError("all selected Sparks must be online before recipe preview")
+        raise QualificationError(
+            "all selected Sparks must be online before recipe preview"
+        )
     if any(_boot_id(nodes[node_id]) is None for node_id in supplied):
-        raise QualificationError("selected Sparks require live serialized boot-ID telemetry")
+        raise QualificationError(
+            "selected Sparks require live serialized boot-ID telemetry"
+        )
     return sorted(supplied)
 
 
 def _operator_gate(args: argparse.Namespace, row: RecipeAuthorityRow) -> None:
     acknowledgments = set(args.accept_operator_gate)
     if acknowledgments - {row.key}:
-        raise QualificationError("operator acceptance must name only the exact current recipe key")
-    if row.operator_acceptance_required and row.key not in acknowledgments:
         raise QualificationError(
-            f"{row.key} requires --accept-operator-gate {row.key}"
+            "operator acceptance must name only the exact current recipe key"
         )
+    if row.operator_acceptance_required and row.key not in acknowledgments:
+        raise QualificationError(f"{row.key} requires --accept-operator-gate {row.key}")
     if not row.operator_acceptance_required and acknowledgments:
-        raise QualificationError(f"{row.key} does not declare an operator-acceptance gate")
+        raise QualificationError(
+            f"{row.key} does not declare an operator-acceptance gate"
+        )
     capacity_acknowledgments = set(args.accept_capacity_review)
     if capacity_acknowledgments - {row.key}:
-        raise QualificationError("capacity review must name only the exact current recipe key")
+        raise QualificationError(
+            "capacity review must name only the exact current recipe key"
+        )
     capacity_required = any(
         gate.get("kind") == "capacity-review" for gate in row.review_gates
     )
@@ -2723,7 +2871,9 @@ def _prepare_profile(
     profile = _profile_view(client, number)
     _assert_profile_owner(profile, authority_id, ledger_id)
     if profile.get("installation_policy") != "keep-cached":
-        raise QualificationError("dedicated qualification profile must retain cached assets")
+        raise QualificationError(
+            "dedicated qualification profile must retain cached assets"
+        )
     current = profile.get("assignments")
     if not isinstance(current, list):
         raise QualificationError("dedicated profile assignment list is invalid")
@@ -2948,7 +3098,9 @@ def _load_and_smoke(
     existing = _latest_payload(ledger, campaign_id, row.key, "profile.load.submitted")
     request = _latest_payload(ledger, campaign_id, row.key, "profile.load.requested")
     if existing is not None and request is None:
-        raise QualificationError("profile application receipt lacks its durable load intent")
+        raise QualificationError(
+            "profile application receipt lacks its durable load intent"
+        )
     if existing is None:
         request_key = _request_key(campaign_id, row.key, "load")
         if request is None:
@@ -2957,7 +3109,8 @@ def _load_and_smoke(
                 "profile_digest": preview.get("profile_digest"),
                 "plan_digest": preview.get("plan_digest"),
                 "campaign_digest": (
-                    _latest_payload(ledger, campaign_id, row.key, "plan.generated") or {}
+                    _latest_payload(ledger, campaign_id, row.key, "plan.generated")
+                    or {}
                 ).get("campaign_digest"),
                 "alias": alias,
                 "smoke_kind": kind,
@@ -2989,12 +3142,16 @@ def _load_and_smoke(
             or request.get("preview") != dict(preview)
             or request.get("smoke_preview") != dict(smoke_preview)
         ):
-            raise QualificationError("durable load intent differs from this exact preview")
+            raise QualificationError(
+                "durable load intent differs from this exact preview"
+            )
         accepted = _submit_load(
             client,
             profile_number,
             request_key,
-            plan_digest=_string(preview.get("plan_digest"), "reviewed profile plan digest"),
+            plan_digest=_string(
+                preview.get("plan_digest"), "reviewed profile plan digest"
+            ),
             profile_id=_string(preview.get("profile_id"), "reviewed profile ID"),
             profile_digest=_string(
                 preview.get("profile_digest"), "reviewed profile digest"
@@ -3002,7 +3159,9 @@ def _load_and_smoke(
         )
         application_id = accepted.get("id")
         if not isinstance(application_id, str) or not application_id:
-            raise QualificationError("profile load did not return a durable application")
+            raise QualificationError(
+                "profile load did not return a durable application"
+            )
         ledger.append(
             "profile.load.submitted",
             plan_digest=campaign_id,
@@ -3016,13 +3175,17 @@ def _load_and_smoke(
         )
     else:
         if request is None:
-            raise QualificationError("profile application receipt lacks its durable load intent")
+            raise QualificationError(
+                "profile application receipt lacks its durable load intent"
+            )
         if (
             existing.get("request_key") != request.get("request_key")
             or existing.get("profile_digest") != request.get("profile_digest")
             or existing.get("plan_digest") != request.get("plan_digest")
         ):
-            raise QualificationError("profile application receipt differs from its durable intent")
+            raise QualificationError(
+                "profile application receipt differs from its durable intent"
+            )
         application_id = existing.get("application_id")
         if not isinstance(application_id, str):
             raise QualificationError("ledger profile application identity is invalid")
@@ -3040,7 +3203,9 @@ def _load_and_smoke(
     )
     request = _latest_payload(ledger, campaign_id, row.key, "profile.load.requested")
     if request is None:
-        raise QualificationError("profile application receipt lacks its durable load intent")
+        raise QualificationError(
+            "profile application receipt lacks its durable load intent"
+        )
     request_key = _string(request.get("request_key"), "profile load request key")
     preview_plan_digest = _string(
         preview.get("plan_digest"), "reviewed profile plan digest"
@@ -3055,7 +3220,9 @@ def _load_and_smoke(
     request_key = request.get("request_key")
     preview_digest = preview.get("plan_digest")
     if not isinstance(request_key, str) or not isinstance(preview_digest, str):
-        raise QualificationError("accepted profile application lacks its execution identity")
+        raise QualificationError(
+            "accepted profile application lacks its execution identity"
+        )
     if application.get("plan_digest") != _application_plan_digest(
         preview_digest, request_key
     ):
@@ -3075,7 +3242,9 @@ def _load_and_smoke(
             raise QualificationError("profile application rank receipt is invalid")
         node_to_rank[node_id] = rank
     if set(node_to_rank) != set(node_ids):
-        raise QualificationError("run rank receipt does not match selected Spark identities")
+        raise QualificationError(
+            "run rank receipt does not match selected Spark identities"
+        )
     fleet = _typed_fleet(client)
     presences = _check_serving_fleet(
         fleet,
@@ -3142,10 +3311,14 @@ def _resume_load_and_smoke(
     sleeper: Callable[[float], None],
 ) -> Mapping[str, object]:
     if _latest_payload(ledger, campaign_id, row.key, "canary.completed") is not None:
-        raise QualificationError("successful canary already exists; resume physical checkpoints")
+        raise QualificationError(
+            "successful canary already exists; resume physical checkpoints"
+        )
     request = _latest_payload(ledger, campaign_id, row.key, "profile.load.requested")
     if request is None:
-        raise QualificationError(f"{row.key} has no durable profile load intent to resume")
+        raise QualificationError(
+            f"{row.key} has no durable profile load intent to resume"
+        )
     application_observation = _latest_payload(
         ledger, campaign_id, row.key, "profile.application.observed"
     )
@@ -3179,7 +3352,9 @@ def _resume_load_and_smoke(
         or request.get("campaign_digest") != plan.get("campaign_digest")
         or not isinstance(profile_id, str)
     ):
-        raise QualificationError("durable load intent differs from its reviewed preview")
+        raise QualificationError(
+            "durable load intent differs from its reviewed preview"
+        )
     campaign_digest = plan.get("campaign_digest")
     node_ids = _string_array(request.get("node_ids"), "load-intent Spark IDs")
     if (
@@ -3192,7 +3367,9 @@ def _resume_load_and_smoke(
     failure_node_id = request.get("failure_node_id")
     if row.node_count == 2:
         if not isinstance(failure_node_id, str) or failure_node_id not in node_ids:
-            raise QualificationError("durable distributed load intent lacks its failure Spark")
+            raise QualificationError(
+                "durable distributed load intent lacks its failure Spark"
+            )
     elif failure_node_id is not None:
         raise QualificationError("single-Spark load intent has a failure Spark")
     if campaign_digest != _preview_digest(
@@ -3202,12 +3379,12 @@ def _resume_load_and_smoke(
         profile={"profile_digest": profile_digest},
         preview=preview,
         node_ids=node_ids,
-        failure_node_id=(
-            failure_node_id if isinstance(failure_node_id, str) else None
-        ),
+        failure_node_id=(failure_node_id if isinstance(failure_node_id, str) else None),
         profile_number=profile_number,
     ):
-        raise QualificationError("saved campaign digest no longer closes over its exact preview")
+        raise QualificationError(
+            "saved campaign digest no longer closes over its exact preview"
+        )
     kind, _definition = _fixture_bindings(row, fixtures)
     if request.get("smoke_kind") != kind:
         raise QualificationError("durable load intent changed its smoke fixture kind")
@@ -3221,7 +3398,9 @@ def _resume_load_and_smoke(
         request.get("operator_gate_accepted") is not row.operator_acceptance_required
         or request.get("capacity_review_accepted") is not capacity_review_required
     ):
-        raise QualificationError("durable load intent lacks exact recipe review acknowledgements")
+        raise QualificationError(
+            "durable load intent lacks exact recipe review acknowledgements"
+        )
 
     existing_application = _lookup_load_request(
         client,
@@ -3263,20 +3442,21 @@ def _resume_load_and_smoke(
         campaign_id=campaign_id,
         ledger=ledger,
         options=manifest,
-        failure_node_id=(
-            failure_node_id if isinstance(failure_node_id, str) else None
-        ),
+        failure_node_id=(failure_node_id if isinstance(failure_node_id, str) else None),
         operator_gate_accepted=row.operator_acceptance_required,
         capacity_review_accepted=capacity_review_required,
         clock=clock,
         sleeper=sleeper,
     )
-    if row.node_count == 2 and _latest_payload(
-        ledger, campaign_id, row.key, "rank-loss.pending"
-    ) is None:
+    if (
+        row.node_count == 2
+        and _latest_payload(ledger, campaign_id, row.key, "rank-loss.pending") is None
+    ):
         ranks = receipt.get("node_to_rank")
         if not isinstance(ranks, Mapping):
-            raise QualificationError("resumed canary lacks exact rank-to-Spark bindings")
+            raise QualificationError(
+                "resumed canary lacks exact rank-to-Spark bindings"
+            )
         ledger.append(
             "rank-loss.pending",
             plan_digest=campaign_id,
@@ -3324,7 +3504,9 @@ def _rank_lost(
     if failed_nodes != {failure_node_id}:
         return False, {}
     if set(node_to_rank) != set(node_ids) or failure_node_id not in node_to_rank:
-        raise QualificationError("rank-loss evidence lacks exact rank-to-Spark bindings")
+        raise QualificationError(
+            "rank-loss evidence lacks exact rank-to-Spark bindings"
+        )
     failure_rank = node_to_rank[failure_node_id]
     expected_present_ranks = set(range(len(node_ids))) - {failure_rank}
     failure_node = _nodes(fleet).get(failure_node_id)
@@ -3448,15 +3630,21 @@ def _restart_observation(
         None,
     )
     if baseline_record is None:
-        raise QualificationError("physical restart baseline is absent from durable evidence")
+        raise QualificationError(
+            "physical restart baseline is absent from durable evidence"
+        )
     baseline = _object(baseline_record.get("payload"), "restart baseline")
     raw_baselines = _object(baseline.get("nodes"), "restart boot IDs")
     if set(raw_baselines) != set(node_ids) or any(
         not isinstance(value, str) or not value for value in raw_baselines.values()
     ):
-        raise QualificationError("physical restart baseline does not match the exact Spark group")
+        raise QualificationError(
+            "physical restart baseline does not match the exact Spark group"
+        )
     if _run_presences(fleet, run_id) or _endpoint_exists(client, alias):
-        raise QualificationError("offline restart checkpoint requires cleanup and route withdrawal")
+        raise QualificationError(
+            "offline restart checkpoint requires cleanup and route withdrawal"
+        )
     if _all_loaded_runs(fleet):
         raise QualificationError(
             "offline restart checkpoint requires every whole-Fleet workload to be stopped"
@@ -3475,8 +3663,9 @@ def _restart_observation(
     if current_node is None:
         nodes = _nodes(fleet)
         recovery_records = {
-            str(_object(record.get("payload"), "restart evidence").get("node_id")):
-            _object(record.get("payload"), "restart evidence")
+            str(
+                _object(record.get("payload"), "restart evidence").get("node_id")
+            ): _object(record.get("payload"), "restart evidence")
             for record in observed
             if record.get("event") == "host-restart.recovered"
         }
@@ -3532,7 +3721,9 @@ def _restart_observation(
         }
     if offline_event is None:
         other_selected = set(node_ids) - {current_node}
-        if not all(other in nodes and _online(nodes[other]) for other in other_selected):
+        if not all(
+            other in nodes and _online(nodes[other]) for other in other_selected
+        ):
             return {
                 "complete": False,
                 "checkpoint": "host-offline",
@@ -3625,7 +3816,9 @@ def _restart_observation(
     )
     return {
         "complete": len(recovered | {current_node}) == len(node_ids),
-        "checkpoint": None if len(recovered | {current_node}) == len(node_ids) else "host-offline",
+        "checkpoint": None
+        if len(recovered | {current_node}) == len(node_ids)
+        else "host-offline",
         "next_node_id": next(
             (item for item in node_ids if item not in recovered | {current_node}), None
         ),
@@ -3645,7 +3838,9 @@ def _accept_if_complete(
     cleanup = _latest_payload(ledger, campaign_id, row.key, "profile.cleanup.completed")
     baseline = _latest_payload(ledger, campaign_id, row.key, "host-restart.baseline")
     if canary is None or cleanup is None or baseline is None:
-        raise QualificationError("spark-accepted gate is missing required physical evidence")
+        raise QualificationError(
+            "spark-accepted gate is missing required physical evidence"
+        )
     ranks = canary.get("node_to_rank")
     if (
         canary.get("recipe_content_sha256") != row.content_sha256
@@ -3656,7 +3851,9 @@ def _accept_if_complete(
         or any(type(value) is not int for value in ranks.values())
         or {int(value) for value in ranks.values()} != set(range(row.node_count))
     ):
-        raise QualificationError("canary evidence does not bind the exact recipe and Spark ranks")
+        raise QualificationError(
+            "canary evidence does not bind the exact recipe and Spark ranks"
+        )
     plan = _latest_payload(ledger, campaign_id, row.key, "plan.generated")
     if plan is None:
         raise QualificationError("canary evidence has no durable reviewed plan")
@@ -3667,7 +3864,9 @@ def _accept_if_complete(
     application = _object(canary.get("application"), "profile application receipt")
     smoke = _object(canary.get("smoke"), "fixture smoke receipt")
     smoke_preview = _object(plan.get("smoke_preview"), "reviewed smoke preview")
-    load_request = _latest_payload(ledger, campaign_id, row.key, "profile.load.requested")
+    load_request = _latest_payload(
+        ledger, campaign_id, row.key, "profile.load.requested"
+    )
     request_key = load_request.get("request_key") if load_request is not None else None
     reconciliation_digest = _object(
         plan.get("preview"), "reviewed profile preview"
@@ -3681,7 +3880,8 @@ def _accept_if_complete(
         dict(authority_row) != dict(row.raw)
         or canary.get("alias") != expected_alias
         or controller_identity.get("content_sha256") != row.content_sha256
-        or controller_identity.get("recipe_revision_id") != canary.get("recipe_revision_id")
+        or controller_identity.get("recipe_revision_id")
+        != canary.get("recipe_revision_id")
         or application.get("state") != "succeeded"
         or application.get("profile_digest") != plan.get("profile_digest")
         or not isinstance(request_key, str)
@@ -3695,7 +3895,9 @@ def _accept_if_complete(
             "exact_preparations"
         )
     ):
-        raise QualificationError("canary execution differs from its exact reviewed plan or fixtures")
+        raise QualificationError(
+            "canary execution differs from its exact reviewed plan or fixtures"
+        )
     smoke_cases = smoke.get("cases")
     if isinstance(smoke_cases, list):
         observed_case_ids = [
@@ -3704,7 +3906,9 @@ def _accept_if_complete(
     else:
         observed_case_ids = [smoke.get("case_id")]
     if observed_case_ids != list(row.smoke_cases):
-        raise QualificationError("smoke receipt does not cover the exact ordered reviewed cases")
+        raise QualificationError(
+            "smoke receipt does not cover the exact ordered reviewed cases"
+        )
     acknowledgements = _object(
         canary.get("review_acknowledgements"), "canary review acknowledgements"
     )
@@ -3712,10 +3916,13 @@ def _accept_if_complete(
         gate.get("kind") == "capacity-review" for gate in row.review_gates
     )
     if (
-        acknowledgements.get("operator_acceptance") is not row.operator_acceptance_required
+        acknowledgements.get("operator_acceptance")
+        is not row.operator_acceptance_required
         or acknowledgements.get("capacity_review") is not capacity_review_required
     ):
-        raise QualificationError("canary lacks the exact recipe review acknowledgements")
+        raise QualificationError(
+            "canary lacks the exact recipe review acknowledgements"
+        )
     if (
         cleanup.get("application_state") != "succeeded"
         or not isinstance(cleanup.get("application_id"), str)
@@ -3731,9 +3938,13 @@ def _accept_if_complete(
         set(baseline_nodes) != set(node_ids)
         or baseline.get("run_id") != canary.get("run_id")
         or baseline.get("route_alias") != canary.get("alias")
-        or any(not isinstance(value, str) or not value for value in baseline_nodes.values())
+        or any(
+            not isinstance(value, str) or not value for value in baseline_nodes.values()
+        )
     ):
-        raise QualificationError("restart baseline does not bind the exact canary run and Sparks")
+        raise QualificationError(
+            "restart baseline does not bind the exact canary run and Sparks"
+        )
     recovered_by_node: dict[str, tuple[int, Mapping[str, object]]] = {}
     offline_by_node: dict[str, tuple[int, Mapping[str, object]]] = {}
     event_positions: dict[str, int] = {}
@@ -3759,9 +3970,13 @@ def _accept_if_complete(
     ):
         raise QualificationError("cleanup and restart evidence are out of sequence")
     if set(recovered_by_node) != set(node_ids):
-        raise QualificationError("offline host restart evidence does not cover every selected Spark")
+        raise QualificationError(
+            "offline host restart evidence does not cover every selected Spark"
+        )
     if set(offline_by_node) != set(node_ids):
-        raise QualificationError("offline observations do not match the exact selected Spark group")
+        raise QualificationError(
+            "offline observations do not match the exact selected Spark group"
+        )
     baseline_position = event_positions["host-restart.baseline"]
     restart_events = sorted(
         [
@@ -3776,13 +3991,17 @@ def _accept_if_complete(
     offline_node: str | None = None
     for index, event, node_id in restart_events:
         if index <= baseline_position:
-            raise QualificationError("physical restart checkpoint preceded its clean baseline")
+            raise QualificationError(
+                "physical restart checkpoint preceded its clean baseline"
+            )
         if event == "offline":
             if offline_node is not None:
                 raise QualificationError("selected Spark restarts were not sequential")
             offline_node = node_id
         elif offline_node != node_id:
-            raise QualificationError("restart recovery does not follow that Spark's offline event")
+            raise QualificationError(
+                "restart recovery does not follow that Spark's offline event"
+            )
         else:
             offline_node = None
     if offline_node is not None:
@@ -3804,9 +4023,13 @@ def _accept_if_complete(
             or recovered.get("observed_boot_id") == baseline_nodes[node_id]
             or recovered.get("telemetry_freshness") != "live"
         ):
-            raise QualificationError(f"{node_id} restart evidence lacks an offline/changed live boot ID")
+            raise QualificationError(
+                f"{node_id} restart evidence lacks an offline/changed live boot ID"
+            )
     rank_loss = _latest_payload(ledger, campaign_id, row.key, "rank-loss.observed")
-    recovery = _latest_payload(ledger, campaign_id, row.key, "rank-recovery.smoke-completed")
+    recovery = _latest_payload(
+        ledger, campaign_id, row.key, "rank-recovery.smoke-completed"
+    )
     if row.node_count == 2:
         if rank_loss is None or recovery is None:
             raise QualificationError(
@@ -3821,7 +4044,9 @@ def _accept_if_complete(
         failed_presence = rank_loss.get("failed_rank_presence")
         recovered_presences = recovery.get("fleet_rank_presence")
         if not isinstance(survivors, list) or not isinstance(failed_presence, list):
-            raise QualificationError("rank-loss evidence lacks per-rank route-withdrawal receipts")
+            raise QualificationError(
+                "rank-loss evidence lacks per-rank route-withdrawal receipts"
+            )
         survivor_ranks: set[int] = set()
         survivor_evidence_valid = True
         for raw_presence in survivors:
@@ -3838,7 +4063,8 @@ def _accept_if_complete(
                 or presence.get("healthy") is not False
                 or presence.get("expected_rank_count") != row.node_count
                 or not isinstance(observed_present, list)
-                or set(observed_present) not in (
+                or set(observed_present)
+                not in (
                     expected_survivor_ranks,
                     set(range(row.node_count)),
                 )
@@ -3864,7 +4090,8 @@ def _accept_if_complete(
             or failure_node not in ranks
             or type(failure_rank) is not int
             or rank_loss.get("failure_rank") != failure_rank
-            or rank_loss.get("expected_present_ranks") != sorted(expected_survivor_ranks)
+            or rank_loss.get("expected_present_ranks")
+            != sorted(expected_survivor_ranks)
             or survivor_ranks != expected_survivor_ranks
             or not survivor_evidence_valid
             or not (
@@ -3882,9 +4109,11 @@ def _accept_if_complete(
             }
             != set(range(row.node_count))
             or any(
-                _object(item, "recovered rank presence").get("route_state") != "published"
+                _object(item, "recovered rank presence").get("route_state")
+                != "published"
                 or _object(item, "recovered rank presence").get("healthy") is not True
-                or _object(item, "recovered rank presence").get("group_state") != "healthy"
+                or _object(item, "recovered rank presence").get("group_state")
+                != "healthy"
                 or _object(item, "recovered rank presence").get("recipe_revision_id")
                 != canary.get("recipe_revision_id")
                 or _object(item, "recovered rank presence").get("member_node_ids")
@@ -3902,14 +4131,18 @@ def _accept_if_complete(
             ]
             != list(row.smoke_cases)
         ):
-            raise QualificationError("distributed failure/recovery evidence changed exact rank identity")
+            raise QualificationError(
+                "distributed failure/recovery evidence changed exact rank identity"
+            )
         if not (
             event_positions.get("canary.completed", -1)
             < event_positions.get("rank-loss.observed", -1)
             < event_positions.get("rank-recovery.smoke-completed", -1)
             < event_positions.get("profile.cleanup.completed", -1)
         ):
-            raise QualificationError("distributed fault and cleanup evidence are out of sequence")
+            raise QualificationError(
+                "distributed fault and cleanup evidence are out of sequence"
+            )
     payload = {
         "sequence": row.sequence,
         "recipe_content_sha256": row.content_sha256,
@@ -4035,11 +4268,15 @@ def run(
         raise QualificationError(
             f"{row.key} distributed fault acceptance requires a serving-route smoke fixture"
         )
-    evidence_nodes = list(args.spark) if not args.observe else _evidence_lock_nodes(
-        ledger, campaign_id, row
+    evidence_nodes = (
+        list(args.spark)
+        if not args.observe
+        else _evidence_lock_nodes(ledger, campaign_id, row)
     )
     if args.observe and not evidence_nodes:
-        raise QualificationError(f"{row.key} has no durable physical/load evidence to observe")
+        raise QualificationError(
+            f"{row.key} has no durable physical/load evidence to observe"
+        )
     if any(_NODE_ID.fullmatch(node_id) is None for node_id in evidence_nodes):
         raise QualificationError("qualification requires exact Controller Spark IDs")
     initial_fleet = _typed_fleet(client)
@@ -4061,15 +4298,23 @@ def run(
                 "scope_recipe_count": len(manifest.authority.rows),
             }
         if locked_row.key != row.key:
-            raise QualificationError("campaign advanced while acquiring locks; rerun for the next recipe")
+            raise QualificationError(
+                "campaign advanced while acquiring locks; rerun for the next recipe"
+            )
         row = locked_row
-        locked_nodes = list(args.spark) if not args.observe else _evidence_lock_nodes(
-            ledger, campaign_id, row
+        locked_nodes = (
+            list(args.spark)
+            if not args.observe
+            else _evidence_lock_nodes(ledger, campaign_id, row)
         )
         if sorted(locked_nodes) != sorted(evidence_nodes):
-            raise QualificationError("campaign evidence changed while acquiring locks; rerun")
+            raise QualificationError(
+                "campaign evidence changed while acquiring locks; rerun"
+            )
         if _qualification_lock_nodes(locked_fleet, locked_nodes) != lock_nodes:
-            raise QualificationError("campaign Spark identities changed while acquiring locks; rerun")
+            raise QualificationError(
+                "campaign Spark identities changed while acquiring locks; rerun"
+            )
         if args.observe:
             return _observe(
                 client=client,
@@ -4093,14 +4338,18 @@ def run(
                     "dual-Spark qualification requires --failure-spark to select the exact rank-loss target"
                 )
         elif args.failure_spark is not None:
-            raise QualificationError("--failure-spark is only valid for dual-Spark recipes")
+            raise QualificationError(
+                "--failure-spark is only valid for dual-Spark recipes"
+            )
         alias = (
             str(fixtures.service_recipes[row.key].alias)
             if kind == "openai-service"
             else f"q{row.sequence}"
         )
         if _ALIAS.fullmatch(alias) is None:
-            raise QualificationError(f"{row.key} smoke alias is invalid for a profile assignment")
+            raise QualificationError(
+                f"{row.key} smoke alias is invalid for a profile assignment"
+            )
         if args.apply:
             canary = _latest_payload(ledger, campaign_id, row.key, "canary.completed")
             if canary is not None:
@@ -4112,7 +4361,10 @@ def run(
                 )
                 if set(canary_nodes) != set(node_ids) or (
                     row.node_count == 2
-                    and (pending is None or pending.get("failure_spark") != args.failure_spark)
+                    and (
+                        pending is None
+                        or pending.get("failure_spark") != args.failure_spark
+                    )
                 ):
                     raise QualificationError(
                         "physical checkpoints are bound to another Spark group/rank; resume with --observe"
@@ -4227,8 +4479,7 @@ def run(
             failure_node_id=args.failure_spark,
             operator_gate_accepted=row.operator_acceptance_required,
             capacity_review_accepted=any(
-                gate.get("kind") == "capacity-review"
-                for gate in row.review_gates
+                gate.get("kind") == "capacity-review" for gate in row.review_gates
             ),
             clock=clock,
             sleeper=sleeper,
@@ -4304,25 +4555,41 @@ def _checkpoint_names(row: RecipeAuthorityRow) -> list[str]:
 def _next_checkpoint(
     ledger: EvidenceLedger, campaign_id: str, row: RecipeAuthorityRow
 ) -> dict[str, object]:
-    if _latest_payload(ledger, campaign_id, row.key, "recipe.spark-accepted") is not None:
+    if (
+        _latest_payload(ledger, campaign_id, row.key, "recipe.spark-accepted")
+        is not None
+    ):
         return {"checkpoint": "complete"}
     if _latest_payload(ledger, campaign_id, row.key, "canary.completed") is None:
         return {"checkpoint": "profile-load-and-fixture-canary"}
     if row.node_count == 2:
         if _latest_payload(ledger, campaign_id, row.key, "rank-loss.observed") is None:
-            pending = _latest_payload(ledger, campaign_id, row.key, "rank-loss.pending") or {}
+            pending = (
+                _latest_payload(ledger, campaign_id, row.key, "rank-loss.pending") or {}
+            )
             return {
                 "checkpoint": "distributed-rank-loss",
                 "failure_spark": pending.get("failure_spark"),
                 "instruction": "Take only the selected rank offline through the approved operator procedure, then run --observe.",
             }
-        if _latest_payload(ledger, campaign_id, row.key, "rank-recovery.smoke-completed") is None:
+        if (
+            _latest_payload(
+                ledger, campaign_id, row.key, "rank-recovery.smoke-completed"
+            )
+            is None
+        ):
             return {
                 "checkpoint": "distributed-rank-recovery",
                 "instruction": "Restore the failed rank through the approved operator procedure, then run --observe.",
             }
-    if _latest_payload(ledger, campaign_id, row.key, "profile.cleanup.completed") is None:
-        return {"checkpoint": "safe-cleanup", "instruction": "Run --observe to finish profile cleanup."}
+    if (
+        _latest_payload(ledger, campaign_id, row.key, "profile.cleanup.completed")
+        is None
+    ):
+        return {
+            "checkpoint": "safe-cleanup",
+            "instruction": "Run --observe to finish profile cleanup.",
+        }
     next_node = _next_restart_node(ledger, campaign_id, row)
     if next_node is not None:
         return {
@@ -4388,7 +4655,10 @@ def _observe(
     node_ids = _ordered_rank_nodes(node_to_rank, row.node_count)
     run_id = _string(canary.get("run_id"), "canary run ID")
     alias = _string(canary.get("alias"), "canary route alias")
-    if _latest_payload(ledger, campaign_id, row.key, "recipe.spark-accepted") is not None:
+    if (
+        _latest_payload(ledger, campaign_id, row.key, "recipe.spark-accepted")
+        is not None
+    ):
         return {"schema_version": 1, "status": "spark-accepted", "recipe": row.key}
 
     if row.node_count == 2:
@@ -4397,12 +4667,18 @@ def _observe(
             request = _latest_payload(
                 ledger, campaign_id, row.key, "profile.load.requested"
             )
-            failure_node = request.get("failure_node_id") if request is not None else None
+            failure_node = (
+                request.get("failure_node_id") if request is not None else None
+            )
             if not isinstance(failure_node, str) or failure_node not in node_ids:
-                raise QualificationError("distributed canary lacks its exact rank-loss target")
+                raise QualificationError(
+                    "distributed canary lacks its exact rank-loss target"
+                )
             ranks = canary.get("node_to_rank")
             if not isinstance(ranks, Mapping) or set(ranks) != set(node_ids):
-                raise QualificationError("distributed canary lacks exact rank-to-Spark bindings")
+                raise QualificationError(
+                    "distributed canary lacks exact rank-to-Spark bindings"
+                )
             pending = {
                 "failure_spark": failure_node,
                 "run_id": run_id,
@@ -4418,12 +4694,16 @@ def _observe(
                 payload=pending,
             )
         if pending is None:
-            raise QualificationError("distributed canary lacks its rank-loss target receipt")
+            raise QualificationError(
+                "distributed canary lacks its rank-loss target receipt"
+            )
         failure_node = _string(pending.get("failure_spark"), "failure Spark")
         revision_id = _string(pending.get("revision_id"), "recipe revision ID")
         node_to_rank = pending.get("node_to_rank")
         if not isinstance(node_to_rank, Mapping):
-            raise QualificationError("rank-loss request lacks exact rank-to-Spark identities")
+            raise QualificationError(
+                "rank-loss request lacks exact rank-to-Spark identities"
+            )
         if _latest_payload(ledger, campaign_id, row.key, "rank-loss.observed") is None:
             fleet = _typed_fleet(client)
             observed, proof = _rank_lost(
@@ -4458,7 +4738,12 @@ def _observe(
                 "next": _next_checkpoint(ledger, campaign_id, row),
                 "spark_accepted": False,
             }
-        if _latest_payload(ledger, campaign_id, row.key, "rank-recovery.smoke-completed") is None:
+        if (
+            _latest_payload(
+                ledger, campaign_id, row.key, "rank-recovery.smoke-completed"
+            )
+            is None
+        ):
             fleet = _typed_fleet(client)
             presences = _rank_recovered(
                 client,
@@ -4483,7 +4768,9 @@ def _observe(
                 recipe_content_sha256=row.content_sha256,
             )
             if smoke_preview.get("available") is not True:
-                raise QualificationError("distributed recovery smoke fixture is unavailable")
+                raise QualificationError(
+                    "distributed recovery smoke fixture is unavailable"
+                )
             smoke = ServiceSmokeAdapter(fixtures).run(client, alias, smoke_preview)
             payload = {
                 "fleet_rank_presence": presences,
@@ -4520,7 +4807,10 @@ def _observe(
                 "next": _next_checkpoint(ledger, campaign_id, row),
                 "spark_accepted": False,
             }
-    if _latest_payload(ledger, campaign_id, row.key, "profile.cleanup.completed") is None:
+    if (
+        _latest_payload(ledger, campaign_id, row.key, "profile.cleanup.completed")
+        is None
+    ):
         _profile_cleanup(
             client=client,
             profile_number=profile_number,
