@@ -43,8 +43,8 @@ removal and recovery are implemented and the combined source at `c1a92c29`
 passes full CI. The final acceptance audit identified two remaining concrete
 boundaries: W17 must display and bind the exact removal impact before consent,
 and W12 needs a connected cancellation-versus-removal race. Both increments
-and W19's disposable cleanup facilitator now pass local integrated checks;
-the follow-up PR revision needs its own combined CI before handoff.
+and W19's disposable cleanup facilitator pass local integrated checks and full
+Linux/ARM64 CI at `ab25b1d7`. U2 and the independent human scorecard remain open.
 
 The [shared-build closure checklist](#shared-build-closure-checklist) retains
 historical implementation detail. It does not supersede the current status.
@@ -168,16 +168,15 @@ and this remaining execution order. The detailed requirements below remain in
 scope; passing an individual package's own criteria does not close its open
 admission or storage dependency.
 
-1. Finish W17's Controller-owned pre-removal impact review and exact review
+1. **Complete at `ab25b1d7`:** W17's Controller-owned pre-removal impact review and exact review
    binding, including interactive consent, scripted review/acceptance, changed
    scope refusal and same-key recovery. Preserve current durable intent,
    reference fencing and crash-safe worker checkpoints.
-2. Qualify W12's cancellation/removal race through actual PostgreSQL and
+2. **Complete at `ab25b1d7`:** W12's cancellation/removal race through actual PostgreSQL and
    managed-storage owners. Pending cancellation must retain its references;
    removing one intent must not delete another consumer's artifacts.
-3. Complete the disposable U8 cleanup setup and repeat the affected installed
-   and connected gates at one integrated revision. Record final required CI
-   against that revision before promoting package evidence.
+3. **Complete at `ab25b1d7`:** the disposable U8 cleanup setup, affected
+   installed and connected gates, and required full CI at one source revision.
 4. Supply U2 with an exact compatible image/model pair that really starts and
    computes a result. Its current verified empty image is insufficient. Keep
    the later-page selection and distinct cache-blocked candidate intact.

@@ -3,8 +3,11 @@
 ## Active integration checkpoint — 2026-09-24
 
 The active candidate is `codex/cli-approved-integration` in
-`/private/tmp/vonk-cli-approved-integration`. Verified source checkpoint
-`c1a92c29` includes upstream `0123eeb4`, byte-bounded library pagination (`02ce6441`),
+`/private/tmp/vonk-cli-approved-integration`. The latest verified source is
+`ab25b1d77708ff998fc103baa4ea03bd359d728a`, including remote main `99fb22f2`,
+exact removal reviews, cancellation/removal recovery, the U8 cleanup facilitator,
+and current web-call-site receipt recovery. Its 23 applicable PR checks pass.
+The earlier verified source checkpoint `c1a92c29` includes upstream `0123eeb4`, byte-bounded library pagination (`02ce6441`),
 common build/profile admission locking (`b6be92fe`), durable model/recipe
 removal, truthful memory commitments, installed recipe-removal qualification
 and the full-CI corrections described below. This is not a merge, publication,
@@ -115,12 +118,23 @@ wheel and owners; its interactive counterpart is deliberately skipped. It
 shows queued and partial states before terminal effects and retains the shared
 object. These automated checks do not fill in a human scorecard.
 
-The earlier green CI links above apply to `c1a92c29`; the follow-up revision
-requires its own PR checks. Remaining handoff gates are final integrated CI and
-review, an explicit schema merge decision, U2's real runnable candidate, and the
-independent operator walkthrough. The user will run every model; that is
-separate physical evidence. No usability study, live cache removal, Controller
-deployment, or model campaign is claimed here.
+The complete follow-up CI now passes at
+`ab25b1d77708ff998fc103baa4ea03bd359d728a`:
+[full CI](https://github.com/CarstVaartjes/vonk-forge/actions/runs/35996952642),
+[ARM64 capsule recovery](https://github.com/CarstVaartjes/vonk-forge/actions/runs/35996952218),
+and [ARM64 signed helper](https://github.com/CarstVaartjes/vonk-forge/actions/runs/35996952272).
+All six full repository/Controller shards, wire contracts, Rust integration,
+Compose, generated clients, web and supply-chain checks pass. Generated clients
+also reproduce without local drift, the full type gate has no unlisted errors,
+and the coordination scanner retains zero reviewed sites. These results qualify
+source and the recorded disposable fixtures, not a published release.
+
+The remaining handoff work is U2's real runnable candidate and the independent
+operator walkthrough. The schema-changing source PR also needs an explicit
+operator merge decision. The user will run every model; that remains separate
+physical evidence. No usability study, live cache removal, Controller deployment,
+or model campaign is claimed here. Component worktrees remain preserved while
+the integrated PR is unmerged.
 
 ## Current authorization and integration base — 2026-09-24
 
@@ -162,10 +176,9 @@ Existing unrelated `.tmp/` files and `docs/handover-spark-canary.md` are preserv
 The rows distinguish repository/installed evidence from the final operator
 handoff. The current continuation implements W17's pre-consent removal review,
 qualifies W12's combined cancellation/removal race and adds W19's cleanup
-facilitator. Their local combined checks pass; the latest PR CI is separate.
-W09's admission and durable asset-ownership implementation has passing combined
-CI evidence at `c1a92c29`; changed boundaries must be requalified after this
-continuation. W19 also retains a genuine runnable U2 candidate and an independent
+facilitator. Their local combined checks and full PR CI pass at `ab25b1d7`.
+W09's admission and durable asset-ownership implementation and this
+continuation have passing combined CI evidence at `ab25b1d7`. W19 also retains a genuine runnable U2 candidate and an independent
 human scorecard. Passing an automated scenario does not fill that scorecard.
 
 | Package | State | Current evidence / remaining work |
@@ -179,16 +192,16 @@ human scorecard. Passing an automated scenario does not fill that scorecard.
 | W06 | Repository and installed observation criteria proven | Exact profile ID pinning; profile request/application selectors; noun-owned model/recipe/fleet-job progress; bounded sleep/request budget; distinct timeout/interruption documents and reconnect commands. Later workflow receipts, timeout/newer-application pinning, process restart, exact logs and resume now have connected and installed coverage. |
 | W07 | Repository and installed authoring criteria proven | Canonical definition read, preserving edits/configure, installed/running intent, private export and bounded import; stale and concurrent writes refused. |
 | W08 | Source/storage-owner and installed workflow criteria proven | Original-key recovery, HTTPS deadlines, durable update parents, process restart adoption, and real storage recovery are verified. Busy model/image writers release execution slots and reschedule without consuming transfer retries; eligible work remains reachable. Installed Find-and-prepare and combined gates pass; the unassisted journey remains W19. |
-| W09 | Repository and installed admission/ownership criteria proven at `c1a92c29` | W09d evidence below adds one effect projection, PostgreSQL workload/capacity fences, physical-pool memory accounting, durable disk/port/memory claims and child handoff. Exact preparation builds inherit parent memory, preserve declared reserves and reconnect before mutable capacity checks. Build cancellation now belongs to the exact attempt, preserving valid requests and verified images; new intent can proceed after cleanup without reviving cancellation. Installed intent no longer succeeds with an empty queue. Fresh post-stop checks, exact rebuilt-image identity and declared runtime reserve/pool propagation have recorded evidence. Retained-memory policy, common lock order and durable shared reference/removal ownership now have combined PostgreSQL/process and full-CI evidence. W17 adds the remaining operator-facing pre-consent removal review. |
+| W09 | Repository and installed admission/ownership criteria proven at `ab25b1d7` | W09d evidence below adds one effect projection, PostgreSQL workload/capacity fences, physical-pool memory accounting, durable disk/port/memory claims and child handoff. Exact preparation builds inherit parent memory, preserve declared reserves and reconnect before mutable capacity checks. Build cancellation now belongs to the exact attempt, preserving valid requests and verified images; new intent can proceed after cleanup without reviving cancellation. Installed intent no longer succeeds with an empty queue. Fresh post-stop checks, exact rebuilt-image identity and declared runtime reserve/pool propagation have recorded evidence. Retained-memory policy, common lock order and durable shared reference/removal ownership now have combined PostgreSQL/process and full-CI evidence. W17 adds the remaining operator-facing pre-consent removal review. |
 | W10 | Repository and installed review criteria proven | Interactive review, explicit scripted digest/consent, capacity display and bounded original-key recovery are integrated. Typed stale refusal triggers one current review without automatic resubmission. Representative installed whole-fleet review now covers affected and idle Sparks, exact asset reuse, replacement effects, interruption and per-node capacity reasons. Shared admission has combined evidence at `c1a92c29`. |
 | W11 | Repository and installed criteria proven | Durable model cancellation, exact-key recovery, publication fencing, shared transfer/verification settlement and process recovery pass connected and installed tests plus current combined gates. |
-| W12 | Owner settlement and connected cancellation/removal race pass locally; combined CI pending | Recipe cancellation commits exact model-child intent before signalling and waits for active writers; restart and shared-consumer PostgreSQL checks pass. The connected multi-recipe cancellation case now proves that a restarted parent does not admit later children. The connected update-parent/shared-consumer case preserves exact partial bytes and completes the unrelated consumer. The real PostgreSQL/storage cancellation/removal race now passes locally: pending cancellation blocks removal, a restarted parent settles its child, a fresh review changes digest, and subsequent cleanup retains shared bytes. |
+| W12 | Owner settlement and connected cancellation/removal criteria proven | Recipe cancellation commits exact model-child intent before signalling and waits for active writers; restart and shared-consumer PostgreSQL checks pass. The connected multi-recipe cancellation case now proves that a restarted parent does not admit later children. The connected update-parent/shared-consumer case preserves exact partial bytes and completes the unrelated consumer. The real PostgreSQL/storage cancellation/removal race now passes locally: pending cancellation blocks removal, a restarted parent settles its child, a fresh review changes digest, and subsequent cleanup retains shared bytes. |
 | W13 | Repository and connected cancellation criteria proven | Explicit cancellation retains claims until issued-effect reconciliation; typed progress is its authority. One due cancellation is observed separately from ordinary advancement, preserving parked recovery. Exact-key receipt recovery and installed cancellation/Activity visibility pass; partial multi-target stop, real worker process death and newer-intent ownership now pass connected PostgreSQL tests. The newer-intent case now settles the exact late agent receipt without reviving the old application or changing the replacement ordinal. |
 | W14 | Repository and installed criteria proven | Operation/job/audit history has owner-bound filters and keyset pagination. Resume checks complete target intent and revocation; cancellation projects exact owner/effects and uses one pending-state predicate for display/filtering. Existing bounded retry/retirement remains intact. Connected and installed resume/Activity checks and current combined gates pass. |
 | W15 | Repository and installed criteria proven | Profile-scoped endpoint projection binds loaded assignment, exact run and route generation. Connected PostgreSQL qualification covers installed-only, foreign-profile alias refusal, expiry and generation replacement through the real profile intent owner. Installed output verifies expiry and the credential-free usage example; withdrawal is observed through the installed client. |
 | W16 | Repository and installed criteria proven | Draft/upload/submit/detail/cancel/verified-download and request recovery pass CLI/API, real byte-route and installed checks. Exact named output identity, atomic verified publication and partial recovery are covered; current combined gates pass. Optional-output recipes now accept a canonical empty manifest; required-output minima are enforced both during result consumption and successful response validation. Installed human and JSON checks distinguish queued/unavailable, empty success and required-output failure, and show verified local files. Definitive refusals now offer read-only inspection or a new review; ambiguous and already-accepted requests retain exact recovery guidance. |
-| W17 | Durable removal and pre-consent impact review pass locally; combined CI pending | Upgrade/removal consent, one-at-a-time maintenance, exact-key replay and durable following pass focused checks. Stored recipe-removal replays now bind exact target, actor and model-retention choice with strict receipt validation. Concurrent first-submission ownership and durable pre-effect intent now pass connected and installed checks. The Controller now exposes exact pre-consent impact, current clients bind its digest, changed scope is refused, and installed replay and cleanup checks pass locally. |
-| W18 | Own repository and installed criteria proven; dependent delivery remains open | Real entry-point, shell, signed updater, terminal contexts and installed runbook/parser checks pass. Actual wheel/TLS/PostgreSQL tests cover delivered workflows. Combined source, generated contract, wire, build and supply-chain checks now pass. Final integrated CI and W19 are still required for the full handoff. |
+| W17 | Durable removal, pre-consent impact review and maintenance criteria proven | Upgrade/removal consent, one-at-a-time maintenance, exact-key replay and durable following pass focused checks. Stored recipe-removal replays now bind exact target, actor and model-retention choice with strict receipt validation. Concurrent first-submission ownership and durable pre-effect intent now pass connected and installed checks. The Controller now exposes exact pre-consent impact, current clients bind its digest, changed scope is refused, and installed replay and cleanup checks pass locally. |
+| W18 | Own repository and installed criteria proven; dependent delivery remains open | Real entry-point, shell, signed updater, terminal contexts and installed runbook/parser checks pass. Actual wheel/TLS/PostgreSQL tests cover delivered workflows. Combined source, generated contract, wire, build and supply-chain checks now pass. W19 remains required for the full handoff. |
 | W19 | In progress | Installed load, authoring, consent and closed-output acceptance exercise actual services/PostgreSQL; endpoint, connection, artifact-job, recipe cancellation and profile cancellation/Activity journeys also pass; interrupted update-batch, Find-and-prepare, sequential-upgrade and exact-resume acceptance pass. Current combined source/installed gates pass. The connected cancellation/removal case and U8 cleanup smoke now pass. A real runnable U2 candidate and the independent operator walkthrough still block handoff. No deployed or physical claim. |
 
 ## Historical checkpoints
