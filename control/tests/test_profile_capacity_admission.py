@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import FleetProfileService
@@ -483,3 +483,121 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
         reservation = session.get(ResourceReservation, reservation_id)
         assert snapshot is not None and snapshot.host_memory_free_bytes > 0
         assert reservation is not None and reservation.amount_bytes == 0
+
+
+def test_profile_load_refuses_a_run_while_shared_node_admission_is_held(
+    tmp_path, postgres_engine
+) -> None:
+    sessions, _, planner, profile, api, headers, _, nodes = _capacity_profile(
+        tmp_path, postgres_engine
+    )
+    lifecycle = planner._lifecycle
+    assert lifecycle is not None
+    with sessions() as session:
+        mapping_id = session.scalar(select(ClusterMapping.id))
+        build_id = session.scalar(select(RecipeBuild.id))
+        assert mapping_id is not None and build_id is not None
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    )
+    review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
+    assert review.status_code == 200 and review.json()["allowed"], review.text
+    run_plan = lifecycle.preview_run(installation.owner_id, "shared-node-admission")
+    assert run_plan.allowed, run_plan.nodes
+    request_key = str(uuid4())
+    with sessions() as session:
+        intents_before = set(
+            session.execute(
+                select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
+            )
+        )
+
+    expected_key = f"vonk-admission:node:{nodes[0]}"
+    run_thread_ids: list[int] = []
+    run_key_acquired = threading.Event()
+    release_run = threading.Event()
+    observed_keys: list[tuple[int, str | None]] = []
+
+    def hold_after_run_admission_key(
+        _connection, _cursor, statement, parameters, _context, _many
+    ):
+        if "pg_try_advisory_xact_lock" in statement:
+            values = parameters if isinstance(parameters, dict) else {}
+            thread_id = threading.get_ident()
+            key = values.get("key")
+            observed_keys.append((thread_id, key))
+        if (
+            "pg_try_advisory_xact_lock" in statement
+            and key == expected_key
+            and run_thread_ids
+            and thread_id == run_thread_ids[0]
+        ):
+            run_key_acquired.set()
+            assert release_run.wait(timeout=10), "test did not release the run admission"
+
+    def start_run():
+        run_thread_ids.append(threading.get_ident())
+        return lifecycle.start(
+            run_plan,
+            plan_digest=run_plan.plan_digest,
+            actor="admin",
+            request_id=str(uuid4()),
+        )
+
+    event.listen(
+        postgres_engine, "after_cursor_execute", hold_after_run_admission_key
+    )
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(start_run)
+            try:
+                assert run_key_acquired.wait(timeout=10)
+                response = api.post(
+                    f"/api/profile/{profile.number}/load",
+                    headers=headers,
+                    json={
+                        "plan_digest": review.json()["plan_digest"],
+                        "request_key": request_key,
+                    },
+                )
+                assert sum(key == expected_key for _, key in observed_keys) >= 2
+                assert any(
+                    thread_id != run_thread_ids[0] and key == expected_key
+                    for thread_id, key in observed_keys
+                )
+                assert response.status_code == 409, response.text
+                assert "busy" in response.json()["detail"].lower()
+                with sessions() as session:
+                    assert (
+                        session.scalar(
+                            select(FleetProfileApplication.id).where(
+                                FleetProfileApplication.request_key == request_key
+                            )
+                        )
+                        is None
+                    )
+                    assert set(
+                        session.execute(
+                            select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
+                        )
+                    ) == intents_before
+            finally:
+                release_run.set()
+            started = future.result(timeout=10)
+    finally:
+        release_run.set()
+        event.remove(
+            postgres_engine, "after_cursor_execute", hold_after_run_admission_key
+        )
+
+    assert started.id
+    with sessions() as session:
+        assert session.scalar(select(Job.id).where(Job.id == started.id)) is not None
+        assert (
+            session.scalar(
+                select(FleetProfileApplication.id).where(
+                    FleetProfileApplication.request_key == request_key
+                )
+            )
+            is None
+        )

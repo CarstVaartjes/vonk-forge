@@ -592,12 +592,49 @@ class RecipeOperationService:
             )
         now = self._clock()
         with self._sessions.begin() as session:
+            try:
+                acquire_admission_keys(
+                    session,
+                    (
+                        job_request_key(request_id),
+                        node_admission_key(plan.builder_node_id),
+                    ),
+                )
+                locked = lock_admission_rows(
+                    session,
+                    (
+                        AdmissionRowLock(
+                            "build-builder-node",
+                            AgentNode,
+                            select(AgentNode).where(
+                                AgentNode.node_id == plan.builder_node_id
+                            ),
+                        ),
+                        AdmissionRowLock(
+                            "build-recipe-revision",
+                            CatalogDocumentRevision,
+                            select(CatalogDocumentRevision).where(
+                                CatalogDocumentRevision.id == plan.recipe_revision_id
+                            ),
+                        ),
+                        AdmissionRowLock(
+                            "build-recipe-build",
+                            RecipeBuild,
+                            select(RecipeBuild).where(
+                                RecipeBuild.id == plan.build_id
+                            ),
+                        ),
+                    ),
+                )
+            except AdmissionLockBusy as error:
+                raise RecipeBuildAdmissionBusy() from error
+            build = next(iter(locked["build-recipe-build"]), None)
+
             # A parent-owned build must revalidate its exact execution claim
             # in the same transaction that accepts the child. The guard does
             # SQL work only and retains its parent fence through this commit.
             if admission_guard is not None:
                 admission_guard(session)
-            build = session.get(RecipeBuild, plan.build_id, with_for_update=True)
             if (
                 build is not None
                 and build.state == "succeeded"

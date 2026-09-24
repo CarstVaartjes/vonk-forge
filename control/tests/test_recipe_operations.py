@@ -5818,7 +5818,6 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
     uninstall_plan = service.preview_uninstall(installation.owner_id)
     available_before = queue.available
     role = threading.local()
-    backend_pids: dict[str, int] = {}
     uninstall_locked = threading.Event()
     start_lock_started = threading.Event()
     release_uninstall = threading.Event()
@@ -5829,7 +5828,7 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
             and "FROM recipe_installations" in statement
             and "FOR UPDATE" in statement
         ):
-            backend_pids["start"] = _postgres_backend_pid(connection)
+            assert "NOWAIT" in statement.upper()
             start_lock_started.set()
 
     def after_lock(connection, _cursor, statement, _parameters, _context, _many):
@@ -5838,7 +5837,6 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
             and "FROM recipe_installations" in statement
             and "FOR UPDATE" in statement
         ):
-            backend_pids["uninstall"] = _postgres_backend_pid(connection)
             uninstall_locked.set()
             assert release_uninstall.wait(timeout=10)
 
@@ -5860,7 +5858,7 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
                 actor="admin",
                 request_id="f" * 35 + "6",
             )
-        except RecipeOperationConflict as error:
+        except (RecipeOperationConflict, RunAdmissionBusy) as error:
             return error
 
     event.listen(postgres_engine, "before_cursor_execute", before_lock)
@@ -5871,22 +5869,43 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
         assert uninstall_locked.wait(timeout=10)
         start_future = pool.submit(start)
         assert start_lock_started.wait(timeout=10)
-        _wait_for_postgres_block(
-            postgres_engine,
-            blocked_pid=backend_pids["start"],
-            blocker_pid=backend_pids["uninstall"],
+        completed, _ = wait((start_future,), timeout=3.0)
+        returned_while_uninstall_held = start_future in completed
+        start_result_while_held = (
+            start_future.result() if returned_while_uninstall_held else None
         )
         release_uninstall.set()
         uninstall_view = uninstall_future.result(timeout=10)
-        start_result = start_future.result(timeout=10)
+        start_result = (
+            start_result_while_held
+            if returned_while_uninstall_held
+            else start_future.result(timeout=10)
+        )
     finally:
         release_uninstall.set()
         pool.shutdown(wait=True)
         event.remove(postgres_engine, "before_cursor_execute", before_lock)
         event.remove(postgres_engine, "after_cursor_execute", after_lock)
 
-    assert isinstance(start_result, RecipeOperationConflict)
-    assert "not runnable" in str(start_result)
+    assert returned_while_uninstall_held, (
+        "start waited on the accepted uninstall instead of returning a bounded "
+        f"admission refusal: {start_result!r}"
+    )
+    assert isinstance(start_result, RunAdmissionBusy), (
+        "start did not report retryable row-lock contention while uninstall "
+        f"was still held: {start_result!r}"
+    )
+
+    # The busy refusal has no durable request owner, so the exact request can
+    # be retried after the uninstall commits. At that point the committed
+    # uninstall is authoritative and refuses the run for its actual reason.
+    with pytest.raises(RecipeOperationConflict, match="not runnable"):
+        service.start(
+            run_plan,
+            plan_digest=run_plan.plan_digest,
+            actor="admin",
+            request_id="f" * 35 + "6",
+        )
     assert queue.available == available_before + 1
     with sessions() as session:
         start_jobs = tuple(

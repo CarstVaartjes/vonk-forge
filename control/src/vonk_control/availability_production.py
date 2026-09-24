@@ -24,6 +24,11 @@ from vonk_agent_protocol import RecipeBuildEvidence
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
+from .admission_locking import (
+    AdmissionLockBusy,
+    acquire_admission_keys,
+    node_admission_key,
+)
 from .bounded_json import require_mapping
 from .models import (
     AgentNode,
@@ -63,6 +68,7 @@ _BUILDER_ADMISSION_CODES = frozenset(
     {
         "build.node_unknown",
         "build.node_incompatible",
+        "build.capacity_busy",
         "build.inventory_missing",
         "build.inventory_stale",
         "build.capability_missing",
@@ -581,6 +587,12 @@ def build_recipe_image_availability(
                         for candidate in candidates
                     )
                     for _, candidate_id in ordered_candidates:
+                        try:
+                            acquire_admission_keys(
+                                session, (node_admission_key(candidate_id),)
+                            )
+                        except AdmissionLockBusy:
+                            continue
                         locked = session.scalar(
                             select(AgentNode)
                             .where(AgentNode.node_id == candidate_id)
@@ -643,6 +655,22 @@ def build_recipe_image_availability(
                     str(error)[:512],
                 ) from error
             with sessions.begin() as session:
+                try:
+                    acquire_admission_keys(
+                        session, (node_admission_key(candidate_id),)
+                    )
+                except AdmissionLockBusy:
+                    attempted_candidates.add(candidate_id)
+                    selected_candidate = next(
+                        (
+                            other_id
+                            for other_id in candidate_ids
+                            if other_id != candidate_id
+                            and other_id not in attempted_candidates
+                        ),
+                        None,
+                    )
+                    continue
                 parent = service._require_claim(session, claim)
                 parent_payload = parent.payload
                 parent_runtime = require_mapping(parent_payload["runtime"], "runtime")

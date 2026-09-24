@@ -20,6 +20,13 @@ from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
+from .admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    acquire_admission_keys,
+    lock_admission_rows,
+    node_admission_key,
+)
 from .catalog_revision_contract import (
     BuildModelArtifactProjection,
     BuildResourcesProjection,
@@ -1006,7 +1013,25 @@ class RecipeBuildService:
         This helper intentionally never opens another transaction.  It may be
         called while the availability parent and builder rows are locked.
         """
-        node = session.get(AgentNode, plan.builder_node_id, with_for_update=True)
+        try:
+            acquire_admission_keys(
+                session, (node_admission_key(plan.builder_node_id),)
+            )
+            locked = lock_admission_rows(
+                session,
+                (
+                    AdmissionRowLock(
+                        "build-builder-node",
+                        AgentNode,
+                        select(AgentNode).where(
+                            AgentNode.node_id == plan.builder_node_id
+                        ),
+                    ),
+                ),
+            )
+            node = next(iter(locked["build-builder-node"]), None)
+        except AdmissionLockBusy as error:
+            raise RecipeBuildAdmissionBusy() from error
         if node is None:
             raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
         _validate_builder(node)
@@ -1193,7 +1218,12 @@ class RecipeBuildService:
         request_id: str | None = None,
     ) -> None:
         try:
+            acquire_admission_keys(
+                session, (node_admission_key(plan.builder_node_id),)
+            )
             self._reserve_in_session(session, plan, now=now, request_id=request_id)
+        except AdmissionLockBusy as error:
+            raise RecipeBuildAdmissionBusy() from error
         except RecipeBuildError:
             raise
         except ValueError as error:
@@ -1216,14 +1246,33 @@ class RecipeBuildService:
         now: datetime,
         request_id: str | None,
     ) -> None:
-        build = session.get(RecipeBuild, plan.build_id, with_for_update=True)
-        revision = (
-            session.get(
-                CatalogDocumentRevision, plan.recipe_revision_id, with_for_update=True
-            )
-            if build is not None
-            else None
+        locked = lock_admission_rows(
+            session,
+            (
+                AdmissionRowLock(
+                    "build-builder-node",
+                    AgentNode,
+                    select(AgentNode).where(
+                        AgentNode.node_id == plan.builder_node_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "build-recipe-revision",
+                    CatalogDocumentRevision,
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.id == plan.recipe_revision_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "build-recipe-build",
+                    RecipeBuild,
+                    select(RecipeBuild).where(RecipeBuild.id == plan.build_id),
+                ),
+            ),
         )
+        node = next(iter(locked["build-builder-node"]), None)
+        revision = next(iter(locked["build-recipe-revision"]), None)
+        build = next(iter(locked["build-recipe-build"]), None)
         if (
             revision is None
             or revision.kind != "recipe"
@@ -1266,7 +1315,6 @@ class RecipeBuildService:
             raise RecipeBuildError(
                 "build.inventory_missing", "fresh builder inventory is unavailable"
             ) from error
-        node = session.get(AgentNode, plan.builder_node_id, with_for_update=True)
         if node is None:
             raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
         _validate_builder(node)

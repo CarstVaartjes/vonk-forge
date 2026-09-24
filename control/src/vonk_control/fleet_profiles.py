@@ -18,6 +18,12 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
+from .admission_locking import (
+    AdmissionLockBusy,
+    acquire_admission_keys,
+    is_admission_contention,
+    node_admission_key,
+)
 from .agent_jobs import AgentJobService
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -260,6 +266,12 @@ def _persisted_profile_plan(row: FleetProfileApplication) -> FleetProfilePreview
     ):
         raise FleetProfileConflict("Persisted Fleet profile plan identity is invalid")
     return plan
+
+
+def _profile_application_effect_nodes(plan: FleetProfilePreview) -> tuple[str, ...]:
+    """Return the exact sorted node scope of reviewed profile effects."""
+
+    return tuple(sorted({node_id for step in plan.steps for node_id in step.node_ids}))
 
 
 def _persisted_profile_result(
@@ -1961,7 +1973,9 @@ class FleetProfileService:
         )
 
     @contextmanager
-    def _admission_session(self, actor: str) -> Iterator[Session]:
+    def _admission_session(
+        self, actor: str, *, node_ids: Sequence[str] = ()
+    ) -> Iterator[Session]:
         """Freeze roster, catalog, workload effects and capacity, including inserts.
 
         PostgreSQL's implicit writer locks participate, so another owner cannot
@@ -1971,6 +1985,15 @@ class FleetProfileService:
         try:
             with self._sessions.begin() as session:
                 self._authorize(session, actor)
+                try:
+                    acquire_admission_keys(
+                        session,
+                        tuple(node_admission_key(node_id) for node_id in node_ids),
+                    )
+                except AdmissionLockBusy as error:
+                    raise FleetProfileConflict(
+                        "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
+                    ) from error
                 if session.get_bind().dialect.name == "postgresql":
                     session.execute(
                         text(
@@ -1985,12 +2008,7 @@ class FleetProfileService:
                     )
                 yield session
         except OperationalError as error:
-            if getattr(error.orig, "sqlstate", None) in {
-                "55P03",
-                "40P01",
-                "40001",
-                "57014",
-            }:
+            if is_admission_contention(error):
                 raise FleetProfileConflict(
                     "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
                 ) from None
@@ -3342,7 +3360,9 @@ class FleetProfileService:
                 )
             }
         )
-        with self._admission_session(actor) as session:
+        with self._admission_session(
+            actor, node_ids=preview.scope.node_ids
+        ) as session:
             profile = session.get(
                 FleetProfile, preview.profile_id, with_for_update={"nowait": True}
             )
@@ -4147,9 +4167,25 @@ class FleetProfileService:
         if str(parsed_key) != request_key:
             raise FleetProfileConflict("Profile cancellation request key is invalid")
 
+        with self._sessions() as snapshot_session:
+            self._authorize(snapshot_session, actor)
+            snapshot = snapshot_session.get(FleetProfileApplication, application_id)
+            if snapshot is None:
+                raise KeyError(application_id)
+            snapshot_number = snapshot_session.scalar(
+                select(FleetProfile.number).where(
+                    FleetProfile.id == snapshot.profile_id
+                )
+            )
+            if snapshot_number != profile_number:
+                raise KeyError(application_id)
+            snapshot_scope = _profile_application_effect_nodes(
+                _persisted_profile_plan(snapshot)
+            )
+
         now = _aware(self._clock())
         cancellation: FleetProfileApplicationCancellationIntent | None = None
-        with self._admission_session(actor) as session:
+        with self._admission_session(actor, node_ids=snapshot_scope) as session:
             row = session.get(
                 FleetProfileApplication,
                 application_id,
@@ -4166,6 +4202,12 @@ class FleetProfileService:
                 raise KeyError(application_id)
 
             progress = _persisted_profile_progress(row)
+            plan = _persisted_profile_plan(row)
+            scope = _profile_application_effect_nodes(plan)
+            if scope != snapshot_scope:
+                raise FleetProfileConflict(
+                    "Profile application scope changed during cancellation"
+                )
             previous = progress.cancellation
             if previous is not None:
                 if (
@@ -4180,12 +4222,6 @@ class FleetProfileService:
             else:
                 if row.state not in {"queued", "running", "waiting-for-operator"}:
                     raise FleetProfileConflict("Profile application is not cancellable")
-                plan = _persisted_profile_plan(row)
-                scope = tuple(
-                    sorted(
-                        {node_id for step in plan.steps for node_id in step.node_ids}
-                    )
-                )
                 ordinal = progress.workload_intent_ordinal
                 if scope and ordinal is None:
                     raise FleetProfileConflict(
