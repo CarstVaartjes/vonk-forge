@@ -1012,75 +1012,180 @@ def _validate_preparations(
         raise QualificationError(
             f"{row.key} preparation does not cover the exact selected Sparks"
         )
-    if preparation.get("targets_ready") is not True or preparation.get("ready") is not True:
-        raise QualificationError(
-            f"{row.key} is blocked: this runner requires exact model and runtime-image "
-            "bytes already verified on every selected Spark; prepare the exact assets "
-            "on those Sparks and rerun the preview. No profile load was submitted"
-        )
     model = _object(preparation.get("model"), "model preparation")
     if model.get("recipe_revision_sha256") != row.content_sha256:
         raise QualificationError(f"{row.key} preparation is bound to another revision")
     model_digests = {str(item["content_sha256"]) for item in row.model_license_refs}
     observed_model_digests = {str(model.get("model_content_sha256"))}
     dependencies = model.get("dependency_model_content_sha256", [])
-    if not isinstance(dependencies, list) or any(not isinstance(value, str) for value in dependencies):
-        raise QualificationError(f"{row.key} preparation Model dependency identities are invalid")
+    if not isinstance(dependencies, list) or any(
+        not isinstance(value, str) for value in dependencies
+    ):
+        raise QualificationError(
+            f"{row.key} preparation Model dependency identities are invalid"
+        )
     observed_model_digests.update(dependencies)
     if observed_model_digests != model_digests:
-        raise QualificationError(f"{row.key} prepared exact Models differ from authority")
+        raise QualificationError(
+            f"{row.key} prepared exact Models differ from authority"
+        )
     artifact_set_sha256 = model.get("artifact_set_sha256")
-    if not isinstance(artifact_set_sha256, str) or _SHA256.fullmatch(artifact_set_sha256) is None:
+    if (
+        not isinstance(artifact_set_sha256, str)
+        or _SHA256.fullmatch(artifact_set_sha256) is None
+    ):
         raise QualificationError(f"{row.key} model artifact-set identity is invalid")
     model_controller = _object(model.get("controller"), "Controller model cache")
     if (
         model_controller.get("state") != "ready"
         or model_controller.get("verified_sha256") != artifact_set_sha256
+        or model_controller.get("verified_at") is None
+        or model_controller.get("expected_bytes") != model.get("artifact_set_bytes")
+        or model_controller.get("verified_bytes") != model.get("artifact_set_bytes")
+        or model_controller.get("missing_bytes") != 0
     ):
-        raise QualificationError(f"{row.key} Controller model cache lacks exact verification")
+        raise QualificationError(
+            f"{row.key} Controller model cache lacks exact verification"
+        )
     model_targets = model.get("targets")
     if not isinstance(model_targets, list):
         raise QualificationError(f"{row.key} model target evidence is invalid")
-    model_target_map = {
-        str(target.get("node_id")): target
-        for target in (_object(item, "model target") for item in model_targets)
-    }
-    if set(model_target_map) != set(node_ids) or any(
-        target.get("state") != "ready"
-        or target.get("verified_sha256") != artifact_set_sha256
-        for target in model_target_map.values()
-    ):
-        raise QualificationError(f"{row.key} selected Sparks lack exact model bytes")
+    if len(model_targets) != len(node_ids):
+        raise QualificationError(f"{row.key} model target evidence is incomplete")
+    model_target_map: dict[str, Mapping[str, object]] = {}
+    for raw_target in model_targets:
+        target = _object(raw_target, "model target")
+        target_node_id = _string(target.get("node_id"), "model target Spark ID")
+        if target_node_id in model_target_map:
+            raise QualificationError(f"{row.key} model target evidence is duplicated")
+        model_target_map[target_node_id] = target
+    if set(model_target_map) != set(node_ids):
+        raise QualificationError(f"{row.key} model target scope differs from selection")
+    for target in model_target_map.values():
+        state = target.get("state")
+        if state == "ready":
+            if (
+                target.get("verified_sha256") != artifact_set_sha256
+                or target.get("verified_at") is None
+            ):
+                raise QualificationError(
+                    f"{row.key} selected Spark has mismatched model verification"
+                )
+        elif state in {"unknown", "missing"}:
+            if (
+                target.get("verified_sha256") is not None
+                or target.get("verified_at") is not None
+            ):
+                raise QualificationError(
+                    f"{row.key} unready model target claims verified bytes"
+                )
+        else:
+            raise QualificationError(
+                f"{row.key} model target state {state!r} is not eligible for exact transfer"
+            )
     image = _object(preparation.get("runtime_image"), "runtime image preparation")
     image_digest = image.get("image_digest")
     image_layout = image.get("oci_layout_sha256")
+    image_bytes = image.get("image_bytes")
     if (
         not isinstance(image_digest, str)
         or _OCI_DIGEST.fullmatch(image_digest) is None
         or not isinstance(image_layout, str)
         or _SHA256.fullmatch(image_layout) is None
+        or type(image_bytes) is not int
+        or image_bytes < 0
     ):
         raise QualificationError(f"{row.key} runtime image identity is invalid")
-    image_controller = _object(image.get("controller"), "Controller runtime image cache")
+    image_controller = _object(
+        image.get("controller"), "Controller runtime image cache"
+    )
     if (
         image_controller.get("state") != "ready"
         or image_controller.get("verified_sha256") != image_layout
+        or image_controller.get("verified_at") is None
+        or image_controller.get("expected_bytes") != image_bytes
+        or image_controller.get("verified_bytes") != image_bytes
+        or image_controller.get("missing_bytes") != 0
     ):
         raise QualificationError(f"{row.key} Controller runtime image is not verified")
     image_targets = image.get("targets")
     if not isinstance(image_targets, list):
         raise QualificationError(f"{row.key} runtime image target evidence is invalid")
-    image_target_map = {
-        str(target.get("node_id")): target
-        for target in (_object(item, "runtime image target") for item in image_targets)
-    }
-    if set(image_target_map) != set(node_ids) or any(
-        target.get("state") != "ready"
-        or target.get("verified_sha256") != image_layout
-        or target.get("imported_image_digest") != image_digest
-        for target in image_target_map.values()
-    ):
-        raise QualificationError(f"{row.key} selected Sparks lack the exact runtime image")
+    if len(image_targets) != len(node_ids):
+        raise QualificationError(
+            f"{row.key} runtime image target evidence is incomplete"
+        )
+    image_target_map: dict[str, Mapping[str, object]] = {}
+    for raw_target in image_targets:
+        target = _object(raw_target, "runtime image target")
+        target_node_id = _string(target.get("node_id"), "runtime image target Spark ID")
+        if target_node_id in image_target_map:
+            raise QualificationError(
+                f"{row.key} runtime image target evidence is duplicated"
+            )
+        image_target_map[target_node_id] = target
+    if set(image_target_map) != set(node_ids):
+        raise QualificationError(
+            f"{row.key} runtime image target scope differs from selection"
+        )
+    for target in image_target_map.values():
+        state = target.get("state")
+        if state == "ready":
+            if (
+                target.get("verified_sha256") != image_layout
+                or target.get("imported_image_digest") != image_digest
+                or target.get("verified_at") is None
+            ):
+                raise QualificationError(
+                    f"{row.key} selected Spark has mismatched runtime image verification"
+                )
+        elif state in {"unknown", "missing"}:
+            if (
+                target.get("verified_sha256") is not None
+                or target.get("imported_image_digest") is not None
+                or target.get("verified_at") is not None
+            ):
+                raise QualificationError(
+                    f"{row.key} unready runtime image target claims verified bytes"
+                )
+        else:
+            raise QualificationError(
+                f"{row.key} runtime image target state {state!r} is not eligible for exact transfer"
+            )
+
+    all_targets_ready = all(
+        target.get("state") == "ready"
+        for target in (*model_target_map.values(), *image_target_map.values())
+    )
+    if preparation.get("targets_ready") is not all_targets_ready:
+        raise QualificationError(
+            f"{row.key} target readiness does not match asset evidence"
+        )
+    exceptions = preparation.get("exceptions", [])
+    if not isinstance(exceptions, list):
+        raise QualificationError(f"{row.key} preparation exception evidence is invalid")
+    exceptions_ready = True
+    for raw_exception in exceptions:
+        exception = _object(raw_exception, "preparation exception")
+        if exception.get("state") != "ready":
+            exceptions_ready = False
+    reasons = preparation.get("reasons", [])
+    if not isinstance(reasons, list):
+        raise QualificationError(f"{row.key} preparation reasons are invalid")
+    blockers_absent = True
+    for raw_reason in reasons:
+        reason = _object(raw_reason, "preparation reason")
+        if reason.get("severity") == "blocker":
+            blockers_absent = False
+    expected_ready = all_targets_ready and exceptions_ready and blockers_absent
+    if preparation.get("ready") is not expected_ready:
+        raise QualificationError(
+            f"{row.key} rollout readiness does not match asset evidence"
+        )
+    if not exceptions_ready or not blockers_absent:
+        raise QualificationError(
+            f"{row.key} preparation contains a non-transfer blocker"
+        )
     return {
         "recipe_revision_sha256": row.content_sha256,
         "model_content_sha256": model.get("model_content_sha256"),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -154,6 +155,104 @@ def _row(
     )
 
 
+def _rollout_preparation(
+    *,
+    node_ids: tuple[str, ...] = (NODE_A,),
+    model_state: str = "unknown",
+    image_state: str = "unknown",
+) -> dict[str, object]:
+    model_set_digest = "e" * 64
+    image_digest = "sha256:" + "f" * 64
+    image_layout_digest = "a" * 64
+    verified_at = "2026-09-24T10:00:00Z"
+
+    def target(
+        node_id: str,
+        state: str,
+        *,
+        verified_sha256: str | None,
+        imported_image_digest: str | None = None,
+    ) -> dict[str, object]:
+        ready = state == "ready"
+        return {
+            "node_id": node_id,
+            "state": state,
+            "expected_bytes": 100,
+            "present_bytes": 100 if ready else 0,
+            "missing_bytes": 0 if ready else 100,
+            "verified_sha256": verified_sha256 if ready else None,
+            "imported_image_digest": imported_image_digest if ready else None,
+            "verified_at": verified_at if ready else None,
+            "reason": None
+            if ready
+            else "The exact asset is not verified on this Spark.",
+        }
+
+    return {
+        "schema_version": 2,
+        "controller_ready": True,
+        "targets_ready": model_state == "ready" and image_state == "ready",
+        "ready": model_state == "ready" and image_state == "ready",
+        "target_node_ids": sorted(node_ids),
+        "model": {
+            "artifact_set_sha256": model_set_digest,
+            "model_content_sha256": "d" * 64,
+            "recipe_revision_sha256": CONTENT_SHA,
+            "artifact_count": 1,
+            "artifact_set_bytes": 100,
+            "dependency_model_content_sha256": [],
+            "completeness": "complete" if model_state == "ready" else "incomplete",
+            "controller": {
+                "state": "ready",
+                "expected_bytes": 100,
+                "verified_bytes": 100,
+                "missing_bytes": 0,
+                "verified_sha256": model_set_digest,
+                "verified_at": verified_at,
+                "source": "nas-cache",
+                "reason": None,
+            },
+            "targets": [
+                target(
+                    node_id,
+                    model_state,
+                    verified_sha256=model_set_digest,
+                )
+                for node_id in sorted(node_ids)
+            ],
+        },
+        "runtime_image": {
+            "image_digest": image_digest,
+            "oci_layout_sha256": image_layout_digest,
+            "image_bytes": 100,
+            "architecture": "linux-arm64",
+            "runtime_interface": "vonk.runtime.v1",
+            "build_id": "build-1",
+            "controller": {
+                "state": "ready",
+                "expected_bytes": 100,
+                "verified_bytes": 100,
+                "missing_bytes": 0,
+                "verified_sha256": image_layout_digest,
+                "verified_at": verified_at,
+                "source": "controller-build",
+                "reason": None,
+            },
+            "targets": [
+                target(
+                    node_id,
+                    image_state,
+                    verified_sha256=image_layout_digest,
+                    imported_image_digest=image_digest,
+                )
+                for node_id in sorted(node_ids)
+            ],
+        },
+        "exceptions": [],
+        "reasons": [],
+    }
+
+
 def _node(
     node_id: str,
     *,
@@ -294,6 +393,92 @@ def test_profile_application_digest_binds_preview_retry_and_request_identity() -
         )
         != expected
     )
+
+
+def test_verified_controller_assets_allow_a_cold_two_spark_preview() -> None:
+    node_ids = (NODE_A, NODE_B)
+    row = replace(
+        _row(node_count=2),
+        model_license_refs=({"content_sha256": "d" * 64},),
+    )
+    preparation = _rollout_preparation(node_ids=node_ids)
+    assert preparation["controller_ready"] is True
+    assert preparation["targets_ready"] is False
+    assert preparation["ready"] is False
+
+    exact = campaign_cli._validate_preparations(
+        {
+            "preparations": [
+                {
+                    "assignment_id": "12345678-1234-4123-8123-123456789abc",
+                    "preparation": preparation,
+                }
+            ]
+        },
+        row,
+        [NODE_B, NODE_A],
+    )
+
+    assert exact == {
+        "recipe_revision_sha256": CONTENT_SHA,
+        "model_content_sha256": "d" * 64,
+        "dependency_model_content_sha256": [],
+        "artifact_set_sha256": "e" * 64,
+        "image_digest": "sha256:" + "f" * 64,
+        "oci_layout_sha256": "a" * 64,
+        "target_node_ids": [NODE_A, NODE_B],
+    }
+
+
+@pytest.mark.parametrize(
+    ("asset_name", "target_state"),
+    [("model", "failed"), ("runtime_image", "unsupported")],
+)
+def test_failed_or_unsupported_spark_assets_still_block_cold_preview(
+    asset_name: str, target_state: str
+) -> None:
+    row = replace(
+        _row(),
+        model_license_refs=({"content_sha256": "d" * 64},),
+    )
+    preparation = _rollout_preparation()
+    asset = preparation[asset_name]
+    assert isinstance(asset, dict)
+    targets = asset["targets"]
+    assert isinstance(targets, list)
+    target = targets[0]
+    assert isinstance(target, dict)
+    target["state"] = target_state
+    target["reason"] = "The target asset failed its prior preparation."
+
+    with pytest.raises(QualificationError, match="not eligible for exact transfer"):
+        campaign_cli._validate_preparations(
+            {"preparations": [{"preparation": preparation}]},
+            row,
+            [NODE_A],
+        )
+
+
+def test_ready_spark_model_must_match_the_controller_artifact_digest() -> None:
+    row = replace(
+        _row(),
+        model_license_refs=({"content_sha256": "d" * 64},),
+    )
+    preparation = _rollout_preparation(model_state="ready", image_state="ready")
+    model = preparation["model"]
+    assert isinstance(model, dict)
+    targets = model["targets"]
+    assert isinstance(targets, list)
+    target = targets[0]
+    assert isinstance(target, dict)
+    target["verified_sha256"] = "0" * 64
+
+    with pytest.raises(QualificationError, match="mismatched model verification"):
+        campaign_cli._validate_preparations(
+            {"preparations": [{"preparation": preparation}]},
+            row,
+            [NODE_A],
+        )
 
 
 class _NoRequests:
