@@ -18,6 +18,7 @@ from vonk_control.recipe_operations import (
     RecipeOperationService,
 )
 from vonk_control.resource_planning import (
+    MemoryReservationTotals,
     PlannedStopRelease,
     ResourceDemand,
     memory_capacity_snapshot,
@@ -221,7 +222,7 @@ def test_unified_demand_checks_each_separate_pool_without_adding_independent_cla
         tmp_path, engine=postgres_engine, memory_kind="unified", memory_pool=pool
     )
     for kind in ("host-memory", "gpu-memory"):
-        _claim(sessions, node, now, kind=kind, amount=50, owner="run")
+        _claim(sessions, node, now, kind=kind, amount=50, owner="recipe-build")
     runs = RunAdmissionService(sessions)
     plan = runs.plan_run(installation, "unified", now=now)
     assert plan.allowed == (pool == "separate")
@@ -236,7 +237,10 @@ def test_separate_pools_recheck_the_other_constraint_after_a_planned_stop():
         "unified",
         host=(100, 80),
         accelerator=(100, 60),
-        reservations={"host-memory": 50, "gpu-memory": 10},
+        reservations=MemoryReservationTotals(
+            {"host-memory": 50, "gpu-memory": 10},
+            {"host-memory": 50, "gpu-memory": 10},
+        ),
         memory_pool="separate",
         evidence_state="fresh",
     )

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.inventory import MemoryPool
 
-from .models import RecipeBuild, RecipeRun, ResourceReservation
+from .models import RecipeBuild, RecipeRun, ResourceReservation, RunNode
 from .profile_capacity import (
     profile_build_memory_claims,
     profile_memory_floor,
@@ -14,7 +14,7 @@ from .profile_capacity import (
     reservation_visible,
 )
 from .recipe_execution_contract import parse_stored_run_plan
-from .resource_planning import memory_reservation_kinds
+from .resource_planning import MemoryReservationTotals, memory_reservation_kinds
 from .run_switch_contract import StopImpact
 
 MEMORY_RESERVATION_KINDS = ("host-memory", "gpu-memory", "unified-memory")
@@ -80,7 +80,7 @@ def memory_reservations(
     excluded_profile_application_ids: Sequence[str] = (),
     excluded_profile_claim_ids: Sequence[str] = (),
     excluded_run_ids: Sequence[str] = (),
-) -> dict[str, int]:
+) -> MemoryReservationTotals:
     claims = tuple(
         session.scalars(
             select(ResourceReservation)
@@ -97,10 +97,22 @@ def memory_reservations(
         )
     )
     if memory_pool is None:
-        return {
+        committed = {
             kind: sum(claim.amount_bytes for claim in claims if claim.kind == kind)
             for kind in MEMORY_RESERVATION_KINDS
         }
+        unmaterialized = {
+            kind: sum(
+                claim.amount_bytes
+                for claim in claims
+                if claim.kind == kind and _claim_is_unmaterialized(session, claim)
+            )
+            for kind in MEMORY_RESERVATION_KINDS
+        }
+        return MemoryReservationTotals(
+            {kind: amount for kind, amount in committed.items() if amount},
+            {kind: amount for kind, amount in unmaterialized.items() if amount},
+        )
     active = [claim for claim in claims if claim.state == "active"]
     future: dict[str, list[ResourceReservation]] = {}
     for claim in claims:
@@ -138,7 +150,8 @@ def memory_reservations(
         ):
             if inherited.owner_id in replacements:
                 replacements[inherited.owner_id].add(build_claim.id)
-    totals = {}
+    committed_totals: dict[str, int] = {}
+    unmaterialized_totals: dict[str, int] = {}
     for pool_kind in (
         ("unified-memory",)
         if memory_pool == "shared"
@@ -147,6 +160,11 @@ def memory_reservations(
         overlapping = memory_reservation_kinds(pool_kind, memory_pool)
         live = [claim for claim in active if claim.kind in overlapping]
         total = sum(claim.amount_bytes for claim in live)
+        unmaterialized = sum(
+            claim.amount_bytes
+            for claim in live
+            if _claim_is_unmaterialized(session, claim)
+        )
         credited: set[str] = set()
         for owner, promised in future.items():
             demand = sum(
@@ -157,8 +175,53 @@ def memory_reservations(
                 for claim in live
                 if claim.id not in credited and claim.id in replacements[owner]
             ]
-            total += max(0, demand - sum(claim.amount_bytes for claim in replaced))
+            increment = max(0, demand - sum(claim.amount_bytes for claim in replaced))
+            total += increment
+            replaced_unmaterialized = sum(
+                claim.amount_bytes
+                for claim in replaced
+                if _claim_is_unmaterialized(session, claim)
+            )
+            # A promise replacing a live run is still a future allocation.
+            # Only another not-yet-materialized claim can supply overlap here;
+            # aggregate free already includes the live run's current use, not
+            # its reserved peak or the promised replacement's future demand.
+            unmaterialized += max(0, demand - replaced_unmaterialized)
             credited.update(claim.id for claim in replaced)
         if total:
-            totals[pool_kind] = total
-    return totals
+            committed_totals[pool_kind] = total
+        if unmaterialized:
+            unmaterialized_totals[pool_kind] = unmaterialized
+    return MemoryReservationTotals(committed_totals, unmaterialized_totals)
+
+
+def _claim_is_unmaterialized(session: Session, claim: ResourceReservation) -> bool:
+    """Whether the owner has not yet materialized memory on its exact node."""
+    if claim.owner_kind == "fleet-profile":
+        return True
+    if claim.owner_kind == "recipe-build":
+        # The builder's process is external to this SQL receipt. Keep its
+        # committed envelope against observed free until the build owner
+        # releases it; hard pool limits still count it only once.
+        return True
+    if claim.owner_kind != "run":
+        raise ValueError("memory reservation has an unsupported owner kind")
+    run = session.get(RecipeRun, claim.owner_id)
+    if run is None:
+        return True
+    run_node = session.scalar(
+        select(RunNode).where(
+            RunNode.run_id == claim.owner_id,
+            RunNode.node_id == claim.node_id,
+        )
+    )
+    if run_node is None:
+        return True
+    # The reservation amount remains a hard ledger commitment even if its
+    # owner binding has drifted. Only the persisted exact rank state is used
+    # here to avoid charging a currently running process a second time against
+    # aggregate free bytes; the existing replacement matcher still requires
+    # the run/claim digest to agree before counting any overlap.
+    # Rank launch precedes model allocation and collective readiness.
+    # Its receipt cannot release a not-yet-materialized promise.
+    return run_node.state != "running"

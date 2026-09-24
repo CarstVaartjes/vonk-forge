@@ -120,6 +120,9 @@ def test_replacement_owns_memory_before_and_after_old_claim_is_released(
         assert old_claim is not None
         demand = old_claim.amount_bytes
         old_claim_id = old_claim.id
+        old_totals = memory_reservations(session, nodes[0], memory_pool="shared")
+        assert old_totals.committed_bytes_by_kind == {"unified-memory": demand}
+        assert old_totals.unmaterialized_bytes_by_kind == {}
     application_id, _ = _load(profile, api, headers)
     with sessions() as session:
         pending = session.scalar(
@@ -129,8 +132,12 @@ def test_replacement_owns_memory_before_and_after_old_claim_is_released(
             )
         )
         assert pending is not None and pending.state == "promised"
-        assert memory_reservations(session, nodes[0], memory_pool="shared") == {
+        totals = memory_reservations(session, nodes[0], memory_pool="shared")
+        assert totals.committed_bytes_by_kind == {
             "unified-memory": max(demand, pending.amount_bytes)
+        }
+        assert totals.unmaterialized_bytes_by_kind == {
+            "unified-memory": pending.amount_bytes
         }
     stop_id = _drive_to_job(profiles, planner, sessions, "recipe.stop")
     lifecycle.record_node_result(
@@ -139,9 +146,9 @@ def test_replacement_owns_memory_before_and_after_old_claim_is_released(
     with sessions() as session:
         released = session.get(ResourceReservation, old_claim_id)
         assert released is not None and released.state == "released"
-        assert memory_reservations(session, nodes[0], memory_pool="shared") == {
-            "unified-memory": demand
-        }
+        totals = memory_reservations(session, nodes[0], memory_pool="shared")
+        assert totals.committed_bytes_by_kind == {"unified-memory": demand}
+        assert totals.unmaterialized_bytes_by_kind == {"unified-memory": demand}
 
 
 @pytest.mark.parametrize("change", ["missing", "amount", "pool", "digest", "intent"])
@@ -242,6 +249,8 @@ def test_stale_or_unrelated_work_cannot_supply_replacement_overlap(
             assert node is not None
             node.workload_intent_ordinal += 1
     with sessions() as session:
-        assert memory_reservations(session, nodes[0], memory_pool="shared") == {
-            "unified-memory": 2 * demand
+        totals = memory_reservations(session, nodes[0], memory_pool="shared")
+        assert totals.committed_bytes_by_kind == {"unified-memory": 2 * demand}
+        assert totals.unmaterialized_bytes_by_kind == {
+            "unified-memory": demand * (2 if change == "owner" else 1)
         }

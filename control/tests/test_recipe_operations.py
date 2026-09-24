@@ -6,7 +6,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -105,7 +105,7 @@ from vonk_control.route_runtime import (
     RouteRuntimeError,
     verify_active_route_bundle,
 )
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
@@ -5903,6 +5903,220 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
     assert start_jobs == ()
     assert runs == ()
     assert {child.node_id for child in uninstall_children} == set(nodes)
+
+
+def test_postgres_start_refuses_without_waiting_on_a_busy_agent_node(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A node-row conflict returns a domain refusal before releasing its holder."""
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="e" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "busy-node")
+    assert plan.allowed
+    available_before = queue.available
+    role = threading.local()
+    start_node_lock_requested = threading.Event()
+
+    def observe_start_node_lock(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ):
+        if (
+            getattr(role, "value", None) == "start"
+            and "FROM agent_nodes" in statement
+            and "FOR UPDATE" in statement
+        ):
+            start_node_lock_requested.set()
+
+    def start():
+        role.value = "start"
+        return service.start(
+            plan,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="e" * 35 + "1",
+        )
+
+    event.listen(postgres_engine, "before_cursor_execute", observe_start_node_lock)
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        with sessions() as holder:
+            holder.begin()
+            locked_node = holder.scalar(
+                select(AgentNode).where(AgentNode.node_id == nodes[0]).with_for_update()
+            )
+            assert locked_node is not None
+            future = pool.submit(start)
+            lock_requested = start_node_lock_requested.wait(timeout=10)
+            completed, _ = wait((future,), timeout=0.5)
+            returned_while_held = future in completed
+            held_error = future.exception() if returned_while_held else None
+            holder.commit()
+
+        try:
+            start_result = future.result(timeout=10)
+            start_error: Exception | None = None
+        except (RecipeOperationConflict, RunAdmissionBusy) as error:
+            start_result = None
+            start_error = error
+    finally:
+        pool.shutdown(wait=True)
+        event.remove(postgres_engine, "before_cursor_execute", observe_start_node_lock)
+
+    assert lock_requested, "start never attempted to lock the target AgentNode"
+    assert returned_while_held, (
+        "lifecycle start waited for a busy AgentNode row; after holder release "
+        f"it returned {start_result!r} with error={start_error!r} "
+        f"(while held: {held_error!r})"
+    )
+    assert isinstance(held_error, RunAdmissionBusy), (
+        f"start did not return the current refusal while the row was held: "
+        f"error={held_error!r} result_after_release={start_result!r} "
+        f"error_after_release={start_error!r}"
+    )
+    assert queue.available == available_before
+    with sessions() as session:
+        start_jobs = tuple(
+            session.scalars(select(Job).where(Job.kind == "recipe.start"))
+        )
+        runs = tuple(session.scalars(select(RecipeRun)))
+    assert start_jobs == ()
+    assert runs == ()
+
+    request_id = "e" * 35 + "1"
+    retried = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=request_id,
+    )
+    assert queue.available == available_before + 1
+    replay = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=request_id,
+    )
+    assert replay.id == retried.id
+    assert queue.available == available_before + 1
+    with sessions() as session:
+        assert (
+            len(tuple(session.scalars(select(Job).where(Job.kind == "recipe.start"))))
+            == 1
+        )
+        assert len(tuple(session.scalars(select(RecipeRun)))) == 1
+
+
+def test_postgres_start_bounds_uncommitted_job_request_unique_wait(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """An implicit unique-index wait rolls back and preserves exact-key retry."""
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="d" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "busy-request")
+    assert plan.allowed
+    request_id = "e" * 35 + "2"
+    available_before = queue.available
+    created_at = NOW
+    holder = sessions()
+    holder.begin()
+    holder.add(
+        Job(
+            id="f" * 36,
+            request_id=request_id,
+            kind="recipe.start",
+            state="running",
+            actor="admin",
+            authority_revision="a" * 64,
+            targets=list(nodes),
+            payload_digest="b" * 64,
+            payload={
+                "schema_version": 1,
+                "owner_kind": "run",
+                "owner_id": "c" * 36,
+                "plan_digest": plan.plan_digest,
+            },
+            created_at=created_at,
+            updated_at=created_at,
+        )
+    )
+    holder.flush()
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(
+        service.start,
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=request_id,
+    )
+    try:
+        completed, _ = wait((future,), timeout=3.0)
+        returned_while_unique_row_uncommitted = future in completed
+        busy_error = (
+            future.exception() if returned_while_unique_row_uncommitted else None
+        )
+    finally:
+        holder.rollback()
+        holder.close()
+        if not future.done():
+            future.result(timeout=10)
+        pool.shutdown(wait=True)
+
+    assert returned_while_unique_row_uncommitted, (
+        "start waited on the jobs.request_id unique index; the admission lock "
+        "budget must bound implicit unique waits"
+    )
+    assert isinstance(busy_error, RunAdmissionBusy), (
+        f"uncommitted request collision did not become a retryable admission "
+        f"refusal: {busy_error!r}"
+    )
+    assert queue.available == available_before
+    with sessions() as session:
+        assert tuple(session.scalars(select(RecipeRun))) == ()
+        assert (
+            tuple(session.scalars(select(Job).where(Job.kind == "recipe.start"))) == ()
+        )
+        assert (
+            tuple(
+                session.scalars(
+                    select(ResourceReservation).where(
+                        ResourceReservation.owner_kind == "run"
+                    )
+                )
+            )
+            == ()
+        )
+
+    retried = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=request_id,
+    )
+    replay = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=request_id,
+    )
+    assert replay.id == retried.id
+    assert queue.available == available_before + 1
+    with sessions() as session:
+        assert len(tuple(session.scalars(select(RecipeRun)))) == 1
+        assert (
+            len(tuple(session.scalars(select(Job).where(Job.kind == "recipe.start"))))
+            == 1
+        )
 
 
 def test_changed_plan_or_reused_request_key_is_rejected(tmp_path: Path) -> None:

@@ -760,12 +760,13 @@ def _distributed_start_timeout() -> int:
 class DatabaseWaitBudgets:
     """Every finite upper bound on a PostgreSQL wait, in one place.
 
-    The engine applies these per connection and to its pool, so contention
-    surfaces as a bounded error the caller can reschedule instead of an
-    unbounded wait that silently stops a worker.
+    The engine applies the connection and pool budgets per connection. The
+    admission budget narrows ``lock_timeout`` inside admission transactions so
+    implicit foreign-key and unique-index waits are rescheduled promptly.
     """
 
     lock_timeout_ms: int
+    admission_lock_timeout_ms: int
     statement_timeout_ms: int
     transaction_timeout_ms: int
     idle_in_transaction_timeout_ms: int
@@ -798,6 +799,9 @@ def database_wait_budgets() -> DatabaseWaitBudgets:
     """Read and validate the finite wait budgets owned by configuration."""
 
     lock = _bounded_int_env("VONK_DATABASE_LOCK_TIMEOUT_MS", 30_000, 1_000, 600_000)
+    admission_lock = _bounded_int_env(
+        "VONK_DATABASE_ADMISSION_LOCK_TIMEOUT_MS", 750, 1, 600_000
+    )
     statement = _bounded_int_env(
         "VONK_DATABASE_STATEMENT_TIMEOUT_MS", 120_000, 1_000, 3_600_000
     )
@@ -807,6 +811,10 @@ def database_wait_budgets() -> DatabaseWaitBudgets:
     idle = _bounded_int_env(
         "VONK_DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS", 60_000, 1_000, 600_000
     )
+    if admission_lock > lock:
+        raise SettingsError(
+            "database admission lock budget must not exceed the lock budget"
+        )
     if not lock <= statement <= transaction:
         raise SettingsError(
             "database wait budgets must satisfy lock <= statement <= transaction"
@@ -817,6 +825,7 @@ def database_wait_budgets() -> DatabaseWaitBudgets:
         )
     return DatabaseWaitBudgets(
         lock_timeout_ms=lock,
+        admission_lock_timeout_ms=admission_lock,
         statement_timeout_ms=statement,
         transaction_timeout_ms=transaction,
         idle_in_transaction_timeout_ms=idle,

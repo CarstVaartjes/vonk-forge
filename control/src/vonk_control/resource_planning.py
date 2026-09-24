@@ -190,6 +190,14 @@ class ResourceDemand:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryReservationTotals:
+    """Exact peak commitments and promises not yet reflected in physical free."""
+
+    committed_bytes_by_kind: Mapping[str, int]
+    unmaterialized_bytes_by_kind: Mapping[str, int]
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryRequirement:
     """One recipe rank's demand and reserve, shared by review and admission."""
 
@@ -277,7 +285,7 @@ def memory_capacity_snapshot(
     *,
     host: tuple[int, int] | None,
     accelerator: tuple[int, int] | None,
-    reservations: Mapping[str, int],
+    reservations: MemoryReservationTotals,
     memory_pool: MemoryPool | None,
     evidence_state: EvidenceState,
     evidence_digest: str | None = None,
@@ -285,7 +293,17 @@ def memory_capacity_snapshot(
     def component(kind: MemoryKind, values: tuple[int, int] | None) -> CapacitySnapshot:
         reserved = (
             sum(
-                reservations.get(item, 0)
+                reservations.committed_bytes_by_kind.get(item, 0)
+                for item in memory_reservation_kinds(
+                    memory_reservation_kind(kind), memory_pool
+                )
+            )
+            if memory_pool is not None
+            else None
+        )
+        unmaterialized = (
+            sum(
+                reservations.unmaterialized_bytes_by_kind.get(item, 0)
                 for item in memory_reservation_kinds(
                     memory_reservation_kind(kind), memory_pool
                 )
@@ -302,6 +320,7 @@ def memory_capacity_snapshot(
             reserved,
             evidence_state if total is not None else "unknown",
             evidence_digest,
+            unmaterialized_bytes=unmaterialized,
         )
 
     if memory_pool == "shared":
@@ -322,7 +341,12 @@ def memory_capacity_snapshot(
     limiting = min(
         components,
         key=lambda item: (
-            item.available_bytes - item.occupied_bytes - item.reserved_bytes
+            min(
+                item.available_bytes - item.reserved_bytes,
+                item.available_bytes
+                - item.occupied_bytes
+                - (item.unmaterialized_bytes or 0),
+            )
             if item.available_bytes is not None
             and item.occupied_bytes is not None
             and item.reserved_bytes is not None
@@ -342,6 +366,7 @@ class CapacitySnapshot:
     evidence_state: EvidenceState = "unknown"
     evidence_digest: str | None = None
     components: tuple[CapacitySnapshot, ...] = ()
+    unmaterialized_bytes: int | None = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,7 +413,7 @@ class ResourcePreflightPlan:
             self.settings is not None
             and self.capacity is not None
             and self.capacity.allowed
-            and not self.reasons
+            and not any(reason.severity == "blocker" for reason in self.reasons)
         )
 
 
@@ -707,14 +732,32 @@ def resource_demand(
             None, None, None, None, None, None, "unknown", tuple(reasons)
         )
     selected = resolution.settings
-    if evidence.evidence_state in {"unknown", "stale"}:
+    declared_bound = (
+        evidence.declared_total_bytes
+        if type(evidence.declared_total_bytes) is int
+        and evidence.declared_total_bytes >= 0
+        else None
+    )
+    uncertain: list[str] = []
+    if evidence.declared_total_bytes is not None and declared_bound is None:
         reasons.append(
             _reason(
-                "resource.evidence_unknown",
-                "Memory evidence is missing or stale for the selected settings.",
+                "resource.evidence_invalid",
+                "Declared recipe-role memory envelope is invalid.",
                 node_id=node_id,
             )
         )
+    if evidence.evidence_state in {"unknown", "stale"}:
+        if declared_bound is None:
+            reasons.append(
+                _reason(
+                    "resource.evidence_unknown",
+                    "Memory evidence is missing or stale and no declared role bound is available.",
+                    node_id=node_id,
+                )
+            )
+        else:
+            uncertain.append(f"{evidence.evidence_state} evidence")
     if evidence.evidence_digest is not None and not _is_digest(
         evidence.evidence_digest
     ):
@@ -729,14 +772,22 @@ def resource_demand(
         ("weights_bytes", evidence.weights_bytes),
         ("runtime_overhead_bytes", evidence.runtime_overhead_bytes),
     ):
-        if (type(item) is not int or item < 0) and not (
-            type(evidence.declared_total_bytes) is int
-            and evidence.declared_total_bytes >= 0
-        ):
+        if item is None:
+            if declared_bound is None:
+                reasons.append(
+                    _reason(
+                        "resource.evidence_unknown",
+                        f"{name} is missing and no declared role bound is available.",
+                        node_id=node_id,
+                    )
+                )
+            else:
+                uncertain.append(name)
+        elif type(item) is not int or item < 0:
             reasons.append(
                 _reason(
-                    "resource.evidence_unknown",
-                    f"{name} is missing or invalid; capacity cannot be predicted.",
+                    "resource.evidence_invalid",
+                    f"{name} is invalid; resource evidence cannot be trusted.",
                     node_id=node_id,
                 )
             )
@@ -767,13 +818,27 @@ def resource_demand(
         node_id,
         required=selected.batch_tokens is not None,
     )
-    for term in (context, concurrency, batch):
-        reasons.extend(term[1])
-    total: int | None = None
-    if not reasons and all(
-        isinstance(term[0], int) for term in (context, concurrency, batch)
+    terms: list[tuple[int | None, tuple[ResourceReason, ...]]] = []
+    for name, term in (
+        ("context", context),
+        ("concurrency", concurrency),
+        ("batch", batch),
     ):
-        base = evidence.declared_total_bytes
+        if term[0] is None and declared_bound is not None:
+            if term[1] and all(
+                reason.code.endswith(("_unknown", "_unsupported")) for reason in term[1]
+            ):
+                uncertain.append(f"{name} estimate")
+                terms.append((0, ()))
+            else:
+                terms.append(term)
+                reasons.extend(term[1])
+        else:
+            terms.append(term)
+            reasons.extend(term[1])
+    total: int | None = None
+    if not reasons and all(isinstance(term[0], int) for term in terms):
+        base = declared_bound
         if (
             base is None
             and type(evidence.weights_bytes) is int
@@ -783,10 +848,19 @@ def resource_demand(
         if base is not None:
             total = (
                 base
-                + require_integer(context[0], "context")
-                + require_integer(concurrency[0], "concurrency")
-                + require_integer(batch[0], "batch")
+                + require_integer(terms[0][0], "context")
+                + require_integer(terms[1][0], "concurrency")
+                + require_integer(terms[2][0], "batch")
             )
+    if uncertain and declared_bound is not None and total is not None:
+        reasons.append(
+            _reason(
+                "resource.estimate_uncertain",
+                f"Forecast {total} bytes from the declared recipe-role memory envelope ({declared_bound} bytes); {', '.join(dict.fromkeys(uncertain))} is unavailable, so actual demand may exceed this bound.",
+                severity="warning",
+                node_id=node_id,
+            )
+        )
     return ResourceDemand(
         evidence.weights_bytes if type(evidence.weights_bytes) is int else None,
         evidence.runtime_overhead_bytes
@@ -896,10 +970,12 @@ def plan_capacity(
             continue
         occupied = capacity.occupied_bytes
         reserved = capacity.reserved_bytes
+        unmaterialized = capacity.unmaterialized_bytes
         for name, value in (
             ("available", available),
             ("occupied", occupied),
             ("reserved", reserved),
+            ("unmaterialized", unmaterialized),
         ):
             if type(value) is not int or value < 0:
                 node_reasons.append(
@@ -922,8 +998,9 @@ def plan_capacity(
             not isinstance(available, int)
             or not isinstance(occupied, int)
             or not isinstance(reserved, int)
+            or not isinstance(unmaterialized, int)
             or total_bytes is None
-            or node_reasons
+            or any(reason.severity == "blocker" for reason in node_reasons)
         ):
             nodes.append(
                 NodeCapacityPlan(
@@ -938,7 +1015,12 @@ def plan_capacity(
                 )
             )
             continue
-        current = available - occupied - reserved - total_bytes
+        # The exact peak commitment owns the hard admission budget. Only
+        # promises that have not materialized reduce observed free bytes: a
+        # live run's use is already part of ``occupied`` and must not be
+        # charged against free a second time.
+        current = available - occupied - unmaterialized - total_bytes
+        budget_after = available - reserved - total_bytes - memory_floor_bytes
         release = releases.get((node_id, capacity.memory_kind), 0)
         if not release:
             release = max(
@@ -951,17 +1033,34 @@ def plan_capacity(
                 default=0,
             )
         after_stop = current + release
-        current_fit = current >= memory_floor_bytes
-        after_fit = after_stop >= memory_floor_bytes
+        budget_after_stop = budget_after + release
+        current_fit = current >= memory_floor_bytes and budget_after >= 0
+        after_fit = after_stop >= memory_floor_bytes and budget_after_stop >= 0
         selected = after_stop if release else current
-        allowed = selected >= memory_floor_bytes
-        if not allowed:
+        allowed = (after_fit if release else current_fit) and not any(
+            reason.severity == "blocker" for reason in node_reasons
+        )
+        if budget_after < 0 and (not release or budget_after_stop < 0):
             node_reasons.append(
                 _reason(
-                    "resource.insufficient_capacity_after_stop"
-                    if release
-                    else "resource.insufficient_capacity",
-                    f"Selected settings leave {selected} bytes after planned stops.",
+                    "resource.insufficient_reservation_budget",
+                    f"Exact memory commitments plus demand and reserve exceed the physical pool by {-budget_after} bytes.",
+                    node_id=node_id,
+                )
+            )
+        if current < memory_floor_bytes and not release:
+            node_reasons.append(
+                _reason(
+                    "resource.insufficient_capacity",
+                    f"Selected demand leaves {current} bytes before the required {memory_floor_bytes}-byte reserve.",
+                    node_id=node_id,
+                )
+            )
+        elif release and after_stop < memory_floor_bytes:
+            node_reasons.append(
+                _reason(
+                    "resource.insufficient_capacity_after_stop",
+                    f"Selected demand leaves {selected} bytes after planned stops; {memory_floor_bytes} bytes must remain reserved.",
                     node_id=node_id,
                 )
             )
@@ -981,7 +1080,9 @@ def plan_capacity(
     reasons.extend(reason for node in nodes for reason in node.reasons)
     return CapacityPlan(
         tuple(nodes),
-        bool(nodes) and not reasons and all(node.allowed for node in nodes),
+        bool(nodes)
+        and all(node.allowed for node in nodes)
+        and not any(reason.severity == "blocker" for reason in reasons),
         any(node.stop_required for node in nodes),
         tuple(reasons),
     )
@@ -1103,9 +1204,27 @@ def _term(
                 ),
             )
         )
+    if baseline is not None and (type(baseline) is not int or baseline < 0):
+        return None, (
+            _reason(
+                f"resource.{name}_evidence_invalid",
+                f"Measured baseline evidence for {name} is invalid.",
+                node_id=node_id,
+            ),
+        )
     if supported is not None and (
-        len(supported) != 2 or value < supported[0] or value > supported[1]
+        len(supported) != 2
+        or any(type(item) is not int or item < 0 for item in supported)
+        or supported[0] > supported[1]
     ):
+        return None, (
+            _reason(
+                f"resource.{name}_evidence_invalid",
+                f"Declared supported range for {name} is invalid.",
+                node_id=node_id,
+            ),
+        )
+    if supported is not None and (value < supported[0] or value > supported[1]):
         return None, (
             _reason(
                 f"resource.{name}_unsupported",
@@ -1123,11 +1242,19 @@ def _term(
         )
     if value == baseline:
         return 0, ()
-    if type(coefficient) is not int or coefficient < 0:
+    if coefficient is None:
         return None, (
             _reason(
                 f"resource.{name}_evidence_unknown",
                 f"No evidence supports changing effective {name} from its measured baseline.",
+                node_id=node_id,
+            ),
+        )
+    if type(coefficient) is not int or coefficient < 0:
+        return None, (
+            _reason(
+                f"resource.{name}_evidence_invalid",
+                f"Measured coefficient for {name} is invalid.",
                 node_id=node_id,
             ),
         )
@@ -1180,8 +1307,14 @@ def _same_memory_kind(left: str, right: str) -> bool:
     )
 
 
-def _reason(code: str, detail: str, *, node_id: str | None = None) -> ResourceReason:
-    return ResourceReason(code, detail, node_id=node_id)
+def _reason(
+    code: str,
+    detail: str,
+    *,
+    severity: Literal["blocker", "warning"] = "blocker",
+    node_id: str | None = None,
+) -> ResourceReason:
+    return ResourceReason(code, detail, severity=severity, node_id=node_id)
 
 
 def _canonical(value: object) -> object:

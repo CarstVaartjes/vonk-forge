@@ -140,7 +140,16 @@ def test_capacity_only_uses_explicit_planned_stop_release() -> None:
     )
     demand = resource_demand(settings, _evidence())
     capacity = [
-        CapacitySnapshot("rank-0", "unified", 1_000, 600, 100, "measured", "b" * 64)
+        CapacitySnapshot(
+            "rank-0",
+            "unified",
+            1_000,
+            600,
+            100,
+            "measured",
+            "b" * 64,
+            unmaterialized_bytes=100,
+        )
     ]
     without = plan_capacity({"rank-0": demand}, capacity, memory_floor_bytes=200)
     with_stop = plan_capacity(
@@ -153,6 +162,121 @@ def test_capacity_only_uses_explicit_planned_stop_release() -> None:
     assert with_stop.allowed and with_stop.stop_before_prepare
     assert with_stop.nodes[0].current_free_after_bytes == 180
     assert with_stop.nodes[0].after_stop_free_after_bytes == 280
+
+
+def test_declared_memory_bound_warns_and_avoids_double_charging_running_peak() -> None:
+    settings = resolve_effective_settings(
+        _recipe_document(_recipe_settings(context=65_536))
+    ).settings
+    assert settings is not None
+    demand = resource_demand(
+        settings,
+        ResourceEvidence(
+            weights_bytes=40,
+            runtime_overhead_bytes=None,
+            declared_total_bytes=60,
+            baseline_context_tokens=32_768,
+            baseline_concurrency=1,
+            evidence_state="declared",
+        ),
+    )
+    assert demand.allowed
+    assert demand.total_bytes == 60
+    warning = next(reason for reason in demand.reasons if reason.severity == "warning")
+    assert "Forecast 60 bytes" in warning.detail
+    assert "declared recipe-role memory envelope" in warning.detail
+    assert "may exceed this bound" in warning.detail
+
+    # Total=100, current aggregate use=30 (including 10 bytes from a running
+    # owner whose peak claim is 15), new bound=60 and reserve=5. The peak is
+    # enforced by the hard budget, while its actual use is already reflected
+    # in free=70 and must not be subtracted from free a second time.
+    capacity = CapacitySnapshot("rank-0", "unified", 100, 30, 15, "fresh")
+    plan = plan_capacity({"rank-0": demand}, [capacity], memory_floor_bytes=5)
+    assert plan.allowed
+    assert plan.nodes[0].current_free_after_bytes == 10
+
+
+def test_uncertain_bound_still_refuses_actual_free_floor_and_budget_exhaustion() -> (
+    None
+):
+    settings = resolve_effective_settings(
+        _recipe_document(_recipe_settings(context=65_536))
+    ).settings
+    assert settings is not None
+    demand = resource_demand(
+        settings,
+        ResourceEvidence(
+            weights_bytes=40,
+            runtime_overhead_bytes=None,
+            declared_total_bytes=60,
+            baseline_context_tokens=32_768,
+            baseline_concurrency=1,
+            evidence_state="declared",
+        ),
+    )
+    assert demand.allowed
+
+    actual_free_short = plan_capacity(
+        {"rank-0": demand},
+        [CapacitySnapshot("rank-0", "unified", 100, 40, 15, "fresh")],
+        memory_floor_bytes=5,
+    )
+    assert not actual_free_short.allowed
+
+    total_budget_short = plan_capacity(
+        {"rank-0": demand},
+        [CapacitySnapshot("rank-0", "unified", 100, 10, 36, "fresh")],
+        memory_floor_bytes=5,
+    )
+    assert not total_budget_short.allowed
+
+    invalid_envelope = resource_demand(
+        settings,
+        ResourceEvidence(
+            weights_bytes=40,
+            runtime_overhead_bytes=None,
+            declared_total_bytes=-1,
+            baseline_context_tokens=32_768,
+            baseline_concurrency=1,
+            evidence_state="declared",
+        ),
+    )
+    assert not invalid_envelope.allowed
+    assert any(
+        reason.code == "resource.evidence_invalid" and reason.severity == "blocker"
+        for reason in invalid_envelope.reasons
+    )
+
+    invalid_measurement = resource_demand(
+        settings,
+        ResourceEvidence(
+            weights_bytes=40,
+            runtime_overhead_bytes=None,
+            declared_total_bytes=60,
+            baseline_context_tokens=32_768,
+            baseline_concurrency=1,
+            context_bytes_per_token=-1,
+            evidence_state="declared",
+        ),
+    )
+    assert not invalid_measurement.allowed
+    assert any(
+        reason.code == "resource.context_evidence_invalid"
+        and reason.severity == "blocker"
+        for reason in invalid_measurement.reasons
+    )
+
+    missing_inventory = plan_capacity(
+        {"rank-0": demand},
+        [CapacitySnapshot("rank-0", "unified", None, None, None, "unknown")],
+        memory_floor_bytes=5,
+    )
+    assert not missing_inventory.allowed
+    assert any(
+        reason.code == "resource.capacity_unknown" and reason.severity == "blocker"
+        for reason in missing_inventory.reasons
+    )
 
 
 def test_missing_changed_text_evidence_blocks_and_effect_does_not_rebuild_image() -> (

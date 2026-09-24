@@ -176,6 +176,10 @@ def test_database_wait_budgets_refuse_out_of_range_values(monkeypatch) -> None:
         database_wait_budgets()
 
     monkeypatch.setenv("VONK_DATABASE_LOCK_TIMEOUT_MS", "30000")
+    monkeypatch.setenv("VONK_DATABASE_ADMISSION_LOCK_TIMEOUT_MS", "30001")
+    with pytest.raises(SettingsError, match="admission lock budget"):
+        database_wait_budgets()
+    monkeypatch.setenv("VONK_DATABASE_ADMISSION_LOCK_TIMEOUT_MS", "750")
     monkeypatch.setenv("VONK_DATABASE_POOL_SIZE", "1000")
     with pytest.raises(SettingsError, match="VONK_DATABASE_POOL_SIZE"):
         database_wait_budgets()

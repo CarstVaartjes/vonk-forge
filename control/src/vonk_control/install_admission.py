@@ -13,6 +13,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    acquire_admission_keys,
+    is_admission_contention,
+    lock_admission_rows,
+    node_admission_key,
+)
 from .cluster_mappings import validate_mapping_parameters
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
@@ -663,6 +671,10 @@ class InstallAdmissionService:
         workload_intent_ordinal: int | None = None,
     ) -> str:
         try:
+            acquire_admission_keys(
+                session,
+                tuple(node_admission_key(node.node_id) for node in plan.nodes),
+            )
             return self._accept_install_in_session(
                 session,
                 plan,
@@ -671,11 +683,10 @@ class InstallAdmissionService:
                 profile_application_id=profile_application_id,
                 workload_intent_ordinal=workload_intent_ordinal,
             )
+        except AdmissionLockBusy as error:
+            raise InstallAdmissionBusy("install.capacity_busy") from error
         except OperationalError as error:
-            code = getattr(error.orig, "sqlstate", None) or getattr(
-                error.orig, "pgcode", None
-            )
-            if code in {"55P03", "40P01", "40001", "57014"}:
+            if is_admission_contention(error):
                 raise InstallAdmissionBusy("install.capacity_busy") from error
             raise
 
@@ -689,19 +700,72 @@ class InstallAdmissionService:
         profile_application_id: str | None = None,
         workload_intent_ordinal: int | None = None,
     ) -> str:
-        mapping = session.get(
-            ClusterMapping, plan.mapping_id, with_for_update={"nowait": True}
-        )
-        build = (
-            session.get(
-                RecipeBuild, plan.recipe_build_id, with_for_update={"nowait": True}
+        node_ids = tuple(node.node_id for node in plan.nodes)
+        requests = [
+            AdmissionRowLock(
+                "target-agent-nodes",
+                AgentNode,
+                select(AgentNode).where(AgentNode.node_id.in_(node_ids)),
+            ),
+            AdmissionRowLock(
+                "reviewed-catalog-revision",
+                CatalogDocumentRevision,
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.id == plan.recipe_revision_id
+                ),
+            ),
+            AdmissionRowLock(
+                "reviewed-mapping",
+                ClusterMapping,
+                select(ClusterMapping).where(ClusterMapping.id == plan.mapping_id),
+            ),
+            AdmissionRowLock(
+                "reviewed-mapping-nodes",
+                ClusterMappingNode,
+                select(ClusterMappingNode).where(
+                    ClusterMappingNode.mapping_id == plan.mapping_id
+                ),
+            ),
+        ]
+        if plan.recipe_build_id is not None:
+            requests.append(
+                AdmissionRowLock(
+                    "reviewed-recipe-build",
+                    RecipeBuild,
+                    select(RecipeBuild).where(RecipeBuild.id == plan.recipe_build_id),
+                )
             )
+        requests.extend(
+            (
+                AdmissionRowLock(
+                    "node-artifacts",
+                    NodeArtifact,
+                    select(NodeArtifact).where(NodeArtifact.node_id.in_(node_ids)),
+                ),
+                AdmissionRowLock(
+                    "node-inventory-snapshots",
+                    NodeInventorySnapshot,
+                    select(NodeInventorySnapshot).where(
+                        NodeInventorySnapshot.node_id.in_(node_ids)
+                    ),
+                ),
+                AdmissionRowLock(
+                    "node-resource-reservations",
+                    ResourceReservation,
+                    select(ResourceReservation).where(
+                        ResourceReservation.node_id.in_(node_ids)
+                    ),
+                ),
+            )
+        )
+        lock_admission_rows(session, requests)
+        mapping = session.get(ClusterMapping, plan.mapping_id)
+        build = (
+            session.get(RecipeBuild, plan.recipe_build_id)
             if plan.recipe_build_id is not None
             else None
         )
-        revision = _active_recipe_revision(
-            session, plan.recipe_revision_id, for_update=True
-        )
+        revision = _active_recipe_revision(session, plan.recipe_revision_id)
         source_build = revision is not None and _is_source_build(revision.document)
         if (
             mapping is None
@@ -726,34 +790,8 @@ class InstallAdmissionService:
                 select(ClusterMappingNode)
                 .where(ClusterMappingNode.mapping_id == plan.mapping_id)
                 .order_by(ClusterMappingNode.rank)
-                .with_for_update(nowait=True)
             )
         )
-        node_ids = tuple(node.node_id for node in mapping_nodes)
-        session.scalars(
-            select(AgentNode)
-            .where(AgentNode.node_id.in_(node_ids))
-            .order_by(AgentNode.node_id)
-            .with_for_update(nowait=True)
-        ).all()
-        session.scalars(
-            select(NodeArtifact)
-            .where(NodeArtifact.node_id.in_(node_ids))
-            .order_by(NodeArtifact.id)
-            .with_for_update(nowait=True)
-        ).all()
-        session.scalars(
-            select(ResourceReservation)
-            .where(ResourceReservation.node_id.in_(node_ids))
-            .order_by(ResourceReservation.id)
-            .with_for_update(nowait=True)
-        ).all()
-        session.scalars(
-            select(NodeInventorySnapshot)
-            .where(NodeInventorySnapshot.node_id.in_(node_ids))
-            .order_by(NodeInventorySnapshot.id)
-            .with_for_update(nowait=True)
-        ).all()
         claims = (
             inherited_profile_disk(
                 session,
@@ -835,14 +873,7 @@ class InstallAdmissionService:
             updated_at=now,
         )
         for node in sorted(fresh.nodes, key=lambda item: item.node_id):
-            if (
-                session.scalar(
-                    select(AgentNode)
-                    .where(AgentNode.node_id == node.node_id)
-                    .with_for_update(nowait=True)
-                )
-                is None
-            ):
+            if session.get(AgentNode, node.node_id) is None:
                 raise InstallPlanConflict("installation node disappeared")
             active = outstanding_disk_reservation_bytes(
                 session,

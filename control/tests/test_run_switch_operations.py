@@ -924,6 +924,15 @@ def test_default_run_switch_admission_uses_the_recipe_memory_reserve(
     )
     plan = service.preview(_request(sessions, nodes[0]), actor="admin")
     assert plan.allowed, plan.blockers
+    assert any(
+        reason.code == "run-switch.resource.estimate_uncertain"
+        and reason.severity == "warning"
+        and "declared recipe-role memory envelope" in reason.detail
+        for reason in plan.warnings
+    )
+    node = plan.fit_current.nodes[0]
+    assert node.resource_demand is not None
+    assert node.resource_demand.total_bytes == node.memory_required_bytes
 
 
 def test_mapping_selection_reads_typed_parameters_from_persisted_mapping(
@@ -2676,7 +2685,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         )
 
 
-def test_resource_constrained_switch_defers_memory_fit_until_after_exact_stops(
+def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -2726,9 +2735,27 @@ def test_resource_constrained_switch_defers_memory_fit_until_after_exact_stops(
         RecordingArtifactExecutor(),
         phase_executor=SynchronousPhaseExecutor(),
     )
+    baseline = service.preview(request, actor="admin")
+    required = baseline.fit_current.nodes[0].memory_required_bytes
+    floor = baseline.fit_current.nodes[0].memory_floor_bytes
+    assert required is not None and floor is not None
+    # Aggregate free already accounts for the running owner. The declared
+    # peak still owns the hard budget until this exact run stops.
+    total = 7_800 + required + floor - 1
+    free = required + floor + 10
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.host_memory_total_bytes = total
+        snapshot.host_memory_free_bytes = free
+        snapshot.gpu_memory_total_bytes = total
+        snapshot.gpu_memory_free_bytes = free
     plan = service.preview(request, actor="admin")
 
     assert plan.fit_current.allowed is False
+    assert "run-switch.resource.insufficient_reservation_budget" in {
+        reason.code for reason in plan.fit_current.blockers
+    }
     assert plan.fit_after_stop is None
     assert plan.post_stop_memory_check is not None
     assert plan.post_stop_memory_check.stop_run_ids == [run_id]
@@ -2795,7 +2822,7 @@ def test_resource_constrained_switch_defers_memory_fit_until_after_exact_stops(
     changed = service.preview(request, actor="admin")
     assert changed.post_stop_memory_check is None
     assert not changed.allowed
-    assert "run-switch.resource.insufficient_capacity" in {
+    assert "run-switch.resource.insufficient_reservation_budget" in {
         reason.code for reason in changed.blockers
     }
 
@@ -4581,3 +4608,42 @@ def test_late_dependency_receipt_resumes_original_checkpoint_after_deadline(
         recovered.result is not None and "transfer" in recovered.result.completed_phases
     )
     assert executor.calls_while_pending == 1
+
+
+def test_shared_admission_contention_preserves_operation_for_retry(
+    tmp_path: Path,
+) -> None:
+    """A busy child enqueue must retain intent instead of escaping the worker."""
+    from vonk_control.admission_locking import AdmissionLockBusy
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+
+    class BusyExecutor(RecordingArtifactExecutor):
+        def execute(self, *args, **kwargs):
+            raise AdmissionLockBusy("admission lock node is busy")
+
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=BusyExecutor(),
+    )
+    request = _request(sessions, nodes[0])
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    for _ in range(12):
+        service.tick()
+        with sessions() as session:
+            job = session.get(Job, operation.operation_id)
+            assert job is not None
+            if job.status_reason and "capacity writer" in job.status_reason:
+                assert job.state == "running"
+                assert "retry at" in job.status_reason
+                break
+    else:
+        pytest.fail("shared admission contention did not schedule a durable retry")

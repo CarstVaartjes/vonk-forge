@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import ValidationError
 from sqlalchemy import Boolean, and_, case, or_, select, update
@@ -32,9 +32,17 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_payload
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
+from .admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    acquire_admission_keys,
+    lock_admission_rows,
+    node_admission_key,
+)
 from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
 from .failure_evidence import safe_text, sanitize_diagnostics
+from .install_admission import InstallAdmissionBusy
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -68,6 +76,7 @@ from .recovery_policy import (
     classify,
     kind_for_agent_error,
 )
+from .run_admission import RunAdmissionBusy
 
 AgentFence = str | AgentClaim | AgentProgress | AgentResult
 ResultConsumer = Callable[
@@ -1358,15 +1367,27 @@ class AgentJobService:
         scope = self._target_scope(targets)
         if scope is None or node_id not in scope:
             raise ValueError("agent operation node must be a parent target")
-        if not self._lock_target_scopes(
-            session, {"enqueue": (parent_job_id, scope)}, node_id
-        ):
+        uses_workload_admission = protocol_operation.value in _RECIPE_CAPABILITIES
+        try:
+            if uses_workload_admission:
+                acquire_admission_keys(
+                    session, tuple(node_admission_key(target) for target in scope)
+                )
+            scopes_locked = self._lock_target_scopes(
+                session,
+                {"enqueue": (parent_job_id, scope)},
+                node_id,
+                nowait=uses_workload_admission,
+            )
+        except AdmissionLockBusy as error:
+            if protocol_operation.value == AgentOperation.RECIPE_INSTALL.value:
+                raise InstallAdmissionBusy("install.capacity_busy") from error
+            if uses_workload_admission:
+                raise RunAdmissionBusy("run capacity writer is busy") from error
+            raise
+        if not scopes_locked:
             raise ValueError("agent operation parent target scope changed")
-        node = session.scalar(
-            select(AgentNode)
-            .where(AgentNode.node_id == node_id)
-            .with_for_update(of=AgentNode)
-        )
+        node = session.scalar(select(AgentNode).where(AgentNode.node_id == node_id))
         if node is None:
             raise KeyError(node_id)
         if node.state != "active" or node.revoked_at is not None:
@@ -1375,9 +1396,7 @@ class AgentJobService:
             raise ValueError(
                 f"agent does not advertise operation capability {operation}"
             )
-        parent = session.scalar(
-            select(Job).where(Job.id == parent_job_id).with_for_update(of=Job)
-        )
+        parent = session.scalar(select(Job).where(Job.id == parent_job_id))
         if parent is None:
             raise KeyError(parent_job_id)
         if parent.state in _TERMINAL_PARENT_STATES:
@@ -1449,6 +1468,9 @@ class AgentJobService:
             or ordinal < 1
         ):
             raise ValueError("workload cancellation scope is invalid")
+        acquire_admission_keys(
+            session, tuple(node_admission_key(node_id) for node_id in scope)
+        )
         parent_ids = tuple(
             session.scalars(
                 select(StoredOperation.parent_job_id)
@@ -1464,26 +1486,41 @@ class AgentJobService:
                 .order_by(StoredOperation.parent_job_id)
             )
         )
-        for parent_id in parent_ids:
-            parent = session.scalar(
-                select(Job)
-                .where(Job.id == parent_id)
-                .with_for_update(of=Job, nowait=True)
+        locked = lock_admission_rows(
+            session,
+            (
+                AdmissionRowLock(
+                    "superseded-workload-parents",
+                    Job,
+                    select(Job).where(Job.id.in_(parent_ids)),
+                ),
+                AdmissionRowLock(
+                    "superseded-workload-children",
+                    StoredOperation,
+                    select(StoredOperation).where(
+                        StoredOperation.parent_job_id.in_(parent_ids)
+                    ),
+                ),
             )
+            if parent_ids
+            else (),
+        )
+        parents = {
+            parent.id: parent
+            for parent in locked.get("superseded-workload-parents", ())
+        }
+        children_by_parent: dict[str, list[StoredOperation]] = {}
+        for child in locked.get("superseded-workload-children", ()):
+            children_by_parent.setdefault(child.parent_job_id, []).append(child)
+        for parent_id in parent_ids:
+            parent = parents.get(parent_id)
             if parent is None or parent.state not in {
                 "queued",
                 "running",
                 "waiting-for-operator",
             }:
                 continue
-            children = tuple(
-                session.scalars(
-                    select(StoredOperation)
-                    .where(StoredOperation.parent_job_id == parent_id)
-                    .order_by(StoredOperation.id)
-                    .with_for_update(of=StoredOperation, nowait=True)
-                )
-            )
+            children = tuple(children_by_parent.get(parent_id, ()))
             bound = parent.payload.get("workload_intent_ordinal")
             if (
                 type(bound) is not int
@@ -3037,31 +3074,60 @@ class AgentJobService:
         session: Session,
         scopes: dict[str, tuple[str, tuple[str, ...]]],
         node_id: str,
+        *,
+        nowait: bool = False,
     ) -> bool:
         nodes = sorted(
             {node_id} | {target for _, scope in scopes.values() for target in scope}
         )
-        locked = list(
-            session.scalars(
-                select(AgentNode)
-                .where(AgentNode.node_id.in_(nodes))
-                .order_by(AgentNode.node_id)
-                .with_for_update(of=AgentNode)
-                .execution_options(populate_existing=True)
+        locked_rows: Mapping[str, tuple[Any, ...]] = {}
+        if nowait:
+            locked_rows = lock_admission_rows(
+                session,
+                (
+                    AdmissionRowLock(
+                        "target-agent-nodes",
+                        AgentNode,
+                        select(AgentNode).where(AgentNode.node_id.in_(nodes)),
+                    ),
+                    AdmissionRowLock(
+                        "target-parent-jobs",
+                        Job,
+                        select(Job).where(
+                            Job.id.in_(
+                                sorted({parent_id for parent_id, _ in scopes.values()})
+                            )
+                        ),
+                    ),
+                ),
             )
-        )
+            locked = list(locked_rows.get("target-agent-nodes", ()))
+        else:
+            locked = list(
+                session.scalars(
+                    select(AgentNode)
+                    .where(AgentNode.node_id.in_(nodes))
+                    .order_by(AgentNode.node_id)
+                    .with_for_update(of=AgentNode)
+                    .execution_options(populate_existing=True)
+                )
+            )
         if [node.node_id for node in locked] != nodes:
             return False
         parent_ids = sorted({parent_id for parent_id, _ in scopes.values()})
         parents = (
             {
                 job.id: job
-                for job in session.scalars(
-                    select(Job)
-                    .where(Job.id.in_(parent_ids))
-                    .order_by(Job.id)
-                    .with_for_update(of=Job)
-                    .execution_options(populate_existing=True)
+                for job in (
+                    locked_rows.get("target-parent-jobs", ())
+                    if nowait
+                    else session.scalars(
+                        select(Job)
+                        .where(Job.id.in_(parent_ids))
+                        .order_by(Job.id)
+                        .with_for_update(of=Job)
+                        .execution_options(populate_existing=True)
+                    )
                 )
             }
             if parent_ids

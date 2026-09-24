@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
@@ -34,6 +34,15 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
+from .admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    acquire_admission_keys,
+    is_admission_contention,
+    job_request_key,
+    lock_admission_rows,
+    node_admission_key,
+)
 from .agent_jobs import (
     AgentJobService,
     _JsonFlagIsTrue,
@@ -1334,9 +1343,26 @@ class RecipeOperationService:
             raise RecipeOperationConflict(str(error)) from error
         with self._sessions.begin() as session:
             try:
+                acquire_admission_keys(
+                    session,
+                    (
+                        job_request_key(request_id),
+                        *(node_admission_key(node.node_id) for node in plan.nodes),
+                    ),
+                )
+            except AdmissionLockBusy as error:
+                raise InstallAdmissionBusy("install.capacity_busy") from error
+            replay = self._idempotent_in_session(
+                session, request_id, "recipe.install", plan_digest
+            )
+            if replay is not None:
+                return replay
+            try:
                 installation_id = self._install_admission.accept_install_in_session(
                     session, plan, actor=actor, now=now
                 )
+            except InstallAdmissionBusy:
+                raise
             except (RuntimeError, ValueError) as error:
                 raise RecipeOperationConflict(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
@@ -1397,6 +1423,21 @@ class RecipeOperationService:
             return existing
         now = self._clock()
         with self._sessions.begin() as session:
+            try:
+                acquire_admission_keys(
+                    session,
+                    (
+                        job_request_key(request_id),
+                        *(node_admission_key(node.node_id) for node in plan.nodes),
+                    ),
+                )
+            except AdmissionLockBusy as error:
+                raise RunAdmissionBusy("run capacity writer is busy") from error
+            replay = self._idempotent_in_session(
+                session, request_id, "recipe.start", plan_digest
+            )
+            if replay is not None:
+                return replay
             presences = {
                 node_id: address
                 for node_id, address in session.execute(
@@ -1421,11 +1462,6 @@ class RecipeOperationService:
                 raise RecipeOperationConflict(
                     "recipe direct-fabric rendezvous is unavailable"
                 )
-            installation_fence = session.get(
-                RecipeInstallation, plan.installation_id, with_for_update=True
-            )
-            if installation_fence is None or installation_fence.state != "installed":
-                raise RecipeOperationConflict("recipe installation is not runnable")
             active_uninstall = session.scalar(
                 select(Job.id)
                 .where(
@@ -4418,6 +4454,26 @@ class RecipeOperationService:
         owner_kind: str | None = None,
         owner_id: str | None = None,
     ) -> RecipeOperationView | None:
+        existing = self._idempotent_job_in_session(
+            session,
+            request_id,
+            kind,
+            plan_digest,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+        )
+        return self._view(existing) if existing is not None else None
+
+    def _idempotent_job_in_session(
+        self,
+        session: Session,
+        request_id: str,
+        kind: str,
+        plan_digest: str | None,
+        *,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
+    ) -> Job | None:
         existing = session.scalar(select(Job).where(Job.request_id == request_id))
         if existing is None:
             return None
@@ -4432,7 +4488,7 @@ class RecipeOperationService:
             or (owner_id is not None and existing.payload.get("owner_id") != owner_id)
         ):
             raise RecipeOperationConflict("request key was already used differently")
-        return self._view(existing)
+        return existing
 
     def _queue(
         self,
@@ -4496,8 +4552,6 @@ class RecipeOperationService:
                 raise RecipeOperationConflict(
                     f"{kind} payload does not satisfy its wire schema"
                 ) from error
-        if session.scalar(select(Job.id).where(Job.request_id == request_id)):
-            raise RecipeOperationConflict("request key was already used differently")
         job_id = str(uuid.uuid4())
         requested_phase_groups = (
             tuple(tuple(group) for group in phases)
@@ -4522,28 +4576,65 @@ class RecipeOperationService:
         targets = sorted(
             {node_id for _operation_id, node_id, _payload in sum(phase_groups, ())}
         )
+        try:
+            acquire_admission_keys(
+                session,
+                (
+                    job_request_key(request_id),
+                    *(node_admission_key(node_id) for node_id in targets),
+                ),
+            )
+        except AdmissionLockBusy as error:
+            if kind == "recipe.install":
+                raise InstallAdmissionBusy("install.capacity_busy") from error
+            raise RunAdmissionBusy("run capacity writer is busy") from error
+        existing = self._idempotent_job_in_session(
+            session,
+            request_id,
+            kind,
+            plan_digest,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+        )
+        if existing is not None:
+            return existing
         if kind in _WORKLOAD_INTENT_KINDS:
             # Only a standalone request admits a new intent. A child carries
             # its parent's exact ordinal and may not capture newer authority.
-            target_nodes = tuple(
-                session.scalars(
-                    select(AgentNode)
-                    .where(AgentNode.node_id.in_(targets))
-                    .order_by(AgentNode.node_id)
-                    .with_for_update(of=AgentNode)
+            try:
+                target_nodes = tuple(
+                    lock_admission_rows(
+                        session,
+                        (
+                            AdmissionRowLock(
+                                "workload-target-nodes",
+                                AgentNode,
+                                select(AgentNode).where(AgentNode.node_id.in_(targets)),
+                            ),
+                        ),
+                    ).get("workload-target-nodes", ())
                 )
-            )
+            except AdmissionLockBusy as error:
+                if kind == "recipe.install":
+                    raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise RunAdmissionBusy("run capacity writer is busy") from error
             if tuple(node.node_id for node in target_nodes) != tuple(targets):
                 raise RecipeOperationConflict("workload intent target disappeared")
             if workload_intent_ordinal is None:
-                workload_intent_ordinal = (
+                next_ordinal = (
                     max(node.workload_intent_ordinal for node in target_nodes) + 1
                 )
+                workload_intent_ordinal = next_ordinal
                 for node in target_nodes:
-                    node.workload_intent_ordinal = workload_intent_ordinal
-                AgentJobService.request_superseded_workload_cancellation_in_session(
-                    session, targets, workload_intent_ordinal, now
-                )
+                    node.workload_intent_ordinal = next_ordinal
+                try:
+                    AgentJobService.request_superseded_workload_cancellation_in_session(
+                        session, targets, next_ordinal, now
+                    )
+                except AdmissionLockBusy as error:
+                    if kind == "recipe.install":
+                        raise InstallAdmissionBusy("install.capacity_busy") from error
+                    raise RunAdmissionBusy("run capacity writer is busy") from error
             elif (
                 type(workload_intent_ordinal) is not int
                 or workload_intent_ordinal < 1
@@ -4610,17 +4701,28 @@ class RecipeOperationService:
             updated_at=now,
         )
         session.add(job)
-        session.flush()
-        for operation_id, node_id, payload in phase_groups[0]:
-            self._agent_jobs.enqueue_in_session(
-                session,
-                job_id,
-                node_id,
-                kind,
-                authority_digest.removeprefix("sha256:"),
-                payload,
-                operation_id=operation_id,
-            )
+        try:
+            session.flush()
+            for operation_id, node_id, payload in phase_groups[0]:
+                self._agent_jobs.enqueue_in_session(
+                    session,
+                    job_id,
+                    node_id,
+                    kind,
+                    authority_digest.removeprefix("sha256:"),
+                    payload,
+                    operation_id=operation_id,
+                )
+        except AdmissionLockBusy as error:
+            if kind == "recipe.install":
+                raise InstallAdmissionBusy("install.capacity_busy") from error
+            raise RunAdmissionBusy("run capacity writer is busy") from error
+        except OperationalError as error:
+            if not is_admission_contention(error):
+                raise
+            if kind == "recipe.install":
+                raise InstallAdmissionBusy("install.capacity_busy") from error
+            raise RunAdmissionBusy("run capacity writer is busy") from error
         return job
 
     def _view(self, job: Job, *, session: Session | None = None) -> RecipeOperationView:

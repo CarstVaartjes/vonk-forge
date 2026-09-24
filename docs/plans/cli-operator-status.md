@@ -1,5 +1,34 @@
 # CLI implementation status
 
+## Active integration checkpoint — 2026-09-24
+
+The coordinator has integrated the admission increment and memory-warning
+commit `c1e98777` in `codex/cli-approved-integration`. This is an unfinished
+checkpoint, not a completion or deployment claim. The new shared-admission
+Run/Switch regression failed before the catch fix and now preserves the
+original operation with a visible bounded retry. A connected distributed
+rank-launch regression also demonstrated premature memory credit; starting
+ranks now retain their future reservation.
+
+Combined evidence: 71 Run/Switch/post-stop checks passed; 162 affected
+PostgreSQL checks passed with one historical blocking-wait assertion requiring
+an update to the new immediate-refusal behavior. The agent subsequently ran
+all 102 recipe-operation checks successfully with that update; the coordinator
+has not integrated that later hunk yet. The broader fast suite passed 2,419
+checks with three skips. Four packaging setup/check failures were caused by
+an omitted writable uv cache setting; the affected modules passed on rerun
+(11 passed, nine lane skips). Pinned lint and the full Python type gate passed
+with one existing reviewed exception and no new exceptions.
+
+Still open: common build/profile lock adapters; durable removal and its
+truthful API progress; byte-bounded library pagination; and exact memory
+materialization accounting. In particular, running state alone does not prove
+resident bytes (job runs can be marked running before submission). The current
+state-based running credit is under correction and must not be treated as a
+validated hard-reservation guarantee. Estimates remain warnings, while actual
+capacity and reservation promises remain enforced. Independent operator and
+physical model acceptance remain separate gates.
+
 ## Current authorization and integration base — 2026-09-24
 
 The user selected **warnings for uncertain memory estimates** and explicitly

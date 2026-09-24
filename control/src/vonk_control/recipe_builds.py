@@ -1557,10 +1557,14 @@ def _available_build_memory(
     assert capacity.available_bytes is not None
     assert capacity.occupied_bytes is not None
     assert capacity.reserved_bytes is not None
+    assert capacity.unmaterialized_bytes is not None
     return (
-        capacity.available_bytes
-        - capacity.occupied_bytes
-        - capacity.reserved_bytes
+        min(
+            capacity.available_bytes - capacity.reserved_bytes,
+            capacity.available_bytes
+            - capacity.occupied_bytes
+            - capacity.unmaterialized_bytes,
+        )
         - floor
     )
 

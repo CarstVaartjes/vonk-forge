@@ -32,6 +32,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .admission_locking import AdmissionLockBusy
 from .agent_jobs import AgentJobService
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -467,6 +468,9 @@ _MEMORY_CAPACITY_REFUSALS = frozenset(
         "run-switch.resource.insufficient_capacity_after_stop",
     }
 )
+_MEMORY_STOP_CONDITIONAL_REFUSALS = _MEMORY_CAPACITY_REFUSALS | {
+    "run-switch.resource.insufficient_reservation_budget"
+}
 _INSTALL_PREFLIGHT_REFRESH_REASON = (
     "runtime preflight expired during install compilation"
 )
@@ -584,7 +588,9 @@ def _conditional_post_stop_memory_check(
     if (
         not stops
         or not blockers
-        or any(reason.code not in _MEMORY_CAPACITY_REFUSALS for reason in blockers)
+        or any(
+            reason.code not in _MEMORY_STOP_CONDITIONAL_REFUSALS for reason in blockers
+        )
     ):
         return None
     blocked_nodes = {node_id for reason in blockers for node_id in reason.node_ids}
@@ -5050,21 +5056,25 @@ class RunSwitchOperationService:
         artifact_bytes: int | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
     ) -> _ResourceFits:
-        freshness, current, current_blockers, warnings, _current_memory_shortfalls = (
-            self._fit(
-                session,
-                revision,
-                request.spark_group,
-                now=now,
-                excluded_run_ids=(),
-                effective_settings=effective_settings,
-                model_documents=model_documents,
-                serving=request.action != "install",
-                revision_digest=revision.content_digest,
-                image_bytes=image_bytes,
-                artifact_bytes=artifact_bytes,
-                excluded_profile_application_ids=excluded_profile_application_ids,
-            )
+        (
+            freshness,
+            current,
+            current_blockers,
+            current_warnings,
+            current_memory_shortfalls,
+        ) = self._fit(
+            session,
+            revision,
+            request.spark_group,
+            now=now,
+            excluded_run_ids=(),
+            effective_settings=effective_settings,
+            model_documents=model_documents,
+            serving=request.action != "install",
+            revision_digest=revision.content_digest,
+            image_bytes=image_bytes,
+            artifact_bytes=artifact_bytes,
+            excluded_profile_application_ids=excluded_profile_application_ids,
         )
         current = self._placement_fit(current, placement_blockers)
         after_stop = None
@@ -5074,8 +5084,8 @@ class RunSwitchOperationService:
             (
                 _,
                 after_stop,
-                blockers,
-                warnings,
+                after_stop_blockers,
+                after_stop_warnings,
                 after_stop_memory_shortfalls,
             ) = self._fit(
                 session,
@@ -5092,16 +5102,65 @@ class RunSwitchOperationService:
                 excluded_profile_application_ids=excluded_profile_application_ids,
             )
             after_stop = self._placement_fit(after_stop, placement_blockers)
-            conditional = _conditional_post_stop_memory_check(
-                session,
-                stops,
-                after_stop,
-                after_stop.blockers,
-                after_stop_memory_shortfalls,
+            warnings = list(current_warnings)
+            for warning in after_stop_warnings:
+                if warning not in warnings:
+                    warnings.append(warning)
+
+            current_memory_blockers = tuple(
+                reason
+                for reason in current_blockers
+                if reason.code in _MEMORY_STOP_CONDITIONAL_REFUSALS
             )
+            if current_memory_blockers:
+                # A post-stop fit is still based on the pre-stop inventory.
+                # When current memory fit depends on an exact stop, publish
+                # only the stop-bound condition and let the existing fresh
+                # post-stop inventory gate decide whether dispatch can start.
+                post_stop_blockers_are_memory_only = all(
+                    reason.code in _MEMORY_CAPACITY_REFUSALS
+                    for reason in after_stop.blockers
+                )
+                memory_shortfalls = {
+                    node_id: current_memory_shortfalls.get(node_id, frozenset())
+                    | after_stop_memory_shortfalls.get(node_id, frozenset())
+                    for node_id in set(current_memory_shortfalls)
+                    | set(after_stop_memory_shortfalls)
+                }
+                if post_stop_blockers_are_memory_only:
+                    conditional = _conditional_post_stop_memory_check(
+                        session,
+                        stops,
+                        current,
+                        (
+                            *current_memory_blockers,
+                            *(
+                                reason
+                                for reason in after_stop.blockers
+                                if reason.code in _MEMORY_CAPACITY_REFUSALS
+                            ),
+                        ),
+                        memory_shortfalls,
+                    )
+                blockers = list(current_memory_blockers)
+                for reason in after_stop.blockers:
+                    if reason not in blockers:
+                        blockers.append(reason)
+                after_stop = None
+            else:
+                conditional = _conditional_post_stop_memory_check(
+                    session,
+                    stops,
+                    after_stop,
+                    after_stop.blockers,
+                    after_stop_memory_shortfalls,
+                )
+                blockers = after_stop_blockers
             if conditional is not None:
                 after_stop = None
                 blockers = []
+        else:
+            warnings = current_warnings
         return _ResourceFits(
             freshness,
             current,
@@ -5280,6 +5339,7 @@ class RunSwitchOperationService:
                             item.node_id,
                             memory_pool=snapshot.memory_pool if snapshot else None,
                             excluded_profile_application_ids=excluded_profile_application_ids,
+                            excluded_run_ids=excluded_run_ids,
                         )
                         capacity = memory_capacity_snapshot(
                             item.node_id,
@@ -5339,10 +5399,14 @@ class RunSwitchOperationService:
                                 else component
                                 for component in fit_node.insufficient_components
                             )
-                        node_blockers.extend(
-                            _resource_reason(reason, node_ids=(item.node_id,))
-                            for reason in fit_node.reasons
-                        )
+                        for reason in fit_node.reasons:
+                            projected = _resource_reason(
+                                reason, node_ids=(item.node_id,)
+                            )
+                            if projected.severity == "warning":
+                                node_warnings.append(projected)
+                            else:
+                                node_blockers.append(projected)
                 try:
                     image_size = (
                         image_bytes
@@ -6577,6 +6641,7 @@ class RunSwitchOperationService:
                     operation_id, phase_index, item_index
                 )
             except (
+                AdmissionLockBusy,
                 InstallAdmissionBusy,
                 RunAdmissionBusy,
                 RecipeBuildAdmissionBusy,
@@ -6665,6 +6730,7 @@ class RunSwitchOperationService:
                 progress["observation_deadline_at"] = None
                 job.status_reason = None
             if progress.get("retry_reason") in (
+                AdmissionLockBusy.code,
                 InstallAdmissionBusy.code,
                 RunAdmissionBusy.code,
                 RecipeBuildAdmissionBusy.code,

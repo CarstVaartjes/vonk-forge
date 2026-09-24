@@ -441,7 +441,11 @@ def test_profile_build_borrows_promise_and_preserves_it_for_runtime(
         )
         assert promise is not None and promise.state == "promised"
         claim_id = promise.id
-        assert memory_reservations(session, node, memory_pool="shared") == {
+        totals = memory_reservations(session, node, memory_pool="shared")
+        assert totals.committed_bytes_by_kind == {
+            "unified-memory": promise.amount_bytes
+        }
+        assert totals.unmaterialized_bytes_by_kind == {
             "unified-memory": promise.amount_bytes
         }
         assert lifecycle.get(child_id).owner_id == selected.build_id
@@ -461,6 +465,10 @@ def test_profile_build_borrows_promise_and_preserves_it_for_runtime(
         promise = session.get(ResourceReservation, claim_id)
         assert promise is not None and promise.owner_id == application_id
         assert promise.state == "promised"
-        assert memory_reservations(session, node, memory_pool="shared") == {
+        totals = memory_reservations(session, node, memory_pool="shared")
+        assert totals.committed_bytes_by_kind == {
+            "unified-memory": promise.amount_bytes
+        }
+        assert totals.unmaterialized_bytes_by_kind == {
             "unified-memory": promise.amount_bytes
         }

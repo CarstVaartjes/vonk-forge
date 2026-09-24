@@ -15,6 +15,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 
+from .admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    acquire_admission_keys,
+    is_admission_contention,
+    lock_admission_rows,
+    node_admission_key,
+)
 from .install_admission import AdmissionReason
 from .inventory_repository import InventoryRepository
 from .legal_admission import territorial_admission
@@ -561,15 +569,17 @@ class RunAdmissionService:
                 memory_floor_bytes=memory_floor,
             ).nodes[0]
             free_after = memory_fit.selected_free_after_bytes
-            blockers.extend(
-                AdmissionReason(
+            for reason in memory_fit.reasons:
+                projected = AdmissionReason(
                     "run.insufficient_memory"
                     if reason.code.startswith("resource.insufficient")
                     else reason.code,
                     reason.detail,
                 )
-                for reason in memory_fit.reasons
-            )
+                if reason.severity == "blocker":
+                    blockers.append(projected)
+                else:
+                    warnings.append(projected)
             plans.append(
                 RunNodePlan(
                     placement.node_id,
@@ -639,55 +649,110 @@ class RunAdmissionService:
         profile_application_id: str | None = None,
         workload_intent_ordinal: int | None = None,
     ) -> str:
-        mapping = session.get(ClusterMapping, plan.mapping_id, with_for_update=True)
+        try:
+            acquire_admission_keys(
+                session,
+                tuple(node_admission_key(node.node_id) for node in plan.nodes),
+            )
+            return self._accept_run_locked_in_session(
+                session,
+                plan,
+                actor=actor,
+                now=now,
+                profile_application_id=profile_application_id,
+                workload_intent_ordinal=workload_intent_ordinal,
+            )
+        except AdmissionLockBusy as error:
+            raise RunAdmissionBusy("run capacity writer is busy") from error
+        except OperationalError as error:
+            if is_admission_contention(error):
+                raise RunAdmissionBusy("run capacity writer is busy") from error
+            raise
+
+    def _accept_run_locked_in_session(
+        self,
+        session: Session,
+        plan: RunPlan,
+        *,
+        actor: str,
+        now: datetime,
+        profile_application_id: str | None = None,
+        workload_intent_ordinal: int | None = None,
+    ) -> str:
+        node_ids = tuple(node.node_id for node in plan.nodes)
+        lock_admission_rows(
+            session,
+            (
+                AdmissionRowLock(
+                    "target-agent-nodes",
+                    AgentNode,
+                    select(AgentNode).where(AgentNode.node_id.in_(node_ids)),
+                ),
+                AdmissionRowLock(
+                    "reviewed-catalog-revision",
+                    CatalogDocumentRevision,
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.id == plan.recipe_revision_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "reviewed-mapping",
+                    ClusterMapping,
+                    select(ClusterMapping).where(ClusterMapping.id == plan.mapping_id),
+                ),
+                AdmissionRowLock(
+                    "reviewed-installation",
+                    RecipeInstallation,
+                    select(RecipeInstallation).where(
+                        RecipeInstallation.id == plan.installation_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "reviewed-mapping-nodes",
+                    ClusterMappingNode,
+                    select(ClusterMappingNode).where(
+                        ClusterMappingNode.mapping_id == plan.mapping_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "reviewed-installation-nodes",
+                    InstallationNode,
+                    select(InstallationNode).where(
+                        InstallationNode.installation_id == plan.installation_id
+                    ),
+                ),
+                AdmissionRowLock(
+                    "node-inventory-snapshots",
+                    NodeInventorySnapshot,
+                    select(NodeInventorySnapshot).where(
+                        NodeInventorySnapshot.node_id.in_(node_ids)
+                    ),
+                ),
+                AdmissionRowLock(
+                    "node-resource-reservations",
+                    ResourceReservation,
+                    select(ResourceReservation).where(
+                        ResourceReservation.node_id.in_(node_ids)
+                    ),
+                ),
+            ),
+        )
+        mapping = session.get(ClusterMapping, plan.mapping_id)
         if (
             mapping is None
             or mapping.state != "ready"
             or mapping.generation != plan.mapping_generation
         ):
             raise RunPlanConflict("mapping generation changed while reserving")
-        installation = session.get(
-            RecipeInstallation, plan.installation_id, with_for_update=True
-        )
-        revision = _active_recipe_revision(
-            session, plan.recipe_revision_id, for_update=True
-        )
+        installation = session.get(RecipeInstallation, plan.installation_id)
+        revision = _active_recipe_revision(session, plan.recipe_revision_id)
         mapping_nodes = tuple(
             session.scalars(
                 select(ClusterMappingNode)
                 .where(ClusterMappingNode.mapping_id == plan.mapping_id)
                 .order_by(ClusterMappingNode.rank)
-                .with_for_update()
             )
         )
-        node_ids = tuple(node.node_id for node in mapping_nodes)
-        session.scalars(
-            select(AgentNode).where(AgentNode.node_id.in_(node_ids)).with_for_update()
-        ).all()
-        session.scalars(
-            select(InstallationNode)
-            .where(InstallationNode.installation_id == plan.installation_id)
-            .with_for_update()
-        ).all()
-        try:
-            session.scalars(
-                select(ResourceReservation)
-                .where(ResourceReservation.node_id.in_(node_ids))
-                .order_by(ResourceReservation.id)
-                .with_for_update(nowait=True)
-            ).all()
-        except OperationalError as error:
-            code = getattr(error.orig, "sqlstate", None) or getattr(
-                error.orig, "pgcode", None
-            )
-            if code in {"55P03", "40P01", "40001", "57014"}:
-                raise RunAdmissionBusy("run capacity writer is busy") from error
-            raise
-        session.scalars(
-            select(NodeInventorySnapshot)
-            .where(NodeInventorySnapshot.node_id.in_(node_ids))
-            .with_for_update()
-        ).all()
         fresh = self.plan_run(
             plan.installation_id,
             plan.alias,
