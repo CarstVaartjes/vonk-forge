@@ -8,6 +8,7 @@ from uuid import UUID, uuid4, uuid5
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
+from vonk_control.inventory_repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
     AgentNode,
@@ -15,14 +16,19 @@ from vonk_control.models import (
     Job,
     NodeInventorySnapshot,
     RecipeBuild,
+    RecipeRun,
     RecipeSourceBundle,
     ResourceReservation,
+    RunNode,
 )
 from vonk_control.recipe_builds import (
     RecipeBuildError,
     RecipeBuildPlan,
     RecipeBuildService,
+    _available_build_memory,
 )
+from vonk_control.recipe_execution_contract import run_plan_document
+from vonk_control.run_admission import _node_document
 from vonk_control.run_switch_contract import RunSwitchPlan
 from vonk_control.run_switch_operations import RunSwitchOperationConflict
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
@@ -31,6 +37,7 @@ from .preflight_fixtures import record_passing_preflight
 from .test_profile_capacity_admission import _capacity_profile
 from .test_profile_installed_execution import _profile_service
 from .test_profile_port_claims import _load, _ready_profile
+from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 
 def _accepted_build_profile(
@@ -247,6 +254,97 @@ def test_bound_build_preserves_the_profile_system_reserve(
             session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
         )
         assert len(builds) == (1 if demand == 225 else 0)
+
+
+def test_active_run_peak_upper_bound_reduces_build_physical_free_capacity(
+    tmp_path,
+):
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    node_id = nodes[0]
+    installation_operation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id=str(uuid4())
+    )
+    run_plan = service._run_admission.plan_run(
+        installation_operation.owner_id, "retained", now=NOW
+    )
+    run_node_plan = next(item for item in run_plan.nodes if item.node_id == node_id)
+    run_document = run_plan_document(
+        {
+            "schema_version": 1,
+            "observation_schema_version": 2,
+            "run_generation": 1,
+            "installation_id": run_plan.installation_id,
+            "alias": run_plan.alias,
+            "mapping_id": run_plan.mapping_id,
+            "mapping_generation": run_plan.mapping_generation,
+            "recipe_revision_id": run_plan.recipe_revision_id,
+            "plan_digest": run_plan.plan_digest,
+            "nodes": [_node_document(item) for item in run_plan.nodes],
+        }
+    )
+    now = NOW
+    run_id = str(uuid4())
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        # Aggregate free already includes an unknown amount from this run.
+        # Its exact use is deliberately absent from RunNode evidence.
+        snapshot.host_memory_total_bytes = snapshot.gpu_memory_total_bytes = 1_000
+        snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = 275
+        run = RecipeRun(
+            id=run_id,
+            installation_id=run_plan.installation_id,
+            mapping_id=run_plan.mapping_id,
+            mapping_generation=run_plan.mapping_generation,
+            run_generation=1,
+            alias=run_plan.alias,
+            plan_digest=run_plan.plan_digest,
+            plan=run_document,
+            state="running",
+            route_state="withdrawn",
+            actor="admin",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(run)
+        session.flush()
+        session.add_all(
+            (
+                RunNode(
+                    run_id=run_id,
+                    node_id=node_id,
+                    rank=run_node_plan.rank,
+                    role=run_node_plan.role,
+                    state="running",
+                    port=run_node_plan.port,
+                    reserved_memory_bytes=run_node_plan.required_memory_bytes,
+                    updated_at=now,
+                ),
+                ResourceReservation(
+                    node_id=node_id,
+                    kind="unified-memory",
+                    resource_key=run_plan.plan_digest,
+                    amount_bytes=run_node_plan.required_memory_bytes,
+                    owner_kind="run",
+                    owner_id=run_id,
+                    state="active",
+                    plan_digest=run_plan.plan_digest,
+                    created_at=now,
+                ),
+            )
+        )
+
+    inventory = InventoryRepository(sessions, clock=lambda: NOW)
+    snapshot = inventory.latest(node_id, now=NOW, maximum_age=300)
+    with sessions() as session:
+        # The peak ledger fits the 1,000-byte hard pool budget, but the
+        # observed free path must reserve the full 225-byte residual upper
+        # bound plus the 50-byte system floor. Ignoring that range would
+        # incorrectly offer 225 bytes to an unrelated source build.
+        assert memory_reservations(
+            session, node_id, memory_pool="shared"
+        ).unknown_run_residuals_by_kind["unified-memory"][0].maximum_bytes == 225
+        assert _available_build_memory(session, snapshot) == 0
 
 
 @pytest.mark.parametrize(

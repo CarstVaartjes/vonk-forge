@@ -1601,6 +1601,7 @@ def _available_build_memory(
         ),
         memory_pool=snapshot.memory_pool,
         evidence_state="fresh" if not snapshot.stale else "stale",
+        evidence_observed_at=snapshot.observed_at,
     )
     assert capacity.available_bytes is not None
     assert capacity.occupied_bytes is not None
@@ -1611,7 +1612,11 @@ def _available_build_memory(
             capacity.available_bytes - capacity.reserved_bytes,
             capacity.available_bytes
             - capacity.occupied_bytes
-            - capacity.unmaterialized_bytes,
+            - capacity.unmaterialized_bytes
+            - sum(
+                residual.maximum_bytes
+                for residual in capacity.unknown_run_residuals
+            ),
         )
         - floor
     )

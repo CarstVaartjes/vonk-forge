@@ -38,6 +38,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.host_helper import HostHelperSignature
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.bounded_json import require_mapping, require_sequence
+from vonk_control.catalog_entities import _digest
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.execution_plan_service import (
@@ -434,6 +435,7 @@ def setup_services(
     create_schema: bool = True,
     route_withdrawer=None,
     distributed_start_timeout_seconds: int = 60,
+    model_artifact: bool = False,
 ):
     engine = engine or create_engine(
         f"sqlite:///{tmp_path / 'operations.sqlite'}",
@@ -641,6 +643,19 @@ def setup_services(
                 state="active",
                 document=canonical_model_document,
                 content_digest=model_digest,
+                artifact_key=(
+                    _digest(
+                        {
+                            "files": [
+                                item.model_dump(mode="json")
+                                for item in model_definition.files
+                            ],
+                            "format": model_definition.format.model_dump(mode="json"),
+                        }
+                    )
+                    if model_artifact
+                    else None
+                ),
                 projected={},
                 created_by="admin",
                 created_at=NOW,

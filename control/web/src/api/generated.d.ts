@@ -3419,6 +3419,24 @@ export interface components {
              */
             type: "float";
         };
+        /** FreshnessEvidence */
+        FreshnessEvidence: {
+            /** Age Seconds */
+            age_seconds?: number | null;
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /** Maximum Age Seconds */
+            maximum_age_seconds?: number | null;
+            /** Observed At */
+            observed_at?: string | null;
+            /** Source */
+            source: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "fresh" | "stale" | "unknown";
+        };
         /** FreshnessPolicy */
         FreshnessPolicy: {
             /**
@@ -4082,6 +4100,26 @@ export interface components {
             /** Release Version */
             release_version?: string | null;
         };
+        /**
+         * MemoryUsageUncertainty
+         * @description Fresh aggregate capacity lacks per-run resident usage evidence.
+         */
+        MemoryUsageUncertainty: {
+            /** Inventory Evidence Digest */
+            inventory_evidence_digest: string;
+            /**
+             * Inventory Observed At
+             * Format: date-time
+             */
+            inventory_observed_at: string;
+            /** Residual Ranges */
+            residual_ranges: components["schemas"]["RunMemoryResidualRange"][];
+            /**
+             * Source
+             * @constant
+             */
+            source: "aggregate_inventory_without_run_usage";
+        };
         /** ModelAccess */
         ModelAccess: {
             /**
@@ -4216,6 +4254,8 @@ export interface components {
             /** Eta Seconds */
             eta_seconds?: number | null;
             failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
+            /** Model Content Sha256 */
+            model_content_sha256?: string | null;
             /** Next Actions */
             next_actions?: string[];
             /** Operation Id */
@@ -4246,6 +4286,22 @@ export interface components {
             total_bytes?: number | null;
             /** Transferred Bytes */
             transferred_bytes: number;
+        };
+        /**
+         * ModelCacheRemovalRequest
+         * @description Exact content identity and request key for a model cache removal.
+         */
+        ModelCacheRemovalRequest: {
+            /** Model Content Sha256 */
+            model_content_sha256: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
         };
         /** ModelCacheRemovalResult */
         ModelCacheRemovalResult: {
@@ -5745,6 +5801,7 @@ export interface components {
             cancelled_builds?: string[];
             /** Cancelled Operations */
             cancelled_operations?: string[];
+            failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
             /** Model Removals */
             model_removals?: string[];
             /** Next Actions */
@@ -6515,6 +6572,29 @@ export interface components {
             /** Targets Ready */
             targets_ready: boolean;
         };
+        /**
+         * RunMemoryResidualRange
+         * @description Possible remaining bytes for one exact active run reservation.
+         */
+        RunMemoryResidualRange: {
+            /** Maximum Bytes */
+            maximum_bytes: number;
+            /**
+             * Minimum Bytes
+             * @default 0
+             * @constant
+             */
+            minimum_bytes: 0;
+            /**
+             * Reservation Kind
+             * @enum {string}
+             */
+            reservation_kind: "host-memory" | "gpu-memory" | "unified-memory";
+            /** Run Generation */
+            run_generation: number;
+            /** Run Id */
+            run_id: string;
+        };
         /** RunNodeChange */
         RunNodeChange: {
             /** Entity Id */
@@ -6630,6 +6710,8 @@ export interface components {
             effective_settings?: components["schemas"]["EffectiveSettingsSelection"] | null;
             fit_after_stop: components["schemas"]["SparkFit"] | null;
             fit_current: components["schemas"]["SparkFit"];
+            /** Freshness */
+            freshness?: components["schemas"]["FreshnessEvidence"][];
             post_stop_memory_check?: components["schemas"]["ConditionalPostStopMemoryCheck"] | null;
             preparation?: components["schemas"]["RolloutPreparation"] | null;
             /**
@@ -7534,6 +7616,7 @@ export interface components {
             memory_pool?: ("shared" | "separate") | null;
             /** Memory Required Bytes */
             memory_required_bytes?: number | null;
+            memory_usage_uncertainty?: components["schemas"]["MemoryUsageUncertainty"] | null;
             /** Node Id */
             node_id: string;
             /** Ports Required */
@@ -10853,7 +10936,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ModelCacheOperatorRequest"];
+                "application/json": components["schemas"]["ModelCacheRemovalRequest"];
             };
         };
         responses: {

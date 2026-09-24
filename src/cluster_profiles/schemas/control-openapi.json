@@ -7063,6 +7063,81 @@
         "title": "FloatParameter",
         "type": "object"
       },
+      "FreshnessEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "age_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Seconds"
+          },
+          "evidence_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Digest"
+          },
+          "maximum_age_seconds": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Age Seconds"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "source": {
+            "maxLength": 96,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "fresh",
+              "stale",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "state"
+        ],
+        "title": "FreshnessEvidence",
+        "type": "object"
+      },
       "FreshnessPolicy": {
         "additionalProperties": false,
         "properties": {
@@ -9162,6 +9237,43 @@
         "title": "ManagedCatalogWithdrawnRecipe",
         "type": "object"
       },
+      "MemoryUsageUncertainty": {
+        "additionalProperties": false,
+        "description": "Fresh aggregate capacity lacks per-run resident usage evidence.",
+        "properties": {
+          "inventory_evidence_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Inventory Evidence Digest",
+            "type": "string"
+          },
+          "inventory_observed_at": {
+            "format": "date-time",
+            "title": "Inventory Observed At",
+            "type": "string"
+          },
+          "residual_ranges": {
+            "items": {
+              "$ref": "#/components/schemas/RunMemoryResidualRange"
+            },
+            "maxItems": 128,
+            "title": "Residual Ranges",
+            "type": "array"
+          },
+          "source": {
+            "const": "aggregate_inventory_without_run_usage",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "inventory_observed_at",
+          "inventory_evidence_digest",
+          "residual_ranges"
+        ],
+        "title": "MemoryUsageUncertainty",
+        "type": "object"
+      },
       "ModelAccess": {
         "additionalProperties": false,
         "properties": {
@@ -9496,6 +9608,18 @@
               }
             ]
           },
+          "model_content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Content Sha256"
+          },
           "next_actions": {
             "items": {
               "type": "string"
@@ -9606,6 +9730,34 @@
           "transferred_bytes"
         ],
         "title": "ModelCacheOperatorResponse",
+        "type": "object"
+      },
+      "ModelCacheRemovalRequest": {
+        "additionalProperties": false,
+        "description": "Exact content identity and request key for a model cache removal.",
+        "properties": {
+          "model_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Content Sha256",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_key",
+          "model_content_sha256"
+        ],
+        "title": "ModelCacheRemovalRequest",
         "type": "object"
       },
       "ModelCacheRemovalResult": {
@@ -14550,6 +14702,16 @@
             "title": "Cancelled Operations",
             "type": "array"
           },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "model_removals": {
             "items": {
               "type": "string"
@@ -16874,6 +17036,51 @@
         "title": "RolloutPreparation",
         "type": "object"
       },
+      "RunMemoryResidualRange": {
+        "additionalProperties": false,
+        "description": "Possible remaining bytes for one exact active run reservation.",
+        "properties": {
+          "maximum_bytes": {
+            "minimum": 0.0,
+            "title": "Maximum Bytes",
+            "type": "integer"
+          },
+          "minimum_bytes": {
+            "const": 0,
+            "default": 0,
+            "title": "Minimum Bytes",
+            "type": "integer"
+          },
+          "reservation_kind": {
+            "enum": [
+              "host-memory",
+              "gpu-memory",
+              "unified-memory"
+            ],
+            "title": "Reservation Kind",
+            "type": "string"
+          },
+          "run_generation": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Run Generation",
+            "type": "integer"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_generation",
+          "reservation_kind",
+          "maximum_bytes"
+        ],
+        "title": "RunMemoryResidualRange",
+        "type": "object"
+      },
       "RunNodeChange": {
         "additionalProperties": false,
         "properties": {
@@ -17222,6 +17429,14 @@
           },
           "fit_current": {
             "$ref": "#/components/schemas/SparkFit"
+          },
+          "freshness": {
+            "items": {
+              "$ref": "#/components/schemas/FreshnessEvidence"
+            },
+            "maxItems": 128,
+            "title": "Freshness",
+            "type": "array"
           },
           "post_stop_memory_check": {
             "anyOf": [
@@ -20024,6 +20239,16 @@
               }
             ],
             "title": "Memory Required Bytes"
+          },
+          "memory_usage_uncertainty": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryUsageUncertainty"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "node_id": {
             "pattern": "^spk_[0-9a-f]{32}$",
@@ -26806,7 +27031,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ModelCacheOperatorRequest"
+                "$ref": "#/components/schemas/ModelCacheRemovalRequest"
               }
             }
           },

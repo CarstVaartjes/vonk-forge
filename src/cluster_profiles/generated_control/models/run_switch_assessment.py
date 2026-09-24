@@ -14,6 +14,7 @@ from typing import Union
 if TYPE_CHECKING:
   from ..models.effective_settings_selection import EffectiveSettingsSelection
   from ..models.run_switch_reason import RunSwitchReason
+  from ..models.freshness_evidence import FreshnessEvidence
   from ..models.rollout_preparation import RolloutPreparation
   from ..models.spark_fit import SparkFit
   from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
@@ -40,6 +41,7 @@ class RunSwitchAssessment:
             stops (list['StopImpact']):
             warnings (list['RunSwitchReason']):
             effective_settings (Union['EffectiveSettingsSelection', None, Unset]):
+            freshness (Union[Unset, list['FreshnessEvidence']]):
             post_stop_memory_check (Union['ConditionalPostStopMemoryCheck', None, Unset]):
             preparation (Union['RolloutPreparation', None, Unset]):
             stop_before_prepare (Union[Unset, bool]):  Default: False.
@@ -54,6 +56,7 @@ class RunSwitchAssessment:
     stops: list['StopImpact']
     warnings: list['RunSwitchReason']
     effective_settings: Union['EffectiveSettingsSelection', None, Unset] = UNSET
+    freshness: Union[Unset, list['FreshnessEvidence']] = UNSET
     post_stop_memory_check: Union['ConditionalPostStopMemoryCheck', None, Unset] = UNSET
     preparation: Union['RolloutPreparation', None, Unset] = UNSET
     stop_before_prepare: Union[Unset, bool] = False
@@ -66,6 +69,7 @@ class RunSwitchAssessment:
     def to_dict(self) -> dict[str, Any]:
         from ..models.effective_settings_selection import EffectiveSettingsSelection
         from ..models.run_switch_reason import RunSwitchReason
+        from ..models.freshness_evidence import FreshnessEvidence
         from ..models.rollout_preparation import RolloutPreparation
         from ..models.spark_fit import SparkFit
         from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
@@ -112,6 +116,15 @@ class RunSwitchAssessment:
         else:
             effective_settings = self.effective_settings
 
+        freshness: Union[Unset, list[dict[str, Any]]] = UNSET
+        if not isinstance(self.freshness, Unset):
+            freshness = []
+            for freshness_item_data in self.freshness:
+                freshness_item = freshness_item_data.to_dict()
+                freshness.append(freshness_item)
+
+
+
         post_stop_memory_check: Union[None, Unset, dict[str, Any]]
         if isinstance(self.post_stop_memory_check, Unset):
             post_stop_memory_check = UNSET
@@ -146,6 +159,8 @@ class RunSwitchAssessment:
         })
         if effective_settings is not UNSET:
             field_dict["effective_settings"] = effective_settings
+        if freshness is not UNSET:
+            field_dict["freshness"] = freshness
         if post_stop_memory_check is not UNSET:
             field_dict["post_stop_memory_check"] = post_stop_memory_check
         if preparation is not UNSET:
@@ -163,6 +178,7 @@ class RunSwitchAssessment:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.effective_settings_selection import EffectiveSettingsSelection
         from ..models.run_switch_reason import RunSwitchReason
+        from ..models.freshness_evidence import FreshnessEvidence
         from ..models.rollout_preparation import RolloutPreparation
         from ..models.spark_fit import SparkFit
         from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
@@ -251,6 +267,16 @@ class RunSwitchAssessment:
         effective_settings = _parse_effective_settings(d.pop("effective_settings", UNSET))
 
 
+        freshness = []
+        _freshness = d.pop("freshness", UNSET)
+        for freshness_item_data in (_freshness or []):
+            freshness_item = FreshnessEvidence.from_dict(freshness_item_data)
+
+
+
+            freshness.append(freshness_item)
+
+
         def _parse_post_stop_memory_check(data: object) -> Union['ConditionalPostStopMemoryCheck', None, Unset]:
             if data is None:
                 return data
@@ -304,6 +330,7 @@ class RunSwitchAssessment:
             stops=stops,
             warnings=warnings,
             effective_settings=effective_settings,
+            freshness=freshness,
             post_stop_memory_check=post_stop_memory_check,
             preparation=preparation,
             stop_before_prepare=stop_before_prepare,

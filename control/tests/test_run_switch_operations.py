@@ -2715,6 +2715,7 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
         installation.state = "partial"
         run.state = "running"
         run.route_state = "published"
+        run_generation = run.run_generation
         for item in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
             item.state = "running"
             item.reserved_memory_bytes = 7_800
@@ -2761,6 +2762,39 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     assert plan.post_stop_memory_check.stop_run_ids == [run_id]
     assert plan.allowed, plan.blockers
     assert plan.stop_before_prepare is True
+    current_node = plan.fit_current.nodes[0]
+    uncertainty = current_node.memory_usage_uncertainty
+    assert uncertainty is not None
+    sample = next(
+        item
+        for item in plan.freshness
+        if item.source == f"spark:{node_id}:inventory"
+    )
+    assert uncertainty.source == "aggregate_inventory_without_run_usage"
+    assert uncertainty.inventory_observed_at == sample.observed_at
+    assert uncertainty.inventory_evidence_digest == sample.evidence_digest
+    assert [
+        (
+            item.run_id,
+            item.run_generation,
+            item.reservation_kind,
+            item.maximum_bytes,
+        )
+        for item in uncertainty.residual_ranges
+    ] == [(run_id, run_generation, "unified-memory", 7_800)]
+    assert current_node.memory_free_after_bytes is None
+    uncertain_reason = next(
+        reason
+        for reason in current_node.blockers
+        if reason.code == "run-switch.resource.resident_usage_unknown"
+    )
+    assert "Capacity is unverified" in uncertain_reason.detail
+    assert "0..7800 bytes" in uncertain_reason.detail
+    assert "leaves -" not in uncertain_reason.detail
+    round_tripped = RunSwitchPlan.model_validate_json(plan.model_dump_json())
+    assert (
+        round_tripped.fit_current.nodes[0].memory_usage_uncertainty == uncertainty
+    )
     bad_stop = plan.model_dump(mode="python")
     bad_stop["post_stop_memory_check"] = {"stop_run_ids": [str(uuid.uuid4())]}
     with pytest.raises(ValidationError, match="exact reviewed stops"):

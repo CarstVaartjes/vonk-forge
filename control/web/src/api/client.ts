@@ -306,12 +306,11 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async removeModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
-    // Removal is the counterpart of the download action: the Controller
-    // cancels any matching transfer and drops the entry when unreferenced.
+  async removeModelCache(selector: string, modelContentSha256: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
+    // Bind removal to the exact revision the operator reviewed.
     return resultData(await this.generated.POST("/api/model/{selector}/remove", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2},
+      body: {model_content_sha256: modelContentSha256, request_key: requestKey, schema_version: 2},
       signal,
     }));
   }

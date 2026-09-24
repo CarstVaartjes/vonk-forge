@@ -555,6 +555,7 @@ class RunAdmissionService:
                 if snapshot is not None and not snapshot.stale
                 else "unknown",
                 evidence_digest=snapshot.evidence_digest if snapshot else None,
+                evidence_observed_at=snapshot.observed_at if snapshot else None,
             )
             reserved = capacity.reserved_bytes or 0
             available = (

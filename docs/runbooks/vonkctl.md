@@ -216,10 +216,18 @@ idempotent; a different request cannot replace it. Cancellation may remain
 partial files are retained; cancellation does not evict them. Reconnect with
 `model progress OPERATION_ID --follow` to observe settlement.
 
-Removal requests eviction from the Controller cache. It does not authorize
-stopping a Spark workload or erasing a saved profile. Reviewed removal and
-concurrent-reference protection are still being completed in W09/W17; do not
-use removal as a substitute for the explicit cancellation command.
+Removal requests eviction of the selected revision from the Controller cache.
+The Controller records the exact request and its deletion targets before
+removing bytes. Accepted references can block removal; an unavailable reference
+scan is an explicit refusal. Removal does not cancel another download or build,
+stop a Spark workload, or erase a saved profile.
+
+Keep the request key printed by the CLI. Reuse it to reconnect after a lost
+response; `model progress --request-key REQUEST_UUID --follow` observes the
+original removal. Queued and partially completed removals remain unfinished.
+A storage or ownership conflict exposes its cause and next automatic retry;
+progress resumes from the original checkpoint when that dependency clears.
+A timeout or Ctrl-C ends observation without cancelling removal.
 
 ## Recipe
 
@@ -241,6 +249,12 @@ vonkctl recipe update --all
 vonkctl recipe remove qwen-code --keep-model --yes
 vonkctl recipe remove qwen-code --with-model --yes
 ```
+
+Recipe removal requires an explicit `--keep-model` or `--with-model` choice.
+The latter binds an exact model-removal child and completes only after that
+child settles. Shared model files needed by retained cache entries are preserved.
+Use `recipe progress --request-key REQUEST_UUID --follow` to reconnect to the
+same operation and inspect a waiting dependency or failure.
 
 Recipe names (`publisher/slug` or an unambiguous slug) and logical recipe IDs
 select the current accepted revision. Use an exact revision ID or content digest

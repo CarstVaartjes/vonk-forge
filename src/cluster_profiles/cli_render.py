@@ -603,6 +603,30 @@ def _preview(payload: Mapping[str, object]) -> None:
                     "Memory after placement",
                     _headroom(node.get("memory_free_after_bytes")),
                 )
+                uncertainty = _optional(
+                    node.get("memory_usage_uncertainty"), "memory usage uncertainty"
+                )
+                if uncertainty:
+                    _field(
+                        "Resident usage evidence",
+                        "Per-run usage is unavailable; admission uses each full residual upper bound.",
+                    )
+                    _field("Capacity source", uncertainty.get("source"))
+                    _field(
+                        "Inventory sample",
+                        uncertainty.get("inventory_observed_at"),
+                    )
+                    _field(
+                        "Inventory evidence digest",
+                        uncertainty.get("inventory_evidence_digest"),
+                    )
+                    for residual in _records(uncertainty, "residual_ranges"):
+                        _field(
+                            "Possible run residual",
+                            f"{residual.get('run_id')} generation "
+                            f"{residual.get('run_generation')}: 0–"
+                            f"{_bytes(residual.get('maximum_bytes'))} (not measured)",
+                        )
                 _field("Disk required", _bytes(node.get("disk_required_bytes")))
                 _field(
                     "Disk after placement", _headroom(node.get("disk_free_after_bytes"))

@@ -160,7 +160,7 @@ export interface LibraryApi {
   artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobResultUrl(jobId: string, name: string, sha256: string): string;
   prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
-  removeModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  removeModelCache(selector: string, modelContentSha256: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   downloadRecipe(selector: string, requestKey: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityResponse>;
   removeRecipe(selector: string, requestKey: string, withModel: boolean, signal?: AbortSignal): Promise<RecipeOperatorResponse>;

@@ -81,6 +81,9 @@ class _Service(RecipeImageAvailabilityService):
     def reconcile_cancellations(self, *, limit: int = 8) -> int:
         return 0
 
+    def advance_removals(self, *, limit: int = 1) -> int:
+        return 0
+
 
 def test_scheduler_submits_durable_claim_without_waiting_for_image_io() -> None:
     service = _Service()

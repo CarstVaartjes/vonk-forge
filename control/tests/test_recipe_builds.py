@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     AgentClaim,
     AgentResult,
     RecipeBuildRequest,
+    canonical_message,
     canonical_payload,
 )
 from vonk_agent_protocol import (
@@ -54,6 +55,7 @@ from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
 )
+from vonk_control.recipe_image_removal_contract import RecipeCacheRemovalOwner
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
@@ -140,6 +142,8 @@ def setup(
     network: dict[str, object] | None = None,
     engine=None,
     existing_node: bool = False,
+    builder_node_id: str | None = None,
+    recipe_slug: str = "qwen3-vllm",
 ):
     engine = engine or create_engine(f"sqlite:///{tmp_path / 'build.sqlite'}")
     Base.metadata.create_all(engine)
@@ -147,7 +151,7 @@ def setup(
     now = datetime(2026, 8, 7, 12, tzinfo=UTC)
     if existing_node:
         now += timedelta(seconds=1)
-    node_id = "spk_" + "1" * 32
+    node_id = builder_node_id or "spk_" + "1" * 32
     bundle = generate_source_bundle(
         {
             "Dockerfile": (
@@ -166,7 +170,7 @@ def setup(
         "mode": "none",
         "hosts": [],
     }
-    document["identity"]["slug"] = "qwen3-vllm"
+    document["identity"]["slug"] = recipe_slug
     document["execution"]["build"]["target"] = "runtime"
     with sessions.begin() as session:
         builder = session.get(AgentNode, node_id) if existing_node else None
@@ -1221,14 +1225,10 @@ def test_stored_build_envelope_names_the_field_that_invalidated_it(
 
 
 def test_removal_does_not_corrupt_the_stored_build_envelope(tmp_path: Path) -> None:
-    """A cache removal must not write engine keys into the build contract.
+    """Removal preserves another request's build and its canonical envelope.
 
-    ``remove_selector`` marked cancelled builds by merging ``removal_fence``
-    and ``cancelled`` into ``RecipeBuild.plan``.  That column is the canonical
-    ``RecipeBuildRequest`` document, whose model forbids extra keys, so the row
-    could never be parsed again and every later plan failed with
-    ``build.plan_invalid``.  A removal cancels the build through state and
-    error; the fence belongs to the removal operation that owns it.
+    This catches implicit build cancellation or removal-only fields written
+    into the strict build plan while cache eviction is accepted.
     """
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
@@ -1254,26 +1254,27 @@ def test_removal_does_not_corrupt_the_stored_build_envelope(tmp_path: Path) -> N
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000024",
     )
-    assert result["cancelled_builds"] == [planned.build_id]
+    assert result["cancelled_builds"] == []
 
     with sessions() as session:
         stored = session.get(RecipeBuild, planned.build_id)
         assert stored is not None
-        assert stored.state == "failed"
+        assert stored.state == "planned"
         # The exact stored document still satisfies the canonical contract.
         assert parse_stored_build_plan(stored.plan).build_id == planned.build_id
 
-    # The fence is recorded on the removal operation that owns the
-    # cancellation, not smuggled into the build contract document.
+    # The fence belongs to the exact removal owner.
     with sessions() as session:
         removal = session.scalar(
             select(Job).where(Job.request_id == "00000000-0000-4000-8000-000000000024")
         )
         assert removal is not None
-        assert isinstance(_json_object(removal.payload).get("removal_fence"), str)
+        owner = RecipeCacheRemovalOwner.model_validate_json(
+            canonical_message(removal.payload)
+        )
+        assert owner.plan.intent.request_key == removal.request_id
 
-    # The planning path the operator runs next must return the cancelled row to
-    # a clean planned attempt with a usable envelope, not reject it.
+    # Replanning reconnects to the same valid build request.
     replanned = builds.plan(revision.id, node_id, now=now)
     assert replanned.build_id == planned.build_id
     assert parse_stored_build_plan(replanned.agent_payload).build_id == planned.build_id

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -177,20 +178,16 @@ class _ModelCacheOperationPayload(StrictModel):
     cancellation: ModelCacheCancellation | None = None
     retry_of: str | None = Field(default=None, pattern=UUID_PATTERN)
     resume_of: str | None = Field(default=None, pattern=UUID_PATTERN)
-    # A removal fence is durable operation state.  Workers must observe it
-    # before publishing a verified object, including after a Controller
-    # restart.  It is deliberately optional so current in-flight operations
-    # retain the same strict envelope until an operator removes them.
-    removal_fence: str | None = Field(default=None, pattern=UUID_PATTERN)
     operator_action: str | None = Field(
         default=None, pattern=r"^[a-z][a-z0-9_.:-]{0,63}$"
     )
-    selector: str | None = Field(default=None, min_length=1, max_length=256)
     with_model: bool | None = None
     force_refresh: bool = False
 
 
 class ModelCacheDownloadPayload(_ModelCacheOperationPayload):
+    removal_fence: str | None = Field(default=None, pattern=UUID_PATTERN)
+    selector: str | None = Field(default=None, min_length=1, max_length=256)
     artifact_set_sha256: Digest
     manifest: CacheManifest
     plan_digest: Digest
@@ -204,10 +201,52 @@ class ModelCacheRepairPayload(ModelCacheDownloadPayload):
 
 
 class ModelCacheRemovalPayload(_ModelCacheOperationPayload):
+    """Exact, restartable removal plan and its durable effect checkpoint."""
+
+    selector: str = Field(..., min_length=1, max_length=256)
+    model_content_sha256: Digest | None = None
+    removal_fence: str = Field(..., pattern=UUID_PATTERN)
     selected: list[Digest]
     selected_objects: list[Digest]
+    delete_objects: list[Digest]
+    object_index: int = Field(ge=0)
+    object_pending_bytes: int | None = Field(ge=0)
     reclaimed_bytes: int = Field(ge=0)
-    result: ModelCacheRemovalResult
+    set_index: int = Field(ge=0)
+    retry: ModelCacheRetry
+    result: ModelCacheRemovalResult | None
+
+    @model_validator(mode="after")
+    def removal_checkpoint_is_consistent(self) -> ModelCacheRemovalPayload:
+        if (
+            self.retry.next_retry_at is not None
+            and datetime.fromisoformat(self.retry.next_retry_at).tzinfo is None
+        ):
+            raise ValueError("model removal retry timestamp must include a timezone")
+        if self.operator_action != "remove-model":
+            raise ValueError("model removal action is missing")
+        if self.object_index > len(self.delete_objects):
+            raise ValueError("model removal object checkpoint exceeds its plan")
+        if self.set_index > len(self.selected):
+            raise ValueError("model removal set checkpoint exceeds its plan")
+        if self.object_pending_bytes is not None and self.object_index >= len(
+            self.delete_objects
+        ):
+            raise ValueError("model removal has a byte checkpoint without an object")
+        if len(self.selected) != len(set(self.selected)):
+            raise ValueError("model removal set identities are duplicated")
+        if len(self.selected_objects) != len(set(self.selected_objects)):
+            raise ValueError("model removal object identities are duplicated")
+        if len(self.delete_objects) != len(set(self.delete_objects)):
+            raise ValueError("model removal delete identities are duplicated")
+        if not set(self.delete_objects).issubset(self.selected_objects):
+            raise ValueError("model removal deletes an unselected object")
+        if self.result is not None and (
+            self.object_index != len(self.delete_objects)
+            or self.set_index != len(self.selected)
+        ):
+            raise ValueError("model removal result precedes its effects")
+        return self
 
 
 ModelCacheOperationPayload = (
@@ -307,6 +346,14 @@ class ModelCacheOperatorRequest(StrictModel):
     request_key: str = Field(pattern=UUID_PATTERN)
 
 
+class ModelCacheRemovalRequest(StrictModel):
+    """Exact content identity and request key for a model cache removal."""
+
+    schema_version: Literal[2] = 2
+    request_key: str = Field(pattern=UUID_PATTERN)
+    model_content_sha256: Digest
+
+
 class ModelCacheCancellationRequest(StrictModel):
     """Stable identity and operator explanation for one cancellation request."""
 
@@ -322,6 +369,7 @@ class ModelCacheOperatorResponse(StrictModel):
     action: ModelCacheOperatorAction
     selector: str = Field(min_length=1, max_length=256)
     request_key: str = Field(pattern=UUID_PATTERN)
+    model_content_sha256: Digest | None = None
     operation_id: str | None = Field(default=None, pattern=UUID_PATTERN)
     state: ModelCacheOperatorState
     phase: str = Field(min_length=1, max_length=64)
@@ -601,6 +649,7 @@ __all__ = [
     "ModelCacheOperatorResponse",
     "ModelCacheOperatorState",
     "ModelCacheRemovalPayload",
+    "ModelCacheRemovalRequest",
     "ModelCacheRemovalResult",
     "ModelCacheRepairPayload",
     "ModelCacheRepairPreviewRequest",

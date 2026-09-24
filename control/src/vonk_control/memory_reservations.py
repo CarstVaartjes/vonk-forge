@@ -1,6 +1,7 @@
 """One ledger projection for all consumers of physical memory."""
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,7 +15,11 @@ from .profile_capacity import (
     reservation_visible,
 )
 from .recipe_execution_contract import parse_stored_run_plan
-from .resource_planning import MemoryReservationTotals, memory_reservation_kinds
+from .resource_planning import (
+    MemoryReservationTotals,
+    UnknownRunMemoryResidual,
+    memory_reservation_kinds,
+)
 from .run_switch_contract import StopImpact
 
 MEMORY_RESERVATION_KINDS = ("host-memory", "gpu-memory", "unified-memory")
@@ -96,6 +101,7 @@ def memory_reservations(
             .order_by(ResourceReservation.id)
         )
     )
+    usage = {claim.id: _claim_usage(session, claim) for claim in claims}
     if memory_pool is None:
         committed = {
             kind: sum(claim.amount_bytes for claim in claims if claim.kind == kind)
@@ -105,13 +111,23 @@ def memory_reservations(
             kind: sum(
                 claim.amount_bytes
                 for claim in claims
-                if claim.kind == kind and _claim_is_unmaterialized(session, claim)
+                if claim.kind == kind and usage[claim.id].unmaterialized
+            )
+            for kind in MEMORY_RESERVATION_KINDS
+        }
+        unknown = {
+            kind: tuple(
+                projection.unknown_residual
+                for claim in claims
+                if claim.kind == kind
+                if (projection := usage[claim.id]).unknown_residual is not None
             )
             for kind in MEMORY_RESERVATION_KINDS
         }
         return MemoryReservationTotals(
             {kind: amount for kind, amount in committed.items() if amount},
             {kind: amount for kind, amount in unmaterialized.items() if amount},
+            {kind: value for kind, value in unknown.items() if value},
         )
     active = [claim for claim in claims if claim.state == "active"]
     future: dict[str, list[ResourceReservation]] = {}
@@ -152,6 +168,7 @@ def memory_reservations(
                 replacements[inherited.owner_id].add(build_claim.id)
     committed_totals: dict[str, int] = {}
     unmaterialized_totals: dict[str, int] = {}
+    unknown_totals: dict[str, tuple[UnknownRunMemoryResidual, ...]] = {}
     for pool_kind in (
         ("unified-memory",)
         if memory_pool == "shared"
@@ -161,9 +178,12 @@ def memory_reservations(
         live = [claim for claim in active if claim.kind in overlapping]
         total = sum(claim.amount_bytes for claim in live)
         unmaterialized = sum(
-            claim.amount_bytes
+            claim.amount_bytes for claim in live if usage[claim.id].unmaterialized
+        )
+        unknown = tuple(
+            projection.unknown_residual
             for claim in live
-            if _claim_is_unmaterialized(session, claim)
+            if (projection := usage[claim.id]).unknown_residual is not None
         )
         credited: set[str] = set()
         for owner, promised in future.items():
@@ -180,7 +200,7 @@ def memory_reservations(
             replaced_unmaterialized = sum(
                 claim.amount_bytes
                 for claim in replaced
-                if _claim_is_unmaterialized(session, claim)
+                if usage[claim.id].unmaterialized
             )
             # A promise replacing a live run is still a future allocation.
             # Only another not-yet-materialized claim can supply overlap here;
@@ -192,23 +212,33 @@ def memory_reservations(
             committed_totals[pool_kind] = total
         if unmaterialized:
             unmaterialized_totals[pool_kind] = unmaterialized
-    return MemoryReservationTotals(committed_totals, unmaterialized_totals)
+        if unknown:
+            unknown_totals[pool_kind] = unknown
+    return MemoryReservationTotals(
+        committed_totals, unmaterialized_totals, unknown_totals
+    )
 
 
-def _claim_is_unmaterialized(session: Session, claim: ResourceReservation) -> bool:
-    """Whether the owner has not yet materialized memory on its exact node."""
+@dataclass(frozen=True, slots=True)
+class _ClaimUsage:
+    unmaterialized: bool
+    unknown_residual: UnknownRunMemoryResidual | None = None
+
+
+def _claim_usage(session: Session, claim: ResourceReservation) -> _ClaimUsage:
+    """Classify one claim without treating run state as resident-byte evidence."""
     if claim.owner_kind == "fleet-profile":
-        return True
+        return _ClaimUsage(unmaterialized=True)
     if claim.owner_kind == "recipe-build":
         # The builder's process is external to this SQL receipt. Keep its
         # committed envelope against observed free until the build owner
         # releases it; hard pool limits still count it only once.
-        return True
+        return _ClaimUsage(unmaterialized=True)
     if claim.owner_kind != "run":
         raise ValueError("memory reservation has an unsupported owner kind")
     run = session.get(RecipeRun, claim.owner_id)
     if run is None:
-        return True
+        return _ClaimUsage(unmaterialized=True)
     run_node = session.scalar(
         select(RunNode).where(
             RunNode.run_id == claim.owner_id,
@@ -216,12 +246,17 @@ def _claim_is_unmaterialized(session: Session, claim: ResourceReservation) -> bo
         )
     )
     if run_node is None:
-        return True
-    # The reservation amount remains a hard ledger commitment even if its
-    # owner binding has drifted. Only the persisted exact rank state is used
-    # here to avoid charging a currently running process a second time against
-    # aggregate free bytes; the existing replacement matcher still requires
-    # the run/claim digest to agree before counting any overlap.
-    # Rank launch precedes model allocation and collective readiness.
-    # Its receipt cannot release a not-yet-materialized promise.
-    return run_node.state != "running"
+        return _ClaimUsage(unmaterialized=True)
+    # The active SQL claim has no connected per-run usage producer. Lifecycle
+    # state, including "starting" and "running", cannot narrow its possible
+    # residual. Inventory already reflects an unknown amount in [0, peak], so
+    # preserve that range separately and use its full upper bound for safety.
+    return _ClaimUsage(
+        unmaterialized=False,
+        unknown_residual=UnknownRunMemoryResidual(
+            run_id=run.id,
+            run_generation=run.run_generation,
+            reservation_kind=claim.kind,
+            maximum_bytes=claim.amount_bytes,
+        ),
+    )

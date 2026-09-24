@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
@@ -54,7 +54,9 @@ def _sqlstate(error: DBAPIError) -> str | None:
     return state if isinstance(state, str) else None
 
 
-def _retryable_database_error(error: DBAPIError) -> ArtifactLifecycleError | None:
+def retryable_artifact_database_error(
+    error: DBAPIError,
+) -> ArtifactLifecycleError | None:
     """Translate only PostgreSQL lock/transaction contention failures."""
 
     state = _sqlstate(error)
@@ -82,7 +84,7 @@ def _reference_sql[Result](query: Callable[[], Result]) -> Result:
     try:
         return query()
     except DBAPIError as error:
-        translated = _retryable_database_error(error)
+        translated = retryable_artifact_database_error(error)
         if translated is None:
             raise
         raise translated from error
@@ -194,6 +196,54 @@ def require_reference_open(
             )
 
 
+def lock_removal_fences(
+    session: Session,
+    identities: Iterable[ArtifactIdentity],
+    *,
+    owner_kind: RemovalOwnerKind,
+    owner_id: str,
+    fence: str,
+    now: datetime,
+) -> bool:
+    """Lock an exact deletion scope in common order and verify every fence."""
+
+    rows = lock_reference_gates(session, identities, now=now)
+    return bool(rows) and all(
+        row.removal_owner_kind == owner_kind
+        and row.removal_owner_id == owner_id
+        and row.removal_fence == fence
+        for row in rows
+    )
+
+
+def removal_fences_match(
+    session: Session,
+    assignments: Iterable[tuple[ArtifactIdentity, RemovalOwnerKind, str, str]],
+    *,
+    now: datetime,
+) -> bool:
+    """Verify a heterogeneous parent/child fence assignment in common order."""
+
+    expected = {
+        identity: (kind, owner_id, fence)
+        for identity, kind, owner_id, fence in assignments
+    }
+    if not expected:
+        return False
+    rows = lock_reference_gates(session, expected, now=now)
+    return all(
+        (
+            row.removal_owner_kind,
+            row.removal_owner_id,
+            row.removal_fence,
+        )
+        == expected[
+            ArtifactIdentity(cast(ArtifactKind, row.artifact_kind), row.artifact_sha256)
+        ]
+        for row in rows
+    )
+
+
 def reserve_removal(
     session: Session,
     identities: Iterable[ArtifactIdentity],
@@ -204,8 +254,44 @@ def reserve_removal(
     now: datetime,
 ) -> None:
     """Persist one removal owner's exclusive identity fences atomically."""
+    reserve_removal_owners(
+        session,
+        ((identity, owner_kind, owner_id, fence) for identity in identities),
+        now=now,
+    )
 
-    for row in lock_reference_gates(session, identities, now=now):
+
+def reserve_removal_owners(
+    session: Session,
+    assignments: Iterable[tuple[ArtifactIdentity, RemovalOwnerKind, str, str]],
+    *,
+    now: datetime,
+) -> None:
+    """Reserve related removals in one globally ordered gate acquisition.
+
+    A recipe removal may own image gates itself while its exact model-removal
+    child owns model-set and model-object gates. Acquire the combined identity
+    set once in the shared kind/digest order, then assign each already-locked
+    row to its durable owner before either owner is committed.
+    """
+
+    by_identity: dict[ArtifactIdentity, tuple[RemovalOwnerKind, str, str]] = {}
+    for identity, owner_kind, owner_id, fence in assignments:
+        if owner_kind not in {"model-cache-operation", "recipe-image-job"}:
+            raise ValueError("artifact removal owner kind is invalid")
+        if not owner_id or not fence:
+            raise ValueError("artifact removal owner identity is incomplete")
+        owner = (owner_kind, owner_id, fence)
+        previous = by_identity.setdefault(identity, owner)
+        if previous != owner:
+            raise ValueError("one artifact identity has multiple removal owners")
+
+    rows = lock_reference_gates(session, by_identity, now=now)
+    for row in rows:
+        identity = ArtifactIdentity(
+            cast(ArtifactKind, row.artifact_kind), row.artifact_sha256
+        )
+        owner_kind, owner_id, fence = by_identity[identity]
         same_owner = (
             row.removal_owner_kind == owner_kind
             and row.removal_owner_id == owner_id
@@ -315,6 +401,8 @@ __all__ = [
     "clear_removal",
     "lock_reference_gates",
     "reference_gate_is_open_nowait",
+    "removal_fences_match",
     "require_reference_open",
     "reserve_removal",
+    "reserve_removal_owners",
 ]

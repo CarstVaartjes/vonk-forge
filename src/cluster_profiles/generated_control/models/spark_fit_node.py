@@ -18,6 +18,7 @@ from typing import Union
 if TYPE_CHECKING:
   from ..models.run_switch_reason import RunSwitchReason
   from ..models.resource_demand_evidence import ResourceDemandEvidence
+  from ..models.memory_usage_uncertainty import MemoryUsageUncertainty
 
 
 
@@ -47,6 +48,7 @@ class SparkFitNode:
             memory_kind (Union[None, SparkFitNodeMemoryKindType0, Unset]):
             memory_pool (Union[None, SparkFitNodeMemoryPoolType0, Unset]):
             memory_required_bytes (Union[None, Unset, int]):
+            memory_usage_uncertainty (Union['MemoryUsageUncertainty', None, Unset]):
             resource_demand (Union['ResourceDemandEvidence', None, Unset]):
             warnings (Union[Unset, list['RunSwitchReason']]):
      """
@@ -67,6 +69,7 @@ class SparkFitNode:
     memory_kind: Union[None, SparkFitNodeMemoryKindType0, Unset] = UNSET
     memory_pool: Union[None, SparkFitNodeMemoryPoolType0, Unset] = UNSET
     memory_required_bytes: Union[None, Unset, int] = UNSET
+    memory_usage_uncertainty: Union['MemoryUsageUncertainty', None, Unset] = UNSET
     resource_demand: Union['ResourceDemandEvidence', None, Unset] = UNSET
     warnings: Union[Unset, list['RunSwitchReason']] = UNSET
 
@@ -77,6 +80,7 @@ class SparkFitNode:
     def to_dict(self) -> dict[str, Any]:
         from ..models.run_switch_reason import RunSwitchReason
         from ..models.resource_demand_evidence import ResourceDemandEvidence
+        from ..models.memory_usage_uncertainty import MemoryUsageUncertainty
         allowed = self.allowed
 
         node_id = self.node_id
@@ -162,6 +166,14 @@ class SparkFitNode:
         else:
             memory_required_bytes = self.memory_required_bytes
 
+        memory_usage_uncertainty: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.memory_usage_uncertainty, Unset):
+            memory_usage_uncertainty = UNSET
+        elif isinstance(self.memory_usage_uncertainty, MemoryUsageUncertainty):
+            memory_usage_uncertainty = self.memory_usage_uncertainty.to_dict()
+        else:
+            memory_usage_uncertainty = self.memory_usage_uncertainty
+
         resource_demand: Union[None, Unset, dict[str, Any]]
         if isinstance(self.resource_demand, Unset):
             resource_demand = UNSET
@@ -211,6 +223,8 @@ class SparkFitNode:
             field_dict["memory_pool"] = memory_pool
         if memory_required_bytes is not UNSET:
             field_dict["memory_required_bytes"] = memory_required_bytes
+        if memory_usage_uncertainty is not UNSET:
+            field_dict["memory_usage_uncertainty"] = memory_usage_uncertainty
         if resource_demand is not UNSET:
             field_dict["resource_demand"] = resource_demand
         if warnings is not UNSET:
@@ -224,6 +238,7 @@ class SparkFitNode:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.run_switch_reason import RunSwitchReason
         from ..models.resource_demand_evidence import ResourceDemandEvidence
+        from ..models.memory_usage_uncertainty import MemoryUsageUncertainty
         d = dict(src_dict)
         allowed = d.pop("allowed")
 
@@ -366,6 +381,26 @@ class SparkFitNode:
         memory_required_bytes = _parse_memory_required_bytes(d.pop("memory_required_bytes", UNSET))
 
 
+        def _parse_memory_usage_uncertainty(data: object) -> Union['MemoryUsageUncertainty', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                memory_usage_uncertainty_type_0 = MemoryUsageUncertainty.from_dict(data)
+
+
+
+                return memory_usage_uncertainty_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['MemoryUsageUncertainty', None, Unset], data)
+
+        memory_usage_uncertainty = _parse_memory_usage_uncertainty(d.pop("memory_usage_uncertainty", UNSET))
+
+
         def _parse_resource_demand(data: object) -> Union['ResourceDemandEvidence', None, Unset]:
             if data is None:
                 return data
@@ -413,6 +448,7 @@ class SparkFitNode:
             memory_kind=memory_kind,
             memory_pool=memory_pool,
             memory_required_bytes=memory_required_bytes,
+            memory_usage_uncertainty=memory_usage_uncertainty,
             resource_demand=resource_demand,
             warnings=warnings,
         )

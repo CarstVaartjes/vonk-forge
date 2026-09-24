@@ -13,12 +13,14 @@ from vonk_control.models import (
     NodeInventorySnapshot,
     RecipeRun,
     ResourceReservation,
+    RunNode,
 )
 from vonk_control.recipe_operations import RecipeOperationConflict
+from vonk_control.resource_planning import UnknownRunMemoryResidual
 
 from .test_profile_installed_execution import _drive_to_job
 from .test_profile_port_claims import _load, _ready_profile
-from .test_recipe_operations import started_recipe
+from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 
 
 @pytest.mark.parametrize("node_count", [1, 2])
@@ -149,6 +151,88 @@ def test_replacement_owns_memory_before_and_after_old_claim_is_released(
         totals = memory_reservations(session, nodes[0], memory_pool="shared")
         assert totals.committed_bytes_by_kind == {"unified-memory": demand}
         assert totals.unmaterialized_bytes_by_kind == {"unified-memory": demand}
+
+
+def test_starting_and_running_claims_keep_the_full_unknown_residual_range(
+    tmp_path, postgres_engine
+):
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    installation_operation = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid4()),
+    )
+    installation_id = installation_operation.owner_id
+    run_plan = lifecycle._run_admission.plan_run(
+        installation_id, "retained", now=lifecycle._clock()
+    )
+    run_id = lifecycle._run_admission.accept_run(
+        run_plan, actor="admin", now=lifecycle._clock()
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run_generation = run.run_generation
+        claim = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run_id,
+                ResourceReservation.node_id == nodes[0],
+                ResourceReservation.kind == "unified-memory",
+                ResourceReservation.state == "active",
+            )
+        )
+        assert claim is not None
+        peak_bytes = claim.amount_bytes
+
+    for state in ("starting", "running"):
+        with sessions.begin() as session:
+            run = session.get(RecipeRun, run_id)
+            run_node = session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == run_id,
+                    RunNode.node_id == nodes[0],
+                )
+            )
+            assert run is not None and run_node is not None
+            run.state = state
+            run_node.state = state
+
+        with sessions() as session:
+            totals = memory_reservations(session, nodes[0], memory_pool="shared")
+            assert totals.committed_bytes_by_kind == {"unified-memory": peak_bytes}
+            assert totals.unmaterialized_bytes_by_kind == {}
+            assert totals.unknown_run_residuals_by_kind == {
+                "unified-memory": (
+                    UnknownRunMemoryResidual(
+                        run_id=run_id,
+                        run_generation=run_generation,
+                        reservation_kind="unified-memory",
+                        maximum_bytes=peak_bytes,
+                    ),
+                )
+            }
+            unrelated_exclusion = memory_reservations(
+                session,
+                nodes[0],
+                memory_pool="shared",
+                excluded_run_ids=(str(uuid4()),),
+            )
+            assert unrelated_exclusion.unknown_run_residuals_by_kind == (
+                totals.unknown_run_residuals_by_kind
+            )
+            exact_exclusion = memory_reservations(
+                session,
+                nodes[0],
+                memory_pool="shared",
+                excluded_run_ids=(run_id,),
+            )
+            assert exact_exclusion.committed_bytes_by_kind == {}
+            assert exact_exclusion.unknown_run_residuals_by_kind == {}
 
 
 @pytest.mark.parametrize("change", ["missing", "amount", "pool", "digest", "intent"])

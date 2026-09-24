@@ -18,6 +18,7 @@ from vonk_control.model_cache_progress import cache_progress
 OPERATION_ID = "00000000-0000-4000-8000-000000000001"
 REQUEST_KEY = "00000000-0000-4000-8000-000000000002"
 CANCEL_KEY = "00000000-0000-4000-8000-000000000003"
+MODEL_CONTENT_SHA256 = "a" * 64
 
 
 def _client(service, role="administrator"):
@@ -41,6 +42,7 @@ def test_remove_is_the_current_model_eviction_boundary():
     operation = Mock(spec=CacheOperationView)
     operation.id = OPERATION_ID
     operation.request_key = REQUEST_KEY
+    operation.model_content_sha256 = MODEL_CONTENT_SHA256
     operation.state = "succeeded"
     operation.progress = cache_progress(
         {
@@ -66,20 +68,40 @@ def test_remove_is_the_current_model_eviction_boundary():
     service.remove_model_selector.return_value = operation
     response = _client(service).post(
         "/api/model/model/remove",
-        json={"request_key": REQUEST_KEY},
+        json={
+            "schema_version": 2,
+            "request_key": REQUEST_KEY,
+            "model_content_sha256": MODEL_CONTENT_SHA256,
+        },
     )
     assert response.status_code == 202, response.text
     parsed = ModelCacheOperatorResponse.model_validate_json(response.content)
     assert parsed.action == "remove"
+    assert parsed.model_content_sha256 == MODEL_CONTENT_SHA256
     service.remove_model_selector.assert_called_once_with(
-        "model", actor="test", request_key=REQUEST_KEY
+        "model",
+        actor="test",
+        request_key=REQUEST_KEY,
+        model_content_sha256=MODEL_CONTENT_SHA256,
     )
+    for body in (
+        {"schema_version": 2, "request_key": REQUEST_KEY},
+        {
+            "schema_version": 2,
+            "request_key": REQUEST_KEY,
+            "model_content_sha256": "not-a-digest",
+        },
+    ):
+        refused = _client(service).post("/api/model/model/remove", json=body)
+        assert refused.status_code == 422
+    assert service.remove_model_selector.call_count == 1
 
 
 def test_model_operation_observation_is_readable_by_any_authenticated_actor():
     operation = Mock(spec=CacheOperationView)
     operation.id = OPERATION_ID
     operation.request_key = REQUEST_KEY
+    operation.model_content_sha256 = None
     operation.state = "succeeded"
     operation.progress = cache_progress(
         {
@@ -117,6 +139,7 @@ def test_cancel_route_requires_operator_and_returns_durable_intent():
     operation = Mock(spec=CacheOperationView)
     operation.id = OPERATION_ID
     operation.request_key = REQUEST_KEY
+    operation.model_content_sha256 = None
     operation.state = "cancelling"
     operation.progress = cache_progress(
         {

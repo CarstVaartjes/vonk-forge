@@ -153,6 +153,35 @@ class SparkGroup(_StrictModel):
         return self
 
 
+class RunMemoryResidualRange(_StrictModel):
+    """Possible remaining bytes for one exact active run reservation."""
+
+    run_id: UuidId
+    run_generation: int = Field(ge=1, le=2**63 - 1)
+    reservation_kind: Literal["host-memory", "gpu-memory", "unified-memory"]
+    minimum_bytes: Literal[0] = 0
+    maximum_bytes: int = Field(ge=0)
+
+
+class MemoryUsageUncertainty(_StrictModel):
+    """Fresh aggregate capacity lacks per-run resident usage evidence."""
+
+    source: Literal["aggregate_inventory_without_run_usage"]
+    inventory_observed_at: datetime
+    inventory_evidence_digest: Digest
+    residual_ranges: list[RunMemoryResidualRange] = Field(max_length=128)
+
+    @model_validator(mode="after")
+    def unique_ordered_claims(self) -> MemoryUsageUncertainty:
+        keys = [
+            (item.run_id, item.run_generation, item.reservation_kind)
+            for item in self.residual_ranges
+        ]
+        if keys != sorted(set(keys)):
+            raise ValueError("memory uncertainty claims must be unique and ordered")
+        return self
+
+
 class RunSwitchPreviewRequest(_StrictModel):
     schema_version: Literal[2] = 2
     model_content_sha256: Digest
@@ -289,6 +318,7 @@ class SparkFitNode(_StrictModel):
     memory_capacity_bytes: int | None = Field(default=None, ge=0)
     memory_available_bytes: int | None = Field(default=None, ge=0)
     memory_free_after_bytes: int | None = None
+    memory_usage_uncertainty: MemoryUsageUncertainty | None = None
     resource_demand: ResourceDemandEvidence | None = None
     blockers: list[RunSwitchReason] = Field(default_factory=list, max_length=32)
     warnings: list[RunSwitchReason] = Field(default_factory=list, max_length=32)
@@ -435,6 +465,7 @@ class RunSwitchAssessment(_StrictModel):
     """Planner-owned admission and observations shared by operator reviews."""
 
     alias: Alias | None
+    freshness: list[FreshnessEvidence] = Field(default_factory=list, max_length=128)
     fit_current: SparkFit
     fit_after_stop: SparkFit | None
     post_stop_memory_check: ConditionalPostStopMemoryCheck | None = None
@@ -462,6 +493,27 @@ class RunSwitchAssessment(_StrictModel):
             for reason in self.preparation.reasons
         ):
             raise ValueError("preparation blockers must be named by admission")
+        freshness_by_node = {
+            item.source.removeprefix("spark:").removesuffix(":inventory"): item
+            for item in self.freshness
+            if item.source.startswith("spark:") and item.source.endswith(":inventory")
+        }
+        for fit in (self.fit_current, self.fit_after_stop):
+            if fit is None:
+                continue
+            for node in fit.nodes:
+                uncertainty = node.memory_usage_uncertainty
+                if uncertainty is None:
+                    continue
+                sample = freshness_by_node.get(node.node_id)
+                if (
+                    sample is None
+                    or sample.observed_at != uncertainty.inventory_observed_at
+                    or sample.evidence_digest != uncertainty.inventory_evidence_digest
+                ):
+                    raise ValueError(
+                        "memory usage uncertainty must bind the node inventory sample"
+                    )
         if self.post_stop_memory_check is not None:
             expected_stops = sorted(stop.run_id for stop in self.stops)
             if not expected_stops or (
@@ -522,7 +574,6 @@ class RunSwitchPlan(RunSwitchAssessment):
     start_plan_digest: Digest | None
     model_capabilities: list[CapabilityEvidence] = Field(max_length=128)
     recipe_capabilities: list[CapabilityEvidence] = Field(max_length=128)
-    freshness: list[FreshnessEvidence] = Field(max_length=128)
     # ``fit`` is the current admission view retained as a compact client
     # affordance; the two named views above make stop-before-prepare decisions
     # explicit for reviewers and profile callers.

@@ -165,6 +165,105 @@ def test_preview_exposes_idle_scope_full_digest_and_blocking_reason(capsys):
     assert reason in captured.err
 
 
+def test_profile_review_shows_unmeasured_run_capacity_as_an_exact_range(capsys):
+    run_id = "11111111-1111-4111-8111-111111111111"
+    node_id = "spk_" + "a" * 32
+    sample_time = "2026-09-24T10:00:00Z"
+    sample_digest = "c" * 64
+    reason = {
+        "code": "run-switch.resource.resident_usage_unknown",
+        "detail": (
+            "Capacity is unverified by aggregate inventory 2026-09-24T10:00:00+00:00 "
+            f"({sample_digest}): 1 exact active run claim may retain 0..7800 bytes, "
+            "and the safe upper bound does not fit. Reconcile the exact run claims "
+            "and retry against fresh inventory."
+        ),
+        "severity": "error",
+        "scope": "node",
+        "node_ids": [node_id],
+        "stale": False,
+    }
+    render_payload(
+        {
+            "allowed": False,
+            "profile_name": "Capacity review",
+            "profile_revision": 3,
+            "plan_digest": "b" * 64,
+            "scope": {"node_ids": [node_id], "idle_node_ids": []},
+            "summary": {},
+            "assignments": [],
+            "steps": [],
+            "effects": {"runs": [], "installations": [], "superseded": []},
+            "preparation_decisions": [],
+            "assessments": [
+                {
+                    "assignment_id": "assignment-1",
+                    "assessment": {
+                        "alias": "retained",
+                        "fit_current": {
+                            "allowed": False,
+                            "nodes": [
+                                {
+                                    "node_id": node_id,
+                                    "ports_required": [],
+                                    "memory_kind": "unified",
+                                    "memory_pool": "shared",
+                                    "memory_required_bytes": 60,
+                                    "memory_floor_bytes": 5,
+                                    "memory_capacity_bytes": 100,
+                                    "memory_available_bytes": 70,
+                                    "memory_free_after_bytes": None,
+                                    "memory_usage_uncertainty": {
+                                        "source": "aggregate_inventory_without_run_usage",
+                                        "inventory_observed_at": sample_time,
+                                        "inventory_evidence_digest": sample_digest,
+                                        "residual_ranges": [
+                                            {
+                                                "run_id": run_id,
+                                                "run_generation": 4,
+                                                "reservation_kind": "unified-memory",
+                                                "maximum_bytes": 7800,
+                                            }
+                                        ],
+                                    },
+                                    "blockers": [reason],
+                                    "warnings": [],
+                                }
+                            ],
+                        },
+                        "fit_after_stop": None,
+                        "post_stop_memory_check": None,
+                        "blockers": [reason],
+                        "warnings": [],
+                        "stop_before_prepare": False,
+                        "stop_before_transfer": False,
+                    },
+                }
+            ],
+            "preparations": [],
+            "reasons": [],
+        },
+        "profile",
+        action="preview",
+    )
+    captured = capsys.readouterr()
+    visible = captured.out + captured.err
+    for evidence in (
+        "Resident usage evidence",
+        "Per-run usage is unavailable",
+        "aggregate_inventory_without_run_usage",
+        sample_time,
+        sample_digest,
+        run_id,
+        "generation 4",
+        "not measured",
+        "Memory after placement: unavailable",
+        "Capacity is unverified",
+    ):
+        assert evidence in visible
+    assert "leaves -" not in visible
+
+
 def test_unknown_transfer_total_does_not_hide_measured_work_or_invent_percent():
     line = progress_line(
         {

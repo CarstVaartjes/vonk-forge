@@ -60,7 +60,7 @@ _ACTIVE_ARTIFACT_JOBS = (
     "cancelling",
 )
 _PROFILE_PAYLOAD_BUDGET = 16 * 1024 * 1024
-_OWNER_PAYLOAD_BUDGET = 16 * 1024 * 1024
+MAX_ARTIFACT_OWNER_SCAN_BYTES = 16 * 1024 * 1024
 
 
 def require_model_sets_open(
@@ -286,10 +286,10 @@ def model_set_reference_reasons(
                 "accepted reference JSON is malformed; removal was deferred",
                 retryable=True,
             ) from error
-        if owner_bytes > _OWNER_PAYLOAD_BUDGET:
+        if owner_bytes > MAX_ARTIFACT_OWNER_SCAN_BYTES:
             raise ArtifactLifecycleError(
                 "artifact.reference_scan_limited",
-                f"accepted-reference scan exceeded {_OWNER_PAYLOAD_BUDGET} bytes; removal was deferred",
+                f"accepted-reference scan exceeded {MAX_ARTIFACT_OWNER_SCAN_BYTES} bytes; removal was deferred",
                 retryable=True,
             )
 
@@ -446,10 +446,10 @@ def runtime_image_reference_reasons(
                 "accepted reference JSON is malformed; removal was deferred",
                 retryable=True,
             ) from error
-        if owner_bytes > _OWNER_PAYLOAD_BUDGET:
+        if owner_bytes > MAX_ARTIFACT_OWNER_SCAN_BYTES:
             raise ArtifactLifecycleError(
                 "artifact.reference_scan_limited",
-                f"accepted-reference scan exceeded {_OWNER_PAYLOAD_BUDGET} bytes; removal was deferred",
+                f"accepted-reference scan exceeded {MAX_ARTIFACT_OWNER_SCAN_BYTES} bytes; removal was deferred",
                 retryable=True,
             )
 
@@ -735,6 +735,7 @@ def _run_switch_kinds() -> frozenset[str]:
 
 
 __all__ = [
+    "MAX_ARTIFACT_OWNER_SCAN_BYTES",
     "model_set_objects",
     "model_set_reference_reasons",
     "require_model_sets_open",

@@ -24,6 +24,7 @@ from .model_cache_contract import (
     ModelCacheOperatorAction,
     ModelCacheOperatorRequest,
     ModelCacheOperatorResponse,
+    ModelCacheRemovalRequest,
     ModelCacheRemovalResult,
 )
 from .model_cache_progress import project_cache_progress
@@ -60,6 +61,7 @@ def _model_operator_response(
         action=action,
         selector=selector,
         request_key=operation.request_key,
+        model_content_sha256=operation.model_content_sha256,
         operation_id=operation.id,
         state=operation.state,
         phase=str(raw.get("phase", progress.phase)),
@@ -95,8 +97,8 @@ def install_model_operator_routes(
 ) -> None:
     """Install the current singular Model mutation routes.
 
-    The service resolves selectors and binds its own current preview.  The
-    operator therefore submits only intent and a request identity.
+    The service resolves selectors against an explicit immutable model digest.
+    Replays bind the actor, request identity, action, selector, and digest.
     """
 
     from .operation_api import _ADMIN_OPERATION_IDS
@@ -214,7 +216,7 @@ def install_model_operator_routes(
         operation_id="removeModel",
     )
     def remove(
-        body: ModelCacheOperatorRequest,
+        body: ModelCacheRemovalRequest,
         request: Request,
         selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Actor = actor_dependency,
@@ -225,6 +227,7 @@ def install_model_operator_routes(
                 selector,
                 actor=actor.subject,
                 request_key=body.request_key,
+                model_content_sha256=body.model_content_sha256,
             )
             audit(request, actor, "model.remove", selector, operation.id)
             return _model_operator_response(

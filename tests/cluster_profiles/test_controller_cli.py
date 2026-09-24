@@ -6,9 +6,11 @@ import re
 import uuid
 from contextlib import redirect_stdout
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from io import StringIO
 
 import pytest
+from vonk_forge_contracts import ModelDefinition, content_sha256
 
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_render import progress_line, render_payload
@@ -234,9 +236,12 @@ class FakeClient:
             "remove",
         }:
             assert isinstance(payload, dict)
-            assert set(payload) <= {"schema_version", "request_key", "with_model"}
-            assert payload["schema_version"] == 2
-            uuid.UUID(payload["request_key"])
+            if selector_path.group(1) == "model" and selector_path.group(2) == "remove":
+                validate_control_document("ModelCacheRemovalRequest", payload)
+            else:
+                assert set(payload) <= {"schema_version", "request_key", "with_model"}
+                assert payload["schema_version"] == 2
+                uuid.UUID(payload["request_key"])
             if selector_path.group(1) == "model":
                 assert "with_model" not in payload
             if selector_path.group(2) == "download":
@@ -291,6 +296,55 @@ def run(argv: tuple[str, ...], client: FakeClient) -> tuple[int, dict[str, objec
             request_id_factory=lambda: "11111111-1111-4111-8111-111111111111",
         )
     return status, json.loads(output.getvalue())
+
+
+def _model_detail(selector: str = "qwen") -> tuple[dict[str, object], str]:
+    document_path = files("vonk_forge_contracts").joinpath(
+        "examples", "model-definition.json"
+    )
+    model = ModelDefinition.model_validate(json.loads(document_path.read_text()))
+    identity = model.identity
+    digest = content_sha256(model)
+    return (
+        {
+            "schema_version": 2,
+            "selector": selector,
+            "identity": {
+                "kind": "model",
+                "publisher": identity.publisher,
+                "slug": identity.slug,
+                "content_sha256": digest,
+            },
+            "document": model.model_dump(mode="json"),
+            "family": f"{identity.family.publisher}/{identity.family.slug}",
+            "version": identity.version,
+            "variant": identity.variant,
+            "quantization": model.format.quantization,
+            "usage": [],
+            "resources": {"disk_bytes": model.download_bytes},
+            "local": {"controller": "not_cached", "running_on": []},
+            "updated_at": "2026-09-24T00:00:00Z",
+            "alignment": [],
+        },
+        digest,
+    )
+
+
+def _recipe_removal_receipt(
+    selector: str, request_key: str, *, with_model: bool
+) -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "action": "remove",
+        "selector": selector,
+        "request_key": request_key,
+        "operation_id": "11111111-1111-4111-8111-111111111121",
+        "recipe_revision_id": "revision-1",
+        "with_model": with_model,
+        "progress": {"phase": "queued"},
+        "reclaimed_bytes": 0,
+        "state": "queued",
+    }
 
 
 def test_parser_exposes_current_singular_operator_roots_and_update() -> None:
@@ -627,13 +681,16 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
     model_operation_id = "11111111-1111-4111-8111-111111111121"
     recipe_operation_id = "11111111-1111-4111-8111-111111111122"
     request_key = "11111111-1111-4111-8111-111111111111"
+    model_detail, model_digest = _model_detail()
     client = FakeClient(
         {
+            ("GET", "/api/model/qwen"): model_detail,
             ("POST", "/api/model/qwen/remove"): {
                 "schema_version": 2,
                 "action": "remove",
                 "selector": "qwen",
                 "request_key": request_key,
+                "model_content_sha256": model_digest,
                 "state": "cancelled",
                 "operation_id": model_operation_id,
                 "phase": "completed",
@@ -666,10 +723,18 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
             },
         }
     )
-    assert run(("model", "remove", "qwen", "--yes", "--json"), client)[0] == 2
-    assert client.calls[0][2] == {
+    model_status, model_receipt = run(
+        ("model", "remove", "qwen", "--yes", "--detach", "--json"), client
+    )
+    assert model_status == 2 and model_receipt["model_content_sha256"] == model_digest
+    assert [call[:2] for call in client.calls[:2]] == [
+        ("GET", "/api/model/qwen"),
+        ("POST", "/api/model/qwen/remove"),
+    ]
+    assert client.calls[1][2] == {
         "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
+        "model_content_sha256": model_digest,
     }
     assert (
         run(("recipe", "remove", "vision", "--with-model", "--yes", "--json"), client)[
@@ -677,10 +742,214 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
         ]
         == 0
     )
-    assert client.calls[1][1] == "/api/recipe/vision/remove"
-    recipe_remove = client.calls[1][2]
+    assert client.calls[2][1] == "/api/recipe/vision/remove"
+    recipe_remove = client.calls[2][2]
     assert recipe_remove is not None
     assert recipe_remove["with_model"] is True
+
+
+def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> None:
+    selector = "qwen"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    operation_id = "11111111-1111-4111-8111-111111111121"
+    detail, digest = _model_detail(selector)
+    receipt = {
+        "schema_version": 2,
+        "action": "remove",
+        "selector": selector,
+        "request_key": request_key,
+        "model_content_sha256": digest,
+        "operation_id": operation_id,
+        "state": "queued",
+        "phase": "queued",
+        "progress": {"phase": "queued"},
+        "transferred_bytes": 0,
+    }
+    lookup = f"/api/model/requests/{request_key}"
+    remove = f"/api/model/{selector}/remove"
+    client = FakeClient(
+        {
+            ("GET", lookup): [
+                ControlNotFound(404, "request was not accepted"),
+                receipt,
+            ],
+            ("GET", f"/api/model/{selector}"): detail,
+            ("POST", remove): ControlTransportError("accepted response was lost"),
+        }
+    )
+
+    status, result = run(
+        (
+            "model",
+            "remove",
+            selector,
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result == receipt
+    assert [call[:2] for call in client.calls] == [
+        ("GET", lookup),
+        ("GET", f"/api/model/{selector}"),
+        ("POST", remove),
+        ("GET", lookup),
+    ]
+    body = client.calls[2][2]
+    assert body == {
+        "schema_version": 2,
+        "request_key": request_key,
+        "model_content_sha256": digest,
+    }
+
+
+def test_model_remove_reconnects_to_existing_key_before_resolving_current_head() -> (
+    None
+):
+    selector = "qwen"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    receipt = {
+        "schema_version": 2,
+        "action": "remove",
+        "selector": selector,
+        "request_key": request_key,
+        "model_content_sha256": "a" * 64,
+        "operation_id": "11111111-1111-4111-8111-111111111121",
+        "state": "succeeded",
+        "phase": "completed",
+        "progress": {"phase": "completed"},
+        "transferred_bytes": 0,
+    }
+    lookup = f"/api/model/requests/{request_key}"
+    client = FakeClient({("GET", lookup): receipt})
+
+    status, result = run(
+        (
+            "model",
+            "remove",
+            selector,
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result == receipt
+    assert [call[:2] for call in client.calls] == [("GET", lookup)]
+
+
+def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() -> None:
+    selector = "vision"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    receipt = _recipe_removal_receipt(selector, request_key, with_model=False)
+    lookup = f"/api/recipe/requests/{request_key}"
+    remove = f"/api/recipe/{selector}/remove"
+    client = FakeClient(
+        {
+            ("GET", lookup): [
+                ControlNotFound(404, "request was not accepted"),
+                receipt,
+            ],
+            ("POST", remove): ControlTransportError(
+                "accepted response was lost"
+            ),
+        }
+    )
+
+    status, result = run(
+        (
+            "recipe",
+            "remove",
+            selector,
+            "--keep-model",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result == receipt
+    assert [call[:2] for call in client.calls] == [
+        ("GET", lookup),
+        ("POST", remove),
+        ("GET", lookup),
+    ]
+    assert client.calls[1][2] == {
+        "schema_version": 2,
+        "request_key": request_key,
+        "with_model": False,
+    }
+
+
+def test_recipe_remove_reconnects_to_existing_key_without_posting() -> None:
+    selector = "vision"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    receipt = _recipe_removal_receipt(selector, request_key, with_model=True)
+    lookup = f"/api/recipe/requests/{request_key}"
+    client = FakeClient({("GET", lookup): receipt})
+
+    status, result = run(
+        (
+            "recipe",
+            "remove",
+            selector,
+            "--with-model",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result == receipt
+    assert [call[:2] for call in client.calls] == [("GET", lookup)]
+
+
+@pytest.mark.parametrize(
+    ("bad_selector", "bad_with_model"),
+    [("another-recipe", False), ("vision", True)],
+)
+def test_recipe_remove_reconnect_rejects_foreign_selector_or_retention(
+    bad_selector: str, bad_with_model: bool
+) -> None:
+    selector = "vision"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    receipt = _recipe_removal_receipt(
+        bad_selector, request_key, with_model=bad_with_model
+    )
+    lookup = f"/api/recipe/requests/{request_key}"
+    client = FakeClient({("GET", lookup): receipt})
+
+    status, payload = run(
+        (
+            "recipe",
+            "remove",
+            selector,
+            "--keep-model",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    assert "receipt" in str(payload.get("error"))
+    assert [call[:2] for call in client.calls] == [("GET", lookup)]
 
 
 @pytest.mark.parametrize(
@@ -694,6 +963,7 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
             "request_key",
             "22222222-2222-4222-8222-222222222222",
         ),
+        ("model", "qwen", "model_content_sha256", "b" * 64),
         ("recipe", "vision", "selector", "other-recipe"),
         (
             "recipe",
@@ -710,11 +980,13 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
     request_key = "11111111-1111-4111-8111-111111111111"
     operation_id = "11111111-1111-4111-8111-111111111121"
     if noun == "model":
+        model_detail, model_digest = _model_detail(selector)
         receipt: dict[str, object] = {
             "schema_version": 2,
             "action": "remove",
             "selector": selector,
             "request_key": request_key,
+            "model_content_sha256": model_digest,
             "operation_id": operation_id,
             "state": "succeeded",
             "phase": "completed",
@@ -736,19 +1008,49 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
         }
     receipt[bad_field] = bad_value
     path = f"/api/{noun}/{selector}/remove"
+    model_receipt_only_reconnect = (
+        noun == "model" and bad_field != "model_content_sha256"
+    )
     args = (
-        (noun, "remove", selector, "--yes", "--json")
+        (
+            (noun, "remove", selector, "--yes", "--request-key", request_key, "--json")
+            if model_receipt_only_reconnect
+            else (noun, "remove", selector, "--yes", "--json")
+        )
         if noun == "model"
         else (noun, "remove", selector, "--keep-model", "--yes", "--json")
     )
     client = FakeClient({("POST", path): receipt})
+    if noun == "model":
+        client.responses[("GET", f"/api/model/{selector}")] = model_detail
+        client.responses[("GET", f"/api/model/requests/{request_key}")] = receipt
 
     status, payload = run(args, client)
 
     error = payload.get("error")
     assert status == 2
-    assert isinstance(error, str) and "receipt" in error
-    assert [call[:2] for call in client.calls] == [("POST", path)]
+    if bad_field == "model_content_sha256":
+        assert isinstance(error, str) and "acceptance is unknown" in error
+        expected_calls = [
+            ("GET", f"/api/model/{selector}"),
+            ("POST", path),
+            ("GET", f"/api/model/requests/{request_key}"),
+        ]
+    else:
+        if noun == "recipe":
+            assert isinstance(error, str) and "acceptance is unknown" in error
+            expected_calls = [
+                ("POST", path),
+                ("GET", f"/api/recipe/requests/{request_key}"),
+            ]
+        else:
+            assert isinstance(error, str) and "receipt" in error
+            expected_calls = [("GET", f"/api/model/requests/{request_key}")]
+    assert [call[:2] for call in client.calls] == expected_calls
+    if model_receipt_only_reconnect:
+        submission = payload["submission"]
+        assert isinstance(submission, dict)
+        assert submission["acceptance"] == "not_submitted"
     if noun == "recipe":
         request = client.calls[0][2]
         assert request is not None and request["with_model"] is False

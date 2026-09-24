@@ -192,6 +192,8 @@ from .fleet_snapshot_event import FleetSnapshotEvent
 from .fleet_telemetry_event import FleetTelemetryEvent
 from .fleet_upgrade_request import FleetUpgradeRequest
 from .float_parameter import FloatParameter
+from .freshness_evidence import FreshnessEvidence
+from .freshness_evidence_state import FreshnessEvidenceState
 from .freshness_policy import FreshnessPolicy
 from .get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
 from .get_fleet_metrics_history_resolution import GetFleetMetricsHistoryResolution
@@ -239,6 +241,7 @@ from .managed_catalog_sync_response import ManagedCatalogSyncResponse
 from .managed_catalog_sync_response_state import ManagedCatalogSyncResponseState
 from .managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTrigger
 from .managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
+from .memory_usage_uncertainty import MemoryUsageUncertainty
 from .model_access import ModelAccess
 from .model_access_authentication import ModelAccessAuthentication
 from .model_access_visibility import ModelAccessVisibility
@@ -252,6 +255,7 @@ from .model_cache_operator_request import ModelCacheOperatorRequest
 from .model_cache_operator_response import ModelCacheOperatorResponse
 from .model_cache_operator_response_action import ModelCacheOperatorResponseAction
 from .model_cache_operator_response_state import ModelCacheOperatorResponseState
+from .model_cache_removal_request import ModelCacheRemovalRequest
 from .model_cache_removal_result import ModelCacheRemovalResult
 from .model_capabilities import ModelCapabilities
 from .model_capability_fact import ModelCapabilityFact
@@ -436,6 +440,8 @@ from .request_validation_problem import RequestValidationProblem
 from .resource_demand_evidence import ResourceDemandEvidence
 from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvidenceState
 from .rollout_preparation import RolloutPreparation
+from .run_memory_residual_range import RunMemoryResidualRange
+from .run_memory_residual_range_reservation_kind import RunMemoryResidualRangeReservationKind
 from .run_node_change import RunNodeChange
 from .run_node_payload import RunNodePayload
 from .run_presence import RunPresence
@@ -741,6 +747,8 @@ __all__ = (
     "FleetTelemetryEvent",
     "FleetUpgradeRequest",
     "FloatParameter",
+    "FreshnessEvidence",
+    "FreshnessEvidenceState",
     "FreshnessPolicy",
     "GetFleetLogInfoSourceType0",
     "GetFleetMetricsHistoryResolution",
@@ -788,6 +796,7 @@ __all__ = (
     "ManagedCatalogSyncResponseState",
     "ManagedCatalogSyncResponseTrigger",
     "ManagedCatalogWithdrawnRecipe",
+    "MemoryUsageUncertainty",
     "ModelAccess",
     "ModelAccessAuthentication",
     "ModelAccessVisibility",
@@ -801,6 +810,7 @@ __all__ = (
     "ModelCacheOperatorResponse",
     "ModelCacheOperatorResponseAction",
     "ModelCacheOperatorResponseState",
+    "ModelCacheRemovalRequest",
     "ModelCacheRemovalResult",
     "ModelCapabilities",
     "ModelCapabilityFact",
@@ -985,6 +995,8 @@ __all__ = (
     "ResourceDemandEvidence",
     "ResourceDemandEvidenceEvidenceState",
     "RolloutPreparation",
+    "RunMemoryResidualRange",
+    "RunMemoryResidualRangeReservationKind",
     "RunNodeChange",
     "RunNodePayload",
     "RunPresence",

@@ -57,6 +57,7 @@ from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .logging import log_event
 from .memory_reservations import (
+    MEMORY_RESERVATION_KINDS,
     memory_reservations,
     reviewed_run_memory_reservations,
 )
@@ -158,7 +159,9 @@ from .run_switch_contract import (
     FreshnessEvidence,
     InvocationMetadata,
     MappingSelection,
+    MemoryUsageUncertainty,
     ResourceDemandEvidence,
+    RunMemoryResidualRange,
     RunSwitchAction,
     RunSwitchApplyRequest,
     RunSwitchAssessment,
@@ -469,7 +472,8 @@ _MEMORY_CAPACITY_REFUSALS = frozenset(
     }
 )
 _MEMORY_STOP_CONDITIONAL_REFUSALS = _MEMORY_CAPACITY_REFUSALS | {
-    "run-switch.resource.insufficient_reservation_budget"
+    "run-switch.resource.insufficient_reservation_budget",
+    "run-switch.resource.resident_usage_unknown",
 }
 _INSTALL_PREFLIGHT_REFRESH_REASON = (
     "runtime preflight expired during install compilation"
@@ -574,6 +578,12 @@ def _resource_reason(
         ),
         node_ids=(node_id,) if isinstance(node_id, str) else node_ids,
     )
+
+
+def _is_memory_reservation_kind(
+    value: str,
+) -> TypeGuard[Literal["host-memory", "gpu-memory", "unified-memory"]]:
+    return value in MEMORY_RESERVATION_KINDS
 
 
 def _conditional_post_stop_memory_check(
@@ -5294,6 +5304,7 @@ class RunSwitchOperationService:
             memory_capacity: int | None = None
             memory_available: int | None = None
             memory_free_after: int | None = None
+            memory_usage_uncertainty: MemoryUsageUncertainty | None = None
             required_disk: int | None = None
             disk_free: int | None = None
             disk_free_after: int | None = None
@@ -5364,6 +5375,9 @@ class RunSwitchOperationService:
                             evidence_digest=snapshot.evidence_digest
                             if snapshot
                             else None,
+                            evidence_observed_at=snapshot.observed_at
+                            if snapshot
+                            else None,
                         )
                         capacity_totals = [
                             part.available_bytes for part in capacity.components
@@ -5391,6 +5405,45 @@ class RunSwitchOperationService:
                         )
                         fit_node = fit_capacity.nodes[0]
                         memory_free_after = fit_node.selected_free_after_bytes
+                        if fit_node.unknown_run_residuals:
+                            if (
+                                snapshot is not None
+                                and evidence.observed_at is not None
+                                and evidence.evidence_digest is not None
+                            ):
+                                residual_ranges = []
+                                for residual in sorted(
+                                    fit_node.unknown_run_residuals,
+                                    key=lambda value: (
+                                        value.run_id,
+                                        value.run_generation,
+                                        value.reservation_kind,
+                                    ),
+                                ):
+                                    if not _is_memory_reservation_kind(
+                                        residual.reservation_kind
+                                    ):
+                                        raise ValueError(
+                                            "active run memory claim has an invalid kind"
+                                        )
+                                    residual_ranges.append(
+                                        RunMemoryResidualRange(
+                                            run_id=residual.run_id,
+                                            run_generation=residual.run_generation,
+                                            reservation_kind=residual.reservation_kind,
+                                            maximum_bytes=residual.maximum_bytes,
+                                        )
+                                    )
+                                memory_usage_uncertainty = MemoryUsageUncertainty(
+                                    source="aggregate_inventory_without_run_usage",
+                                    inventory_observed_at=evidence.observed_at,
+                                    inventory_evidence_digest=evidence.evidence_digest,
+                                    residual_ranges=residual_ranges,
+                                )
+                            # An exact numeric headroom would imply measured
+                            # per-run usage. The typed range and fit decision
+                            # carry the conservative bound instead.
+                            memory_free_after = None
                         if fit_node.insufficient_components:
                             insufficient_components_by_node[item.node_id] = frozenset(
                                 "shared"
@@ -5481,6 +5534,7 @@ class RunSwitchOperationService:
                     memory_capacity_bytes=memory_capacity,
                     memory_available_bytes=memory_available,
                     memory_free_after_bytes=memory_free_after,
+                    memory_usage_uncertainty=memory_usage_uncertainty,
                     resource_demand=(
                         ResourceDemandEvidence(
                             weights_bytes=demand.weights_bytes,

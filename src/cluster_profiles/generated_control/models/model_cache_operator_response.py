@@ -47,6 +47,7 @@ class ModelCacheOperatorResponse:
             cancelled_operations (Union[Unset, list[str]]):
             eta_seconds (Union[None, Unset, float]):
             failure (Union['AvailabilityOperationFailure', None, Unset]):
+            model_content_sha256 (Union[None, Unset, str]):
             next_actions (Union[Unset, list[str]]):
             operation_id (Union[None, Unset, str]):
             preserved (Union[Unset, list[str]]):
@@ -66,6 +67,7 @@ class ModelCacheOperatorResponse:
     cancelled_operations: Union[Unset, list[str]] = UNSET
     eta_seconds: Union[None, Unset, float] = UNSET
     failure: Union['AvailabilityOperationFailure', None, Unset] = UNSET
+    model_content_sha256: Union[None, Unset, str] = UNSET
     next_actions: Union[Unset, list[str]] = UNSET
     operation_id: Union[None, Unset, str] = UNSET
     preserved: Union[Unset, list[str]] = UNSET
@@ -125,6 +127,12 @@ class ModelCacheOperatorResponse:
         else:
             failure = self.failure
 
+        model_content_sha256: Union[None, Unset, str]
+        if isinstance(self.model_content_sha256, Unset):
+            model_content_sha256 = UNSET
+        else:
+            model_content_sha256 = self.model_content_sha256
+
         next_actions: Union[Unset, list[str]] = UNSET
         if not isinstance(self.next_actions, Unset):
             next_actions = self.next_actions
@@ -181,6 +189,8 @@ class ModelCacheOperatorResponse:
             field_dict["eta_seconds"] = eta_seconds
         if failure is not UNSET:
             field_dict["failure"] = failure
+        if model_content_sha256 is not UNSET:
+            field_dict["model_content_sha256"] = model_content_sha256
         if next_actions is not UNSET:
             field_dict["next_actions"] = next_actions
         if operation_id is not UNSET:
@@ -282,6 +292,16 @@ class ModelCacheOperatorResponse:
         failure = _parse_failure(d.pop("failure", UNSET))
 
 
+        def _parse_model_content_sha256(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256", UNSET))
+
+
         next_actions = cast(list[str], d.pop("next_actions", UNSET))
 
 
@@ -354,6 +374,7 @@ class ModelCacheOperatorResponse:
             cancelled_operations=cancelled_operations,
             eta_seconds=eta_seconds,
             failure=failure,
+            model_content_sha256=model_content_sha256,
             next_actions=next_actions,
             operation_id=operation_id,
             preserved=preserved,

@@ -318,10 +318,12 @@ def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
     ]
     assert len(busy_indexes) == 1
     completed_index = 1 - busy_indexes[0]
-    assert results[completed_index].id == operation_ids[completed_index]
+    completed_result = results[completed_index]
+    assert isinstance(completed_result, AgentOperation), completed_result
+    assert completed_result.id == operation_ids[completed_index]
 
     retried = enqueue(busy_indexes[0])
-    assert not isinstance(retried, RunAdmissionBusy)
+    assert isinstance(retried, AgentOperation), retried
     assert retried.id == operation_ids[busy_indexes[0]]
     with sessions() as observer:
         final = tuple(

@@ -356,6 +356,14 @@ def test_remove_response_projects_the_stored_model_choice_not_the_request() -> N
         "recipe_revision_id": "revision-example",
         "with_model": False,
         "state": "succeeded",
+        "progress": {
+            "phase": "completed",
+            "completed_bytes": 0,
+            "total_bytes": 0,
+            "total_bytes_known": True,
+            "completed_items": 0,
+            "total_items": 0,
+        },
         "reclaimed_bytes": 0,
         "preserved": ["model-download"],
         "next_actions": [],
@@ -375,6 +383,56 @@ def test_remove_response_projects_the_stored_model_choice_not_the_request() -> N
 
     assert response.status_code == 202, response.text
     assert response.json()["with_model"] is False
+
+
+def test_remove_response_preserves_partial_progress_and_failure() -> None:
+    service = Mock()
+    service.remove_selector.return_value = {
+        "schema_version": 2,
+        "action": "remove",
+        "selector": "example",
+        "request_key": _REQUEST_KEY,
+        "operation_id": "00000000-0000-4000-8000-000000000002",
+        "recipe_revision_id": "revision-example",
+        "with_model": False,
+        "state": "partial",
+        "progress": {
+            "phase": "reclaiming",
+            "completed_bytes": 13,
+            "total_bytes_known": False,
+            "completed_items": 1,
+            "total_items": 2,
+            "activity": "waiting",
+        },
+        "reclaimed_bytes": 13,
+        "preserved": ["model-download"],
+        "next_actions": ["retry"],
+        "cancelled_operations": [],
+        "cancelled_builds": [],
+        "model_removals": [],
+        "failure": {
+            "code": "runtime_image.removal_storage_failed",
+            "detail": "managed image storage is temporarily unavailable",
+            "retryable": True,
+            "recovery_actions": ["retry"],
+            "retry_time": "2026-01-01T00:00:05+00:00",
+            "retry_after_seconds": 5,
+        },
+    }
+
+    response = _operator_client(service).post(
+        "/api/recipe/example/remove",
+        json={"schema_version": 2, "request_key": _REQUEST_KEY},
+    )
+
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["state"] == "partial"
+    assert body["progress"]["phase"] == "reclaiming"
+    assert body["progress"]["completed_bytes"] == 13
+    assert body["progress"]["total_bytes"] is None
+    assert body["failure"]["retryable"] is True
+    assert body["next_actions"] == ["retry"]
 
 
 def test_operation_observation_names_a_transient_availability_refusal() -> None:

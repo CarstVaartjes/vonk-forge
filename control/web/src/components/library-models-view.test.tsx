@@ -84,6 +84,10 @@ test("removes a cached model only after an explicit confirmation", async () => {
   expect(removeModelCache).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", {name: "Confirm remove"}));
   await waitFor(() => expect(removeModelCache).toHaveBeenCalledTimes(1));
+  expect(removeModelCache).toHaveBeenCalledWith(
+    `${base.model.publisher}/${base.model.slug}`, base.model.content_sha256,
+    expect.any(String), expect.anything(),
+  );
 });
 
 test("offers the same model filters as vonkctl model library", () => {

@@ -267,9 +267,10 @@ def test_a_plan_does_not_count_the_capacity_of_the_run_it_stops(tmp_path) -> Non
 
     replaced = service.plan_run(installation, alias="qwen", now=now)
     assert replaced.allowed is False
-    assert "run.insufficient_memory" in {
+    assert "resource.resident_usage_unknown" in {
         blocker.code for blocker in replaced.nodes[0].blockers
     }
+    assert replaced.nodes[0].free_after_bytes is None
 
     replacement = service.plan_run(
         installation, alias="qwen", now=now, released_run_ids=(run_id,)

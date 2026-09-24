@@ -110,7 +110,7 @@ function ModelRevisionsRow({api, revisions, onNavigate, onPrepared}: {api: Contr
           {revisions.map(revision => <option key={modelKey(revision.model)} value={modelKey(revision.model)}>{revision.version} · {revision.model.content_sha256.slice(0, 8)}{revision.recipes.length ? " · Recipes available" : ""}</option>)}
         </select>
       </label>}
-      <LibraryCacheAction key={key} api={api} onPrepared={onPrepared} selector={`${model.model.publisher}/${model.model.slug}`} state={model.local.controller} />
+      <LibraryCacheAction key={key} api={api} onPrepared={onPrepared} selector={`${model.model.publisher}/${model.model.slug}`} modelContentSha256={model.model.content_sha256} state={model.local.controller} />
       {model.local.controller === "preparing" && preparation && <span role="status">{preparation.phase ?? preparation.state}</span>}
     </div>
     <dl>

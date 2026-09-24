@@ -25,22 +25,42 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from pydantic import ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
-from vonk_agent_protocol import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol import (
+    OperationMemberProgress,
+    OperationProgress,
+    canonical_message,
+)
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
+    RemovalOwnerKind,
+    check_removal_fence_nowait,
+    clear_removal,
+    lock_removal_fences,
     require_reference_open,
+    reserve_removal_owners,
+    retryable_artifact_database_error,
+)
+from .artifact_reference_scan import (
+    MAX_ARTIFACT_OWNER_SCAN_BYTES,
+    runtime_image_reference_reasons,
 )
 from .bounded_json import mapping, require_mapping, require_sequence
 from .catalog_queries import active_head_revision
-from .model_cache import ModelCacheNotFound
-from .model_cache_contract import ModelCacheCancellation
+from .catalog_revision_contract import read_catalog_document
+from .model_cache import (
+    ModelCacheConflict,
+    ModelCacheError,
+    ModelCacheNotFound,
+    ModelCacheRemovalScope,
+)
+from .model_cache_contract import ModelCacheCancellation, ModelCacheRemovalResult
 from .model_cache_progress import project_cache_progress
 from .models import (
     CatalogDocumentHead,
@@ -50,7 +70,11 @@ from .models import (
     RecipeBuild,
     RuntimeImageAuthorization,
 )
-from .operation_contract import normalize_operation_progress, sanitize_failure_evidence
+from .operation_contract import (
+    AvailabilityOperationFailure,
+    normalize_operation_progress,
+    sanitize_failure_evidence,
+)
 from .operation_progress import aggregate_progress
 from .recipe_availability_intent import (
     RecipeAvailabilityIntent,
@@ -68,7 +92,12 @@ from .recipe_build_cancellation import (
 )
 from .recipe_image_removal_contract import (
     RECIPE_CACHE_REMOVE_KIND,
+    RecipeCacheRemovalCheckpoint,
     RecipeCacheRemovalIntent,
+    RecipeCacheRemovalModelChild,
+    RecipeCacheRemovalOwner,
+    RecipeCacheRemovalPlan,
+    RecipeCacheRemovalResult,
 )
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import UPDATE_KIND, RecipeUpdateResponse
@@ -110,6 +139,28 @@ _TERMINAL_FAILURE_CODES = frozenset(
         "runtime_image.authorization_invalid",
     }
 )
+
+
+def _removal_retry_is_due(
+    failure: AvailabilityOperationFailure | None, now: datetime
+) -> bool:
+    if failure is None:
+        return True
+    if not failure.retryable or failure.retry_time is None:
+        return False
+    try:
+        retry_time = datetime.fromisoformat(failure.retry_time)
+    except ValueError as error:
+        raise RecipeImageAvailabilityError(
+            "recipe_image.operation_invalid",
+            "stored removal retry time is malformed",
+        ) from error
+    retry_time = (
+        retry_time if retry_time.tzinfo is not None else retry_time.replace(tzinfo=UTC)
+    )
+    return now >= retry_time
+
+
 _CAPACITY_FAILURE_CODES = frozenset(
     {
         "build.insufficient_disk",
@@ -216,6 +267,10 @@ class RuntimeImageCacheStorage(RuntimeImageStorage, Protocol):
 
     root: Path
 
+    def published_archive_bytes(self, archive_sha256: str) -> int: ...
+
+    def remove_published(self, archive_sha256: str) -> int: ...
+
     def build_archive_available(
         self, archive_sha256: str, expected_bytes: int
     ) -> bool: ...
@@ -225,11 +280,36 @@ class ModelCacheOperationHandle(Protocol):
     """The bounded view a durable ModelCache operation exposes to its caller."""
 
     id: str
+    kind: str
+    request_key: str
     state: str
     progress: Mapping[str, object]
     artifact_set_sha256: str | None
     plan_digest: str | None
     failure: Mapping[str, object] | None
+    result: object | None
+
+
+class ModelCacheRemovalCoordinator(Protocol):
+    """Exact model-cache scope/owner seam used by recipe removal."""
+
+    def recipe_removal_scope_in_session(
+        self, session: Session, *, recipe_revision_id: str
+    ) -> ModelCacheRemovalScope | None: ...
+
+    def accept_recipe_removal_child_in_session(
+        self,
+        session: Session,
+        *,
+        actor: str,
+        request_key: str,
+        recipe_revision_id: str,
+        operation_id: str,
+        removal_fence: str,
+        scope: ModelCacheRemovalScope,
+    ) -> tuple[str, str, tuple[str, ...], str] | None: ...
+
+    def get_operation(self, operation_id: str) -> ModelCacheOperationHandle: ...
 
 
 class ModelCacheCancellationOwner(Protocol):
@@ -598,59 +678,65 @@ class RecipeImageAvailabilityService:
             )
         selector = selector.strip().casefold()
         with self._sessions() as session:
-            if _SHA256.fullmatch(selector):
-                rows = list(
-                    session.scalars(
-                        select(CatalogDocumentRevision).where(
-                            CatalogDocumentRevision.kind == "recipe",
-                            CatalogDocumentRevision.state == "active",
-                            CatalogDocumentRevision.content_digest == selector,
-                        )
+            return self._resolve_recipe_selector_in_session(session, selector)
+
+    @staticmethod
+    def _resolve_recipe_selector_in_session(session: Session, selector: str) -> str:
+        """Resolve one already-normalized recipe selector in its SQL snapshot."""
+
+        if _SHA256.fullmatch(selector):
+            rows = list(
+                session.scalars(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.content_digest == selector,
                     )
                 )
-            elif re.fullmatch(
-                r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
-                selector,
-            ):
-                rows = list(
-                    session.scalars(
-                        select(CatalogDocumentRevision).where(
-                            CatalogDocumentRevision.kind == "recipe",
-                            CatalogDocumentRevision.state == "active",
-                            (CatalogDocumentRevision.id == selector)
-                            | (
-                                (CatalogDocumentRevision.document_id == selector)
-                                & active_head_revision()
-                            ),
-                        )
+            )
+        elif re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            selector,
+        ):
+            rows = list(
+                session.scalars(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.state == "active",
+                        (CatalogDocumentRevision.id == selector)
+                        | (
+                            (CatalogDocumentRevision.document_id == selector)
+                            & active_head_revision()
+                        ),
                     )
+                )
+            )
+        else:
+            if "/" in selector:
+                publisher, slug = selector.split("/", 1)
+                query = select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.publisher == publisher,
+                    CatalogDocumentRevision.slug == slug,
                 )
             else:
-                if "/" in selector:
-                    publisher, slug = selector.split("/", 1)
-                    query = select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                        CatalogDocumentRevision.publisher == publisher,
-                        CatalogDocumentRevision.slug == slug,
-                    )
-                else:
-                    query = select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                        CatalogDocumentRevision.slug == selector,
-                    )
-                rows = list(session.scalars(query.where(active_head_revision())))
-            if not rows:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.selector_missing", "recipe selector was not found"
+                query = select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.slug == selector,
                 )
-            if len(rows) != 1:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.selector_ambiguous",
-                    "recipe selector matches multiple recipes",
-                )
-            return rows[0].id
+            rows = list(session.scalars(query.where(active_head_revision())))
+        if not rows:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.selector_missing", "recipe selector was not found"
+            )
+        if len(rows) != 1:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.selector_ambiguous",
+                "recipe selector matches multiple recipes",
+            )
+        return rows[0].id
 
     def start_selector(
         self,
@@ -668,61 +754,184 @@ class RecipeImageAvailabilityService:
     @staticmethod
     def _removal_payload_digest(payload: Mapping[str, object]) -> str:
         encoded = json.dumps(
-            dict(payload), sort_keys=True, separators=(",", ":")
+            serialize_json_value(dict(payload)),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode()
         return hashlib.sha256(encoded).hexdigest()
 
-    def _read_removal_intent(self, operation: Job) -> RecipeCacheRemovalIntent:
+    def _read_removal_owner(self, operation: Job) -> RecipeCacheRemovalOwner:
         try:
-            intent = RecipeCacheRemovalIntent.model_validate(operation.payload)
-        except (TypeError, ValidationError) as error:
+            encoded = canonical_message(operation.payload)
+            if len(encoded) > MAX_ARTIFACT_OWNER_SCAN_BYTES:
+                raise ValueError(
+                    "stored recipe removal owner exceeds the scan byte budget"
+                )
+            owner = RecipeCacheRemovalOwner.model_validate_json(encoded)
+        except (TypeError, ValueError) as error:
             raise RecipeImageAvailabilityError(
                 "recipe_image.operation_invalid",
-                "stored recipe removal intent is malformed",
+                "stored recipe removal owner is malformed",
             ) from error
-        payload = intent.model_dump(mode="json")
+        plan = owner.plan
+        intent = plan.intent
+        payload = plan.model_dump(mode="json")
         if (
             operation.kind != REMOVE_OPERATION_KIND
+            or operation.state
+            not in {"queued", "running", "partial", "succeeded", "failed", "cancelled"}
             or operation.actor != intent.actor
             or operation.request_id != intent.request_key
             or operation.authority_revision != intent.recipe_revision_id
             or operation.payload_digest != self._removal_payload_digest(payload)
+            or operation.targets != []
         ):
             raise RecipeImageAvailabilityError(
                 "recipe_image.operation_invalid",
-                "stored recipe removal intent does not match its Job owner",
+                "stored recipe removal plan does not match its Job owner",
             )
-        return intent
+        if operation.state in {"queued", "running", "partial"} and (
+            owner.checkpoint.failure is not None
+            and not owner.checkpoint.failure.retryable
+        ):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.operation_invalid",
+                "active recipe removal has a terminal failure checkpoint",
+            )
+        if operation.state == "failed" and (
+            owner.checkpoint.failure is None or owner.checkpoint.failure.retryable
+        ):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.operation_invalid",
+                "failed recipe removal has no terminal failure checkpoint",
+            )
+        return owner
+
+    def _read_removal_intent(self, operation: Job) -> RecipeCacheRemovalIntent:
+        return self._read_removal_owner(operation).plan.intent
+
+    @staticmethod
+    def _removal_progress_document(
+        operation: Job,
+        owner: RecipeCacheRemovalOwner,
+    ) -> dict[str, object]:
+        checkpoint = owner.checkpoint
+        total_items = len(owner.plan.image_archives) + len(owner.plan.model_children)
+        completed_items = checkpoint.image_index + checkpoint.model_index
+        reclaimed_bytes = (
+            checkpoint.image_reclaimed_bytes + checkpoint.model_reclaimed_bytes
+        )
+        successful = operation.state == "succeeded"
+        progress = OperationProgress(
+            phase=(
+                "completed"
+                if successful
+                else "failed"
+                if operation.state in {"failed", "cancelled"}
+                else "reclaiming"
+            ),
+            completed_bytes=reclaimed_bytes,
+            total_bytes=reclaimed_bytes if successful else None,
+            total_bytes_known=successful,
+            completed_items=completed_items,
+            total_items=total_items,
+            observed_at=_iso(operation.updated_at),
+            activity="active" if operation.state == "running" else "waiting",
+        )
+        return progress.model_dump(mode="json", exclude_none=True)
 
     def _read_removal_result(
         self, operation: Job, intent: RecipeCacheRemovalIntent
     ) -> dict[str, object]:
-        if not isinstance(operation.result, Mapping):
+        owner = self._read_removal_owner(operation)
+        if owner.plan.intent != intent:
             raise RecipeImageAvailabilityError(
                 "recipe_image.operation_invalid",
-                "stored removal operation is malformed",
+                "stored removal projection intent changed",
             )
-        result = dict(operation.result)
-        stored_choice = result.get("with_model")
-        expected_identity: dict[str, object] = {
+        if operation.state == "succeeded":
+            if not isinstance(operation.result, Mapping):
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.operation_invalid",
+                    "successful removal has no stored result",
+                )
+            try:
+                result = RecipeCacheRemovalResult.model_validate_json(
+                    json.dumps(
+                        serialize_json_value(operation.result),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+            except (TypeError, ValidationError) as error:
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.operation_invalid",
+                    "stored recipe removal result is malformed",
+                ) from error
+            if (
+                result.action != intent.action
+                or result.selector != intent.selector
+                or result.request_key != intent.request_key
+                or result.operation_id != operation.id
+                or result.recipe_revision_id != intent.recipe_revision_id
+                or result.with_model is not intent.with_model
+                or result.reclaimed_bytes
+                != owner.checkpoint.image_reclaimed_bytes
+                + owner.checkpoint.model_reclaimed_bytes
+                or result.model_removals
+                != [item.operation_id for item in owner.plan.model_children]
+                or owner.checkpoint.image_index != len(owner.plan.image_archives)
+                or owner.checkpoint.model_index != len(owner.plan.model_children)
+                or owner.checkpoint.failure is not None
+            ):
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.operation_invalid",
+                    "stored removal result does not match its accepted intent",
+                )
+            return result.model_dump(mode="json") | {
+                "progress": self._removal_progress_document(operation, owner),
+            }
+        if operation.result is not None:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.operation_invalid",
+                "unfinished recipe removal has a terminal result",
+            )
+        return {
+            "schema_version": SCHEMA_VERSION,
             "action": intent.action,
             "selector": intent.selector,
             "request_key": intent.request_key,
             "operation_id": operation.id,
             "recipe_revision_id": intent.recipe_revision_id,
+            "with_model": intent.with_model,
+            "state": operation.state,
+            "progress": self._removal_progress_document(operation, owner),
+            "reclaimed_bytes": (
+                owner.checkpoint.image_reclaimed_bytes
+                + owner.checkpoint.model_reclaimed_bytes
+            ),
+            "preserved": ["profile-assignments", "spark-local-copies"]
+            + ([] if intent.with_model else ["model-download"]),
+            "failure": (
+                None
+                if owner.checkpoint.failure is None
+                else owner.checkpoint.failure.model_dump(mode="json")
+            ),
+            "next_actions": (
+                []
+                if owner.checkpoint.failure is None
+                else [
+                    action.value for action in owner.checkpoint.failure.recovery_actions
+                ]
+            ),
+            "cancelled_operations": [],
+            "cancelled_builds": [],
+            "model_removals": [
+                child.operation_id for child in owner.plan.model_children
+            ],
         }
-        if (
-            not isinstance(stored_choice, bool)
-            or stored_choice is not intent.with_model
-            or any(
-                result.get(field) != value for field, value in expected_identity.items()
-            )
-        ):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.operation_invalid",
-                "stored removal response does not match its accepted intent",
-            )
-        return result
 
     def _replay_removal(
         self,
@@ -738,7 +947,8 @@ class RecipeImageAvailabilityService:
                 "recipe_image.request_key_reused",
                 "request key was already used for another operation",
             )
-        intent = self._read_removal_intent(operation)
+        owner = self._read_removal_owner(operation)
+        intent = owner.plan.intent
         if (
             intent.selector != selector
             or intent.actor != actor
@@ -759,8 +969,13 @@ class RecipeImageAvailabilityService:
         request_id: str,
         with_model: bool = False,
     ) -> dict[str, object]:
-        """Cancel image/build preparation and remove Controller image bytes."""
+        """Accept one exact, restart-safe cache removal before any byte effect."""
 
+        if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.selector_invalid", "recipe selector is required"
+            )
+        selector = selector.strip().casefold()
         with self._sessions() as session:
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if existing is not None:
@@ -772,24 +987,280 @@ class RecipeImageAvailabilityService:
                     with_model=with_model,
                 )
 
-        revision_id = self._resolve_recipe_selector(selector)
-        fence = str(uuid.uuid4())
-        intent = RecipeCacheRemovalIntent(
-            schema_version=SCHEMA_VERSION,
-            kind=REMOVE_OPERATION_KIND,
-            action="remove",
-            selector=selector,
-            actor=actor,
-            request_key=request_id,
-            recipe_revision_id=revision_id,
-            with_model=with_model,
-            removal_fence=fence,
-        )
-        removal_payload = intent.model_dump(mode="json")
-        remove_operation_id: str | None = None
-        with self._removal_lock, self._sessions.begin() as session:
-            existing = session.scalar(select(Job).where(Job.request_id == request_id))
-            if existing is not None:
+        operation_id = str(uuid.uuid4())
+        try:
+            with self._sessions.begin() as session:
+                existing = session.scalar(
+                    select(Job).where(Job.request_id == request_id)
+                )
+                if existing is not None:
+                    return self._replay_removal(
+                        existing,
+                        selector=selector,
+                        actor=actor,
+                        request_id=request_id,
+                        with_model=with_model,
+                    )
+
+                revision_id = self._resolve_recipe_selector_in_session(
+                    session, selector
+                )
+                revision = session.get(
+                    CatalogDocumentRevision,
+                    revision_id,
+                    populate_existing=True,
+                )
+                if (
+                    revision is None
+                    or revision.kind != "recipe"
+                    or revision.state != "active"
+                    or not isinstance(revision.content_digest, str)
+                ):
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.selector_missing",
+                        "selected recipe revision is not active",
+                    )
+                try:
+                    recipe = read_catalog_document(revision)
+                    if not isinstance(recipe, RecipeDefinition):
+                        raise TypeError("catalog revision is not a Recipe")
+                except (TypeError, ValueError) as error:
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.recipe_invalid",
+                        "selected canonical recipe revision is invalid",
+                    ) from error
+
+                authorizations = tuple(
+                    session.scalars(
+                        select(RuntimeImageAuthorization)
+                        .where(
+                            RuntimeImageAuthorization.recipe_revision_id == revision_id
+                        )
+                        .order_by(
+                            RuntimeImageAuthorization.oci_archive_sha256,
+                            RuntimeImageAuthorization.id,
+                        )
+                    )
+                )
+                image_archives = tuple(
+                    sorted(
+                        {
+                            _digest(
+                                authorization.oci_archive_sha256,
+                                field="runtime image archive digest",
+                            )
+                            for authorization in authorizations
+                        }
+                    )
+                )
+                for authorization in authorizations:
+                    if (
+                        authorization.original_content_digest != revision.content_digest
+                        or authorization.effective_execution_key
+                        != revision.execution_key
+                        or authorization.state not in {"authorized", "revoked"}
+                    ):
+                        raise RecipeImageAvailabilityError(
+                            "runtime_image.authorization_invalid",
+                            "stored recipe image authorization does not match its exact revision",
+                        )
+
+                model_scope: ModelCacheRemovalScope | None = None
+                if with_model:
+                    if self._model_cache is None:
+                        raise RecipeImageAvailabilityError(
+                            "model_cache.unavailable",
+                            "model cache removal is unavailable",
+                        )
+                    model_scope = cast(
+                        ModelCacheRemovalCoordinator, self._model_cache
+                    ).recipe_removal_scope_in_session(
+                        session, recipe_revision_id=revision_id
+                    )
+
+                removal_fence = str(uuid.uuid4())
+                model_operation_id = (
+                    str(uuid.uuid4()) if model_scope is not None else None
+                )
+                model_removal_fence = (
+                    str(uuid.uuid4()) if model_scope is not None else None
+                )
+                image_owner_kind: RemovalOwnerKind = "recipe-image-job"
+                assignments: list[
+                    tuple[ArtifactIdentity, RemovalOwnerKind, str, str]
+                ] = [
+                    (
+                        ArtifactIdentity("runtime-image", archive),
+                        image_owner_kind,
+                        operation_id,
+                        removal_fence,
+                    )
+                    for archive in image_archives
+                ]
+                if model_scope is not None:
+                    if model_operation_id is None or model_removal_fence is None:
+                        raise AssertionError("model removal owner identity is missing")
+                    model_owner_kind: RemovalOwnerKind = "model-cache-operation"
+                    assignments.extend(
+                        (
+                            ArtifactIdentity("model-set", set_digest),
+                            model_owner_kind,
+                            model_operation_id,
+                            model_removal_fence,
+                        )
+                        for set_digest in model_scope.selected_sets
+                    )
+                    assignments.extend(
+                        (
+                            ArtifactIdentity("model-object", object_digest),
+                            "model-cache-operation",
+                            model_operation_id,
+                            model_removal_fence,
+                        )
+                        for object_digest in model_scope.delete_objects
+                    )
+                now = self._clock()
+                now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+                reserve_removal_owners(session, assignments, now=now)
+
+                try:
+                    references = runtime_image_reference_reasons(
+                        session, image_archives
+                    )
+                except ArtifactLifecycleError as error:
+                    raise RecipeImageAvailabilityError(
+                        error.code,
+                        error.detail,
+                        retryable=error.retryable,
+                        recovery_actions=("retry",) if error.retryable else (),
+                    ) from error
+                blocked = {
+                    archive: reasons
+                    for archive, reasons in references.items()
+                    if reasons
+                }
+                if blocked:
+                    archive = min(blocked)
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.removal_referenced",
+                        f"runtime image {archive} is still referenced: "
+                        + ", ".join(blocked[archive][:4]),
+                        retryable=True,
+                        recovery_actions=("retry",),
+                    )
+
+                model_children: list[RecipeCacheRemovalModelChild] = []
+                if model_scope is not None:
+                    assert model_operation_id is not None
+                    assert model_removal_fence is not None
+                    child_request_key = str(
+                        uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"vonk:recipe-remove-model:{request_id}:{revision_id}",
+                        )
+                    )
+                    accepted_child = cast(
+                        ModelCacheRemovalCoordinator, self._model_cache
+                    ).accept_recipe_removal_child_in_session(
+                        session,
+                        actor=actor,
+                        request_key=child_request_key,
+                        recipe_revision_id=revision_id,
+                        operation_id=model_operation_id,
+                        removal_fence=model_removal_fence,
+                        scope=model_scope,
+                    )
+                    if accepted_child is None:
+                        raise RecipeImageAvailabilityError(
+                            "model_cache.removal_scope_changed",
+                            "model cache scope changed before the recipe removal was accepted",
+                        )
+                    child_id, accepted_key, selected_sets, plan_digest = accepted_child
+                    if (
+                        child_id != model_operation_id
+                        or accepted_key != child_request_key
+                        or selected_sets != model_scope.selected_sets
+                    ):
+                        raise RecipeImageAvailabilityError(
+                            "model_cache.removal_scope_changed",
+                            "accepted model removal does not match the reviewed recipe scope",
+                        )
+                    model_children.append(
+                        RecipeCacheRemovalModelChild(
+                            request_key=accepted_key,
+                            operation_id=child_id,
+                            plan_digest=plan_digest,
+                            selected_sets=list(selected_sets),
+                        )
+                    )
+
+                intent = RecipeCacheRemovalIntent(
+                    schema_version=SCHEMA_VERSION,
+                    kind=REMOVE_OPERATION_KIND,
+                    action="remove",
+                    selector=selector,
+                    actor=actor,
+                    request_key=request_id,
+                    recipe_revision_id=revision_id,
+                    with_model=with_model,
+                    removal_fence=removal_fence,
+                )
+                plan = RecipeCacheRemovalPlan(
+                    schema_version=SCHEMA_VERSION,
+                    intent=intent,
+                    image_archives=list(image_archives),
+                    model_children=model_children,
+                )
+                checkpoint = RecipeCacheRemovalCheckpoint(
+                    schema_version=SCHEMA_VERSION,
+                    image_index=0,
+                    image_pending_bytes=None,
+                    image_reclaimed_bytes=0,
+                    model_index=0,
+                    model_reclaimed_bytes=0,
+                    retry_attempts=0,
+                    failure=None,
+                )
+                owner = RecipeCacheRemovalOwner(
+                    schema_version=SCHEMA_VERSION,
+                    plan=plan,
+                    checkpoint=checkpoint,
+                )
+                owner_bytes = len(canonical_message(owner.model_dump(mode="json")))
+                if owner_bytes > MAX_ARTIFACT_OWNER_SCAN_BYTES:
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.removal_scope_limited",
+                        "recipe removal owner is "
+                        f"{owner_bytes} bytes; limit is {MAX_ARTIFACT_OWNER_SCAN_BYTES} bytes",
+                    )
+                now = self._clock()
+                now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+                operation = Job(
+                    id=operation_id,
+                    request_id=request_id,
+                    kind=REMOVE_OPERATION_KIND,
+                    state="queued",
+                    actor=actor,
+                    authority_revision=revision_id,
+                    targets=[],
+                    payload_digest=self._removal_payload_digest(
+                        plan.model_dump(mode="json")
+                    ),
+                    payload=owner.model_dump(mode="json"),
+                    result=None,
+                    current_attempt=1,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(operation)
+                session.flush()
+        except IntegrityError:
+            with self._sessions() as session:
+                existing = session.scalar(
+                    select(Job).where(Job.request_id == request_id)
+                )
+                if existing is None:
+                    raise
                 return self._replay_removal(
                     existing,
                     selector=selector,
@@ -797,241 +1268,640 @@ class RecipeImageAvailabilityService:
                     request_id=request_id,
                     with_model=with_model,
                 )
-            jobs = list(
-                session.scalars(
-                    select(Job).where(
-                        Job.kind == OPERATION_KIND,
-                        Job.authority_revision == revision_id,
-                        Job.state.in_(("queued", "running", "partial")),
-                    )
-                )
-            )
-            cancelled = []
-            now = self._clock()
-            for job in jobs:
-                payload = dict(job.payload) if isinstance(job.payload, Mapping) else {}
-                payload.update(
-                    {
-                        "removal_fence": fence,
-                        "removed": True,
-                        "operator_action": "remove-recipe",
-                    }
-                )
-                payload.pop("claim_owner", None)
-                payload.pop("claim_until", None)
-                job.payload = payload
-                job.result = None
-                job.state = "cancelled"
-                job.status_reason = "recipe Controller cache removed"
-                job.updated_at = now
-                cancelled.append(job.id)
-            try:
-                builds = list(
-                    session.scalars(
-                        select(RecipeBuild)
-                        .where(
-                            RecipeBuild.recipe_revision_id == revision_id,
-                            RecipeBuild.state.in_(("planned", "building")),
-                        )
-                        .order_by(RecipeBuild.id)
-                        .with_for_update(of=RecipeBuild, nowait=True)
-                    )
-                )
-                for build in builds:
-                    try:
-                        consumers = current_build_consumers(session, build)
-                    except BuildConsumerError as error:
-                        raise RecipeImageAvailabilityError(
-                            error.code, str(error)
-                        ) from error
-                    if consumers:
-                        raise RecipeImageAvailabilityError(
-                            "build.shared_consumers",
-                            "accepted preparation still needs this build; cancel its parent intent first",
-                        )
-                build_jobs = tuple(
-                    session.scalars(
-                        select(Job)
-                        .where(
-                            Job.kind == "recipe.build.v1",
-                            Job.payload["owner_id"]
-                            .as_string()
-                            .in_([build.id for build in builds]),
-                            Job.state.in_(
-                                ("queued", "running", "waiting-for-operator")
-                            ),
-                        )
-                        .order_by(Job.id)
-                        .with_for_update(of=Job, nowait=True)
-                    )
-                )
-            except DBAPIError as error:
-                if getattr(error.orig, "sqlstate", None) != "55P03":
-                    raise
+        except ArtifactLifecycleError as error:
+            raise RecipeImageAvailabilityError(
+                error.code,
+                error.detail,
+                retryable=error.retryable,
+                recovery_actions=("retry",) if error.retryable else (),
+            ) from error
+        except ModelCacheConflict as error:
+            raise RecipeImageAvailabilityError(
+                error.code,
+                error.detail,
+                retryable=error.recovery == "retry",
+                retry_after_seconds=error.retry_after_seconds,
+                recovery_actions=("retry",) if error.recovery == "retry" else (),
+            ) from error
+
+        with self._sessions() as session:
+            operation = session.get(Job, operation_id)
+            if operation is None:
                 raise RecipeImageAvailabilityError(
-                    "recipe_image.removal_busy",
-                    "build ownership is changing; retry recipe cache removal",
+                    "recipe_image.operation_missing",
+                    "accepted recipe removal owner could not be read",
                     retryable=True,
                     recovery_actions=("retry",),
-                ) from error
-            for job in build_jobs:
-                request_build_cancellation(
-                    job,
-                    actor=actor,
-                    request_id=str(
-                        uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:cancel-build:{job.id}")
-                    ),
-                    reason="recipe Controller cache removal cancelled the build",
-                    now=now,
                 )
-            for build in builds:
-                # Retire unissued preparation too: removal must not leave it
-                # schedulable. Keep its canonical request intact so a fresh
-                # explicit prepare can replan it; issued jobs retain their
-                # separate cancellation and cleanup receipts above.
-                build.state = "failed"
-                build.error = "recipe Controller cache removal cancelled the build"
-                build.updated_at = now
-            # The result is written after this session commits, so the exact
-            # build identities are captured before the rows detach.
-            cancelled_build_ids = [build.id for build in builds]
-            revision = session.get(CatalogDocumentRevision, revision_id)
-            content_digest = revision.content_digest if revision is not None else None
-            # SQL owns which revisions are authorized; the archive identity is
-            # the authorization's own digest now that no receipt row exists.
-            receipts = (
-                list(
-                    session.scalars(
-                        select(RuntimeImageAuthorization).where(
-                            RuntimeImageAuthorization.original_content_digest
-                            == content_digest,
+            intent = self._read_removal_intent(operation)
+            return self._read_removal_result(operation, intent)
+
+    def advance_removals(self, *, limit: int = 1) -> int:
+        """Advance bounded, durable cache removals without claiming image slots."""
+
+        if not 1 <= limit <= 16:
+            raise ValueError("recipe removal batch limit is invalid")
+        advanced = 0
+        boundary: tuple[datetime, str] | None = None
+        while advanced < limit:
+            with self._sessions() as session:
+                statement = (
+                    select(Job.id, Job.updated_at)
+                    .where(
+                        Job.kind == REMOVE_OPERATION_KIND,
+                        Job.state.in_(("queued", "running", "partial")),
+                    )
+                    .order_by(Job.updated_at, Job.id)
+                    .limit(64)
+                )
+                if boundary is not None:
+                    boundary_time, boundary_id = boundary
+                    statement = statement.where(
+                        or_(
+                            Job.updated_at > boundary_time,
+                            and_(
+                                Job.updated_at == boundary_time,
+                                Job.id > boundary_id,
+                            ),
                         )
                     )
-                )
-                if content_digest is not None
-                else []
-            )
-            all_receipts = list(session.scalars(select(RuntimeImageAuthorization)))
-            removed_archives = {item.oci_archive_sha256 for item in receipts}
-            other_archives = {
-                item.oci_archive_sha256
-                for item in all_receipts
-                if item.oci_archive_sha256 not in removed_archives
-            }
-            # Cache removal invalidates availability, not recipe authority.
-            # Exact re-preparation may restore evicted bytes; an explicit
-            # security revocation must survive removal and re-download. The
-            # deletion of those bytes is not SQL work, so it is collected here
-            # and performed once this transaction has committed.
-            removal_targets: list[tuple[Path, Path]] = []
-            for receipt in receipts:
-                archive_sha256 = _digest(
-                    receipt.oci_archive_sha256, field="runtime image archive digest"
-                )
-                archive = self._storage.root / archive_sha256
-                receipt_file = self._storage.root / f"{archive_sha256}.receipt.json"
-                if receipt.state == "verified":
-                    receipt.state = "evicted"
-                if archive_sha256 not in other_archives:
-                    removal_targets.append((archive, receipt_file))
-            model_children = [
-                child.get("model_content_digests", [])
-                for job in jobs
-                for child in [
-                    job.payload.get("model_child", {})
-                    if isinstance(job.payload, Mapping)
-                    else {}
-                ]
-                if isinstance(child, Mapping)
-            ]
-        # Storage deletion happens between two short transactions: the fence and
-        # evicted receipt states are already durable above, and the removal
-        # operation that records reclaimed bytes is written below.
-        reclaimed = 0
-        for archive, receipt_file in removal_targets:
-            if archive.is_file():
-                reclaimed += archive.stat().st_size
-                archive.unlink(missing_ok=True)
-            receipt_file.unlink(missing_ok=True)
-        with self._removal_lock, self._sessions.begin() as session:
-            result = {
-                "schema_version": SCHEMA_VERSION,
-                "action": "remove",
-                "selector": selector,
-                "request_key": request_id,
-                "recipe_revision_id": revision_id,
-                "with_model": intent.with_model,
-                "state": "succeeded",
-                "cancelled_operations": cancelled,
-                "cancelled_builds": cancelled_build_ids,
-                "reclaimed_bytes": reclaimed,
-                "preserved": [
-                    "profile-assignments",
-                    "spark-local-copies",
-                    "model-download",
-                ]
-                if not with_model
-                else ["profile-assignments", "spark-local-copies"],
-                "model_content_digests": [
-                    digest
-                    for values in model_children
-                    for digest in values
-                    if isinstance(digest, str)
-                ],
-                "next_actions": ["download"] if (cancelled or builds) else [],
-            }
-            now = self._clock()
-            operation = Job(
-                id=str(uuid.uuid4()),
-                request_id=intent.request_key,
-                kind=REMOVE_OPERATION_KIND,
-                state="succeeded",
-                actor=intent.actor,
-                authority_revision=intent.recipe_revision_id,
-                targets=[],
-                payload_digest=self._removal_payload_digest(removal_payload),
-                payload=removal_payload,
-                result=None,
-                current_attempt=1,
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(operation)
-            session.flush()
-            remove_operation_id = operation.id
-            result["operation_id"] = operation.id
-            operation.result = dict(result)
-        if with_model and self._model_cache is not None:
-            model_removals = []
-            for digest in result["model_content_digests"]:
-                child_request = str(
-                    uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"vonk:recipe-remove-model:{request_id}:{digest}",
-                    )
-                )
+                rows = tuple(session.execute(statement))
+            if not rows:
+                break
+            for operation_id, _updated_at in rows:
                 try:
-                    removed = self._model_cache.remove_model_selector(
-                        digest,
-                        actor=actor,
-                        request_key=child_request,
+                    advanced += int(self._advance_recipe_removal(operation_id))
+                except RecipeImageAvailabilityError:
+                    # A malformed owner is isolated to its own request. It
+                    # remains fail-closed and cannot hold up later rows.
+                    continue
+                if advanced >= limit:
+                    break
+            last_updated, last_id = rows[-1][1], rows[-1][0]
+            boundary = (last_updated, last_id)
+        return advanced
+
+    def _advance_recipe_removal(self, operation_id: str) -> bool:
+        now = self._clock()
+        now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        with self._sessions() as session:
+            operation = session.get(Job, operation_id, populate_existing=True)
+            if (
+                operation is None
+                or operation.kind != REMOVE_OPERATION_KIND
+                or operation.state not in {"queued", "running", "partial"}
+            ):
+                return False
+            owner = self._read_removal_owner(operation)
+        if not _removal_retry_is_due(owner.checkpoint.failure, now):
+            return False
+
+        if owner.checkpoint.image_index < len(owner.plan.image_archives):
+            archive_sha256 = owner.plan.image_archives[owner.checkpoint.image_index]
+            return self._advance_recipe_image_removal(
+                operation_id, owner, archive_sha256, now=now
+            )
+        if owner.checkpoint.model_index < len(owner.plan.model_children):
+            return self._advance_recipe_model_child(
+                operation_id,
+                owner,
+                owner.plan.model_children[owner.checkpoint.model_index],
+                now=now,
+            )
+        return self._finish_recipe_removal(operation_id, owner, now=now)
+
+    def _advance_recipe_image_removal(
+        self,
+        operation_id: str,
+        observed_owner: RecipeCacheRemovalOwner,
+        archive_sha256: str,
+        *,
+        now: datetime,
+    ) -> bool:
+        identity = ArtifactIdentity("runtime-image", archive_sha256)
+        try:
+            with self._storage.publication_lock(archive_sha256):
+                observed_bytes = self._storage.published_archive_bytes(archive_sha256)
+                pending_bytes = self._checkpoint_recipe_image_removal(
+                    operation_id,
+                    observed_owner,
+                    identity=identity,
+                    observed_bytes=observed_bytes,
+                    now=now,
+                )
+                if pending_bytes is None:
+                    return False
+                reclaimed_now = self._storage.remove_published(archive_sha256)
+                if reclaimed_now not in {0, pending_bytes}:
+                    raise RuntimeImagePreparationError(
+                        "runtime_image.archive_mismatch",
+                        "published image length changed during the fenced removal",
                     )
-                except Exception as error:
+                return self._complete_recipe_image_removal(
+                    operation_id,
+                    observed_owner,
+                    identity=identity,
+                    pending_bytes=pending_bytes,
+                    now=self._clock(),
+                )
+        except RuntimeImagePreparationError as error:
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code=error.code,
+                detail=error.detail,
+                retryable=error.retryable,
+                retry_after_seconds=5,
+            )
+        except ArtifactLifecycleError as error:
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code=error.code,
+                detail=error.detail,
+                retryable=error.retryable,
+                retry_after_seconds=5,
+            )
+        except RecipeImageAvailabilityError as error:
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code=error.code,
+                detail=error.detail,
+                retryable=error.retryable,
+                retry_after_seconds=error.retry_after_seconds or 5,
+            )
+        except DBAPIError as error:
+            translated = retryable_artifact_database_error(error)
+            if translated is None:
+                raise
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code=translated.code,
+                detail=translated.detail,
+                retryable=True,
+                retry_after_seconds=5,
+            )
+
+    def _checkpoint_recipe_image_removal(
+        self,
+        operation_id: str,
+        observed_owner: RecipeCacheRemovalOwner,
+        *,
+        identity: ArtifactIdentity,
+        observed_bytes: int,
+        now: datetime,
+    ) -> int | None:
+        intent = observed_owner.plan.intent
+        with self._sessions.begin() as session:
+            if not check_removal_fence_nowait(
+                session,
+                identity,
+                owner_kind="recipe-image-job",
+                owner_id=operation_id,
+                fence=intent.removal_fence,
+            ):
+                return None
+            operation = session.scalar(
+                select(Job)
+                .where(Job.id == operation_id, Job.kind == REMOVE_OPERATION_KIND)
+                .execution_options(populate_existing=True)
+                .with_for_update(nowait=True)
+            )
+            if operation is None or operation.state not in {
+                "queued",
+                "running",
+                "partial",
+            }:
+                return None
+            owner = self._read_removal_owner(operation)
+            checkpoint = owner.checkpoint
+            if (
+                owner.plan.intent != intent
+                or checkpoint.image_index != observed_owner.checkpoint.image_index
+            ):
+                return None
+            references = runtime_image_reference_reasons(session, (identity.sha256,))
+            if references[identity.sha256]:
+                raise RecipeImageAvailabilityError(
+                    "artifact.reference_changed",
+                    "runtime image acquired an active reference while removal was reserved",
+                    retryable=True,
+                    recovery_actions=("retry",),
+                )
+            pending_bytes = checkpoint.image_pending_bytes
+            if pending_bytes is None:
+                pending_bytes = observed_bytes
+            elif observed_bytes not in {0, pending_bytes}:
+                raise RuntimeImagePreparationError(
+                    "runtime_image.archive_mismatch",
+                    "published image length disagrees with its durable removal checkpoint",
+                )
+            updated_checkpoint = checkpoint.model_copy(
+                update={"image_pending_bytes": pending_bytes, "failure": None}
+            )
+            updated_owner = owner.model_copy(update={"checkpoint": updated_checkpoint})
+            operation.payload = updated_owner.model_dump(mode="json")
+            operation.state = "running"
+            operation.status_reason = None
+            operation.updated_at = now
+            return pending_bytes
+
+    def _complete_recipe_image_removal(
+        self,
+        operation_id: str,
+        observed_owner: RecipeCacheRemovalOwner,
+        *,
+        identity: ArtifactIdentity,
+        pending_bytes: int,
+        now: datetime,
+    ) -> bool:
+        intent = observed_owner.plan.intent
+        with self._sessions.begin() as session:
+            if not check_removal_fence_nowait(
+                session,
+                identity,
+                owner_kind="recipe-image-job",
+                owner_id=operation_id,
+                fence=intent.removal_fence,
+            ):
+                return False
+            operation = session.scalar(
+                select(Job)
+                .where(Job.id == operation_id, Job.kind == REMOVE_OPERATION_KIND)
+                .execution_options(populate_existing=True)
+                .with_for_update(nowait=True)
+            )
+            if operation is None or operation.state not in {
+                "queued",
+                "running",
+                "partial",
+            }:
+                return False
+            owner = self._read_removal_owner(operation)
+            checkpoint = owner.checkpoint
+            if (
+                owner.plan.intent != intent
+                or checkpoint.image_index != observed_owner.checkpoint.image_index
+                or checkpoint.image_pending_bytes != pending_bytes
+            ):
+                return False
+            updated_checkpoint = checkpoint.model_copy(
+                update={
+                    "image_index": checkpoint.image_index + 1,
+                    "image_pending_bytes": None,
+                    "image_reclaimed_bytes": checkpoint.image_reclaimed_bytes
+                    + pending_bytes,
+                    "failure": None,
+                }
+            )
+            updated_owner = owner.model_copy(update={"checkpoint": updated_checkpoint})
+            operation.payload = updated_owner.model_dump(mode="json")
+            operation.state = "running"
+            operation.status_reason = None
+            operation.updated_at = now
+            return True
+
+    def _advance_recipe_model_child(
+        self,
+        operation_id: str,
+        owner: RecipeCacheRemovalOwner,
+        child: RecipeCacheRemovalModelChild,
+        *,
+        now: datetime,
+    ) -> bool:
+        if self._model_cache is None:
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code="model_cache.unavailable",
+                detail="model cache child status is unavailable",
+                retryable=True,
+                retry_after_seconds=5,
+            )
+        cache = cast(ModelCacheRemovalCoordinator, self._model_cache)
+        try:
+            operation = cache.get_operation(child.operation_id)
+        except ModelCacheNotFound:
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code="model_cache.removal_child_missing",
+                detail="accepted model-removal child is unavailable",
+                retryable=False,
+            )
+        except ModelCacheError as error:
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code="model_cache.removal_child_invalid",
+                detail=error.detail,
+                retryable=False,
+            )
+        except DBAPIError as error:
+            translated = retryable_artifact_database_error(error)
+            if translated is None:
+                raise
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code=translated.code,
+                detail=translated.detail,
+                retryable=True,
+                retry_after_seconds=5,
+            )
+        if (
+            operation.id != child.operation_id
+            or operation.request_key != child.request_key
+            or operation.kind != "remove"
+            or operation.plan_digest != child.plan_digest
+        ):
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code="model_cache.removal_child_mismatch",
+                detail="model-removal child identity does not match its accepted recipe owner",
+                retryable=False,
+            )
+        if operation.state in {"queued", "running", "partial", "cancelling"}:
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code="model_cache.removal_child_pending",
+                detail="waiting for the accepted model-removal child to finish",
+                retryable=True,
+                retry_after_seconds=5,
+            )
+        if operation.state != "succeeded":
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code="model_cache.removal_child_failed",
+                detail="accepted model-removal child did not complete successfully",
+                retryable=False,
+            )
+        try:
+            if isinstance(operation.result, ModelCacheRemovalResult):
+                result = operation.result
+            else:
+                result = ModelCacheRemovalResult.model_validate(operation.result)
+        except (TypeError, ValueError, ValidationError):
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code="model_cache.removal_child_invalid",
+                detail="successful model-removal child has an invalid result",
+                retryable=False,
+            )
+        if result.removed_entries != child.selected_sets or result.cancelled_operations:
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code="model_cache.removal_child_mismatch",
+                detail="model-removal child result does not match its accepted scope",
+                retryable=False,
+            )
+        try:
+            return self._complete_recipe_model_child(
+                operation_id,
+                owner,
+                child,
+                reclaimed_bytes=result.reclaimed_bytes,
+                now=now,
+            )
+        except DBAPIError as error:
+            translated = retryable_artifact_database_error(error)
+            if translated is None:
+                raise
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code=translated.code,
+                detail=translated.detail,
+                retryable=True,
+                retry_after_seconds=5,
+            )
+
+    def _complete_recipe_model_child(
+        self,
+        operation_id: str,
+        observed_owner: RecipeCacheRemovalOwner,
+        child: RecipeCacheRemovalModelChild,
+        *,
+        reclaimed_bytes: int,
+        now: datetime,
+    ) -> bool:
+        with self._sessions.begin() as session:
+            operation = session.scalar(
+                select(Job)
+                .where(Job.id == operation_id, Job.kind == REMOVE_OPERATION_KIND)
+                .execution_options(populate_existing=True)
+                .with_for_update(nowait=True)
+            )
+            if operation is None or operation.state not in {
+                "queued",
+                "running",
+                "partial",
+            }:
+                return False
+            owner = self._read_removal_owner(operation)
+            checkpoint = owner.checkpoint
+            if (
+                owner.plan.intent != observed_owner.plan.intent
+                or checkpoint.model_index != observed_owner.checkpoint.model_index
+                or owner.plan.model_children[checkpoint.model_index] != child
+                or checkpoint.image_index != len(owner.plan.image_archives)
+            ):
+                return False
+            updated_checkpoint = checkpoint.model_copy(
+                update={
+                    "model_index": checkpoint.model_index + 1,
+                    "model_reclaimed_bytes": checkpoint.model_reclaimed_bytes
+                    + reclaimed_bytes,
+                    "failure": None,
+                }
+            )
+            updated_owner = owner.model_copy(update={"checkpoint": updated_checkpoint})
+            operation.payload = updated_owner.model_dump(mode="json")
+            operation.state = "running"
+            operation.status_reason = None
+            operation.updated_at = now
+            return True
+
+    def _record_recipe_removal_failure(
+        self,
+        operation_id: str,
+        *,
+        code: str,
+        detail: str,
+        retryable: bool,
+        retry_after_seconds: int = 5,
+    ) -> bool:
+        now = self._clock()
+        now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        try:
+            with self._sessions.begin() as session:
+                operation = session.scalar(
+                    select(Job)
+                    .where(Job.id == operation_id, Job.kind == REMOVE_OPERATION_KIND)
+                    .execution_options(populate_existing=True)
+                    .with_for_update(nowait=True)
+                )
+                if operation is None or operation.state not in {
+                    "queued",
+                    "running",
+                    "partial",
+                }:
+                    return False
+                owner = self._read_removal_owner(operation)
+                checkpoint = owner.checkpoint
+                retry_attempts = checkpoint.retry_attempts
+                retry_time: str | None = None
+                delay: int | None = None
+                if retryable:
+                    retry_attempts += 1
+                    delay = min(
+                        60,
+                        max(1, retry_after_seconds, 2 ** min(retry_attempts, 6)),
+                    )
+                    retry_time = _iso(now + timedelta(seconds=delay))
+                safe = sanitize_failure_evidence({"code": code, "detail": detail})
+                failure = AvailabilityOperationFailure.model_validate(
+                    {
+                        "code": safe.get("code", "recipe_image.removal_failed"),
+                        "detail": safe.get("detail", "recipe removal did not complete"),
+                        "recovery_actions": [] if retryable else ["inspect"],
+                        "retryable": retryable,
+                        "retry_time": retry_time,
+                        "retry_after_seconds": delay,
+                    }
+                )
+                updated_checkpoint = checkpoint.model_copy(
+                    update={"retry_attempts": retry_attempts, "failure": failure}
+                )
+                operation.payload = owner.model_copy(
+                    update={"checkpoint": updated_checkpoint}
+                ).model_dump(mode="json")
+                operation.state = "partial" if retryable else "failed"
+                operation.status_reason = failure.detail
+                operation.updated_at = now
+                return True
+        except DBAPIError as error:
+            translated = retryable_artifact_database_error(error)
+            if translated is None:
+                raise
+            return False
+
+    def _finish_recipe_removal(
+        self,
+        operation_id: str,
+        observed_owner: RecipeCacheRemovalOwner,
+        *,
+        now: datetime,
+    ) -> bool:
+        intent = observed_owner.plan.intent
+        identities = tuple(
+            ArtifactIdentity("runtime-image", digest)
+            for digest in observed_owner.plan.image_archives
+        )
+        try:
+            with self._sessions.begin() as session:
+                if identities and not lock_removal_fences(
+                    session,
+                    identities,
+                    owner_kind="recipe-image-job",
+                    owner_id=operation_id,
+                    fence=intent.removal_fence,
+                    now=now,
+                ):
+                    return False
+                operation = session.scalar(
+                    select(Job)
+                    .where(Job.id == operation_id, Job.kind == REMOVE_OPERATION_KIND)
+                    .execution_options(populate_existing=True)
+                    .with_for_update(nowait=True)
+                )
+                if operation is None or operation.state not in {
+                    "queued",
+                    "running",
+                    "partial",
+                }:
+                    return False
+                owner = self._read_removal_owner(operation)
+                checkpoint = owner.checkpoint
+                if (
+                    owner.plan.intent != intent
+                    or checkpoint.image_index != len(owner.plan.image_archives)
+                    or checkpoint.image_pending_bytes is not None
+                    or checkpoint.model_index != len(owner.plan.model_children)
+                    or not _removal_retry_is_due(checkpoint.failure, now)
+                ):
+                    return False
+                intent_archives = tuple(owner.plan.image_archives)
+                references = runtime_image_reference_reasons(session, intent_archives)
+                if any(references[digest] for digest in intent_archives):
                     raise RecipeImageAvailabilityError(
-                        "recipe_image.model_cache_removal_failed",
-                        "recipe image was removed but its model cache was not",
+                        "artifact.reference_changed",
+                        "a runtime image reference remains after the removal effects",
                         retryable=True,
                         recovery_actions=("retry",),
-                    ) from error
-                model_removals.append(removed.id)
-            result["model_removals"] = model_removals
-        if remove_operation_id is not None:
-            with self._sessions.begin() as session:
-                operation = session.get(Job, remove_operation_id)
-                if operation is not None:
-                    operation.result = dict(result)
-                    operation.updated_at = self._clock()
-        return result
+                    )
+                if identities:
+                    clear_removal(
+                        session,
+                        identities,
+                        owner_kind="recipe-image-job",
+                        owner_id=operation_id,
+                        fence=intent.removal_fence,
+                        now=now,
+                    )
+                result = RecipeCacheRemovalResult(
+                    schema_version=SCHEMA_VERSION,
+                    action="remove",
+                    selector=intent.selector,
+                    request_key=intent.request_key,
+                    operation_id=operation.id,
+                    recipe_revision_id=intent.recipe_revision_id,
+                    with_model=intent.with_model,
+                    state="succeeded",
+                    reclaimed_bytes=(
+                        checkpoint.image_reclaimed_bytes
+                        + checkpoint.model_reclaimed_bytes
+                    ),
+                    model_removals=[
+                        child.operation_id for child in owner.plan.model_children
+                    ],
+                    preserved=["profile-assignments", "spark-local-copies"]
+                    + ([] if intent.with_model else ["model-download"]),
+                    cancelled_operations=[],
+                    cancelled_builds=[],
+                    next_actions=[],
+                )
+                operation.result = result.model_dump(mode="json")
+                operation.state = "succeeded"
+                operation.status_reason = None
+                operation.updated_at = now
+                updated_owner = owner.model_copy(
+                    update={
+                        "checkpoint": checkpoint.model_copy(update={"failure": None})
+                    }
+                )
+                operation.payload = updated_owner.model_dump(mode="json")
+                return True
+        except ArtifactLifecycleError as error:
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code=error.code,
+                detail=error.detail,
+                retryable=error.retryable,
+                retry_after_seconds=5,
+            )
+        except RecipeImageAvailabilityError as error:
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code=error.code,
+                detail=error.detail,
+                retryable=error.retryable,
+                retry_after_seconds=error.retry_after_seconds or 5,
+            )
+        except DBAPIError as error:
+            translated = retryable_artifact_database_error(error)
+            if translated is None:
+                raise
+            return self._record_recipe_removal_failure(
+                operation_id,
+                code=translated.code,
+                detail=translated.detail,
+                retryable=True,
+                retry_after_seconds=5,
+            )
 
     def update(
         self,
@@ -2452,7 +3322,7 @@ class RecipeImageAvailabilityService:
                     select(func.count())
                     .select_from(Job)
                     .where(
-                        Job.kind == OPERATION_KIND,
+                        Job.kind.in_((OPERATION_KIND, REMOVE_OPERATION_KIND)),
                         Job.state.in_(("queued", "running", "partial", "cancelling")),
                     )
                 )
@@ -2463,6 +3333,7 @@ class RecipeImageAvailabilityService:
     def run_pending(self, *, limit: int = 1) -> int:
         if not 1 <= limit <= 16:
             raise ValueError("availability worker batch limit is invalid")
+        removals = self.advance_removals(limit=1)
         self.reconcile_cancellations(limit=limit)
         update_claim = self.claim_update(f"update-{uuid.uuid4().hex}")
         if update_claim is not None:
@@ -2470,7 +3341,7 @@ class RecipeImageAvailabilityService:
         claims = self.claim_pending(limit=min(limit, self._max_parallel))
         for claim in claims:
             self.run_claim(claim)
-        return len(claims) + int(update_claim is not None)
+        return len(claims) + int(update_claim is not None) + removals
 
     def claim_pending(
         self, *, limit: int = 4, owner_id: str | None = None

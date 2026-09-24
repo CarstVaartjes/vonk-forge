@@ -12,6 +12,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import Literal, Protocol, TypeGuard, get_args, runtime_checkable
 
 from vonk_agent_protocol.inventory import MemoryPool
@@ -190,11 +191,24 @@ class ResourceDemand:
 
 
 @dataclass(frozen=True, slots=True)
+class UnknownRunMemoryResidual:
+    """Upper bound for an active run whose resident usage is not observed."""
+
+    run_id: str
+    run_generation: int
+    reservation_kind: str
+    maximum_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryReservationTotals:
-    """Exact peak commitments and promises not yet reflected in physical free."""
+    """Hard peak commitments and bounds not resolved by physical observations."""
 
     committed_bytes_by_kind: Mapping[str, int]
     unmaterialized_bytes_by_kind: Mapping[str, int]
+    unknown_run_residuals_by_kind: Mapping[
+        str, tuple[UnknownRunMemoryResidual, ...]
+    ] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,6 +303,7 @@ def memory_capacity_snapshot(
     memory_pool: MemoryPool | None,
     evidence_state: EvidenceState,
     evidence_digest: str | None = None,
+    evidence_observed_at: datetime | None = None,
 ) -> CapacitySnapshot:
     def component(kind: MemoryKind, values: tuple[int, int] | None) -> CapacitySnapshot:
         reserved = (
@@ -311,6 +326,17 @@ def memory_capacity_snapshot(
             if memory_pool is not None
             else None
         )
+        unknown_run_residuals = (
+            tuple(
+                residual
+                for item in memory_reservation_kinds(
+                    memory_reservation_kind(kind), memory_pool
+                )
+                for residual in reservations.unknown_run_residuals_by_kind.get(item, ())
+            )
+            if memory_pool is not None
+            else ()
+        )
         total, free = values if values is not None else (None, None)
         return CapacitySnapshot(
             node_id,
@@ -321,6 +347,8 @@ def memory_capacity_snapshot(
             evidence_state if total is not None else "unknown",
             evidence_digest,
             unmaterialized_bytes=unmaterialized,
+            unknown_run_residuals=unknown_run_residuals,
+            evidence_observed_at=evidence_observed_at,
         )
 
     if memory_pool == "shared":
@@ -345,7 +373,8 @@ def memory_capacity_snapshot(
                 item.available_bytes - item.reserved_bytes,
                 item.available_bytes
                 - item.occupied_bytes
-                - (item.unmaterialized_bytes or 0),
+                - (item.unmaterialized_bytes or 0)
+                - sum(item.maximum_bytes for item in item.unknown_run_residuals),
             )
             if item.available_bytes is not None
             and item.occupied_bytes is not None
@@ -353,7 +382,19 @@ def memory_capacity_snapshot(
             else -1
         ),
     )
-    return replace(limiting, memory_kind="unified", components=components)
+    residuals = tuple(
+        dict.fromkeys(
+            residual
+            for component in components
+            for residual in component.unknown_run_residuals
+        )
+    )
+    return replace(
+        limiting,
+        memory_kind="unified",
+        components=components,
+        unknown_run_residuals=residuals,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,6 +408,8 @@ class CapacitySnapshot:
     evidence_digest: str | None = None
     components: tuple[CapacitySnapshot, ...] = ()
     unmaterialized_bytes: int | None = 0
+    unknown_run_residuals: tuple[UnknownRunMemoryResidual, ...] = ()
+    evidence_observed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,6 +433,7 @@ class NodeCapacityPlan:
     allowed: bool
     reasons: tuple[ResourceReason, ...] = ()
     insufficient_components: tuple[str, ...] = ()
+    unknown_run_residuals: tuple[UnknownRunMemoryResidual, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -881,6 +925,34 @@ def _minimum_known(values: Sequence[int | None]) -> int | None:
     )
 
 
+def _resident_usage_uncertainty_detail(
+    capacity: CapacitySnapshot,
+    residuals: Sequence[UnknownRunMemoryResidual],
+    *,
+    admitted: bool,
+) -> str:
+    observed_at = (
+        capacity.evidence_observed_at.isoformat()
+        if capacity.evidence_observed_at is not None
+        else "timestamp unavailable"
+    )
+    digest = capacity.evidence_digest or "digest unavailable"
+    maximum = sum(item.maximum_bytes for item in residuals)
+    if admitted:
+        return (
+            f"Aggregate inventory {observed_at} ({digest}) reports no per-run "
+            f"resident usage for {len(residuals)} exact active claim(s); their "
+            f"remaining commitment is in the range 0..{maximum} bytes. Admission "
+            "applies the full upper bound."
+        )
+    return (
+        f"Capacity is unverified by aggregate inventory {observed_at} ({digest}): "
+        f"{len(residuals)} exact active run claim(s) may retain 0..{maximum} "
+        "bytes, and the safe upper bound does not fit. Reconcile the exact run "
+        "claims and retry against fresh inventory."
+    )
+
+
 def plan_capacity(
     requirements: Mapping[str, ResourceDemand],
     capacities: Sequence[CapacitySnapshot],
@@ -965,12 +1037,23 @@ def plan_capacity(
                             for component in part.insufficient_components
                         )
                     ),
+                    tuple(
+                        dict.fromkeys(
+                            residual
+                            for part in parts
+                            for residual in part.unknown_run_residuals
+                        )
+                    ),
                 )
             )
             continue
         occupied = capacity.occupied_bytes
         reserved = capacity.reserved_bytes
         unmaterialized = capacity.unmaterialized_bytes
+        unknown_residuals = capacity.unknown_run_residuals
+        unknown_upper_bytes = sum(
+            residual.maximum_bytes for residual in unknown_residuals
+        )
         for name, value in (
             ("available", available),
             ("occupied", occupied),
@@ -1015,11 +1098,12 @@ def plan_capacity(
                 )
             )
             continue
-        # The exact peak commitment owns the hard admission budget. Only
-        # promises that have not materialized reduce observed free bytes: a
-        # live run's use is already part of ``occupied`` and must not be
-        # charged against free a second time.
-        current = available - occupied - unmaterialized - total_bytes
+        # Aggregate inventory has no exact resident usage for a retained run.
+        # Its remaining reservation is therefore a range from zero to the full
+        # peak. Admission uses the safe lower-capacity bound; it never treats a
+        # starting/running state as measured bytes or as a release receipt.
+        current_without_unknown = available - occupied - unmaterialized - total_bytes
+        current = current_without_unknown - unknown_upper_bytes
         budget_after = available - reserved - total_bytes - memory_floor_bytes
         release = releases.get((node_id, capacity.memory_kind), 0)
         if not release:
@@ -1048,11 +1132,27 @@ def plan_capacity(
                     node_id=node_id,
                 )
             )
-        if current < memory_floor_bytes and not release:
+        if (
+            current_without_unknown >= memory_floor_bytes
+            and current < memory_floor_bytes
+            and not release
+        ):
+            node_reasons.append(
+                _reason(
+                    "resource.resident_usage_unknown",
+                    _resident_usage_uncertainty_detail(
+                        capacity, unknown_residuals, admitted=False
+                    ),
+                    node_id=node_id,
+                )
+            )
+        elif current_without_unknown < memory_floor_bytes and not release:
             node_reasons.append(
                 _reason(
                     "resource.insufficient_capacity",
-                    f"Selected demand leaves {current} bytes before the required {memory_floor_bytes}-byte reserve.",
+                    f"Observed free capacity less definite claims and selected demand leaves "
+                    f"{current_without_unknown} bytes before the required "
+                    f"{memory_floor_bytes}-byte reserve, even if retained runs use zero bytes.",
                     node_id=node_id,
                 )
             )
@@ -1064,17 +1164,34 @@ def plan_capacity(
                     node_id=node_id,
                 )
             )
+        elif (
+            not release
+            and current >= memory_floor_bytes
+            and budget_after >= 0
+            and unknown_residuals
+        ):
+            node_reasons.append(
+                _reason(
+                    "resource.resident_usage_unknown",
+                    _resident_usage_uncertainty_detail(
+                        capacity, unknown_residuals, admitted=True
+                    ),
+                    severity="warning",
+                    node_id=node_id,
+                )
+            )
         nodes.append(
             NodeCapacityPlan(
                 node_id,
                 demand.total_bytes,
-                current,
-                after_stop,
-                selected,
+                None if unknown_residuals else current,
+                None if unknown_residuals else after_stop,
+                None if unknown_residuals else selected,
                 not current_fit and after_fit and release > 0,
                 allowed,
                 tuple(node_reasons),
                 (capacity.memory_kind,) if not current_fit else (),
+                unknown_residuals,
             )
         )
     reasons.extend(reason for node in nodes for reason in node.reasons)

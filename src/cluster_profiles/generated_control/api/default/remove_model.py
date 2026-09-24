@@ -8,8 +8,8 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
-from ...models.model_cache_operator_request import ModelCacheOperatorRequest
 from ...models.model_cache_operator_response import ModelCacheOperatorResponse
+from ...models.model_cache_removal_request import ModelCacheRemovalRequest
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
@@ -18,7 +18,7 @@ from typing import cast
 def _get_kwargs(
     selector: str,
     *,
-    body: ModelCacheOperatorRequest,
+    body: ModelCacheRemovalRequest,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -112,14 +112,15 @@ def sync_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
-    body: ModelCacheOperatorRequest,
+    body: ModelCacheRemovalRequest,
 
 ) -> Response[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]:
     """ Remove
 
     Args:
         selector (str):
-        body (ModelCacheOperatorRequest): Body shared by the singular operator model actions.
+        body (ModelCacheRemovalRequest): Exact content identity and request key for a model cache
+            removal.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -146,14 +147,15 @@ def sync(
     selector: str,
     *,
     client: AuthenticatedClient,
-    body: ModelCacheOperatorRequest,
+    body: ModelCacheRemovalRequest,
 
 ) -> Optional[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]:
     """ Remove
 
     Args:
         selector (str):
-        body (ModelCacheOperatorRequest): Body shared by the singular operator model actions.
+        body (ModelCacheRemovalRequest): Exact content identity and request key for a model cache
+            removal.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -175,14 +177,15 @@ async def asyncio_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
-    body: ModelCacheOperatorRequest,
+    body: ModelCacheRemovalRequest,
 
 ) -> Response[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]:
     """ Remove
 
     Args:
         selector (str):
-        body (ModelCacheOperatorRequest): Body shared by the singular operator model actions.
+        body (ModelCacheRemovalRequest): Exact content identity and request key for a model cache
+            removal.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -209,14 +212,15 @@ async def asyncio(
     selector: str,
     *,
     client: AuthenticatedClient,
-    body: ModelCacheOperatorRequest,
+    body: ModelCacheRemovalRequest,
 
 ) -> Optional[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]:
     """ Remove
 
     Args:
         selector (str):
-        body (ModelCacheOperatorRequest): Body shared by the singular operator model actions.
+        body (ModelCacheRemovalRequest): Exact content identity and request key for a model cache
+            removal.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

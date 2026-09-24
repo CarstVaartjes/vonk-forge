@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import multiprocessing
+import os
 import sqlite3
 import threading
 import uuid
@@ -17,6 +19,7 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_control import artifact_reference_scan, runtime_image_preparation
 from vonk_control.artifact_lifecycle import ArtifactLifecycleError
 from vonk_control.artifact_reference_scan import runtime_image_reference_reasons
 from vonk_control.bounded_json import require_mapping, require_sequence
@@ -31,10 +34,13 @@ from vonk_control.model_cache_contract import (
 from vonk_control.model_cache_progress import cache_progress
 from vonk_control.models import (
     AgentNode,
+    ArtifactLifecycleGate,
     Base,
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
+    FleetProfile,
+    FleetProfileApplication,
     Job,
     ModelCacheOperation,
     ModelCacheSet,
@@ -49,6 +55,9 @@ from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_image_availability_api import _view_document
+from vonk_control.recipe_image_removal_contract import (
+    RecipeCacheRemovalOwner,
+)
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -142,6 +151,25 @@ class Transport:
 
     def inspect_archive(self, archive: Path, **_: object) -> PulledImageEvidence:
         raise AssertionError(archive)
+
+
+class _ExitAfterImageUnlinkStorage(FilesystemRuntimeImageStorage):
+    def remove_published(self, archive_sha256: str) -> int:
+        super().remove_published(archive_sha256)
+        os._exit(73)
+
+
+def _exit_after_recipe_image_unlink(database_url: str, artifact_root: str) -> None:
+    engine = create_engine(database_url)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=_ExitAfterImageUnlinkStorage(Path(artifact_root)),
+        authority=lambda *_args, **_kwargs: (_recipe("recipe-image.json"), _runtime()),
+        clock=lambda: datetime.now(UTC),
+    )
+    service.advance_removals(limit=1)
+    os._exit(74)
 
 
 def _add_revision(
@@ -556,13 +584,21 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
         execution_key = authorization.effective_execution_key
         if revoked is not None:
             authorization.state = "revoked"
-    service.remove_selector(
+    removal = service.remove_selector(
         recipe.identity.slug,
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000022",
     )
-    # Removal takes the bytes and the managed-storage receipt with them; SQL
-    # keeps the authorization decision, which a restore re-checks.
+    assert removal["state"] == "queued"
+    assert service.advance_removals(limit=1) == 1
+    assert service.advance_removals(limit=1) == 1
+    removed = service.get_operator_request(
+        "00000000-0000-4000-8000-000000000022", actor="operator"
+    )
+    assert isinstance(removed, dict)
+    assert removed["state"] == "succeeded"
+    # The worker takes the bytes and storage receipt only after committing its
+    # exact checkpoint and deletion fence; SQL keeps the authorization decision.
     assert not (storage.root / ARCHIVE_SHA).exists()
     assert not (storage.root / f"{ARCHIVE_SHA}.receipt.json").exists()
     # Restart and use the real download path, including SQL receipt persistence.
@@ -939,7 +975,7 @@ def test_build_mode_dispatches_when_no_verified_build_receipt_exists(
     assert (storage.root / ARCHIVE_SHA).read_bytes() == ARCHIVE
 
 
-def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(
+def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
     tmp_path: Path,
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
@@ -987,24 +1023,275 @@ def test_remove_recipe_cancels_build_and_publishes_no_late_receipt(
         request_id="00000000-0000-4000-8000-000000000023",
     )
     assert result["operation_id"]
-    assert queued.id in require_sequence(
-        result["cancelled_operations"], "cancelled operations"
-    )
-    assert result["cancelled_builds"] == ["00000000-0000-4000-8000-000000000901"]
+    assert result["cancelled_operations"] == []
+    assert result["cancelled_builds"] == []
     assert result["preserved"] == [
         "profile-assignments",
         "spark-local-copies",
         "model-download",
     ]
-    assert service.run_pending() == 0
-    assert service.get(queued.id).state == "cancelled"
+    assert service.get(queued.id).state == "queued"
     observed = service.get_operator_operation(str(result["operation_id"]))
     assert isinstance(observed, dict)
     assert observed["operation_id"] == result["operation_id"]
     with sessions() as session:
         build = session.get(RecipeBuild, "00000000-0000-4000-8000-000000000901")
-        assert build is not None and build.state == "failed"
+        assert build is not None and build.state == "building"
         assert session.scalars(select(RuntimeImageAuthorization)).all() == []
+
+
+def test_recipe_removal_reference_scan_enforces_accumulated_owner_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'reference-budget.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        profile = FleetProfile(
+            id="00000000-0000-4000-8000-000000000031",
+            number=1,
+            revision=1,
+            name="budget test",
+            description="",
+            installation_policy="keep-cached",
+            assignments=[],
+            labels={},
+            favorite=False,
+            created_by="operator",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(profile)
+        session.add(
+            FleetProfileApplication(
+                id="00000000-0000-4000-8000-000000000032",
+                request_key="00000000-0000-4000-8000-000000000033",
+                profile_id=profile.id,
+                profile_digest="a" * 64,
+                plan_digest="b" * 64,
+                state="running",
+                plan={"oversized": "owner payload"},
+                current_step=0,
+                current_operation_id=None,
+                progress={},
+                result=None,
+                status_reason=None,
+                actor="operator",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    monkeypatch.setattr(artifact_reference_scan, "MAX_ARTIFACT_OWNER_SCAN_BYTES", 1)
+
+    with sessions() as session, pytest.raises(ArtifactLifecycleError) as refused:
+        runtime_image_reference_reasons(session, (ARCHIVE_SHA,))
+
+    assert refused.value.code == "artifact.reference_scan_limited"
+    engine.dispose()
+
+
+def test_recipe_removal_fails_closed_on_symlinked_archive(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'symlink-removal.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    receipt = _reference_receipt()
+    with sessions.begin() as session:
+        revision = _add_revision(session, "rev-symlink-removal", recipe)
+        _add_head(session, revision)
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=revision.id,
+                source="published",
+                original_content_digest=content_sha256(recipe),
+                effective_execution_key=revision.execution_key,
+                registry_manifest_digest=receipt.registry_manifest_digest,
+                platform_manifest_digest=receipt.platform_manifest_digest,
+                local_image_config_id=receipt.local_image_config_id,
+                oci_archive_sha256=receipt.oci_archive_sha256,
+                image_bytes=receipt.image_bytes,
+                build_id=None,
+                authorized_at=now,
+            )
+        )
+    storage = FilesystemRuntimeImageStorage(tmp_path / "managed")
+    outside = tmp_path / "outside archive"
+    outside.write_bytes(ARCHIVE)
+    archive = storage.root / ARCHIVE_SHA
+    archive.symlink_to(outside)
+    receipt_path = storage.root / f"{ARCHIVE_SHA}.receipt.json"
+    receipt_path.write_text(
+        json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
+    )
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: now,
+    )
+
+    accepted = service.remove_selector(
+        recipe.identity.slug,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000034",
+        with_model=False,
+    )
+    assert accepted["state"] == "queued"
+    assert service.advance_removals(limit=1) == 1
+
+    with sessions() as session:
+        operation = session.scalar(
+            select(Job).where(Job.request_id == "00000000-0000-4000-8000-000000000034")
+        )
+        gate = session.get(ArtifactLifecycleGate, ("runtime-image", ARCHIVE_SHA))
+        assert operation is not None and operation.state == "failed"
+        owner = RecipeCacheRemovalOwner.model_validate_json(
+            json.dumps(operation.payload)
+        )
+        assert owner.checkpoint.failure is not None
+        assert owner.checkpoint.failure.code == "runtime_image.removal_path_unsafe"
+        assert operation.result is None
+        assert gate is not None and gate.removal_owner_id == operation.id
+    assert archive.is_symlink()
+    assert outside.read_bytes() == ARCHIVE
+    assert receipt_path.exists()
+    engine.dispose()
+
+
+@pytest.mark.parametrize("fault", ["publication-lock", "archive-stat"])
+def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'retry-removal.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = [datetime.now(UTC)]
+    receipt = _reference_receipt()
+    with sessions.begin() as session:
+        revision = _add_revision(session, "rev-retry-removal", recipe)
+        _add_head(session, revision)
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=revision.id,
+                source="published",
+                original_content_digest=content_sha256(recipe),
+                effective_execution_key=revision.execution_key,
+                registry_manifest_digest=receipt.registry_manifest_digest,
+                platform_manifest_digest=receipt.platform_manifest_digest,
+                local_image_config_id=receipt.local_image_config_id,
+                oci_archive_sha256=receipt.oci_archive_sha256,
+                image_bytes=receipt.image_bytes,
+                build_id=None,
+                authorized_at=now[0],
+            )
+        )
+    storage = FilesystemRuntimeImageStorage(tmp_path / "managed-retry")
+    archive = storage.root / ARCHIVE_SHA
+    archive.write_bytes(ARCHIVE)
+    receipt_path = storage.root / f"{ARCHIVE_SHA}.receipt.json"
+    receipt_path.write_text(json.dumps(receipt.model_dump(mode="json")))
+    failure_code = "runtime_image.publication_contended"
+    if fault == "publication-lock":
+        original_lock = storage.publication_lock
+        contended = False
+
+        def contend_once(archive_sha256: str):
+            nonlocal contended
+            if not contended:
+                contended = True
+                raise RuntimeImagePreparationError(
+                    failure_code,
+                    "another owner holds the exact image publication lock",
+                    retryable=True,
+                    recovery_actions=("retry",),
+                )
+            return original_lock(archive_sha256)
+
+        monkeypatch.setattr(storage, "publication_lock", contend_once)
+    else:
+        failure_code = "runtime_image.removal_storage_failed"
+        original_stat = runtime_image_preparation.os.stat
+        stat_failed = False
+
+        def stat_with_one_failure(
+            path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+            *,
+            dir_fd: int | None = None,
+            follow_symlinks: bool = True,
+        ) -> os.stat_result:
+            nonlocal stat_failed
+            if path == ARCHIVE_SHA and dir_fd is not None and not stat_failed:
+                stat_failed = True
+                raise PermissionError("injected archive-stat failure")
+            return original_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(runtime_image_preparation.os, "stat", stat_with_one_failure)
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: now[0],
+    )
+    request_key = "00000000-0000-4000-8000-000000000037"
+    accepted = service.remove_selector(
+        recipe.identity.slug,
+        actor="operator",
+        request_id=request_key,
+        with_model=False,
+    )
+    assert accepted["state"] == "queued"
+    assert service.advance_removals(limit=1) == 1
+    waiting = service.get_operator_request(request_key, actor="operator")
+    assert isinstance(waiting, dict)
+    failure = require_mapping(waiting["failure"], "removal failure")
+    retry_time = failure["retry_time"]
+    assert waiting["state"] == "partial"
+    assert failure["code"] == failure_code
+    assert failure["retryable"] is True
+    assert failure["recovery_actions"] == []
+    assert waiting["next_actions"] == []
+    assert isinstance(retry_time, str)
+    assert archive.read_bytes() == ARCHIVE
+    assert receipt_path.exists()
+
+    now[0] = datetime.fromisoformat(retry_time) + timedelta(seconds=1)
+    assert service.advance_removals(limit=1) == 1
+    assert not archive.exists()
+    assert not receipt_path.exists()
+    assert service.advance_removals(limit=1) == 1
+    completed = service.get_operator_request(request_key, actor="operator")
+    assert isinstance(completed, dict)
+    assert completed["state"] == "succeeded"
+    engine.dispose()
+
+
+def test_oversized_removal_owner_does_not_hold_up_later_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
+    bad_key = "00000000-0000-4000-8000-000000000035"
+    good_key = "00000000-0000-4000-8000-000000000036"
+    service.remove_selector(selector, actor="operator", request_id=bad_key)
+    service.remove_selector(selector, actor="operator", request_id=good_key)
+    monkeypatch.setattr(artifact_reference_scan, "MAX_ARTIFACT_OWNER_SCAN_BYTES", 4096)
+    with sessions.begin() as session:
+        bad = session.scalar(select(Job).where(Job.request_id == bad_key))
+        assert bad is not None
+        bad.payload = dict(bad.payload) | {"padding": "x" * 5000}
+        bad.updated_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    assert service.advance_removals(limit=1) == 1
+
+    with sessions() as session:
+        bad = session.scalar(select(Job).where(Job.request_id == bad_key))
+        good = session.scalar(select(Job).where(Job.request_id == good_key))
+        assert bad is not None and bad.state == "queued"
+        assert good is not None and good.state == "succeeded"
 
 
 def _empty_recipe_removal_owner(
@@ -1070,6 +1357,10 @@ def test_recipe_removal_request_key_rejects_changed_intent(
         request_id=request_id,
         with_model=False,
     )
+    assert original["state"] == "queued"
+    assert service.advance_removals(limit=1) == 1
+    original = service.get_operator_request(request_id, actor="operator")
+    assert isinstance(original, dict)
     assert original["state"] == "succeeded"
     with sessions() as session:
         assert session.scalars(select(RuntimeImageAuthorization)).all() == []
@@ -1093,6 +1384,9 @@ def test_recipe_removal_request_key_replays_before_resolving_current_head(
     original = service.remove_selector(
         selector, actor="operator", request_id=request_id, with_model=False
     )
+    assert original["state"] == "queued"
+    assert service.advance_removals(limit=1) == 1
+    original = service.get_operator_request(request_id, actor="operator")
     with sessions.begin() as session:
         head = session.scalar(
             select(CatalogDocumentHead).where(
@@ -1110,6 +1404,269 @@ def test_recipe_removal_request_key_replays_before_resolving_current_head(
     assert replay["with_model"] is False
 
 
+def test_postgres_recipe_removal_persists_owner_before_first_unlink(
+    tmp_path: Path, postgres_engine, monkeypatch
+) -> None:
+    """The committed checkpoint and fence precede each managed image unlink."""
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    recipe = _recipe("recipe-image.json")
+    receipt = _reference_receipt()
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        revision = _add_revision(session, "revision-removal-pre-effect", recipe)
+        _add_head(session, revision)
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=revision.id,
+                source="published",
+                original_content_digest=content_sha256(recipe),
+                effective_execution_key=revision.execution_key,
+                registry_manifest_digest=receipt.registry_manifest_digest,
+                platform_manifest_digest=receipt.platform_manifest_digest,
+                local_image_config_id=receipt.local_image_config_id,
+                oci_archive_sha256=receipt.oci_archive_sha256,
+                image_bytes=receipt.image_bytes,
+                build_id=None,
+                authorized_at=now,
+            )
+        )
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
+    archive = storage.root / ARCHIVE_SHA
+    receipt_file = storage.root / f"{ARCHIVE_SHA}.receipt.json"
+    archive.write_bytes(ARCHIVE)
+    receipt_document = json.dumps(receipt.model_dump(mode="json"))
+    receipt_file.write_text(receipt_document)
+    request_id = str(uuid.uuid4())
+    actor = "operator"
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: now,
+    )
+    original_remove = storage.remove_published
+    removal_calls: list[str] = []
+
+    def require_committed_checkpoint_before_unlink(archive_digest: str) -> int:
+        with sessions() as observer:
+            owner_row = observer.scalar(select(Job).where(Job.request_id == request_id))
+            assert owner_row is not None
+            owner = RecipeCacheRemovalOwner.model_validate_json(
+                json.dumps(owner_row.payload)
+            )
+            intent = owner.plan.intent
+            assert owner_row.kind == intent.kind
+            assert owner_row.actor == intent.actor == actor
+            assert intent.request_key == request_id
+            assert intent.action == "remove"
+            assert intent.selector == recipe.identity.slug
+            assert intent.recipe_revision_id == "revision-removal-pre-effect"
+            assert owner_row.state == "running"
+            assert owner.plan.image_archives == [archive_digest]
+            assert owner.checkpoint.image_pending_bytes == len(ARCHIVE)
+        removal_calls.append(archive_digest)
+        return original_remove(archive_digest)
+
+    monkeypatch.setattr(
+        storage, "remove_published", require_committed_checkpoint_before_unlink
+    )
+    try:
+        accepted = service.remove_selector(
+            recipe.identity.slug,
+            actor=actor,
+            request_id=request_id,
+            with_model=False,
+        )
+        assert accepted["state"] == "queued"
+        assert archive.read_bytes() == ARCHIVE
+        assert receipt_file.read_text() == receipt_document
+        assert service.advance_removals(limit=1) == 1
+    except AssertionError:
+        assert archive.read_bytes() == ARCHIVE
+        assert receipt_file.read_text() == receipt_document
+        raise
+    assert removal_calls == [ARCHIVE_SHA]
+    assert not archive.exists()
+    assert not receipt_file.exists()
+
+
+def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and_checkpoint(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A committed byte checkpoint reconciles an unlink lost to process death."""
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    recipe = _recipe("recipe-image.json")
+    receipt = _reference_receipt()
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        revision = _add_revision(session, "rev-removal-death", recipe)
+        _add_head(session, revision)
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=revision.id,
+                source="published",
+                original_content_digest=content_sha256(recipe),
+                effective_execution_key=revision.execution_key,
+                registry_manifest_digest=receipt.registry_manifest_digest,
+                platform_manifest_digest=receipt.platform_manifest_digest,
+                local_image_config_id=receipt.local_image_config_id,
+                oci_archive_sha256=receipt.oci_archive_sha256,
+                image_bytes=receipt.image_bytes,
+                build_id=None,
+                authorized_at=now,
+            )
+        )
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
+    archive = storage.root / ARCHIVE_SHA
+    receipt_file = storage.root / f"{ARCHIVE_SHA}.receipt.json"
+    archive.write_bytes(ARCHIVE)
+    receipt_file.write_text(
+        json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
+    )
+    request_id = str(uuid.uuid4())
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: now,
+    )
+    accepted = service.remove_selector(
+        recipe.identity.slug,
+        actor="operator",
+        request_id=request_id,
+        with_model=False,
+    )
+    assert accepted["state"] == "queued"
+    postgres_engine.dispose()
+
+    process = multiprocessing.get_context("fork").Process(
+        target=_exit_after_recipe_image_unlink,
+        args=(
+            postgres_engine.url.render_as_string(hide_password=False),
+            str(storage.root.parent),
+        ),
+    )
+    process.start()
+    process.join(timeout=20)
+    if process.is_alive():
+        process.terminate()
+        process.join(timeout=5)
+        pytest.fail("recipe removal process did not reach its injected crash point")
+    assert process.exitcode == 73
+    assert not archive.exists()
+    assert not receipt_file.exists()
+
+    with sessions() as observer:
+        owner_row = observer.scalar(select(Job).where(Job.request_id == request_id))
+        assert owner_row is not None
+        owner = RecipeCacheRemovalOwner.model_validate_json(
+            json.dumps(owner_row.payload)
+        )
+        assert owner_row.state == "running"
+        assert owner_row.result is None
+        assert owner.checkpoint.image_index == 0
+        assert owner.checkpoint.image_pending_bytes == len(ARCHIVE)
+        assert owner.checkpoint.image_reclaimed_bytes == 0
+
+    restarted = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(storage.root.parent),
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: now,
+    )
+    assert restarted.advance_removals(limit=1) == 1
+    assert restarted.advance_removals(limit=1) == 1
+    recovered = restarted.get_operator_request(request_id, actor="operator")
+    assert isinstance(recovered, dict)
+    assert recovered["state"] == "succeeded"
+    assert recovered["reclaimed_bytes"] == len(ARCHIVE)
+
+
+def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A due finalization retry clears prior contention and settles the owner."""
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    recipe = _recipe("recipe-image.json")
+    receipt = _reference_receipt()
+    now = [datetime.now(UTC)]
+    with sessions.begin() as session:
+        revision = _add_revision(session, "rev-removal-finalize", recipe)
+        _add_head(session, revision)
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=revision.id,
+                source="published",
+                original_content_digest=content_sha256(recipe),
+                effective_execution_key=revision.execution_key,
+                registry_manifest_digest=receipt.registry_manifest_digest,
+                platform_manifest_digest=receipt.platform_manifest_digest,
+                local_image_config_id=receipt.local_image_config_id,
+                oci_archive_sha256=receipt.oci_archive_sha256,
+                image_bytes=receipt.image_bytes,
+                build_id=None,
+                authorized_at=now[0],
+            )
+        )
+    storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
+    archive = storage.root / ARCHIVE_SHA
+    archive.write_bytes(ARCHIVE)
+    (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text(
+        json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
+    )
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: now[0],
+    )
+    request_key = str(uuid.uuid4())
+    accepted = service.remove_selector(
+        recipe.identity.slug,
+        actor="operator",
+        request_id=request_key,
+        with_model=False,
+    )
+    assert accepted["state"] == "queued"
+    assert service.advance_removals(limit=1) == 1
+    assert not archive.exists()
+
+    with sessions.begin() as holder:
+        locked_gate = holder.scalar(
+            select(ArtifactLifecycleGate)
+            .where(
+                ArtifactLifecycleGate.artifact_kind == "runtime-image",
+                ArtifactLifecycleGate.artifact_sha256 == ARCHIVE_SHA,
+            )
+            .with_for_update()
+        )
+        assert locked_gate is not None
+        assert service.advance_removals(limit=1) == 1
+
+    waiting = service.get_operator_request(request_key, actor="operator")
+    assert isinstance(waiting, dict)
+    assert waiting["state"] == "partial"
+    failure = require_mapping(waiting["failure"], "removal failure")
+    assert failure["code"] == "artifact.reference_busy"
+    assert failure["retryable"] is True
+    retry_time = failure["retry_time"]
+    assert isinstance(retry_time, str)
+    now[0] = datetime.fromisoformat(retry_time) + timedelta(seconds=1)
+
+    assert service.advance_removals(limit=1) == 1
+    recovered = service.get_operator_request(request_key, actor="operator")
+    assert isinstance(recovered, dict)
+    assert recovered["state"] == "succeeded"
+
+
 def test_recipe_removal_replay_rejects_malformed_stored_intent(
     tmp_path: Path,
 ) -> None:
@@ -1118,11 +1675,16 @@ def test_recipe_removal_replay_rejects_malformed_stored_intent(
     service.remove_selector(
         selector, actor="operator", request_id=request_id, with_model=False
     )
+    assert service.advance_removals(limit=1) == 1
     with sessions.begin() as session:
         operation = session.scalar(select(Job).where(Job.request_id == request_id))
         assert operation is not None
-        malformed_payload = dict(operation.payload)
-        malformed_payload.pop("with_model")
+        malformed_payload = dict(require_mapping(operation.payload, "removal owner"))
+        plan = dict(require_mapping(malformed_payload["plan"], "removal plan"))
+        intent = dict(require_mapping(plan["intent"], "removal intent"))
+        intent.pop("with_model")
+        plan["intent"] = intent
+        malformed_payload["plan"] = plan
         operation.payload = malformed_payload
 
     with pytest.raises(RecipeImageAvailabilityError) as refused:
@@ -1141,6 +1703,7 @@ def test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope(
     service.remove_selector(
         selector, actor="operator", request_id=request_id, with_model=False
     )
+    assert service.advance_removals(limit=1) == 1
     with sessions.begin() as session:
         operation = session.scalar(select(Job).where(Job.request_id == request_id))
         assert operation is not None
@@ -1162,6 +1725,7 @@ def test_recipe_removal_replay_rejects_integer_stored_model_choice(
     service.remove_selector(
         selector, actor="operator", request_id=request_id, with_model=False
     )
+    assert service.advance_removals(limit=1) == 1
     with sessions.begin() as session:
         operation = session.scalar(select(Job).where(Job.request_id == request_id))
         assert operation is not None and operation.result is not None

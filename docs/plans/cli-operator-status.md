@@ -2,44 +2,68 @@
 
 ## Active integration checkpoint — 2026-09-24
 
-Upstream `e7810dac` is integrated after checkpoint `eefa0d2b`. Profile load uses
-one current wire field, `plan_digest`, with required request identity and the
-candidate's exact reviewed-decision/recovery behavior. The upstream web retry
-flow remains, without resubmitting a changed review. Generated clients and
-supply-chain records were regenerated. Focused checks passed: 128 CLI/schema,
-nine profile API/parity, five web profile tests, web build, and 62 qualification
-campaign/fixture tests. The campaign checks use the exact pinned recipe checkout
-`d44600bbdd2d7ce08ba77f2d9a95017a76e141d2` in
-`/private/tmp/vonk-cli-recipes-validation`; the unrelated sibling checkout was
-left untouched. The full Python type gate has one existing reviewed exception.
+The active candidate is `codex/cli-approved-integration` in
+`/private/tmp/vonk-cli-approved-integration`. Its committed base `f03050f6`
+includes upstream `0123eeb4`, byte-bounded library pagination (`02ce6441`),
+and common build/profile admission locking (`b6be92fe`). Uncommitted source
+increments below remain under combined validation; this is not a merge,
+publication, deployment, or physical acceptance claim. Other tasks' checkouts
+and the earlier integration snapshot remain preserved.
 
+Library pages now bound the complete JSON response, including facets and the
+signed cursor, to 1 MiB. The requested page size survives continuation; an
+exact boundary regression catches an oversized response. All 23 focused
+pagination checks passed. Admission integration passed the affected recipe,
+profile, install and Run/Switch checks, including actual PostgreSQL lock
+contention and the current `plan_digest` wire field.
 
-The coordinator has integrated the admission increment and memory-warning
-commit `c1e98777` in `codex/cli-approved-integration`. This is an unfinished
-checkpoint, not a completion or deployment claim. The new shared-admission
-Run/Switch regression failed before the catch fix and now preserves the
-original operation with a visible bounded retry. A connected distributed
-rank-launch regression also demonstrated premature memory credit; starting
-ranks now retain their future reservation.
+Model removal now persists exact intent and deletion ownership before effects,
+revalidates its immutable plan, advances durable checkpoints under the storage
+lock, and exposes bounded retries. Shared retained blobs are not fenced for
+deletion. The API and CLI bind the exact model revision, and a lost response
+reconnects to the original accepted operation. The combined model/API/reference,
+installed CLI and admission PostgreSQL suite passed 97 tests. Three additional
+PostgreSQL worker tests passed: bounded row-lock retry, progress past held or
+not-due owners, and process death after unlink before SQL completion with
+reclaimed bytes accounted once on restart. Tests use disposable storage.
 
-Combined evidence: 71 Run/Switch/post-stop checks passed; 162 affected
-PostgreSQL checks passed with one historical blocking-wait assertion requiring
-an update to the new immediate-refusal behavior. The agent subsequently ran
-all 102 recipe-operation checks successfully with that update; the coordinator
-has not integrated that later hunk yet. The broader fast suite passed 2,419
-checks with three skips. Four packaging setup/check failures were caused by
-an omitted writable uv cache setting; the affected modules passed on rerun
-(11 passed, nine lane skips). Pinned lint and the full Python type gate passed
-with one existing reviewed exception and no new exceptions.
+Memory accounting retains accepted peak commitments and represents uncertain
+resident attribution as an explicit range tied to the exact run and inventory.
+Starting/running state does not prove bytes are resident. Estimates remain
+warnings; actual capacity, reservations and declared reserves remain enforced.
+The integrated planner, profile, Run/Switch and rank-launch checks passed 94
+tests, and 15 CLI presentation tests passed. The source-build helper now
+subtracts the worst-case outstanding resident-memory range; its regression
+failed before the fix. All 28 integrated build-memory/materialization/planner
+checks passed after that correction.
 
-Still open: common build/profile lock adapters; durable removal and its
-truthful API progress; byte-bounded library pagination; and exact memory
-materialization accounting. In particular, running state alone does not prove
-resident bytes (job runs can be marked running before submission). The current
-state-based running credit is under correction and must not be treated as a
-validated hard-reservation guarantee. Estimates remain warnings, while actual
-capacity and reservation promises remain enforced. Independent operator and
-physical model acceptance remain separate gates.
+Generated clients have been refreshed for the model-removal, recipe-removal
+and memory contracts. After updating current consumers, the complete Controller
+fast gate passed **2,447 tests, three skips**. The independent root fast lane
+passed **1,083 tests, 12 skips and 45 subtests**. An earlier unfiltered root run
+was stopped after reaching Linux-only installer checks on macOS; it is not
+qualification evidence for that lane. Local TLS-dependent CLI checks passed
+with the required fixture access and exact pinned recipe checkout.
+
+The final connected PostgreSQL slice passed six cases, including actual
+recipe-plus-model-child settlement with shared blobs, image-worker process
+death, and finalization contention for both removal owners. Both finalization
+regressions reproduced their old failure before correction. The broader
+removal/API/reference slice passed 85 tests before those final cases. The
+installed model-removal test passes against the actual wheel/TLS/API/PG/storage
+boundary. The recipe CLI's lost-response case reproduced the raw-POST defect;
+its shared submission helper and installed acceptance are being finalized.
+
+The web has 164 passing tests and a successful production build. The full
+Python type gate reports one existing reviewed exception and no new errors.
+Wire generation, pinned lint and the coordination scanner pass; the scanner
+has zero reviewed sites. It does not replace the recorded PostgreSQL tests.
+
+Still open: finish installed recipe receipt recovery and its final CLI/type
+checks, regenerate the supply map, record the final revision, and complete the
+independent operator walkthrough. The user will run every model; that remains
+separate physical evidence. No usability study, live cache removal, Controller
+deployment, or model campaign is claimed here.
 
 ## Current authorization and integration base — 2026-09-24
 

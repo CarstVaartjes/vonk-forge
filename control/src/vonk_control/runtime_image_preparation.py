@@ -1146,6 +1146,14 @@ class RuntimeImageStorage(Protocol):
         """Return an existing verified archive or raise."""
         ...
 
+    def published_archive_bytes(self, archive_sha256: str) -> int:
+        """Read the exact published archive size without following symlinks."""
+        ...
+
+    def remove_published(self, archive_sha256: str) -> int:
+        """Remove one archive and receipt; caller holds its publication lock."""
+        ...
+
     def find_published(
         self,
         registry_manifest_digest: str,
@@ -1746,6 +1754,110 @@ class FilesystemRuntimeImageStorage:
                 "stored OCI archive failed content verification",
             )
         return path
+
+    def published_archive_bytes(self, archive_sha256: str) -> int:
+        """Return one exact regular archive size under the managed image root."""
+
+        if _SHA256.fullmatch(archive_sha256) is None:
+            raise RuntimeImagePreparationError(
+                "runtime_image.identity_invalid",
+                "archive size lookup requires an exact SHA-256",
+            )
+        root_fd = self._open_managed_root()
+        try:
+            try:
+                metadata = os.stat(
+                    archive_sha256, dir_fd=root_fd, follow_symlinks=False
+                )
+            except FileNotFoundError:
+                return 0
+            if not stat.S_ISREG(metadata.st_mode):
+                raise RuntimeImagePreparationError(
+                    "runtime_image.removal_path_unsafe",
+                    "published image archive is not a regular file",
+                )
+            return metadata.st_size
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.removal_storage_failed",
+                "published image archive could not be inspected safely",
+                retryable=True,
+                recovery_actions=("retry",),
+            ) from error
+        finally:
+            os.close(root_fd)
+
+    def remove_published(self, archive_sha256: str) -> int:
+        """Unlink one archive and receipt by exact digest under the held lock.
+
+        The caller owns the matching nonblocking ``publication_lock`` and its
+        committed SQL deletion fence. Repeating this operation after process
+        death is safe: either pathname may already be absent.
+        """
+
+        if _SHA256.fullmatch(archive_sha256) is None:
+            raise RuntimeImagePreparationError(
+                "runtime_image.identity_invalid",
+                "archive removal requires an exact SHA-256",
+            )
+        root_fd = self._open_managed_root()
+        try:
+            reclaimed = 0
+            filenames = (archive_sha256, f"{archive_sha256}.receipt.json")
+            present: dict[str, os.stat_result] = {}
+            for filename in filenames:
+                try:
+                    metadata = os.stat(filename, dir_fd=root_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise RuntimeImagePreparationError(
+                        "runtime_image.removal_path_unsafe",
+                        "published image archive or receipt is not a regular file",
+                    )
+                present[filename] = metadata
+            for filename in filenames:
+                metadata = present.get(filename)
+                if metadata is None:
+                    continue
+                if filename == archive_sha256:
+                    reclaimed = metadata.st_size
+                os.unlink(filename, dir_fd=root_fd)
+            os.fsync(root_fd)
+            return reclaimed
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.removal_storage_failed",
+                "published image archive or receipt could not be removed safely",
+                retryable=True,
+                recovery_actions=("retry",),
+            ) from error
+        finally:
+            os.close(root_fd)
+
+    def _open_managed_root(self) -> int:
+        try:
+            descriptor = os.open(
+                self.root,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+        except OSError as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.storage_unavailable",
+                "managed image cache root is unavailable",
+                retryable=True,
+                recovery_actions=("retry",),
+            ) from error
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            os.close(descriptor)
+            raise RuntimeImagePreparationError(
+                "runtime_image.storage_unavailable",
+                "managed image cache root is not a directory",
+            )
+        return descriptor
 
     def build_archive_available(self, archive_sha256: str, expected_bytes: int) -> bool:
         """Report whether exact build bytes are present without scanning the archive.

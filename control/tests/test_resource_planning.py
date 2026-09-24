@@ -1,10 +1,13 @@
 from vonk_control.resource_planning import (
     CapacitySnapshot,
     EffectiveResourceSettings,
+    MemoryReservationTotals,
     ParallelismSettings,
     PlannedStopRelease,
     ResourceEvidence,
+    UnknownRunMemoryResidual,
     classify_preparation_effects,
+    memory_capacity_snapshot,
     plan_capacity,
     plan_resource_preflight,
     resolve_effective_settings,
@@ -164,7 +167,7 @@ def test_capacity_only_uses_explicit_planned_stop_release() -> None:
     assert with_stop.nodes[0].after_stop_free_after_bytes == 280
 
 
-def test_declared_memory_bound_warns_and_avoids_double_charging_running_peak() -> None:
+def test_unknown_run_residual_uses_full_upper_bound_and_warns_when_safe() -> None:
     settings = resolve_effective_settings(
         _recipe_document(_recipe_settings(context=65_536))
     ).settings
@@ -187,14 +190,132 @@ def test_declared_memory_bound_warns_and_avoids_double_charging_running_peak() -
     assert "declared recipe-role memory envelope" in warning.detail
     assert "may exceed this bound" in warning.detail
 
-    # Total=100, current aggregate use=30 (including 10 bytes from a running
-    # owner whose peak claim is 15), new bound=60 and reserve=5. The peak is
-    # enforced by the hard budget, while its actual use is already reflected
-    # in free=70 and must not be subtracted from free a second time.
-    capacity = CapacitySnapshot("rank-0", "unified", 100, 30, 15, "fresh")
+    residual = UnknownRunMemoryResidual(
+        run_id="old-run",
+        run_generation=4,
+        reservation_kind="unified-memory",
+        maximum_bytes=15,
+    )
+    reservations = MemoryReservationTotals(
+        {"unified-memory": 15}, {}, {"unified-memory": (residual,)}
+    )
+    # Free=85, demand=60, reserve=5, and the exact active claim may have any
+    # residual from 0 through its 15-byte peak. The safe upper bound fits.
+    capacity = memory_capacity_snapshot(
+        "rank-0",
+        "unified",
+        host=(100, 85),
+        accelerator=(100, 85),
+        reservations=reservations,
+        memory_pool="shared",
+        evidence_state="fresh",
+        evidence_digest="a" * 64,
+    )
     plan = plan_capacity({"rank-0": demand}, [capacity], memory_floor_bytes=5)
     assert plan.allowed
-    assert plan.nodes[0].current_free_after_bytes == 10
+    assert plan.nodes[0].current_free_after_bytes is None
+    assert plan.nodes[0].unknown_run_residuals == (residual,)
+    warning = next(
+        reason
+        for reason in plan.nodes[0].reasons
+        if reason.code == "resource.resident_usage_unknown"
+    )
+    assert warning.severity == "warning"
+    assert "range 0..15 bytes" in warning.detail
+    assert "full upper bound" in warning.detail
+
+
+def test_possible_zero_resident_use_refuses_when_only_the_peak_upper_bound_fails() -> None:
+    settings = resolve_effective_settings(
+        _recipe_document(_recipe_settings(context=65_536))
+    ).settings
+    assert settings is not None
+    demand = resource_demand(
+        settings,
+        ResourceEvidence(
+            weights_bytes=40,
+            runtime_overhead_bytes=None,
+            declared_total_bytes=60,
+            baseline_context_tokens=32_768,
+            baseline_concurrency=1,
+            evidence_state="declared",
+        ),
+    )
+    residual = UnknownRunMemoryResidual(
+        run_id="old-run",
+        run_generation=4,
+        reservation_kind="unified-memory",
+        maximum_bytes=15,
+    )
+    capacity = memory_capacity_snapshot(
+        "rank-0",
+        "unified",
+        host=(100, 70),
+        accelerator=(100, 70),
+        reservations=MemoryReservationTotals(
+            {"unified-memory": 15}, {}, {"unified-memory": (residual,)}
+        ),
+        memory_pool="shared",
+        evidence_state="fresh",
+    )
+    plan = plan_capacity({"rank-0": demand}, [capacity], memory_floor_bytes=5)
+    assert not plan.allowed
+    assert plan.nodes[0].current_free_after_bytes is None
+    assert plan.nodes[0].unknown_run_residuals == (residual,)
+    blocker = next(
+        reason
+        for reason in plan.nodes[0].reasons
+        if reason.code == "resource.resident_usage_unknown"
+    )
+    assert blocker.severity == "blocker"
+    assert "Capacity is unverified" in blocker.detail
+    assert "Reconcile the exact run claims" in blocker.detail
+    assert "resource.insufficient_capacity" not in {
+        reason.code for reason in plan.nodes[0].reasons
+    }
+
+
+def test_fresh_aggregate_shortfall_remains_a_physical_capacity_blocker() -> None:
+    settings = resolve_effective_settings(
+        _recipe_document(_recipe_settings(context=65_536))
+    ).settings
+    assert settings is not None
+    demand = resource_demand(
+        settings,
+        ResourceEvidence(
+            weights_bytes=40,
+            runtime_overhead_bytes=None,
+            declared_total_bytes=60,
+            baseline_context_tokens=32_768,
+            baseline_concurrency=1,
+            evidence_state="declared",
+        ),
+    )
+    residual = UnknownRunMemoryResidual(
+        run_id="old-run",
+        run_generation=4,
+        reservation_kind="unified-memory",
+        maximum_bytes=15,
+    )
+    capacity = memory_capacity_snapshot(
+        "rank-0",
+        "unified",
+        host=(100, 60),
+        accelerator=(100, 60),
+        reservations=MemoryReservationTotals(
+            {"unified-memory": 15}, {}, {"unified-memory": (residual,)}
+        ),
+        memory_pool="shared",
+        evidence_state="fresh",
+    )
+    plan = plan_capacity({"rank-0": demand}, [capacity], memory_floor_bytes=5)
+    assert not plan.allowed
+    assert "resource.insufficient_capacity" in {
+        reason.code for reason in plan.nodes[0].reasons
+    }
+    assert "resource.resident_usage_unknown" not in {
+        reason.code for reason in plan.nodes[0].reasons
+    }
 
 
 def test_uncertain_bound_still_refuses_actual_free_floor_and_budget_exhaustion() -> (

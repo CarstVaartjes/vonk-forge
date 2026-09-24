@@ -13,7 +13,7 @@ from .test_recipe_operations import (
 )
 
 
-def test_rank_launch_keeps_future_memory_reserved_until_readiness(
+def test_rank_launch_does_not_credit_unmeasured_resident_memory(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping, build, nodes = setup_services(
@@ -54,5 +54,10 @@ def test_rank_launch_keeps_future_memory_reserved_until_readiness(
         )
         assert rank is not None and rank.state == "starting"
         totals = memory_reservations(session, nodes[0], memory_pool="shared")
-        assert totals.unmaterialized_bytes_by_kind == totals.committed_bytes_by_kind
-        assert totals.unmaterialized_bytes_by_kind["unified-memory"] > 0
+        residuals = totals.unknown_run_residuals_by_kind["unified-memory"]
+        assert all(item.run_id == operation.owner_id for item in residuals)
+        assert (
+            sum(item.maximum_bytes for item in residuals)
+            == totals.committed_bytes_by_kind["unified-memory"]
+        )
+        assert totals.committed_bytes_by_kind["unified-memory"] > 0

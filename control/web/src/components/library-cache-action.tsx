@@ -30,9 +30,10 @@ function failureText(response: ModelCacheOperatorResponse): string {
  * authority for what a profile may place, so an uncached model needs an
  * explicit, observable preparation action rather than a silent fetch later.
  */
-export function LibraryCacheAction({api, selector, state, onPrepared}: {
+export function LibraryCacheAction({api, selector, modelContentSha256, state, onPrepared}: {
   api: ControlApi;
   selector: string;
+  modelContentSha256: string;
   state: LibraryCacheState;
   onPrepared(): void;
 }) {
@@ -83,7 +84,7 @@ export function LibraryCacheAction({api, selector, state, onPrepared}: {
     setBusy(true);
     setError("");
     try {
-      const result = await api.removeModelCache(selector, crypto.randomUUID(), controller.signal);
+      const result = await api.removeModelCache(selector, modelContentSha256, crypto.randomUUID(), controller.signal);
       if (controller.signal.aborted) return;
       setBusy(false);
       setConfirming(false);
@@ -97,7 +98,7 @@ export function LibraryCacheAction({api, selector, state, onPrepared}: {
       setBusy(false);
       setError(value instanceof Error ? value.message.slice(0, 256) : "Cache removal failed");
     }
-  }, [api, onPrepared, selector]);
+  }, [api, modelContentSha256, onPrepared, selector]);
 
   if (state === "cached") {
     // Removal is destructive, so it takes an explicit second action rather

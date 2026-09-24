@@ -1048,8 +1048,9 @@ def _validate_cache_removal_receipt(
     result: Mapping[str, object],
     *,
     expected_with_model: bool | None,
+    expected_model_content_sha256: str | None = None,
 ) -> str:
-    """Bind a removal receipt to its submitted noun, selector, and request key."""
+    """Bind a removal receipt to its submitted target and durable identity."""
 
     contract = (
         "ModelCacheOperatorResponse" if noun == "model" else "RecipeOperatorResponse"
@@ -1060,24 +1061,207 @@ def _validate_cache_removal_receipt(
         raise ControlMalformedResponse(
             f"{noun} removal receipt does not match its canonical contract"
         ) from None
+    receipt_selector = receipt.get("selector")
+    selector_matches = (
+        isinstance(receipt_selector, str)
+        and receipt_selector.casefold() == selector.strip().casefold()
+        if noun == "model"
+        else receipt_selector == selector
+    )
     identity_matches = (
         receipt.get("action") == "remove"
-        and receipt.get("selector") == selector
+        and selector_matches
         and receipt.get("request_key") == request_key
     )
     if noun == "recipe":
         identity_matches = (
             identity_matches
+            and expected_model_content_sha256 is None
             and expected_with_model is not None
             and receipt.get("with_model") is expected_with_model
         )
-    elif expected_with_model is not None:
-        identity_matches = False
+    else:
+        digest = receipt.get("model_content_sha256")
+        identity_matches = (
+            identity_matches
+            and expected_with_model is None
+            and isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+            and (
+                expected_model_content_sha256 is None
+                or digest == expected_model_content_sha256
+            )
+        )
     if not identity_matches:
         raise ControlMalformedResponse(
-            f"{noun} removal receipt identifies another request, selector, or model-retention choice"
+            f"{noun} removal receipt identifies another request, selector, digest, or retention choice"
         )
     return _cache_operation_id(noun, receipt)
+
+
+def _submit_model_removal(
+    client: ControllerClient,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+) -> dict[str, object]:
+    """Submit or reconnect to one digest-bound model removal."""
+
+    if not args.yes:
+        raise ValueError("model remove requires --yes in noninteractive mode")
+    selector = args.selector.strip()
+    if not selector:
+        raise ValueError("model remove requires a non-empty selector")
+    args.selector = selector
+    supplied_request_key = getattr(args, "request_key", None) is not None
+    key = _request_key(args, factory)
+    path = f"/api/model/{_quoted(selector)}/remove"
+    lookup = f"/api/model/requests/{_quoted(key)}"
+    timeout = client.request_timeout_seconds
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("request timeout must be finite and positive")
+    submission = Submission(
+        key,
+        path,
+        lookup,
+        3 * timeout,
+        action="remove",
+        acceptance="not_submitted",
+    )
+    args.submission = submission
+
+    def validate(result: Mapping[str, object], *, expected_digest: str | None) -> str:
+        return _validate_cache_removal_receipt(
+            "model",
+            selector,
+            key,
+            result,
+            expected_with_model=None,
+            expected_model_content_sha256=expected_digest,
+        )
+
+    if supplied_request_key:
+        try:
+            existing = client.request("GET", lookup)
+        except ControlNotFound:
+            pass
+        else:
+            submission.operation_id = validate(existing, expected_digest=None)
+            submission.acceptance = "accepted"
+            return existing
+
+    detail = client.request("GET", f"/api/model/{_quoted(selector)}")
+    try:
+        detail = validate_control_document("ModelDetailResponse", detail)
+    except ControlClientError:
+        raise ControlMalformedResponse(
+            "model removal target does not match its canonical detail contract"
+        ) from None
+    identity = detail.get("identity")
+    if not isinstance(identity, Mapping):
+        raise ControlMalformedResponse("model detail has no canonical identity")
+    digest = identity.get("content_sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ControlMalformedResponse("model detail has no valid content digest")
+    if re.fullmatch(r"[0-9a-fA-F]{64}", selector) and digest != selector.lower():
+        raise ControlMalformedResponse("model detail identifies another content digest")
+
+    body = {
+        "schema_version": 2,
+        "request_key": key,
+        "model_content_sha256": digest,
+    }
+
+    def validate_submitted(result: Mapping[str, object]) -> str:
+        return validate(result, expected_digest=digest)
+
+    return _submit_idempotent_request(
+        client,
+        args,
+        key=key,
+        path=path,
+        lookup=lookup,
+        body=body,
+        noun="model",
+        action="remove",
+        validate=validate_submitted,
+        lookup_validate=validate_submitted,
+        reconnect=shlex.join(
+            ["vonkctl", "model", "progress", "--request-key", key, "--follow"]
+        ),
+    )
+
+
+def _submit_recipe_removal(
+    client: ControllerClient,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+) -> dict[str, object]:
+    """Submit or reconnect to one exact recipe-removal request."""
+
+    if not args.yes:
+        raise ValueError("recipe remove requires --yes in noninteractive mode")
+    selector = args.selector.strip()
+    if not selector:
+        raise ValueError("recipe remove requires a non-empty selector")
+    args.selector = selector
+    if not (args.with_model or args.keep_model):
+        raise ValueError("recipe remove requires --with-model or --keep-model")
+    with_model = args.with_model and not args.keep_model
+    supplied_request_key = getattr(args, "request_key", None) is not None
+    key = _request_key(args, factory)
+    path = f"/api/recipe/{_quoted(selector)}/remove"
+    lookup = f"/api/recipe/requests/{_quoted(key)}"
+
+    def validate(result: Mapping[str, object]) -> str:
+        return _validate_cache_removal_receipt(
+            "recipe",
+            selector,
+            key,
+            result,
+            expected_with_model=with_model,
+        )
+
+    if supplied_request_key:
+        timeout = client.request_timeout_seconds
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("request timeout must be finite and positive")
+        submission = Submission(
+            key,
+            path,
+            lookup,
+            3 * timeout,
+            action="remove",
+            acceptance="not_submitted",
+        )
+        args.submission = submission
+        try:
+            existing = client.request("GET", lookup)
+        except ControlNotFound:
+            pass
+        else:
+            submission.operation_id = validate(existing)
+            submission.acceptance = "accepted"
+            return existing
+
+    return _submit_idempotent_request(
+        client,
+        args,
+        key=key,
+        path=path,
+        lookup=lookup,
+        body={
+            "schema_version": 2,
+            "request_key": key,
+            "with_model": with_model,
+        },
+        noun="recipe",
+        action="remove",
+        validate=validate,
+        lookup_validate=validate,
+        reconnect=shlex.join(
+            ["vonkctl", "recipe", "progress", "--request-key", key, "--follow"]
+        ),
+    )
 
 
 def _submit_cache_request(
@@ -2115,20 +2299,7 @@ def _model(
         result = _submit_cache_request(client, "model", args, factory)
         return _follow_mutation(client, "model", result, args)
     if action == "remove":
-        if not args.yes:
-            raise ValueError("model remove requires --yes in noninteractive mode")
-        request_key = _request_key(args, factory)
-        result = client.request(
-            "POST",
-            f"/api/model/{_quoted(args.selector)}/remove",
-            {
-                "schema_version": 2,
-                "request_key": request_key,
-            },
-        )
-        _validate_cache_removal_receipt(
-            "model", args.selector, request_key, result, expected_with_model=None
-        )
+        result = _submit_model_removal(client, args, factory)
         return _follow_mutation(client, "model", result, args)
     raise ValueError(f"unsupported model action: {action}")
 
@@ -2186,28 +2357,7 @@ def _recipe(
         result = _submit_cache_request(client, "recipe", args, factory)
         return _follow_mutation(client, "recipe", result, args)
     if action == "remove":
-        if not args.yes:
-            raise ValueError("recipe remove requires --yes in noninteractive mode")
-        if not (args.with_model or args.keep_model):
-            raise ValueError("recipe remove requires --with-model or --keep-model")
-        request_key = _request_key(args, factory)
-        with_model = args.with_model and not args.keep_model
-        result = client.request(
-            "POST",
-            f"/api/recipe/{_quoted(args.selector)}/remove",
-            {
-                "schema_version": 2,
-                "request_key": request_key,
-                "with_model": with_model,
-            },
-        )
-        _validate_cache_removal_receipt(
-            "recipe",
-            args.selector,
-            request_key,
-            result,
-            expected_with_model=with_model,
-        )
+        result = _submit_recipe_removal(client, args, factory)
         return _follow_mutation(client, "recipe", result, args)
     if action == "cancel":
         if not args.yes:

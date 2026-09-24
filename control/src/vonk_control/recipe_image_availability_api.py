@@ -179,6 +179,22 @@ class RecipeOperatorResponse(StrictJSONModel):
     cancelled_operations: list[str] = Field(default_factory=list, max_length=32)
     cancelled_builds: list[str] = Field(default_factory=list, max_length=32)
     model_removals: list[str] = Field(default_factory=list, max_length=32)
+    failure: AvailabilityOperationFailure | None = None
+
+    @model_validator(mode="after")
+    def terminal_removal_evidence_is_consistent(self) -> RecipeOperatorResponse:
+        if self.state == "succeeded":
+            if self.failure is not None or self.progress.phase != "completed":
+                raise ValueError(
+                    "successful recipe removal requires completed progress and no failure"
+                )
+        elif self.progress.phase == "completed":
+            raise ValueError(
+                "unfinished recipe removal cannot report completed progress"
+            )
+        if self.state == "failed" and self.failure is None:
+            raise ValueError("failed recipe removal requires failure evidence")
+        return self
 
 
 RecipeOperationResponse = (
@@ -383,9 +399,18 @@ def install_recipe_operator_routes(
                 "recipe_image.operation_invalid",
                 "stored removal choice is malformed",
             )
-        reclaimed_bytes = integer(result.get("reclaimed_bytes"), default=0) or 0
+        reclaimed_bytes = require_integer(
+            result.get("reclaimed_bytes"), "reclaimed bytes"
+        )
         cancelled_operations = require_sequence(
             result.get("cancelled_operations", []), "cancelled operations"
+        )
+        progress = _progress(result.get("progress"))
+        failure_value = result.get("failure")
+        failure = (
+            None
+            if failure_value is None
+            else AvailabilityOperationFailure.model_validate(failure_value)
         )
         return RecipeOperatorResponse.model_validate(
             {
@@ -397,14 +422,7 @@ def install_recipe_operator_routes(
                 "recipe_revision_id": str(result["recipe_revision_id"]),
                 "with_model": with_model,
                 "state": result["state"],
-                "progress": OperationProgress(
-                    phase="completed",
-                    completed_bytes=reclaimed_bytes,
-                    total_bytes=reclaimed_bytes,
-                    total_bytes_known=True,
-                    completed_items=len(cancelled_operations),
-                    total_items=len(cancelled_operations),
-                ),
+                "progress": progress,
                 "reclaimed_bytes": reclaimed_bytes,
                 "preserved": [
                     str(item)
@@ -431,6 +449,7 @@ def install_recipe_operator_routes(
                         result.get("model_removals", []), "model removals"
                     )
                 ],
+                "failure": failure,
             }
         )
 
