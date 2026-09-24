@@ -170,6 +170,12 @@ with `installation_policy=keep-cached` and labels
 `qualification-ledger=<runner ledger identity>`. The ledger identity is the
 first 63 hexadecimal characters of the SHA-256 of its resolved absolute path.
 
+The checkout must contain the Git objects for the catalog's exact `source_commit`:
+the runner reads its canonical archive validator from that commit, never from
+mutable working-tree code. For a shallow checkout, fetch that exact commit from
+the reviewed recipe repository before running; the runner never fetches code
+implicitly during validation.
+
 Preview requires `--manifest`, `--library-root`, `--ledger`, `--profile-number`,
 `--recipe`, and the exact Controller `--spark` IDs for that row. It saves the
 recipe assignment in this dedicated profile and records the reviewed preview;
