@@ -10,16 +10,21 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import runpy
 import stat
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from collections.abc import Set as AbstractSet
+from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 from .control_client import (
@@ -624,69 +629,191 @@ def _read_verified_package(
     return b"".join(chunks)
 
 
+@contextmanager
 def _canonical_recipe_package_tools(
     library_root: Path,
-) -> tuple[
-    Callable[[bytes, dict[str, object], dict[str, dict[str, object]]], None],
-    Any,
-    Any,
-    Callable[[Any], str],
-    str,
-]:
-    import runpy
-
-    validator_path = _relative_path(
-        library_root,
-        "tools/build-catalog-index",
-        "canonical recipe package validator",
-    )
-    contracts_init = _relative_path(
-        library_root,
-        "contracts/src/vonk_forge_contracts/__init__.py",
-        "canonical recipe contracts",
-    )
-    try:
-        tool_namespace = runpy.run_path(str(validator_path))
-        contract_source = str(contracts_init.parent.parent)
-        sys.path[:] = [entry for entry in sys.path if entry != contract_source]
-        sys.path.insert(0, contract_source)
-        for module_name in tuple(sys.modules):
-            if module_name == "vonk_forge_contracts" or module_name.startswith(
-                "vonk_forge_contracts."
-            ):
-                del sys.modules[module_name]
-        import vonk_forge_contracts
-        from vonk_forge_contracts import (
-            ModelDefinition,
-            RecipeDefinition,
-            content_sha256,
-        )
-    except Exception as error:
-        raise QualificationError(
-            "canonical recipe contracts or package validator cannot be loaded"
-        ) from error
-    if Path(vonk_forge_contracts.__file__).resolve() != contracts_init:
-        raise QualificationError(
-            "loaded recipe contracts do not belong to the reviewed recipe repository"
-        )
-    candidate_validator = tool_namespace.get("validate_recipe_archive")
-    if not callable(candidate_validator):
-        raise QualificationError("canonical recipe package validator is unavailable")
-    validator = cast(
+    source_commit: str,
+) -> Iterator[
+    tuple[
         Callable[[bytes, dict[str, object], dict[str, dict[str, object]]], None],
-        candidate_validator,
+        Any,
+        Any,
+        Callable[[Any], str],
+        str,
+    ]
+]:
+    if _GIT_SHA.fullmatch(source_commit) is None:
+        raise QualificationError("canonical recipe source commit is invalid")
+    root = library_root.resolve(strict=True)
+    if not root.is_dir():
+        raise QualificationError("recipe library root must be a directory")
+
+    # Ignore ambient Git selectors/configuration. The library root and commit
+    # are explicit inputs; a shell environment must not redirect object lookup.
+    git_environment = {
+        name: value for name, value in os.environ.items() if not name.startswith("GIT_")
+    }
+    git_environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    git_environment["GIT_CONFIG_GLOBAL"] = os.devnull
+
+    def git(*arguments: str) -> subprocess.CompletedProcess[bytes]:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(root), *arguments],
+                check=False,
+                capture_output=True,
+                env=git_environment,
+            )
+        except OSError as error:
+            raise QualificationError(
+                "canonical recipe source repository cannot be read"
+            ) from error
+
+    repository_root = git("rev-parse", "--show-toplevel")
+    if repository_root.returncode != 0:
+        raise QualificationError("recipe library root is not a Git repository")
+    try:
+        resolved_repository_root = Path(
+            repository_root.stdout.decode("utf-8").rstrip("\n")
+        ).resolve(strict=True)
+    except (OSError, UnicodeError) as error:
+        raise QualificationError("recipe library Git root is invalid") from error
+    if resolved_repository_root != root:
+        raise QualificationError("recipe library root is not the selected Git root")
+
+    commit_type = git("cat-file", "-t", source_commit)
+    if commit_type.returncode != 0 or commit_type.stdout.strip() != b"commit":
+        raise QualificationError(
+            "canonical recipe source commit is unavailable in the selected repository"
+        )
+    tree = git(
+        "ls-tree",
+        "-r",
+        "-z",
+        "--full-tree",
+        source_commit,
+        "--",
+        "tools/build-catalog-index",
+        "contracts/src/vonk_forge_contracts",
     )
-    package_media_type = _string(
-        tool_namespace.get("PACKAGE_MEDIA_TYPE"),
-        "canonical recipe package media type",
-    )
-    return (
-        validator,
-        RecipeDefinition,
-        ModelDefinition,
-        content_sha256,
-        package_media_type,
-    )
+    if tree.returncode != 0 or not tree.stdout.endswith(b"\0"):
+        raise QualificationError("canonical recipe source tree cannot be read")
+
+    tool_relative = "tools/build-catalog-index"
+    contracts_prefix = "contracts/src/vonk_forge_contracts/"
+    required_paths = {
+        tool_relative,
+        f"{contracts_prefix}__init__.py",
+    }
+    seen_paths: set[str] = set()
+    tree_entries: list[tuple[str, str]] = []
+    for encoded_entry in tree.stdout[:-1].split(b"\0"):
+        try:
+            metadata, encoded_path = encoded_entry.split(b"\t", 1)
+            mode_bytes, object_type_bytes, object_id_bytes = metadata.split()
+            path = encoded_path.decode("utf-8")
+            mode = mode_bytes.decode("ascii")
+            object_type = object_type_bytes.decode("ascii")
+            object_id = object_id_bytes.decode("ascii")
+        except (UnicodeError, ValueError) as error:
+            raise QualificationError(
+                "canonical recipe source tree is malformed"
+            ) from error
+        pure_path = PurePosixPath(path)
+        allowed_path = path == tool_relative or path.startswith(contracts_prefix)
+        if (
+            not allowed_path
+            or pure_path.is_absolute()
+            or path != pure_path.as_posix()
+            or "\\" in path
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+            or mode not in {"100644", "100755"}
+            or object_type != "blob"
+            or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", object_id) is None
+            or path in seen_paths
+        ):
+            raise QualificationError(
+                "canonical recipe source tree contains an unsafe entry"
+            )
+        seen_paths.add(path)
+        tree_entries.append((path, object_id))
+    if not required_paths.issubset(seen_paths):
+        raise QualificationError("canonical recipe source tree is incomplete")
+
+    with tempfile.TemporaryDirectory(prefix="vonk-campaign-canonical-") as temporary:
+        snapshot_root = Path(temporary).resolve(strict=True)
+        for relative, object_id in tree_entries:
+            content = git("cat-file", "blob", object_id)
+            if content.returncode != 0:
+                raise QualificationError("canonical recipe source blob cannot be read")
+            destination = snapshot_root.joinpath(*PurePosixPath(relative).parts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content.stdout)
+
+        validator_path = snapshot_root / tool_relative
+        contracts_init = snapshot_root / f"{contracts_prefix}__init__.py"
+        contract_source = str(contracts_init.parent.parent)
+        original_sys_path = sys.path.copy()
+        original_contract_modules = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == "vonk_forge_contracts"
+            or name.startswith("vonk_forge_contracts.")
+        }
+        try:
+            try:
+                for module_name in tuple(sys.modules):
+                    if module_name == "vonk_forge_contracts" or module_name.startswith(
+                        "vonk_forge_contracts."
+                    ):
+                        del sys.modules[module_name]
+                sys.path.insert(0, contract_source)
+                tool_namespace = runpy.run_path(str(validator_path))
+                import vonk_forge_contracts
+                from vonk_forge_contracts import (
+                    ModelDefinition,
+                    RecipeDefinition,
+                    content_sha256,
+                )
+            except Exception as error:
+                raise QualificationError(
+                    "canonical recipe contracts or package validator cannot be loaded"
+                ) from error
+
+            if Path(vonk_forge_contracts.__file__).resolve() != contracts_init:
+                raise QualificationError(
+                    "loaded recipe contracts do not belong to the pinned source commit"
+                )
+            candidate_validator = tool_namespace.get("validate_recipe_archive")
+            if not callable(candidate_validator):
+                raise QualificationError(
+                    "canonical recipe package validator is unavailable"
+                )
+            validator = cast(
+                Callable[
+                    [bytes, dict[str, object], dict[str, dict[str, object]]], None
+                ],
+                candidate_validator,
+            )
+            package_media_type = _string(
+                tool_namespace.get("PACKAGE_MEDIA_TYPE"),
+                "canonical recipe package media type",
+            )
+            yield (
+                validator,
+                RecipeDefinition,
+                ModelDefinition,
+                content_sha256,
+                package_media_type,
+            )
+        finally:
+            sys.path[:] = original_sys_path
+            for module_name in tuple(sys.modules):
+                if module_name == "vonk_forge_contracts" or module_name.startswith(
+                    "vonk_forge_contracts."
+                ):
+                    del sys.modules[module_name]
+            sys.modules.update(original_contract_modules)
 
 
 def _catalog_recipe_entries(
@@ -779,77 +906,27 @@ def _recipe_model_closure(
     return result
 
 
-def _bind_repository_inputs(
-    manifest: CampaignManifest, library_root: Path, fixtures: FixtureRegistry
+def _validate_repository_recipe_packages(
+    root: Path,
+    rows: Sequence[RecipeAuthorityRow],
+    recipe_entries: Mapping[str, tuple[Mapping[str, object], Mapping[str, object]]],
+    catalog_models: Mapping[str, tuple[Mapping[str, object], Mapping[str, object]]],
+    canonical_tools: tuple[
+        Callable[[bytes, dict[str, object], dict[str, dict[str, object]]], None],
+        Any,
+        Any,
+        Callable[[Any], str],
+        str,
+    ],
 ) -> None:
-    root = library_root.resolve(strict=True)
-    if not root.is_dir():
-        raise QualificationError("recipe library root must be a directory")
-    if not manifest.path.is_relative_to(root):
-        raise QualificationError(
-            "campaign manifest must be inside the recipe repository"
-        )
-    if not manifest.fixture_manifest.is_relative_to(root):
-        raise QualificationError(
-            "fixture manifest must be inside the recipe repository"
-        )
-    manifest_value = _object(
-        _strict_read(manifest.path, "campaign manifest")[0], "manifest"
-    )
-    resolved_authority = _relative_path(
-        root,
-        manifest_value["qualification_authority"],
-        "authority path",
-        allow_parent=True,
-        base=manifest.path.parent,
-    )
-    if not resolved_authority.is_relative_to(root):
-        raise QualificationError(
-            "qualification authority must be inside the recipe repository"
-        )
-
-    catalog_path = _relative_path(root, "catalog-index.json", "catalog index")
-    index_path = _relative_path(
-        root, "qualification/qualification-index.json", "qualification index"
-    )
-    catalog_size = catalog_path.stat().st_size
-    if catalog_size > _MAX_CATALOG_FILE_BYTES:
-        raise QualificationError(
-            f"catalog index exceeds its {_MAX_CATALOG_FILE_BYTES}-byte read bound"
-        )
-    fixture_size = index_path.stat().st_size
-    if fixture_size > _MAX_FIXTURE_MANIFEST_BYTES:
-        raise QualificationError(
-            f"qualification index exceeds its {_MAX_FIXTURE_MANIFEST_BYTES}-byte read bound"
-        )
-    catalog_digest = _safe_file_digest(catalog_path, catalog_size)
-    qualification_digest = _safe_file_digest(index_path, fixture_size)
-    if catalog_digest != manifest.authority.catalog["catalog_index_sha256"]:
-        raise QualificationError("catalog index differs from the reviewed authority")
-    if qualification_digest != manifest.authority.catalog["qualification_index_sha256"]:
-        raise QualificationError("qualification fixture index differs from authority")
-    if fixtures.manifest_sha256 != qualification_digest:
-        raise QualificationError("loaded fixture manifest is not the reviewed index")
-    catalog_value, _catalog_raw = _strict_read(
-        catalog_path,
-        "catalog index",
-        maximum_bytes=_MAX_CATALOG_FILE_BYTES,
-    )
-    catalog_document = _object(catalog_value, "catalog index")
-    source_commit = catalog_document.get("source_commit")
-    if source_commit != manifest.authority.catalog["source_commit"]:
-        raise QualificationError("catalog source commit differs from its authority")
-
-    recipe_entries = _catalog_recipe_entries(catalog_document)
-    catalog_models = _catalog_model_entries(catalog_document)
     (
         validate_recipe_archive,
         recipe_type,
         model_type,
         content_sha256,
         expected_package_media_type,
-    ) = _canonical_recipe_package_tools(root)
-    for row in manifest.authority.rows:
+    ) = canonical_tools
+    for row in rows:
         catalog_recipe = recipe_entries.get(row.key)
         if catalog_recipe is None:
             raise QualificationError(f"{row.key} is absent from the catalog index")
@@ -946,6 +1023,85 @@ def _bind_repository_inputs(
             raise QualificationError(
                 f"{row.key} package closure is invalid: {error}"
             ) from error
+
+
+def _bind_repository_inputs(
+    manifest: CampaignManifest, library_root: Path, fixtures: FixtureRegistry
+) -> None:
+    root = library_root.resolve(strict=True)
+    if not root.is_dir():
+        raise QualificationError("recipe library root must be a directory")
+    if not manifest.path.is_relative_to(root):
+        raise QualificationError(
+            "campaign manifest must be inside the recipe repository"
+        )
+    if not manifest.fixture_manifest.is_relative_to(root):
+        raise QualificationError(
+            "fixture manifest must be inside the recipe repository"
+        )
+    manifest_value = _object(
+        _strict_read(manifest.path, "campaign manifest")[0], "manifest"
+    )
+    resolved_authority = _relative_path(
+        root,
+        manifest_value["qualification_authority"],
+        "authority path",
+        allow_parent=True,
+        base=manifest.path.parent,
+    )
+    if not resolved_authority.is_relative_to(root):
+        raise QualificationError(
+            "qualification authority must be inside the recipe repository"
+        )
+
+    catalog_path = _relative_path(root, "catalog-index.json", "catalog index")
+    index_path = _relative_path(
+        root, "qualification/qualification-index.json", "qualification index"
+    )
+    catalog_size = catalog_path.stat().st_size
+    if catalog_size > _MAX_CATALOG_FILE_BYTES:
+        raise QualificationError(
+            f"catalog index exceeds its {_MAX_CATALOG_FILE_BYTES}-byte read bound"
+        )
+    fixture_size = index_path.stat().st_size
+    if fixture_size > _MAX_FIXTURE_MANIFEST_BYTES:
+        raise QualificationError(
+            f"qualification index exceeds its {_MAX_FIXTURE_MANIFEST_BYTES}-byte read bound"
+        )
+    catalog_digest = _safe_file_digest(catalog_path, catalog_size)
+    qualification_digest = _safe_file_digest(index_path, fixture_size)
+    if catalog_digest != manifest.authority.catalog["catalog_index_sha256"]:
+        raise QualificationError("catalog index differs from the reviewed authority")
+    if qualification_digest != manifest.authority.catalog["qualification_index_sha256"]:
+        raise QualificationError("qualification fixture index differs from authority")
+    if fixtures.manifest_sha256 != qualification_digest:
+        raise QualificationError("loaded fixture manifest is not the reviewed index")
+    catalog_value, _catalog_raw = _strict_read(
+        catalog_path,
+        "catalog index",
+        maximum_bytes=_MAX_CATALOG_FILE_BYTES,
+    )
+    catalog_document = _object(catalog_value, "catalog index")
+    source_commit = _string(
+        catalog_document.get("source_commit"), "catalog source commit"
+    )
+    authority_source_commit = _string(
+        manifest.authority.catalog.get("source_commit"),
+        "authority catalog source commit",
+    )
+    if source_commit != authority_source_commit:
+        raise QualificationError("catalog source commit differs from its authority")
+
+    recipe_entries = _catalog_recipe_entries(catalog_document)
+    catalog_models = _catalog_model_entries(catalog_document)
+    with _canonical_recipe_package_tools(root, source_commit) as canonical_tools:
+        _validate_repository_recipe_packages(
+            root,
+            manifest.authority.rows,
+            recipe_entries,
+            catalog_models,
+            canonical_tools,
+        )
 
 
 def _service_fixture_inputs(value: object, result: list[str]) -> None:

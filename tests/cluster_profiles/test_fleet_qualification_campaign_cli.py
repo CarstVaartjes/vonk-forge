@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import tarfile
 from argparse import Namespace
 from collections.abc import Mapping, Sequence
@@ -91,6 +92,28 @@ def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
     fixture_path.write_bytes(fixture_raw)
 
     source_commit = reviewed_authority["catalog"]["source_commit"]
+    subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+    object_directory = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(library_root),
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "objects",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (root / ".git" / "objects" / "info" / "alternates").write_text(
+        f"{object_directory}\n", encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "-C", str(root), "update-ref", "refs/heads/source", source_commit],
+        check=True,
+    )
     catalog_document = {
         "schema_version": reviewed_catalog["schema_version"],
         "kind": reviewed_catalog["kind"],
@@ -875,6 +898,37 @@ def test_repository_binding_rejects_rehashed_packages_outside_recipe_closure(
     fixtures = FixtureRegistry.load(manifest.fixture_manifest)
     with pytest.raises(QualificationError, match=message):
         campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
+
+
+def test_repository_binding_does_not_execute_tampered_working_tree_tools(
+    tmp_path: Path,
+) -> None:
+    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
+    tool_marker = tmp_path / "working-tree-validator-executed"
+    contracts_marker = tmp_path / "working-tree-contracts-executed"
+    tool_path = tmp_path / "tools" / "build-catalog-index"
+    contracts_init = (
+        tmp_path / "contracts" / "src" / "vonk_forge_contracts" / "__init__.py"
+    )
+    tool_path.write_text(
+        tool_path.read_text(encoding="utf-8")
+        + "\nfrom pathlib import Path as _MarkerPath\n"
+        + f"_MarkerPath({str(tool_marker)!r}).write_text('executed')\n",
+        encoding="utf-8",
+    )
+    contracts_init.write_text(
+        contracts_init.read_text(encoding="utf-8")
+        + "\nfrom pathlib import Path as _MarkerPath\n"
+        + f"_MarkerPath({str(contracts_marker)!r}).write_text('executed')\n",
+        encoding="utf-8",
+    )
+
+    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
+    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
+    campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
+
+    assert not tool_marker.exists()
+    assert not contracts_marker.exists()
 
 
 def test_manifest_rejects_parent_references_that_escape_or_follow_symlinks(
