@@ -78,6 +78,18 @@ def ledger_lock(path: Path) -> Iterator[None]:
             raise QualificationError(
                 f"another qualification runner owns {lock_path}"
             ) from error
+        try:
+            named = lock_path.lstat()
+        except FileNotFoundError as error:
+            raise QualificationError(
+                "qualification lock changed while acquiring"
+            ) from error
+        if (
+            not stat.S_ISREG(named.st_mode)
+            or stat.S_ISLNK(named.st_mode)
+            or (metadata.st_dev, metadata.st_ino) != (named.st_dev, named.st_ino)
+        ):
+            raise QualificationError("qualification lock changed while acquiring")
         yield
     finally:
         os.close(descriptor)

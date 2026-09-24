@@ -2869,7 +2869,7 @@ def run(
         # The lock may be acquired after another invocation completed. Reload
         # under lock before deriving sequence or appending, so stale in-memory
         # sequence numbers cannot corrupt the hash-chained ledger.
-        ledger = EvidenceLedger(ledger_path)
+        ledger = EvidenceLedger._under_ledger_lock(ledger_path)
         locked_row = _current_row(manifest, ledger, campaign_id, args.recipe)
         if locked_row is None:
             return {

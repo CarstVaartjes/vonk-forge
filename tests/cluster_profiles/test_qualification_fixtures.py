@@ -4,7 +4,11 @@ import base64
 import hashlib
 import io
 import json
+import os
 import re
+import signal
+import subprocess
+import sys
 import zipfile
 from collections.abc import Mapping
 from dataclasses import replace
@@ -17,6 +21,7 @@ from library_route_fixtures import _library_detail
 from cluster_profiles.fleet_qualification import (
     ArtifactJobSmokeAdapter,
     EvidenceLedger,
+    QualificationError,
 )
 from cluster_profiles.qualification_fixtures import (
     Fixture,
@@ -36,6 +41,109 @@ from cluster_profiles.qualification_fixtures import (
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAYElEQVR4nO3PwQkAIBDAMAX3H/lwCB9BaCZo96y/HR3wqgGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQHtAgK6AfwYG1VIAAAAAElFTkSuQmCC"
 )
+
+
+def test_evidence_ledger_recovers_killed_partial_append_and_resumes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "evidence.jsonl"
+    ledger = EvidenceLedger(path)
+    ledger.append("baseline", plan_digest="f" * 64)
+
+    script = """
+import os
+import signal
+import sys
+from pathlib import Path
+from cluster_profiles.fleet_qualification import EvidenceLedger
+
+ledger = EvidenceLedger(Path(sys.argv[1]))
+write = os.write
+def interrupt_after_partial_write(descriptor, content):
+    write(descriptor, content[:max(1, len(content) // 2)])
+    os.kill(os.getpid(), signal.SIGKILL)
+os.write = interrupt_after_partial_write
+ledger.append("interrupted", plan_digest="f" * 64)
+"""
+    environment = os.environ.copy()
+    source_root = str(Path(__file__).resolve().parents[2] / "src")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        filter(None, (source_root, environment.get("PYTHONPATH")))
+    )
+    killed = subprocess.run(
+        [sys.executable, "-c", script, str(path)],
+        check=False,
+        env=environment,
+    )
+
+    assert killed.returncode == -signal.SIGKILL
+    assert not path.read_bytes().endswith(b"\n")
+
+    resumed = EvidenceLedger(path)
+    assert [record["event"] for record in resumed.records] == ["baseline"]
+    resumed.append("resumed", plan_digest="f" * 64)
+
+    verified = EvidenceLedger(path)
+    assert [record["sequence"] for record in verified.records] == [1, 2]
+    assert [record["event"] for record in verified.records] == ["baseline", "resumed"]
+
+
+def test_evidence_ledger_keeps_complete_malformed_record_fail_closed(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "malformed-evidence.jsonl"
+    ledger = EvidenceLedger(path)
+    ledger.append("baseline", plan_digest="f" * 64)
+    corrupted = path.read_bytes() + b'{"sequence":2,}\n'
+    path.write_bytes(corrupted)
+
+    with pytest.raises(QualificationError, match="record 2 is invalid"):
+        EvidenceLedger(path)
+
+    assert path.read_bytes() == corrupted
+
+
+def test_evidence_ledger_keeps_complete_hash_invalid_record_fail_closed(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "invalid-hash-evidence.jsonl"
+    ledger = EvidenceLedger(path)
+    ledger.append("baseline", plan_digest="f" * 64)
+    ledger.append("complete", plan_digest="f" * 64)
+    lines = path.read_bytes().splitlines(keepends=True)
+    second = json.loads(lines[1])
+    second["event"] = "tampered"
+    corrupted = (
+        lines[0]
+        + (json.dumps(second, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    )
+    path.write_bytes(corrupted)
+
+    with pytest.raises(
+        QualificationError, match="record 2 failed integrity validation"
+    ):
+        EvidenceLedger(path)
+
+    assert path.read_bytes() == corrupted
+
+
+def test_evidence_ledger_rejects_oversized_record_without_appending(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "bounded-evidence.jsonl"
+    ledger = EvidenceLedger(path)
+    ledger.append("baseline", plan_digest="f" * 64)
+    original = path.read_bytes()
+
+    with pytest.raises(QualificationError, match="limit is"):
+        ledger.append(
+            "oversized",
+            plan_digest="f" * 64,
+            payload={"value": "x" * EvidenceLedger.MAX_RECORD_BYTES},
+        )
+
+    assert path.read_bytes() == original
+    assert [record["event"] for record in EvidenceLedger(path).records] == ["baseline"]
 
 
 def _registry() -> FixtureRegistry:
