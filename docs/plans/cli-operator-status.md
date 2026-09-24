@@ -2,6 +2,16 @@
 
 ## Active integration checkpoint — 2026-09-24
 
+All 23 applicable PR checks pass at recovery source
+`134bcbf9fd54a70da2be8204a805dfd5c34feccc`:
+[full CI](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36011809072),
+[ARM64 capsule recovery](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36011808418),
+and [ARM64 signed helper](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36011808590).
+The refreshed [handoff examples](../examples/cli-operator/README.md) retain
+32 actual installed-CLI observations from seven passing scenarios at this
+revision. Publication remains skipped for the PR. The same-profile journey,
+runnable U2 fixture integration and independent human scorecard remain open.
+
 The native build-failure audit found two connected recovery defects. Source
 fetch and image-upload failures lost their typed causes at the Rust producer;
 a temporary source failure then retained the settled child at the availability

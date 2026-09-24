@@ -1,7 +1,7 @@
 # Installed CLI output capture
 
 The [qualified captured examples](../examples/cli-operator/README.md) are available
-from source `872d639a`. The CLI handoff requires examples from the installed executable. The design
+from source `134bcbf9`. The CLI handoff requires examples from the installed executable. The design
 plan's invented layouts explain intent; they are not acceptance evidence.
 
 `scripts/capture-cli-handoff` records the actual process streams produced by

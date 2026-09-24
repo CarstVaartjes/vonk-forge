@@ -5,35 +5,35 @@
     "cancelled_effects": [],
     "cause": "operator",
     "completed_effects": [],
-    "dependency": "33aa3154-5eb1-4927-89b8-753f37760995",
+    "dependency": "77ed636a-8a84-4939-a4ec-c187180ee459",
     "owner": "run-switch",
     "pending_effects": [
       {
-        "effect_id": "33aa3154-5eb1-4927-89b8-753f37760995",
+        "effect_id": "77ed636a-8a84-4939-a4ec-c187180ee459",
         "kind": "run",
         "label": "Active Run/Switch child",
-        "operation_id": "33aa3154-5eb1-4927-89b8-753f37760995",
+        "operation_id": "77ed636a-8a84-4939-a4ec-c187180ee459",
         "outcome": "pending"
       }
     ],
-    "request_key": "343a256e-2788-4684-a098-2ad15d99f13a",
+    "request_key": "fd198755-2ea8-4956-a690-d0a000df97ba",
     "requested_at": "2026-08-07T12:00:00Z",
     "state": "cancelling"
   },
   "created_at": "2026-08-07T12:00:00Z",
   "current_operation_id": null,
   "current_step": 0,
-  "id": "534153d8-2c40-44f8-9293-98f5981339f1",
-  "plan_digest": "da000eb015b05c0066dc401fba31ddb49cd459a9458667e71ef675322cba4be0",
-  "profile_digest": "50ede98d339d6f10c82a4b1540dc333f4f7f8f257d5ba21f1408a1ff23771749",
-  "profile_id": "cb0dd330-7fd1-4364-8e38-a1214b9970a6",
+  "id": "cedb720b-f82e-4bdd-a4e1-949f3ebb356f",
+  "plan_digest": "c163e2e539bd7d204eab5fd3e6b187f1edc462f2c945f59e6e76c828c899b2a8",
+  "profile_digest": "e1bbea3b3180ed1d54637baca03a79d6d83cb42b4900f80d8b45ad0f308a997a",
+  "profile_id": "882f8dfd-8ea1-4083-b132-88839780afdf",
   "progress": {
     "attempt": 1,
     "cancellation": {
       "actor": "administrator",
       "cause": "operator",
       "pending_operation_ids": [],
-      "request_key": "343a256e-2788-4684-a098-2ad15d99f13a",
+      "request_key": "fd198755-2ea8-4956-a690-d0a000df97ba",
       "requested_at": "2026-08-07T12:00:00Z",
       "state": "cancelling",
       "workload_intent_ordinal": 2
@@ -55,16 +55,16 @@
               "role": "entrypoint"
             }
           ],
-          "recipe_id": "344f7cf4-0169-4df3-8723-01bfa549115f",
-          "recipe_revision_id": "d94c5aa4-4a11-4b7c-b85e-999968edd1a5",
+          "recipe_id": "cf16b77e-7b21-4605-8dec-5690ab04c81c",
+          "recipe_revision_id": "3052e242-dfbb-4d72-b8bf-3b9a650aee88",
           "recipe_title": "Synthetic Tiny image",
           "topology_name": "solo"
         }
       ],
       "installation_policy": "keep-cached",
-      "profile_digest": "50ede98d339d6f10c82a4b1540dc333f4f7f8f257d5ba21f1408a1ff23771749",
-      "reviewed_application_id": "534153d8-2c40-44f8-9293-98f5981339f1",
-      "reviewed_plan_digest": "29b1898328a24ebb425771e1bba539edd4efbe92cf1743255f6af545ab0ea34b",
+      "profile_digest": "e1bbea3b3180ed1d54637baca03a79d6d83cb42b4900f80d8b45ad0f308a997a",
+      "reviewed_application_id": "cedb720b-f82e-4bdd-a4e1-949f3ebb356f",
+      "reviewed_plan_digest": "ea4dd5a6adbf5c09014eb97dd42df527b56ccc8a8372155f67d4a0ffafa84f28",
       "scope": {
         "node_ids": [
           "spk_00000000000000000000000000000001"
@@ -75,7 +75,7 @@
     "step_results": {},
     "switch_adapter": {
       "active_kind": "run",
-      "active_operation_id": "33aa3154-5eb1-4927-89b8-753f37760995",
+      "active_operation_id": "77ed636a-8a84-4939-a4ec-c187180ee459",
       "actor": "admin",
       "assignment_ids": [
         "e91429fc-7932-547d-9e7e-8c3f440ebe04"
@@ -94,13 +94,13 @@
               "role": "entrypoint"
             }
           ],
-          "recipe_id": "344f7cf4-0169-4df3-8723-01bfa549115f",
-          "recipe_revision_id": "d94c5aa4-4a11-4b7c-b85e-999968edd1a5",
+          "recipe_id": "cf16b77e-7b21-4605-8dec-5690ab04c81c",
+          "recipe_revision_id": "3052e242-dfbb-4d72-b8bf-3b9a650aee88",
           "recipe_title": "Synthetic Tiny image",
           "topology_name": "solo"
         }
       ],
-      "child_id": "534153d8-2c40-44f8-9293-98f5981339f1",
+      "child_id": "cedb720b-f82e-4bdd-a4e1-949f3ebb356f",
       "children": [],
       "pending_operation_ids": [],
       "position": 0,
@@ -110,7 +110,7 @@
           "kind": "run"
         }
       ],
-      "request_id": "a1f2deee-f3b4-529a-8621-0c45e7c9f64c",
+      "request_id": "5cba9c11-f7c5-55a3-afa5-eb01cdaef5ee",
       "schema_version": 2,
       "scope_node_ids": [
         "spk_00000000000000000000000000000001"

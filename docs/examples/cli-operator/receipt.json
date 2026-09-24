@@ -3,19 +3,19 @@
   "created_at": "2026-09-10T00:00:00Z",
   "current_operation_id": null,
   "current_step": 0,
-  "id": "8b64e1b2-ec79-4021-9a88-5d7450488d2a",
-  "plan_digest": "700509643a75e05e618bdaf2ea0c91f02a72e88d92af35cd524beeda35f94b6f",
-  "profile_digest": "fd9030ba7a12847bc454165c2ee70f01d252a1129f5806ae3fe78a319e1ff825",
-  "profile_id": "425bc8e8-4caf-4da6-a4f5-1f54c4e0a663",
+  "id": "cbee14cf-2404-4523-84f5-6d80c797fab9",
+  "plan_digest": "128b4d68f42a3d5912c03b992040e6ea24c7dd177822c180ce71857c7d9bcb4b",
+  "profile_digest": "58b32a1f14cba85613c191c51c867df5a988cc7ad4257f5430209e4e1c583dcd",
+  "profile_id": "4a426143-ba9c-48b7-b16f-9a92f9e01c40",
   "progress": {
     "attempt": 1,
     "completed_steps": 0,
     "intended_profile": {
       "assignments": [],
       "installation_policy": "keep-cached",
-      "profile_digest": "fd9030ba7a12847bc454165c2ee70f01d252a1129f5806ae3fe78a319e1ff825",
-      "reviewed_application_id": "8b64e1b2-ec79-4021-9a88-5d7450488d2a",
-      "reviewed_plan_digest": "fc6e50152ecb0fffee469629c52eb7f404732d40ff04c3d5108359e5e93c55d9",
+      "profile_digest": "58b32a1f14cba85613c191c51c867df5a988cc7ad4257f5430209e4e1c583dcd",
+      "reviewed_application_id": "cbee14cf-2404-4523-84f5-6d80c797fab9",
+      "reviewed_plan_digest": "920377f2779a469be93bd863c0e70b582d42b37845b9d17a1b8fae6cf98a485c",
       "scope": {
         "node_ids": [
           "spk_11111111111111111111111111111111",

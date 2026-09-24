@@ -9,7 +9,7 @@
     "superseded": []
   },
   "generated_at": "2026-09-10T00:00:00Z",
-  "plan_digest": "fe70c58845e90a866e018391222fb7cb8702a997b405da0ddea8eab69c4b2caf",
+  "plan_digest": "1b0d557ca344249bf36fd29a9747627ea9939962bb8b48d0140b801aa9376163",
   "preparation_decisions": [],
   "preparations": [],
   "profile_definition": {
@@ -20,8 +20,8 @@
     "labels": {},
     "name": "Reviewed idle"
   },
-  "profile_digest": "275baf7bb4315740b44cbe74dd7569659fe47bb4a35af5aa8b5d410eba4fc7f4",
-  "profile_id": "425bc8e8-4caf-4da6-a4f5-1f54c4e0a663",
+  "profile_digest": "d84914b380b0916db3a96d41018397c4762f8bd8f1a1d14ef369828db390126c",
+  "profile_id": "4a426143-ba9c-48b7-b16f-9a92f9e01c40",
   "profile_name": "Reviewed idle",
   "profile_revision": 1,
   "reasons": [],
