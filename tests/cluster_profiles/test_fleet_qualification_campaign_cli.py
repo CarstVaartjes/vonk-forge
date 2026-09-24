@@ -147,11 +147,11 @@ def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
 
 def _rewrite_package(payload: bytes, mutation: str) -> bytes:
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
-        files = {
-            member.name: archive.extractfile(member).read()
-            for member in archive.getmembers()
-            if archive.extractfile(member) is not None
-        }
+        files: dict[str, bytes] = {}
+        for member in archive.getmembers():
+            source = archive.extractfile(member)
+            if source is not None:
+                files[member.name] = source.read()
     package_manifest = json.loads(files["manifest.json"])
     if mutation == "recipe-document":
         recipe = json.loads(files["recipe.json"])
