@@ -3,11 +3,12 @@
 ## Active integration checkpoint — 2026-09-24
 
 The active candidate is `codex/cli-approved-integration` in
-`/private/tmp/vonk-cli-approved-integration`. Its committed base `f03050f6`
+`/private/tmp/vonk-cli-approved-integration`. Source checkpoint `a04416e2`
 includes upstream `0123eeb4`, byte-bounded library pagination (`02ce6441`),
-and common build/profile admission locking (`b6be92fe`). Uncommitted source
-increments below remain under combined validation; this is not a merge,
-publication, deployment, or physical acceptance claim. Other tasks' checkouts
+common build/profile admission locking (`b6be92fe`), durable model/recipe
+removal and truthful memory commitments. The following acceptance checkpoint
+adds installed recipe-removal qualification. This is not a merge, publication,
+deployment, or physical acceptance claim. Other tasks' checkouts
 and the earlier integration snapshot remain preserved.
 
 Library pages now bound the complete JSON response, including facets and the
@@ -52,17 +53,23 @@ regressions reproduced their old failure before correction. The broader
 removal/API/reference slice passed 85 tests before those final cases. The
 installed model-removal test passes against the actual wheel/TLS/API/PG/storage
 boundary. The recipe CLI's lost-response case reproduced the raw-POST defect;
-its shared submission helper and installed acceptance are being finalized.
+its shared submission helper now passes all 95 CLI module tests. The installed
+recipe-removal test also passes against a real wheel, HTTPS peer, PostgreSQL,
+API and managed storage: a lost accepted response and a new CLI process both
+recover the same owner, and only the worker's completed effects report success.
 
 The web has 164 passing tests and a successful production build. The full
 Python type gate reports one existing reviewed exception and no new errors.
 Wire generation, pinned lint and the coordination scanner pass; the scanner
 has zero reviewed sites. It does not replace the recorded PostgreSQL tests.
 
-Still open: finish installed recipe receipt recovery and its final CLI/type
-checks, regenerate the supply map, record the final revision, and complete the
-independent operator walkthrough. The user will run every model; that remains
-separate physical evidence. No usability study, live cache removal, Controller
+The generated clients reproduce without drift, and the curated supply map
+regenerates and verifies successfully. Remaining release gates are the PR's
+required CI/review, an explicit schema merge decision, and the independent
+operator walkthrough. W09/W12/W17's previous source blockers are implemented;
+the package table is not promoted to final handoff until its combined evidence
+is reviewed. The user will run every model; that remains separate physical
+evidence. No usability study, live cache removal, Controller
 deployment, or model campaign is claimed here.
 
 ## Current authorization and integration base — 2026-09-24
@@ -75,8 +82,8 @@ below are historical; they no longer block this repository work. The user also
 plans to run every model. Model acceptance does not replace the independent CLI
 usability scorecard, which remains unrun.
 
-The coordinator now owns `codex/cli-approved-integration` at
-`/private/tmp/vonk-cli-approved-integration`, combining preserved snapshot
+The initial preservation checkpoint established `codex/cli-approved-integration`
+at `/private/tmp/vonk-cli-approved-integration`, combining preserved snapshot
 `338354bb4c1e6b6913e86d32909538e836ba0c0e` with fetched `origin/main` at
 `93c3746db4fe0af5b20e6c37a14be5e99e5c3669`. Only generated supply-chain files
 conflicted; they were regenerated from the combined inputs. The original
@@ -89,8 +96,8 @@ The baseline descriptions below identify earlier checkpoints. New fixes will
 use the explicitly coordinated refreshed integration base, with separate
 worktree ownership and connected validation before integration.
 
-Implementation is integrated in the isolated `codex/cli-integration` candidate.
-The initial `codex/cli-operator-experience` checkout and its unrelated dirty work
+The earlier isolated `codex/cli-integration` candidate is retained as history.
+The active branch is named in the current checkpoint above. The initial `codex/cli-operator-experience` checkout and its unrelated dirty work
 remain preserved. The full objective remains the
 [twenty-package implementation plan](cli-operator-implementation.md).
 This record distinguishes implemented pieces from completed packages; nothing
