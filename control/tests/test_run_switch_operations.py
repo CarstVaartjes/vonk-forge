@@ -45,6 +45,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.operation_api import OperationQuery
+from vonk_control.operation_contract import OperationFailureEvidence
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     RecipeBuildService,
@@ -3632,7 +3633,7 @@ def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     }
     damaged_detail = operation_detail_response(damaged_item)
     assert damaged_detail.id == unreadable.operation_id
-    assert damaged_detail.failure is not None
+    assert isinstance(damaged_detail.failure, OperationFailureEvidence)
     assert damaged_detail.failure.error_code == "operation_history_unreadable"
     assert page.items[1]["id"] == valid.operation_id
     assert page.items[1]["node_ids"] == list(nodes)
