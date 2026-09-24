@@ -598,7 +598,7 @@ jobs:
           resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify HEAD^{commit})
           test "$resolved" = "$EXPECTED_REVISION"
           printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
-      - name: Fetch the catalog-bound validation source
+      - name: Fetch catalog and authority validation sources
         shell: bash
         run: |
           python3 - <<'PY'
@@ -609,11 +609,32 @@ jobs:
           from pathlib import Path
 
           library = Path(os.environ["VONK_RECIPE_LIBRARY_ROOT"])
-          source = json.loads((library / "catalog-index.json").read_text())["source_commit"]
-          if not isinstance(source, str) or re.fullmatch(r"[0-9a-f]{40}", source) is None:
-              raise SystemExit("catalog validation source is not an exact Git commit")
-          subprocess.run(["git", "-C", str(library), "fetch", "--no-tags", "--depth=1", "origin", source], check=True, timeout=120)
-          subprocess.run(["git", "-C", str(library), "cat-file", "-e", f"{source}^{{commit}}"], check=True, timeout=30)
+          catalog = json.loads(
+              (library / "catalog-index.json").read_text(encoding="utf-8")
+          )
+          sources = [catalog["source_commit"]]
+          for authority_path in sorted((library / "qualification/authorities").glob("*.json")):
+              authority = json.loads(authority_path.read_text(encoding="utf-8"))
+              sources.append(authority["catalog"]["source_commit"])
+          if any(
+              not isinstance(source, str)
+              or re.fullmatch(r"[0-9a-f]{40}", source) is None
+              for source in sources
+          ):
+              raise SystemExit(
+                  "catalog or authority validation source is not an exact Git commit"
+              )
+          for source in sorted(set(sources)):
+              subprocess.run(
+                  ["git", "-C", str(library), "fetch", "--no-tags", "--depth=1", "origin", source],
+                  check=True,
+                  timeout=120,
+              )
+              subprocess.run(
+                  ["git", "-C", str(library), "cat-file", "-e", f"{source}^{{commit}}"],
+                  check=True,
+                  timeout=30,
+              )
           PY
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1

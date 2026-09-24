@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Path, Query
 
 from .auth import CursorError
 from .bounded_json import BoundedJSONError
+from .cursor_contract import MAX_CURSOR_LENGTH
 from .library_contract import (
     ModelDetailResponse,
     ModelLibraryResponse,
@@ -96,7 +97,7 @@ def install_library_routes(
     )
     def model_library(
         limit: Annotated[int, Query(ge=1, le=512)] = 100,
-        cursor: Annotated[str | None, Query(max_length=1024)] = None,
+        cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH)] = None,
         usage: Annotated[list[str] | None, Query(max_length=64)] = None,
         family: Annotated[list[str] | None, Query(max_length=64)] = None,
         version: Annotated[list[str] | None, Query(max_length=64)] = None,
@@ -160,7 +161,7 @@ def install_library_routes(
     )
     def recipe_library(
         limit: Annotated[int, Query(ge=1, le=512)] = 100,
-        cursor: Annotated[str | None, Query(max_length=1024)] = None,
+        cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH)] = None,
         model: Annotated[list[str] | None, Query(max_length=64)] = None,
         all_models: Annotated[bool, Query()] = False,
         usage: Annotated[list[str] | None, Query(max_length=64)] = None,
