@@ -241,6 +241,13 @@ export class ApiClient implements ControlApi {
     }));
   }
 
+  async profileApplicationByRequest(number: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+    return resultData(await this.generated.GET("/api/profile/{number}/requests/{request_key}", {
+      params: {path: {number, request_key: requestKey}},
+      signal,
+    }));
+  }
+
   async profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.GET("/api/profile/{number}/progress", {
       params: {path: {number}},

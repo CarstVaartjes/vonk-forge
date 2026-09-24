@@ -89,7 +89,7 @@ def _accept_newer_disjoint_application(
         f"/api/profile/{profile.number}/load",
         json={
             "request_key": str(uuid4()),
-            "expected_plan_digest": preview["plan_digest"],
+            "plan_digest": preview["plan_digest"],
         },
         headers=administrator_headers,
     )

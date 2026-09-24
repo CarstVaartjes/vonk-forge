@@ -2,6 +2,18 @@
 
 ## Active integration checkpoint — 2026-09-24
 
+Upstream `e7810dac` is integrated after checkpoint `eefa0d2b`. Profile load uses
+one current wire field, `plan_digest`, with required request identity and the
+candidate's exact reviewed-decision/recovery behavior. The upstream web retry
+flow remains, without resubmitting a changed review. Generated clients and
+supply-chain records were regenerated. Focused checks passed: 128 CLI/schema,
+nine profile API/parity, five web profile tests, web build, and 62 qualification
+campaign/fixture tests. The campaign checks use the exact pinned recipe checkout
+`d44600bbdd2d7ce08ba77f2d9a95017a76e141d2` in
+`/private/tmp/vonk-cli-recipes-validation`; the unrelated sibling checkout was
+left untouched. The full Python type gate has one existing reviewed exception.
+
+
 The coordinator has integrated the admission increment and memory-warning
 commit `c1e98777` in `codex/cli-approved-integration`. This is an unfinished
 checkpoint, not a completion or deployment claim. The new shared-admission

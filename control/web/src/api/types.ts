@@ -174,6 +174,7 @@ export interface ControlApi extends LibraryApi {
   autosaveProfile(number: number, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;
   previewProfile(number: number, signal?: AbortSignal): Promise<FleetProfilePreview>;
   loadProfile(number: number, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  profileApplicationByRequest(number: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   jobs(cursor?: string): Promise<JobsResponse>;

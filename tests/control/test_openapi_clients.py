@@ -367,7 +367,7 @@ def test_generated_python_models_compile() -> None:
 def test_packaged_profile_load_requires_review_and_refuses_revision_overrides() -> None:
     request = {
         "request_key": "00000000-0000-4000-8000-000000000001",
-        "expected_plan_digest": "a" * 64,
+        "plan_digest": "a" * 64,
     }
     assert validate_control_document("FleetProfileLoadRequest", request) == request
     with pytest.raises(ControlClientError):

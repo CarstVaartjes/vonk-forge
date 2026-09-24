@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -334,60 +335,201 @@ class RunnerOptions:
 class EvidenceLedger:
     """Append-only hash-chained JSONL evidence with durable writes."""
 
+    # Ledger payloads are summaries rather than media or raw logs. These byte
+    # limits bound both an individual parse and the verified chain in memory.
+    MAX_RECORD_BYTES = 4 * 1024 * 1024
+    MAX_LEDGER_BYTES = 128 * 1024 * 1024
+
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._ledger_lock_held = False
+        self._identity: tuple[int, int] | None = None
+        self._file_size = 0
         self.records = self._read()
 
+    @classmethod
+    def _under_ledger_lock(cls, path: Path) -> EvidenceLedger:
+        """Reload a ledger when the caller already owns ``ledger_lock(path)``."""
+        ledger = cls.__new__(cls)
+        ledger.path = path
+        ledger._ledger_lock_held = True
+        ledger._identity = None
+        ledger._file_size = 0
+        ledger.records = ledger._read_under_lock()
+        return ledger
+
     def _read(self) -> list[dict[str, object]]:
-        if not self.path.exists():
-            return []
-        metadata = self.path.lstat()
-        if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        from .qualification_locking import ledger_lock
+
+        with ledger_lock(self.path):
+            return self._read_under_lock()
+
+    def _file_identity(self, descriptor: int) -> tuple[int, int]:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
             raise QualificationError("qualification ledger must be a regular file")
         getuid = getattr(os, "getuid", None)
         if getuid is not None and metadata.st_uid != getuid():
             raise QualificationError("qualification ledger owner is invalid")
         if stat.S_IMODE(metadata.st_mode) & 0o077:
             raise QualificationError("qualification ledger permissions are too broad")
-        records: list[dict[str, object]] = []
-        previous = "0" * 64
-        with self.path.open("rb") as source:
-            for line_number, raw in enumerate(source, 1):
-                if not raw.endswith(b"\n"):
-                    raise QualificationError(
-                        "qualification ledger has a partial final record"
-                    )
-                try:
-                    value = _strict_json_loads(raw)
-                except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-                    raise QualificationError(
-                        f"qualification ledger record {line_number} is invalid"
-                    ) from error
-                record = _object(value, "qualification ledger record")
-                supplied = record.get("record_sha256")
-                unsigned = {
-                    key: item for key, item in record.items() if key != "record_sha256"
-                }
-                expected = _digest(unsigned)
-                if (
-                    record.get("sequence") != line_number
-                    or record.get("previous_sha256") != previous
-                    or supplied != expected
-                ):
-                    raise QualificationError(
-                        f"qualification ledger record {line_number} failed integrity validation"
-                    )
-                records.append(dict(record))
-                previous = expected
-        return records
+        try:
+            named = self.path.lstat()
+        except FileNotFoundError as error:
+            raise QualificationError(
+                "qualification ledger changed while locked"
+            ) from error
+        if (
+            not stat.S_ISREG(named.st_mode)
+            or stat.S_ISLNK(named.st_mode)
+            or (metadata.st_dev, metadata.st_ino) != (named.st_dev, named.st_ino)
+        ):
+            raise QualificationError("qualification ledger changed while locked")
+        return metadata.st_dev, metadata.st_ino
 
-    def append(
+    def _read_under_lock(self) -> list[dict[str, object]]:
+        self._identity = None
+        self._file_size = 0
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        if no_follow is None:
+            raise QualificationError("qualification ledger cannot be opened safely")
+        try:
+            descriptor = os.open(
+                self.path,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | no_follow,
+            )
+        except FileNotFoundError:
+            return []
+        except OSError as error:
+            if error.errno == getattr(errno, "ELOOP", -1):
+                raise QualificationError(
+                    "qualification ledger must be a regular file"
+                ) from error
+            raise
+
+        try:
+            identity = self._file_identity(descriptor)
+            size = os.fstat(descriptor).st_size
+            if size > self.MAX_LEDGER_BYTES:
+                raise QualificationError(
+                    f"qualification ledger is {size} bytes; limit is "
+                    f"{self.MAX_LEDGER_BYTES}"
+                )
+            records: list[dict[str, object]] = []
+            previous = "0" * 64
+            bytes_read = 0
+            prefix_bytes = 0
+            partial_tail_start: int | None = None
+            with os.fdopen(os.dup(descriptor), "rb") as source:
+                line_number = 0
+                while True:
+                    line_number += 1
+                    raw = source.readline(self.MAX_RECORD_BYTES + 1)
+                    if not raw:
+                        break
+                    bytes_read += len(raw)
+                    if len(raw) > self.MAX_RECORD_BYTES:
+                        raise QualificationError(
+                            f"qualification ledger record {line_number} exceeds "
+                            f"{self.MAX_RECORD_BYTES} bytes (observed at least "
+                            f"{len(raw)})"
+                        )
+                    if bytes_read > self.MAX_LEDGER_BYTES:
+                        raise QualificationError(
+                            f"qualification ledger is at least {bytes_read} bytes; "
+                            f"limit is {self.MAX_LEDGER_BYTES}"
+                        )
+                    if not raw.endswith(b"\n"):
+                        partial_tail_start = prefix_bytes
+                        break
+                    try:
+                        value = _strict_json_loads(raw)
+                    except (
+                        UnicodeDecodeError,
+                        json.JSONDecodeError,
+                        ValueError,
+                    ) as error:
+                        raise QualificationError(
+                            f"qualification ledger record {line_number} is invalid"
+                        ) from error
+                    record = _object(value, "qualification ledger record")
+                    supplied = record.get("record_sha256")
+                    unsigned = {
+                        key: item
+                        for key, item in record.items()
+                        if key != "record_sha256"
+                    }
+                    expected = _digest(unsigned)
+                    if (
+                        record.get("sequence") != line_number
+                        or record.get("previous_sha256") != previous
+                        or supplied != expected
+                    ):
+                        raise QualificationError(
+                            f"qualification ledger record {line_number} failed integrity validation"
+                        )
+                    records.append(dict(record))
+                    previous = expected
+                    prefix_bytes += len(raw)
+
+            if bytes_read != size or os.fstat(descriptor).st_size != size:
+                raise QualificationError("qualification ledger changed while locked")
+            if partial_tail_start is not None:
+                self._truncate_partial_tail(
+                    identity,
+                    expected_size=size,
+                    truncate_size=partial_tail_start,
+                )
+                self._file_size = partial_tail_start
+            else:
+                self._file_identity(descriptor)
+                self._file_size = size
+            self._identity = identity
+            return records
+        finally:
+            os.close(descriptor)
+
+    def _truncate_partial_tail(
+        self,
+        identity: tuple[int, int],
+        *,
+        expected_size: int,
+        truncate_size: int,
+    ) -> None:
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        if no_follow is None:
+            raise QualificationError("qualification ledger cannot be opened safely")
+        try:
+            descriptor = os.open(
+                self.path,
+                os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | no_follow,
+            )
+        except OSError as error:
+            raise QualificationError(
+                "qualification ledger partial tail cannot be repaired safely"
+            ) from error
+        try:
+            if self._file_identity(descriptor) != identity:
+                raise QualificationError("qualification ledger changed while locked")
+            if os.fstat(descriptor).st_size != expected_size:
+                raise QualificationError("qualification ledger changed while locked")
+            os.ftruncate(descriptor, truncate_size)
+            os.fsync(descriptor)
+            if (
+                self._file_identity(descriptor) != identity
+                or os.fstat(descriptor).st_size != truncate_size
+            ):
+                raise QualificationError("qualification ledger changed while locked")
+        finally:
+            os.close(descriptor)
+
+    def _append_under_lock(
         self,
         event: str,
         *,
         plan_digest: str,
-        recipe: str | None = None,
-        payload: Mapping[str, object] | None = None,
+        recipe: str | None,
+        payload: Mapping[str, object] | None,
     ) -> dict[str, object]:
         previous = str(self.records[-1]["record_sha256"]) if self.records else "0" * 64
         unsigned: dict[str, object] = {
@@ -401,37 +543,163 @@ class EvidenceLedger:
             "previous_sha256": previous,
         }
         record = {**unsigned, "record_sha256": _digest(unsigned)}
+        encoded = _canonical(record) + b"\n"
+        if len(encoded) > self.MAX_RECORD_BYTES:
+            raise QualificationError(
+                f"qualification ledger record is {len(encoded)} bytes; "
+                f"limit is {self.MAX_RECORD_BYTES}"
+            )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         no_follow = getattr(os, "O_NOFOLLOW", None)
         if no_follow is None:
             raise QualificationError("qualification ledger cannot be opened safely")
-        descriptor = os.open(
-            self.path,
-            os.O_APPEND
-            | os.O_CREAT
-            | os.O_WRONLY
-            | getattr(os, "O_CLOEXEC", 0)
-            | no_follow,
-            0o600,
-        )
+        flags = os.O_RDWR | os.O_APPEND | getattr(os, "O_CLOEXEC", 0) | no_follow
+        creating = self._identity is None
+        if creating:
+            flags |= os.O_CREAT | os.O_EXCL
         try:
-            metadata = os.fstat(descriptor)
-            getuid = getattr(os, "getuid", None)
-            if (
-                not stat.S_ISREG(metadata.st_mode)
-                or (getuid is not None and metadata.st_uid != getuid())
-                or stat.S_IMODE(metadata.st_mode) & 0o077
-            ):
-                raise QualificationError("qualification ledger is not private")
-            encoded = _canonical(record) + b"\n"
+            descriptor = os.open(self.path, flags, 0o600)
+        except FileExistsError as error:
+            raise QualificationError(
+                "qualification ledger changed while locked"
+            ) from error
+        except OSError as error:
+            if error.errno == getattr(errno, "ELOOP", -1):
+                raise QualificationError(
+                    "qualification ledger must be a regular file"
+                ) from error
+            raise
+        try:
+            identity = self._file_identity(descriptor)
+            if self._identity is not None and identity != self._identity:
+                raise QualificationError("qualification ledger changed while locked")
+            size = os.fstat(descriptor).st_size
+            if size != self._file_size:
+                raise QualificationError("qualification ledger changed while locked")
+            if size > self.MAX_LEDGER_BYTES:
+                raise QualificationError(
+                    f"qualification ledger is {size} bytes; limit is "
+                    f"{self.MAX_LEDGER_BYTES}"
+                )
+            new_size = size + len(encoded)
+            if new_size > self.MAX_LEDGER_BYTES:
+                raise QualificationError(
+                    f"qualification ledger would be {new_size} bytes; limit is "
+                    f"{self.MAX_LEDGER_BYTES}"
+                )
             offset = 0
             while offset < len(encoded):
-                offset += os.write(descriptor, encoded[offset:])
+                written = os.write(descriptor, encoded[offset:])
+                if written <= 0:
+                    raise QualificationError(
+                        "qualification ledger append made no progress"
+                    )
+                offset += written
             os.fsync(descriptor)
+            if os.fstat(descriptor).st_size != new_size:
+                raise QualificationError("qualification ledger append size changed")
+            if creating:
+                self._fsync_parent_directory()
+            self._identity = identity
+            self._file_size = new_size
         finally:
             os.close(descriptor)
         self.records.append(record)
         return record
+
+    def _fsync_parent_directory(self) -> None:
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(self.path.parent, flags)
+        except OSError as error:
+            raise QualificationError(
+                "qualification ledger directory cannot be opened safely"
+            ) from error
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise QualificationError(
+                    "qualification ledger parent must be a directory"
+                )
+            try:
+                named = self.path.parent.lstat()
+            except FileNotFoundError as error:
+                raise QualificationError(
+                    "qualification ledger parent changed while locked"
+                ) from error
+            if not stat.S_ISDIR(named.st_mode) or (
+                metadata.st_dev,
+                metadata.st_ino,
+            ) != (named.st_dev, named.st_ino):
+                raise QualificationError(
+                    "qualification ledger parent changed while locked"
+                )
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def _refresh_if_changed_under_lock(self) -> None:
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        if no_follow is None:
+            raise QualificationError("qualification ledger cannot be opened safely")
+        try:
+            descriptor = os.open(
+                self.path,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | no_follow,
+            )
+        except FileNotFoundError:
+            if self._identity is not None:
+                raise QualificationError("qualification ledger changed while locked")
+            self.records = []
+            self._file_size = 0
+            return
+        except OSError as error:
+            if error.errno == getattr(errno, "ELOOP", -1):
+                raise QualificationError(
+                    "qualification ledger must be a regular file"
+                ) from error
+            raise
+        try:
+            identity = self._file_identity(descriptor)
+            size = os.fstat(descriptor).st_size
+        finally:
+            os.close(descriptor)
+        if self._identity is not None and identity != self._identity:
+            raise QualificationError("qualification ledger changed while locked")
+        if self._identity is None or size != self._file_size:
+            self.records = self._read_under_lock()
+
+    def append(
+        self,
+        event: str,
+        *,
+        plan_digest: str,
+        recipe: str | None = None,
+        payload: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        if self._ledger_lock_held:
+            self._refresh_if_changed_under_lock()
+            return self._append_under_lock(
+                event,
+                plan_digest=plan_digest,
+                recipe=recipe,
+                payload=payload,
+            )
+        from .qualification_locking import ledger_lock
+
+        with ledger_lock(self.path):
+            self._refresh_if_changed_under_lock()
+            return self._append_under_lock(
+                event,
+                plan_digest=plan_digest,
+                recipe=recipe,
+                payload=payload,
+            )
 
     def recipe_records(self, plan_digest: str, recipe: str) -> list[dict[str, object]]:
         return [

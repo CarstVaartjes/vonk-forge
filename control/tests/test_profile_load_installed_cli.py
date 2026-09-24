@@ -467,7 +467,7 @@ def test_installed_interactive_review_recovers_the_original_load_after_edit(
     ]
     assert state.calls[2][2] == {
         "request_key": KEY,
-        "expected_plan_digest": digest,
+        "plan_digest": digest,
     }
     with sessions() as session:
         applications = list(session.scalars(select(FleetProfileApplication)))
@@ -555,7 +555,7 @@ def test_installed_json_no_input_load_requires_reviewed_digest_and_emits_one_res
     ]
     assert state.calls[0][2] == {
         "request_key": KEY,
-        "expected_plan_digest": digest,
+        "plan_digest": digest,
     }
     with sessions() as session:
         applications = list(session.scalars(select(FleetProfileApplication)))

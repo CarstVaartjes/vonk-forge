@@ -434,7 +434,7 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
 
     load_request: dict[str, object] = {
         "request_key": REQUEST_KEY,
-        "expected_plan_digest": "c" * 64,
+        "plan_digest": "c" * 64,
     }
     assert _cli(
         cli_transport,

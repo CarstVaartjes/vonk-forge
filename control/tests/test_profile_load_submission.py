@@ -65,11 +65,11 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
     sessions, api, codec, headers, preview = _profile_api(postgres_engine)
     path = "/api/profile/1/load"
     key = str(uuid4())
-    body = {"request_key": key, "expected_plan_digest": preview["plan_digest"]}
+    body = {"request_key": key, "plan_digest": preview["plan_digest"]}
     for missing in (
         {},
         {"request_key": key},
-        {"expected_plan_digest": preview["plan_digest"]},
+        {"plan_digest": preview["plan_digest"]},
         {**body, "dry_run": True},
     ):
         assert api.post(path, headers=headers, json=missing).status_code == 422
@@ -91,7 +91,7 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
     assert stale_review.headers["x-vonk-error-code"] == "profile.stale_plan"
     assert (
         api.post(
-            path, headers=headers, json={**body, "expected_plan_digest": "f" * 64}
+            path, headers=headers, json={**body, "plan_digest": "f" * 64}
         ).status_code
         == 409
     )
@@ -202,7 +202,7 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
     assert [method for method, _, _ in calls] == ["POST", "GET"]
     assert calls[0][2] == {
         "request_key": key,
-        "expected_plan_digest": preview["plan_digest"],
+        "plan_digest": preview["plan_digest"],
     }
     assert calls[1][1].endswith(f"/api/profile/1/requests/{key}")
     with sessions() as session:
@@ -250,7 +250,7 @@ def test_change_between_fresh_review_and_admission_refuses_load(
         headers=headers,
         json={
             "request_key": str(uuid4()),
-            "expected_plan_digest": preview["plan_digest"],
+            "plan_digest": preview["plan_digest"],
         },
     )
     assert response.status_code == (403 if change == "authority" else 409), (
@@ -268,7 +268,7 @@ def test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_revie
     first_committed = threading.Event()
     second_request = ContextVar("second_request", default=False)
     original = FleetProfileService.preview
-    body = {"request_key": str(uuid4()), "expected_plan_digest": preview["plan_digest"]}
+    body = {"request_key": str(uuid4()), "plan_digest": preview["plan_digest"]}
 
     def preview_after_lookup(service, *args, **kwargs):
         rendezvous.wait(timeout=5)
@@ -345,7 +345,7 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
                 headers=headers,
                 json={
                     "request_key": str(uuid4()),
-                    "expected_plan_digest": preview["plan_digest"],
+                    "plan_digest": preview["plan_digest"],
                 },
             )
             try:
@@ -440,7 +440,7 @@ def test_recipe_head_changed_after_review_is_not_substituted_into_admitted_inten
         headers=headers,
         json={
             "request_key": str(uuid4()),
-            "expected_plan_digest": preview["plan_digest"],
+            "plan_digest": preview["plan_digest"],
         },
     )
     assert response.status_code == 409, response.text
@@ -536,7 +536,7 @@ def test_workload_change_between_review_and_acceptance_is_refused(
         headers=headers,
         json={
             "request_key": str(uuid4()),
-            "expected_plan_digest": preview["plan_digest"],
+            "plan_digest": preview["plan_digest"],
         },
     )
     assert response.status_code == 409, response.text
@@ -588,7 +588,7 @@ def test_admission_serializes_run_replacement_until_acceptance_commits(
                 headers=headers,
                 json={
                     "request_key": str(uuid4()),
-                    "expected_plan_digest": preview["plan_digest"],
+                    "plan_digest": preview["plan_digest"],
                 },
             )
             try:
@@ -772,7 +772,7 @@ def test_superseded_child_contention_refuses_without_holding_admission(
                 headers=headers,
                 json={
                     "request_key": str(uuid4()),
-                    "expected_plan_digest": preview["plan_digest"],
+                    "plan_digest": preview["plan_digest"],
                 },
             )
             try:

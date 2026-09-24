@@ -442,7 +442,7 @@ def _exercise_smoke(
         assert stale["changed"] is True and stale["status"] == 200
         submitted = stale["body"]
         assert isinstance(submitted, dict)
-        assert submitted["expected_plan_digest"] == old_digest
+        assert submitted["plan_digest"] == old_digest
         assert submitted["request_key"] == _STALE_REQUEST_KEY
         assert status == 2
         assert not stdout
@@ -524,11 +524,11 @@ def _exercise_smoke(
         ]
         assert len(load_bodies) == 2
         assert load_bodies[0] == {
-            "expected_plan_digest": old_digest,
+            "plan_digest": old_digest,
             "request_key": _STALE_REQUEST_KEY,
         }
         assert load_bodies[1] == {
-            "expected_plan_digest": current_digest,
+            "plan_digest": current_digest,
             "request_key": _ACCEPTED_REQUEST_KEY,
         }
 

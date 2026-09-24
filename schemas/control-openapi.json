@@ -5590,9 +5590,9 @@
       "FleetProfileLoadRequest": {
         "additionalProperties": false,
         "properties": {
-          "expected_plan_digest": {
+          "plan_digest": {
             "pattern": "^[0-9a-f]{64}$",
-            "title": "Expected Plan Digest",
+            "title": "Plan Digest",
             "type": "string"
           },
           "request_key": {
@@ -5602,7 +5602,7 @@
           }
         },
         "required": [
-          "expected_plan_digest",
+          "plan_digest",
           "request_key"
         ],
         "title": "FleetProfileLoadRequest",

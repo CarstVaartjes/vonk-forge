@@ -521,7 +521,50 @@ before saving; the web editor likewise sends the selected library row's
 canonical selector. It does not pin a recipe revision or declare a subset scope.
 The Controller returns warnings for incomplete groups and resource pressure at
 save time. A load preview reports blockers, resolved immutable identities, the
-whole-fleet snapshot, resource fit, and the plan it will bind internally.
+whole-fleet snapshot, resource fit, and a `plan_digest`. The CLI submits that
+digest with the load request, and the Controller rejects the request if the
+preview no longer describes the current plan.
+
+### Sequential recipe qualification
+
+`vonk-fleet-qualify-campaign` executes one reviewed authority row at a time.
+Use the campaign manifest and recipe checkout named by the current qualification
+plan, plus a durable ledger outside that checkout. Reserve a dedicated profile
+with `installation_policy=keep-cached` and labels
+`qualification-authority=<authority ID>` and
+`qualification-ledger=<runner ledger identity>`. The ledger identity is the
+first 63 hexadecimal characters of the SHA-256 of its resolved absolute path.
+
+The checkout must contain the Git objects for the catalog's exact `source_commit`:
+the runner reads its canonical archive validator from that commit, never from
+mutable working-tree code. For a shallow checkout, fetch that exact commit from
+the reviewed recipe repository before running; the runner never fetches code
+implicitly during validation.
+
+Preview requires `--manifest`, `--library-root`, `--ledger`, `--profile-number`,
+`--recipe`, and the exact Controller `--spark` IDs for that row. It saves the
+recipe assignment in this dedicated profile and records the reviewed preview;
+it does not load the profile. Every profile covers the full enrolled fleet,
+including Sparks left idle. A dual-Spark row also requires `--failure-spark`
+to identify its later recovery checkpoint.
+
+Prepare missing NAS assets through `vonkctl recipe download` before preview.
+Spark-local copies may be cold: the accepted plan owns their transfer. If a
+healthy workload already occupies the fleet, both preview and apply require
+`--replace-run-id` naming that exact run. Its observed membership and planned
+interruption become part of the reviewed campaign digest.
+
+To execute, repeat the reviewed selection with `--apply --campaign-digest DIGEST`.
+Add `--accept-operator-gate RECIPE` and `--accept-capacity-review RECIPE` only for
+the gates declared by that row. Preview provides the evidence for these apply
+acknowledgements. A changed plan or run requires a fresh preview.
+
+Use `--observe` with the same manifest, library, ledger, profile and recipe to
+reconcile an interrupted submission or advance a recorded physical checkpoint.
+Observe takes no Spark selection or acknowledgement flags. Follow its reported
+checkpoint instructions for rank loss and host restart; those physical actions
+are operator-run. A passing initial smoke is not complete physical acceptance.
+Cleanup stops the campaign workload and retains verified cached assets.
 
 The preview identifies each endpoint/run it will keep or stop, each installation
 it will retain or remove, complete distributed Spark groups, and pending orders

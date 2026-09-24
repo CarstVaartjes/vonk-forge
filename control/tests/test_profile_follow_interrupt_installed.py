@@ -262,7 +262,7 @@ def test_installed_follow_timeout_stays_with_original_application_after_newer_lo
                 f"/api/profile/{profile.number}/load",
                 json={
                     "request_key": str(uuid4()),
-                    "expected_plan_digest": preview["plan_digest"],
+                    "plan_digest": preview["plan_digest"],
                 },
                 headers=headers,
             )

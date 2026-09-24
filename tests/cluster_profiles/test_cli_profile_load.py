@@ -58,7 +58,7 @@ class Client:
                 ),
             }
         assert path.endswith("/load")
-        assert payload == {"request_key": KEY, "expected_plan_digest": DIGEST}
+        assert payload == {"request_key": KEY, "plan_digest": DIGEST}
         return {
             "id": APPLICATION,
             "request_key": KEY,
@@ -540,7 +540,7 @@ def test_unbound_load_receipt_is_only_looked_up_and_never_replayed(binding, caps
             "/api/profile/2/load",
             {
                 "request_key": KEY,
-                "expected_plan_digest": DIGEST,
+                "plan_digest": DIGEST,
             },
         ),
         ("GET", f"/api/profile/2/requests/{KEY}", None),

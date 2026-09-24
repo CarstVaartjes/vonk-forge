@@ -20,11 +20,11 @@ T = TypeVar("T", bound="FleetProfileLoadRequest")
 class FleetProfileLoadRequest:
     """
         Attributes:
-            expected_plan_digest (str):
+            plan_digest (str):
             request_key (str):
      """
 
-    expected_plan_digest: str
+    plan_digest: str
     request_key: str
 
 
@@ -32,7 +32,7 @@ class FleetProfileLoadRequest:
 
 
     def to_dict(self) -> dict[str, Any]:
-        expected_plan_digest = self.expected_plan_digest
+        plan_digest = self.plan_digest
 
         request_key = self.request_key
 
@@ -40,7 +40,7 @@ class FleetProfileLoadRequest:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "expected_plan_digest": expected_plan_digest,
+            "plan_digest": plan_digest,
             "request_key": request_key,
         })
 
@@ -51,12 +51,12 @@ class FleetProfileLoadRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        expected_plan_digest = d.pop("expected_plan_digest")
+        plan_digest = d.pop("plan_digest")
 
         request_key = d.pop("request_key")
 
         fleet_profile_load_request = cls(
-            expected_plan_digest=expected_plan_digest,
+            plan_digest=plan_digest,
             request_key=request_key,
         )
 

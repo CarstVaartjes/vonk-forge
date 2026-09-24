@@ -16,14 +16,14 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.jobs import JobService
-from vonk_control.models import Base, User
+from vonk_control.models import AgentNode, Base, User
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
 
 
 def _client(
-    sessions=None, *, profiles=None, operations=None
+    sessions=None, *, profiles=None, operations=None, with_idle_spark=False
 ) -> tuple[TestClient, TokenCodec]:
     if sessions is None:
         engine = create_engine(
@@ -42,6 +42,18 @@ def _client(
         ):
             if session.scalar(select(User).where(User.subject == subject)) is None:
                 session.add(User(subject=subject, role=role))
+    if with_idle_spark:
+        with sessions.begin() as session:
+            session.add(
+                AgentNode(
+                    node_id="spk_" + "1" * 32,
+                    state="active",
+                    protocol_version=1,
+                    architecture="linux-arm64",
+                    capabilities=[],
+                    last_seen_at=datetime(2026, 9, 10, tzinfo=UTC),
+                )
+            )
     codec = TokenCodec(b"p" * 32)
     app = create_app(
         jobs=JobService(sessions, clock=lambda: datetime(2026, 9, 10, tzinfo=UTC)),
@@ -338,3 +350,56 @@ def test_production_app_composes_fleet_profiles_with_preparation_authority() -> 
     source = inspect.getsource(api.production_app)
     assert "build_production_fleet_profile_service(" in source
     assert "FleetProfileService(" not in source
+
+
+def test_profile_load_requires_and_applies_the_reviewed_preview_digest() -> None:
+    client, codec = _client(with_idle_spark=True)
+    headers = _headers(codec, "administrator")
+    saved = client.put(
+        "/api/profile/1",
+        headers=headers,
+        json={"name": "Empty profile", "expected_revision": 0},
+    )
+    assert saved.status_code == 200
+
+    first_preview = client.post("/api/profile/1/preview", headers=headers)
+    assert first_preview.status_code == 200
+    old_digest = first_preview.json()["plan_digest"]
+    assert first_preview.json()["allowed"] is True
+
+    missing = client.post(
+        "/api/profile/1/load",
+        headers=headers,
+        json={"request_key": "11111111-1111-4111-8111-111111111111"},
+    )
+    assert missing.status_code == 422
+
+    changed = client.put(
+        "/api/profile/1",
+        headers=headers,
+        json={"name": "Renamed profile", "expected_revision": saved.json()["revision"]},
+    )
+    assert changed.status_code == 200
+
+    stale = client.post(
+        "/api/profile/1/load",
+        headers=headers,
+        json={
+            "plan_digest": old_digest,
+            "request_key": "22222222-2222-4222-8222-222222222222",
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.headers["x-vonk-error-code"] == "profile.stale_plan"
+
+    current_preview = client.post("/api/profile/1/preview", headers=headers)
+    loaded = client.post(
+        "/api/profile/1/load",
+        headers=headers,
+        json={
+            "plan_digest": current_preview.json()["plan_digest"],
+            "request_key": "33333333-3333-4333-8333-333333333333",
+        },
+    )
+    assert loaded.status_code == 202
+    assert loaded.json()["profile_id"] == changed.json()["id"]

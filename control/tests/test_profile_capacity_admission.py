@@ -210,7 +210,7 @@ def test_load_refuses_capacity_lost_after_its_last_preview(
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "expected_plan_digest": review["plan_digest"],
+            "plan_digest": review["plan_digest"],
             "request_key": str(uuid4()),
         },
     )
@@ -402,7 +402,7 @@ def test_admission_accepts_changed_headroom_without_reopening_storage_or_capabil
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "expected_plan_digest": review["plan_digest"],
+            "plan_digest": review["plan_digest"],
             "request_key": str(uuid4()),
         },
     )
@@ -453,7 +453,7 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
             f"/api/profile/{profile.number}/load",
             headers=headers,
             json={
-                "expected_plan_digest": review["plan_digest"],
+                "plan_digest": review["plan_digest"],
                 "request_key": str(uuid4()),
             },
         )

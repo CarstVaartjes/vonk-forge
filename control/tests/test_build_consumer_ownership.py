@@ -304,7 +304,7 @@ def test_profile_acceptance_joins_the_build_cancellation_boundary(
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers).json()
     assert review["allowed"], review
     request_key = str(uuid.uuid4())
-    body = {"expected_plan_digest": review["plan_digest"], "request_key": request_key}
+    body = {"plan_digest": review["plan_digest"], "request_key": request_key}
     with sessions.begin() as blocker:
         blocker.scalar(select(RecipeBuild).with_for_update())
         response = api.post(
@@ -360,7 +360,7 @@ def test_profile_holds_build_dependency_until_its_acceptance_commits(
             f"/api/profile/{profile.number}/load",
             headers=headers,
             json={
-                "expected_plan_digest": review["plan_digest"],
+                "plan_digest": review["plan_digest"],
                 "request_key": str(uuid.uuid4()),
             },
         )

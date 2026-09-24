@@ -905,7 +905,7 @@ def _submit_profile_load(
     lookup = f"/api/profile/{number}/requests/{key}"
     body: dict[str, object] = {
         "request_key": key,
-        "expected_plan_digest": expected_digest,
+        "plan_digest": expected_digest,
     }
 
     def validate(result: Mapping[str, object]) -> str:

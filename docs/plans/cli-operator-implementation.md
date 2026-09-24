@@ -835,7 +835,7 @@ progress/intended contracts, `fleet_profile_api.py`, and `fleet_profiles.py`
 (`load`, `preview`, `_queue_application`, `application_by_request_key`). Update
 all generated clients and existing load call sites in the same PR.
 
-1. Require `expected_plan_digest` and a client-generated `request_key` in the
+1. Require `plan_digest` and a client-generated `request_key` in the
    current schema-2 load request. Remove its unused `dry_run` field and active
    callers; dry-run already uses the separate preview route. There is one
    authorized load path, with no old-body fallback.

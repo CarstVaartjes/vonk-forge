@@ -42,7 +42,7 @@ def test_profile_disk_claim_blocks_competing_install_and_is_inherited(
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "expected_plan_digest": review["plan_digest"],
+            "plan_digest": review["plan_digest"],
             "request_key": str(uuid4()),
         },
     )
@@ -113,7 +113,7 @@ def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "expected_plan_digest": review["plan_digest"],
+            "plan_digest": review["plan_digest"],
             "request_key": str(uuid4()),
         },
     )
@@ -190,7 +190,7 @@ def test_supersession_and_failed_dispatch_release_only_unassigned_claims(
             f"/api/profile/{profile.number}/load",
             headers=headers,
             json={
-                "expected_plan_digest": review["plan_digest"],
+                "plan_digest": review["plan_digest"],
                 "request_key": str(uuid4()),
             },
         )

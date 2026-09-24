@@ -2923,8 +2923,8 @@ export interface components {
         };
         /** FleetProfileLoadRequest */
         FleetProfileLoadRequest: {
-            /** Expected Plan Digest */
-            expected_plan_digest: string;
+            /** Plan Digest */
+            plan_digest: string;
             /** Request Key */
             request_key: string;
         };

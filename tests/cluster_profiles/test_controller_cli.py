@@ -1422,7 +1422,7 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
     ]
     assert client.calls[0][2] == {
         "request_key": "11111111-1111-4111-8111-111111111111",
-        "expected_plan_digest": "c" * 64,
+        "plan_digest": "c" * 64,
     }
 
 

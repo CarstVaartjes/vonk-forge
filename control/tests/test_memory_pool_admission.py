@@ -272,7 +272,7 @@ def test_changed_physical_pool_requires_a_new_profile_review(tmp_path, postgres_
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "expected_plan_digest": reviewed["plan_digest"],
+            "plan_digest": reviewed["plan_digest"],
             "request_key": str(uuid4()),
         },
     )

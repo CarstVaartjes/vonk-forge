@@ -3,8 +3,8 @@
 Vonk Forge is a private control plane for one NVIDIA DGX Spark or a fleet. The
 controller runs on any local computer with Docker Compose—your laptop, a NAS, or
 a server—and owns the Web UI, API, PostgreSQL state, identity, policy, and
-runtime secrets. Native Spark agents connect outbound; normal operation does not
-require routine SSH.
+runtime secrets. Native Spark agents connect outbound; normal Spark operation
+does not require routine SSH.
 
 ## Choose your path
 
@@ -19,6 +19,7 @@ require routine SSH.
 | Use the complete terminal interface | [`vonkctl` guide](runbooks/vonkctl.md) |
 | Improve and qualify the terminal interface | [CLI operator experience plan](plans/cli-operator-experience.md) |
 | Implement the terminal interface improvements | [Detailed CLI implementation plan](plans/cli-operator-implementation.md) |
+| Use unattended credentials and redeploy NAS Compose | [Operator CLI access](runbooks/operator-cli-access.md) |
 | Deploy or upgrade the Docker Compose project | [Controller-host deployment](../deploy/compose/README.md) |
 | Configure Tailscale before first install | [Tailscale fresh-install preflight](runbooks/tailscale.md#fresh-install-preflight) |
 | Understand identities and trust | [Security threat model](security/threat-model.md) |
