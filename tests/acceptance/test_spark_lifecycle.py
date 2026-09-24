@@ -2293,15 +2293,9 @@ class SparkLifecycle:
                     "synthetic canary preparation receipts are incomplete"
                 )
 
-            _, application_payload = self.control.request(
-                "POST",
-                "/api/profile/1/load",
-                {
-                    "request_key": self._canary_request_key(
-                        fixture, node_id, "profile-load"
-                    )
-                },
-                allowed=(202,),
+            application_payload = self._load_canary_profile(
+                preview,
+                request_key=self._canary_request_key(fixture, node_id, "profile-load"),
             )
             application = self._await_profile_application(
                 require_object(
@@ -2411,15 +2405,11 @@ class SparkLifecycle:
                     "synthetic canary cleanup preview is not admitted: "
                     + self._preview_diagnostic(cleanup_preview)
                 ) from error
-            _, cleanup_application_payload = self.control.request(
-                "POST",
-                "/api/profile/1/load",
-                {
-                    "request_key": self._canary_request_key(
-                        fixture, node_id, "profile-cleanup"
-                    )
-                },
-                allowed=(202,),
+            cleanup_application_payload = self._load_canary_profile(
+                cleanup_preview,
+                request_key=self._canary_request_key(
+                    fixture, node_id, "profile-cleanup"
+                ),
             )
             cleanup_application = self._await_profile_application(
                 require_object(
@@ -2480,6 +2470,25 @@ class SparkLifecycle:
             "completed_states": completed,
             "deterministic_response_sha256": response_digest,
         }
+
+    def _load_canary_profile(
+        self, preview: dict[str, object], *, request_key: str
+    ) -> object:
+        from vonk_control.fleet_profile_contract import FleetProfileLoadRequest
+
+        assert self.control is not None
+        request = FleetProfileLoadRequest.model_validate_json(
+            _canonical(
+                {"request_key": request_key, "plan_digest": preview.get("plan_digest")}
+            )
+        )
+        _, payload = self.control.request(
+            "POST",
+            "/api/profile/1/load",
+            request.model_dump(mode="json"),
+            allowed=(202,),
+        )
+        return payload
 
     @staticmethod
     def _canary_request_key(
