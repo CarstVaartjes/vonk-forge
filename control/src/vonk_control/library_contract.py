@@ -10,6 +10,7 @@ from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
+from .cursor_contract import MAX_CURSOR_LENGTH
 from .run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
 from .strict_json import StrictJSONModel
 
@@ -253,7 +254,7 @@ class ModelLibraryResponse(_StrictModel):
     generated_at: datetime
     models: list[LibraryModelProjection] = Field(max_length=_MAX_PAGE_RECIPES)
     facets: LibraryFacetValues
-    next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
+    next_cursor: Annotated[str, StringConstraints(max_length=MAX_CURSOR_LENGTH)] | None
     filters: LibraryFilterValues = Field(default_factory=LibraryFilterValues)
     freshness_policy: FreshnessPolicy
 
@@ -308,7 +309,7 @@ class RecipeLibraryResponse(_StrictModel):
     generated_at: datetime
     recipes: list[LibraryRecipeProjection] = Field(max_length=_MAX_PAGE_RECIPES)
     facets: LibraryFacetValues
-    next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
+    next_cursor: Annotated[str, StringConstraints(max_length=MAX_CURSOR_LENGTH)] | None
     filters: LibraryFilterValues = Field(default_factory=LibraryFilterValues)
     freshness_policy: FreshnessPolicy
 

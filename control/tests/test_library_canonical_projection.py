@@ -171,18 +171,20 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
         cursors=TokenCodec(b"p" * 32).cursor_codec(),
         clock=clock,
     )
-    model_page = projection.models(limit=100)
-    model_items = list(model_page.models)
-    model_cursor = model_page.next_cursor
-    while model_cursor is not None:
-        next_page = projection.models(limit=100, cursor=model_cursor)
-        model_items.extend(next_page.models)
-        model_cursor = next_page.next_cursor
-    model_page = model_page.model_copy(update={"models": model_items})
-    assert len(model_page.models) == expected_model_count
-    assert {model.identity.content_sha256 for model in model_page.models} == set(
-        expected_models
-    )
+    models = []
+    model_page = None
+    cursor = None
+    while True:
+        page = projection.models(limit=100, cursor=cursor)
+        if model_page is None:
+            model_page = page
+        models.extend(page.models)
+        if page.next_cursor is None:
+            break
+        cursor = page.next_cursor
+    assert model_page is not None
+    assert len(models) == expected_model_count
+    assert {model.identity.content_sha256 for model in models} == set(expected_models)
     recipe_page = projection.recipe_library(limit=100, all_models=True)
     recipe_items = list(recipe_page.recipes)
     recipe_cursor = recipe_page.next_cursor
@@ -195,6 +197,24 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     recipe_page = recipe_page.model_copy(update={"recipes": recipe_items})
     assert len(recipe_page.recipes) == expected_recipe_count
     assert {item.identity.recipe_id for item in recipe_page.recipes} == recipe_ids
+    for sort in ("name", "updated"):
+        first_page = projection.recipe_library(
+            limit=1,
+            all_models=True,
+            sort=sort,
+        )
+        assert first_page.next_cursor is not None
+        second_page = projection.recipe_library(
+            limit=1,
+            all_models=True,
+            sort=sort,
+            cursor=first_page.next_cursor,
+        )
+        assert second_page.recipes
+        assert (
+            second_page.recipes[0].identity.content_sha256
+            != first_page.recipes[0].identity.content_sha256
+        )
     for item in recipe_page.recipes:
         assert (
             item.identity.recipe_revision_id
@@ -207,12 +227,12 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
 
     # Creator is faceted and filterable on both nouns.
     assert set(model_page.facets.publisher) == {
-        model.identity.publisher for model in model_page.models
+        model.identity.publisher for model in models
     }
     assert set(recipe_page.facets.publisher) >= {
         item.identity.publisher for item in recipe_page.recipes
     }
-    creator = min({model.identity.publisher for model in model_page.models})
+    creator = min({model.identity.publisher for model in models})
     creator_models = projection.models(limit=100, publisher=[creator]).models
     assert creator_models
     assert {model.identity.publisher for model in creator_models} == {creator}
@@ -231,7 +251,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert len(abliterated) == sum(
         1 for item in recipe_page.recipes if item.alignment == "abliterated"
     )
-    assert any("abliterated" in model.alignment for model in model_page.models)
+    assert any("abliterated" in model.alignment for model in models)
 
     # Sparks is the recipe topology node count, faceted and filterable.
     assert {item.node_count for item in recipe_page.recipes} == set(
@@ -246,7 +266,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
 
     # Several model selectors are a union. A repeated query parameter used to
     # reach a single-value parameter, so every selector but the last was lost.
-    selectors = sorted({model.selector for model in model_page.models})
+    selectors = sorted({model.selector for model in models})
     first, second = selectors[0], selectors[1]
     one = {
         item.identity.recipe_id
@@ -275,14 +295,16 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
         projection=projection,
     )
     client = TestClient(app)
-    response = client.get("/api/model/library")
+    response = client.get("/api/model/library", params={"limit": 512})
     assert response.status_code == 200
     assert len(response.content) <= MAX_CONTROL_DOCUMENT_BYTES
     payload = response.json()
     model_rows = list(payload["models"])
     model_cursor = payload["next_cursor"]
     while model_cursor is not None:
-        response = client.get("/api/model/library", params={"cursor": model_cursor})
+        response = client.get(
+            "/api/model/library", params={"limit": 512, "cursor": model_cursor}
+        )
         assert response.status_code == 200
         assert len(response.content) <= MAX_CONTROL_DOCUMENT_BYTES
         payload = response.json()
@@ -417,8 +439,17 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
     tmp_path: Path,
 ) -> None:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
-    model_document = copy.deepcopy(index["catalog_entities"][0]["document"])
     recipe_document = copy.deepcopy(index["recipes"][0]["document"])
+    selected_model = RecipeDefinition.model_validate(recipe_document).models[0].model
+    model_document = copy.deepcopy(
+        next(
+            entry["document"]
+            for entry in index["catalog_entities"]
+            if entry["content_sha256"] == selected_model.content_sha256
+            and entry["document"]["identity"]["publisher"] == selected_model.publisher
+            and entry["document"]["identity"]["slug"] == selected_model.slug
+        )
+    )
     engine = create_engine(f"sqlite:///{tmp_path / 'local-state.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
