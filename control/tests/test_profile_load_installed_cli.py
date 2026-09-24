@@ -319,19 +319,38 @@ def _process_environment(
     token = tmp_path / "controller-token"
     token.write_text(headers["Authorization"].removeprefix("Bearer "), encoding="utf-8")
     token.chmod(0o600)
+    default_recipe_root = "/opt/vonk-forge-recipes"
     return {
         **os.environ,
         "PYTHONPATH": "",
         "VONK_CONTROL_URL": url,
         "VONK_CONTROL_TOKEN_FILE": str(token),
         "VONK_CLI_UPDATE_NOTICES": "0",
-        "VONK_RECIPE_LIBRARY_ROOT": "/opt/vonk-forge-recipes",
+        "VONK_RECIPE_LIBRARY_ROOT": os.environ.get(
+            "VONK_RECIPE_LIBRARY_ROOT", default_recipe_root
+        ),
         "SSL_CERT_FILE": str(certificate),
         "NO_PROXY": "127.0.0.1,localhost",
         "no_proxy": "127.0.0.1,localhost",
         "HTTPS_PROXY": "",
         "https_proxy": "",
     }
+
+
+def test_process_environment_preserves_recipe_library_root_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    expected_root = tmp_path / "selected-recipes"
+    monkeypatch.setenv("VONK_RECIPE_LIBRARY_ROOT", str(expected_root))
+
+    environment = _process_environment(
+        tmp_path,
+        "https://controller.example.test",
+        tmp_path / "controller.pem",
+        {"Authorization": "Bearer fixture-token"},
+    )
+
+    assert environment["VONK_RECIPE_LIBRARY_ROOT"] == str(expected_root)
 
 
 def _run_pty(

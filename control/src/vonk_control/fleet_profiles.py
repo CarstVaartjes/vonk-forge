@@ -2179,9 +2179,11 @@ class FleetProfileService:
                 )
                 for rank, node_id in enumerate(choice.spark_ids)
             ]
-            alias = choice.assignment_name
-            if choice.desired_state == "running" and alias is None:
-                alias = self._assignment_selector(choice)
+            alias = (
+                self._assignment_selector(choice)
+                if choice.desired_state == "running"
+                else None
+            )
             result.append(
                 FleetProfileAssignment(
                     id=_choice_id(choice),

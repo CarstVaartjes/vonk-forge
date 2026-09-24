@@ -1118,6 +1118,30 @@ def test_preview_isolates_an_unreadable_pending_plan() -> None:
         assert damaged.plan["steps"] == [{"kind": "not-a-step"}]
 
 
+@pytest.mark.parametrize("desired_state", ["installed", "running"])
+def test_named_assignment_keeps_authoring_name_without_inventing_an_endpoint(
+    desired_state: str,
+) -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    document = _input(revision_id).model_dump(mode="json")
+    document["assignments"][0]["desired_state"] = desired_state
+    saved = service.create(
+        FleetProfileInput.model_validate_json(json.dumps(document)), actor="admin"
+    )
+
+    # Re-read persisted authoring data before the real preview conversion.
+    stored = service.get(saved.id)
+    assert stored.definition.assignments[0].assignment_name == "studio-chat"
+    preview = service.preview(saved.id)
+    assignment = preview.resolved_assignments[0]
+    assert assignment.desired_state == desired_state
+    assert assignment.alias == ("studio-chat" if desired_state == "running" else None)
+
+
 def test_preview_reports_an_unreadable_pending_plan_without_a_scope() -> None:
     """Without a readable scope the preview blocks instead of guessing one."""
 

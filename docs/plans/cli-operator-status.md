@@ -24,7 +24,9 @@ is `0.1.1~dev.611+gf2be83c2f165`; it does not replace the publication source ide
 
 The independent human U1–U8 scorecard remains unperformed. W19 and the CLI
 handoff therefore remain open. The locally qualified Qwen CPU fixture and
-connected same-Profile journey are ready for that walkthrough. CI installer
+connected same-Profile journey have local execution evidence. The review
+corrections and their subsequent checks are recorded below; they do not supply
+the missing human results. CI installer
 acceptance does not establish deployment on the user's NAS/Sparks, physical
 frontier-model qualification, or the every-model campaign.
 
@@ -33,6 +35,78 @@ linked-journey/Qwen, and corrective worktrees were removed. Older worktrees
 containing uncommitted changes were preserved for separate reconciliation;
 cleanup did not discard them. Earlier evidence below is historical and retains
 its original revision and scope.
+
+## Acceptance review corrections — 2026-09-24
+
+Final fixture and code corrections are integrated at `45b0e602`. The protocol
+now maps all 13 technical scenarios separately from eight human cards, supplies
+a connected-gate run record, and records unclear terms, separate timing,
+assistance, redaction and retests. All 85 local links/anchors and 45 documented
+selectors in the changed guides resolve. Docker/OrbStack and Skopeo prerequisites
+are explicit; each acceptance invocation requires execution rather than skips.
+
+The participant runbook and valid/invalid/expired connection case files are
+staged privately. The smoke sources those actual files through a shell and
+asserts transport failure, HTTP 401 authentication refusal, and restored valid
+access. Restoring the old `--controller` flag makes it fail because the reported
+error is `arguments`, not `control_api`; restoring the supported connection check
+passes. Recipe-root overrides propagate into the installed process. The Qwen
+blocked row now binds the real model and a missing fixture image, and its exact
+preparation request is recorded as queued in PostgreSQL. Its corrected real CPU
+inference node passes in 177.65 seconds with no skips. Queued preparation is not
+completed preparation or a physical Spark result.
+
+The stricter preview check exposed a production bug: converting a named
+installed-only choice incorrectly created an endpoint alias. The conversion now
+retains the authoring name and produces an alias only for running intent. Its
+persist/store/read/preview regression fails with the old conversion and passes
+with the fix; all 50 fast Profile tests pass. No database schema changed. The
+walkthrough wires the real assessment provider without execution authority,
+then verifies the specific missing-authority reason and HTTP 409 refusal. The
+corrected operator, linked Profile, and read-only pipeline nodes pass together:
+3 passed, no skips, 26.62 seconds. The earlier combined run also passed the clock
+regression and all three installed Profile-load checks. Pinned Ruff, full Python
+types (one existing reviewed exception), and regenerated supply-chain verification
+pass. The human scorecard and completed acceptance-run ledger remain open.
+
+The external review found that the earlier invalid-connection smoke passed an
+unsupported `--controller` flag and therefore proved parser rejection, not a
+connection failure. That part of the old green run is withdrawn as evidence.
+The eight human cards also lacked an explicit mapping to three of W19's 13
+connected scenarios. Neither an earlier green smoke nor an incomplete scorecard
+closes W19.
+
+At correction commit `813b93f6`, the opt-in
+`-p control.tests.required_execution` gate rejects selected skips and expected
+failures, and rejects collection-only runs as acceptance. Normal test-suite skip
+policy is unchanged. Eight subprocess tests exercise these exit semantics.
+Twelve updater tests also pass, including a real signed-wheel installation into
+a disposable environment: the update result now reports the installed identity
+as `current` and retains the former identity as `previous`. A fresh CLI process
+must agree with the reported current identity. The combined run is 20 passed,
+no skips; pinned Ruff, full Python types (one existing reviewed exception), and
+supply-chain verification pass.
+
+Fresh connected evidence on that correction commit passes with the same strict
+gate and real PostgreSQL:
+
+- Ambiguous submit: `test_profile_load_submission.py::test_cli_recovers_committed_load_after_lost_response_and_profile_edit`.
+- Recipe update batch: `test_recipe_update_batch_installed_cli.py::test_installed_update_survives_cli_and_worker_death_with_frozen_cache_scope`.
+- Storage: `test_model_cache.py::test_interrupted_download_checkpoint_resumes_after_service_restart`,
+  `test_stored_bytes_without_a_receipt_are_not_admitted`, and
+  `test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes`.
+- Worker/storage recovery: all ten parametrizations of
+  `test_profile_build_process_recovery.py::test_profile_recovers_after_worker_process_death`.
+  These remove accepted image bytes and receipts, kill a worker subprocess,
+  reconnect after restart, and reject changed image/archive replacements. The
+  Spark executor is deterministic; this is not physical Spark acceptance.
+
+The first two scenarios pass two tests in 12.64 seconds. Storage and worker
+recovery pass 13 tests in 85.26 seconds. Files are under `control/tests/`; the
+[walkthrough protocol](cli-operator-walkthrough.md) owns the scenario map and
+reproducible invocations. Owner-level storage/process checks do not by themselves
+prove an unaided installed-CLI recovery journey. No human card has been performed
+by these automated runs.
 
 ## Automated integration checkpoint — 2026-09-24
 
@@ -307,10 +381,11 @@ qualifies W12's combined cancellation/removal race and adds W19's cleanup
 facilitator. Their local combined checks and full PR CI pass at `ab25b1d7`.
 W09's admission and durable asset-ownership implementation and this
 continuation have passing combined CI evidence at `ab25b1d7`, with the latest
-upstream/recovery integration qualified at `023466cf`. W19 still requires a
-genuine runnable U2 candidate, the same-profile author-to-endpoint journey,
-and an independent human scorecard. Passing an automated scenario does not
-fill that scorecard.
+upstream/recovery integration qualified at `023466cf`. The runnable U2 candidate
+and same-profile author-to-endpoint journey subsequently passed at `b1eee312`.
+W19 still requires the corrected acceptance protocol, explicit evidence records
+for all 13 scenarios, and an independent human scorecard. Passing an automated
+scenario does not fill that scorecard.
 
 | Package | State | Current evidence / remaining work |
 | --- | --- | --- |
@@ -333,7 +408,7 @@ fill that scorecard.
 | W16 | Repository and installed criteria proven | Draft/upload/submit/detail/cancel/verified-download and request recovery pass CLI/API, real byte-route and installed checks. Exact named output identity, atomic verified publication and partial recovery are covered; current combined gates pass. Optional-output recipes now accept a canonical empty manifest; required-output minima are enforced both during result consumption and successful response validation. Installed human and JSON checks distinguish queued/unavailable, empty success and required-output failure, and show verified local files. Definitive refusals now offer read-only inspection or a new review; ambiguous and already-accepted requests retain exact recovery guidance. |
 | W17 | Durable removal, pre-consent impact review and maintenance criteria proven | Upgrade/removal consent, one-at-a-time maintenance, exact-key replay and durable following pass focused checks. Stored recipe-removal replays now bind exact target, actor and model-retention choice with strict receipt validation. Concurrent first-submission ownership and durable pre-effect intent now pass connected and installed checks. The Controller now exposes exact pre-consent impact, current clients bind its digest, changed scope is refused, and installed replay and cleanup checks pass locally. |
 | W18 | Own repository and installed criteria proven; dependent delivery remains open | Real entry-point, shell, signed updater, terminal contexts and installed runbook/parser checks pass. Actual wheel/TLS/PostgreSQL tests cover delivered workflows. Combined source, generated contract, wire, build and supply-chain checks now pass. W19 remains required for the full handoff. |
-| W19 | In progress | Installed load, authoring, consent and closed-output acceptance exercise actual services/PostgreSQL; endpoint, connection, artifact-job, recipe cancellation and profile cancellation/Activity journeys also pass; interrupted update-batch, Find-and-prepare, sequential-upgrade and exact-resume acceptance pass. Current combined source/installed gates pass. The connected cancellation/removal case and U8 cleanup smoke now pass. A real runnable U2 candidate, the connected same-profile author-to-endpoint journey, and the independent operator walkthrough still block handoff. No deployed or physical claim. |
+| W19 | In progress | Installed load, authoring, consent and closed-output acceptance exercise actual services/PostgreSQL; endpoint, connection, artifact-job, recipe cancellation and profile cancellation/Activity journeys also pass; interrupted update-batch, Find-and-prepare, sequential-upgrade and exact-resume acceptance pass. Current combined source/installed gates pass. The connected cancellation/removal case and U8 cleanup smoke now pass. The real runnable U2 candidate and connected same-profile author-to-endpoint journey passed at `b1eee312`. The reviewed protocol corrections pass at `45b0e602`; completing the 13-scenario acceptance-run ledger and independent operator walkthrough still block handoff. No deployed or physical claim. |
 
 ## Historical checkpoints
 

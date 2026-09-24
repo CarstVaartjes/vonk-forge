@@ -26,11 +26,15 @@ own PostgreSQL database during fixture teardown.
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 export UV_CACHE_DIR=/private/tmp/vonk-forge-cli-implementation-cache
 
-VONK_U8_UPGRADE_MODE=smoke uv run --project control --frozen --with-editable . \
-  pytest -q -s control/tests/test_cli_upgrade_walkthrough.py::test_disposable_u8_upgrade_walkthrough_smoke
+VONK_U8_UPGRADE_MODE=smoke PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+  uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_upgrade_walkthrough.py::test_disposable_u8_upgrade_walkthrough_smoke
 
-VONK_U8_UPGRADE_MODE=interactive uv run --project control --frozen --with-editable . \
-  pytest -q -s control/tests/test_cli_upgrade_walkthrough.py::test_disposable_u8_upgrade_walkthrough_interactive
+VONK_U8_UPGRADE_MODE=interactive PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+  uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_upgrade_walkthrough.py::test_disposable_u8_upgrade_walkthrough_interactive
 ```
 
 The interactive shell gets a private `HOME`, a private token file, and disabled

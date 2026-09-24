@@ -18,11 +18,15 @@ export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 export UV_CACHE_DIR=/private/tmp/vonk-forge-cli-implementation-cache
 
 VONK_CANCELLATION_WALKTHROUGH_MODE=smoke \
-  uv run --project control --frozen --with-editable . pytest -q -s \
+PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+  uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
   control/tests/test_cli_cancellation_walkthrough.py::test_disposable_cli_cancellation_walkthrough_smoke
 
 VONK_CANCELLATION_WALKTHROUGH_MODE=interactive \
-  uv run --project control --frozen --with-editable . pytest -q -s \
+PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+  uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
   control/tests/test_cli_cancellation_walkthrough.py::test_disposable_cli_cancellation_walkthrough_interactive
 ```
 

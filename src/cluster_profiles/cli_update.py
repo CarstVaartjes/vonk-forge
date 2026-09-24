@@ -321,6 +321,11 @@ def run_update(
             raise CliUpdateError(
                 "CLI installation failed in the current Python environment"
             )
+    result["previous"] = current
+    result["current"] = {
+        "version": release["version"],
+        "source_sha": target_source,
+    }
     result["updated"] = True
     result["update_available"] = False
     return result

@@ -52,6 +52,10 @@ The genuine U2 fixture now also passes at `b1eee312`, including later-page
 discovery, verified managed assets and actual bounded Qwen CPU inference. The
 combined automated walkthroughs pass four tests; two human sessions are
 intentionally skipped. The independent human U1–U8 scorecard remains open.
+Review subsequently found incomplete scenario traceability and a false-positive
+invalid-connection assertion in that smoke. Its previous green result does not
+prove the invalid-connection case. Protocol and fixture corrections pass at `45b0e602`; the explicit acceptance-run
+record for all 13 W19 scenarios and the human scorecard remain required.
 Exact checks and remaining evidence boundaries are in the status document.
 
 The [shared-build closure checklist](#shared-build-closure-checklist) retains

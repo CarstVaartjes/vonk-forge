@@ -15,11 +15,20 @@ file. Neither application is marked complete or given a synthetic success.
 Run the bounded installed-process qualification from the repository root:
 
 ```bash
-VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes \
-UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
+export UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache
+
 VONK_OBSERVER_WALKTHROUGH_MODE=smoke \
+PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
 uv run --project control --frozen --with-editable . \
-  pytest -q -s control/tests/test_cli_observer_walkthrough.py
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_observer_walkthrough.py::test_disposable_cli_observer_walkthrough_smoke
+
+VONK_OBSERVER_WALKTHROUGH_MODE=interactive \
+PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_observer_walkthrough.py::test_disposable_cli_observer_walkthrough_interactive
 ```
 
 The smoke interrupts the real installed follower, verifies that its JSON keeps
@@ -32,7 +41,7 @@ token, TLS files, and managed files were removed. Pytest teardown drops only
 the run's PostgreSQL database and stops its uniquely named disposable
 PostgreSQL container.
 
-Replace `smoke` with `interactive` to open the human shell. The first
+The second command opens the human shell. The first
 `profile progress` request reads the original receipt; while the test peer is
 delivering it, the API admits the newer disjoint application. The facilitator
 should give the participant only the shipped [`vonkctl` runbook](../runbooks/vonkctl.md)
