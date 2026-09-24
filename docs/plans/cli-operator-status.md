@@ -1,5 +1,29 @@
 # CLI implementation status
 
+## Current authorization and integration base — 2026-09-24
+
+The user selected **warnings for uncertain memory estimates** and explicitly
+approved admission-locking and crash-safe cache-removal implementation. Actual
+capacity, reservation, declared reserve, authorization and exact-plan limits
+remain enforced. Earlier unanswered-policy and insufficient-authorization notes
+below are historical; they no longer block this repository work. The user also
+plans to run every model. Model acceptance does not replace the independent CLI
+usability scorecard, which remains unrun.
+
+The coordinator now owns `codex/cli-approved-integration` at
+`/private/tmp/vonk-cli-approved-integration`, combining preserved snapshot
+`338354bb4c1e6b6913e86d32909538e836ba0c0e` with fetched `origin/main` at
+`93c3746db4fe0af5b20e6c37a14be5e99e5c3669`. Only generated supply-chain files
+conflicted; they were regenerated from the combined inputs. The original
+`codex/cli-integration` worktree remains preserved. Branch
+`codex/cli-preserved-338354bb` protects the immutable snapshot. A filesystem
+comparison found all 1,813 snapshot files present in the original worktree;
+its only subsequent change was the implementation-plan status correction.
+
+The baseline descriptions below identify earlier checkpoints. New fixes will
+use the explicitly coordinated refreshed integration base, with separate
+worktree ownership and connected validation before integration.
+
 Implementation is integrated in the isolated `codex/cli-integration` candidate.
 The initial `codex/cli-operator-experience` checkout and its unrelated dirty work
 remain preserved. The full objective remains the

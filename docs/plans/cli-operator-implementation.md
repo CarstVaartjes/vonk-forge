@@ -47,9 +47,10 @@ contract; the status table makes those dependencies explicit.
 The [shared-build closure checklist](#shared-build-closure-checklist) retains
 the detailed admission work. Its earlier checkpoints are historical evidence,
 not a direction to repeat completed cancellation or process-recovery work.
-Current parallel work prepares the remaining disposable walkthrough scenarios
-and corrects misleading recovery commands found in actual installed output.
-The retained-memory decision, common lock order and removal protocol remain
+Disposable U1/U3, U4, U5, U6 and U7 facilitators now have connected evidence;
+U8's upgrade and read-only pipeline portions pass. The user chose warnings for
+uncertain memory estimates and explicitly approved the admission-locking and
+crash-safe removal implementations. Their implementation and qualification remain
 open. Preserve the original acceptance cards: a test fixture or a queued
 request alone does not establish a usable recipe or human usability.
 
@@ -166,16 +167,16 @@ and this remaining execution order. The detailed requirements below remain in
 scope; passing an individual package's own criteria does not close its open
 admission or storage dependency.
 
-1. Resolve W09d C/D's retained-memory policy. Current aggregate free-memory
+1. Implement W09d C/D's approved warnings policy. Current aggregate free-memory
    measurements and signed run liveness do not prove an atomic, attributed
-   snapshot. The pending choice between warning on uncertainty while retaining
-   actual capacity checks and conservative refusal must be explicit. Do not
+   snapshot. Warn about uncertain estimates while retaining actual capacity,
+   reservation, system-reserve and exact-plan checks. Do not
    claim both zero false refusals and zero overcommit from the current evidence.
 2. Complete W09d F's common SQL acquisition order across admission and all
    competing writers. Retain the current PostgreSQL contention reproduction;
    prove bounded refusal/retry, transaction release and preservation of the
-   exact reviewed request. The previously rejected production edit remains
-   behind its recorded approval boundary.
+   exact reviewed request. Explicit user approval on 2026-09-24 supersedes the
+   earlier insufficient-authorization rejection for this repository work.
 3. Complete W09e's shared reference/removal protocol and W17's durable pre-effect
    removal intent, first-submission arbitration and restart recovery. Move
    producers, readers, cancellation and collection together. Prove actual
@@ -189,9 +190,11 @@ admission or storage dependency.
    cancellation boundaries against that completed admission/storage behavior.
 5. Finish W19's disposable U1–U8 scenario setup and independent operator
    walkthrough, correct observed defects, then repeat the affected installed
-   and connected gates. U1/U3 and observer-only U5 setup now pass. U2 remains
-   partial until a usable later-page candidate exists; U4/U6/U7/U8 setup and
-   the independent human scorecard remain unfinished. Complete the W18/W19 handoff from the final
+   and connected gates. U1/U3, U4, observer-only U5, U6 and U7 setup now pass,
+   as do U8's upgrade and read-only pipeline portions. U2 remains partial until
+   a usable later-page candidate exists; U8 cleanup depends on W09/W17. The
+   planned every-model campaign and independent human usability scorecard are
+   separate evidence. Complete the W18/W19 handoff from the final
    contracts and evidence, keeping repository, deployment and physical
    qualification distinct. Web implementation remains outside this CLI scope.
 
