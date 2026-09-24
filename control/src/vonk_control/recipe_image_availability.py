@@ -109,7 +109,9 @@ class RecipeImageAvailabilityError(RuntimeError):
         code: str,
         detail: str,
         *,
-        retryable: bool = False,
+        # None leaves classification to the existing transport/code heuristics;
+        # either bool is an explicit owner decision and must be preserved.
+        retryable: bool | None = None,
         retry_after_seconds: int | None = None,
         retry_time: str | None = None,
         recovery_actions: Sequence[str] = (),
@@ -321,9 +323,10 @@ def _retryable(error: BaseException) -> bool:
     code = getattr(error, "code", None)
     if isinstance(code, str) and code in _TERMINAL_FAILURE_CODES:
         return False
+    explicit_retryable = getattr(error, "retryable", None)
+    if type(explicit_retryable) is bool:
+        return explicit_retryable
     if isinstance(code, str) and code in _RECOVERABLE_MISS_CODES:
-        return True
-    if getattr(error, "retryable", False) is True:
         return True
     status = getattr(error, "status_code", None)
     if type(status) is int:
