@@ -382,8 +382,406 @@ def _node(
     }
 
 
+def _loaded_run_presence(
+    *,
+    run_id: str = RUN_ID,
+    node_ids: tuple[str, ...] = (NODE_A, NODE_B),
+    rank: int = 0,
+) -> dict[str, object]:
+    return {
+        "alias": "current-service",
+        "expected_rank_count": len(node_ids),
+        "group_state": "healthy",
+        "healthy": True,
+        "installation_id": "installation-current",
+        "member_node_ids": list(node_ids),
+        "present_ranks": list(range(len(node_ids))),
+        "rank": rank,
+        "rank_age_seconds": 1.0,
+        "rank_fresh": True,
+        "rank_state": "running",
+        "recipe_id": "recipe-current",
+        "recipe_revision_id": "revision-current",
+        "role": f"rank-{rank}",
+        "route_state": "published",
+        "run_id": run_id,
+        "run_state": "running",
+        "title": "Current service",
+    }
+
+
+def _healthy_two_spark_fleet(run_id: str = RUN_ID) -> dict[str, object]:
+    return {
+        "nodes": [
+            _node(
+                NODE_A,
+                loaded=[_loaded_run_presence(run_id=run_id, rank=0)],
+            ),
+            _node(
+                NODE_B,
+                loaded=[_loaded_run_presence(run_id=run_id, rank=1)],
+            ),
+        ]
+    }
+
+
+def test_one_exact_acknowledged_healthy_run_is_the_only_replacement_candidate() -> None:
+    fleet = _healthy_two_spark_fleet()
+
+    with pytest.raises(QualificationError, match="--replace-run-id"):
+        campaign_cli._assert_fleet_exclusive(fleet)
+
+    evidence = campaign_cli._assert_fleet_exclusive(fleet, replace_run_id=RUN_ID)
+
+    assert evidence == {
+        "run_id": RUN_ID,
+        "member_node_ids": [NODE_A, NODE_B],
+        "expected_rank_count": 2,
+        "present_ranks": [0, 1],
+    }
+
+
+@pytest.mark.parametrize("replace_run_id", ["different-run", "new-run"])
+def test_replacement_acknowledgement_must_match_the_only_current_run(
+    replace_run_id: str,
+) -> None:
+    with pytest.raises(QualificationError, match="acknowledged run"):
+        campaign_cli._assert_fleet_exclusive(
+            _healthy_two_spark_fleet(), replace_run_id=replace_run_id
+        )
+
+
+def test_replacement_preview_rejects_a_new_run_after_acknowledgement() -> None:
+    fleet = _healthy_two_spark_fleet()
+    replacement = campaign_cli._assert_fleet_exclusive(fleet, replace_run_id=RUN_ID)
+    assert replacement is not None
+    preview = {
+        "plan_digest": "a" * 64,
+        "summary": {"stops": 1, "starts": 1, "uninstalls": 0},
+        "steps": [{"kind": "switch", "node_ids": [NODE_A, NODE_B]}],
+    }
+
+    with pytest.raises(QualificationError, match="does not match"):
+        campaign_cli._check_replacement_preview(
+            preview,
+            fleet=_healthy_two_spark_fleet("new-run"),
+            node_ids=[NODE_A],
+            replacement=replacement,
+        )
+
+
+def test_replacement_rejects_an_additional_foreign_run() -> None:
+    fleet = _healthy_two_spark_fleet()
+    nodes = fleet["nodes"]
+    assert isinstance(nodes, list)
+    first = nodes[0]
+    assert isinstance(first, dict)
+    loaded = first["loaded"]
+    assert isinstance(loaded, list)
+    loaded.append(_loaded_run_presence(run_id="another-run", rank=0))
+
+    with pytest.raises(QualificationError, match="sole current foreign run"):
+        campaign_cli._assert_fleet_exclusive(fleet, replace_run_id=RUN_ID)
+
+
+def test_replacement_rejects_a_run_whose_complete_membership_is_not_in_fleet() -> None:
+    fleet = {
+        "nodes": [
+            _node(NODE_A, loaded=[_loaded_run_presence(rank=0)]),
+        ]
+    }
+
+    with pytest.raises(QualificationError, match="complete run membership"):
+        campaign_cli._assert_fleet_exclusive(fleet, replace_run_id=RUN_ID)
+
+
+def test_replacement_preview_binds_stop_membership_and_plan_digest() -> None:
+    fleet = _healthy_two_spark_fleet()
+    replacement = campaign_cli._assert_fleet_exclusive(fleet, replace_run_id=RUN_ID)
+    assert replacement is not None
+    preview = {
+        "plan_digest": "a" * 64,
+        "summary": {"stops": 1, "starts": 1, "uninstalls": 0},
+        "steps": [{"kind": "switch", "node_ids": [NODE_A, NODE_B]}],
+    }
+
+    evidence = campaign_cli._check_replacement_preview(
+        preview,
+        fleet=fleet,
+        node_ids=[NODE_A],
+        replacement=replacement,
+    )
+
+    assert evidence == {
+        **replacement,
+        "acknowledged_run_id": RUN_ID,
+        "switch_node_ids": [NODE_A, NODE_B],
+        "stop_count": 1,
+        "start_count": 1,
+        "profile_plan_digest": "a" * 64,
+    }
+
+    with pytest.raises(QualificationError, match="complete acknowledged run"):
+        campaign_cli._check_replacement_preview(
+            {
+                **preview,
+                "steps": [{"kind": "switch", "node_ids": [NODE_A]}],
+            },
+            fleet=fleet,
+            node_ids=[NODE_A],
+            replacement=replacement,
+        )
+
+
+def test_no_loaded_run_keeps_no_interruption_behavior_and_rejects_stale_ack() -> None:
+    fleet = {"nodes": [_node(NODE_A)]}
+    preview = {
+        "plan_digest": "a" * 64,
+        "summary": {"stops": 0, "starts": 1, "uninstalls": 0},
+        "steps": [{"kind": "switch", "node_ids": [NODE_A]}],
+    }
+
+    assert (
+        campaign_cli._check_replacement_preview(
+            preview,
+            fleet=fleet,
+            node_ids=[NODE_A],
+            replacement=None,
+        )
+        is None
+    )
+    with pytest.raises(QualificationError, match="acknowledged run"):
+        campaign_cli._assert_fleet_exclusive(fleet, replace_run_id=RUN_ID)
+
+
+def test_campaign_digest_binds_replacement_evidence_and_exact_plan_digest(
+    tmp_path: Path,
+) -> None:
+    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
+    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
+    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
+    base_preview = {
+        "plan_digest": "a" * 64,
+        "exact_preparations": {"target_node_ids": [NODE_A]},
+        "replacement_interruption": {
+            "acknowledged_run_id": RUN_ID,
+            "member_node_ids": [NODE_A, NODE_B],
+            "stop_count": 1,
+            "profile_plan_digest": "a" * 64,
+        },
+    }
+    digest = campaign_cli._preview_digest(
+        manifest=manifest,
+        fixtures=fixtures,
+        row=_row(),
+        profile={"profile_digest": "b" * 64},
+        preview=base_preview,
+        node_ids=[NODE_A],
+        failure_node_id=None,
+        profile_number=7,
+    )
+
+    changed_evidence = {
+        **base_preview,
+        "replacement_interruption": {
+            **base_preview["replacement_interruption"],
+            "acknowledged_run_id": "different-run",
+        },
+    }
+    assert (
+        campaign_cli._preview_digest(
+            manifest=manifest,
+            fixtures=fixtures,
+            row=_row(),
+            profile={"profile_digest": "b" * 64},
+            preview=changed_evidence,
+            node_ids=[NODE_A],
+            failure_node_id=None,
+            profile_number=7,
+        )
+        != digest
+    )
+
+    changed_plan = {
+        **base_preview,
+        "replacement_interruption": {
+            **base_preview["replacement_interruption"],
+            "profile_plan_digest": "c" * 64,
+        },
+    }
+    assert (
+        campaign_cli._preview_digest(
+            manifest=manifest,
+            fixtures=fixtures,
+            row=_row(),
+            profile={"profile_digest": "b" * 64},
+            preview=changed_plan,
+            node_ids=[NODE_A],
+            failure_node_id=None,
+            profile_number=7,
+        )
+        != digest
+    )
+
+
+def test_fresh_profile_preview_persists_replacement_evidence_in_campaign_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
+    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
+    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
+    fleet = _healthy_two_spark_fleet()
+    ledger = EvidenceLedger(tmp_path / "evidence.jsonl")
+    raw_preview: dict[str, object] = {
+        "plan_digest": "a" * 64,
+        "summary": {"stops": 1, "starts": 1, "uninstalls": 0},
+        "steps": [{"kind": "switch", "node_ids": [NODE_A, NODE_B]}],
+    }
+    profile = {"profile_digest": "b" * 64}
+
+    class PreviewClient:
+        def request(self, method: str, path: str) -> dict[str, object]:
+            assert method == "POST"
+            assert path == "/api/profile/7/preview"
+            return raw_preview
+
+    class SmokeAdapter:
+        def __init__(self, _fixtures: FixtureRegistry) -> None:
+            pass
+
+        def preview(
+            self,
+            _detail: dict[str, object],
+            *,
+            recipe_key: str,
+            recipe_content_sha256: str,
+        ) -> dict[str, object]:
+            assert recipe_key == RECIPE_KEY
+            assert recipe_content_sha256 == CONTENT_SHA
+            return {
+                "available": True,
+                "fixture_manifest_sha256": fixtures.manifest_sha256,
+            }
+
+    monkeypatch.setattr(
+        campaign_cli,
+        "_validate_current_recipe",
+        lambda _client, _row: ({"identity": {"recipe_id": "recipe-current"}}, {}),
+    )
+    monkeypatch.setattr(campaign_cli, "_typed_fleet", lambda _client: fleet)
+    monkeypatch.setattr(campaign_cli, "_prepare_profile", lambda **_kwargs: profile)
+
+    def check_preview(_raw: dict[str, object], **kwargs: object) -> dict[str, object]:
+        replacement = kwargs["replacement"]
+        assert isinstance(replacement, dict)
+        evidence = campaign_cli._check_replacement_preview(
+            raw_preview,
+            fleet=fleet,
+            node_ids=[NODE_A],
+            replacement=replacement,
+        )
+        assert evidence is not None
+        return {
+            **raw_preview,
+            "assignments": [{"recipe_revision_id": REVISION_ID}],
+            "exact_preparations": {"target_node_ids": [NODE_A]},
+            "replacement_interruption": evidence,
+        }
+
+    monkeypatch.setattr(campaign_cli, "_check_preview", check_preview)
+    monkeypatch.setattr(campaign_cli, "ArtifactJobSmokeAdapter", SmokeAdapter)
+
+    checked, _smoke, _result = campaign_cli._fresh_profile_preview(
+        client=PreviewClient(),
+        manifest=manifest,
+        fixtures=fixtures,
+        row=_row(),
+        library_root=tmp_path,
+        profile_number=7,
+        authority_id="test-authority",
+        ledger_id="evidence.jsonl",
+        node_ids=[NODE_A],
+        failure_node_id=None,
+        alias="test-alias",
+        kind="artifact-job",
+        campaign_id=CAMPAIGN_ID,
+        ledger=ledger,
+        expected_fleet_node_ids=[NODE_A, NODE_B],
+        replace_run_id=RUN_ID,
+    )
+
+    record = ledger.recipe_records(CAMPAIGN_ID, RECIPE_KEY)[0]
+    payload = record["payload"]
+    assert isinstance(payload, dict)
+    interruption = payload["replacement_interruption"]
+    assert interruption == checked["replacement_interruption"]
+    assert isinstance(interruption, dict)
+    assert interruption["acknowledged_run_id"] == RUN_ID
+    assert interruption["profile_plan_digest"] == raw_preview["plan_digest"]
+
+
+def test_campaign_parser_accepts_exact_replacement_ack_for_preview_and_apply() -> None:
+    preview = campaign_cli._arguments(
+        [
+            "--manifest",
+            "campaign.json",
+            "--library-root",
+            "recipes",
+            "--ledger",
+            "evidence.jsonl",
+            "--profile-number",
+            "7",
+            "--spark",
+            NODE_A,
+            "--replace-run-id",
+            RUN_ID,
+        ]
+    )
+    assert preview.replace_run_id == RUN_ID
+
+    apply = campaign_cli._arguments(
+        [
+            "--manifest",
+            "campaign.json",
+            "--library-root",
+            "recipes",
+            "--ledger",
+            "evidence.jsonl",
+            "--profile-number",
+            "7",
+            "--spark",
+            NODE_A,
+            "--replace-run-id",
+            RUN_ID,
+            "--apply",
+            "--campaign-digest",
+            "a" * 64,
+        ]
+    )
+    assert apply.replace_run_id == RUN_ID
+
+    with pytest.raises(SystemExit):
+        campaign_cli._arguments(
+            [
+                "--manifest",
+                "campaign.json",
+                "--library-root",
+                "recipes",
+                "--ledger",
+                "evidence.jsonl",
+                "--profile-number",
+                "7",
+                "--observe",
+                "--replace-run-id",
+                RUN_ID,
+            ]
+        )
+
+
 class _MissingEndpoint:
-    def request(self, method: str, path: str, *args: object, **kwargs: object) -> dict[str, object]:
+    def request(
+        self, method: str, path: str, *args: object, **kwargs: object
+    ) -> dict[str, object]:
         assert method == "GET"
         alias = unquote(path.rsplit("/", 1)[-1])
         assert alias == "test-alias"

@@ -1162,13 +1162,187 @@ def _all_loaded_runs(fleet: Mapping[str, object]) -> set[str]:
 
 
 def _assert_fleet_exclusive(
-    fleet: Mapping[str, object], *, owned_run_ids: AbstractSet[str] = frozenset()
-) -> None:
+    fleet: Mapping[str, object],
+    *,
+    owned_run_ids: AbstractSet[str] = frozenset(),
+    replace_run_id: str | None = None,
+) -> dict[str, object] | None:
     foreign = _all_loaded_runs(fleet) - owned_run_ids
-    if foreign:
+    if not foreign:
+        if replace_run_id is not None:
+            raise QualificationError(
+                "acknowledged run is no longer the sole current foreign loaded run"
+            )
+        return None
+    if replace_run_id is None:
         raise QualificationError(
-            "whole-fleet profile is unsafe: non-campaign loaded run is present"
+            "whole-fleet profile is unsafe: loaded run is present; pass "
+            "--replace-run-id with the exact run ID to acknowledge replacement"
         )
+    if foreign != {replace_run_id}:
+        if replace_run_id not in foreign:
+            raise QualificationError(
+                "acknowledged run does not match the sole current foreign loaded run"
+            )
+        raise QualificationError(
+            "whole-fleet profile replacement requires the acknowledged run to be "
+            "the sole current foreign run"
+        )
+
+    nodes = _nodes(fleet)
+    presences = _run_presences(fleet, replace_run_id)
+    if not presences:
+        raise QualificationError("acknowledged run has no complete run membership")
+    roster = set(nodes)
+    observed_node_ids = [node_id for node_id, _presence in presences]
+    if len(observed_node_ids) != len(set(observed_node_ids)):
+        raise QualificationError(
+            "acknowledged run has duplicate or conflicting rank membership"
+        )
+
+    first = presences[0][1]
+    raw_members = first.get("member_node_ids")
+    if not isinstance(raw_members, list) or any(
+        not isinstance(item, str) or _NODE_ID.fullmatch(item) is None
+        for item in raw_members
+    ):
+        raise QualificationError("acknowledged run has invalid complete run membership")
+    members = tuple(raw_members)
+    if len(members) != len(set(members)) or tuple(sorted(members)) != members:
+        raise QualificationError("acknowledged run membership is not canonical")
+    if not set(members) <= roster:
+        raise QualificationError(
+            "acknowledged run has complete run membership outside the current Fleet"
+        )
+    expected_rank_count = first.get("expected_rank_count")
+    if (
+        not isinstance(expected_rank_count, int)
+        or isinstance(expected_rank_count, bool)
+        or expected_rank_count < 1
+        or expected_rank_count > len(roster)
+        or expected_rank_count != len(members)
+    ):
+        raise QualificationError("acknowledged run has invalid complete run membership")
+    if set(observed_node_ids) != set(members) or len(presences) != expected_rank_count:
+        raise QualificationError(
+            "acknowledged run is not fully present across its complete run membership"
+        )
+
+    raw_ranks = first.get("present_ranks")
+    if (
+        not isinstance(raw_ranks, list)
+        or any(
+            not isinstance(rank, int) or isinstance(rank, bool) for rank in raw_ranks
+        )
+        or sorted(raw_ranks) != list(range(expected_rank_count))
+    ):
+        raise QualificationError(
+            "acknowledged run has invalid complete rank membership"
+        )
+    ranks: list[int] = []
+    identity_keys = (
+        "installation_id",
+        "recipe_revision_id",
+        "alias",
+        "expected_rank_count",
+        "member_node_ids",
+        "present_ranks",
+    )
+    identity = tuple(first.get(key) for key in identity_keys)
+    for node_id, presence in presences:
+        if tuple(presence.get(key) for key in identity_keys) != identity:
+            raise QualificationError(
+                "acknowledged run has conflicting complete run membership"
+            )
+        rank = presence.get("rank")
+        if not isinstance(rank, int) or isinstance(rank, bool):
+            raise QualificationError("acknowledged run has invalid rank membership")
+        ranks.append(rank)
+        if (
+            presence.get("healthy") is not True
+            or presence.get("group_state") != "healthy"
+            or presence.get("run_state") != "running"
+            or presence.get("rank_state") != "running"
+            or presence.get("route_state") != "published"
+            or presence.get("rank_fresh") is not True
+        ):
+            raise QualificationError(
+                "only a fully observed healthy run can be explicitly replaced"
+            )
+    if sorted(ranks) != list(range(expected_rank_count)):
+        raise QualificationError("acknowledged run has incomplete rank membership")
+
+    return {
+        "run_id": replace_run_id,
+        "member_node_ids": list(members),
+        "expected_rank_count": expected_rank_count,
+        "present_ranks": list(raw_ranks),
+    }
+
+
+def _check_replacement_preview(
+    preview: Mapping[str, object],
+    *,
+    fleet: Mapping[str, object],
+    node_ids: Sequence[str],
+    replacement: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    summary = _object(preview.get("summary"), "profile preview summary")
+    if replacement is None:
+        _assert_fleet_exclusive(fleet)
+        if summary.get("stops") != 0:
+            raise QualificationError(
+                "profile preview contains an unacknowledged workload stop"
+            )
+        return None
+
+    run_id = _string(replacement.get("run_id"), "acknowledged run ID")
+    observed = _assert_fleet_exclusive(fleet, replace_run_id=run_id)
+    if observed != dict(replacement):
+        raise QualificationError(
+            "the acknowledged run or its complete Fleet membership changed during preview"
+        )
+    if summary.get("stops") != 1 or summary.get("starts") != 1:
+        raise QualificationError(
+            "whole-fleet preview does not contain exactly one run stop and one replacement start"
+        )
+    if summary.get("uninstalls") != 0:
+        raise QualificationError(
+            "workload replacement preview must retain cached assets"
+        )
+    raw_steps = preview.get("steps")
+    if not isinstance(raw_steps, list) or len(raw_steps) != 1:
+        raise QualificationError(
+            "whole-fleet replacement preview must contain one aggregate switch step"
+        )
+    step = _object(raw_steps[0], "profile replacement switch step")
+    if step.get("kind") != "switch":
+        raise QualificationError(
+            "whole-fleet replacement preview has an unsupported step"
+        )
+    step_nodes = _string_array(step.get("node_ids"), "replacement switch node IDs")
+    fleet_nodes = set(_nodes(fleet))
+    members = _string_array(
+        replacement.get("member_node_ids"), "acknowledged run member node IDs"
+    )
+    if (
+        not set(step_nodes) <= fleet_nodes
+        or not set(members) <= set(step_nodes)
+        or not set(node_ids) <= set(step_nodes)
+    ):
+        raise QualificationError(
+            "replacement switch step does not cover the complete acknowledged run "
+            "and requested profile assignment inside the current Fleet"
+        )
+    plan_digest = _string(preview.get("plan_digest"), "profile plan digest")
+    return {
+        **dict(replacement),
+        "acknowledged_run_id": run_id,
+        "switch_node_ids": list(step_nodes),
+        "stop_count": 1,
+        "start_count": 1,
+        "profile_plan_digest": plan_digest,
+    }
 
 
 def _qualification_lock_nodes(
@@ -1507,6 +1681,7 @@ def _check_preview(
     node_ids: Sequence[str],
     cleanup: bool = False,
     owned_run_ids: AbstractSet[str] = frozenset(),
+    replacement: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     try:
         preview = FleetProfilePreview.from_dict(raw_preview).to_dict()
@@ -1591,8 +1766,14 @@ def _check_preview(
     if preview.get("profile_id") != profile.get("id") or preview.get("profile_digest") != profile.get("profile_digest"):
         raise QualificationError("profile preview is bound to another saved profile")
     summary = _object(preview.get("summary"), "profile preview summary")
-    if summary.get("stops") != 0 or summary.get("uninstalls") != 0:
-        raise QualificationError("profile preview would stop or uninstall non-campaign work")
+    replacement_interruption = _check_replacement_preview(
+        preview,
+        fleet=fleet,
+        node_ids=node_ids,
+        replacement=replacement,
+    )
+    if summary.get("uninstalls") != 0:
+        raise QualificationError("profile preview would uninstall cached assets")
     assignments = preview.get("assignments")
     if not isinstance(assignments, list) or len(assignments) != 1:
         raise QualificationError("profile preview must contain one exact recipe assignment")
@@ -1603,7 +1784,10 @@ def _check_preview(
     ):
         raise QualificationError("profile preview changed the exact Spark/desired-state binding")
     preparations = _validate_preparations(preview, row, node_ids)
-    return {**preview, "exact_preparations": preparations}
+    checked = {**preview, "exact_preparations": preparations}
+    if replacement_interruption is not None:
+        checked["replacement_interruption"] = replacement_interruption
+    return checked
 
 
 def _run_id_from_application(application: Mapping[str, object], node_count: int) -> tuple[str, Mapping[str, object]]:
@@ -2586,6 +2770,7 @@ def _preview_digest(
             "profile_digest": profile.get("profile_digest"),
             "profile_plan_digest": preview.get("plan_digest"),
             "exact_preparations": preview.get("exact_preparations"),
+            "replacement_interruption": preview.get("replacement_interruption"),
         }
     )
 
@@ -2607,6 +2792,7 @@ def _fresh_profile_preview(
     campaign_id: str,
     ledger: EvidenceLedger,
     expected_fleet_node_ids: Sequence[str],
+    replace_run_id: str | None = None,
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
     detail, definition = _validate_current_recipe(client, row)
     fleet = _typed_fleet(client)
@@ -2617,7 +2803,7 @@ def _fresh_profile_preview(
         raise QualificationError(
             "whole-fleet profile execution requires every enrolled Spark online"
         )
-    _assert_fleet_exclusive(fleet)
+    replacement = _assert_fleet_exclusive(fleet, replace_run_id=replace_run_id)
     profile = _prepare_profile(
         client=client,
         number=profile_number,
@@ -2631,18 +2817,43 @@ def _fresh_profile_preview(
     _require_locked_fleet_roster(fleet, expected_fleet_node_ids)
     if len(_nodes(fleet)) < row.node_count:
         raise QualificationError(f"{row.key} does not fit the current complete Fleet")
-    _assert_fleet_exclusive(fleet)
+    confirmed_replacement = _assert_fleet_exclusive(
+        fleet, replace_run_id=replace_run_id
+    )
+    if confirmed_replacement != replacement:
+        raise QualificationError(
+            "the acknowledged run or its complete Fleet membership changed while "
+            "preparing the profile preview"
+        )
     if any(not _online(node) for node in _nodes(fleet).values()):
         raise QualificationError(
             "whole-fleet profile execution requires every enrolled Spark online"
         )
     raw_preview = client.request("POST", f"/api/profile/{profile_number}/preview")
+    preview_fleet = _typed_fleet(client)
+    _require_locked_fleet_roster(preview_fleet, expected_fleet_node_ids)
+    if len(_nodes(preview_fleet)) < row.node_count:
+        raise QualificationError(f"{row.key} does not fit the current complete Fleet")
+    if any(not _online(node) for node in _nodes(preview_fleet).values()):
+        raise QualificationError(
+            "whole-fleet profile execution requires every enrolled Spark online"
+        )
+    preview_replacement = _assert_fleet_exclusive(
+        preview_fleet, replace_run_id=replace_run_id
+    )
+    if preview_replacement != replacement:
+        raise QualificationError(
+            "the acknowledged run or its complete Fleet membership changed while "
+            "the Controller generated the profile preview"
+        )
+    fleet = preview_fleet
     checked = _check_preview(
         raw_preview,
         profile=profile,
         fleet=fleet,
         row=row,
         node_ids=node_ids,
+        replacement=replacement,
     )
     assignments = checked.get("assignments")
     assert isinstance(assignments, list) and len(assignments) == 1
@@ -2656,7 +2867,9 @@ def _fresh_profile_preview(
     if kind == "artifact-job":
         adapter = ArtifactJobSmokeAdapter(fixtures)
         smoke_preview = adapter.preview(
-            {"definition": definition}, recipe_key=row.key, recipe_content_sha256=row.content_sha256
+            {"definition": definition},
+            recipe_key=row.key,
+            recipe_content_sha256=row.content_sha256,
         )
     else:
         adapter = ServiceSmokeAdapter(fixtures)
@@ -2700,10 +2913,15 @@ def _fresh_profile_preview(
             "profile_number": profile_number,
             "profile_digest": profile.get("profile_digest"),
             "preview": checked,
+            "replacement_interruption": checked.get("replacement_interruption"),
             "smoke_preview": smoke_preview,
         },
     )
-    return checked, smoke_preview, {"campaign_digest": campaign_digest, "profile": profile}
+    return (
+        checked,
+        smoke_preview,
+        {"campaign_digest": campaign_digest, "profile": profile},
+    )
 
 
 def _load_and_smoke(
@@ -3744,6 +3962,13 @@ def _arguments(argv: Sequence[str] | None) -> argparse.Namespace:
         "--campaign-digest",
         help="Required with --apply; copy from the fresh preview for this exact recipe and Spark group",
     )
+    parser.add_argument(
+        "--replace-run-id",
+        help=(
+            "Explicitly acknowledge replacement of this exact currently loaded "
+            "run when the whole-Fleet profile preview includes its stop"
+        ),
+    )
     args = parser.parse_args(argv)
     if type(args.profile_number) is not int or args.profile_number < 1:
         parser.error("--profile-number must be a positive existing profile number")
@@ -3758,8 +3983,12 @@ def _arguments(argv: Sequence[str] | None) -> argparse.Namespace:
         or args.failure_spark
         or args.accept_operator_gate
         or args.accept_capacity_review
+        or args.replace_run_id
     ):
-        parser.error("--observe resumes durable evidence; it takes no Spark or review-gate flags")
+        parser.error(
+            "--observe resumes durable evidence; it takes no Spark, replacement, "
+            "or review-gate flags"
+        )
     if not args.observe and not args.spark:
         parser.error("preview and apply require exact --spark IDs")
     return args
@@ -3935,6 +4164,7 @@ def run(
                 campaign_id=campaign_id,
                 ledger=ledger,
                 expected_fleet_node_ids=initial_roster,
+                replace_run_id=args.replace_run_id,
             )
             return {
                 "schema_version": 1,
@@ -3971,6 +4201,7 @@ def run(
             campaign_id=campaign_id,
             ledger=ledger,
             expected_fleet_node_ids=initial_roster,
+            replace_run_id=args.replace_run_id,
         )
         if metadata["campaign_digest"] != args.campaign_digest:
             raise QualificationError(
