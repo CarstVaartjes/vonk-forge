@@ -39,6 +39,8 @@ def _subparser_choices(
 class FakeClient:
     """Strict in-process adapter for the current operator wire contracts."""
 
+    profile_plan_digest = "a" * 64
+
     def __init__(self, responses: dict[tuple[str, str], object]):
         self.responses = responses
         self.calls: list[tuple[str, str, dict[str, object] | None, object]] = []
@@ -46,7 +48,12 @@ class FakeClient:
     def request(self, method, path, payload=None, *, extra_headers=None, query=None):
         self._validate_request(method, path, payload, query)
         self.calls.append((method, path, payload, query))
-        response = self.responses.get((method, path), {})
+        default_response = (
+            {"allowed": True, "plan_digest": self.profile_plan_digest}
+            if method == "POST" and path.endswith("/preview")
+            else {}
+        )
+        response = self.responses.get((method, path), default_response)
         if isinstance(response, list):
             # The final entry is sticky so a caller can describe a dependency
             # that keeps answering the same way, including one that stays
@@ -173,8 +180,9 @@ class FakeClient:
             assert profile_path is not None and payload is None
         elif path.endswith("/load"):
             assert profile_path is not None
-            assert set(payload) <= {"request_key", "dry_run"}
+            assert set(payload) <= {"request_key", "dry_run", "plan_digest"}
             assert "request_key" in payload
+            assert payload.get("plan_digest") == self.profile_plan_digest
             uuid.UUID(payload["request_key"])
         elif selector_path is not None and selector_path.group(2) in {
             "download",
@@ -601,10 +609,14 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
 
     assert status == 0 and payload["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
+        "/api/profile/1/preview",
         "/api/profile/1/load",
         f"/api/profile/applications/{application_id}",
     ]
-    assert client.calls[0][2] == {"request_key": "11111111-1111-4111-8111-111111111111"}
+    assert client.calls[1][2] == {
+        "plan_digest": client.profile_plan_digest,
+        "request_key": "11111111-1111-4111-8111-111111111111",
+    }
 
 
 def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route() -> (
@@ -619,7 +631,19 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
     status, payload = run(("profile", "load", "--json"), client)
 
     assert status == 0 and payload["state"] == "queued"
-    assert [call[1] for call in client.calls] == ["/api/profile/1/load"]
+    assert [call[1] for call in client.calls] == [
+        "/api/profile/1/preview",
+        "/api/profile/1/load",
+    ]
+
+
+def test_profile_load_fails_closed_when_preview_has_no_plan_digest() -> None:
+    client = FakeClient({("POST", "/api/profile/1/preview"): {"allowed": True}})
+    status, payload = run(("profile", "load", "--json"), client)
+
+    assert status == 2
+    assert payload["error"] == "profile preview did not contain a valid plan digest"
+    assert [call[1] for call in client.calls] == ["/api/profile/1/preview"]
 
 
 def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
@@ -755,7 +779,11 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
 
     assert status == 0
     assert payload["id"] == operation
-    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert [(call[0], call[1]) for call in client.calls] == [
+        ("POST", "/api/profile/1/preview"),
+        ("POST", "/api/profile/1/load"),
+        ("GET", f"/api/profile/1/requests/{key}"),
+    ]
 
 
 def test_lost_load_response_retries_only_with_original_request_key() -> None:
@@ -780,9 +808,18 @@ def test_lost_load_response_retries_only_with_original_request_key() -> None:
     post_keys = [
         call[2]["request_key"]
         for call in client.calls
-        if call[0] == "POST" and call[2] is not None
+        if call[0] == "POST" and call[1].endswith("/load") and call[2] is not None
     ]
     assert post_keys == [key, key]
+    post_bodies = [
+        call[2]
+        for call in client.calls
+        if call[0] == "POST" and call[1].endswith("/load") and call[2] is not None
+    ]
+    assert post_bodies == [
+        {"plan_digest": client.profile_plan_digest, "request_key": key},
+        {"plan_digest": client.profile_plan_digest, "request_key": key},
+    ]
 
 
 def test_progress_does_not_invent_percentage_for_unknown_total() -> None:

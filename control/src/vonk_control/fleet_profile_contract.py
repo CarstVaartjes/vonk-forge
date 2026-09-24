@@ -587,6 +587,7 @@ class FleetProfilePreview(_StrictModel):
 
 class FleetProfileLoadRequest(_StrictModel):
     dry_run: bool = False
+    plan_digest: Digest
     request_key: UuidId | None = None
 
 

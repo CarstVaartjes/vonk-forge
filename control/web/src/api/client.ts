@@ -233,10 +233,17 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async loadProfile(number: number, input: FleetProfileLoadInput = {dry_run: false}, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+  async loadProfile(number: number, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.POST("/api/profile/{number}/load", {
       params: {path: {number}},
       body: input,
+      signal,
+    }));
+  }
+
+  async profileApplicationByRequest(number: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+    return resultData(await this.generated.GET("/api/profile/{number}/requests/{request_key}", {
+      params: {path: {number, request_key: requestKey}},
       signal,
     }));
   }

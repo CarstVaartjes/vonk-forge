@@ -333,7 +333,9 @@ def test_profile_load_contract_does_not_accept_client_revision_pins() -> None:
     assert set(components["FleetProfileLoadRequest"]["properties"]) == {
         "request_key",
         "dry_run",
+        "plan_digest",
     }
+    assert "plan_digest" in components["FleetProfileLoadRequest"]["required"]
     assert {"plan_digest", "profile_digest", "progress"} <= set(
         components["FleetProfileApplicationView"]["properties"]
     )

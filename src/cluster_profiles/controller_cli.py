@@ -19,7 +19,12 @@ from typing import Protocol, runtime_checkable
 
 from .cli_render import progress_line
 from .cli_select import SelectorError
-from .control_client import ControlNotFound, ControlTransportError, ControlUnavailable
+from .control_client import (
+    ControlMalformedResponse,
+    ControlNotFound,
+    ControlTransportError,
+    ControlUnavailable,
+)
 
 FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
@@ -496,7 +501,7 @@ def _poll_path(
 
 
 def _submit_profile_load(
-    client: ControllerClient, number: int, request_key: str
+    client: ControllerClient, number: int, request_key: str, plan_digest: str
 ) -> dict[str, object]:
     """Resolve an ambiguous accepted POST under its original identity.
 
@@ -506,7 +511,7 @@ def _submit_profile_load(
     """
 
     path = f"/api/profile/{number}/load"
-    payload = {"request_key": request_key}
+    payload = {"plan_digest": plan_digest, "request_key": request_key}
     try:
         return client.request("POST", path, payload)
     except (ControlTransportError, ControlUnavailable, OSError) as lost:
@@ -1117,7 +1122,18 @@ def _profile(
     if action == "load":
         if args.dry_run:
             return client.request("POST", f"/api/profile/{number}/preview")
-        result = _submit_profile_load(client, number, _request_key(args, factory))
+        preview = client.request("POST", f"/api/profile/{number}/preview")
+        plan_digest = preview.get("plan_digest")
+        if (
+            not isinstance(plan_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", plan_digest) is None
+        ):
+            raise ControlMalformedResponse(
+                "profile preview did not contain a valid plan digest"
+            )
+        result = _submit_profile_load(
+            client, number, _request_key(args, factory), plan_digest
+        )
         if args.detach:
             return result
         application_id = result.get("id")

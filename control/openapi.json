@@ -4511,6 +4511,11 @@
             "title": "Dry Run",
             "type": "boolean"
           },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
           "request_key": {
             "anyOf": [
               {
@@ -4524,6 +4529,9 @@
             "title": "Request Key"
           }
         },
+        "required": [
+          "plan_digest"
+        ],
         "title": "FleetProfileLoadRequest",
         "type": "object"
       },

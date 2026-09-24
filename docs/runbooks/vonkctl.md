@@ -156,7 +156,9 @@ before saving; the web editor likewise sends the selected library row's
 canonical selector. It does not pin a recipe revision or declare a subset scope.
 The Controller returns warnings for incomplete groups and resource pressure at
 save time. A load preview reports blockers, resolved immutable identities, the
-whole-fleet snapshot, resource fit, and the plan it will bind internally.
+whole-fleet snapshot, resource fit, and a `plan_digest`. The CLI submits that
+digest with the load request, and the Controller rejects the request if the
+preview no longer describes the current plan.
 
 ## Output and recovery
 
