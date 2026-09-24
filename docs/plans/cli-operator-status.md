@@ -36,6 +36,47 @@ containing uncommitted changes were preserved for separate reconciliation;
 cleanup did not discard them. Earlier evidence below is historical and retains
 its original revision and scope.
 
+## Acceptance review corrections — 2026-09-24
+
+The external review found that the earlier invalid-connection smoke passed an
+unsupported `--controller` flag and therefore proved parser rejection, not a
+connection failure. That part of the old green run is withdrawn as evidence.
+The eight human cards also lacked an explicit mapping to three of W19's 13
+connected scenarios. Neither an earlier green smoke nor an incomplete scorecard
+closes W19.
+
+At correction commit `813b93f6`, the opt-in
+`-p control.tests.required_execution` gate rejects selected skips and expected
+failures, and rejects collection-only runs as acceptance. Normal test-suite skip
+policy is unchanged. Eight subprocess tests exercise these exit semantics.
+Twelve updater tests also pass, including a real signed-wheel installation into
+a disposable environment: the update result now reports the installed identity
+as `current` and retains the former identity as `previous`. A fresh CLI process
+must agree with the reported current identity. The combined run is 20 passed,
+no skips; pinned Ruff, full Python types (one existing reviewed exception), and
+supply-chain verification pass.
+
+Fresh connected evidence on that correction commit passes with the same strict
+gate and real PostgreSQL:
+
+- Ambiguous submit: `test_profile_load_submission.py::test_cli_recovers_committed_load_after_lost_response_and_profile_edit`.
+- Recipe update batch: `test_recipe_update_batch_installed_cli.py::test_installed_update_survives_cli_and_worker_death_with_frozen_cache_scope`.
+- Storage: `test_model_cache.py::test_interrupted_download_checkpoint_resumes_after_service_restart`,
+  `test_stored_bytes_without_a_receipt_are_not_admitted`, and
+  `test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes`.
+- Worker/storage recovery: all ten parametrizations of
+  `test_profile_build_process_recovery.py::test_profile_recovers_after_worker_process_death`.
+  These remove accepted image bytes and receipts, kill a worker subprocess,
+  reconnect after restart, and reject changed image/archive replacements. The
+  Spark executor is deterministic; this is not physical Spark acceptance.
+
+The first two scenarios pass two tests in 12.64 seconds. Storage and worker
+recovery pass 13 tests in 85.26 seconds. Files are under `control/tests/`; the
+[walkthrough protocol](cli-operator-walkthrough.md) owns the scenario map and
+reproducible invocations. Owner-level storage/process checks do not by themselves
+prove an unaided installed-CLI recovery journey. No human card has been performed
+by these automated runs.
+
 ## Automated integration checkpoint — 2026-09-24
 
 The final automated fixture integration is committed at `b1eee312`, based on
