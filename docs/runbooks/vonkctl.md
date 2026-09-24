@@ -269,6 +269,11 @@ time, candidate group, capacity evidence, and named reasons. The API's
 `assess=false` option skips assessment for exact identity scans; it cannot be
 combined with readiness filters.
 
+Library `--limit` is a requested maximum. A page can contain fewer entries to
+keep the complete JSON response within the 1 MiB document limit. Continue with
+the returned cursor and the same limit and filters; a short page does not mean
+the collection is exhausted.
+
 After a lost download response, the CLI first looks up the original request
 key. A matching receipt resumes following that operation. Only an authoritative
 not-found permits one replay of the identical request; failed or denied lookup

@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Literal, cast
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .auth import CursorCodec, CursorError
 from .catalog_queries import active_head_revision
@@ -39,6 +42,7 @@ from .library_contract import (
     RecipeLibraryResponse,
     _utc,
 )
+from .model_cache_contract import DIGEST_PATTERN, UUID_PATTERN
 from .models import (
     CatalogDocumentRevision,
     InstallationNode,
@@ -82,6 +86,103 @@ _LOCAL_STATE_PRIORITY = {
 type LibraryControllerState = Literal[
     "cached", "preparing", "not_cached", "failed", "unknown"
 ]
+
+
+def _wire_json_bytes(value: object) -> bytes:
+    """Serialize as the compact UTF-8 JSON response used by Starlette."""
+
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _bounded_library_page[T: BaseModel](
+    candidates: Sequence[T],
+    *,
+    has_more_after_candidates: bool,
+    collection_field: Literal["models", "recipes"],
+    empty_response: ModelLibraryResponse | RecipeLibraryResponse,
+    encode_cursor: Callable[[T], str],
+) -> tuple[list[T], str | None]:
+    """Choose the largest contiguous page that fits the shared wire budget.
+
+    The empty response includes the full filter/facet envelope. Item documents
+    are encoded once and added by byte length, including the exact continuation
+    token for each possible boundary. The caller's requested limit remains in
+    the cursor context; this function only shortens a page when its JSON bytes
+    require it.
+    """
+
+    envelope = empty_response.model_dump(mode="json")
+    empty_items = envelope.get(collection_field)
+    if empty_items != [] or envelope.get("next_cursor") is not None:
+        raise AssertionError("byte page sizing requires an empty response envelope")
+    envelope_bytes = len(_wire_json_bytes(envelope))
+    if envelope_bytes > MAX_CONTROL_DOCUMENT_BYTES:
+        raise RequestFault(
+            "library response envelope requires "
+            f"{envelope_bytes} bytes before entries; document limit is "
+            f"{MAX_CONTROL_DOCUMENT_BYTES} bytes; narrow the library filters"
+        )
+    if not candidates:
+        return [], None
+
+    item_sizes = [
+        len(_wire_json_bytes(item.model_dump(mode="json"))) for item in candidates
+    ]
+    prefix_sizes = [0]
+    for item_size in item_sizes:
+        prefix_sizes.append(prefix_sizes[-1] + item_size)
+
+    selected_count = 0
+    selected_cursor: str | None = None
+    first_item_response_bytes: int | None = None
+    first_cursor_too_large = False
+    for count in range(len(candidates), 0, -1):
+        needs_cursor = count < len(candidates) or has_more_after_candidates
+        try:
+            cursor = encode_cursor(candidates[count - 1]) if needs_cursor else None
+        except ValueError as error:
+            if str(error) != "cursor document is too large":
+                raise
+            if count == 1:
+                first_cursor_too_large = True
+            # This boundary cannot be issued to a caller. A later contiguous
+            # boundary can still be representable, so keep scanning prefixes.
+            continue
+        cursor_bytes = len(_wire_json_bytes(cursor)) if cursor is not None else 4
+        response_bytes = (
+            envelope_bytes
+            + prefix_sizes[count]
+            + count
+            - 1  # Commas between entries.
+            + cursor_bytes
+            - 4  # Replace the serialized null cursor.
+        )
+        if count == 1:
+            first_item_response_bytes = response_bytes
+        if response_bytes <= MAX_CONTROL_DOCUMENT_BYTES:
+            selected_count = count
+            selected_cursor = cursor
+            break
+
+    if selected_count == 0:
+        if first_cursor_too_large:
+            raise RequestFault(
+                "the first matching library entry cannot be continued because "
+                "its signed cursor boundary exceeds the Controller cursor limit; "
+                "narrow the library filters"
+            )
+        assert first_item_response_bytes is not None
+        raise RequestFault(
+            "the first matching library entry requires "
+            f"{first_item_response_bytes} bytes; document limit is "
+            f"{MAX_CONTROL_DOCUMENT_BYTES} bytes; narrow filters to exclude it"
+        )
+    return list(candidates[:selected_count]), selected_cursor
 
 
 def _controller_state(
@@ -874,28 +975,41 @@ class LibraryProjection:
                 raise CursorError(
                     "library cursor is invalid or the selection changed; restart without a cursor"
                 ) from None
-            expected_length = 3 if sort == "updated" else 2
+            expected_length = 2 if sort == "updated" else 1
             if not isinstance(boundary, list) or len(boundary) != expected_length:
                 raise CursorError("model library cursor is invalid")
-            boundary_key = tuple(str(value) for value in boundary)
             if sort == "updated":
-                filtered = [item for item in filtered if key(item) < boundary_key]
+                boundary_updated_at, boundary_digest = map(str, boundary)
+                boundary_items = [
+                    item
+                    for item in filtered
+                    if item.updated_at.strftime("%Y%m%dT%H%M%SZ") == boundary_updated_at
+                    and item.identity.content_sha256 == boundary_digest
+                ]
             else:
-                filtered = [item for item in filtered if key(item) > boundary_key]
-        page = filtered[:limit]
-        next_cursor = None
-        if len(filtered) > limit and page:
-            next_cursor = self._cursors.encode(
-                resource="models",
-                order=_LIBRARY_ORDER,
-                context=context,
-                boundary=list(key(page[-1])),
-            )
-        return ModelLibraryResponse(
+                (boundary_digest,) = map(str, boundary)
+                boundary_items = [
+                    item
+                    for item in filtered
+                    if item.identity.content_sha256 == boundary_digest
+                ]
+            if not boundary_items:
+                raise CursorError("model library cursor boundary is invalid")
+            boundary_key = key(boundary_items[0])
+            filtered = [
+                item
+                for item in filtered
+                if (
+                    key(item) < boundary_key
+                    if sort == "updated"
+                    else key(item) > boundary_key
+                )
+            ]
+        response = ModelLibraryResponse(
             generated_at=_utc(self._clock()),
-            models=page,
+            models=[],
             facets=self._facet_values(entries),
-            next_cursor=next_cursor,
+            next_cursor=None,
             filters=LibraryFilterValues(
                 usage=list(usage),
                 family=list(family),
@@ -913,6 +1027,29 @@ class LibraryProjection:
             freshness_policy=self._freshness,
         )
 
+        def encode_cursor(item: LibraryModelProjection) -> str:
+            item_key = key(item)
+            boundary = (
+                [item_key[0], item.identity.content_sha256]
+                if sort == "updated"
+                else [item.identity.content_sha256]
+            )
+            return self._cursors.encode(
+                resource="models",
+                order=_LIBRARY_ORDER,
+                context=context,
+                boundary=boundary,
+            )
+
+        page, next_cursor = _bounded_library_page(
+            filtered[:limit],
+            has_more_after_candidates=len(filtered) > limit,
+            collection_field="models",
+            empty_response=response,
+            encode_cursor=encode_cursor,
+        )
+        return response.model_copy(update={"models": page, "next_cursor": next_cursor})
+
     @staticmethod
     def _model_sort_key(
         sort: str,
@@ -926,6 +1063,9 @@ class LibraryProjection:
         return lambda item: (item.selector.casefold(), item.identity.content_sha256)
 
     def model_detail(self, selector: str) -> ModelDetailResponse:
+        selected = selector.strip().casefold()
+        if not selected:
+            raise RequestFault("model selector is required")
         snapshot = self._local_state_snapshot()
         model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
         alignment_by_model = self._alignment_by_model(recipe_rows)
@@ -942,12 +1082,67 @@ class LibraryProjection:
             )
             for row in model_rows
         ]
-        entry = self._resolve_selector(
-            entries,
-            selector,
-            lambda item: (item.identity.publisher, item.identity.slug),
-        )
-        assert isinstance(entry, LibraryModelProjection)
+        pairs = list(zip(model_rows, entries, strict=True))
+        candidates: list[LibraryModelProjection]
+        if re.fullmatch(DIGEST_PATTERN, selected):
+            candidates = [
+                entry
+                for revision, entry in pairs
+                if revision.state == "active" and revision.content_digest == selected
+            ]
+            if not candidates:
+                with self._sessions() as session:
+                    cached = session.scalar(
+                        select(ModelCacheSet.model_content_sha256)
+                        .where(ModelCacheSet.model_content_sha256 == selected)
+                        .limit(1)
+                    )
+                if cached is not None:
+                    candidates = [
+                        entry
+                        for revision, entry in pairs
+                        if revision.content_digest == selected
+                    ]
+        elif re.fullmatch(UUID_PATTERN, selected):
+            candidates = [
+                entry
+                for revision, entry in pairs
+                if revision.state == "active"
+                and selected
+                in {revision.id.casefold(), revision.document_id.casefold()}
+            ]
+        else:
+            if "/" in selected:
+                publisher, slug = selected.split("/", 1)
+                candidates = [
+                    entry
+                    for revision, entry in pairs
+                    if revision.state == "active"
+                    and revision.publisher.casefold() == publisher
+                    and revision.slug.casefold() == slug
+                ]
+            else:
+                candidates = [
+                    entry
+                    for revision, entry in pairs
+                    if revision.state == "active"
+                    and revision.slug.casefold() == selected
+                ]
+
+        if not candidates:
+            raise KeyError(selector)
+        if len(candidates) > 1:
+            if re.fullmatch(DIGEST_PATTERN, selected):
+                # A content digest names identical canonical bytes even when
+                # the catalog has more than one active reference to them.
+                entry = max(candidates, key=lambda item: item.updated_at)
+            else:
+                raise LibrarySelectorAmbiguous(
+                    selector,
+                    sorted({item.identity.content_sha256 for item in candidates}),
+                )
+        else:
+            entry = candidates[0]
         return ModelDetailResponse.model_validate(entry.model_dump(mode="python"))
 
     def recipe_library(
@@ -1127,9 +1322,28 @@ class LibraryProjection:
                 raise CursorError(
                     "library cursor is invalid or the selection changed; restart without a cursor"
                 ) from None
-            if not isinstance(boundary, list) or len(boundary) != 3:
+            if not isinstance(boundary, list) or len(boundary) != (
+                2 if sort == "updated" else 1
+            ):
                 raise CursorError("recipe library cursor is invalid")
-            boundary_key = tuple(str(value) for value in boundary)
+            if sort == "updated":
+                boundary_updated_at, boundary_digest = map(str, boundary)
+                boundary_items = [
+                    item
+                    for item in filtered
+                    if item.updated_at.strftime("%Y%m%dT%H%M%SZ") == boundary_updated_at
+                    and item.identity.content_sha256 == boundary_digest
+                ]
+            else:
+                (boundary_digest,) = map(str, boundary)
+                boundary_items = [
+                    item
+                    for item in filtered
+                    if item.identity.content_sha256 == boundary_digest
+                ]
+            if not boundary_items:
+                raise CursorError("recipe library cursor boundary is invalid")
+            boundary_key = key(boundary_items[0])
             filtered = [
                 item
                 for item in filtered
@@ -1139,22 +1353,14 @@ class LibraryProjection:
                     else key(item) > boundary_key
                 )
             ]
-        page = filtered[:limit]
-        next_cursor = None
-        if len(filtered) > limit and page:
-            next_cursor = self._cursors.encode(
-                resource="recipes",
-                order=_LIBRARY_ORDER,
-                context=context,
-                boundary=list(key(page[-1])),
-            )
-        return RecipeLibraryResponse(
+        candidates = filtered[:limit]
+        if assess and not filtering_assessment:
+            candidates = self._assessed(candidates)
+        response = RecipeLibraryResponse(
             generated_at=_utc(self._clock()),
-            recipes=self._assessed(page)
-            if assess and not filtering_assessment
-            else page,
+            recipes=[],
             facets=self._recipe_facet_values(model_entries, entries),
-            next_cursor=next_cursor,
+            next_cursor=None,
             filters=LibraryFilterValues(
                 model=list(model_selectors),
                 all_models=all_models,
@@ -1172,6 +1378,29 @@ class LibraryProjection:
             ),
             freshness_policy=self._freshness,
         )
+
+        def encode_cursor(item: LibraryRecipeProjection) -> str:
+            item_key = key(item)
+            boundary = (
+                [item_key[0], item.identity.content_sha256]
+                if sort == "updated"
+                else [item.identity.content_sha256]
+            )
+            return self._cursors.encode(
+                resource="recipes",
+                order=_LIBRARY_ORDER,
+                context=context,
+                boundary=boundary,
+            )
+
+        page, next_cursor = _bounded_library_page(
+            candidates,
+            has_more_after_candidates=len(filtered) > len(candidates),
+            collection_field="recipes",
+            empty_response=response,
+            encode_cursor=encode_cursor,
+        )
+        return response.model_copy(update={"recipes": page, "next_cursor": next_cursor})
 
     @staticmethod
     def _recipe_sort_key(
