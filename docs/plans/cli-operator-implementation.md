@@ -47,7 +47,10 @@ and W19's disposable cleanup facilitator pass local integrated checks and full
 Linux/ARM64 CI at `ab25b1d7`. U2, the connected same-profile authoring/load/
 reconnect/endpoint journey, and the independent human scorecard remain open.
 The existing separate walkthrough cards do not establish the same-profile
-boundary; preserve that requirement in W19's final acceptance.
+boundary; preserve that requirement in W19's final acceptance. Upstream build
+failure/retry policy is now integrated and qualified by full CI and both ARM64
+acceptance workflows at `023466cf`; the latest checkpoint and evidence links
+are in the status document.
 
 The [shared-build closure checklist](#shared-build-closure-checklist) retains
 historical implementation detail. It does not supersede the current status.

@@ -15,8 +15,13 @@ sites. The final affected boundary suite passes 217 tests, including real
 PostgreSQL child recovery, update/removal consumers and managed image storage.
 Only clean archive absence is retryable; permission and integrity failures
 remain terminal. The full type gate has one reviewed exception and no unlisted
-errors; pinned lint/format and regenerated supply evidence pass. This batch is
-not yet qualified by full CI.
+errors; pinned lint/format and regenerated supply evidence pass. All 23 applicable
+checks pass at source `023466cf774f4785ea52d02a42e69244a53df7e8`:
+[full CI](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36006775392),
+[ARM64 capsule recovery](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36006775022),
+and [ARM64 signed helper](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36006775021).
+Publication jobs were skipped for the PR; no accepted release or deployment is
+claimed.
 
 The final W19 audit also found a connected-journey evidence gap: the existing
 authoring, load/reconnect and endpoint scenarios use different profiles and
@@ -28,7 +33,7 @@ remain required; neither is supplied by synthetic cache-ready assets.
 
 The active candidate is `codex/cli-approved-integration` in
 `/private/tmp/vonk-cli-approved-integration`. The latest verified source is
-`ab25b1d77708ff998fc103baa4ea03bd359d728a`, including remote main `99fb22f2`,
+`023466cf774f4785ea52d02a42e69244a53df7e8`, including remote main `e31f3fa0`,
 exact removal reviews, cancellation/removal recovery, the U8 cleanup facilitator,
 and current web-call-site receipt recovery. Its 23 applicable PR checks pass.
 The earlier verified source checkpoint `c1a92c29` includes upstream `0123eeb4`, byte-bounded library pagination (`02ce6441`),
@@ -203,8 +208,11 @@ handoff. The current continuation implements W17's pre-consent removal review,
 qualifies W12's combined cancellation/removal race and adds W19's cleanup
 facilitator. Their local combined checks and full PR CI pass at `ab25b1d7`.
 W09's admission and durable asset-ownership implementation and this
-continuation have passing combined CI evidence at `ab25b1d7`. W19 also retains a genuine runnable U2 candidate and an independent
-human scorecard. Passing an automated scenario does not fill that scorecard.
+continuation have passing combined CI evidence at `ab25b1d7`, with the latest
+upstream/recovery integration qualified at `023466cf`. W19 still requires a
+genuine runnable U2 candidate, the same-profile author-to-endpoint journey,
+and an independent human scorecard. Passing an automated scenario does not
+fill that scorecard.
 
 | Package | State | Current evidence / remaining work |
 | --- | --- | --- |
@@ -227,7 +235,7 @@ human scorecard. Passing an automated scenario does not fill that scorecard.
 | W16 | Repository and installed criteria proven | Draft/upload/submit/detail/cancel/verified-download and request recovery pass CLI/API, real byte-route and installed checks. Exact named output identity, atomic verified publication and partial recovery are covered; current combined gates pass. Optional-output recipes now accept a canonical empty manifest; required-output minima are enforced both during result consumption and successful response validation. Installed human and JSON checks distinguish queued/unavailable, empty success and required-output failure, and show verified local files. Definitive refusals now offer read-only inspection or a new review; ambiguous and already-accepted requests retain exact recovery guidance. |
 | W17 | Durable removal, pre-consent impact review and maintenance criteria proven | Upgrade/removal consent, one-at-a-time maintenance, exact-key replay and durable following pass focused checks. Stored recipe-removal replays now bind exact target, actor and model-retention choice with strict receipt validation. Concurrent first-submission ownership and durable pre-effect intent now pass connected and installed checks. The Controller now exposes exact pre-consent impact, current clients bind its digest, changed scope is refused, and installed replay and cleanup checks pass locally. |
 | W18 | Own repository and installed criteria proven; dependent delivery remains open | Real entry-point, shell, signed updater, terminal contexts and installed runbook/parser checks pass. Actual wheel/TLS/PostgreSQL tests cover delivered workflows. Combined source, generated contract, wire, build and supply-chain checks now pass. W19 remains required for the full handoff. |
-| W19 | In progress | Installed load, authoring, consent and closed-output acceptance exercise actual services/PostgreSQL; endpoint, connection, artifact-job, recipe cancellation and profile cancellation/Activity journeys also pass; interrupted update-batch, Find-and-prepare, sequential-upgrade and exact-resume acceptance pass. Current combined source/installed gates pass. The connected cancellation/removal case and U8 cleanup smoke now pass. A real runnable U2 candidate and the independent operator walkthrough still block handoff. No deployed or physical claim. |
+| W19 | In progress | Installed load, authoring, consent and closed-output acceptance exercise actual services/PostgreSQL; endpoint, connection, artifact-job, recipe cancellation and profile cancellation/Activity journeys also pass; interrupted update-batch, Find-and-prepare, sequential-upgrade and exact-resume acceptance pass. Current combined source/installed gates pass. The connected cancellation/removal case and U8 cleanup smoke now pass. A real runnable U2 candidate, the connected same-profile author-to-endpoint journey, and the independent operator walkthrough still block handoff. No deployed or physical claim. |
 
 ## Historical checkpoints
 
