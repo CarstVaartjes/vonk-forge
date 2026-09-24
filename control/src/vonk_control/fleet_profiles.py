@@ -2502,13 +2502,15 @@ class FleetProfileService:
         )
         try:
             intended = self._intended_profile(application, session=session)
-        except FleetProfileConflict as error:
-            # A broken historical plan blocks execution, but it should not
-            # hide the rest of this read-only endpoint projection. The exact
-            # reviewed assignments remain unknown; never reconstruct them
-            # from today's mutable saved profile.
+        except (FleetProfileConflict, ValidationError) as error:
+            # Broken historical plan or progress blocks execution, but it
+            # should not hide the rest of this read-only endpoint projection.
+            # The exact reviewed assignments remain unknown; never reconstruct
+            # them from today's mutable saved profile.
             cause = error.__cause__
-            detail = stored_document_detail(cause) if isinstance(cause, Exception) else None
+            detail = stored_document_detail(error)
+            if detail is None and isinstance(cause, Exception):
+                detail = stored_document_detail(cause)
             return FleetProfileEndpointIntent(
                 number=number,
                 profile_id=profile.id,

@@ -908,6 +908,45 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
     assert withdrawn.assignments[0].state == "withdrawn"
     assert withdrawn.assignments[0].expected_run_id is None
 
+    # A required field missing from immutable persisted progress should make
+    # endpoint membership explicitly unreadable, while execution keeps using
+    # the strict progress validator.
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        valid_progress = deepcopy(row.progress)
+    assert isinstance(valid_progress, dict)
+
+    for missing_field in ("reviewed_plan_digest", "reviewed_application_id"):
+        corrupted_progress = deepcopy(valid_progress)
+        intended_profile = corrupted_progress.get("intended_profile")
+        assert isinstance(intended_profile, dict)
+        intended_profile.pop(missing_field)
+        with sessions.begin() as session:
+            row = session.get(FleetProfileApplication, application.id)
+            assert row is not None
+            row.progress = corrupted_progress
+
+        with sessions() as session:
+            unreadable = service.endpoint_intent(session, profile.number)
+            row = session.get(FleetProfileApplication, application.id)
+            assert row is not None
+            with pytest.raises(ValidationError):
+                service._intended_profile(row, session=session)
+
+        assert unreadable.application_id == application.id
+        assert unreadable.assignments is None
+        assert unreadable.projection_issue is not None
+        assert unreadable.projection_issue.detail == (
+            "stored document is invalid at intended_profile."
+            f"{missing_field} (missing)"
+        )
+
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.progress = valid_progress
+
     # Endpoint discovery is a read-only projection. If the immutable reviewed
     # plan is corrupt, expose that membership is unknown without changing the
     # strict validator used by execution and recovery.
@@ -928,6 +967,9 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
     assert unavailable.assignments is None
     assert unavailable.projection_issue is not None
     assert unavailable.projection_issue.code == "profile.application_intent.invalid"
+    assert unavailable.projection_issue.detail == (
+        "stored document is invalid at profile_id (missing)"
+    )
 
 
 def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progress() -> (
