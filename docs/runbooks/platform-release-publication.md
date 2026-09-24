@@ -15,8 +15,11 @@ directory containing the existing bundle:
 curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
-They then upload the refreshed three-entry directory and redeploy it with the
-NAS Docker UI. This is the only supported NAS upgrade entry point.
+They then transfer the refreshed three-entry directory and redeploy the existing
+Compose project through approved host access. Prefer the configured headless CLI
+and follow the [NAS redeployment procedure](operator-cli-access.md#nas-compose-redeployment);
+the NAS Docker UI is not a required authentication or deployment step. The signed
+installer remains the supported NAS upgrade entry point.
 
 Spark nodes use the architecture-specific `vonk-forge-agent` Debian package.
 For an enrolled, online fleet, the authenticated Fleet upgrade action (or

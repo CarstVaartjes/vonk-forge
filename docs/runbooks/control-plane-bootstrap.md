@@ -50,7 +50,9 @@ address comes from the generated command. Tailscale remains on the NAS gateway;
 it is not required on the Sparks.
 
 Rerun the NAS command from the existing bundle's parent directory to prepare a
-NAS upgrade. After the NAS is running the accepted release, use Fleet's signed
+NAS upgrade, then follow the [NAS Compose redeployment procedure](operator-cli-access.md#nas-compose-redeployment).
+An approved headless host CLI can apply the bundle without a NAS browser session.
+After the NAS is running the accepted release, use Fleet's signed
 one-at-a-time upgrade action for routine Spark package rollouts; it uses the
 existing agent connection, requires the exact target identity before advancing,
 and does not require SSH. Rerun the Spark command for package repair, a fresh
