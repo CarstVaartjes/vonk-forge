@@ -5,6 +5,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    collections::VecDeque,
     fs::File,
     io::Read,
     path::Path,
@@ -14,6 +15,7 @@ use std::{
 
 const LOG_BYTES: usize = 2048;
 const LOG_LINES: usize = 32;
+const TRUNCATED_LOG_MARKER: &[u8] = b"[earlier diagnostic output truncated]";
 
 pub use vonk_agent_protocol::failure_evidence::{
     FailureCategory, FailureDiagnostics, FailureLogTail, FailureProperty,
@@ -151,40 +153,112 @@ fn clamp_tail(text: String, limit: usize) -> (String, usize) {
     while cut < text.len() && !text.is_char_boundary(cut) {
         cut += 1;
     }
-    if let Some(index) = text[cut..].find('\n') {
+    if let Some(index) = text[cut..].find('\n')
+        && cut + index + 1 < text.len()
+    {
         cut += index + 1;
     }
     (text[cut..].to_owned(), cut)
 }
 
 pub fn log_tail(bytes: &[u8]) -> FailureLogTail {
-    let start = bytes.len().saturating_sub(LOG_BYTES);
-    let selected = &bytes[start..];
-    let selected = if start > 0 {
-        selected
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(&[][..], |index| &selected[index + 1..])
+    // Find the last logical lines before decoding or clipping them. Bare CR is
+    // also a progress-line separator; CRLF counts as one separator. Keep only
+    // borrowed source slices here so old or oversized lines do not accumulate
+    // while scanning the stream.
+    let announced = bytes.starts_with(TRUNCATED_LOG_MARKER);
+    let (mut line_start, mut offset, mut discard_partial_line) = if announced {
+        let after_marker = TRUNCATED_LOG_MARKER.len();
+        let delimiter_len = if bytes[after_marker..].starts_with(b"\r\n") {
+            Some(2)
+        } else if bytes[after_marker..].starts_with(b"\n")
+            || bytes[after_marker..].starts_with(b"\r")
+        {
+            Some(1)
+        } else {
+            None
+        };
+        if let Some(delimiter_len) = delimiter_len {
+            (
+                after_marker + delimiter_len,
+                after_marker + delimiter_len,
+                true,
+            )
+        } else {
+            // A marker with no line delimiter leaves no trustworthy source
+            // boundary. Fail closed instead of treating the suffix as a line.
+            (bytes.len(), bytes.len(), false)
+        }
     } else {
-        selected
+        (0, 0, false)
     };
-    let text = String::from_utf8_lossy(selected);
-    let lines = text.lines().collect::<Vec<_>>();
-    let total_lines = bytes.iter().filter(|b| **b == b'\n').count();
-    let tail = lines[lines.len().saturating_sub(LOG_LINES)..].join("\n");
-    let safe = sanitize_text(&tail);
-    let capped = safe.len().saturating_sub(LOG_BYTES);
-    let (safe, dropped_by_bound) = clamp_tail(safe, LOG_BYTES);
-    let announced = bytes.starts_with(b"[earlier diagnostic output truncated]");
+    let mut selected: VecDeque<(&[u8], usize)> = VecDeque::with_capacity(LOG_LINES);
+    let mut total_lines = 0;
+    while offset < bytes.len() {
+        let separator_len = match bytes[offset] {
+            b'\n' => Some(1),
+            b'\r' => Some(if bytes.get(offset + 1) == Some(&b'\n') {
+                2
+            } else {
+                1
+            }),
+            _ => None,
+        };
+        if let Some(separator_len) = separator_len {
+            if discard_partial_line {
+                discard_partial_line = false;
+            } else {
+                if selected.len() == LOG_LINES {
+                    selected.pop_front();
+                }
+                selected.push_back((
+                    &bytes[line_start..offset],
+                    offset - line_start + separator_len,
+                ));
+            }
+            total_lines += 1;
+            offset += separator_len;
+            line_start = offset;
+        } else {
+            offset += 1;
+        }
+    }
+    if line_start < bytes.len() && !discard_partial_line {
+        if selected.len() == LOG_LINES {
+            selected.pop_front();
+        }
+        selected.push_back((&bytes[line_start..], bytes.len() - line_start));
+        total_lines += 1;
+    }
+
+    let selected_bytes = selected.iter().map(|(_, source_bytes)| source_bytes).sum();
+    let mut safe_lines = Vec::with_capacity(selected.len());
+    let mut dropped_by_line = 0_usize;
+    for (line, _) in selected.iter() {
+        // Redact each complete logical line before its byte window is clipped.
+        // Otherwise an Authorization/token marker at the front of an oversized
+        // line could be lost while leaving its credential-bearing suffix.
+        let decoded = String::from_utf8_lossy(line);
+        let safe = sanitize_text(&decoded);
+        let (safe, dropped) = clamp_tail(safe, LOG_BYTES);
+        dropped_by_line = dropped_by_line.saturating_add(dropped);
+        safe_lines.push(safe);
+    }
+    let joined = safe_lines.join("\n");
+    let (safe, dropped_by_join) = clamp_tail(joined, LOG_BYTES);
+    // Per-line clips are omitted before joining; the joined clip removes bytes
+    // from that already-bounded text, so both counts describe distinct drops.
+    let dropped_by_bound = dropped_by_line.saturating_add(dropped_by_join);
     FailureLogTail {
         text: safe,
-        truncated: start > 0
-            || lines.len() > LOG_LINES
+        truncated: bytes.len() > LOG_BYTES
+            || total_lines > LOG_LINES
             || dropped_by_bound > 0
-            || capped > 0
             || announced,
-        dropped_bytes: (!announced)
-            .then_some((bytes.len() - selected.len()) as u64 + dropped_by_bound as u64),
+        dropped_bytes: (!announced).then_some(
+            (bytes.len().saturating_sub(selected_bytes) as u64)
+                .saturating_add(dropped_by_bound as u64),
+        ),
         dropped_lines: (!announced).then_some(total_lines.saturating_sub(LOG_LINES) as u64),
     }
 }
@@ -562,6 +636,118 @@ mod tests {
         assert!(kept.ends_with("the engine exited here\n"), "{kept}");
         assert!(kept.len() <= LOG_BYTES);
         assert_eq!(dropped, text.len() - kept.len());
+        assert!(dropped > 0);
+    }
+
+    #[test]
+    fn an_oversized_single_line_keeps_its_trailing_failure() {
+        // Wrong implementation this catches: selecting the last byte window
+        // before finding a line boundary turns a long Podman error line into an
+        // empty tail when its only newline is at the end.
+        let text = format!(
+            "{}permission denied while building image\n",
+            "STEP echo ".repeat(500)
+        );
+        let tail = log_tail(text.as_bytes());
+        assert!(tail.truncated);
+        assert!(
+            tail.text
+                .ends_with("permission denied while building image"),
+            "{}",
+            tail.text
+        );
+        assert!(tail.text.len() <= LOG_BYTES);
+    }
+
+    #[test]
+    fn an_oversized_carriage_return_progress_stream_keeps_its_final_failure() {
+        // Podman progress may use bare carriage returns instead of linefeeds.
+        // Wrong implementation: it treats the whole stream as one partial
+        // line and discards the useful final status.
+        let text = format!(
+            "{}permission denied during image build",
+            "copying layer 98%\r".repeat(300)
+        );
+        let tail = log_tail(text.as_bytes());
+        assert!(tail.truncated);
+        assert!(
+            tail.text.ends_with("permission denied during image build"),
+            "{}",
+            tail.text
+        );
+        assert!(tail.text.len() <= LOG_BYTES);
+    }
+
+    #[test]
+    fn an_oversized_credential_line_is_redacted_before_the_tail_is_clipped() {
+        // Wrong implementation this catches: clipping before redaction drops
+        // the Authorization marker and could expose a credential-bearing suffix.
+        let credential = "sensitive-credential-value".repeat(150);
+        let text = format!("Authorization: Bearer {credential} permission denied\n");
+        let tail = log_tail(text.as_bytes());
+        assert!(tail.truncated);
+        assert_eq!(tail.text, "[redacted diagnostic line]");
+        assert!(!tail.text.contains("sensitive-credential-value"));
+    }
+
+    #[test]
+    fn an_oversized_utf8_line_keeps_a_valid_bounded_tail() {
+        // The byte bound must not split a multibyte code point while keeping
+        // the final diagnostic from a long line.
+        let text = format!("{}permission denied", "🧱".repeat(700));
+        let tail = log_tail(text.as_bytes());
+        assert!(tail.truncated);
+        assert!(tail.text.ends_with("permission denied"));
+        assert!(tail.text.len() <= LOG_BYTES);
+    }
+
+    #[test]
+    fn byte_drop_count_includes_clipped_earlier_lines() {
+        // The per-line clips happen before the joined tail is bounded. Both
+        // losses must be reflected, even when a later short line survives.
+        let first = format!("{}first failure\n", "x ".repeat(1100));
+        let second = format!("{}second failure\n", "y ".repeat(1100));
+        let text = format!("{first}{second}last status");
+        let tail = log_tail(text.as_bytes());
+        assert_eq!(tail.text, "last status");
+        assert_eq!(
+            tail.dropped_bytes,
+            Some((text.len() - tail.text.len()) as u64)
+        );
+    }
+
+    #[test]
+    fn announced_truncation_discards_the_partial_first_source_line() {
+        // DiagnosticRing prepends this marker to an arbitrary byte suffix. If
+        // capture began after an Authorization/Bearer marker, the first suffix
+        // fragment cannot be safely redacted and must be discarded to its next
+        // line boundary.
+        let text = format!(
+            "{}\n=hunter2\npermission denied",
+            String::from_utf8_lossy(TRUNCATED_LOG_MARKER)
+        );
+        let tail = log_tail(text.as_bytes());
+        assert_eq!(tail.text, "permission denied");
+        assert!(tail.truncated);
+        assert_eq!(tail.dropped_bytes, None);
+        assert_eq!(tail.dropped_lines, None);
+
+        // Without a boundary there is no trustworthy complete diagnostic line.
+        let text = format!(
+            "{}\n=hunter2",
+            String::from_utf8_lossy(TRUNCATED_LOG_MARKER)
+        );
+        assert!(log_tail(text.as_bytes()).text.is_empty());
+    }
+
+    #[test]
+    fn clamp_tail_keeps_an_oversized_final_line_ending_in_newline() {
+        // Wrong implementation this catches: moving past the only newline in
+        // the retained window drops the entire oversized final line.
+        let text = format!("{}permission denied\n", "x".repeat(LOG_BYTES + 128));
+        let (kept, dropped) = clamp_tail(text, LOG_BYTES);
+        assert!(kept.ends_with("permission denied\n"), "{kept}");
+        assert!(kept.len() <= LOG_BYTES);
         assert!(dropped > 0);
     }
 
