@@ -69,16 +69,16 @@ inference service. The genuine runnable U2 fixture integration and independent
 human walkthrough remain required.
 
 The active candidate is `codex/cli-approved-integration` in
-`/private/tmp/vonk-cli-approved-integration`. The latest verified source is
-`023466cf774f4785ea52d02a42e69244a53df7e8`, including remote main `e31f3fa0`,
-exact removal reviews, cancellation/removal recovery, the U8 cleanup facilitator,
-and current web-call-site receipt recovery. Its 23 applicable PR checks pass.
-The earlier verified source checkpoint `c1a92c29` includes upstream `0123eeb4`, byte-bounded library pagination (`02ce6441`),
-common build/profile admission locking (`b6be92fe`), durable model/recipe
-removal, truthful memory commitments, installed recipe-removal qualification
-and the full-CI corrections described below. This is not a merge, publication,
-deployment, or physical acceptance claim. Other tasks' checkouts
-and the earlier integration snapshot remain preserved.
+`/private/tmp/vonk-cli-approved-integration`. The connected-journey checkpoint
+`415d7e690e0515175281ca4445175dcd7d5fc501` passes all 23 applicable PR checks:
+[CI](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36015718024),
+[ARM64 recovery](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36015717433),
+and [signed helper](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36015717506).
+It includes remote main `e31f3fa0`, native build recovery, exact removal review,
+cancellation/removal recovery, the U8 cleanup facilitator, current web-call-site
+receipt recovery and the connected Profile journey. This is not a merge,
+publication, deployment or physical acceptance claim. Other tasks' checkouts
+and earlier integration snapshots remain preserved.
 
 Library pages now bound the complete JSON response, including facets and the
 signed cursor, to 1 MiB. The requested page size survives continuation; an
