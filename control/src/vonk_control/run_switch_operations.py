@@ -7355,8 +7355,8 @@ class RunSwitchOperationProvider:
             return self._item(job)
 
     def _item(self, job: Job) -> Mapping[str, object]:
+        node_ids: list[str] = []
         try:
-            operation = self._service._operation_view(job)
             if (
                 not isinstance(job.targets, list)
                 or not job.targets
@@ -7368,13 +7368,24 @@ class RunSwitchOperationProvider:
             ):
                 raise ValueError("stored Run/Switch targets are malformed")
             node_ids = list(job.targets)
-        except (AttributeError, KeyError, TypeError, ValueError, ValidationError):
+            operation = self._service._operation_view(job)
+        except (
+            AttributeError,
+            KeyError,
+            RunSwitchOperationConflict,
+            TypeError,
+            ValueError,
+            ValidationError,
+        ):
             return {
                 "id": job.id,
                 "job_id": job.id,
                 "parent_id": None,
                 "owner": {"kind": "job", "id": job.id, "request_id": job.request_id},
-                "node_ids": [],
+                # Job.targets is the durable owner of target membership. Keep
+                # a valid scope visible when plan parsing fails so global
+                # node-filtered Activity pages retain this unreadable row.
+                "node_ids": node_ids,
                 "kind": "run-switch-unreadable",
                 "state": "unavailable",
                 "attempt": max(0, int(getattr(job, "current_attempt", 0) or 0)),
