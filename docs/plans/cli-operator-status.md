@@ -1,6 +1,40 @@
 # CLI implementation status
 
-## Active integration checkpoint — 2026-09-24
+## Current handoff checkpoint — 2026-09-24
+
+The implementation is merged through `eafd2107e48e4e8309802633ae71fca071be17f6`.
+[PR #883](https://github.com/CarstVaartjes/vonk-forge/pull/883) merged after all
+23 applicable checks passed. Installer acceptance exposed two obsolete test
+runner requests: enrollment omitted its request key, and recipe download sent
+the retired `with_model` field. [PR #887](https://github.com/CarstVaartjes/vonk-forge/pull/887)
+and [PR #888](https://github.com/CarstVaartjes/vonk-forge/pull/888) use the current
+generated request contracts. Each regression failed before its fix; the runner
+suite passes 42 tests with seven platform-specific skips, and the full type gate
+passes with one existing reviewed exception. Both corrective PRs merged after
+all ten applicable checks passed.
+
+[Installer publication run 36025460279](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36025460279)
+passed both clean NAS lanes, ARM64 Spark lifecycle/canary acceptance, signed
+acceptance, and development-channel promotion. Its publication plan binds source
+`eafd2107e48e4e8309802633ae71fca071be17f6` to generation
+`c48232d115091d41d38ffa805b6342cf43a2dbb948afe9616b2f9127f728f2af`.
+The promotion receipt records the development pointer update and confirms that
+the image aliases match the accepted immutable set. The reused binary version
+is `0.1.1~dev.611+gf2be83c2f165`; it does not replace the publication source identity.
+
+The independent human U1–U8 scorecard remains unperformed. W19 and the CLI
+handoff therefore remain open. The locally qualified Qwen CPU fixture and
+connected same-Profile journey are ready for that walkthrough. CI installer
+acceptance does not establish deployment on the user's NAS/Sparks, physical
+frontier-model qualification, or the every-model campaign.
+
+Canonical local main was fast-forwarded cleanly. The merged integration, final
+linked-journey/Qwen, and corrective worktrees were removed. Older worktrees
+containing uncommitted changes were preserved for separate reconciliation;
+cleanup did not discard them. Earlier evidence below is historical and retains
+its original revision and scope.
+
+## Automated integration checkpoint — 2026-09-24
 
 The final automated fixture integration is committed at `b1eee312`, based on
 the conflict-resolved merge `5754ed30` of remote main `d08d8b31`. The recipe
