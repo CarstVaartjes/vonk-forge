@@ -1,9 +1,11 @@
 # W19 operator walkthrough protocol
 
 **Status:** no human participant acceptance has been performed. A disposable
-U1/U3 fixture and U2 cache-readiness setup are available. The empty image
-fixture does not establish a runnable candidate. This protocol does not prove
-that an operator completed the CLI journey and does not close W19.
+U1/U3 fixture and U2 cache-readiness setup are available. The default synthetic
+fixture's empty image does not establish a runnable candidate; an opt-in,
+locally pinned Qwen CPU candidate is available for the interactive launcher.
+This protocol does not prove that an operator completed the CLI journey and
+does not close W19.
 
 The source criteria are the [W19 implementation plan](cli-operator-implementation.md#operator-walkthrough-and-acceptance-scorecard).
 The participant receives only the shipped [`vonkctl` runbook](../runbooks/vonkctl.md),
@@ -41,21 +43,24 @@ provides a disposable first-connection, recipe-discovery, and Profile-authoring
 setup. Its smoke mode exercises an independently built CLI wheel, the
 registered HTTPS API, and PostgreSQL-backed catalog, Fleet, cache-assessment,
 recipe-preparation, and Profile owners. Its interactive mode opens a local
-shell against those same services. U2 has three Fleet-fit pages: the middle
-page contains a cache-ready candidate, prepared through `ModelCacheService`
-with one digest-pinned local model fixture and synchronous owner processing;
-the final page contains a separate cache-blocked candidate with its exact
-advertised download action. The blocked candidate's action creates a real
-PostgreSQL-backed queued preparation request. The model source is served only
-by a request-restricted local `httpx.MockTransport`; a valid local OCI layout
-is converted and inspected by Skopeo before the image digest is pinned and
-published through `RecipeImageAvailabilityService` and managed storage. Setup
-files stay under the walk-through temporary directory. The fixture runs no
-background worker and fetches no external asset or registry image. Its ready
-projection proves current fit and cache readiness only; it does not prove that
-the empty OCI fixture starts in an engine, that model bytes have useful quality,
-or that a Spark can run it. If Skopeo is missing, the test reports an explicit
-skip rather than a successful ready-candidate result. U4–U8 operational
+shell against those same services. Without an asset override, U2 uses the
+synthetic fixture: the ready entry is cache-backed but its empty image does not
+start in an engine. With `VONK_QWEN3_CPU_ASSET_ROOT` set for interactive mode,
+the setup verifies a pinned Qwen3-0.6B BF16 snapshot and locally derived CPU
+runtime archive, preparing both through their actual storage owners.
+The Qwen setup exposes a cache-blocked CPU-fitting row before the ready Qwen
+row; its advertised missing-asset action creates a real
+PostgreSQL-backed queued preparation request. Model bytes are served only by a
+request-restricted local `httpx.MockTransport`; Skopeo inspects the pinned
+runtime archive before its digest is published through
+`RecipeImageAvailabilityService` and managed storage. Setup files stay under
+the walk-through temporary directory. The fixture starts no background worker,
+inference container, or Spark workload. Its ready projection proves current fit
+and cache readiness against the disposable CPU inventory; a separate opt-in
+U2 CPU smoke proves that the exact prepared model and image return a real
+response locally. Neither claim establishes model quality or physical Spark
+acceptance. If Skopeo is missing, the test reports an explicit skip rather than
+a successful ready-candidate result. U4–U8 operational
 scenarios remain unavailable in this launcher. Separate [U4 whole-Fleet review](cli-u4-whole-fleet-facilitator.md),
 [U5 observer setup](cli-observer-walkthrough.md), [U6 cancellation setup](cli-cancellation-walkthrough.md),
 and [U7 results setup](cli-results-walkthrough.md) exercise stale-review consent,
@@ -119,6 +124,35 @@ export files. Pytest fixture teardown drops only that run's PostgreSQL database
 and stops only its uniquely named disposable container. A forced process kill
 can bypass fixture teardown, so it is not a supported stop method.
 
+For the actual U2 candidate, set the verified asset root only on the
+interactive command:
+
+```bash
+VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes \
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+VONK_QWEN3_CPU_ASSET_ROOT=/private/tmp/vonk-cli-u2-qwen-assets \
+VONK_WALKTHROUGH_MODE=interactive \
+uv run --project control --frozen --with-editable . \
+  pytest -q -s control/tests/test_cli_operator_walkthrough.py::test_disposable_cli_operator_walkthrough_interactive
+```
+
+The option is used only in interactive mode; smoke mode stays on the default
+synthetic fixture. The external asset directory must contain `hub-snapshot/`
+from Qwen/Qwen3-0.6B commit
+`c1899de289a04d12100db370d81485cdf75e47ca`, including the pinned
+`model.safetensors` file (1,503,300,328 bytes, SHA256
+`f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b`), and
+`vllm-qwen3-cpu-runtime-verified-u2-20260924.tar` (881,898,496 bytes, SHA256
+`d7af73ab4387d996caaf7b74eea0e45886a351cb9a2cf9014f42c6cd4025516d`). The
+runtime wrapper is derived from
+`docker.io/vllm/vllm-openai-cpu@sha256:527ec4e8188f2ad480aca5863ab3b7e7c39cfda84f6c0bbb06525363a3eb5a0f`;
+its Skopeo-inspected archive manifest is
+`sha256:c775a5f6e778c53946ce3dc266dc4052d3ca1e18f904b4d09eed8cef1c0489ee`.
+The interactive launcher validates these pins and prepares managed cache
+records, but does not start inference or submit a run. The separate
+`VONK_QWEN3_CPU_SMOKE=1` test uses the same asset-root variable to verify local
+inference; that test is not part of human-session startup.
+
 The shell has ordinary host networking; this is not an OS network sandbox. The
 configured Controller URL points to a loopback HTTPS peer and its short-lived
 credential is signed by a random key held only by the disposable app. Do not
@@ -138,7 +172,7 @@ Seed the following boundaries and confirm they work before the session:
 
 | Cards | Facilitator prerequisites |
 | --- | --- |
-| U1–U2 | Offline help; one invalid origin or denied/expired token case; an authorized Fleet identity; a recipe catalog with more than one page, a later-page runnable candidate, a separate Fleet-fit-but-cache-blocked candidate, and an actionable missing-asset reason. The fixture now provides verified cache bytes and a ready control-plane assessment, but its empty OCI image does not establish the runnable-candidate prerequisite. Engine startup and Spark execution remain unproven. |
+| U1–U2 | Offline help; one invalid origin or denied/expired token case; an authorized Fleet identity; a recipe catalog with more than one page, a later-page runnable candidate, a separate Fleet-fit-but-cache-blocked candidate, and an actionable missing-asset reason. The optional Qwen asset root supplies a runnable candidate for the disposable CPU inventory and the separate local inference smoke verifies it. Physical Spark execution remains unproven. |
 | U3 | An unused Profile number and a safe export/import destination; the scenario must preserve metadata and installed-only state without dispatching work. |
 | U4 | A whole-Fleet scenario with affected and idle Sparks; a controllable stale-review change between review and acceptance; a noninteractive invocation that requires the exact reviewed decision and explicit consent. |
 | U5 | An accepted application that remains observable long enough to interrupt local follow; a new shell must be able to query the same application ID while a newer application can exist. |

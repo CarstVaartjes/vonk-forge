@@ -18,7 +18,7 @@ import stat
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -57,10 +57,15 @@ from vonk_control.install_admission import (
     InstallAdmissionService,
     authorize_installation_runtime_images,
 )
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.jobs import JobService
 from vonk_control.library_assessment import LibraryAssessment
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache_contract import ModelCacheObjectReceipt
 from vonk_control.models import (
     AgentNode,
     AgentNodeProfile,
@@ -175,6 +180,275 @@ def _walkthrough_clock(
     return clock, advance_clock
 
 
+_QWEN3_BLOCKED_RECIPE_SELECTOR = "qwen3-vllm-0-blocked"
+_QWEN3_REVISION = "c1899de289a04d12100db370d81485cdf75e47ca"
+_QWEN3_SOURCE_URL = "https://huggingface.co/Qwen/Qwen3-0.6B"
+_QWEN3_IMAGE_DIGEST = (
+    "sha256:c775a5f6e778c53946ce3dc266dc4052d3ca1e18f904b4d09eed8cef1c0489ee"
+)
+_QWEN3_RUNTIME_REPOSITORY = "vonk-test/qwen3-vllm-cpu-runtime"
+_QWEN3_RUNTIME_TAG = "vonk-test/qwen3-vllm-cpu-runtime:verified-u2-20260924"
+_QWEN3_ARCHIVE_SHA256 = (
+    "d7af73ab4387d996caaf7b74eea0e45886a351cb9a2cf9014f42c6cd4025516d"
+)
+_QWEN3_ARCHIVE_BYTES = 881_898_496
+_QWEN3_PINNED_FILES = {
+    ".gitattributes": (
+        1570,
+        "git:52373fe24473b1aa44333d318f578ae6bf04b49b",
+        "git-attributes",
+        "metadata",
+    ),
+    "LICENSE": (
+        11_343,
+        "git:6634c8cc3133b3848ec74b9f275acaaa1ea618ab",
+        "license",
+        "metadata",
+    ),
+    "README.md": (
+        13_965,
+        "git:a50b19e76f5274f9ec99f5a5d99873dca5bff25e",
+        "readme",
+        "metadata",
+    ),
+    "config.json": (
+        726,
+        "git:f5c3703b78ae2a478ae15b247e9f855e0ce2107b",
+        "config",
+        "config",
+    ),
+    "generation_config.json": (
+        239,
+        "git:20a8a9156fc8c3f25295ca067f61fdf120d517c5",
+        "generation-config",
+        "config",
+    ),
+    "merges.txt": (
+        1_671_853,
+        "git:31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+        "merges",
+        "tokenizer",
+    ),
+    "model.safetensors": (
+        1_503_300_328,
+        "sha256:f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+        "weights",
+        "weights",
+    ),
+    "tokenizer.json": (
+        11_422_654,
+        "git:949e1ec83f61520a25c75426edc4a43acc36f29a",
+        "tokenizer",
+        "tokenizer",
+    ),
+    "tokenizer_config.json": (
+        9732,
+        "git:417d038a63fa3de29cfde265caedae14d1a58d92",
+        "tokenizer-config",
+        "tokenizer",
+    ),
+    "vocab.json": (
+        2_776_833,
+        "git:4783fe10ac3adce15ac8f358ef5462739852c569",
+        "vocab",
+        "tokenizer",
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _QwenCPUAssets:
+    model: ModelDefinition
+    source_files: dict[str, Path]
+    runtime_archive: Path
+    image_evidence: PulledImageEvidence
+
+
+class _FileResponseStream(httpx.SyncByteStream):
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def __iter__(self) -> Iterator[bytes]:
+        with self._path.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                yield chunk
+
+    def close(self) -> None:
+        return None
+
+
+def load_qwen_cpu_assets(asset_root: Path) -> _QwenCPUAssets:
+    """Verify persistent Qwen bytes against their exact upstream tree identity."""
+
+    if asset_root.is_symlink() or not asset_root.is_dir():
+        raise ValueError("Qwen CPU asset root is not a local directory")
+    snapshot = asset_root / "hub-snapshot"
+    source_files: dict[str, Path] = {}
+    file_documents: list[dict[str, object]] = []
+    verified_digests: dict[str, str] = {}
+    for path, (
+        expected_bytes,
+        expected_identity,
+        file_id,
+        role,
+    ) in _QWEN3_PINNED_FILES.items():
+        source = snapshot / path
+        if source.is_symlink() or not source.is_file():
+            raise ValueError(f"pinned Qwen asset is missing or not regular: {path}")
+        observed_bytes = source.stat().st_size
+        if observed_bytes != expected_bytes:
+            raise ValueError(
+                f"pinned Qwen asset has {observed_bytes} bytes; "
+                f"expected {expected_bytes}: {path}"
+            )
+        sha256 = hashlib.sha256()
+        git_blob_sha1 = hashlib.sha1()
+        git_blob_sha1.update(f"blob {observed_bytes}\0".encode("ascii"))
+        with source.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                sha256.update(chunk)
+                git_blob_sha1.update(chunk)
+        observed_sha256 = sha256.hexdigest()
+        observed_identity = (
+            f"sha256:{observed_sha256}"
+            if expected_identity.startswith("sha256:")
+            else f"git:{git_blob_sha1.hexdigest()}"
+        )
+        if observed_identity != expected_identity:
+            raise ValueError(
+                f"pinned Qwen asset identity differs from the exact revision: {path}"
+            )
+        source_files[path] = source
+        verified_digests[path] = observed_sha256
+        file_documents.append(
+            {
+                "id": file_id,
+                "path": path,
+                "roles": [role],
+                "sha256": observed_sha256,
+                "size_bytes": observed_bytes,
+            }
+        )
+
+    configuration = json.loads((snapshot / "config.json").read_text(encoding="utf-8"))
+    if (
+        configuration.get("architectures") != ["Qwen3ForCausalLM"]
+        or configuration.get("model_type") != "qwen3"
+        or configuration.get("max_position_embeddings") != 40_960
+        or configuration.get("torch_dtype") != "bfloat16"
+    ):
+        raise ValueError("pinned Qwen configuration does not match expected identity")
+    evidence_digest = verified_digests["README.md"]
+    model_document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
+    )
+    model_document.update(
+        {
+            "identity": {
+                "publisher": "qwen",
+                "slug": "qwen3-0-6b-bf16",
+                "family": {"publisher": "qwen", "slug": "qwen3", "title": "Qwen3"},
+                "model": {
+                    "architecture": "Qwen3ForCausalLM",
+                    "publisher": "qwen",
+                    "slug": "qwen3-0-6b",
+                    "title": "Qwen3-0.6B",
+                },
+                "version": _QWEN3_REVISION,
+                "variant": "bf16",
+            },
+            "metadata": {
+                "description": (
+                    "Qwen3-0.6B causal text-generation model from its pinned "
+                    "upstream snapshot."
+                ),
+                "tags": ["qwen", "text", "transformer"],
+            },
+            "access": {
+                "visibility": "public",
+                "gated": False,
+                "authentication": "none",
+            },
+            "lineage": {
+                "publisher": "qwen",
+                "relation": "official",
+                "source_model": {
+                    "kind": "model",
+                    "publisher": "qwen",
+                    "slug": "qwen3-0-6b",
+                },
+                "derivation": f"Upstream Qwen3-0.6B snapshot {_QWEN3_REVISION}.",
+            },
+            "source": {"repository": _QWEN3_SOURCE_URL, "revision": _QWEN3_REVISION},
+            "format": {
+                "container": "safetensors",
+                "precision": "bfloat16",
+                "quantization": "none",
+            },
+            "parameters": {},
+            "limits": {"context_tokens": 40_960},
+            "license": {
+                "spdx": "Apache-2.0",
+                "url": "https://www.apache.org/licenses/LICENSE-2.0",
+                "attribution": ["Qwen"],
+                "operator_acceptance_required": False,
+            },
+            "files": file_documents,
+            "capabilities": {
+                "facts": [
+                    {
+                        "capability": "text-generation",
+                        "support": "supported",
+                        "evidence_status": "declared",
+                        "evidence_digest": None,
+                    }
+                ],
+                "provenance": {
+                    "source_url": (
+                        f"{_QWEN3_SOURCE_URL}/blob/{_QWEN3_REVISION}/README.md"
+                    ),
+                    "source_revision": _QWEN3_REVISION,
+                    "evidence_digest": evidence_digest,
+                },
+            },
+            "provenance": {
+                "source_url": f"{_QWEN3_SOURCE_URL}/tree/{_QWEN3_REVISION}",
+                "source_revision": _QWEN3_REVISION,
+                "evidence_digest": evidence_digest,
+                "attribution": ["Qwen"],
+            },
+        }
+    )
+    model = ModelDefinition.model_validate(model_document)
+
+    runtime_archive = asset_root / "vllm-qwen3-cpu-runtime-verified-u2-20260924.tar"
+    if runtime_archive.is_symlink() or not runtime_archive.is_file():
+        raise ValueError("pinned Qwen CPU runtime archive is missing or not regular")
+    archive_bytes = runtime_archive.stat().st_size
+    if archive_bytes != _QWEN3_ARCHIVE_BYTES:
+        raise ValueError(
+            f"runtime archive has {archive_bytes} bytes; "
+            f"expected {_QWEN3_ARCHIVE_BYTES}"
+        )
+    with runtime_archive.open("rb") as stream:
+        archive_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+    if archive_sha256 != _QWEN3_ARCHIVE_SHA256:
+        raise ValueError("pinned Qwen CPU runtime archive SHA256 differs")
+    inspector = SkopeoOCIImageTransport(executable=_local_skopeo())
+    image_evidence = inspector.inspect_archive(
+        runtime_archive,
+        expected_architecture="linux/arm64",
+        expected_runtime_interface="vonk.runtime.v1",
+        expected_archive_sha256=archive_sha256,
+        expected_archive_bytes=archive_bytes,
+    )
+    if image_evidence.manifest_digest != _QWEN3_IMAGE_DIGEST:
+        raise ValueError("pinned Qwen CPU image manifest differs from Skopeo output")
+    return _QwenCPUAssets(model, source_files, runtime_archive, image_evidence)
+
+
 class _LocalOCIFileTransport:
     """Copy one local archive and attach the exact Skopeo-inspected identity."""
 
@@ -205,7 +479,8 @@ class _LocalOCIFileTransport:
             )
         shutil.copyfile(self._archive, destination)
         archive_bytes = destination.stat().st_size
-        archive_sha256 = hashlib.sha256(destination.read_bytes()).hexdigest()
+        with destination.open("rb") as stream:
+            archive_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
         inspected = self._inspector.inspect_archive(
             destination,
             expected_architecture=expected_architecture,
@@ -436,6 +711,7 @@ def _walkthrough_app(
     *,
     linked_profile: bool = False,
     interactive_clock: bool = False,
+    qwen_cpu_assets: _QwenCPUAssets | None = None,
 ):
     clock, advance_clock = _walkthrough_clock(interactive=interactive_clock)
 
@@ -493,8 +769,32 @@ def _walkthrough_app(
         session.add(
             AgentNodeProfile(
                 node_id=node_id,
-                display_name="Spark One",
-                hostname="spark-one",
+                display_name=(
+                    "OrbStack ARM64 CPU" if qwen_cpu_assets is not None else "Spark One"
+                ),
+                hostname=(
+                    "orbstack-arm64-cpu" if qwen_cpu_assets is not None else "spark-one"
+                ),
+            )
+        )
+    if qwen_cpu_assets is not None:
+        # The opt-in CPU fixture describes only its disposable container target.
+        # Its resource observation is sized from the bounded local engine run,
+        # not a Spark measurement or physical acceptance claim.
+        InventoryRepository(sessions, clock=clock).record(
+            InventorySnapshotInput(
+                node_id=node_id,
+                observed_at=NOW + timedelta(seconds=1),
+                disk_total_bytes=64 * 1024**3,
+                disk_free_bytes=48 * 1024**3,
+                host_memory_total_bytes=12 * 1024**3,
+                host_memory_free_bytes=10 * 1024**3,
+                gpu_memory_total_bytes=0,
+                gpu_memory_free_bytes=0,
+                gpu_count=0,
+                artifact_store_read_only=False,
+                capabilities=("runtime.vonk.v1", "recipe.operations.v1"),
+                memory_pool="separate",
             )
         )
 
@@ -554,31 +854,36 @@ def _walkthrough_app(
     model_draft = catalog.create_draft(model.model_dump(mode="json"), actor="admin")
     catalog.resolve(model_draft.id, actor="admin")
 
-    ready_model_document = copy.deepcopy(model_document)
-    ready_model_identity = ready_model_document["identity"]
-    assert isinstance(ready_model_identity, dict)
-    ready_model_identity["slug"] = _READY_MODEL_SELECTOR
-    ready_model_model = ready_model_identity["model"]
-    ready_model_family = ready_model_identity["family"]
-    assert isinstance(ready_model_model, dict) and isinstance(ready_model_family, dict)
-    ready_model_model["slug"] = "walkthrough-synthetic-tiny-ready"
-    ready_model_family["slug"] = "walkthrough-synthetic-ready"
-    ready_model_source = ready_model_document["source"]
-    assert isinstance(ready_model_source, dict)
-    ready_model_source["repository"] = (
-        "https://huggingface.co/walkthrough/walkthrough-synthetic-tiny-ready"
-    )
-    ready_model_source["revision"] = _READY_MODEL_REVISION
-    ready_model_document["files"] = [
-        {
-            "id": "weights",
-            "path": "model.safetensors",
-            "roles": ["weights"],
-            "sha256": hashlib.sha256(_READY_MODEL_PAYLOAD).hexdigest(),
-            "size_bytes": len(_READY_MODEL_PAYLOAD),
-        }
-    ]
-    ready_model = ModelDefinition.model_validate(ready_model_document)
+    if qwen_cpu_assets is None:
+        ready_model_document = copy.deepcopy(model_document)
+        ready_model_identity = ready_model_document["identity"]
+        assert isinstance(ready_model_identity, dict)
+        ready_model_identity["slug"] = _READY_MODEL_SELECTOR
+        ready_model_model = ready_model_identity["model"]
+        ready_model_family = ready_model_identity["family"]
+        assert isinstance(ready_model_model, dict) and isinstance(
+            ready_model_family, dict
+        )
+        ready_model_model["slug"] = "walkthrough-synthetic-tiny-ready"
+        ready_model_family["slug"] = "walkthrough-synthetic-ready"
+        ready_model_source = ready_model_document["source"]
+        assert isinstance(ready_model_source, dict)
+        ready_model_source["repository"] = (
+            "https://huggingface.co/walkthrough/walkthrough-synthetic-tiny-ready"
+        )
+        ready_model_source["revision"] = _READY_MODEL_REVISION
+        ready_model_document["files"] = [
+            {
+                "id": "weights",
+                "path": "model.safetensors",
+                "roles": ["weights"],
+                "sha256": hashlib.sha256(_READY_MODEL_PAYLOAD).hexdigest(),
+                "size_bytes": len(_READY_MODEL_PAYLOAD),
+            }
+        ]
+        ready_model = ModelDefinition.model_validate(ready_model_document)
+    else:
+        ready_model = qwen_cpu_assets.model
     ready_model_digest = content_sha256(ready_model)
     ready_model_draft = catalog.create_draft(
         ready_model.model_dump(mode="json"), actor="admin"
@@ -597,13 +902,26 @@ def _walkthrough_app(
     ready_metadata = ready_recipe_document["metadata"]
     assert isinstance(ready_identity, dict) and isinstance(ready_metadata, dict)
     ready_identity["slug"] = _READY_RECIPE_SELECTOR
-    ready_metadata["title"] = "Qwen 3 VLLM ready candidate"
+    ready_metadata["title"] = (
+        "Qwen3 0.6B vLLM CPU ready candidate"
+        if qwen_cpu_assets is not None
+        else "Qwen 3 VLLM ready candidate"
+    )
+    if qwen_cpu_assets is not None:
+        ready_metadata["description"] = (
+            "Opt-in later-page candidate bound to pinned Qwen3-0.6B BF16 "
+            "weights and an inspected ARM64 CPU vLLM image."
+        )
     ready_recipe_document["execution"] = copy.deepcopy(image_example["execution"])
     ready_execution = ready_recipe_document["execution"]
     assert isinstance(ready_execution, dict)
     ready_image = ready_execution["image"]
     assert isinstance(ready_image, dict)
-    ready_image["repository"] = "registry.example/walkthrough/synthetic-runtime"
+    ready_image["repository"] = (
+        _QWEN3_RUNTIME_REPOSITORY
+        if qwen_cpu_assets is not None
+        else "registry.example/walkthrough/synthetic-runtime"
+    )
     # Compile a canonical temporary candidate to learn the runtime contract;
     # the actual catalog revision is pinned to Skopeo's observed digest below.
     ready_image["digest"] = "0" * 64
@@ -618,12 +936,81 @@ def _walkthrough_app(
     ready_model_reference["content_sha256"] = ready_model_digest
     ready_selection["files"] = [
         {
-            "id": "weights",
-            "file_id": "weights",
+            "id": model_file.id,
+            "file_id": model_file.id,
             "roles": ["entrypoint"],
-            "mount": {"target": "/models/model.safetensors", "read_only": True},
+            "mount": {"target": "/models", "read_only": True},
         }
+        for model_file in ready_model.files
     ]
+    if qwen_cpu_assets is not None:
+        ready_runtime = ready_recipe_document["runtime"]
+        ready_interfaces = ready_recipe_document["interfaces"]
+        ready_validation_document = ready_recipe_document["validation"]
+        ready_topology = ready_recipe_document["topology"]
+        assert isinstance(ready_interfaces, list) and ready_interfaces
+        assert isinstance(ready_validation_document, dict)
+        assert isinstance(ready_topology, dict)
+        ready_roles = ready_topology["roles"]
+        assert isinstance(ready_roles, list) and ready_roles
+        ready_interface = ready_interfaces[0]
+        ready_validation = ready_validation_document["serving"]
+        ready_settings = ready_recipe_document["settings"]
+        ready_role = ready_roles[0]
+        assert (
+            isinstance(ready_runtime, dict)
+            and isinstance(ready_interface, dict)
+            and isinstance(ready_validation, dict)
+            and isinstance(ready_settings, dict)
+            and isinstance(ready_role, dict)
+        )
+        ready_runtime["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
+        ready_runtime["arguments"] = [
+            {"name": "dtype", "value": "float32"},
+            {"name": "max-model-len", "value": 128},
+            {"name": "max-num-seqs", "value": 1},
+            {"name": "served-model-name", "value": "qwen3-0.6b"},
+        ]
+        ready_interface["model_aliases"] = ["qwen3-0.6b"]
+        ready_validation["checks"] = [
+            {
+                "name": "text-generation",
+                "kind": "openai.chat",
+                "request": {
+                    "transport": "http",
+                    "method": "POST",
+                    "path": "/v1/chat/completions",
+                    "body": {
+                        "model": "$MODEL",
+                        "messages": [{"role": "user", "content": "Reply with READY."}],
+                        "max_tokens": 16,
+                        "chat_template_kwargs": {"enable_thinking": False},
+                    },
+                },
+                "assertions": ["chat.nonempty", "chat.output-cap"],
+            }
+        ]
+        ready_settings["context_tokens"] = {
+            "value": 128,
+            "change_effect": "restart",
+        }
+        ready_role["resources"] = {
+            "disk": {
+                "image_bytes": 5 * 1024**3,
+                "artifact_bytes": ready_model.installed_bytes,
+                "staging_bytes": 4 * 1024**3,
+                "cache_bytes": 2 * 1024**3,
+                "rollback_bytes": 0,
+                "safety_margin_bytes": 1 * 1024**3,
+            },
+            "memory": {
+                "kind": "host",
+                "startup_peak_bytes": 7 * 1024**3,
+                "steady_state_bytes": 4 * 1024**3,
+                "runtime_growth_bytes": 1 * 1024**3,
+                "system_reserve_bytes": 1 * 1024**3,
+            },
+        }
     unpinned_ready_recipe = RecipeDefinition.model_validate(ready_recipe_document)
     with sessions() as session:
         resolved_ready_entities = resolve_recipe_entities(
@@ -641,12 +1028,23 @@ def _walkthrough_app(
         raise TypeError("canonical ready-recipe runtime is unavailable")
     expectations = runtime_image_expectations(ready_runtime)
     skopeo = _local_skopeo()
-    source_archive, image_inspector, image_evidence = _local_oci_archive(
-        owner_root / "image-fixture",
-        architecture=expectations["architecture"],
-        runtime_interface=expectations["interface"],
-        skopeo=skopeo,
-    )
+    if qwen_cpu_assets is None:
+        source_archive, image_inspector, image_evidence = _local_oci_archive(
+            owner_root / "image-fixture",
+            architecture=expectations["architecture"],
+            runtime_interface=expectations["interface"],
+            skopeo=skopeo,
+        )
+    else:
+        source_archive = qwen_cpu_assets.runtime_archive
+        image_inspector = SkopeoOCIImageTransport(executable=skopeo)
+        image_evidence = image_inspector.inspect_archive(
+            source_archive,
+            expected_architecture=expectations["architecture"],
+            expected_runtime_interface=expectations["interface"],
+            expected_archive_sha256=_QWEN3_ARCHIVE_SHA256,
+            expected_archive_bytes=_QWEN3_ARCHIVE_BYTES,
+        )
     expected_image_digest = image_evidence.manifest_digest
     assert expected_image_digest.startswith("sha256:")
     ready_image["digest"] = expected_image_digest.removeprefix("sha256:")
@@ -656,43 +1054,80 @@ def _walkthrough_app(
     )
     ready_revision = catalog.resolve(ready_draft.id, actor="admin")
 
-    identity = base_recipe_document["identity"]
-    metadata = base_recipe_document["metadata"]
+    candidate_recipe_document = (
+        copy.deepcopy(ready_recipe_document)
+        if qwen_cpu_assets is not None
+        else base_recipe_document
+    )
+    if qwen_cpu_assets is None:
+        candidate_recipe_document["execution"] = image_example["execution"]
+    identity = candidate_recipe_document["identity"]
+    metadata = candidate_recipe_document["metadata"]
     assert isinstance(identity, dict) and isinstance(metadata, dict)
-    identity["slug"] = _BLOCKED_RECIPE_SELECTOR
-    metadata["title"] = "Qwen 3 VLLM later-page candidate"
-    base_recipe_document["execution"] = image_example["execution"]
-    selections = base_recipe_document["models"]
+    identity["slug"] = (
+        _QWEN3_BLOCKED_RECIPE_SELECTOR
+        if qwen_cpu_assets is not None
+        else _BLOCKED_RECIPE_SELECTOR
+    )
+    metadata["title"] = (
+        "Qwen3 0.6B vLLM CPU blocked candidate"
+        if qwen_cpu_assets is not None
+        else "Qwen 3 VLLM later-page candidate"
+    )
+    selections = candidate_recipe_document["models"]
     assert isinstance(selections, list) and selections
     selection = selections[0]
     assert isinstance(selection, dict)
     model_reference = selection["model"]
     assert isinstance(model_reference, dict)
-    model_reference["publisher"] = model.identity.publisher
-    model_reference["slug"] = model.identity.slug
-    model_reference["content_sha256"] = content_sha256(model)
-    candidate = RecipeDefinition.model_validate(base_recipe_document)
+    candidate_model = model
+    model_reference["publisher"] = candidate_model.identity.publisher
+    model_reference["slug"] = candidate_model.identity.slug
+    model_reference["content_sha256"] = content_sha256(candidate_model)
+    if qwen_cpu_assets is not None:
+        selection["files"] = [
+            {
+                "id": model_file.id,
+                "file_id": model_file.id,
+                "roles": ["entrypoint"],
+                "mount": {"target": "/models", "read_only": True},
+            }
+            for model_file in candidate_model.files
+        ]
+    candidate = RecipeDefinition.model_validate(candidate_recipe_document)
     candidate_draft = catalog.create_draft(
         candidate.model_dump(mode="json"), actor="admin"
     )
     candidate_revision = catalog.resolve(candidate_draft.id, actor="admin")
 
     runtime_storage = FilesystemRuntimeImageStorage(owner_root / "runtime-images")
-    expected_model_path = (
-        "/walkthrough/walkthrough-synthetic-tiny-ready/resolve/"
-        f"{_READY_MODEL_REVISION}/model.safetensors"
-    )
     model_requests: list[str] = []
+    expected_model_paths = (
+        {
+            f"/Qwen/Qwen3-0.6B/resolve/{_QWEN3_REVISION}/{path}": source
+            for path, source in qwen_cpu_assets.source_files.items()
+        }
+        if qwen_cpu_assets is not None
+        else {
+            "/walkthrough/walkthrough-synthetic-tiny-ready/resolve/"
+            f"{_READY_MODEL_REVISION}/model.safetensors": None
+        }
+    )
 
     def serve_only_ready_model_artifact(request: httpx.Request) -> httpx.Response:
         model_requests.append(f"{request.method} {request.url.host}{request.url.path}")
-        if (
-            request.method != "GET"
-            or request.url.host != "huggingface.co"
-            or request.url.path != expected_model_path
-        ):
+        if request.method != "GET" or request.url.host != "huggingface.co":
             return httpx.Response(403, request=request)
-        return httpx.Response(200, content=_READY_MODEL_PAYLOAD, request=request)
+        source = expected_model_paths.get(request.url.path)
+        if request.url.path not in expected_model_paths:
+            return httpx.Response(403, request=request)
+        if source is None:
+            return httpx.Response(200, content=_READY_MODEL_PAYLOAD, request=request)
+        return httpx.Response(
+            200,
+            stream=_FileResponseStream(source),
+            request=request,
+        )
 
     with httpx.Client(
         transport=httpx.MockTransport(serve_only_ready_model_artifact),
@@ -712,7 +1147,7 @@ def _walkthrough_app(
             model_content_sha256=ready_model_digest
         )
         assert model_preview["blockers"] == []
-        assert model_preview["new_bytes"] == len(_READY_MODEL_PAYLOAD)
+        assert model_preview["new_bytes"] == ready_model.download_bytes
         model_operation = model_cache.start_download(
             actor="walkthrough-setup",
             request_key="22222222-2222-4222-8222-222222222201",
@@ -723,18 +1158,30 @@ def _walkthrough_app(
         assert model_cache.run_pending(limit=1) == 1
         model_operation = model_cache.get_operation(model_operation.id)
         assert model_operation.state == "succeeded"
-        assert model_requests == [f"GET huggingface.co{expected_model_path}"]
+        assert set(model_requests) == {
+            f"GET huggingface.co{path}" for path in expected_model_paths
+        }
         model_manifest = model_cache.resolve_artifact_set(
             model_content_sha256=ready_model_digest
         )
-        assert len(model_manifest.artifacts) == 1
-        model_artifact = model_manifest.artifacts[0]
-        managed_object = model_cache._object_path(model_artifact.sha256)
-        assert managed_object.read_bytes() == _READY_MODEL_PAYLOAD
-        assert hashlib.sha256(managed_object.read_bytes()).hexdigest() == (
-            model_artifact.sha256
-        )
-        assert model_cache._receipt_path(model_artifact.sha256).is_file()
+        assert len(model_manifest.artifacts) == len(ready_model.files)
+        for model_artifact in model_manifest.artifacts:
+            managed_object = model_cache._object_path(model_artifact.sha256)
+            assert managed_object.is_file()
+            assert managed_object.stat().st_size == model_artifact.expected_bytes
+            receipt_path = model_cache._receipt_path(model_artifact.sha256)
+            assert receipt_path.is_file()
+            receipt = ModelCacheObjectReceipt.model_validate_json(
+                receipt_path.read_bytes()
+            )
+            assert receipt.sha256 == model_artifact.sha256
+            assert receipt.expected_bytes == model_artifact.expected_bytes
+            assert receipt.actual_bytes == model_artifact.expected_bytes
+            if qwen_cpu_assets is None:
+                assert managed_object.read_bytes() == _READY_MODEL_PAYLOAD
+                assert hashlib.sha256(managed_object.read_bytes()).hexdigest() == (
+                    model_artifact.sha256
+                )
         assert (
             model_cache.download_preview(model_content_sha256=ready_model_digest)[
                 "new_bytes"
@@ -937,7 +1384,8 @@ def _walkthrough_app(
     assert isinstance(archive_digest, str) and type(archive_bytes) is int
     stored_image = runtime_storage.verify_existing(archive_digest, archive_bytes)
     assert stored_image.is_file()
-    assert hashlib.sha256(stored_image.read_bytes()).hexdigest() == archive_digest
+    with stored_image.open("rb") as stream:
+        assert hashlib.file_digest(stream, "sha256").hexdigest() == archive_digest
     linked_owners: _LinkedProfileOwners | None = None
     linked_operations = None
     if linked_profile:
@@ -1364,6 +1812,10 @@ def _smoke(
 
 
 def _run_walkthrough(postgres_engine, mode: str) -> None:
+    qwen_cpu_assets = None
+    qwen_asset_root = os.environ.get("VONK_QWEN3_CPU_ASSET_ROOT")
+    if mode == "interactive" and qwen_asset_root is not None:
+        qwen_cpu_assets = load_qwen_cpu_assets(Path(qwen_asset_root))
     temporary_path: Path
     with tempfile.TemporaryDirectory(prefix="vonk-cli-walkthrough-") as temporary:
         workspace = Path(temporary)
@@ -1378,7 +1830,11 @@ def _run_walkthrough(postgres_engine, mode: str) -> None:
             candidate_digest,
             ready_revision_id,
             ready_digest,
-        ) = _walkthrough_app(postgres_engine, workspace / "owner-services")
+        ) = _walkthrough_app(
+            postgres_engine,
+            workspace / "owner-services",
+            qwen_cpu_assets=qwen_cpu_assets,
+        )
         executable = _build_installed_vonkctl(workspace / "installed-cli")
         operator_cwd = workspace / "operator-cwd"
         operator_cwd.mkdir(mode=0o700)
@@ -1431,6 +1887,11 @@ def _run_walkthrough(postgres_engine, mode: str) -> None:
                     "Fleet removal, upgrade, or profile-load provider. This is "
                     "not an OS network sandbox. Type `exit` or press Ctrl-D to "
                     "close the session and clean up.",
+                    flush=True,
+                )
+                print(
+                    "This launcher never starts an inference container or "
+                    "launches a model.",
                     flush=True,
                 )
                 shell = shutil.which("bash") or "/bin/bash"
