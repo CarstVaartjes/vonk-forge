@@ -554,7 +554,6 @@ def install_recipe_operator_routes(
                     selector,
                     actor=actor.subject,
                     request_id=body.request_key,
-                    force=True,
                 )
             )
         except HTTPException:
