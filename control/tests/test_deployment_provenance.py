@@ -381,6 +381,241 @@ def test_connected_recipe_start_receipts_expose_rank_artifacts(tmp_path):
     assert sum(rank.identity_agreement == "mismatch" for rank in result.ranks) == 1
 
 
+@pytest.mark.parametrize("invalid_document", ["payload", "result"])
+def test_invalid_old_recipe_start_document_is_exposed_without_blocking_fleet_detail(
+    tmp_path, invalid_document
+):
+    import uuid
+
+    from fastapi import Depends, FastAPI
+    from fastapi.testclient import TestClient
+    from vonk_control.auth import Actor
+    from vonk_control.models import AgentOperation, AgentOperationAttempt
+    from vonk_control.operator_projection_api import (
+        FleetOperatorServices,
+        install_operator_projection_routes,
+    )
+
+    from .test_metrics import NODE, _fleet_snapshot
+    from .test_recipe_operations import (
+        NOW,
+        installed_recipe,
+        setup_services,
+        start_evidence,
+        started_recipe,
+    )
+
+    sessions, operations, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        operations, mapping_id, build_id, nodes, request_id="provenance-install"
+    )
+    run = started_recipe(
+        sessions,
+        operations,
+        installation.owner_id,
+        nodes,
+        request_id="provenance-current-start",
+    )
+    with sessions.begin() as session:
+        current = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == run.id,
+                AgentOperation.kind == "recipe.start",
+            )
+        )
+        assert current is not None
+        evidence = start_evidence(current.payload)
+        attempt_result = {
+            "evidence": evidence,
+            "evidence_digest": evidence["evidence_digest"],
+        }
+        session.add(
+            AgentOperationAttempt(
+                operation_id=current.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=NOW,
+                agent_certificate_serial="serial-0",
+                state="succeeded",
+                result=attempt_result,
+            )
+        )
+        payload = dict(current.payload)
+        payload["run_id"] = str(uuid.uuid4())
+        result = attempt_result
+        if invalid_document == "payload":
+            del payload["memory_floor_bytes"]
+        else:
+            result = {}
+        history = AgentOperation(
+            parent_job_id=run.id,
+            node_id=current.node_id,
+            kind="recipe.start",
+            payload_digest="d" * 64,
+            payload=payload,
+            authority_revision=current.authority_revision,
+            state="succeeded",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(history)
+        session.flush()
+        history_id = history.id
+        session.add(
+            AgentOperationAttempt(
+                operation_id=history_id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=NOW,
+                agent_certificate_serial="serial-0",
+                state="succeeded",
+                result=result,
+            )
+        )
+
+    service = DeploymentProvenanceService(sessions, clock=lambda: NOW)
+
+    class _Projection:
+        def read(self):
+            return _fleet_snapshot()
+
+    app = FastAPI()
+    install_operator_projection_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("operator", "operator")),
+        fleet_projection=_Projection(),
+        library_projection=None,
+        fleet_services=FleetOperatorServices(provenance=service),
+    )
+    response = TestClient(app).get(f"/api/fleet/{NODE}")
+
+    assert response.status_code == 200, response.text
+    provenance = response.json()["provenance"]
+    assert provenance["workloads"][0]["rank_agreement"] == "match"
+    assert provenance["workloads"][0]["ranks"][0]["observed_recipe_sha256"] == (
+        current.payload["recipe_content_sha256"]
+    )
+    assert provenance["invalid_operation_evidence"] == [
+        {
+            "document": invalid_document,
+            "detail": (
+                "stored document is invalid at memory_floor_bytes (missing)"
+                if invalid_document == "payload"
+                else "stored document is invalid at evidence (missing)"
+            ),
+            "kind": "recipe.start",
+            "node_id": current.node_id,
+            "operation_id": history_id,
+        }
+    ]
+    assert provenance["invalid_operation_evidence_omitted_count"] == 0
+
+
+@pytest.mark.parametrize("invalid_document", ["payload", "result"])
+def test_invalid_later_same_run_start_does_not_reuse_older_start_receipt(
+    tmp_path, invalid_document
+):
+    import uuid
+
+    from vonk_control.models import AgentOperation, AgentOperationAttempt
+
+    from .test_recipe_operations import (
+        NOW,
+        installed_recipe,
+        setup_services,
+        start_evidence,
+        started_recipe,
+    )
+
+    sessions, operations, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        operations, mapping_id, build_id, nodes, request_id="provenance-install"
+    )
+    run = started_recipe(
+        sessions,
+        operations,
+        installation.owner_id,
+        nodes,
+        request_id="provenance-current-start",
+    )
+    with sessions.begin() as session:
+        current = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == run.id,
+                AgentOperation.kind == "recipe.start",
+            )
+        )
+        assert current is not None
+        evidence = start_evidence(current.payload)
+        attempt_result = {
+            "evidence": evidence,
+            "evidence_digest": evidence["evidence_digest"],
+        }
+        session.add(
+            AgentOperationAttempt(
+                operation_id=current.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=NOW,
+                agent_certificate_serial="serial-0",
+                state="succeeded",
+                result=attempt_result,
+            )
+        )
+        payload = dict(current.payload)
+        result = attempt_result
+        if invalid_document == "payload":
+            del payload["memory_floor_bytes"]
+        else:
+            result = {}
+        history = AgentOperation(
+            parent_job_id=run.id,
+            node_id=current.node_id,
+            kind="recipe.start",
+            payload_digest="d" * 64,
+            payload=payload,
+            authority_revision=current.authority_revision,
+            state="succeeded",
+            created_at=NOW,
+            updated_at=NOW + timedelta(seconds=1),
+        )
+        session.add(history)
+        session.flush()
+        history_id = history.id
+        session.add(
+            AgentOperationAttempt(
+                operation_id=history_id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=NOW,
+                agent_certificate_serial="serial-0",
+                state="succeeded",
+                result=result,
+            )
+        )
+
+    snapshot = DeploymentProvenanceService(
+        sessions, clock=lambda: NOW
+    ).snapshot()
+    rank = snapshot.workloads[0].ranks[0]
+    assert rank.observed_recipe_sha256 is None
+    assert rank.identity_agreement == "match"
+    expected_detail = (
+        "stored document is invalid at memory_floor_bytes (missing)"
+        if invalid_document == "payload"
+        else "stored document is invalid at evidence (missing)"
+    )
+    assert [issue.model_dump() for issue in snapshot.invalid_operation_evidence] == [
+        {
+            "operation_id": history_id,
+            "kind": "recipe.start",
+            "node_id": current.node_id,
+            "document": invalid_document,
+            "detail": expected_detail,
+        }
+    ]
+
+
 @pytest.mark.parametrize("coerced", [True, "7200", 7200.0])
 def test_nested_provenance_scalar_coercions_are_rejected(tmp_path, coerced):
     import json

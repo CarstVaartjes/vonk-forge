@@ -151,6 +151,7 @@ from .fleet_profile_effects import FleetProfileEffects
 from .fleet_profile_endpoint_assignment_view import FleetProfileEndpointAssignmentView
 from .fleet_profile_endpoint_assignment_view_desired_state import FleetProfileEndpointAssignmentViewDesiredState
 from .fleet_profile_endpoint_assignment_view_state import FleetProfileEndpointAssignmentViewState
+from .fleet_profile_endpoint_projection_issue import FleetProfileEndpointProjectionIssue
 from .fleet_profile_endpoints_view import FleetProfileEndpointsView
 from .fleet_profile_endpoints_view_application_state_type_0 import FleetProfileEndpointsViewApplicationStateType0
 from .fleet_profile_input import FleetProfileInput
@@ -212,6 +213,8 @@ from .identity_history_response import IdentityHistoryResponse
 from .installation_node_change import InstallationNodeChange
 from .installation_node_payload import InstallationNodePayload
 from .integer_parameter import IntegerParameter
+from .invalid_operation_evidence import InvalidOperationEvidence
+from .invalid_operation_evidence_document import InvalidOperationEvidenceDocument
 from .inventory_state import InventoryState
 from .inventory_state_freshness import InventoryStateFreshness
 from .job_change import JobChange
@@ -716,6 +719,7 @@ __all__ = (
     "FleetProfileEndpointAssignmentView",
     "FleetProfileEndpointAssignmentViewDesiredState",
     "FleetProfileEndpointAssignmentViewState",
+    "FleetProfileEndpointProjectionIssue",
     "FleetProfileEndpointsView",
     "FleetProfileEndpointsViewApplicationStateType0",
     "FleetProfileInput",
@@ -777,6 +781,8 @@ __all__ = (
     "InstallationNodeChange",
     "InstallationNodePayload",
     "IntegerParameter",
+    "InvalidOperationEvidence",
+    "InvalidOperationEvidenceDocument",
     "InventoryState",
     "InventoryStateFreshness",
     "JobChange",

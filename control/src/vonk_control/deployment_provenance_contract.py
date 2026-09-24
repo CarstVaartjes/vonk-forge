@@ -155,6 +155,16 @@ class AgentDeploymentEvidence(ProvenanceModel):
     evidence: EvidenceAge
 
 
+class InvalidOperationEvidence(ProvenanceModel):
+    """A bounded diagnostic for a stored agent receipt outside the current contract."""
+
+    operation_id: str
+    kind: Literal["recipe.start"]
+    node_id: str
+    document: Literal["payload", "result"]
+    detail: str = Field(max_length=256)
+
+
 class DeploymentProvenance(ProvenanceModel):
     schema_version: Literal[2] = 2
     generated_at: datetime
@@ -162,3 +172,5 @@ class DeploymentProvenance(ProvenanceModel):
     recipe_library: RecipeLibraryEvidence
     agents: list[AgentDeploymentEvidence]
     workloads: list[WorkloadProvenance]
+    invalid_operation_evidence: list[InvalidOperationEvidence]
+    invalid_operation_evidence_omitted_count: int = Field(ge=0)

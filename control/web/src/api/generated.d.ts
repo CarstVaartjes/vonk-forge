@@ -1966,6 +1966,10 @@ export interface components {
              * Format: date-time
              */
             generated_at: string;
+            /** Invalid Operation Evidence */
+            invalid_operation_evidence: components["schemas"]["InvalidOperationEvidence"][];
+            /** Invalid Operation Evidence Omitted Count */
+            invalid_operation_evidence_omitted_count: number;
             /** Platform */
             platform: components["schemas"]["PlatformBoundary"][];
             recipe_library: components["schemas"]["RecipeLibraryEvidence"];
@@ -2961,6 +2965,19 @@ export interface components {
              */
             state: "installed-only" | "not-published-yet" | "published" | "expired" | "withdrawn" | "unavailable";
         };
+        /**
+         * FleetProfileEndpointProjectionIssue
+         * @description Safe diagnostic for immutable profile history that cannot be read.
+         */
+        FleetProfileEndpointProjectionIssue: {
+            /**
+             * Code
+             * @constant
+             */
+            code: "profile.application_intent.invalid";
+            /** Detail */
+            detail: string;
+        };
         /** FleetProfileEndpointsView */
         FleetProfileEndpointsView: {
             /** Application Id */
@@ -2968,7 +2985,7 @@ export interface components {
             /** Application State */
             application_state?: ("queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled") | null;
             /** Assignments */
-            assignments: components["schemas"]["FleetProfileEndpointAssignmentView"][];
+            assignments: components["schemas"]["FleetProfileEndpointAssignmentView"][] | null;
             /** Number */
             number: number;
             /**
@@ -2978,6 +2995,7 @@ export interface components {
             observed_at: string;
             /** Profile Id */
             profile_id?: string | null;
+            projection_issue?: components["schemas"]["FleetProfileEndpointProjectionIssue"] | null;
         };
         /** FleetProfileInput */
         FleetProfileInput: {
@@ -3685,6 +3703,28 @@ export interface components {
              * @enum {string}
              */
             type: "integer";
+        };
+        /**
+         * InvalidOperationEvidence
+         * @description A bounded diagnostic for a stored agent receipt outside the current contract.
+         */
+        InvalidOperationEvidence: {
+            /** Detail */
+            detail: string;
+            /**
+             * Document
+             * @enum {string}
+             */
+            document: "payload" | "result";
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "recipe.start";
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
         };
         /** InventoryState */
         InventoryState: {

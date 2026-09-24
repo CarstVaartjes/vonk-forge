@@ -888,6 +888,7 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
 
     assert intent.application_id == application.id
     assert intent.application_state == "queued"
+    assert intent.assignments is not None
     assert len(intent.assignments) == 1
     assert intent.assignments[0].alias == "studio-chat"
     assert intent.assignments[0].state == "not-published-yet"
@@ -902,9 +903,31 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
     with sessions() as session:
         withdrawn = service.endpoint_intent(session, profile.number)
     assert withdrawn.application_id == application.id
+    assert withdrawn.assignments is not None
     assert len(withdrawn.assignments) == 1
     assert withdrawn.assignments[0].state == "withdrawn"
     assert withdrawn.assignments[0].expected_run_id is None
+
+    # Endpoint discovery is a read-only projection. If the immutable reviewed
+    # plan is corrupt, expose that membership is unknown without changing the
+    # strict validator used by execution and recovery.
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        row.plan = {}
+
+    with sessions() as session:
+        unavailable = service.endpoint_intent(session, profile.number)
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        with pytest.raises(FleetProfileConflict, match="Persisted Fleet profile plan"):
+            service._intended_profile(row, session=session)
+
+    assert unavailable.application_id == application.id
+    assert unavailable.application_state == "succeeded"
+    assert unavailable.assignments is None
+    assert unavailable.projection_issue is not None
+    assert unavailable.projection_issue.code == "profile.application_intent.invalid"
 
 
 def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progress() -> (

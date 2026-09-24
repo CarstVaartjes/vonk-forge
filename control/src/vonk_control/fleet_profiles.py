@@ -58,6 +58,7 @@ from .fleet_profile_contract import (
     FleetProfileEffects,
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
+    FleetProfileEndpointProjectionIssue,
     FleetProfileInput,
     FleetProfileInstallationEffect,
     FleetProfileInstallationPolicy,
@@ -142,6 +143,7 @@ from .run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationService,
 )
+from .strict_json import stored_document_detail
 from .user_authority import serialize_user_authority
 
 if TYPE_CHECKING:
@@ -2495,10 +2497,30 @@ class FleetProfileService:
                 assignments=(),
             )
 
-        intended = self._intended_profile(application, session=session)
         application_state = _OPERATION_STATE_ADAPTER.validate_python(
             application.state, strict=True
         )
+        try:
+            intended = self._intended_profile(application, session=session)
+        except FleetProfileConflict as error:
+            # A broken historical plan blocks execution, but it should not
+            # hide the rest of this read-only endpoint projection. The exact
+            # reviewed assignments remain unknown; never reconstruct them
+            # from today's mutable saved profile.
+            cause = error.__cause__
+            detail = stored_document_detail(cause) if isinstance(cause, Exception) else None
+            return FleetProfileEndpointIntent(
+                number=number,
+                profile_id=profile.id,
+                application_id=application.id,
+                application_state=application_state,
+                assignments=None,
+                projection_issue=FleetProfileEndpointProjectionIssue(
+                    code="profile.application_intent.invalid",
+                    detail=detail
+                    or "Stored application intent is invalid or inconsistent.",
+                ),
+            )
         projected: list[FleetProfileEndpointAssignmentIntent] = []
         for assignment in intended.assignments:
             if assignment.desired_state == "installed":

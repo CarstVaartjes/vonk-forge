@@ -417,6 +417,7 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
     assert installed.status_code == 200, installed.text
     installed_view = FleetProfileEndpointsView.model_validate_json(installed.text)
     assert installed_view.profile_id == installed_profile_id
+    assert installed_view.assignments is not None
     assert len(installed_view.assignments) == 1
     installed_assignment = installed_view.assignments[0]
     assert installed_assignment.assignment_id == installed_assignment_id
@@ -446,6 +447,7 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
     )
     assert current.status_code == 200, current.text
     current_view = FleetProfileEndpointsView.model_validate_json(current.text)
+    assert current_view.assignments is not None
     current_endpoint = current_view.assignments[0].endpoint
     assert current_endpoint is not None
     assert current_endpoint.generation == first_generation.generation
@@ -467,6 +469,7 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
     )
     assert refreshed.status_code == 200, refreshed.text
     refreshed_view = FleetProfileEndpointsView.model_validate_json(refreshed.text)
+    assert refreshed_view.assignments is not None
     refreshed_endpoint = refreshed_view.assignments[0].endpoint
     assert refreshed_endpoint is not None
     assert refreshed_endpoint.generation == replacement.generation
@@ -493,8 +496,56 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
         )
     assert expired.status_code == 200, expired.text
     expired_view = FleetProfileEndpointsView.model_validate_json(expired.text)
+    assert expired_view.assignments is not None
     assert expired_view.assignments[0].state == "expired"
     assert expired_view.assignments[0].endpoint is None
+
+
+@pytest.mark.lane
+def test_invalid_profile_history_is_reported_without_false_alias_not_found(
+    postgres_engine,
+    tmp_path: Path,
+) -> None:
+    """Unreadable immutable membership stays visible and is never reconstructed."""
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    base_routes, _publisher, _applied, run_id = setup_routes(
+        tmp_path / "route-fixture", ranks=2, engine=postgres_engine
+    )
+    route_root = tmp_path / "routes"
+    routes = atomic_service(base_routes, route_root, lambda: ROUTE_NOW)
+    routes.publish_run(run_id)
+    profiles, profile_id, application_id, _assignment_id = (
+        _seed_profile_application_for_run(
+            sessions, run_id, profile_number=1, alias="qwen"
+        )
+    )
+
+    with sessions.begin() as session:
+        application = session.get(FleetProfileApplication, application_id)
+        assert application is not None
+        application.plan = {}
+
+    api, codec = _api(sessions, route_root, profiles=profiles)
+    token = codec.issue(Actor("viewer", "viewer"), ttl_seconds=1_000, now=0)
+    response = api.get(
+        "/api/profile/1/endpoints",
+        params={"alias": "qwen"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    view = FleetProfileEndpointsView.model_validate_json(response.text)
+    assert view.profile_id == profile_id
+    assert view.application_id == application_id
+    assert view.assignments is None
+    assert view.projection_issue is not None
+    assert view.projection_issue.code == "profile.application_intent.invalid"
+    assert "stored document is invalid" in view.projection_issue.detail
+    with sessions() as session:
+        application = session.get(FleetProfileApplication, application_id)
+        assert application is not None and application.plan == {}
 
 
 @pytest.mark.lane
@@ -522,6 +573,7 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
     owner_response = api.get("/api/profile/1/endpoints", headers=headers)
     assert owner_response.status_code == 200, owner_response.text
     owner_view = FleetProfileEndpointsView.model_validate_json(owner_response.text)
+    assert owner_view.assignments is not None
     assert len(owner_view.assignments) == 1
     loaded_assignment = owner_view.assignments[0]
     endpoint = loaded_assignment.endpoint
@@ -578,6 +630,7 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
 
     assert withdrawn.returncode == 0, withdrawn.stderr
     withdrawn_view = FleetProfileEndpointsView.model_validate_json(withdrawn.stdout)
+    assert withdrawn_view.assignments is not None
     assert len(withdrawn_view.assignments) == 1
     assignment = withdrawn_view.assignments[0]
     assert assignment.assignment_id == assignment_id

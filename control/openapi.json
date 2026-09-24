@@ -2551,6 +2551,18 @@
             "title": "Generated At",
             "type": "string"
           },
+          "invalid_operation_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/InvalidOperationEvidence"
+            },
+            "title": "Invalid Operation Evidence",
+            "type": "array"
+          },
+          "invalid_operation_evidence_omitted_count": {
+            "minimum": 0.0,
+            "title": "Invalid Operation Evidence Omitted Count",
+            "type": "integer"
+          },
           "platform": {
             "items": {
               "$ref": "#/components/schemas/PlatformBoundary"
@@ -2580,7 +2592,9 @@
           "platform",
           "recipe_library",
           "agents",
-          "workloads"
+          "workloads",
+          "invalid_operation_evidence",
+          "invalid_operation_evidence_omitted_count"
         ],
         "title": "DeploymentProvenance",
         "type": "object"
@@ -5639,6 +5653,29 @@
         "title": "FleetProfileEndpointAssignmentView",
         "type": "object"
       },
+      "FleetProfileEndpointProjectionIssue": {
+        "additionalProperties": false,
+        "description": "Safe diagnostic for immutable profile history that cannot be read.",
+        "properties": {
+          "code": {
+            "const": "profile.application_intent.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "FleetProfileEndpointProjectionIssue",
+        "type": "object"
+      },
       "FleetProfileEndpointsView": {
         "additionalProperties": false,
         "properties": {
@@ -5674,12 +5711,19 @@
             "title": "Application State"
           },
           "assignments": {
-            "items": {
-              "$ref": "#/components/schemas/FleetProfileEndpointAssignmentView"
-            },
-            "maxItems": 64,
-            "title": "Assignments",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FleetProfileEndpointAssignmentView"
+                },
+                "maxItems": 64,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignments"
           },
           "number": {
             "minimum": 1.0,
@@ -5702,6 +5746,16 @@
               }
             ],
             "title": "Profile Id"
+          },
+          "projection_issue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetProfileEndpointProjectionIssue"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -7746,6 +7800,47 @@
           "default"
         ],
         "title": "IntegerParameter",
+        "type": "object"
+      },
+      "InvalidOperationEvidence": {
+        "additionalProperties": false,
+        "description": "A bounded diagnostic for a stored agent receipt outside the current contract.",
+        "properties": {
+          "detail": {
+            "maxLength": 256,
+            "title": "Detail",
+            "type": "string"
+          },
+          "document": {
+            "enum": [
+              "payload",
+              "result"
+            ],
+            "title": "Document",
+            "type": "string"
+          },
+          "kind": {
+            "const": "recipe.start",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "kind",
+          "node_id",
+          "document",
+          "detail"
+        ],
+        "title": "InvalidOperationEvidence",
         "type": "object"
       },
       "InventoryState": {

@@ -45,6 +45,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.operation_api import OperationQuery
+from vonk_control.operation_contract import OperationFailureEvidence
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     RecipeBuildService,
@@ -3556,6 +3557,87 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     assert get_operation_from_providers([shared], operations[0].operation_id)["id"] == (
         operations[0].operation_id
     )
+
+
+def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
+    tmp_path: Path,
+) -> None:
+    from vonk_control.operation_api import (
+        OperationProvider,
+        merge_operation_providers,
+        operation_detail_response,
+    )
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    service = _service(
+        sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
+    )
+    request = _request(sessions, nodes[0])
+    operations = [
+        service.apply(
+            RunSwitchApplyRequest(
+                **request.model_dump(), request_key=str(uuid.uuid4())
+            ),
+            actor="admin",
+        )
+        for _ in range(2)
+    ]
+    valid, unreadable = operations
+    with sessions.begin() as session:
+        job = session.get(Job, unreadable.operation_id)
+        assert job is not None and isinstance(job.payload, dict)
+        persisted_payload = dict(job.payload)
+        persisted_plan = persisted_payload.get("plan")
+        assert isinstance(persisted_plan, dict)
+        invalid_plan = dict(persisted_plan)
+        # A required current-contract field is absent. Reading the durable
+        # operation must stay strict; Activity will report this row as invalid.
+        invalid_plan.pop("action")
+        persisted_payload["plan"] = invalid_plan
+        job.payload = persisted_payload
+        job.created_at = job.created_at + timedelta(seconds=1)
+        job.updated_at = job.created_at
+
+    with pytest.raises(RunSwitchOperationConflict, match="persisted plan is invalid"):
+        service.get(unreadable.operation_id)
+
+    provider = service.activity_provider()
+    shared_provider = OperationProvider(
+        family=provider.family,
+        list_operations=provider.list_operations,
+        get_operation=provider.get_operation,
+    )
+    page = merge_operation_providers(
+        [shared_provider],
+        cursor=None,
+        limit=10,
+        state=None,
+        node_id=nodes[0],
+        cursors=CursorCodec(hashlib.sha256(b"run-switch-unreadable").digest()),
+    )
+
+    assert page.total == 2
+    assert [item["id"] for item in page.items] == [
+        unreadable.operation_id,
+        valid.operation_id,
+    ]
+    damaged_item = page.items[0]
+    assert damaged_item["kind"] == "run-switch-unreadable"
+    assert damaged_item["state"] == "unavailable"
+    assert damaged_item["failure"] == {
+        "error_code": "operation_history_unreadable",
+        "summary": "Stored Run/Switch history is malformed",
+        "retryable": False,
+    }
+    damaged_detail = operation_detail_response(damaged_item)
+    assert damaged_detail.id == unreadable.operation_id
+    assert isinstance(damaged_detail.failure, OperationFailureEvidence)
+    assert damaged_detail.failure.error_code == "operation_history_unreadable"
+    assert page.items[1]["id"] == valid.operation_id
+    assert page.items[1]["node_ids"] == list(nodes)
+    assert page.items[1].get("failure") is None
 
 
 @pytest.mark.parametrize("failed", [False, True])
