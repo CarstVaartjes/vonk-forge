@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from argparse import Namespace
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import unquote
@@ -258,7 +259,7 @@ def _node(
     *,
     online: bool = True,
     boot_id: str = "boot-before",
-    loaded: list[dict[str, object]] | None = None,
+    loaded: Sequence[Mapping[str, object]] | None = None,
     freshness: str = "live",
 ) -> dict[str, object]:
     return {
@@ -375,8 +376,13 @@ def test_exact_fixture_cases_are_derived_from_the_reviewed_registry() -> None:
         raw=row.raw,
     )
 
-    assert campaign_cli._fixture_bindings(row, registry)[0] == "openai-service"
-    assert campaign_cli._fixture_bindings(row, registry)[1]["cases"][0]["id"] == "health"
+    interface, binding = campaign_cli._fixture_bindings(row, registry)
+    assert interface == "openai-service"
+    cases = binding["cases"]
+    assert isinstance(cases, list) and cases
+    first_case = cases[0]
+    assert isinstance(first_case, Mapping)
+    assert first_case["id"] == "health"
 
 
 def test_profile_application_digest_binds_preview_retry_and_request_identity() -> None:
@@ -730,7 +736,9 @@ def test_offline_restart_requires_observed_downtime_and_changed_live_boot_id(
         fleet={"nodes": [_node(NODE_A, boot_id="boot-before")]},
     )
     assert unchanged["complete"] is False
-    assert "unchanged boot ID" in unchanged["reason"]
+    reason = unchanged["reason"]
+    assert isinstance(reason, str)
+    assert "unchanged boot ID" in reason
 
     restarted = campaign_cli._restart_observation(
         **common,

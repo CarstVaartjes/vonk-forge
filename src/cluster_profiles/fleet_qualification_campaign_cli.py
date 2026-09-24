@@ -17,6 +17,7 @@ import time
 import urllib.parse
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -160,7 +161,7 @@ def _exact_keys(
     value: Mapping[str, object],
     *,
     required: set[str],
-    optional: set[str] = frozenset(),
+    optional: AbstractSet[str] = frozenset(),
     label: str,
 ) -> None:
     missing = sorted(required - set(value))
@@ -625,7 +626,9 @@ def _bind_repository_inputs(
         raise QualificationError("catalog source commit differs from its authority")
     for row in manifest.authority.rows:
         package_path = _relative_path(root, row.package["path"], f"{row.key} package")
-        expected_bytes = int(row.package["expected_bytes"])
+        expected_bytes = _integer(
+            row.package["expected_bytes"], f"{row.key} package bytes", 1, 2**63 - 1
+        )
         if _safe_file_digest(package_path, expected_bytes) != row.package["sha256"]:
             raise QualificationError(f"{row.key} package digest differs from authority")
 
@@ -779,9 +782,10 @@ def _validate_current_recipe(
         str(item["content_sha256"]) for item in row.model_license_refs
     }
     selected_digests = {
-        str(_object(item, "recipe Model selection").get("model", {}).get("content_sha256"))
+        str(model.get("content_sha256"))
         for item in definition.get("models", [])
-        if isinstance(item, Mapping) and isinstance(item.get("model"), Mapping)
+        if isinstance(item, Mapping)
+        if isinstance((model := item.get("model")), Mapping)
     }
     if selected_digests != model_digests:
         raise QualificationError(f"{row.key} selected Models differ from authority")
@@ -861,7 +865,7 @@ def _all_loaded_runs(fleet: Mapping[str, object]) -> set[str]:
 
 
 def _assert_fleet_exclusive(
-    fleet: Mapping[str, object], *, owned_run_ids: set[str] = frozenset()
+    fleet: Mapping[str, object], *, owned_run_ids: AbstractSet[str] = frozenset()
 ) -> None:
     foreign = _all_loaded_runs(fleet) - owned_run_ids
     if foreign:
@@ -1205,7 +1209,7 @@ def _check_preview(
     row: RecipeAuthorityRow,
     node_ids: Sequence[str],
     cleanup: bool = False,
-    owned_run_ids: set[str] = frozenset(),
+    owned_run_ids: AbstractSet[str] = frozenset(),
 ) -> dict[str, object]:
     try:
         preview = FleetProfilePreview.from_dict(raw_preview).to_dict()
@@ -1304,7 +1308,13 @@ def _run_id_from_application(application: Mapping[str, object], node_count: int)
         for item in ranks_by_node.values()
     ):
         raise QualificationError("recipe run rank receipts are incomplete or stale")
-    if {int(item["rank"]) for item in ranks_by_node.values()} != set(range(node_count)):
+    rank_values: set[int] = set()
+    for item in ranks_by_node.values():
+        rank = item.get("rank")
+        if not isinstance(rank, int) or isinstance(rank, bool):
+            raise QualificationError("recipe run rank receipts are incomplete or stale")
+        rank_values.add(rank)
+    if rank_values != set(range(node_count)):
         raise QualificationError("recipe run rank receipts are not contiguous")
     return str(final["run_id"]), final
 
@@ -1874,6 +1884,7 @@ def _fresh_profile_preview(
         failure_node_id=failure_node_id,
         profile_number=profile_number,
     )
+    identity = detail.get("identity")
     ledger.append(
         "plan.generated",
         plan_digest=campaign_id,
@@ -1883,8 +1894,8 @@ def _fresh_profile_preview(
             "sequence": row.sequence,
             "authority_row": dict(row.raw),
             "controller_recipe_identity": {
-                "recipe_id": detail.get("identity", {}).get("recipe_id")
-                if isinstance(detail.get("identity"), Mapping)
+                "recipe_id": identity.get("recipe_id")
+                if isinstance(identity, Mapping)
                 else None,
                 "recipe_revision_id": revision_id,
                 "content_sha256": row.content_sha256,
@@ -2184,6 +2195,7 @@ def _rank_lost(
     node = failure_node
     if not failure_node_offline and failure_node_id not in failed_state:
         return False, {}
+    connection = node.get("connection")
     try:
         client.request("GET", f"/api/endpoints/{urllib.parse.quote(alias, safe='')}")
     except ControlNotFound:
@@ -2194,8 +2206,8 @@ def _rank_lost(
             "survivors": [dict(item) for _, item in survivors],
             "failed_rank_presence": [dict(item) for item in failed_presence],
             "failed_node_online_state": (
-                node.get("connection", {}).get("online_state")
-                if isinstance(node.get("connection"), Mapping)
+                connection.get("online_state")
+                if isinstance(connection, Mapping)
                 else None
             ),
             "endpoint_not_found": True,
@@ -2419,6 +2431,7 @@ def _restart_observation(
             "node_id": current_node,
             "reason": "another selected Spark is offline; sequential restart gate failed",
         }
+    telemetry = node.get("telemetry")
     ledger.append(
         "host-restart.recovered",
         plan_digest=campaign_id,
@@ -2429,9 +2442,7 @@ def _restart_observation(
             "observed_boot_id": boot_id,
             "online_state": "online",
             "telemetry_freshness": (
-                node.get("telemetry", {}).get("freshness")
-                if isinstance(node.get("telemetry"), Mapping)
-                else None
+                telemetry.get("freshness") if isinstance(telemetry, Mapping) else None
             ),
         },
     )
@@ -2619,16 +2630,18 @@ def _accept_if_complete(
             raise QualificationError(f"{node_id} restart evidence lacks an offline/changed live boot ID")
     rank_loss = _latest_payload(ledger, campaign_id, row.key, "rank-loss.observed")
     recovery = _latest_payload(ledger, campaign_id, row.key, "rank-recovery.smoke-completed")
-    if row.node_count == 2 and (rank_loss is None or recovery is None):
-        raise QualificationError("distributed spark-accepted gate lacks rank-loss recovery evidence")
     if row.node_count == 2:
-        failure_node = rank_loss.get("failure_node_id") if rank_loss is not None else None
-        failure_rank = ranks.get(failure_node) if isinstance(failure_node, str) else None
-        expected_survivor_ranks = set(range(row.node_count)) - {failure_rank}
-        survivors = rank_loss.get("survivors") if rank_loss is not None else None
-        failed_presence = (
-            rank_loss.get("failed_rank_presence") if rank_loss is not None else None
+        if rank_loss is None or recovery is None:
+            raise QualificationError(
+                "distributed spark-accepted gate lacks rank-loss recovery evidence"
+            )
+        failure_node = rank_loss.get("failure_node_id")
+        failure_rank = (
+            ranks.get(failure_node) if isinstance(failure_node, str) else None
         )
+        expected_survivor_ranks = set(range(row.node_count)) - {failure_rank}
+        survivors = rank_loss.get("survivors")
+        failed_presence = rank_loss.get("failed_rank_presence")
         recovered_presences = recovery.get("fleet_rank_presence")
         if not isinstance(survivors, list) or not isinstance(failed_presence, list):
             raise QualificationError("rank-loss evidence lacks per-rank route-withdrawal receipts")
