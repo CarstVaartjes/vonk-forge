@@ -1993,13 +1993,20 @@ class SparkLifecycle:
         from cluster_profiles.generated_control.models.enrollment_grant_response import (
             EnrollmentGrantResponse,
         )
+        from cluster_profiles.generated_control.models.fleet_enroll_request import (
+            FleetEnrollRequest,
+        )
 
         assert self.control is not None
         try:
             _, response = self.control.request(
                 "POST",
                 "/api/fleet/enroll",
-                {"name": "Acceptance Spark", "ttl_seconds": 600},
+                FleetEnrollRequest(
+                    name="Acceptance Spark",
+                    request_key=str(uuid.uuid4()),
+                    ttl_seconds=600,
+                ).to_dict(),
             )
             envelope = require_object(response, "Fleet enrollment")
             grant = require_object(envelope.get("grant"), "enrollment grant")
