@@ -1980,20 +1980,16 @@ class FleetProfileService:
 
         PostgreSQL's implicit writer locks participate, so another owner cannot
         insert or replace an effect between reconciliation and acceptance.
-        This is a short SQL-only transaction; contention refuses before effects.
+        This is a short SQL-only transaction; contention anywhere in the
+        admission work refuses before effects and releases the transaction.
         """
         try:
             with self._sessions.begin() as session:
                 self._authorize(session, actor)
-                try:
-                    acquire_admission_keys(
-                        session,
-                        tuple(node_admission_key(node_id) for node_id in node_ids),
-                    )
-                except AdmissionLockBusy as error:
-                    raise FleetProfileConflict(
-                        "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
-                    ) from error
+                acquire_admission_keys(
+                    session,
+                    tuple(node_admission_key(node_id) for node_id in node_ids),
+                )
                 if session.get_bind().dialect.name == "postgresql":
                     session.execute(
                         text(
@@ -2007,6 +2003,10 @@ class FleetProfileService:
                         )
                     )
                 yield session
+        except AdmissionLockBusy as error:
+            raise FleetProfileConflict(
+                "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
+            ) from error
         except OperationalError as error:
             if is_admission_contention(error):
                 raise FleetProfileConflict(

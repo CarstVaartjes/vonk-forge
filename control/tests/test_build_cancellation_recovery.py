@@ -18,7 +18,6 @@ from vonk_control.models import (
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_execution_contract import parse_stored_build_plan
 from vonk_control.recipe_image_availability import (
-    RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_operations import (
@@ -110,10 +109,41 @@ def _evidence(plan):
     }
 
 
-@pytest.mark.parametrize("source", ["direct", "removal"])
 @pytest.mark.parametrize("issued", [False, True])
-def test_cancellation_does_not_corrupt_the_canonical_build_request(
-    tmp_path, postgres_engine, source, issued
+def test_explicit_cancellation_does_not_corrupt_the_canonical_build_request(
+    tmp_path, postgres_engine, issued
+):
+    sessions, _builds, operations, _storage, _now, _node_id, _revision, plan = (
+        _services(tmp_path, postgres_engine)
+    )
+    original = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+    )
+    if issued:
+        _issue(sessions, original.id)
+    operations.cancel(
+        original.id,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+        reason="cancel this preparation",
+    )
+    with sessions() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        job = session.get(Job, original.id)
+        assert build is not None and job is not None
+        assert parse_stored_build_plan(build.plan) == parse_stored_build_plan(
+            plan.agent_payload
+        )
+        assert job.result is not None and job.result["cancel_requested"] is True
+    assert bool(_active_claims(sessions, plan.build_id)) is issued
+
+
+@pytest.mark.parametrize("issued", [False, True])
+def test_cache_removal_preserves_an_accepted_build_and_its_claim(
+    tmp_path, postgres_engine, issued
 ):
     sessions, _builds, operations, storage, now, _node_id, revision, plan = _services(
         tmp_path, postgres_engine
@@ -126,34 +156,58 @@ def test_cancellation_does_not_corrupt_the_canonical_build_request(
     )
     if issued:
         _issue(sessions, original.id)
-    if source == "direct":
-        operations.cancel(
-            original.id,
-            actor="operator",
-            request_id=str(uuid.uuid4()),
-            reason="cancel this preparation",
+    with sessions() as session:
+        before_build = session.get(RecipeBuild, plan.build_id)
+        before_job = session.get(Job, original.id)
+        before_child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == original.id)
         )
-    else:
-        recipe = RecipeDefinition.model_validate_json(json.dumps(revision.document))
-        availability = RecipeImageAvailabilityService(
-            sessions,
-            storage=storage,
-            authority=lambda *_args, **_kwargs: (recipe, {}),
-            clock=lambda: now,
-        )
-        availability.remove_selector(
-            recipe.identity.slug, actor="operator", request_id=str(uuid.uuid4())
-        )
-        assert operations.reconcile_cancelled_builds()
+        assert before_build is not None and before_job is not None
+        assert before_child is not None
+        child_id = before_child.id
+        child_state = before_child.state
+        child_attempt = before_child.current_attempt
+        job_payload = dict(before_job.payload)
+        assert before_build.state == "building"
+        assert before_job.result is None
+        assert child_state == ("running" if issued else "queued")
+    claims = _active_claims(sessions, plan.build_id)
+    assert claims
+
+    recipe = RecipeDefinition.model_validate_json(json.dumps(revision.document))
+    availability = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda *_args, **_kwargs: (recipe, {}),
+        clock=lambda: now,
+    )
+    removal = availability.remove_selector(
+        recipe.identity.slug, actor="operator", request_id=str(uuid.uuid4())
+    )
+
+    assert removal["action"] == "remove"
+    assert removal["cancelled_builds"] == []
+    assert not operations.reconcile_cancelled_builds()
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         job = session.get(Job, original.id)
-        assert build is not None and job is not None
+        child = session.get(AgentOperation, child_id)
+        build_jobs = tuple(
+            session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
+        )
+        assert build is not None and job is not None and child is not None
+        assert build.state == "building"
         assert parse_stored_build_plan(build.plan) == parse_stored_build_plan(
             plan.agent_payload
         )
-        assert job.result is not None and job.result["cancel_requested"] is True
-    assert bool(_active_claims(sessions, plan.build_id)) is issued
+        assert job.state == original.state == "running"
+        assert job.payload == job_payload
+        assert job.result is None
+        assert child.id == child_id
+        assert child.state == child_state
+        assert child.current_attempt == child_attempt
+        assert tuple(candidate.id for candidate in build_jobs) == (original.id,)
+    assert _active_claims(sessions, plan.build_id) == claims
 
 
 @pytest.mark.parametrize("issued", [False, True])
@@ -339,7 +393,7 @@ def test_removal_of_an_unissued_plan_does_not_invent_a_failed_attempt(
 
 
 @pytest.mark.parametrize("locked_owner", ["job", "build"])
-def test_removal_defers_a_busy_cancellation_owner_without_partial_changes(
+def test_removal_does_not_lock_or_mutate_an_accepted_build_owner(
     tmp_path, postgres_engine, locked_owner
 ):
     sessions, _builds, operations, storage, now, _node_id, revision, plan = _services(
@@ -359,6 +413,19 @@ def test_removal_defers_a_busy_cancellation_owner_without_partial_changes(
         clock=lambda: now,
     )
     claims = _active_claims(sessions, plan.build_id)
+    with sessions() as session:
+        child_before = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == original.id)
+        )
+        job_before = session.get(Job, original.id)
+        build_before = session.get(RecipeBuild, plan.build_id)
+        assert child_before is not None and job_before is not None
+        assert build_before is not None
+        child_id = child_before.id
+        child_state = child_before.state
+        child_attempt = child_before.current_attempt
+        job_payload = dict(job_before.payload)
+        build_plan = parse_stored_build_plan(build_before.plan)
     with sessions.begin() as blocker:
         statement = (
             select(Job).where(Job.id == original.id)
@@ -366,20 +433,27 @@ def test_removal_defers_a_busy_cancellation_owner_without_partial_changes(
             else select(RecipeBuild).where(RecipeBuild.id == plan.build_id)
         )
         blocker.scalar(statement.with_for_update())
-        with pytest.raises(RecipeImageAvailabilityError) as caught:
-            availability.remove_selector(
-                recipe.identity.slug, actor="operator", request_id=str(uuid.uuid4())
-            )
-        assert caught.value.code == "recipe_image.removal_busy"
-        assert caught.value.retryable
+        removal = availability.remove_selector(
+            recipe.identity.slug, actor="operator", request_id=str(uuid.uuid4())
+        )
+        assert removal["action"] == "remove"
+        assert removal["cancelled_builds"] == []
+        # Cache removal has no build-cancellation ownership to acquire. It
+        # accepts its removal intent while the unrelated build rows stay locked.
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         job = session.get(Job, original.id)
+        child = session.get(AgentOperation, child_id)
+        build_jobs = tuple(
+            session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
+        )
         assert build is not None and build.state == "building"
-        assert job is not None and job.result is None
+        assert parse_stored_build_plan(build.plan) == build_plan
+        assert job is not None and job.state == "running" and job.result is None
+        assert job.payload == job_payload
+        assert child is not None and child.id == child_id
+        assert child.state == child_state
+        assert child.current_attempt == child_attempt
+        assert tuple(candidate.id for candidate in build_jobs) == (original.id,)
     assert _active_claims(sessions, plan.build_id) == claims
-    availability.remove_selector(
-        recipe.identity.slug, actor="operator", request_id=str(uuid.uuid4())
-    )
-    assert operations.reconcile_cancelled_builds()
-    assert operations.get(original.id).state == "cancelled"
+    assert not operations.reconcile_cancelled_builds()

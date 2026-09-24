@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
+from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
@@ -10,8 +12,22 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.models import AgentNode, CatalogDocumentRevision, Job, RecipeRun
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.inventory_repository import (
+    MAX_INVENTORY_FUTURE_SKEW,
+    InventoryRepository,
+    InventorySnapshotInput,
+)
+from vonk_control.models import (
+    AgentNode,
+    CatalogDocumentRevision,
+    Job,
+    NodeInventorySnapshot,
+    RecipeRun,
+)
+from vonk_control.run_switch_operations import (
+    RecipeLifecyclePhaseExecutor,
+    RunSwitchOperationService,
+)
 from vonk_control.runtime_preflight import mandatory_capabilities, request_digest
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
@@ -174,6 +190,42 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         with sessions() as session:
             old_run = session.get(RecipeRun, old_start.owner_id)
             assert old_run is not None and old_run.state == "stopped"
+            stopped_at = old_run.stopped_at
+            snapshot = session.scalar(
+                select(NodeInventorySnapshot).where(
+                    NodeInventorySnapshot.node_id == node_id
+                )
+            )
+            assert snapshot is not None
+            assert (
+                session.scalar(
+                    select(Job).where(
+                        Job.kind == "recipe.start", Job.id != old_start.id
+                    )
+                )
+                is None
+            )
+        assert stopped_at is not None
+
+        # The stop releases ownership, but only new physical evidence can show
+        # that its memory is actually free. Keep the replacement unqueued until
+        # a sample clears the stop timestamp and admitted clock skew.
+        fresh_at = stopped_at + MAX_INVENTORY_FUTURE_SKEW + timedelta(seconds=1)
+        fresh_clock = lambda: fresh_at
+        lifecycle._clock = fresh_clock
+        agent_jobs._clock = fresh_clock
+        switch._clock = fresh_clock
+        profiles._clock = fresh_clock
+        phase_executor = switch._phase_executor
+        assert isinstance(phase_executor, RecipeLifecyclePhaseExecutor)
+        phase_executor._clock = fresh_clock
+        inventory = InventoryRepository(sessions, clock=fresh_clock)
+        inventory_values = {
+            item.name: getattr(snapshot, item.name)
+            for item in fields(InventorySnapshotInput)
+        }
+        inventory_values["observed_at"] = fresh_at
+        inventory.record(InventorySnapshotInput(**inventory_values))
 
         # A fresh start can now be claimed. No old job is replayed to the node.
         replacement = None

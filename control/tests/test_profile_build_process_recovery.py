@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import fields
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -186,7 +187,13 @@ def _worker_process(config: dict, crash: str) -> None:
     sessions = sessionmaker(engine, expire_on_commit=False)
     storage = FilesystemRuntimeImageStorage(root / "runtime-images")
 
-    def prepared_image(_recipe, _runtime, build):
+    def prepared_image(
+        _recipe,
+        _runtime,
+        build,
+        *,
+        before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
+    ):
         receipt = storage.find_build(
             build.build_input_sha256,
             expected_architecture="linux/arm64",
@@ -194,6 +201,13 @@ def _worker_process(config: dict, crash: str) -> None:
             expected_archive_sha256=build.oci_layout_sha256,
         )
         assert receipt is not None, "the exact prepared image receipt is missing"
+        if before_publish is not None:
+            # Match the production cache-hit path: establish the same exact
+            # archive fence before the durable owner validates and records its
+            # provisional reference. Propagate fence/callback failures so the
+            # fixture cannot authorize a stale or cancelled publication.
+            with storage.publication_lock(receipt.oci_archive_sha256):
+                before_publish(receipt)
         return receipt
 
     compilation = ControllerExecutionPlanService(

@@ -747,6 +747,10 @@ def test_superseded_child_contention_refuses_without_holding_admission(
             )
         )
     attempted = threading.Event()
+    request_body = {
+        "request_key": str(uuid4()),
+        "plan_digest": preview["plan_digest"],
+    }
     prefix = f"SELECT {locked_model.__tablename__}."
 
     def before_lock(_connection, _cursor, statement, _parameters, _context, _many):
@@ -770,10 +774,7 @@ def test_superseded_child_contention_refuses_without_holding_admission(
                 api.post,
                 f"/api/profile/{profile.number}/load",
                 headers=headers,
-                json={
-                    "request_key": str(uuid4()),
-                    "plan_digest": preview["plan_digest"],
-                },
+                json=request_body,
             )
             try:
                 assert attempted.wait(timeout=5)
@@ -798,3 +799,12 @@ def test_superseded_child_contention_refuses_without_holding_admission(
     finally:
         locker.close()
         event.remove(postgres_engine, "before_cursor_execute", before_lock)
+    retried = api.post(
+        f"/api/profile/{profile.number}/load", headers=headers, json=request_body
+    )
+    assert retried.status_code == 202, retried.text
+    assert retried.json()["request_key"] == request_body["request_key"]
+    with sessions() as session:
+        accepted = tuple(session.scalars(select(FleetProfileApplication)))
+        assert len(accepted) == 1
+        assert accepted[0].request_key == request_body["request_key"]

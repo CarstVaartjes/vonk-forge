@@ -88,6 +88,27 @@ def _collide_inserts(
     return results
 
 
+def _start_together(
+    calls: tuple[Callable[[], object], Callable[[], object]],
+) -> list[tuple[int, object]]:
+    """Start two real PostgreSQL submissions together without pinning their order."""
+
+    barrier = threading.Barrier(2, timeout=10)
+
+    def capture(index: int, call: Callable[[], object]) -> tuple[int, object]:
+        barrier.wait()
+        try:
+            return index, call()
+        except (ModelCacheConflict, RecipeImageAvailabilityError) as error:
+            return index, error
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(capture, index, call) for index, call in enumerate(calls)
+        ]
+        return [future.result(timeout=20) for future in futures]
+
+
 @pytest.mark.parametrize("different_issuer", [False, True])
 def test_model_duplicate_insert_adopts_only_identical_issuer_intent(
     postgres_engine: Engine, tmp_path: Path, different_issuer: bool
@@ -121,18 +142,59 @@ def test_model_duplicate_insert_adopts_only_identical_issuer_intent(
             force=True,
         )
 
-    results = _collide_inserts(
-        postgres_engine,
-        "model_cache_operations",
-        "request_key",
-        key,
-        (lambda: submit(0), lambda: submit(1)),
+    # Model-set/object reference gates serialize same-target requests before
+    # the operation INSERT. A barrier immediately before that INSERT would
+    # deadlock the legitimate winner against a contender that must back off.
+    # Start both requests concurrently, then exercise the same-key replay after
+    # any gate-busy response has unwound.
+    results = _start_together((lambda: submit(0), lambda: submit(1)))
+    conflicts = [
+        result for _index, result in results if isinstance(result, ModelCacheConflict)
+    ]
+    accepted = [
+        result for _index, result in results if isinstance(result, CacheOperationView)
+    ]
+    assert accepted
+    assert len(conflicts) + len(accepted) == 2
+    assert all(
+        error.code
+        in (
+            {"artifact.reference_busy", "model_cache.request_key_reused"}
+            if different_issuer
+            else {"artifact.reference_busy"}
+        )
+        for error in conflicts
     )
-    conflicts = [result for result in results if isinstance(result, ModelCacheConflict)]
-    assert len(conflicts) == int(different_issuer)
-    assert all(error.code == "model_cache.request_key_reused" for error in conflicts)
-    accepted = [result for result in results if isinstance(result, CacheOperationView)]
-    assert len(accepted) + len(conflicts) == 2
+    if different_issuer:
+        assert len(accepted) == 1
+        with sessions() as session:
+            stored = session.scalar(select(ModelCacheOperation))
+            assert stored is not None
+            winning_actor = stored.actor
+            assert stored.request_key == key
+            assert stored.artifact_set_sha256 == manifest.digest
+            assert stored.plan_digest == preview["plan_digest"]
+            assert stored.payload["selector"] == "selected-model"
+            assert stored.payload["force_refresh"] is True
+        winning_index = 0 if winning_actor == "first" else 1
+        assert [
+            index for index, result in results if isinstance(result, CacheOperationView)
+        ] == [winning_index]
+        losing_actor = "second" if winning_actor == "first" else "first"
+        with pytest.raises(ModelCacheConflict) as reused:
+            services[0].start_download(
+                actor=losing_actor,
+                request_key=key,
+                selector="selected-model",
+                artifact_set_sha256=manifest.digest,
+                plan_digest=str(preview["plan_digest"]),
+                force=True,
+            )
+        assert reused.value.code == "model_cache.request_key_reused"
+    else:
+        replay = submit(1)
+        assert isinstance(replay, CacheOperationView)
+        accepted.append(replay)
     assert len({result.id for result in accepted}) == 1
     with sessions() as session:
         assert (

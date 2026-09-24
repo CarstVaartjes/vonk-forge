@@ -58,6 +58,17 @@ recipe-removal test also passes against a real wheel, HTTPS peer, PostgreSQL,
 API and managed storage: a lost accepted response and a new CLI process both
 recover the same owner, and only the worker's completed effects report success.
 
+The first full PR CI run also exercised Linux and PostgreSQL lanes beyond the
+local fast tier. It exposed a missing Zsh dependency, strict request-UUID
+fixtures, old removal-as-cancellation assumptions, a subprocess preparer that
+omitted the publication fence callback, and stale post-stop inventory fixtures.
+Those consumers are corrected without relaxing authority or reference checks.
+A production regression also escaped nested `AdmissionLockBusy` as a generic
+503; the shared admission boundary now rolls back and reports its existing
+conflict response, and the same request can retry after the held lock clears.
+Real PostgreSQL and Rust/Python wire reproductions pass after correction.
+The next full PR CI run remains the combined Linux acceptance gate.
+
 The web has 164 passing tests and a successful production build. The full
 Python type gate reports one existing reviewed exception and no new errors.
 Wire generation, pinned lint and the coordination scanner pass; the scanner

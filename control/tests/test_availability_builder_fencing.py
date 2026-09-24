@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
-from vonk_control.models import Job
+from vonk_control.models import Job, User
 
 from .test_build_cancellation_recovery import _evidence, _services
 from .test_recipe_builds import _write_controller_build_receipt
@@ -38,6 +38,8 @@ def test_replaced_builder_preserves_current_intent_at_each_commit(
         clock=lambda: clock[0],
     )
     service = production.service
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
     parent = service.start(revision.id, actor="operator", request_id=str(uuid.uuid4()))
     if boundary == "bound_plan":
         # Reconstruct the durable builder checkpoint before child dispatch,
@@ -82,8 +84,11 @@ def test_replaced_builder_preserves_current_intent_at_each_commit(
                 }
             claim = service.claim_pending(limit=1, owner_id="replacement")[0]
         else:
-            service.remove_selector(
-                revision.id, actor="operator", request_id=str(uuid.uuid4())
+            service.cancel(
+                parent.id,
+                actor="operator",
+                request_id=str(uuid.uuid4()),
+                reason="fence the accepted builder attempt",
             )
         with sessions() as session:
             row = session.get(Job, parent.id)
@@ -128,9 +133,16 @@ def test_replaced_builder_preserves_current_intent_at_each_commit(
     with sessions() as session:
         row = session.get(Job, parent.id)
         assert row is not None
-        assert row.state == state
         assert row.current_attempt == attempt
-        assert row.payload == payload
+        if replacement == "cancel":
+            assert row.state in {"cancelling", "cancelled"}
+            assert row.payload["cancellation"] == payload["cancellation"]
+            if row.state == "cancelled":
+                assert "claim_owner" not in row.payload
+                assert "claim_until" not in row.payload
+        else:
+            assert row.state == state
+            assert row.payload == payload
         children = tuple(
             session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
         )
@@ -139,7 +151,9 @@ def test_replaced_builder_preserves_current_intent_at_each_commit(
     # The valid executor either dispatches the original intent or recovers the
     # child that committed before takeover. Both paths produce one effect.
     if replacement == "cancel":
+        service.reconcile_cancellations()
         operations.reconcile_cancelled_builds()
+        service.reconcile_cancellations()
         assert service.get(parent.id).state == "cancelled"
         parent = service.start(
             revision.id, actor="operator", request_id=str(uuid.uuid4())
@@ -198,6 +212,8 @@ def test_parent_claim_is_held_until_child_admission_commits(
         clock=lambda: now,
     )
     service = production.service
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
     parent = service.start(revision.id, actor="operator", request_id=str(uuid.uuid4()))
     claim = service.claim_pending(limit=1, owner_id="worker")[0]
     admitted = threading.Event()
@@ -237,7 +253,14 @@ def test_parent_claim_is_held_until_child_admission_commits(
             ]
             == child.id
         )
-    service.remove_selector(revision.id, actor="operator", request_id=str(uuid.uuid4()))
+    service.cancel(
+        parent.id,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+        reason="cancel after child admission",
+    )
+    service.reconcile_cancellations()
     assert operations.reconcile_cancelled_builds()
+    service.reconcile_cancellations()
     assert service.get(parent.id).state == "cancelled"
     assert operations.get(child.id).state == "cancelled"

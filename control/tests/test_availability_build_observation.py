@@ -327,10 +327,10 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
     assert completed.state == "succeeded", completed.failure
 
 
-def test_new_availability_intent_after_removal_does_not_replay_cancelled_child(
+def test_new_availability_intent_after_removal_joins_the_accepted_build(
     tmp_path, postgres_engine
 ):
-    sessions, builds, operations, _storage, now, _node, revision, _plan = _services(
+    sessions, builds, operations, _storage, now, _node, revision, plan = _services(
         tmp_path, postgres_engine
     )
     production = build_recipe_image_availability(
@@ -349,30 +349,48 @@ def test_new_availability_intent_after_removal_does_not_replay_cancelled_child(
         child = session.scalar(select(Job).where(Job.kind == "recipe.build.v1"))
         assert child is not None
         child_id = child.id
-    production.service.remove_selector(
+        child_payload = dict(child.payload)
+        child_state = child.state
+        child_result = child.result
+    removal = production.service.remove_selector(
         revision.id, actor="operator", request_id=str(uuid.uuid4())
     )
-    assert operations.reconcile_cancelled_builds()
-    assert operations.get(child_id).state == "cancelled"
+    assert removal["cancelled_builds"] == []
+    assert not operations.reconcile_cancelled_builds()
+    assert operations.get(child_id).state == child_state == "running"
+    assert production.service.get(original.id).state == "queued"
+    claims = _active_claims(sessions, plan.build_id)
+    assert claims
+
     fresh = production.service.start(
         revision.id, actor="operator", request_id=str(uuid.uuid4())
     )
-    assert production.service.run_pending(limit=1) == 1
-    waiting = production.service.get(fresh.id)
-    assert waiting.state == "queued", waiting.failure
-    assert (
-        waiting.failure is not None
-        and waiting.failure["code"] == "recipe_image.build_wait"
-    )
-    assert production.service.get(original.id).state == "cancelled"
+    assert production.service.run_pending(limit=2) >= 1
+    for parent_id in (original.id, fresh.id):
+        waiting = production.service.get(parent_id)
+        assert waiting.state == "queued", waiting.failure
+        assert waiting.failure is not None
+        assert waiting.failure["code"] == "recipe_image.build_wait"
+    assert operations.reconcile_cancelled_builds() is False
+    assert operations.get(child_id).state == child_state == "running"
     with sessions() as session:
         children = tuple(
             session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
         )
-        assert len(children) == 2
-        assert (
-            next(child for child in children if child.id != child_id).state == "running"
-        )
+        assert len(children) == 1
+        child = children[0]
+        assert child.id == child_id
+        assert child.state == child_state
+        assert child.result == child_result
+        assert child.payload == child_payload
+        for parent_id in (original.id, fresh.id):
+            parent = session.get(Job, parent_id)
+            assert parent is not None
+            dependency = require_mapping(
+                parent.payload["build_dependency"], "build dependency"
+            )
+            assert dependency["operation_id"] == child_id
+    assert _active_claims(sessions, plan.build_id) == claims
 
 
 def test_unbound_consumer_reuses_verified_image_while_replacement_build_runs(
