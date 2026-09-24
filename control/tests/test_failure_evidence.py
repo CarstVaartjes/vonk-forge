@@ -445,7 +445,13 @@ def test_retention_caps_count_and_age_and_does_not_recapture(service):
         service.read(ids[-1], 1)
 
 
-def test_worker_cursor_survives_restart_and_retention(service):
+def test_worker_cursor_survives_restart_and_retention(service, monkeypatch):
+    # This test checks durable cursor/retention semantics, not whether the CI
+    # host can scan SQLite within one 250 ms worker slice. Budget yielding has
+    # its own controlled-clock test below.
+    monkeypatch.setattr(
+        failure_evidence_module, "time", SimpleNamespace(monotonic=lambda: 1.0)
+    )
     identity = str(uuid4())
     with service.sessions.begin() as session:
         session.add(
