@@ -49,6 +49,7 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/catalog_service.py",
         "control/src/vonk_control/catalog_api.py",
         "control/src/vonk_control/auth.py",
+        "control/src/vonk_control/cursor_contract.py",
         "control/src/vonk_control/library_contract.py",
         "control/src/vonk_control/recipe_routes.py",
         "control/src/vonk_control/models.py",
