@@ -212,6 +212,8 @@ from .identity_history_response import IdentityHistoryResponse
 from .installation_node_change import InstallationNodeChange
 from .installation_node_payload import InstallationNodePayload
 from .integer_parameter import IntegerParameter
+from .invalid_operation_evidence import InvalidOperationEvidence
+from .invalid_operation_evidence_document import InvalidOperationEvidenceDocument
 from .inventory_state import InventoryState
 from .inventory_state_freshness import InventoryStateFreshness
 from .job_change import JobChange
@@ -777,6 +779,8 @@ __all__ = (
     "InstallationNodeChange",
     "InstallationNodePayload",
     "IntegerParameter",
+    "InvalidOperationEvidence",
+    "InvalidOperationEvidenceDocument",
     "InventoryState",
     "InventoryStateFreshness",
     "JobChange",

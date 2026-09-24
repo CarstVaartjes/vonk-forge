@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -15,6 +16,7 @@ from vonk_agent_protocol import (
     AgentUpgradeResult,
     RecipeStartPayload,
     RecipeStartResult,
+    canonical_message,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -25,6 +27,7 @@ from .deployment_provenance_contract import (
     DeploymentObservations,
     DeploymentProvenance,
     EvidenceAge,
+    InvalidOperationEvidence,
     PhysicalAcceptanceEvidence,
     PlatformBoundary,
     PlatformBoundaryName,
@@ -48,8 +51,10 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .strict_json import stored_document_detail
 
 CONTROLLER_BUILD_METADATA = Path("/usr/local/share/vonk-forge/controller-build.json")
+_INVALID_OPERATION_EVIDENCE_RESPONSE_BYTES = 64 * 1024
 
 
 def _utc(value: datetime) -> datetime:
@@ -209,6 +214,43 @@ class DeploymentProvenanceService:
 
         with self._sessions() as session:
             start_receipts = {}
+            invalid_operation_evidence: list[InvalidOperationEvidence] = []
+            invalid_operation_evidence_bytes = 0
+            invalid_operation_evidence_omitted_count = 0
+            latest_invalid_start_at: dict[tuple[str, str], datetime] = {}
+
+            def invalid_start_document(
+                operation: AgentOperation,
+                document: Literal["payload", "result"],
+                error: Exception,
+                *,
+                run_id: str | None,
+            ) -> None:
+                nonlocal invalid_operation_evidence_bytes
+                nonlocal invalid_operation_evidence_omitted_count
+                issue = InvalidOperationEvidence(
+                    operation_id=operation.id,
+                    kind="recipe.start",
+                    node_id=operation.node_id,
+                    document=document,
+                    detail=stored_document_detail(error)
+                    or "stored document is invalid at <root> (invalid)",
+                )
+                encoded_bytes = len(issue.model_dump_json().encode("utf-8")) + 1
+                if (
+                    invalid_operation_evidence_bytes + encoded_bytes
+                    <= _INVALID_OPERATION_EVIDENCE_RESPONSE_BYTES
+                ):
+                    invalid_operation_evidence.append(issue)
+                    invalid_operation_evidence_bytes += encoded_bytes
+                else:
+                    invalid_operation_evidence_omitted_count += 1
+                if isinstance(run_id, str) and run_id:
+                    key = (run_id, operation.node_id)
+                    previous = latest_invalid_start_at.get(key)
+                    if previous is None or _utc(operation.updated_at) > _utc(previous):
+                        latest_invalid_start_at[key] = operation.updated_at
+
             for operation, attempt in session.execute(
                 select(AgentOperation, AgentOperationAttempt)
                 .join(
@@ -225,9 +267,31 @@ class DeploymentProvenanceService:
                     AgentOperationAttempt.attempt,
                 )
             ):
-                payload = RecipeStartPayload.model_validate(operation.payload)
+                try:
+                    payload = RecipeStartPayload.model_validate_json(
+                        canonical_message(operation.payload)
+                    )
+                except (TypeError, ValueError) as error:
+                    raw_run_id = (
+                        operation.payload.get("run_id")
+                        if isinstance(operation.payload, Mapping)
+                        else None
+                    )
+                    invalid_start_document(
+                        operation, "payload", error, run_id=raw_run_id
+                    )
+                    continue
+                try:
+                    result = RecipeStartResult.model_validate_json(
+                        canonical_message(attempt.result)
+                    )
+                except (TypeError, ValueError) as error:
+                    invalid_start_document(
+                        operation, "result", error, run_id=payload.run_id
+                    )
+                    continue
                 start_receipts[(payload.run_id, operation.node_id)] = (
-                    RecipeStartResult.model_validate(attempt.result),
+                    result,
                     operation.updated_at,
                 )
             attempts_by_operation: dict[str, list[AgentOperationAttempt]] = {}
@@ -414,6 +478,15 @@ class DeploymentProvenanceService:
                     start = (
                         start_receipts.get((run.id, placement.node_id)) if run else None
                     )
+                    invalid_start_at = (
+                        latest_invalid_start_at.get((run.id, placement.node_id))
+                        if run
+                        else None
+                    )
+                    if invalid_start_at and (
+                        start is None or _utc(invalid_start_at) >= _utc(start[1])
+                    ):
+                        start = None
                     start_evidence = start[0].evidence if start else None
                     agreement = "unknown"
                     if run_node and run_node.observed_run_generation is not None:
@@ -560,4 +633,8 @@ class DeploymentProvenanceService:
                 recipe_library=library,
                 agents=agents,
                 workloads=workloads,
+                invalid_operation_evidence=invalid_operation_evidence,
+                invalid_operation_evidence_omitted_count=(
+                    invalid_operation_evidence_omitted_count
+                ),
             )

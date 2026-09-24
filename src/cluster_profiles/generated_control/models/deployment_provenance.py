@@ -13,10 +13,11 @@ from typing import Literal, Union, cast
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.agent_deployment_evidence import AgentDeploymentEvidence
   from ..models.recipe_library_evidence import RecipeLibraryEvidence
   from ..models.platform_boundary import PlatformBoundary
+  from ..models.agent_deployment_evidence import AgentDeploymentEvidence
   from ..models.workload_provenance import WorkloadProvenance
+  from ..models.invalid_operation_evidence import InvalidOperationEvidence
 
 
 
@@ -32,6 +33,8 @@ class DeploymentProvenance:
         Attributes:
             agents (list['AgentDeploymentEvidence']):
             generated_at (datetime.datetime):
+            invalid_operation_evidence (list['InvalidOperationEvidence']):
+            invalid_operation_evidence_omitted_count (int):
             platform (list['PlatformBoundary']):
             recipe_library (RecipeLibraryEvidence):
             workloads (list['WorkloadProvenance']):
@@ -40,6 +43,8 @@ class DeploymentProvenance:
 
     agents: list['AgentDeploymentEvidence']
     generated_at: datetime.datetime
+    invalid_operation_evidence: list['InvalidOperationEvidence']
+    invalid_operation_evidence_omitted_count: int
     platform: list['PlatformBoundary']
     recipe_library: 'RecipeLibraryEvidence'
     workloads: list['WorkloadProvenance']
@@ -50,10 +55,11 @@ class DeploymentProvenance:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.agent_deployment_evidence import AgentDeploymentEvidence
         from ..models.recipe_library_evidence import RecipeLibraryEvidence
         from ..models.platform_boundary import PlatformBoundary
+        from ..models.agent_deployment_evidence import AgentDeploymentEvidence
         from ..models.workload_provenance import WorkloadProvenance
+        from ..models.invalid_operation_evidence import InvalidOperationEvidence
         agents = []
         for agents_item_data in self.agents:
             agents_item = agents_item_data.to_dict()
@@ -62,6 +68,15 @@ class DeploymentProvenance:
 
 
         generated_at = self.generated_at.isoformat()
+
+        invalid_operation_evidence = []
+        for invalid_operation_evidence_item_data in self.invalid_operation_evidence:
+            invalid_operation_evidence_item = invalid_operation_evidence_item_data.to_dict()
+            invalid_operation_evidence.append(invalid_operation_evidence_item)
+
+
+
+        invalid_operation_evidence_omitted_count = self.invalid_operation_evidence_omitted_count
 
         platform = []
         for platform_item_data in self.platform:
@@ -87,6 +102,8 @@ class DeploymentProvenance:
         field_dict.update({
             "agents": agents,
             "generated_at": generated_at,
+            "invalid_operation_evidence": invalid_operation_evidence,
+            "invalid_operation_evidence_omitted_count": invalid_operation_evidence_omitted_count,
             "platform": platform,
             "recipe_library": recipe_library,
             "workloads": workloads,
@@ -100,10 +117,11 @@ class DeploymentProvenance:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.agent_deployment_evidence import AgentDeploymentEvidence
         from ..models.recipe_library_evidence import RecipeLibraryEvidence
         from ..models.platform_boundary import PlatformBoundary
+        from ..models.agent_deployment_evidence import AgentDeploymentEvidence
         from ..models.workload_provenance import WorkloadProvenance
+        from ..models.invalid_operation_evidence import InvalidOperationEvidence
         d = dict(src_dict)
         agents = []
         _agents = d.pop("agents")
@@ -119,6 +137,18 @@ class DeploymentProvenance:
 
 
 
+
+        invalid_operation_evidence = []
+        _invalid_operation_evidence = d.pop("invalid_operation_evidence")
+        for invalid_operation_evidence_item_data in (_invalid_operation_evidence):
+            invalid_operation_evidence_item = InvalidOperationEvidence.from_dict(invalid_operation_evidence_item_data)
+
+
+
+            invalid_operation_evidence.append(invalid_operation_evidence_item)
+
+
+        invalid_operation_evidence_omitted_count = d.pop("invalid_operation_evidence_omitted_count")
 
         platform = []
         _platform = d.pop("platform")
@@ -152,6 +182,8 @@ class DeploymentProvenance:
         deployment_provenance = cls(
             agents=agents,
             generated_at=generated_at,
+            invalid_operation_evidence=invalid_operation_evidence,
+            invalid_operation_evidence_omitted_count=invalid_operation_evidence_omitted_count,
             platform=platform,
             recipe_library=recipe_library,
             workloads=workloads,

@@ -1966,6 +1966,10 @@ export interface components {
              * Format: date-time
              */
             generated_at: string;
+            /** Invalid Operation Evidence */
+            invalid_operation_evidence: components["schemas"]["InvalidOperationEvidence"][];
+            /** Invalid Operation Evidence Omitted Count */
+            invalid_operation_evidence_omitted_count: number;
             /** Platform */
             platform: components["schemas"]["PlatformBoundary"][];
             recipe_library: components["schemas"]["RecipeLibraryEvidence"];
@@ -3685,6 +3689,28 @@ export interface components {
              * @enum {string}
              */
             type: "integer";
+        };
+        /**
+         * InvalidOperationEvidence
+         * @description A bounded diagnostic for a stored agent receipt outside the current contract.
+         */
+        InvalidOperationEvidence: {
+            /** Detail */
+            detail: string;
+            /**
+             * Document
+             * @enum {string}
+             */
+            document: "payload" | "result";
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "recipe.start";
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
         };
         /** InventoryState */
         InventoryState: {
