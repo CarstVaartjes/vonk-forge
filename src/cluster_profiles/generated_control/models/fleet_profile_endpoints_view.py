@@ -16,6 +16,7 @@ from typing import Union
 import datetime
 
 if TYPE_CHECKING:
+  from ..models.fleet_profile_endpoint_projection_issue import FleetProfileEndpointProjectionIssue
   from ..models.fleet_profile_endpoint_assignment_view import FleetProfileEndpointAssignmentView
 
 
@@ -30,33 +31,40 @@ T = TypeVar("T", bound="FleetProfileEndpointsView")
 class FleetProfileEndpointsView:
     """
         Attributes:
-            assignments (list['FleetProfileEndpointAssignmentView']):
+            assignments (Union[None, list['FleetProfileEndpointAssignmentView']]):
             number (int):
             observed_at (datetime.datetime):
             application_id (Union[None, Unset, str]):
             application_state (Union[FleetProfileEndpointsViewApplicationStateType0, None, Unset]):
             profile_id (Union[None, Unset, str]):
+            projection_issue (Union['FleetProfileEndpointProjectionIssue', None, Unset]):
      """
 
-    assignments: list['FleetProfileEndpointAssignmentView']
+    assignments: Union[None, list['FleetProfileEndpointAssignmentView']]
     number: int
     observed_at: datetime.datetime
     application_id: Union[None, Unset, str] = UNSET
     application_state: Union[FleetProfileEndpointsViewApplicationStateType0, None, Unset] = UNSET
     profile_id: Union[None, Unset, str] = UNSET
+    projection_issue: Union['FleetProfileEndpointProjectionIssue', None, Unset] = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.fleet_profile_endpoint_projection_issue import FleetProfileEndpointProjectionIssue
         from ..models.fleet_profile_endpoint_assignment_view import FleetProfileEndpointAssignmentView
-        assignments = []
-        for assignments_item_data in self.assignments:
-            assignments_item = assignments_item_data.to_dict()
-            assignments.append(assignments_item)
+        assignments: Union[None, list[dict[str, Any]]]
+        if isinstance(self.assignments, list):
+            assignments = []
+            for assignments_type_0_item_data in self.assignments:
+                assignments_type_0_item = assignments_type_0_item_data.to_dict()
+                assignments.append(assignments_type_0_item)
 
 
+        else:
+            assignments = self.assignments
 
         number = self.number
 
@@ -82,6 +90,14 @@ class FleetProfileEndpointsView:
         else:
             profile_id = self.profile_id
 
+        projection_issue: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.projection_issue, Unset):
+            projection_issue = UNSET
+        elif isinstance(self.projection_issue, FleetProfileEndpointProjectionIssue):
+            projection_issue = self.projection_issue.to_dict()
+        else:
+            projection_issue = self.projection_issue
+
 
         field_dict: dict[str, Any] = {}
 
@@ -96,6 +112,8 @@ class FleetProfileEndpointsView:
             field_dict["application_state"] = application_state
         if profile_id is not UNSET:
             field_dict["profile_id"] = profile_id
+        if projection_issue is not UNSET:
+            field_dict["projection_issue"] = projection_issue
 
         return field_dict
 
@@ -103,16 +121,30 @@ class FleetProfileEndpointsView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.fleet_profile_endpoint_projection_issue import FleetProfileEndpointProjectionIssue
         from ..models.fleet_profile_endpoint_assignment_view import FleetProfileEndpointAssignmentView
         d = dict(src_dict)
-        assignments = []
-        _assignments = d.pop("assignments")
-        for assignments_item_data in (_assignments):
-            assignments_item = FleetProfileEndpointAssignmentView.from_dict(assignments_item_data)
+        def _parse_assignments(data: object) -> Union[None, list['FleetProfileEndpointAssignmentView']]:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, list):
+                    raise TypeError()
+                assignments_type_0 = []
+                _assignments_type_0 = data
+                for assignments_type_0_item_data in (_assignments_type_0):
+                    assignments_type_0_item = FleetProfileEndpointAssignmentView.from_dict(assignments_type_0_item_data)
 
 
 
-            assignments.append(assignments_item)
+                    assignments_type_0.append(assignments_type_0_item)
+
+                return assignments_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, list['FleetProfileEndpointAssignmentView']], data)
+
+        assignments = _parse_assignments(d.pop("assignments"))
 
 
         number = d.pop("number")
@@ -162,6 +194,26 @@ class FleetProfileEndpointsView:
         profile_id = _parse_profile_id(d.pop("profile_id", UNSET))
 
 
+        def _parse_projection_issue(data: object) -> Union['FleetProfileEndpointProjectionIssue', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                projection_issue_type_0 = FleetProfileEndpointProjectionIssue.from_dict(data)
+
+
+
+                return projection_issue_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['FleetProfileEndpointProjectionIssue', None, Unset], data)
+
+        projection_issue = _parse_projection_issue(d.pop("projection_issue", UNSET))
+
+
         fleet_profile_endpoints_view = cls(
             assignments=assignments,
             number=number,
@@ -169,6 +221,7 @@ class FleetProfileEndpointsView:
             application_id=application_id,
             application_state=application_state,
             profile_id=profile_id,
+            projection_issue=projection_issue,
         )
 
         return fleet_profile_endpoints_view

@@ -151,6 +151,7 @@ from .fleet_profile_effects import FleetProfileEffects
 from .fleet_profile_endpoint_assignment_view import FleetProfileEndpointAssignmentView
 from .fleet_profile_endpoint_assignment_view_desired_state import FleetProfileEndpointAssignmentViewDesiredState
 from .fleet_profile_endpoint_assignment_view_state import FleetProfileEndpointAssignmentViewState
+from .fleet_profile_endpoint_projection_issue import FleetProfileEndpointProjectionIssue
 from .fleet_profile_endpoints_view import FleetProfileEndpointsView
 from .fleet_profile_endpoints_view_application_state_type_0 import FleetProfileEndpointsViewApplicationStateType0
 from .fleet_profile_input import FleetProfileInput
@@ -718,6 +719,7 @@ __all__ = (
     "FleetProfileEndpointAssignmentView",
     "FleetProfileEndpointAssignmentViewDesiredState",
     "FleetProfileEndpointAssignmentViewState",
+    "FleetProfileEndpointProjectionIssue",
     "FleetProfileEndpointsView",
     "FleetProfileEndpointsViewApplicationStateType0",
     "FleetProfileInput",

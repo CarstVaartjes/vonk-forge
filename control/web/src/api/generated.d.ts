@@ -2965,6 +2965,19 @@ export interface components {
              */
             state: "installed-only" | "not-published-yet" | "published" | "expired" | "withdrawn" | "unavailable";
         };
+        /**
+         * FleetProfileEndpointProjectionIssue
+         * @description Safe diagnostic for immutable profile history that cannot be read.
+         */
+        FleetProfileEndpointProjectionIssue: {
+            /**
+             * Code
+             * @constant
+             */
+            code: "profile.application_intent.invalid";
+            /** Detail */
+            detail: string;
+        };
         /** FleetProfileEndpointsView */
         FleetProfileEndpointsView: {
             /** Application Id */
@@ -2972,7 +2985,7 @@ export interface components {
             /** Application State */
             application_state?: ("queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled") | null;
             /** Assignments */
-            assignments: components["schemas"]["FleetProfileEndpointAssignmentView"][];
+            assignments: components["schemas"]["FleetProfileEndpointAssignmentView"][] | null;
             /** Number */
             number: number;
             /**
@@ -2982,6 +2995,7 @@ export interface components {
             observed_at: string;
             /** Profile Id */
             profile_id?: string | null;
+            projection_issue?: components["schemas"]["FleetProfileEndpointProjectionIssue"] | null;
         };
         /** FleetProfileInput */
         FleetProfileInput: {

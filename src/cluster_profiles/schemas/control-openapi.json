@@ -5625,6 +5625,29 @@
         "title": "FleetProfileEndpointAssignmentView",
         "type": "object"
       },
+      "FleetProfileEndpointProjectionIssue": {
+        "additionalProperties": false,
+        "description": "Safe diagnostic for immutable profile history that cannot be read.",
+        "properties": {
+          "code": {
+            "const": "profile.application_intent.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "FleetProfileEndpointProjectionIssue",
+        "type": "object"
+      },
       "FleetProfileEndpointsView": {
         "additionalProperties": false,
         "properties": {
@@ -5660,12 +5683,19 @@
             "title": "Application State"
           },
           "assignments": {
-            "items": {
-              "$ref": "#/components/schemas/FleetProfileEndpointAssignmentView"
-            },
-            "maxItems": 64,
-            "title": "Assignments",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FleetProfileEndpointAssignmentView"
+                },
+                "maxItems": 64,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignments"
           },
           "number": {
             "minimum": 1.0,
@@ -5688,6 +5718,16 @@
               }
             ],
             "title": "Profile Id"
+          },
+          "projection_issue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetProfileEndpointProjectionIssue"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
