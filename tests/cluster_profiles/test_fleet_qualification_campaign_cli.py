@@ -1,273 +1,564 @@
 from __future__ import annotations
 
+import hashlib
 import json
-import os
-import stat
-import subprocess
-import sys
-import threading
+from argparse import Namespace
 from pathlib import Path
 from urllib.parse import unquote
 
 import pytest
-from library_route_fixtures import _library_detail, _recipe
 
-from cluster_profiles import fleet_qualification
 from cluster_profiles import fleet_qualification_campaign_cli as campaign_cli
 from cluster_profiles.fleet_qualification import EvidenceLedger, QualificationError
+from cluster_profiles.qualification_fixtures import (
+    FixtureRegistry,
+    ServiceCase,
+    ServiceRecipe,
+)
 from cluster_profiles.qualification_locking import node_locks
 
 NODE_A = "spk_" + "1" * 32
 NODE_B = "spk_" + "2" * 32
-REAL_AUTHORITY_LOADER = campaign_cli._load_authority
+RUN_ID = "qualification-run"
+REVISION_ID = "recipe-revision"
+CAMPAIGN_ID = "a" * 64
+RECIPE_KEY = "vonk-forge/test-model"
+CONTENT_SHA = "c" * 64
 
 
-@pytest.fixture(autouse=True)
-def _reviewed_test_authority(monkeypatch: pytest.MonkeyPatch) -> None:
-    authority = campaign_cli.CampaignAuthority(
-        authority_id="test-nl-single",
-        authority_sha256="d" * 64,
-        repository="test/recipes",
-        commit="b" * 40,
-        catalog_index_sha256="e" * 64,
-        catalog_recipe_count=3,
-        jurisdiction="NL",
-        actionable_recipe_keys=("vonk/a", "vonk/b", "vonk/c"),
+def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
+    package = b"reviewed recipe package"
+    package_path = root / "packages" / "test-model.tar.gz"
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    package_path.write_bytes(package)
+
+    index = {
+        "schema_version": 2,
+        "fixtures": {},
+        "recipes": {},
+        "special_fixtures": {},
+        "service_case_templates": {},
+        "service_recipes": {},
+    }
+    fixture_raw = json.dumps(index, sort_keys=True).encode()
+    fixture_path = root / "qualification" / "qualification-index.json"
+    fixture_path.parent.mkdir(parents=True, exist_ok=True)
+    fixture_path.write_bytes(fixture_raw)
+
+    source_commit = "1" * 40
+    catalog_raw = json.dumps({"source_commit": source_commit}, sort_keys=True).encode()
+    (root / "catalog-index.json").write_bytes(catalog_raw)
+
+    authority = {
+        "schema_version": 3,
+        "authority_id": "test-authority",
+        "catalog": {
+            "repository": "test/recipes",
+            "commit": "2" * 40,
+            "release_tag": "v1.0.0",
+            "source_commit": source_commit,
+            "catalog_index_sha256": hashlib.sha256(catalog_raw).hexdigest(),
+            "qualification_index_sha256": hashlib.sha256(fixture_raw).hexdigest(),
+            "recipe_count": 1,
+        },
+        "scope": {
+            "maximum_node_count": 2,
+            "recipe_count": 1,
+            "excluded_topology_recipe_keys": [],
+        },
+        "recipes": [
+            {
+                "sequence": 1,
+                "key": RECIPE_KEY,
+                "recipe_version": "1.0.0",
+                "content_sha256": CONTENT_SHA,
+                "package": {
+                    "path": "packages/test-model.tar.gz",
+                    "sha256": hashlib.sha256(package).hexdigest(),
+                    "expected_bytes": len(package),
+                    "media_type": "application/vnd.vonk-forge.recipe-package.v2+tar+gzip",
+                },
+                "node_count": 1,
+                "interface": "openai-service",
+                "disposition": "actionable",
+                "operator_acceptance_required": False,
+                "model_license_refs": [
+                    {
+                        "key": "test/model",
+                        "content_sha256": "d" * 64,
+                        "spdx": "Apache-2.0",
+                        "url": "https://example.invalid/license",
+                        "attribution": [],
+                        "operator_acceptance_required": False,
+                    }
+                ],
+                "qualification_inputs": [],
+                "smoke_cases": ["health"],
+                "review_gates": [],
+            }
+        ],
+    }
+    authority_path = root / "qualification" / "authorities" / "test.json"
+    authority_path.parent.mkdir(parents=True, exist_ok=True)
+    authority_path.write_text(json.dumps(authority), encoding="utf-8")
+
+    campaign_path = root / "qualification" / "campaigns" / "test.json"
+    campaign_path.parent.mkdir(parents=True, exist_ok=True)
+    campaign_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "qualification_authority": "../authorities/test.json",
+                "fixture_manifest": "../qualification-index.json",
+                "options": {"cleanup": "stop"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return campaign_path, package, fixture_raw
+
+
+def _row(
+    *, node_count: int = 1, review_gates: tuple[dict[str, object], ...] = ()
+) -> campaign_cli.RecipeAuthorityRow:
+    raw = {
+        "sequence": 1,
+        "key": RECIPE_KEY,
+        "content_sha256": CONTENT_SHA,
+        "node_count": node_count,
+        "interface": "openai-service",
+        "recipe_version": "1.0.0",
+        "package": {},
+        "disposition": "actionable",
+        "operator_acceptance_required": False,
+        "model_license_refs": [],
+        "qualification_inputs": [],
+        "smoke_cases": ["health"],
+        "review_gates": [dict(gate) for gate in review_gates],
+    }
+    return campaign_cli.RecipeAuthorityRow(
+        sequence=1,
+        key=RECIPE_KEY,
+        content_sha256=CONTENT_SHA,
+        node_count=node_count,
+        interface="openai-service",
+        recipe_version="1.0.0",
+        package={},
+        disposition="actionable",
+        review_gates=review_gates,
+        operator_acceptance_required=False,
+        model_license_refs=(),
+        qualification_inputs=(),
+        smoke_cases=("health",),
+        raw=raw,
     )
 
-    def load(_path: Path) -> campaign_cli.CampaignAuthority:
-        return authority
 
-    monkeypatch.setattr(campaign_cli, "_load_authority", load)
-
-
-class _Client:
-    def __init__(self, *, catalog_commit: str = "b" * 40) -> None:
-        del catalog_commit
-        self._details = {}
-        for slug in ("a", "b", "c"):
-            detail = _library_detail(_recipe(slug))
-            selector = f"vonk/{slug}"
-            self._details[selector] = detail
-
-    def request(
-        self,
-        method: str,
-        path: str,
-        payload: object = None,
-        *,
-        extra_headers: object = None,
-        query: object = None,
-    ) -> dict[str, object]:
-        del payload, extra_headers, query
-        if (method, path) == ("GET", "/api/fleet"):
-            return {
-                "authority_revision": "a" * 40,
-                "event_cursor": 1,
-                "nodes": [
-                    {
-                        "id": node_id,
-                        "connection": {"online_state": "online"},
-                        "inventory": {
-                            "host_memory_free_bytes": 120_000_000_000,
-                            "disk_free_bytes": 500_000_000_000,
-                        },
-                    }
-                    for node_id in (NODE_A, NODE_B)
-                ],
-            }
-        if (method, path) == ("GET", "/api/recipe/library"):
-            return {
-                "schema_version": 2,
-                "generated_at": "2026-09-07T00:00:00Z",
-                "next_cursor": None,
-                "freshness_policy": {},
-                "facets": {
-                    "usage": [],
-                    "family": [],
-                    "version": [],
-                    "quantization": [],
-                },
-                "filters": {},
-                "recipes": [
-                    {
-                        "schema_version": 2,
-                        "document": item["detail"]["definition"],
-                        "identity": item["detail"]["recipe"],
-                        "local": {"controller": "cached"},
-                        "model_selectors": [],
-                        "resources": {},
-                        "selector": selector,
-                        "updated_at": "2026-09-07T00:00:00Z",
-                        "usage": [],
-                        # Derived from the canonical document so the fixture
-                        # cannot drift from the projection contract.
-                        "alignment": item["detail"]["definition"]["metadata"].get(
-                            "alignment"
-                        ),
-                        "node_count": item["detail"]["definition"]["topology"][
-                            "node_count"
-                        ],
-                    }
-                    for selector, item in self._details.items()
-                ],
-            }
-        prefix = "/api/recipe/"
-        if method == "GET" and path.startswith(prefix):
-            selector = unquote(path.removeprefix(prefix))
-            detail = self._details[selector]["detail"]
-            return {
-                "schema_version": 2,
-                "document": detail["definition"],
-                "identity": detail["recipe"],
-                "local": {"controller": "cached"},
-                "model_documents": detail["model_documents"],
-                "model_selectors": [],
-                "resources": {},
-                "selector": selector,
-                "updated_at": "2026-09-07T00:00:00Z",
-                "usage": [],
-                "alignment": detail["definition"]["metadata"].get("alignment"),
-                "node_count": detail["definition"]["topology"]["node_count"],
-            }
-        raise AssertionError((method, path))
-
-
-def _document() -> dict[str, object]:
+def _node(
+    node_id: str,
+    *,
+    online: bool = True,
+    boot_id: str = "boot-before",
+    loaded: list[dict[str, object]] | None = None,
+    freshness: str = "live",
+) -> dict[str, object]:
     return {
-        "schema_version": 1,
-        "qualification_authority": "authority.json",
-        "fixture_manifest": "qualification-index.json",
-        "options": {
-            "jurisdiction": "NL",
-            "cleanup": "stop",
-            "operation_timeout_seconds": 60,
-            "poll_interval_seconds": 0.1,
-        },
-        "lanes": [
-            {
-                "name": "first",
-                "node_id": NODE_A,
-                "recipes": ["vonk/a"],
-                "ledger": "evidence/first.jsonl",
-                "plan_output": "plans/first.json",
-            },
-            {
-                "name": "second",
-                "node_id": NODE_B,
-                "recipes": ["vonk/b", "vonk/c"],
-                "ledger": "evidence/second.jsonl",
-                "plan_output": "plans/second.json",
-            },
-        ],
+        "id": node_id,
+        "connection": {"online_state": "online" if online else "offline"},
+        "telemetry": {"freshness": freshness, "sample": {"boot_id": boot_id}},
+        "loaded": loaded or [],
     }
 
 
-def _write_manifest(tmp_path: Path, document: object | None = None) -> Path:
-    (tmp_path / "qualification-index.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "fixtures": {},
-                "recipes": {},
-                "special_fixtures": {},
-                "service_case_templates": {},
-                "service_recipes": {},
-            }
-        ),
-        encoding="utf-8",
-    )
-    path = tmp_path / "campaign.json"
-    path.write_text(json.dumps(document or _document()), encoding="utf-8")
-    return path
+class _MissingEndpoint:
+    def request(self, method: str, path: str, *args: object, **kwargs: object) -> dict[str, object]:
+        assert method == "GET"
+        alias = unquote(path.rsplit("/", 1)[-1])
+        assert alias == "test-alias"
+        raise campaign_cli.ControlNotFound(404, "endpoint is absent", endpoint=path)
 
 
-def test_manifest_requires_an_exact_disjoint_complete_partition(tmp_path: Path) -> None:
-    overlapping = _document()
-    overlapping["lanes"][1]["recipes"] = ["vonk/a"]  # type: ignore[index]
-    path = _write_manifest(tmp_path, overlapping)
-    with pytest.raises(QualificationError, match="assigns recipe more than once"):
-        campaign_cli.load_manifest(path)
-
-    missing = _document()
-    missing["lanes"][1]["recipes"] = ["vonk/b"]  # type: ignore[index]
-    path = _write_manifest(tmp_path, missing)
-    with pytest.raises(
-        QualificationError, match=r"missing=\['vonk/c'\], unexpected=\[\]"
-    ):
-        campaign_cli.load_manifest(path)
-
-    substituted = _document()
-    substituted["lanes"][1]["recipes"] = ["vonk/b", "vonk/d"]  # type: ignore[index]
-    path = _write_manifest(tmp_path, substituted)
-    with pytest.raises(
-        QualificationError,
-        match=r"missing=\['vonk/c'\], unexpected=\['vonk/d'\]",
-    ):
-        campaign_cli.load_manifest(path)
-
-    duplicate_output = _document()
-    duplicate_output["lanes"][1]["plan_output"] = (  # type: ignore[index]
-        "evidence/first.jsonl"
-    )
-    path = _write_manifest(tmp_path, duplicate_output)
-    with pytest.raises(QualificationError, match="must all be unique"):
-        campaign_cli.load_manifest(path)
-
-    overwrite_manifest = _document()
-    overwrite_manifest["lanes"][0]["plan_output"] = "campaign.json"  # type: ignore[index]
-    path = _write_manifest(tmp_path, overwrite_manifest)
-    with pytest.raises(QualificationError, match="overwrite an input file"):
-        campaign_cli.load_manifest(path)
-
-
-def test_manifest_rejects_duplicate_json_keys(tmp_path: Path) -> None:
-    path = tmp_path / "campaign.json"
-    path.write_text(
-        '{"schema_version":1,"schema_version":1,"qualification_authority":"authority.json","fixture_manifest":"qualification-index.json","lanes":[]}',
-        encoding="utf-8",
-    )
-    with pytest.raises(QualificationError, match="duplicate key: schema_version"):
-        campaign_cli.load_manifest(path)
-
-
-def test_external_authority_contract_is_loaded_from_the_manifest_owner(
+def test_manifest_loads_confined_parent_references_and_binds_all_local_inputs(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "authority.json"
-    path.write_text(
+    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
+
+    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
+    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
+    campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
+
+    assert manifest.authority.authority_id == "test-authority"
+    assert len(manifest.authority.rows) == 1
+    assert manifest.authority.rows[0].interface == "openai-service"
+    assert fixtures.manifest_sha256 == manifest.authority.catalog["qualification_index_sha256"]
+
+
+def test_manifest_rejects_parent_references_that_escape_or_follow_symlinks(
+    tmp_path: Path,
+) -> None:
+    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
+    campaign_path.write_text(
         json.dumps(
             {
                 "schema_version": 2,
-                "authority_id": "test-nl-single",
-                "catalog": {
-                    "repository": "test/recipes",
-                    "commit": "b" * 40,
-                    "catalog_index_sha256": "e" * 64,
-                    "recipe_count": 3,
-                },
-                "jurisdiction": "NL",
-                "reviewed_disposition": {
-                    "actionable_single_spark_count": 3,
-                    "capacity_blocked_single_spark_count": 0,
-                    "legal_blocked_single_spark_count": 0,
-                    "dual_spark_count": 0,
-                    "unsupported_topology_count": 0,
-                },
-                "actionable_recipe_keys": ["vonk/a", "vonk/b", "vonk/c"],
-                "capacity_blocked_recipe_keys": [],
-                "legal_blocked_recipe_keys": [],
-                "dual_spark_recipe_keys": [],
-                "unsupported_topology_recipe_keys": [],
+                "qualification_authority": "../../../outside.json",
+                "fixture_manifest": "../qualification-index.json",
             }
         ),
         encoding="utf-8",
     )
+    with pytest.raises(QualificationError, match="escapes the recipe repository"):
+        campaign_cli.load_manifest(campaign_path, tmp_path)
 
-    authority = REAL_AUTHORITY_LOADER(path)
+    campaign_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "qualification_authority": "../authorities/test.json",
+                "fixture_manifest": "../qualification-index.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+    fixture_path = tmp_path / "qualification" / "qualification-index.json"
+    fixture_path.unlink()
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    fixture_path.symlink_to(outside)
+    with pytest.raises(QualificationError, match="symbolic link"):
+        campaign_cli.load_manifest(campaign_path, tmp_path)
 
-    assert authority.authority_id == "test-nl-single"
-    assert authority.actionable_recipe_keys == ("vonk/a", "vonk/b", "vonk/c")
+
+def test_exact_fixture_cases_are_derived_from_the_reviewed_registry() -> None:
+    row = _row()
+    registry = FixtureRegistry(
+        fixtures={},
+        recipes={},
+        special={},
+        manifest_sha256="e" * 64,
+        service_cases={},
+        service_recipes={
+            RECIPE_KEY: ServiceRecipe(
+                key=RECIPE_KEY,
+                content_sha256=CONTENT_SHA,
+                alias="test-alias",
+                cases=(
+                    ServiceCase(
+                        case_id="health",
+                        method="GET",
+                        path="/health",
+                        body=None,
+                        timeout_seconds=1,
+                        max_response_bytes=128,
+                        assertions=(),
+                    ),
+                ),
+                higher_tiers={},
+            )
+        },
+    )
+    # A fixture-free request has no asset references; the authority records the
+    # actual case order, not an invented input ID.
+    row = campaign_cli.RecipeAuthorityRow(
+        sequence=row.sequence,
+        key=row.key,
+        content_sha256=row.content_sha256,
+        node_count=row.node_count,
+        interface=row.interface,
+        recipe_version=row.recipe_version,
+        package=row.package,
+        disposition=row.disposition,
+        review_gates=row.review_gates,
+        operator_acceptance_required=row.operator_acceptance_required,
+        model_license_refs=row.model_license_refs,
+        qualification_inputs=(),
+        smoke_cases=("health",),
+        raw=row.raw,
+    )
+
+    assert campaign_cli._fixture_bindings(row, registry)[0] == "openai-service"
+    assert campaign_cli._fixture_bindings(row, registry)[1]["cases"][0]["id"] == "health"
+
+
+def test_rank_loss_requires_exact_failed_rank_and_withdrawn_route() -> None:
+    survivor = {
+        "run_id": RUN_ID,
+        "recipe_revision_id": REVISION_ID,
+        "alias": "test-alias",
+        "rank": 0,
+        "expected_rank_count": 2,
+        "present_ranks": [0],
+        "group_state": "degraded",
+        "route_state": "withdrawn",
+        "healthy": False,
+    }
+    fleet = {
+        "nodes": [
+            _node(NODE_A, loaded=[survivor]),
+            _node(NODE_B, online=False),
+        ]
+    }
+    observed, proof = campaign_cli._rank_lost(
+        _MissingEndpoint(),
+        fleet,
+        run_id=RUN_ID,
+        revision_id=REVISION_ID,
+        alias="test-alias",
+        node_ids=[NODE_A, NODE_B],
+        node_to_rank={NODE_A: 0, NODE_B: 1},
+        failure_node_id=NODE_B,
+    )
+    assert observed is True
+    assert proof["failure_rank"] == 1
+    assert proof["endpoint_not_found"] is True
+
+    fleet["nodes"][0]["loaded"][0]["route_state"] = "published"  # type: ignore[index]
+    observed, _proof = campaign_cli._rank_lost(
+        _MissingEndpoint(),
+        fleet,
+        run_id=RUN_ID,
+        revision_id=REVISION_ID,
+        alias="test-alias",
+        node_ids=[NODE_A, NODE_B],
+        node_to_rank={NODE_A: 0, NODE_B: 1},
+        failure_node_id=NODE_B,
+    )
+    assert observed is False
+
+
+def test_offline_restart_requires_observed_downtime_and_changed_live_boot_id(
+    tmp_path: Path,
+) -> None:
+    row = _row()
+    ledger = EvidenceLedger(tmp_path / "evidence.jsonl")
+    ledger.append(
+        "host-restart.baseline",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={"nodes": {NODE_A: "boot-before"}, "route_alias": "test-alias", "run_id": RUN_ID},
+    )
+    common = {
+        "row": row,
+        "campaign_id": CAMPAIGN_ID,
+        "run_id": RUN_ID,
+        "alias": "test-alias",
+        "node_ids": [NODE_A],
+        "ledger": ledger,
+        "client": _MissingEndpoint(),
+    }
+
+    offline = campaign_cli._restart_observation(
+        **common,
+        fleet={"nodes": [_node(NODE_A, online=False, freshness="stale")]},
+    )
+    assert offline["checkpoint"] == "host-online"
+
+    unchanged = campaign_cli._restart_observation(
+        **common,
+        fleet={"nodes": [_node(NODE_A, boot_id="boot-before")]},
+    )
+    assert unchanged["complete"] is False
+    assert "unchanged boot ID" in unchanged["reason"]
+
+    restarted = campaign_cli._restart_observation(
+        **common,
+        fleet={"nodes": [_node(NODE_A, boot_id="boot-after")]},
+    )
+    assert restarted["complete"] is True
+    recovered = campaign_cli._latest_payload(
+        ledger, CAMPAIGN_ID, RECIPE_KEY, "host-restart.recovered"
+    )
+    assert recovered is not None
+    assert recovered["observed_boot_id"] == "boot-after"
+
+
+def test_offline_restart_refuses_an_unrelated_whole_fleet_workload(
+    tmp_path: Path,
+) -> None:
+    ledger = EvidenceLedger(tmp_path / "busy-evidence.jsonl")
+    ledger.append(
+        "host-restart.baseline",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={"nodes": {NODE_A: "boot-before"}, "route_alias": "test-alias", "run_id": RUN_ID},
+    )
+    foreign = {"run_id": "other-run"}
+
+    with pytest.raises(QualificationError, match="every whole-Fleet workload"):
+        campaign_cli._restart_observation(
+            client=_MissingEndpoint(),
+            fleet={"nodes": [_node(NODE_A, loaded=[foreign])]},
+            row=_row(),
+            campaign_id=CAMPAIGN_ID,
+            run_id=RUN_ID,
+            alias="test-alias",
+            node_ids=[NODE_A],
+            ledger=ledger,
+        )
+
+
+def _append_single_recipe_evidence(
+    ledger: EvidenceLedger, *, include_offline: bool = True, same_boot: bool = False
+) -> None:
+    ledger.append(
+        "plan.generated",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={
+            "authority_row": {
+                "sequence": 1,
+                "key": RECIPE_KEY,
+                "content_sha256": CONTENT_SHA,
+                "node_count": 1,
+                "interface": "openai-service",
+                "recipe_version": "1.0.0",
+                "package": {},
+                "disposition": "actionable",
+                "operator_acceptance_required": False,
+                "model_license_refs": [],
+                "qualification_inputs": [],
+                "smoke_cases": ["health"],
+                "review_gates": [],
+            },
+            "controller_recipe_identity": {
+                "content_sha256": CONTENT_SHA,
+                "recipe_revision_id": REVISION_ID,
+            },
+            "profile_digest": "profile-digest",
+            "preview": {"plan_digest": "profile-plan"},
+            "smoke_preview": {
+                "kind": "openai-service",
+                "endpoint_alias": "test-alias",
+                "fixture_manifest_sha256": "e" * 64,
+                "cases": [{"id": "health"}],
+            },
+        },
+    )
+    ledger.append(
+        "canary.completed",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={
+            "recipe_content_sha256": CONTENT_SHA,
+            "alias": "test-alias",
+            "run_id": RUN_ID,
+            "recipe_revision_id": REVISION_ID,
+            "node_to_rank": {NODE_A: 0},
+            "application": {
+                "state": "succeeded",
+                "profile_digest": "profile-digest",
+                "plan_digest": "profile-plan",
+            },
+            "smoke": {
+                "fixture_manifest_sha256": "e" * 64,
+                "case_id": "health",
+            },
+            "review_acknowledgements": {
+                "operator_acceptance": False,
+                "capacity_review": False,
+            },
+        },
+    )
+    ledger.append(
+        "profile.cleanup.completed",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={
+            "application_id": "cleanup-application",
+            "application_state": "succeeded",
+            "cleanup_policy": "stop",
+            "uninstalls": 0,
+            "route_withdrawn": True,
+            "run_absent_from_fleet": True,
+        },
+    )
+    ledger.append(
+        "host-restart.baseline",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={"nodes": {NODE_A: "boot-before"}, "route_alias": "test-alias", "run_id": RUN_ID},
+    )
+    if include_offline:
+        ledger.append(
+            "host-restart.offline",
+            plan_digest=CAMPAIGN_ID,
+            recipe=RECIPE_KEY,
+            payload={"node_id": NODE_A, "online_state": "offline", "baseline_boot_id": "boot-before"},
+        )
+    ledger.append(
+        "host-restart.recovered",
+        plan_digest=CAMPAIGN_ID,
+        recipe=RECIPE_KEY,
+        payload={
+            "node_id": NODE_A,
+            "online_state": "online",
+            "baseline_boot_id": "boot-before",
+            "observed_boot_id": "boot-before" if same_boot else "boot-after",
+            "telemetry_freshness": "live",
+        },
+    )
+
+
+def test_spark_accepted_requires_the_offline_event_and_changed_boot_id(
+    tmp_path: Path,
+) -> None:
+    row = _row()
+    ledger = EvidenceLedger(tmp_path / "complete-evidence.jsonl")
+    _append_single_recipe_evidence(ledger, include_offline=False)
+    with pytest.raises(QualificationError, match="offline observation"):
+        campaign_cli._accept_if_complete(
+            row=row,
+            campaign_id=CAMPAIGN_ID,
+            ledger=ledger,
+            node_ids=[NODE_A],
+        )
+
+    other = EvidenceLedger(tmp_path / "unchanged-boot-evidence.jsonl")
+    _append_single_recipe_evidence(other, same_boot=True)
+    with pytest.raises(QualificationError, match="changed live boot ID"):
+        campaign_cli._accept_if_complete(
+            row=row,
+            campaign_id=CAMPAIGN_ID,
+            ledger=other,
+            node_ids=[NODE_A],
+        )
+
+
+def test_review_gates_must_be_acknowledged_for_the_exact_recipe() -> None:
+    row = campaign_cli.RecipeAuthorityRow(
+        sequence=1,
+        key=RECIPE_KEY,
+        content_sha256=CONTENT_SHA,
+        node_count=1,
+        interface="openai-service",
+        recipe_version="1.0.0",
+        package={},
+        disposition="operator-acceptance-required",
+        review_gates=(
+            {"kind": "operator-acceptance-required", "reason": "review license"},
+            {"kind": "capacity-review", "reason": "review capacity"},
+        ),
+        operator_acceptance_required=True,
+        model_license_refs=(),
+        qualification_inputs=(),
+        smoke_cases=("health",),
+        raw={},
+    )
+    missing_capacity = Namespace(
+        accept_operator_gate=[RECIPE_KEY], accept_capacity_review=[]
+    )
+    with pytest.raises(QualificationError, match="accept-capacity-review"):
+        campaign_cli._operator_gate(missing_capacity, row)
+
+    accepted = Namespace(
+        accept_operator_gate=[RECIPE_KEY], accept_capacity_review=[RECIPE_KEY]
+    )
+    campaign_cli._operator_gate(accepted, row)
+
+
+def test_profile_ledger_label_fits_the_current_contract(tmp_path: Path) -> None:
+    identity = campaign_cli._ledger_identity(tmp_path / "evidence.jsonl")
+    assert len(identity) == 63
 
 
 def test_node_lock_is_shared_across_independent_ledgers(tmp_path: Path) -> None:
@@ -282,194 +573,16 @@ def test_node_lock_is_shared_across_independent_ledgers(tmp_path: Path) -> None:
             pass
 
 
-def test_node_lock_environment_roots_must_be_absolute(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    del tmp_path
-    monkeypatch.setenv("VONK_QUALIFICATION_LOCK_DIR", "relative-locks")
-    with (
-        pytest.raises(QualificationError, match="must be an absolute path"),
-        node_locks([NODE_A]),
-    ):
-        pass
+def test_profile_campaign_lock_covers_the_whole_fleet() -> None:
+    fleet = {"nodes": [_node(NODE_A), _node(NODE_B)]}
 
-    monkeypatch.delenv("VONK_QUALIFICATION_LOCK_DIR")
-    monkeypatch.setenv("XDG_STATE_HOME", "relative-state")
-    with (
-        pytest.raises(QualificationError, match="must be an absolute path"),
-        node_locks([NODE_A]),
-    ):
-        pass
+    assert campaign_cli._qualification_lock_nodes(fleet, [NODE_A]) == [NODE_A, NODE_B]
+    with pytest.raises(QualificationError, match="absent from current Fleet"):
+        campaign_cli._qualification_lock_nodes(fleet, [NODE_A, "spk_" + "3" * 32])
 
 
-def test_node_lock_is_shared_across_processes_with_different_working_directories(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    first_cwd = tmp_path / "first"
-    second_cwd = tmp_path / "second"
-    first_cwd.mkdir()
-    second_cwd.mkdir()
-    monkeypatch.delenv("VONK_QUALIFICATION_LOCK_DIR", raising=False)
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    environment = os.environ.copy()
-    source_root = Path(campaign_cli.__file__).resolve().parents[1]
-    environment["PYTHONPATH"] = str(source_root)
-    monkeypatch.chdir(first_cwd)
-    script = f"""
-from cluster_profiles.fleet_qualification import QualificationError
-from cluster_profiles.qualification_locking import node_locks
-try:
-    with node_locks([{NODE_A!r}]):
-        raise SystemExit(3)
-except QualificationError as error:
-    if "owns controller node" not in str(error):
-        raise
-"""
-    with node_locks([NODE_A]):
-        completed = subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=second_cwd,
-            env=environment,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    assert completed.returncode == 0, completed.stderr
+def test_profile_campaign_lock_rejects_roster_change() -> None:
+    fleet = {"nodes": [_node(NODE_A), _node(NODE_B), _node("spk_" + "3" * 32)]}
 
-
-def test_preview_writes_both_private_plans_and_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    manifest_path = _write_manifest(tmp_path)
-    monkeypatch.setenv("VONK_QUALIFICATION_LOCK_DIR", str(tmp_path / "locks"))
-
-    result = campaign_cli.run(
-        ["--manifest", str(manifest_path)], client_factory=_Client
-    )
-
-    assert result["mode"] == "preview"
-    assert len(str(result["campaign_digest"])) == 64
-    assert {lane["recipe_count"] for lane in result["lanes"]} == {1, 2}  # type: ignore[index]
-    assert result["qualification_authority"] == "test-nl-single"
-    for lane_name in ("first", "second"):
-        plan_path = tmp_path / "plans" / f"{lane_name}.json"
-        plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        assert plan["campaign_digest"] == result["campaign_digest"]
-        assert plan["lane"] == lane_name
-        assert stat.S_IMODE(plan_path.stat().st_mode) == 0o600
-        ledger = EvidenceLedger(tmp_path / "evidence" / f"{lane_name}.jsonl")
-        assert ledger.records[-1]["event"] == "plan.generated"
-        payload = ledger.records[-1]["payload"]
-        assert isinstance(payload, dict)
-        assert payload["campaign_digest"] == result["campaign_digest"]
-
-
-def test_apply_checks_global_digest_before_starting_either_lane(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    manifest_path = _write_manifest(tmp_path)
-    monkeypatch.setenv("VONK_QUALIFICATION_LOCK_DIR", str(tmp_path / "locks"))
-    started: list[str] = []
-
-    class _Runner:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            del args, kwargs
-            started.append("constructed")
-
-        def apply(
-            self, plan: dict[str, object], expected_digest: str
-        ) -> dict[str, object]:
-            assert plan["plan_digest"] == expected_digest
-            return {"plan_digest": expected_digest, "succeeded": 1}
-
-    monkeypatch.setattr(campaign_cli, "QualificationRunner", _Runner)
-    with pytest.raises(QualificationError, match="does not match"):
-        campaign_cli.run(
-            [
-                "--manifest",
-                str(manifest_path),
-                "--campaign-digest",
-                "0" * 64,
-                "--apply",
-            ],
-            client_factory=_Client,
-        )
-    assert started == []
-
-
-def test_apply_passes_each_exact_plan_digest_and_runs_lanes_concurrently(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    manifest_path = _write_manifest(tmp_path)
-    monkeypatch.setenv("VONK_QUALIFICATION_LOCK_DIR", str(tmp_path / "locks"))
-    preview = campaign_cli.run(
-        ["--manifest", str(manifest_path)], client_factory=_Client
-    )
-    barrier = threading.Barrier(2, timeout=5)
-    observed: list[str] = []
-
-    class _Runner:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            del args, kwargs
-
-        def apply(
-            self, plan: dict[str, object], expected_digest: str
-        ) -> dict[str, object]:
-            assert plan["plan_digest"] == expected_digest
-            observed.append(expected_digest)
-            barrier.wait()
-            return {"plan_digest": expected_digest, "succeeded": 1}
-
-    monkeypatch.setattr(campaign_cli, "QualificationRunner", _Runner)
-    applied = campaign_cli.run(
-        [
-            "--manifest",
-            str(manifest_path),
-            "--campaign-digest",
-            str(preview["campaign_digest"]),
-            "--apply",
-        ],
-        client_factory=_Client,
-    )
-
-    assert applied["mode"] == "apply"
-    assert applied["campaign_digest"] == preview["campaign_digest"]
-    assert len(observed) == 2
-    assert set(observed) == {
-        lane["plan_digest"]
-        for lane in preview["lanes"]  # type: ignore[index]
-    }
-
-
-def test_apply_rejects_options_that_do_not_match_the_campaign_intent() -> None:
-    """The runner must compare itself against the plan's campaign intent.
-
-    The comparison used to read a retired ``profile_number`` field that
-    ``RunnerOptions`` never had, so the real runner raised ``AttributeError``
-    before it could reject anything. The apply tests above stub
-    ``QualificationRunner``, which is how that stayed invisible.
-    """
-
-    options = fleet_qualification.RunnerOptions(
-        cleanup="stop",
-        selected_recipes=frozenset({"vonk/a"}),
-        allowed_node_ids=frozenset({NODE_A}),
-    )
-    runner = fleet_qualification.QualificationRunner.__new__(
-        fleet_qualification.QualificationRunner
-    )
-    runner.options = options
-    matching: dict[str, object] = {
-        "cleanup": "stop",
-        "selected_recipes": ["vonk/a"],
-        "allowed_node_ids": [NODE_A],
-    }
-    runner._require_matching_intent_options(matching)
-
-    for field, value in (
-        ("cleanup", "uninstall"),
-        ("selected_recipes", ["vonk/b"]),
-        ("allowed_node_ids", [NODE_B]),
-    ):
-        with pytest.raises(QualificationError, match="do not match campaign intent"):
-            runner._require_matching_intent_options({**matching, field: value})
+    with pytest.raises(QualificationError, match="Fleet membership changed"):
+        campaign_cli._require_locked_fleet_roster(fleet, [NODE_A, NODE_B])
