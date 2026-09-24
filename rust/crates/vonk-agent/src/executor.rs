@@ -29,6 +29,7 @@ use crate::{
         CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, same_installed_workload,
     },
 };
+use vonk_agent_protocol::generated::AgentFailureKind;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, OperationProgress,
     ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
@@ -1051,7 +1052,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .await
                 {
                     Ok(archive) => archive,
-                    Err(_) => return failed("authorized source bundle is unavailable"),
+                    Err(error) => {
+                        return recipe_build_client_failure_result(
+                            &error,
+                            "source-bundle-fetch",
+                            "authorized source bundle could not be fetched",
+                        );
+                    }
                 };
                 let builder = RecipeBuilder {
                     runner: self.runtime.runner,
@@ -1119,8 +1126,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         // The transfer owns the sender; finishing closes the channel.
                         // The reporter drains its last snapshot independently of transfer IO.
                         let _ = progress_task.await;
-                        if result.is_err() {
-                            return failed("built OCI image could not be stored by the controller");
+                        if let Err(error) = result {
+                            return recipe_build_client_failure_result(
+                                &error,
+                                "image-upload",
+                                "Controller did not confirm the built OCI image upload",
+                            );
                         }
                         ExecutionResult {
                             state: "succeeded",
@@ -2682,6 +2693,61 @@ fn distribution_failure_result(error: &ClientError) -> ExecutionResult {
     }
 }
 
+fn recipe_build_client_failure_kind(error: &ClientError) -> AgentFailureKind {
+    if error.retryable() {
+        return AgentFailureKind::TemporaryDependency;
+    }
+    if matches!(error.status(), Some(401 | 403))
+        || matches!(
+            error,
+            ClientError::CredentialRead(_) | ClientError::Identity | ClientError::Pin
+        )
+    {
+        return AgentFailureKind::InvalidAuthority;
+    }
+    match error {
+        ClientError::Controller(controller) if (400..=499).contains(&controller.status) => {
+            if controller.status == 404 {
+                AgentFailureKind::ResourcePrerequisite
+            } else if controller.status == 409 {
+                AgentFailureKind::IntegrityFailure
+            } else {
+                AgentFailureKind::InvalidContract
+            }
+        }
+        ClientError::ResultRejected(_) | ClientError::Protocol => AgentFailureKind::InvalidContract,
+        ClientError::ObservationNotReady => AgentFailureKind::ResourcePrerequisite,
+        ClientError::ResultSuperseded => AgentFailureKind::UncertainEffect,
+        _ => AgentFailureKind::IntegrityFailure,
+    }
+}
+
+fn recipe_build_client_failure_result(
+    error: &ClientError,
+    stage: &'static str,
+    reason: &'static str,
+) -> ExecutionResult {
+    let failure_kind = recipe_build_client_failure_kind(error);
+    let mut body = json!({
+        "failure_kind": failure_kind,
+        "reason": reason,
+        "stage": stage,
+    });
+    if failure_kind == AgentFailureKind::TemporaryDependency
+        && let Some(seconds) = error.retry_after_seconds()
+    {
+        body["retry_after_seconds"] = json!(seconds);
+    }
+    let diagnostic = controller_denial_diagnostic(error);
+    if !diagnostic.is_empty() {
+        body["diagnostic"] = json!(diagnostic);
+    }
+    ExecutionResult {
+        state: "failed",
+        body,
+    }
+}
+
 enum InterruptibleJob<T> {
     Completed(T),
     Cancelled { stopped: bool },
@@ -3615,9 +3681,9 @@ mod tests {
         RunOncePolicy, classify_heartbeat_failure, controller_denial_diagnostic,
         distribution_failure_result, distribution_success_evidence, normalize_execution_result,
         output_media_type, parse_compiled_execution_plan, readiness_identity,
-        recipe_install_success_body, report_complete_recipe_run_observations,
-        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
-        runtime_observation_failure, temporary_observation_error,
+        recipe_build_client_failure_result, recipe_install_success_body,
+        report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
+        run_once_with_heartbeat_interval, runtime_observation_failure, temporary_observation_error,
         temporary_runtime_observation_failure, wait_for_launch_stability,
         wait_ready_with_runtime_guard_and_cancellation,
     };
@@ -3644,6 +3710,7 @@ mod tests {
     };
     use tempfile::tempdir;
     use uuid::Uuid;
+    use vonk_agent_protocol::generated::{AgentFailureKind, AgentFailureResult};
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, AgentResult, RecipeJobOutputMapping,
         RecipeOperationRequest, canonical_json, hex_sha256,
@@ -4092,6 +4159,76 @@ mod tests {
                 "status": "failed",
             })
         );
+    }
+
+    #[test]
+    fn recipe_build_client_failures_keep_typed_retry_and_refusal_evidence() {
+        let mut unavailable = ControllerError::from_status(503);
+        unavailable.retry_after_seconds = Some(19);
+        let denied = ControllerError::from_status(403);
+        let invalid_contract = ControllerError::from_status(422);
+        let conflict = ControllerError::from_status(409);
+        let cases = [
+            (
+                ClientError::Controller(Box::new(unavailable)),
+                "source-bundle-fetch",
+                AgentFailureKind::TemporaryDependency,
+                Some(19),
+            ),
+            (
+                ClientError::Controller(Box::new(denied)),
+                "source-bundle-fetch",
+                AgentFailureKind::InvalidAuthority,
+                None,
+            ),
+            (
+                ClientError::Controller(Box::new(invalid_contract)),
+                "source-bundle-fetch",
+                AgentFailureKind::InvalidContract,
+                None,
+            ),
+            (
+                ClientError::Protocol,
+                "image-upload",
+                AgentFailureKind::InvalidContract,
+                None,
+            ),
+            (
+                ClientError::Controller(Box::new(conflict)),
+                "image-upload",
+                AgentFailureKind::IntegrityFailure,
+                None,
+            ),
+            (
+                ClientError::Retryable,
+                "image-upload",
+                AgentFailureKind::TemporaryDependency,
+                None,
+            ),
+        ];
+        let mut build_claim = claim();
+        build_claim.operation = "recipe.build.v1".parse().unwrap();
+
+        for (error, stage, expected_kind, expected_retry_after) in cases {
+            let result = recipe_build_client_failure_result(
+                &error,
+                stage,
+                "build dependency could not be confirmed",
+            );
+            let result = normalize_execution_result(&build_claim, result);
+            let failure: AgentFailureResult = serde_json::from_value(result.body.clone()).unwrap();
+
+            assert_eq!(result.state, "failed");
+            assert_eq!(failure.status.as_deref(), Some("failed"));
+            assert_eq!(failure.error_code.as_deref(), Some("recipe_build_failed"));
+            assert_eq!(failure.stage.as_deref(), Some(stage));
+            assert_eq!(failure.failure_kind, Some(expected_kind));
+            assert_eq!(failure.retry_after_seconds, expected_retry_after);
+            assert_eq!(
+                failure.reason.as_deref(),
+                Some("build dependency could not be confirmed")
+            );
+        }
     }
 
     #[test]

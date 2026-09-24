@@ -232,6 +232,7 @@ class RecipeImageAvailabilityError(RuntimeError):
         recovery_actions: Sequence[str] = (),
         log_excerpt: str | None = None,
         step: str | None = None,
+        settled_build_operation_id: str | None = None,
         required_bytes: int | None = None,
         free_bytes: int | None = None,
         shortfall_bytes: int | None = None,
@@ -244,6 +245,7 @@ class RecipeImageAvailabilityError(RuntimeError):
         self.recovery_actions = tuple(recovery_actions)
         self.log_excerpt = log_excerpt
         self.step = step
+        self.settled_build_operation_id = settled_build_operation_id
         self.required_bytes = required_bytes
         self.free_bytes = free_bytes
         self.shortfall_bytes = shortfall_bytes
@@ -5211,10 +5213,14 @@ class RecipeImageAvailabilityService:
                 return
             payload.pop("image_reference_intent", None)
             payload |= {"retry": retry, "failure": failure}
-            if str(code) in {
-                "recipe_image.build_failed",
-                "runtime_image.cache_missing",
-            }:
+            dependency = payload.get("build_dependency")
+            settled_build_id = getattr(error, "settled_build_operation_id", None)
+            exact_build_settled = (
+                isinstance(settled_build_id, str)
+                and isinstance(dependency, Mapping)
+                and dependency.get("operation_id") == settled_build_id
+            )
+            if exact_build_settled or str(code) == "runtime_image.cache_missing":
                 # The failed effect is settled; a later execution claim may
                 # create a new child. Observation waits retain the exact child.
                 payload.pop("build_dependency", None)

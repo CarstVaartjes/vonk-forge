@@ -1112,6 +1112,7 @@ def _observe_build(
             retry_after_seconds=(failure.retry_after_seconds if retryable else None),
             log_excerpt=diagnostic or None,
             step=failure.stage or "build",
+            settled_build_operation_id=operation.id,
         )
     if operation.state != "succeeded" or not isinstance(operation.result, Mapping):
         raise RecipeImageAvailabilityError(

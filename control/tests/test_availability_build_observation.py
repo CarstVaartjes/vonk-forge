@@ -489,7 +489,10 @@ def test_expired_observers_failure_cannot_erase_the_new_claims_build_dependency(
         # An expired lease did not stop this executor. Its delayed failure
         # must not reset the newer claim or discard its exact child reference.
         raise RecipeImageAvailabilityError(
-            "recipe_image.build_failed", "old executor failed", retryable=True
+            "recipe_build_failed",
+            "old executor failed",
+            retryable=True,
+            settled_build_operation_id=inherited[0]["operation_id"],
         )
 
     monkeypatch.setattr(service, "_builder", fail_after_claim_replacement)

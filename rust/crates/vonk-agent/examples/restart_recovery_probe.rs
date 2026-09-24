@@ -2,21 +2,84 @@
 
 //! Exercise the agent's persistent claim journal and real HTTPS distribution
 //! client in separate processes for Controller restart recovery acceptance.
+//! `execute-build` runs the production build executor and result normalizer
+//! against a real HTTPS source response; it must never launch a build process.
 
 use std::{
     io::{self, Read},
     path::PathBuf,
+    sync::{Arc, Mutex},
 };
 
+use async_trait::async_trait;
 use serde::Deserialize;
 use vonk_agent::{
-    client::AgentHttpClient,
+    client::{AgentHttpClient, ClientError},
     config::AgentConfig,
-    executor::distribution_success_evidence,
+    executor::{LoopClient, RecipeExecutor, distribution_success_evidence, run_once},
     identity::IdentityPaths,
+    oci::OciRuntime,
+    process::{ProcessError, ProcessOutput, ProcessRunner, Program},
+    runtime_identity::AgentRuntimeIdentity,
     state::{BeginDecision, StateStore},
 };
-use vonk_agent_protocol::{AgentClaim, generated::AgentClaimPayload};
+use vonk_agent_protocol::{
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, generated::AgentClaimPayload,
+};
+
+struct NoBuildProcess;
+
+impl ProcessRunner for NoBuildProcess {
+    fn run(
+        &self,
+        _program: Program,
+        _arguments: &[String],
+        _timeout: std::time::Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        panic!("source failure must be reported before any build process starts")
+    }
+}
+
+// Only lease delivery/result capture is local. Source fetching, execution,
+// normalization and durable result serialization use production owners.
+#[derive(Clone)]
+struct BuildLoop {
+    claim: Arc<Mutex<Option<AgentClaim>>>,
+    results: Arc<Mutex<Vec<AgentResult>>>,
+}
+
+#[async_trait]
+impl LoopClient for BuildLoop {
+    async fn claim(
+        &self,
+        _capabilities: &[&str],
+        _wait_seconds: u64,
+        _runtime_identity: Option<&AgentRuntimeIdentity>,
+    ) -> Result<Option<AgentClaim>, ClientError> {
+        Ok(self.claim.lock().expect("claim lock").take())
+    }
+
+    async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+        Ok(AgentDirective {
+            attempt: progress.attempt,
+            cancel_requested: false,
+            deadline: progress.deadline,
+            fence: progress.fence,
+            job_id: progress.job_id,
+            node_id: progress.node_id.clone(),
+            operation_id: progress.operation_id,
+            schema_version: progress.schema_version,
+        })
+    }
+
+    async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+        self.results
+            .lock()
+            .expect("result lock")
+            .push(result.clone());
+        Ok(())
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -55,17 +118,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", serde_json::to_string(&result)?);
         return Ok(());
     }
-    if request.mode != "execute-distribution" {
+    if !matches!(
+        request.mode.as_str(),
+        "execute-distribution" | "execute-build"
+    ) {
         return Err("unsupported probe mode".into());
     }
-    let decision = state.begin(&claim, chrono::Utc::now())?;
-    if let BeginDecision::Replay(result) = decision {
-        println!("{}", serde_json::to_string(&result)?);
-        return Ok(());
+    if request.mode == "execute-distribution" {
+        let decision = state.begin(&claim, chrono::Utc::now())?;
+        if let BeginDecision::Replay(result) = decision {
+            println!("{}", serde_json::to_string(&result)?);
+            return Ok(());
+        }
     }
-    let AgentClaimPayload::ArtifactDistributionPayload(payload) = &claim.payload else {
-        return Err("claim is not artifact distribution".into());
-    };
     let ca_path = required(request.ca_pem, "ca_pem")?;
     let controller_url: url::Url = required(request.controller_url, "controller_url")?.parse()?;
     let config = AgentConfig {
@@ -87,6 +152,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         private_key: required(request.private_key_pem, "private_key_pem")?,
     };
     let client = AgentHttpClient::from_identity_paths(&config, &identity)?;
+    if request.mode == "execute-build" {
+        if claim.operation != "recipe.build.v1" {
+            return Err("claim is not recipe build".into());
+        }
+        let loop_client = BuildLoop {
+            claim: Arc::new(Mutex::new(Some(claim.clone()))),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let runner = NoBuildProcess;
+        let executor = RecipeExecutor {
+            client: &client,
+            runtime: OciRuntime {
+                runner: &runner,
+                data_root: &request.data_root,
+                huggingface_curl_config: None,
+            },
+            runtime_root: &request.data_root,
+            observation_receipt_public_key: [0; 32],
+        };
+        run_once(
+            &loop_client,
+            &mut state,
+            &executor,
+            &["recipe.build.v1"],
+            0,
+            None,
+        )
+        .await?;
+        let results = loop_client.results.lock().expect("result lock");
+        if results.len() != 1 {
+            return Err("build probe must produce exactly one result".into());
+        }
+        println!("{}", serde_json::to_string(&results[0])?);
+        return Ok(());
+    }
+    let AgentClaimPayload::ArtifactDistributionPayload(payload) = &claim.payload else {
+        return Err("claim is not artifact distribution".into());
+    };
     let evidence = client
         .download_distribution(
             &payload.plan_digest,

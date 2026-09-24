@@ -2,6 +2,26 @@
 
 ## Active integration checkpoint — 2026-09-24
 
+The native build-failure audit found two connected recovery defects. Source
+fetch and image-upload failures lost their typed causes at the Rust producer;
+a temporary source failure then retained the settled child at the availability
+owner. The native producer now preserves failure kind, stage, safe diagnostic
+and retry delay. The parent clears a failed dependency only when the validated
+settled child ID matches its current dependency under the active claim; stale
+observers cannot erase a replacement owner's child.
+
+The real mTLS/native-process/PostgreSQL regression fails against the saved
+pre-fix binary for missing failure evidence. With only the native fix it exposes
+the retained-child defect. With both fixes, a 503 starts a fresh child under the
+original accepted parent, while 403 and malformed source responses remain
+terminal. All five native wire cases and 74 affected availability tests pass,
+including existing process-death recovery and stale-observer protection. The
+native unit regression and Clippy pass; the full Python type gate has one
+reviewed exception and no unlisted errors. Pinned lint, supply evidence and
+the coordination scanner pass. This closes the
+source-fetch recovery boundary, not complete model execution or W19 acceptance.
+
+
 This integration batch combines upstream `e31f3fa0` with the current
 CLI owners. Upstream's typed build-failure cause and retry policy are preserved
 without restoring blocking build observation. The API, removal and update
