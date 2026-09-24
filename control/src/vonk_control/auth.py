@@ -15,6 +15,8 @@ from typing import Any, Final, Literal
 from starlette.responses import Response
 from starlette.types import Scope
 
+from .cursor_contract import MAX_CURSOR_LENGTH
+
 # The one definition of the administrator role. Browser sessions and their
 # response contract both refer to it, so the set cannot drift.
 AdministratorRole = Literal["administrator"]
@@ -23,9 +25,16 @@ _ROLES = frozenset({"viewer", "operator", "administrator"})
 _AGENT_NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _AGENT_IDENTITY_SCOPE_KEY = "vonk.agent_identity"
 _AGENT_SOURCE_SCOPE_KEY = "vonk.agent_source"
-_CURSOR_TOKEN = re.compile(r"v1\.[A-Za-z0-9_-]{1,384}\.[A-Za-z0-9_-]{43}\Z")
 _CURSOR_DOMAIN = b"vonk-forge/control-cursor/v1\0"
-_MAX_CURSOR_LENGTH = 512
+_CURSOR_SIGNATURE_LENGTH = len(
+    base64.urlsafe_b64encode(hashlib.sha256().digest()).rstrip(b"=")
+)
+_MAX_CURSOR_BODY_LENGTH = MAX_CURSOR_LENGTH - len("v1..") - _CURSOR_SIGNATURE_LENGTH
+_MAX_CURSOR_PAYLOAD_LENGTH = _MAX_CURSOR_BODY_LENGTH * 3 // 4
+_CURSOR_TOKEN = re.compile(
+    rf"v1\.[A-Za-z0-9_-]{{1,{_MAX_CURSOR_BODY_LENGTH}}}\."
+    rf"[A-Za-z0-9_-]{{{_CURSOR_SIGNATURE_LENGTH}}}\Z"
+)
 
 MUTATION_ROLES = {
     ("POST", "/api/fleet/enroll"): frozenset({"administrator"}),
@@ -335,6 +344,8 @@ class CursorCodec:
             ).encode("ascii")
         except (TypeError, ValueError) as error:
             raise ValueError("cursor document is invalid") from error
+        if len(payload) > _MAX_CURSOR_PAYLOAD_LENGTH:
+            raise ValueError("cursor document is too large")
         body = _encode(payload)
         signature = _encode(
             hmac.new(
@@ -342,7 +353,7 @@ class CursorCodec:
             ).digest()
         )
         token = f"v1.{body}.{signature}"
-        if len(body) > 384 or len(token) > _MAX_CURSOR_LENGTH:
+        if len(token) > MAX_CURSOR_LENGTH:
             raise ValueError("cursor document is too large")
         return token
 
@@ -357,7 +368,7 @@ class CursorCodec:
         try:
             if (
                 not isinstance(token, str)
-                or len(token) > _MAX_CURSOR_LENGTH
+                or len(token) > MAX_CURSOR_LENGTH
                 or _CURSOR_TOKEN.fullmatch(token) is None
             ):
                 raise ValueError
