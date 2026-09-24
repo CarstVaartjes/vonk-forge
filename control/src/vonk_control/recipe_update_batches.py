@@ -803,6 +803,7 @@ class RecipeUpdateBatches:
         from .recipe_image_availability import (
             RecipeImageAvailabilityError,
             RecipeImageAvailabilityView,
+            _retryable,
         )
 
         with self.sessions.begin() as session:
@@ -860,15 +861,16 @@ class RecipeUpdateBatches:
             except RecipeImageAvailabilityError as error:
                 if error.code == "recipe_update.claim_lost":
                     return
+                retryable = _retryable(error)
                 child.failure = RecipeUpdateFailure(
                     code=error.code,
                     detail=str(redact_text(error.detail))[:512],
-                    retryable=error.retryable,
+                    retryable=retryable,
                 )
-                child.state = "pending" if error.retryable else "failed"
+                child.state = "pending" if retryable else "failed"
                 child.retry_at = (
                     now + timedelta(seconds=max(2, error.retry_after_seconds or 2))
-                    if error.retryable
+                    if retryable
                     else None
                 )
             except (ValueError, TypeError):

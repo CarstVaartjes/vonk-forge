@@ -2229,19 +2229,34 @@ def test_native_transfer_continues_while_progress_observer_is_busy(
 
 
 def test_runtime_image_storage_types_only_clean_absence_as_cache_missing(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     digest = "a" * 64
     with pytest.raises(RuntimeImagePreparationError) as missing:
         storage.verify_existing(digest, 4)
     assert missing.value.code == "runtime_image.cache_missing"
+    assert missing.value.retryable is True
 
     archive = storage.root / digest
     archive.symlink_to(tmp_path / "absent-target")
     with pytest.raises(RuntimeImagePreparationError) as unsafe:
         storage.verify_existing(digest, 4)
     assert unsafe.value.code == "runtime_image.archive_mismatch"
+    assert unsafe.value.retryable is False
+
+    original_lstat = Path.lstat
+
+    def denied_lstat(path: Path) -> os.stat_result:
+        if path == archive:
+            raise PermissionError("injected archive stat denial")
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", denied_lstat)
+    with pytest.raises(RuntimeImagePreparationError) as denied:
+        storage.verify_existing(digest, 4)
+    assert denied.value.code == "runtime_image.archive_unavailable"
+    assert denied.value.retryable is False
 
 
 def test_controller_build_receipt_requires_its_adapter_identity() -> None:

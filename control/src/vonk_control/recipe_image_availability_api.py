@@ -24,6 +24,7 @@ from .recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
     RecipeImageAvailabilityView,
+    _retryable,
 )
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import RecipeUpdateRequest, RecipeUpdateResponse
@@ -378,7 +379,7 @@ def _recipe_error(error: BaseException) -> HTTPException:
     # already decided which one it is, so keep 503 Service Unavailable for the
     # former and 409 Conflict for the latter: a client may retry the first and
     # must not loop on the second.
-    if isinstance(error, RecipeImageAvailabilityError) and not error.retryable:
+    if isinstance(error, RecipeImageAvailabilityError) and not _retryable(error):
         return HTTPException(status_code=409, detail=_refusal_detail(error))
     return HTTPException(status_code=503, detail=_refusal_detail(error))
 

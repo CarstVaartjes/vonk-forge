@@ -15,6 +15,7 @@ import httpx
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import AgentFailureResult
 from vonk_control import availability_production
 from vonk_control.auth import TokenCodec
 from vonk_control.availability_production import (
@@ -34,7 +35,7 @@ from vonk_control.models import (
     RecipeBuild,
     RuntimeImageAuthorization,
 )
-from vonk_control.recipe_builds import RecipeBuildResolution
+from vonk_control.recipe_builds import RecipeBuildPlan, RecipeBuildResolution
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
@@ -539,6 +540,291 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
         result = execute()
         assert result["build_input_sha256"] == "b" * 64
     assert builds.plan_calls == 1
+    production.close()
+
+
+@pytest.mark.parametrize(
+    (
+        "failure_kind",
+        "uncertain",
+        "diagnostic_category",
+        "error_code",
+        "has_evidence",
+        "malformed_kind",
+        "expected_state",
+        "expected_retryable",
+        "expected_code",
+    ),
+    [
+        (
+            None,
+            False,
+            "platform-policy",
+            "permission_denied",
+            True,
+            False,
+            "failed",
+            False,
+            "permission_denied",
+        ),
+        (
+            "temporary-dependency",
+            False,
+            "network",
+            "dependency_unavailable",
+            True,
+            False,
+            "queued",
+            True,
+            "dependency_unavailable",
+        ),
+        (
+            "uncertain-effect",
+            True,
+            "network",
+            "operation_outcome_uncertain",
+            True,
+            False,
+            "failed",
+            False,
+            "operation_outcome_uncertain",
+        ),
+        (
+            None,
+            False,
+            None,
+            None,
+            False,
+            False,
+            "failed",
+            False,
+            "recipe_image.build_invalid",
+        ),
+        (
+            "invalid-authority",
+            False,
+            "platform-policy",
+            "permission_denied",
+            True,
+            True,
+            "failed",
+            False,
+            "recipe_image.build_invalid",
+        ),
+    ],
+)
+def test_builder_parent_preserves_typed_failure_and_retry_policy(
+    tmp_path,
+    monkeypatch,
+    failure_kind: str | None,
+    uncertain: bool,
+    diagnostic_category: str | None,
+    error_code: str | None,
+    has_evidence: bool,
+    malformed_kind: bool,
+    expected_state: str,
+    expected_retryable: bool,
+    expected_code: str,
+) -> None:
+    """A failed canonical build must not turn a terminal receipt into a retry.
+
+    This crosses the production builder closure and the parent availability
+    worker.  The old wrapper discarded the child node receipt and marked every
+    failed build retryable, so a permission-policy refusal was automatically
+    dispatched again.
+    """
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-source-build.json")
+            .read_text()
+        )
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'builder-failure.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    revision_id = "builder-failure-revision"
+    builder_node_id = "builder-node-000000000000000000000000000000"
+    with sessions.begin() as session:
+        session.add(
+            CatalogDocumentRevision(
+                id=revision_id,
+                document_id="builder-failure-document",
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=recipe.model_dump(mode="json"),
+                content_digest=content_sha256(recipe),
+                artifact_key="c" * 64,
+                execution_key="a" * 64,
+                projected={},
+                created_by="test",
+                created_at=now,
+            )
+        )
+        session.add(
+            AgentNode(
+                node_id=builder_node_id,
+                state="active",
+                architecture="linux-arm64",
+                capabilities=["recipe.build.v1"],
+            )
+        )
+
+    monkeypatch.setattr(
+        availability_production,
+        "resolve_recipe_entities",
+        lambda _session, _document: {},
+    )
+    monkeypatch.setattr(
+        availability_production,
+        "_compile_consistent_runtime",
+        lambda *_args, **_kwargs: {
+            "input_intent_sha256": "a" * 64,
+            "interface": "vonk.runtime.v1",
+            "architecture": "linux/arm64",
+            "image": "sha256:" + "a" * 64,
+        },
+    )
+
+    class Builds:
+        def resolve(self, revision_id: str):
+            return RecipeBuildResolution(
+                recipe_revision_id=revision_id,
+                recipe_content_sha256=content_sha256(recipe),
+                source_bundle_sha256="c" * 64,
+                input_intent_sha256="a" * 64,
+                input_intent={},
+            )
+
+        def prepare_plan(self, revision_id: str, node_id: str, **_kwargs):
+            return RecipeBuildPlan(
+                build_id="00000000-0000-4000-8000-000000000743",
+                recipe_revision_id=revision_id,
+                recipe_content_sha256=content_sha256(recipe),
+                source_bundle_sha256="c" * 64,
+                agent_payload={},
+                build_input_sha256="b" * 64,
+                builder_node_id=node_id,
+            )
+
+        def persist_plan_in_session(self, _session, plan, **_kwargs):
+            return plan
+
+    child_evidence: dict[str, object] | None = None
+    if has_evidence:
+        child_document: dict[str, object] = {
+            "reason": "Package source rejected the build request",
+            "summary": "PyTorch package index rejected access",
+            "status": "failed",
+            "operation": "recipe.build.v1",
+            "stage": "build",
+        }
+        if failure_kind is not None:
+            child_document["failure_kind"] = failure_kind
+        if error_code is not None:
+            child_document["error_code"] = error_code
+        if uncertain:
+            child_document["uncertain"] = True
+        if failure_kind == "temporary-dependency":
+            child_document["retry_after_seconds"] = 2
+        if diagnostic_category is not None:
+            stderr = (
+                "HTTP 403 Forbidden from package index; Authorization: Bearer child-secret-value"
+                if diagnostic_category == "platform-policy"
+                else "HTTP 503 package index temporarily unavailable"
+            )
+            child_document["diagnostics"] = {
+                "schema_version": 1,
+                "collected_at": now.isoformat(),
+                "phase": "build",
+                "category": diagnostic_category,
+                "stdout": {
+                    "text": "",
+                    "truncated": False,
+                    "dropped_bytes": 0,
+                    "dropped_lines": 0,
+                },
+                "stderr": {
+                    "text": stderr,
+                    "truncated": False,
+                    "dropped_bytes": 0,
+                    "dropped_lines": 0,
+                },
+                "versions": [],
+                "sandbox": [],
+                "storage": [],
+                "preflight": [],
+                "collector_errors": [],
+            }
+        child_evidence = AgentFailureResult.model_validate_json(
+            json.dumps(child_document)
+        ).model_dump(mode="json", exclude_none=True)
+        if malformed_kind:
+            child_evidence["failure_kind"] = "unknown-failure-kind"
+
+    class Operations:
+        calls = 0
+
+        def build(self, plan, **_kwargs):
+            self.calls += 1
+            node_evidence = (
+                {plan.builder_node_id: child_evidence}
+                if child_evidence is not None
+                else {}
+            )
+            return SimpleNamespace(
+                id="00000000-0000-4000-8000-000000000744",
+                state="failed",
+                result={
+                    "successful_nodes": [],
+                    "failed_nodes": [plan.builder_node_id],
+                    "node_evidence": node_evidence,
+                },
+            )
+
+    operations = Operations()
+
+    class Settings:
+        agent_artifact_root = tmp_path / "artifacts"
+
+    production = build_recipe_image_availability(
+        sessions,
+        settings=Settings(),
+        managed_catalog_sync=None,
+        recipe_builds=Builds(),
+        recipe_operations=operations,
+        clock=lambda: now,
+    )
+    queued = production.service.start(
+        revision_id,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+    )
+
+    assert production.service.run_pending() == 1
+    failed = production.service.get(queued.id)
+    assert failed.state == expected_state
+    assert failed.attempt == 1
+    assert failed.failure is not None
+    assert failed.failure["code"] == expected_code
+    assert failed.failure["retryable"] is expected_retryable
+    detail = failed.failure["detail"]
+    assert isinstance(detail, str)
+    if has_evidence and not malformed_kind:
+        if diagnostic_category is not None:
+            assert detail.startswith(f"build: {diagnostic_category}: ")
+            assert "child-secret-value" not in str(failed.failure["log_excerpt"])
+            if diagnostic_category == "platform-policy":
+                assert "<redacted>" in str(failed.failure["log_excerpt"])
+        assert "PyTorch package index rejected access" in detail
+    assert operations.calls == 1
+    assert production.service.run_pending() == 0
+    assert operations.calls == 1
     production.close()
 
 

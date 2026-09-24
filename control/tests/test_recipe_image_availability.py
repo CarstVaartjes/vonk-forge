@@ -56,8 +56,9 @@ from vonk_control.recipe_image_availability import (
     SUPERSEDED_PREPARATION_CODE,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
+    _retryable,
 )
-from vonk_control.recipe_image_availability_api import _view_document
+from vonk_control.recipe_image_availability_api import _recipe_error, _view_document
 from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
 )
@@ -131,6 +132,47 @@ def _progress_members(value: object) -> list[Mapping[str, object]]:
         require_mapping(member, "progress member")
         for member in require_sequence(value, "progress members")
     ]
+
+
+@pytest.mark.parametrize(
+    ("code", "explicit_retryable", "detail", "expected"),
+    [
+        ("runtime_image.cache_missing", False, "network timeout", False),
+        ("recipe_image.identity_conflict", True, "network timeout", False),
+        ("recipe_image.other_failure", None, "network timeout", True),
+    ],
+)
+def test_explicit_retry_decision_precedes_fallback_classification(
+    code: str,
+    explicit_retryable: bool | None,
+    detail: str,
+    expected: bool,
+) -> None:
+    error = RecipeImageAvailabilityError(
+        code,
+        detail,
+        retryable=explicit_retryable,
+    )
+
+    assert _retryable(error) is expected
+    assert _recipe_error(error).status_code == (503 if expected else 409)
+
+
+@pytest.mark.parametrize(
+    ("retryable", "expected_status"),
+    [(None, 409), (False, 409), (True, 503)],
+)
+def test_api_treats_unspecified_retryability_like_terminal_default(
+    retryable: bool | None,
+    expected_status: int,
+) -> None:
+    error = RecipeImageAvailabilityError(
+        "recipe_image.build_failed",
+        "canonical Recipe build failed",
+        retryable=retryable,
+    )
+
+    assert _recipe_error(error).status_code == expected_status
 
 
 class Transport:

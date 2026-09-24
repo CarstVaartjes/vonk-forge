@@ -20,7 +20,11 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import RecipeBuildEvidence
+from vonk_agent_protocol import (
+    AgentFailureResult,
+    RecipeBuildEvidence,
+    canonical_message,
+)
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
@@ -57,6 +61,7 @@ from .recipe_image_availability import (
 )
 from .recipe_operations import RecipeOperationConflict
 from .recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
+from .recovery_policy import RecoveryDecision, classify, kind_for_agent_error
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImageReceipt,
@@ -657,9 +662,7 @@ def build_recipe_image_availability(
                 ) from error
             with sessions.begin() as session:
                 try:
-                    acquire_admission_keys(
-                        session, (node_admission_key(candidate_id),)
-                    )
+                    acquire_admission_keys(session, (node_admission_key(candidate_id),))
                 except AdmissionLockBusy:
                     attempted_candidates.add(candidate_id)
                     selected_candidate = next(
@@ -1061,11 +1064,54 @@ def _observe_build(
             retry_after_seconds=5,
         )
     if operation.state in {"failed", "expired"}:
+        aggregate = operation.result
+        node_evidence = (
+            aggregate.get("node_evidence") if isinstance(aggregate, Mapping) else None
+        )
+        raw_failure = (
+            node_evidence.get(builder_node_id)
+            if isinstance(node_evidence, Mapping)
+            else None
+        )
+        if not isinstance(raw_failure, Mapping):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.build_invalid",
+                "canonical Recipe build failure evidence is missing or invalid",
+                step="build",
+            )
+        try:
+            failure = AgentFailureResult.model_validate_json(
+                canonical_message(raw_failure)
+            )
+        except (TypeError, ValueError) as error:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.build_invalid",
+                "canonical Recipe build failure evidence is missing or invalid",
+                step="build",
+            ) from error
+        failure_document = failure.model_dump(mode="json", exclude_none=True)
+        retryable = (
+            classify(kind_for_agent_error(failure_document)) is RecoveryDecision.RETRY
+        )
+        summary = failure.summary or failure.reason or "canonical Recipe build failed"
+        category = (
+            failure.diagnostics.category if failure.diagnostics is not None else None
+        )
+        detail = f"{category}: {summary}" if category is not None else summary
+        diagnostic = failure.diagnostic
+        if failure.diagnostics is not None:
+            diagnostic = (
+                failure.diagnostics.stderr.text
+                or failure.diagnostics.stdout.text
+                or diagnostic
+            )
         raise RecipeImageAvailabilityError(
-            "recipe_image.build_failed",
-            "canonical Recipe build failed",
-            retryable=True,
-            step="build",
+            failure.error_code or "recipe_image.build_failed",
+            detail,
+            retryable=retryable,
+            retry_after_seconds=(failure.retry_after_seconds if retryable else None),
+            log_excerpt=diagnostic or None,
+            step=failure.stage or "build",
         )
     if operation.state != "succeeded" or not isinstance(operation.result, Mapping):
         raise RecipeImageAvailabilityError(

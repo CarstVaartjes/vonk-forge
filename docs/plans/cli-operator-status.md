@@ -2,6 +2,30 @@
 
 ## Active integration checkpoint — 2026-09-24
 
+This integration batch combines upstream `e31f3fa0` with the current
+CLI owners. Upstream's typed build-failure cause and retry policy are preserved
+without restoring blocking build observation. The API, removal and update
+consumers now derive retryability from the same predicate. The previous
+`d24473c9` CI run exposed a timing-sensitive failure-evidence assertion: a
+worker slice may expire before scanning. The durable receipt survives and a
+later slice collects it; the deterministic regression passes locally. The
+combined Controller fast suite passes 2,488 tests with three skips. Generated
+clients reproduce without drift and the coordination scanner has zero reviewed
+sites. The final affected boundary suite passes 217 tests, including real
+PostgreSQL child recovery, update/removal consumers and managed image storage.
+Only clean archive absence is retryable; permission and integrity failures
+remain terminal. The full type gate has one reviewed exception and no unlisted
+errors; pinned lint/format and regenerated supply evidence pass. This batch is
+not yet qualified by full CI.
+
+The final W19 audit also found a connected-journey evidence gap: the existing
+authoring, load/reconnect and endpoint scenarios use different profiles and
+fixtures. A new single-profile journey is in progress through the actual
+Profile, application, Run/Switch and publication owners. Its deterministic
+agent receipts qualify owner identity and recovery, not runtime execution.
+A real pinned CPU model/runtime fixture and an independent human walkthrough
+remain required; neither is supplied by synthetic cache-ready assets.
+
 The active candidate is `codex/cli-approved-integration` in
 `/private/tmp/vonk-cli-approved-integration`. The latest verified source is
 `ab25b1d77708ff998fc103baa4ea03bd359d728a`, including remote main `99fb22f2`,
@@ -129,8 +153,9 @@ also reproduce without local drift, the full type gate has no unlisted errors,
 and the coordination scanner retains zero reviewed sites. These results qualify
 source and the recorded disposable fixtures, not a published release.
 
-The remaining handoff work is U2's real runnable candidate and the independent
-operator walkthrough. The schema-changing source PR also needs an explicit
+The remaining handoff work is U2's real runnable candidate, the same-profile
+author-to-endpoint journey, and the independent operator walkthrough. The
+schema-changing source PR also needs an explicit
 operator merge decision. The user will run every model; that remains separate
 physical evidence. No usability study, live cache removal, Controller deployment,
 or model campaign is claimed here. Component worktrees remain preserved while

@@ -1734,6 +1734,7 @@ class FilesystemRuntimeImageStorage:
             raise RuntimeImagePreparationError(
                 "runtime_image.cache_missing",
                 "OCI archive is not present in Controller storage",
+                retryable=True,
             ) from error
         except OSError as error:
             raise RuntimeImagePreparationError(

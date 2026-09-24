@@ -44,7 +44,10 @@ passes full CI. The final acceptance audit identified two remaining concrete
 boundaries: W17 must display and bind the exact removal impact before consent,
 and W12 needs a connected cancellation-versus-removal race. Both increments
 and W19's disposable cleanup facilitator pass local integrated checks and full
-Linux/ARM64 CI at `ab25b1d7`. U2 and the independent human scorecard remain open.
+Linux/ARM64 CI at `ab25b1d7`. U2, the connected same-profile authoring/load/
+reconnect/endpoint journey, and the independent human scorecard remain open.
+The existing separate walkthrough cards do not establish the same-profile
+boundary; preserve that requirement in W19's final acceptance.
 
 The [shared-build closure checklist](#shared-build-closure-checklist) retains
 historical implementation detail. It does not supersede the current status.

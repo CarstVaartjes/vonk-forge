@@ -282,7 +282,10 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
         succeeded=outcome == "missing_archive",
         evidence=_evidence(plan)
         if outcome == "missing_archive"
-        else {"reason": "build executor failed"},
+        else {
+            "failure_kind": "temporary-dependency",
+            "reason": "build executor failed",
+        },
     )
     clock[0] += timedelta(seconds=6)
     assert production.service.run_pending(limit=1) == 1
