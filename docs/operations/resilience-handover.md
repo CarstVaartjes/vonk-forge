@@ -63,15 +63,10 @@ completion criterion for build reuse.
 
 ## Budget and retry policy
 
-Classify the rule by the resource or authority it protects, not by whether its
-message contains the word "budget".
-
-| Kind of rule | Required behavior |
-| --- | --- |
-| Estimate of workload demand or a heuristic forecast | Report the estimate, observed capacity, unit, source, and uncertainty. Warn or choose an already authorized recovery path; an estimate alone must not permanently poison an otherwise admissible request. |
-| Enforced resource or isolation limit | Retain actual allocator, device/kernel, container, storage, reservation, and concurrency boundaries. A temporary shortage waits with a bounded retry policy; an invalid request receives an actionable refusal. Do not turn a kernel safety condition into a warning merely because it mentions a budget. |
-| Authorization, contract, integrity, or exact identity | Fail closed. No retry grants extra permission, ignores corruption, revives revoked authority, or silently changes the model, recipe image, topology, context, or plan digest. |
-| Time, attempts, and retry rate | Bound each attempt and waiting dependency; persist deadlines across restart and show the next check. Exhausting one attempt's budget must not permanently ban a fresh authorized request. Never reset a deadline indefinitely to make stuck work look healthy. |
+The durable [resource accounting and budget policy](../engineering-principles.md#resource-accounting-and-budget-policy)
+owns these rules. It classifies forecasts, actual resource/isolation limits,
+authority/integrity checks, and attempt deadlines separately. This handover
+records the review's application and evidence, not a second policy definition.
 
 The current [engineering principles](../engineering-principles.md#every-frontier-recipe-must-remain-runnable)
 require admission to account for the recipe's declared system-memory reserve,

@@ -66,21 +66,35 @@ GitHub Actions-only and has no access to runtime secrets.
 
 ## Validate a checkout locally
 
-From a checkout of both repositories:
+From the exact platform task worktree and an owned recipe-library checkout:
 
 ```bash
-./scripts/validate-recipe-library \
-  --library-root ../vonk-forge-recipes \
-  --platform-root . \
+export VONK_PLATFORM_ROOT="$PWD"
+export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
+
+cd "$VONK_RECIPE_LIBRARY_ROOT"
+tools/build-catalog-index
+tools/build-catalog-index --check
+"$VONK_PLATFORM_ROOT/control/.venv/bin/python" \
+  "$VONK_PLATFORM_ROOT/scripts/validate-recipe-library" \
+  --library-root "$VONK_RECIPE_LIBRARY_ROOT" \
+  --platform-root "$VONK_PLATFORM_ROOT" \
   --json
+cd "$VONK_PLATFORM_ROOT"
 ```
+
+Set the library path to its owning task worktree when recipe edits are in
+progress; do not regenerate over another task's uncommitted library files.
+Sync the platform worktree's control environment using the
+[testing policy](../testing-and-ci.md#lint-format-type-and-generation-checks).
+Record both exact commits and the recipe content digest with the result.
 
 To run structural qualification for one recipe from the external checkout:
 
 ```bash
 ./scripts/qualify-recipe \
-  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json \
-  --library-root ../vonk-forge-recipes \
+  --recipe "$VONK_RECIPE_LIBRARY_ROOT/recipes/deepseek-v4-flash-0731-ds4-single.json" \
+  --library-root "$VONK_RECIPE_LIBRARY_ROOT" \
   --platform-root . \
   --level structural
 ```

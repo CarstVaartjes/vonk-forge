@@ -7,8 +7,8 @@ qualification as separate evidence boundaries.
 
 ## Engineering stance
 
-Vonk Forge optimizes for simplicity, stability, and security while keeping every
-frontier recipe runnable on local Spark capacity. Read
+Vonk Forge optimizes for simplicity, stability, security, and automatic recovery
+while keeping every frontier recipe runnable on local Spark capacity. Read
 [docs/engineering-principles.md](docs/engineering-principles.md) before making a
 structural choice. The short form:
 
@@ -17,15 +17,82 @@ structural choice. The short form:
   microservices, and a mandatory Vault are explicit non-goals. GPU nodes run
   workloads, never ingress, databases, monitoring, or the admin UI.
 - **Stability:** state before controls, live-versus-desired before mutation, and
-  one Spark at a time for consequential fleet-wide change. Remove retired paths
-  together with their callers instead of carrying compatibility shims.
+  one Spark at a time for consequential fleet-wide platform change. Keep
+  workload profile changes topology-atomic. Remove retired paths together with
+  their callers instead of carrying compatibility shims.
+- **Recovery:** converge automatically to the latest authorized intent after a
+  recoverable fault clears. Reuse completed work and durable partial progress
+  through the normal execution path. Routine recovery must not require manual
+  retirement, Idle/reapply, or a new recipe revision to escape poisoned state.
+- **Transparency:** show truthful progress, the meaningful cause, and the next
+  action or retry. Unknown, waiting, refused, and completed are distinct states.
 - **Security:** fail closed. Never soften a `PermissionDenied`, never clamp an
   invalid request into a valid one, keep the update-signing key separate from
   administrative authorization, and never let candidate tooling install itself.
   SSH is diagnostic and bootstrap-only.
 - **Every frontier recipe:** the curated library exists to make any model
   reproducible, not to restrict what can run. Missing assets are actionable
-  cache blockers and never a problem deferred to a Spark.
+  cache blockers and never a problem deferred to a Spark. Runnable, cache-ready,
+  and physically qualified are separate claims.
+
+The linked engineering and architecture documents own durable policy. Plans
+record implementation progress; dated handovers record evidence. Neither an
+old workaround nor a status snapshot authorizes a new operational action. Keep
+one current action list and verify changing claims against their actual owner.
+Keep commands in their linked runbooks so this guide stays focused on decisions.
+
+## Shared decisions and operator visibility
+
+The Controller owns planning, admission, orchestration, and durable progress.
+CLI and web consume the same typed decisions and receipts; do not add a client
+planner, independent refusal classifier, or second recovery implementation.
+Preview and execution share one decision: bind the reviewed effects and exact
+identities, revalidate at acceptance, and reject changed effects instead of
+silently broadening consent. Name predicate conditions once and derive both
+the decision and its explanation from those same conditions.
+
+Every operation exposes its phase, measured progress, meaningful failure cause,
+waiting dependency/owner, next attempt, deadline, and required operator action
+where applicable. Preserve safe typed reasons and correlation identity across
+helper, agent, Controller, and clients under the
+[error policy](docs/error-reporting.md). Do not truncate away the cause or invent
+an ETA, percentage, missing value, or success when evidence is unknown.
+
+Persist request identity before effects and reconcile a lost response before
+retrying. Reconnect to the original operation. A client timeout, disconnect, or
+Ctrl-C stops observation; remote cancellation is explicit and retains its own
+authorization and cleanup semantics. Read-only progress views must not advance
+or block the work they observe.
+
+## Resource accounting, budgets, and bounds
+
+Follow [the resource policy](docs/engineering-principles.md#resource-accounting-and-budget-policy).
+Classify a rule by what it protects, not by the word "budget":
+
+- Estimates and heuristic forecasts expose value, unit, source, and uncertainty.
+  Warn without permanently poisoning otherwise admissible work.
+- Actual allocator, device, container, storage, reservation, and concurrency
+  limits remain enforced. Temporary shortages wait with a visible resume
+  condition; invalid requests receive actionable refusals.
+- Authorization, integrity, contract, and exact-plan checks fail closed. Retry
+  cannot change the model, runtime, context, topology, or image unless that
+  alternative is explicitly permitted and bound in the accepted plan.
+- Bound attempts and retry rates. Persist deadlines across restart, expose the
+  next check, and reconcile at expiry. An exhausted attempt does not permanently
+  ban a fresh authorized request; resetting its deadline indefinitely is not
+  recovery.
+
+Count each physical resource once. Keep observations, reservations, future
+promises, and estimates distinct; inherited parent/child claims must not compete
+with themselves. A planned stop or terminal row does not prove capacity free.
+Release claims only after reconciling exact effects. Retain recipe-declared
+system reserves and account for unified memory as one physical pool.
+
+Derive bounds from bytes, time, disk, memory, or another protected resource.
+Avoid arbitrary structural counts; report the limit and observed value. All
+layers must accept values permitted by the canonical plan contract, including
+empty or multiline arguments, or reject them at the owning compile/admission
+boundary before effects.
 
 ## State ownership and resilient recovery
 
@@ -97,193 +164,32 @@ failures to their owner; do not turn a busy artifact, malformed history row, or
 unavailable source into a barrier for unrelated eligible work. Verify these
 rules with concurrent PostgreSQL/process tests, not mocked locks or SQLite.
 
-## Local Linux and container testing
+## Verification and completion
 
-On macOS, use OrbStack for container-backed tests before treating a Linux-only
-path as unavailable:
+The [testing policy](docs/testing-and-ci.md) owns verification commands,
+worktree-local environments, OrbStack setup, lane selection, pinned lint/type/
+generation checks, and reviewed baselines. Use those instructions from the
+active task worktree. On macOS, check the intended OrbStack engine before
+calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
+quality evidence still requires its designated lane.
 
-```bash
-docker context show
-docker info
-```
+Every test must name a wrong implementation it catches. Prefer behavioral
+boundaries and real producer/store/consumer seams; do not duplicate constants,
+field lists, workflow text, or schema shapes already owned elsewhere. A bug
+fix ships with a regression demonstrated to fail before the fix. Follow
+[what earns a test](docs/testing-and-ci.md#what-earns-a-test).
 
-The active context and `docker info` output must identify the intended OrbStack
-engine. Switch explicitly with `docker context use orbstack` when needed. Run
-Compose, Linux/systemd harnesses, and disposable NAS acceptance in OrbStack or
-in the designated CI lane; do not declare them impossible merely because the
-host is macOS. OrbStack can catch container, Compose, installer, systemd, and
-readiness regressions. Real NVIDIA hardware, NCCL/fabric behavior, model
-quality, and physical Spark acceptance still require the designated Linux/ARM64
-or Spark lane.
+Completion means the authorized user workflow works across its producers,
+storage, workers, and consumers, including recovery after the injected fault
+clears. Passing isolated components, writing a handover, or shrinking the scope
+to a passing subset does not close an unfinished integration boundary. Record
+exact revisions, relevant checks, and remaining evidence gaps. Source completion,
+merge, accepted publication, deployment, and physical acceptance are distinct.
 
-Use a writable, task-specific uv cache. From `/opt/vonk-forge`:
-
-```bash
-export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
-
-# Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
-# Approximately 80s for control/tests and 36s for tests on 8 cores.
-UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
-  uv run --project control --frozen --with-editable . pytest -q \
-    control/tests -m "not lane" -n auto --dist loadfile
-UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
-  uv run --python 3.14 --frozen --with pytest==9.1.1 \
-    --with pytest-xdist==3.8.0 \
-    --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
-    pytest -q tests -m "not lane" -n auto
-
-# Lane tier: the same trees without the marker filter. Run it in OrbStack or
-# the designated CI lane; it needs Docker, PostgreSQL, cargo, dpkg and a
-# Linux/ARM64 host.
-UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
-  uv run --project control --frozen --with-editable . pytest -q control/tests
-UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
-  uv run --python 3.14 --frozen --with pytest==9.1.1 \
-    --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" pytest -q tests
-
-# Compose lane. These tests import the Controller, so they run in the control
-# environment, not the root one.
-TMPDIR=/tmp/vk UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
-  uv run --project control --frozen --with-editable . pytest -q deploy/compose/tests
-```
-
-The compose lane needs the control environment because the container config it
-loads imports `pydantic`; the root project deliberately has neither. On macOS,
-also point `TMPDIR` at a short directory: several of these tests bind a Unix
-socket under `tmp_path`, and the default `/private/var/folders/...` prefix plus a
-long test name exceeds the 104-byte `sun_path` limit, which fails the whole
-Tailscale group with `OSError: AF_UNIX path too long`.
-
-The `lane` marker is applied automatically at collection time for a PostgreSQL
-fixture or a `*_wire_bridge.py` Rust probe module. A test that starts Docker
-carries `@pytest.mark.lane` itself, so the reason stays visible where the
-container starts. Either way `-m "not lane"` stays honest. A fast-tier
-failure is a real defect; a lane-tier failure on macOS is usually a missing
-Linux dependency, not a regression.
-
-The fast tier is also hermetic about the developer's environment. The root and
-control `conftest.py` files configure `git` to ignore global and system
-configuration, so a test that creates a throwaway repository cannot be broken by
-a personal `commit.gpgsign`, a signing agent, a hook, or `init.defaultBranch`.
-Keep that isolation: a fixture that only passes on one machine is not evidence.
-
-Every test costs review time on every future change, so each one has to earn its
-place by catching a defect a reviewer would otherwise reason about by hand. Name
-the wrong implementation it fails on; if only deleting the code it calls can make
-it fail, it is ceremony. Prefer the boundary — empty, absent, malformed, first
-and last accepted value, replayed or expired grant, a permission that must be
-refused — over another walk through the happy path. Do not re-assert a constant,
-field list, literal set or schema shape that another test already pins; two
-copies drift, and the drift costs more than the copy catches. A bug fix ships
-with the test that fails without it, and you confirm that failure before fixing.
-Exercise the real seam: a stub that replaces the thing under review cannot catch
-a fault in it. See
-[docs/testing-and-ci.md](docs/testing-and-ci.md#what-earns-a-test).
-
-Run the two trees in separate pytest invocations. Both contain modules with the
-same basename, so a single invocation over `tests control/tests` mis-collects
-them.
-
-Run the root `tests/` suite in the standalone environment CI uses: `pytest`
-plus an editable install of the recipe contracts package. The root project is
-the `vonk-cluster-profiles` package and its lint tooling; it deliberately has
-no dependency on `pydantic`, `vonk_control`, or the contracts package, so a
-bare `uv run pytest` from the root environment cannot import what the
-acceptance and contract tests need. The control environment is a superset and
-can also run that tree for a quick check, but CI parity is the standalone form.
-
-`VONK_RECIPE_LIBRARY_ROOT` is a path to the sibling recipe-library checkout, not
-a secret. Catalog, canonical-consumer, and acceptance-recipe tests read the real
-library through it and fail at collection when it is unset, so export it before
-running the root or control suites.
-
-The native Rust agent and its wire contract build only for Linux. The
-`control/tests/*_wire_bridge.py` suites consume probes produced by
-`scripts/tests/run_agent_wire_contracts.py`; on macOS `cargo build` fails on
-platform-gated code such as `rustix::fs::openat2`, so run those suites in the
-Linux/OrbStack or designated CI lane instead of reading the failure as a
-regression.
-
-### Lint, format and type checks
-
-Run all three after a change. Each is pinned and deterministic.
-
-```bash
-export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
-
-# Python lint; ruff is the repository's formatting authority too.
-UV_CACHE_DIR=/private/tmp/vonk-forge-uv-cache uv run --frozen ruff check .
-
-# Python types. Pyright reads [tool.pyright] and resolves imports from the
-# control virtualenv, so sync that project once first.
-UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
-  uv sync --project control --frozen
-UV_CACHE_DIR=/private/tmp/vonk-forge-uv-cache scripts/check-python-types
-
-# TypeScript types; the build runs tsc --noEmit before bundling.
-npm ci --prefix control/web
-npm run build --prefix control/web
-
-# Rust wire structures: fail if they no longer match the Pydantic schemas.
-# This runs the typify code generator with cargo, then compares its output.
-# The generator runs on macOS too; it does not build the Linux-only agent.
-UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
-  uv run --project control --frozen --with-editable . \
-  python scripts/generate-agent-wire --check
-```
-
-`control/.venv` cannot satisfy the ruff pin because `openapi-python-client`
-requires `ruff<0.14`; always lint through the root project. CI runs the same
-version via `uvx --from ruff==0.16.1 ruff check .`.
-
-The repository does not type-check cleanly yet, but every surviving error is a
-reviewed one. `scripts/check-python-types` treats
-`tools/pyright-baseline.json` as an allowlist: each entry names a file, a
-pyright rule, the accepted count and the reason it is accepted. An error that
-is not listed fails even when the file's total count is unchanged; a listed
-entry whose count moves in either direction fails, so a second error of the
-same rule cannot hide and a fixed error must be removed; an entry that no
-longer occurs fails as stale; and an entry without a reason fails, so
-`--update` is not a way to accept an error without saying why. Run `--update`
-to write the current errors, then write the reason for anything it adds.
-`pyright` runs over `control/src`, `src`, `tests` and `control/tests` in basic
-mode; generated clients and virtualenvs are excluded.
-
-The coordination boundaries are checked by
-`control/tests/coordination_boundaries.py`, which is pure stdlib and runs as
-`python3 control/tests/coordination_boundaries.py` (CI runs the same step). It
-proves from the syntax tree that a SQL transaction never spans external work
-and that an artifact lock is acquired outside a transaction, nonblockingly, and
-one at a time. `tools/coordination-baseline.json` is a reviewed allowlist like
-the pyright baseline: an unreviewed site fails, a baseline site that no longer
-occurs fails as stale, and every entry carries a written reason. A stale entry
-means the boundary now holds, so the entry is deleted rather than explained.
-Run `--write-baseline` after a fix to see exactly which entries disappeared.
-The scanner's one-lock and nesting rules apply to locks that guard managed
-storage. Two distinctions keep that honest. An in-process concurrency guard --
-one that serialises this process's own work -- is a different resource class and
-is listed by name in `GUARD_LOCK_NAMES` with its justification in the plan; a
-lock that is not listed is still scanned as an artifact lock, so a new lock
-cannot silently opt out. Separately, a blocking `flock` on a descriptor from an
-`O_EXCL` create is provably private and cannot contend, so it is not reported;
-a blocking `flock` on a shared file still is.
-
-There is no separate ESLint or Prettier configuration. TypeScript formatting
-follows the surrounding files, and `npm run build` is the type gate.
-
-When acceptance inputs are available, run the actual harness through the same
-OrbStack Docker context, not only its unit tests:
-
-```bash
-UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
-  uv run python tests/acceptance/test_fresh_nas_install.py
-UV_CACHE_DIR=/private/tmp/vonk-forge-acceptance-cache \
-  uv run python tests/acceptance/test_spark_lifecycle.py run
-```
-
-Those commands require the candidate, compose, Controller, and acceptance
-environment described by the acceptance workflow. Never substitute synthetic
-success for missing environment inputs.
+The coordination scanner detects defined syntax patterns; a passing scan does
+not prove arbitrary runtime code deadlock-free. Use real PostgreSQL and process
+checks for the claimed concurrency behavior. Fix violations and remove stale
+baseline entries; never expand a reviewed baseline to conceal a new violation.
 
 ## Current contracts only: no legacy compatibility
 
@@ -292,8 +198,9 @@ and one current execution path for each document and operation. Remove retired
 parsers, DTOs, database models/tables, endpoints, CLI compatibility aliases,
 fixtures, packaged assets, and callers together. Do not retain deprecated
 constructors, old field names, dual readers/writers, or fallback shapes merely
-to keep old tests or old worktrees working. In particular, `fleet node-profile`
-is the current command; remove the obsolete `fleet profile` alias.
+to keep old tests or old worktrees working. The current parser and
+[operator runbook](docs/runbooks/vonkctl.md) own command vocabulary; do not
+restore the obsolete `fleet profile` alias from a historical guide.
 
 Published Model and Recipe structures are defined by the canonical Pydantic
 package in vonk-forge-recipes. Controller APIs and Controller/Spark messages
@@ -361,24 +268,12 @@ does not mean maintaining schema-1/schema-2 runtime paths.
 ## Recipe-library checks
 
 Build and validate the sibling recipe checkout against the exact platform
-checkout before calling a recipe installable:
-
-```bash
-cd /opt/vonk-forge-recipes
-tools/build-catalog-index
-tools/build-catalog-index --check
-/opt/vonk-forge/control/.venv/bin/python \
-  /opt/vonk-forge/scripts/validate-recipe-library \
-  --library-root /opt/vonk-forge-recipes \
-  --platform-root /opt/vonk-forge \
-  --json
-```
-
-Structural qualification proves an executable contract, not physical model
-acceptance. For a single recipe, use `scripts/qualify-recipe` with
-`--level structural`; reserve native/container/Spark acceptance for the matching Linux,
-OrbStack, CI, or physical hardware lane. Record the exact platform commit,
-recipe-library commit, recipe digest, and resulting evidence.
+worktree using [the recipe-library procedure](docs/operators/recipe-library.md#validate-a-checkout-locally)
+before calling its contract installable. Record both commits, the recipe digest,
+and the evidence level. Structural qualification proves an executable contract;
+it does not prove container or physical model acceptance. A candidate with a
+valid contract may proceed under normal authority, capacity, and exact-cache
+checks without prior physical qualification. Keep that unproven status visible.
 
 ## Deployment and fleet safety
 
@@ -430,113 +325,71 @@ model-quality acceptance. A passing profile preview or cache operation is not
 physical Spark qualification, and SSH must not become an undocumented
 alternative rollout path.
 
-## Parallel work
+## Checkout, pull requests, and worktree lifecycle
 
-Use an isolated branch/worktree for each independent agent, based on the latest
-`origin/main`. Do not edit another agent’s worktree or the shared checkout’s
-uncommitted files. Before committing, inspect `git status`, run relevant tests,
-and run `git diff --check`. Keep commits scoped and coordinate overlapping
-files before merging.
+`/opt/vonk-forge` is the canonical checkout of local `main`, tracking
+`origin/main`. Keep it clean and fast-forward it after fetching before starting
+work and after merges. A fetch updates `origin/main`, not local `main`. One
+coordinator updates the canonical checkout while it is idle; agents must not
+switch it to feature branches or use it as an integration workspace.
 
-The shared checkout carries stashes left by earlier work on other branches, so
-never run a bare `git stash` or `git stash pop` there: on a clean tree the
-former saves nothing and the latter then pops somebody else's work into your
-tree, which is how an unrelated conflicted file appears in `git status`. To
-compare "before" and "after", extract a detached worktree at the commit you
-want (`git worktree add --detach /private/tmp/before origin/main`) or stash
-explicit paths (`git stash push -- <paths>`), and delete the worktree when you
-are done.
+All implementation work, including lead-agent and subagent work, uses an
+isolated `codex/` branch/worktree based on freshly fetched `origin/main`.
+Dependent work may use an explicitly coordinated integration base. Each tree
+has one active owner. Do not edit another agent's tree or shared uncommitted
+files. If the canonical checkout is already dirty or on another branch,
+preserve it, report the deviation, and coordinate with its owner before
+restoring `main`; never force checkout, reset, or stash others' work to comply.
 
-### Land one pull request at a time
+When related subagent results arrive together, prefer one coherent integrated
+PR. One coordinator combines scoped results in an integration worktree, resolves
+overlaps, and verifies the combined behavior. Keep unrelated work separately
+reviewable. Account for component PRs and trees through the integrated merge;
+do not merge the same work twice or leave its landed component trees behind.
 
-Staggering merges is a deployment requirement, not tidiness.
+Use [the development workflow](docs/runbooks/development-workflow.md) for the
+commands and release evidence. Its lifecycle is required:
 
-A merge to `main` that touches a build input triggers an image build and an
-installer generation, and the publisher **refuses to promote a superseded
-build**. Merging several such pull requests in a burst therefore leaves the later
-images built, published and addressable but referenced by no accepted generation
-— they cannot be deployed, and redeploying silently pulls the older Controller.
-That is not hypothetical: `dev-sha-17c4276a…` was published and referenced by
-nothing, so a redeploy appeared to do nothing.
+- Open the scoped PR against remote `main`. Inspect status, run relevant checks,
+  and review `git diff --check` before each commit.
+- When merging is authorized and the PR is eligible, enable auto-merge while
+  retaining required checks and reviews. Arm only one PR at a time. A
+  schema-changing PR requires an explicit operator merge decision; see below.
+- If the PR is blocked because its branch is out of date, fetch and merge
+  `origin/main` into its worktree branch, deliberately resolve conflicts,
+  regenerate affected outputs, rerun affected checks, and push. Continue until
+  the authorized merge completes or report the concrete remaining blocker.
+- For a build-producing merge, wait for accepted publication containing that
+  merge before arming the next PR. Verify workflow path filters and artifact
+  provenance; a documentation-only merge does not imply a new image exists and
+  must not wait for a build that will never run.
+- After merge, verify GitHub's merged result and that the branch's final work is
+  accounted for (including squash merges). Stop its agents, inspect tracked,
+  untracked, and valuable ignored files, and remove the clean, inactive task
+  worktree locally. Preserve/report unmerged or dirty work; never force-remove
+  it. Delete the landed local branch only after checking for additional commits.
+  Fast-forward the clean, idle canonical `main` checkout and report any deferred
+  cleanup. Do not leave a merged task's worktree as the normal completion state.
 
-**Not every merge produces a build, and you must check before reasoning from
-one.** `dev-images.yml` is path-filtered (`on.push.paths`): a merge that changes
-only documentation, tests, a script, or a workflow builds nothing and produces no
-`dev-sha-<commit>` tag. Two consequences, both of which have already caused a
-confidently wrong answer:
+Never use a bare `git stash` or `git stash pop` in the canonical checkout.
+The shared stash may belong to another task. Use a detached comparison worktree
+or explicitly named paths in your own worktree, and remove temporary comparison
+trees once they are clean and inactive.
 
-- A merge with no build is **not** a promotion candidate and supersedes nothing.
-  Do not claim it displaced an earlier build — verify with
-  `git ls-remote`/the registry that `dev-sha-<full-commit-sha>` exists before
-  treating a commit as deployable.
-- When you need to promote, re-run the publication for the newest commit that
-  **did** build (`dev-sha-…` exists). Publishing a tip that never built promotes
-  a generation with nothing behind it, and the alias will not move.
+### Schema implementation, merge, and deployment
 
-Arm auto-merge on **one** pull request at a time, and arm the next only once the
-accepted generation has been built from a commit that **contains** the previous
-merge. Until then, deploy by pinning the immutable tag a build produced
-(`dev-sha-<full-commit-sha>`) or the digest set a generation names — never rely on
-a floating alias, which follows *accepted* images rather than the newest build.
+Necessary schema implementation is allowed within the authorized task scope.
+Inspect the actual schema effect of changes to `control/src/vonk_control/models.py`
+and `control/migrations/`; a file edit alone is not proof of a schema change.
+Reuse an existing canonical fact when appropriate, without hiding new state in
+untyped JSON to avoid a justified schema change.
 
-Two consequences:
-
-- Every branch regenerates `inventory/sbom/manifest.json`, so a branch based on
-  an earlier `main` arrives `DIRTY` rather than merely behind. Resolve it by
-  merging `main` and **regenerating**, never by hand. If a conflict appears
-  anywhere other than that generated file, keep both sides deliberately and say
-  which — do not let a script pick for you.
-- **Never arm auto-merge on a pull request that changes the schema.**
-  `control/src/vonk_control/models.py` and `control/migrations/` are the marker.
-  Under the fresh-schema contract a deployed Controller refuses startup on any
-  schema difference and `0000_fresh_schema` has no upgrade path, so merging one
-  means wiping the database — fleet enrollment, profiles, every installation
-  record and the audit trail — and re-enrolling a Spark needs node access. That
-  is an operator decision every time. Prefer removing the schema change: a value
-  a projection needs is usually already persisted in an existing JSON document,
-  which costs no column at all.
-
-### Two artifacts are called "the manifest"
-
-They have different owners and different update rules.
-
-- `inventory/sbom/manifest.json` is a curated **file→digest map** over declared
-  inputs (`image_lock_sha256`, `inputs`, `protocol_wheel_sha256`, `sboms`,
-  `signature_key_sha256`) with no `source_sha`. Regenerate it last, and expect
-  **no change** when a commit touches nothing curated — a no-op is correct, not a
-  failure.
-- `install.vonkforge.ai/artifacts/dev/current.manifest` is the signed **release**
-  manifest, carrying `version`, `source_sha`, `generation` and `release_path`.
-  Its `version` ends in `g<commit>` — the commit the artifacts were **built
-  from** — while `source_sha` is refreshed by the scheduled re-sign **without
-  rebuilding**. When comparing a generation to `main`, use the build commit from
-  `version`; `source_sha` alone reports a generation as covering a tip whose
-  artifacts predate it.
-
-### Derive a rule; do not restate it
-
-A rule with two implementations drifts, and the drift stays invisible until it
-refuses real work. Two conditions of the claim predicate went unchecked in a
-hand-written refusal classifier purely because the predicate grew and the
-restatement did not, and a JSON value read one way in SQL and another in Python
-turned a malformed row into an opaque `unclassified-` refusal. When a predicate
-decides something, name its conditions once and have both the decision and the
-explanation evaluate **those same objects**, so a condition cannot exist without
-a name. Pair it with a test that fails when a condition has no named reason, so
-the next addition cannot reintroduce the gap.
-
-### Bound the resource, and say what the bound is
-
-A cap is fault tolerance only if it derives from the resource it protects and
-reports itself when it fires. Count caps chosen as round numbers do not: a
-512-element cap beside a 256 KiB frame budget refused a legitimate container
-command line of 518 arguments, and the refusal surfaced under a name that blamed
-an unrelated component for hours. Prefer bounding bytes, time, disk or memory;
-derive any structural count from that bound or drop it; separate legal bytes from
-unframeable ones; and record the limit **and** the observed value, so a refusal
-reads "613 of 4096" rather than "invalid".
-
-Never refuse legitimate work for carrying a value the plan contract permits —
-an argument that is empty, or contains a newline, for instance. Either both
-layers agree, or the stricter one moves to where it can fail early, at compile or
-admission, rather than after a successful install.
+Keep schema-changing PRs out of auto-merge; obtain an explicit operator decision
+for their merge, honoring authorization already given for that action. Describe
+the deployment impact in the PR. The fresh-schema contract has no in-place
+upgrade path for an incompatible existing database, and a deployed Controller
+refuses that mismatch. Merging source does not itself wipe a database.
+Resetting a deployed database, losing enrollment/profiles/audit, and re-enrolling
+nodes are separate consequential operations requiring explicit authorization.
+Do not infer that authorization from permission to implement or merge, or infer
+a live production environment from an old incident record.

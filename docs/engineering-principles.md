@@ -58,6 +58,14 @@ do not maintain two authorities during a compatibility period.
 
 ## Stability comes from one current path
 
+Fault tolerance, self-healing, and eventual consistency mean automatic
+convergence to the latest authorized intent after a recoverable fault clears.
+The normal execution path owns initial work, retries, and recovery. Preserve
+completed effects and compatible partial work. Manual retirement, Idle/reapply,
+or another recipe revision must not be required to escape poisoned state.
+These are required behaviors; implementation and physical recovery evidence
+remain separately recorded.
+
 - Coordination must have an acyclic wait graph: work cannot wait on a dependency
   that needs a lock, slot, or reservation held by that same waiting work. Follow
   the [coordination boundaries](architecture-overview.md#coordination-and-deadlock-prevention).
@@ -107,6 +115,64 @@ do not maintain two authorities during a compatibility period.
   malformed record must not stop unrelated work. Unavailable references or a
   denied scan defer cleanup; they never authorize deletion of possibly used data.
 
+## Resource accounting and budget policy
+
+Classify a rule by the resource or authority it protects, not by whether its
+message says "budget". A forecast and an enforced limit have different meanings:
+
+| Kind of rule | Required behavior |
+| --- | --- |
+| Workload estimate or heuristic forecast | Report value, unit, observed capacity, source, and uncertainty. Warn or use an already authorized recovery path; an estimate alone must not permanently poison otherwise admissible work. |
+| Actual resource or isolation limit | Enforce allocator, device/kernel, container, storage, reservation, and concurrency boundaries. A temporary shortage waits with a visible dependency, bounded retry, and resume condition; an invalid request receives an actionable refusal. |
+| Authorization, contract, integrity, or exact identity | Fail closed. Retry cannot broaden grants, ignore corruption, revive cancelled/revoked intent, or silently change the model, image, topology, context, or plan. An alternative must be explicitly permitted and bound in the accepted plan. |
+| Time, attempts, and retry rate | Bound attempts and waiting dependencies; persist deadlines across restart and show the next check. Reconcile at expiry. An exhausted attempt must not permanently ban a fresh authorized request, and repeated deadline resets cannot make stuck work healthy. |
+
+Admission retains the recipe's declared system reserve, workload demand, and
+existing reservations. Do not weaken those guarantees by changing an estimate's
+severity or adding an arbitrary platform reserve. Derive caps from the resource
+they protect and report the observed value and limit. Structural counts need a
+resource basis too. All layers must agree on values the canonical plan permits;
+reject an invalid value at its owning compile/admission boundary before effects.
+
+Count each physical resource once. Distinguish measured usage, reservations,
+future promises, and estimated demand. Unified host/accelerator memory is one
+physical pool. Do not charge already materialized usage again as independent
+reserved demand, or treat a peak reservation as a measurement of bytes freed.
+Parent and exact child claims inherit and transfer ownership without competing
+with themselves; unrelated work cannot borrow their promise. A planned stop,
+expired lease, or terminal status alone does not prove capacity free. Reconcile
+the exact effects before releasing claims, including after cancellation and
+supersession. Preview, admission, and explanation use the same accounting owner.
+
+## Shared decisions and truthful operator experience
+
+The Controller owns planning, admission, orchestration, and durable progress.
+CLI and web consume the same typed decisions, receipts, and recovery semantics.
+No client adds an independent planner, admission predicate, or scheduler.
+Define named decision conditions once and derive the outcome and its
+explanation from them. Review binds exact effects and identities; acceptance
+revalidates them, and execution cannot silently expand reviewed consent.
+
+Every operation explains its phase, measured progress, meaningful cause,
+waiting dependency and owner, next attempt, deadline, and any required operator
+action where applicable. Unknown, absent, zero, waiting, refused, and complete
+remain distinct. Preserve safe typed causes and correlation identity across
+helper, agent, Controller, and clients under the [error policy](error-reporting.md).
+Do not hide the cause through truncation or invent progress, success, or an ETA.
+
+Persist request identity before effects. Lost submission responses require
+reconciliation under that identity; reconnecting follows the same operation.
+A client timeout, disconnect, or Ctrl-C stops observation. Remote cancellation
+is explicit and retains authorization, fencing, and cleanup requirements.
+Read-only views neither advance nor block the durable work they observe.
+
+Completion is the connected, authorized user workflow through its actual
+producers, storage, workers, and consumers, including eventual recovery after
+injected faults clear. Verify the meaningful boundary and report missing
+evidence. Isolated component checks or a written handover cannot close an
+unfinished integration boundary, and repository verification cannot substitute
+for accepted publication, deployment, or physical acceptance.
+
 ## Security is fail-closed and least-authority
 
 - `PermissionDenied` during a directory scan is never treated as an absent
@@ -134,6 +200,11 @@ recipes reproducible rather than to restrict them.
 - A recipe binds model, runtime, topology, capacity, source, and qualification
   facts to immutable identities, so "any model" means one exact, comparable
   artifact set rather than a loose configuration.
+- Runnable, cache-ready, and physically qualified are separate claims. A
+  structurally valid candidate may proceed through normal authorization,
+  capacity, and exact-cache admission without prior physical qualification;
+  its unproven status remains visible. Missing qualification alone is not a
+  reason to reject an otherwise admissible candidate.
 - The NAS/Controller cache is the authority for what a profile may place.
   Missing assets are actionable blockers with a prepare-cache action; they are
   never deferred to a Spark.
