@@ -242,6 +242,18 @@ def _node(node: Mapping[str, object], *, detail: bool, placements: bool = True) 
             _reasons([run["degraded_reason"]], subject=name)
     if detail:
         _field("Lifecycle", node.get("lifecycle"))
+        provenance = _optional(node.get("provenance"), "provenance")
+        if provenance:
+            invalid = _records(provenance, "invalid_operation_evidence")
+            omitted = provenance.get("invalid_operation_evidence_omitted_count")
+            if type(omitted) is not int or omitted < 0:
+                raise ValueError("invalid evidence omitted count is invalid")
+            count = len(invalid) + omitted
+            if count:
+                _warn(
+                    f"Deployment history: {count} invalid historical evidence records; "
+                    "use --json to inspect the reported details."
+                )
         for key, value in _object(node.get("labels", {}), "labels").items():
             _field("Label", f"{key}={_text(value)}")
         installed = _records(node, "installed")
