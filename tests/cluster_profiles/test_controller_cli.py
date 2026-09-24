@@ -27,6 +27,8 @@ from cluster_profiles.generated_control.models.fleet_profile_endpoints_view impo
     FleetProfileEndpointsView,
 )
 
+_REVIEW_DIGEST = "b" * 64
+
 
 def _subparser_choices(
     parser: argparse.ArgumentParser,
@@ -110,7 +112,7 @@ class FakeClient:
             path,
         )
         selector_path = re.fullmatch(
-            r"/api/(model|recipe)/[^/]+(?:/(download|remove))?", path
+            r"/api/(model|recipe)/[^/]+(?:/(download|remove|remove-review))?", path
         )
         operation_path = re.fullmatch(
             r"/api/(model|recipe)/(operations|requests)/[^/]+(?:/cancel)?", path
@@ -191,6 +193,14 @@ class FakeClient:
                 }
             elif selector_path is not None and selector_path.group(2) is None:
                 assert query is None or set(query) <= {"technical"}
+            elif (
+                selector_path is not None and selector_path.group(2) == "remove-review"
+            ):
+                if selector_path.group(1) == "recipe":
+                    assert query is not None and set(query) == {"with_model"}
+                    assert type(query["with_model"]) is bool
+                else:
+                    assert query is None
             elif operation_path is not None:
                 assert query is None
             elif path.startswith("/api/jobs/"):
@@ -237,11 +247,33 @@ class FakeClient:
         }:
             assert isinstance(payload, dict)
             if selector_path.group(1) == "model" and selector_path.group(2) == "remove":
-                validate_control_document("ModelCacheRemovalRequest", payload)
-            else:
-                assert set(payload) <= {"schema_version", "request_key", "with_model"}
+                assert set(payload) == {
+                    "schema_version",
+                    "request_key",
+                    "model_content_sha256",
+                    "review_digest",
+                }
                 assert payload["schema_version"] == 2
                 uuid.UUID(payload["request_key"])
+                assert re.fullmatch(r"[0-9a-f]{64}", payload["model_content_sha256"])
+                assert re.fullmatch(r"[0-9a-f]{64}", payload["review_digest"])
+            else:
+                assert set(payload) <= {
+                    "schema_version",
+                    "request_key",
+                    "with_model",
+                    "review_digest",
+                }
+                assert payload["schema_version"] == 2
+                uuid.UUID(payload["request_key"])
+                if selector_path.group(2) == "remove":
+                    assert set(payload) == {
+                        "schema_version",
+                        "request_key",
+                        "with_model",
+                        "review_digest",
+                    }
+                    assert re.fullmatch(r"[0-9a-f]{64}", payload["review_digest"])
             if selector_path.group(1) == "model":
                 assert "with_model" not in payload
             if selector_path.group(2) == "download":
@@ -341,9 +373,33 @@ def _recipe_removal_receipt(
         "operation_id": "11111111-1111-4111-8111-111111111121",
         "recipe_revision_id": "revision-1",
         "with_model": with_model,
+        "review_digest": "b" * 64,
         "progress": {"phase": "queued"},
         "reclaimed_bytes": 0,
         "state": "queued",
+    }
+
+
+def _removal_review(
+    noun: str,
+    selector: str,
+    *,
+    model_digest: str | None = None,
+    with_model: bool | None = None,
+) -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "action": "remove",
+        "resource_kind": noun,
+        "selector": selector,
+        "target_identity": model_digest or "revision-1",
+        "with_model": with_model,
+        "assets": [],
+        "references": [],
+        "active_work": [],
+        "blockers": [],
+        "observed_at": "2026-09-24T10:00:00Z",
+        "review_digest": "b" * 64,
     }
 
 
@@ -685,18 +741,25 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
     client = FakeClient(
         {
             ("GET", "/api/model/qwen"): model_detail,
+            ("GET", "/api/model/qwen/remove-review"): _removal_review(
+                "model", "qwen", model_digest=model_digest
+            ),
             ("POST", "/api/model/qwen/remove"): {
                 "schema_version": 2,
                 "action": "remove",
                 "selector": "qwen",
                 "request_key": request_key,
                 "model_content_sha256": model_digest,
+                "review_digest": _REVIEW_DIGEST,
                 "state": "cancelled",
                 "operation_id": model_operation_id,
                 "phase": "completed",
                 "progress": {"phase": "completed"},
                 "transferred_bytes": 0,
             },
+            ("GET", "/api/recipe/vision/remove-review"): _removal_review(
+                "recipe", "vision", with_model=True
+            ),
             ("POST", "/api/recipe/vision/remove"): {
                 "schema_version": 2,
                 "state": "accepted",
@@ -706,6 +769,7 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "operation_id": recipe_operation_id,
                 "recipe_revision_id": "revision-1",
                 "with_model": True,
+                "review_digest": _REVIEW_DIGEST,
                 "progress": {"phase": "completed"},
                 "reclaimed_bytes": 0,
             },
@@ -724,26 +788,48 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
         }
     )
     model_status, model_receipt = run(
-        ("model", "remove", "qwen", "--yes", "--detach", "--json"), client
+        (
+            "model",
+            "remove",
+            "qwen",
+            "--review-digest",
+            _REVIEW_DIGEST,
+            "--yes",
+            "--detach",
+            "--json",
+        ),
+        client,
     )
     assert model_status == 2 and model_receipt["model_content_sha256"] == model_digest
     assert [call[:2] for call in client.calls[:2]] == [
-        ("GET", "/api/model/qwen"),
+        ("GET", "/api/model/qwen/remove-review"),
         ("POST", "/api/model/qwen/remove"),
     ]
     assert client.calls[1][2] == {
         "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
         "model_content_sha256": model_digest,
+        "review_digest": _REVIEW_DIGEST,
     }
     assert (
-        run(("recipe", "remove", "vision", "--with-model", "--yes", "--json"), client)[
-            0
-        ]
+        run(
+            (
+                "recipe",
+                "remove",
+                "vision",
+                "--with-model",
+                "--review-digest",
+                _REVIEW_DIGEST,
+                "--yes",
+                "--json",
+            ),
+            client,
+        )[0]
         == 0
     )
-    assert client.calls[2][1] == "/api/recipe/vision/remove"
-    recipe_remove = client.calls[2][2]
+    assert client.calls[2][1] == "/api/recipe/vision/remove-review"
+    assert client.calls[3][1] == "/api/recipe/vision/remove"
+    recipe_remove = client.calls[3][2]
     assert recipe_remove is not None
     assert recipe_remove["with_model"] is True
 
@@ -752,13 +838,14 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
     selector = "qwen"
     request_key = "11111111-1111-4111-8111-111111111111"
     operation_id = "11111111-1111-4111-8111-111111111121"
-    detail, digest = _model_detail(selector)
+    _detail, digest = _model_detail(selector)
     receipt = {
         "schema_version": 2,
         "action": "remove",
         "selector": selector,
         "request_key": request_key,
         "model_content_sha256": digest,
+        "review_digest": _REVIEW_DIGEST,
         "operation_id": operation_id,
         "state": "queued",
         "phase": "queued",
@@ -773,7 +860,10 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
                 ControlNotFound(404, "request was not accepted"),
                 receipt,
             ],
-            ("GET", f"/api/model/{selector}"): detail,
+            (
+                "GET",
+                f"/api/model/{selector}/remove-review",
+            ): _removal_review("model", selector, model_digest=digest),
             ("POST", remove): ControlTransportError("accepted response was lost"),
         }
     )
@@ -784,6 +874,8 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
             "remove",
             selector,
             "--yes",
+            "--review-digest",
+            _REVIEW_DIGEST,
             "--request-key",
             request_key,
             "--detach",
@@ -795,7 +887,7 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
     assert status == 0 and result == receipt
     assert [call[:2] for call in client.calls] == [
         ("GET", lookup),
-        ("GET", f"/api/model/{selector}"),
+        ("GET", f"/api/model/{selector}/remove-review"),
         ("POST", remove),
         ("GET", lookup),
     ]
@@ -804,6 +896,7 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
         "schema_version": 2,
         "request_key": request_key,
         "model_content_sha256": digest,
+        "review_digest": _REVIEW_DIGEST,
     }
 
 
@@ -818,6 +911,7 @@ def test_model_remove_reconnects_to_existing_key_before_resolving_current_head()
         "selector": selector,
         "request_key": request_key,
         "model_content_sha256": "a" * 64,
+        "review_digest": _REVIEW_DIGEST,
         "operation_id": "11111111-1111-4111-8111-111111111121",
         "state": "succeeded",
         "phase": "completed",
@@ -857,9 +951,11 @@ def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() ->
                 ControlNotFound(404, "request was not accepted"),
                 receipt,
             ],
-            ("POST", remove): ControlTransportError(
-                "accepted response was lost"
-            ),
+            (
+                "GET",
+                f"/api/recipe/{selector}/remove-review",
+            ): _removal_review("recipe", selector, with_model=False),
+            ("POST", remove): ControlTransportError("accepted response was lost"),
         }
     )
 
@@ -870,6 +966,8 @@ def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() ->
             selector,
             "--keep-model",
             "--yes",
+            "--review-digest",
+            _REVIEW_DIGEST,
             "--request-key",
             request_key,
             "--detach",
@@ -881,13 +979,15 @@ def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() ->
     assert status == 0 and result == receipt
     assert [call[:2] for call in client.calls] == [
         ("GET", lookup),
+        ("GET", f"/api/recipe/{selector}/remove-review"),
         ("POST", remove),
         ("GET", lookup),
     ]
-    assert client.calls[1][2] == {
+    assert client.calls[2][2] == {
         "schema_version": 2,
         "request_key": request_key,
         "with_model": False,
+        "review_digest": _REVIEW_DIGEST,
     }
 
 
@@ -987,6 +1087,7 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
             "selector": selector,
             "request_key": request_key,
             "model_content_sha256": model_digest,
+            "review_digest": _REVIEW_DIGEST,
             "operation_id": operation_id,
             "state": "succeeded",
             "phase": "completed",
@@ -1002,6 +1103,7 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
             "operation_id": operation_id,
             "recipe_revision_id": "revision-1",
             "with_model": False,
+            "review_digest": _REVIEW_DIGEST,
             "state": "succeeded",
             "progress": {"phase": "completed"},
             "reclaimed_bytes": 0,
@@ -1011,19 +1113,54 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
     model_receipt_only_reconnect = (
         noun == "model" and bad_field != "model_content_sha256"
     )
-    args = (
-        (
-            (noun, "remove", selector, "--yes", "--request-key", request_key, "--json")
+    if noun == "model":
+        args = (
+            (
+                noun,
+                "remove",
+                selector,
+                "--yes",
+                "--request-key",
+                request_key,
+                "--review-digest",
+                _REVIEW_DIGEST,
+                "--json",
+            )
             if model_receipt_only_reconnect
-            else (noun, "remove", selector, "--yes", "--json")
+            else (
+                noun,
+                "remove",
+                selector,
+                "--yes",
+                "--review-digest",
+                _REVIEW_DIGEST,
+                "--json",
+            )
         )
-        if noun == "model"
-        else (noun, "remove", selector, "--keep-model", "--yes", "--json")
-    )
+    else:
+        args = (
+            noun,
+            "remove",
+            selector,
+            "--keep-model",
+            "--yes",
+            "--review-digest",
+            _REVIEW_DIGEST,
+            "--json",
+        )
     client = FakeClient({("POST", path): receipt})
     if noun == "model":
         client.responses[("GET", f"/api/model/{selector}")] = model_detail
         client.responses[("GET", f"/api/model/requests/{request_key}")] = receipt
+        if not model_receipt_only_reconnect:
+            client.responses[("GET", f"/api/model/{selector}/remove-review")] = (
+                _removal_review("model", selector, model_digest=model_digest)
+            )
+    else:
+        client.responses[("GET", f"/api/recipe/{selector}/remove-review")] = (
+            _removal_review("recipe", selector, with_model=False)
+        )
+        client.responses[("GET", f"/api/recipe/requests/{request_key}")] = receipt
 
     status, payload = run(args, client)
 
@@ -1032,7 +1169,7 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
     if bad_field == "model_content_sha256":
         assert isinstance(error, str) and "acceptance is unknown" in error
         expected_calls = [
-            ("GET", f"/api/model/{selector}"),
+            ("GET", f"/api/model/{selector}/remove-review"),
             ("POST", path),
             ("GET", f"/api/model/requests/{request_key}"),
         ]
@@ -1040,6 +1177,7 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
         if noun == "recipe":
             assert isinstance(error, str) and "acceptance is unknown" in error
             expected_calls = [
+                ("GET", f"/api/recipe/{selector}/remove-review"),
                 ("POST", path),
                 ("GET", f"/api/recipe/requests/{request_key}"),
             ]
@@ -1052,8 +1190,8 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
         assert isinstance(submission, dict)
         assert submission["acceptance"] == "not_submitted"
     if noun == "recipe":
-        request = client.calls[0][2]
-        assert request is not None and request["with_model"] is False
+        query = client.calls[0][3]
+        assert query == {"with_model": False}
 
 
 def test_fleet_remove_resolves_and_confirms_stable_node_before_post(
@@ -2829,7 +2967,7 @@ def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() 
     status, payload = run(("model", "remove", "qwen", "--json"), model)
     removal_error = payload["error"]
     assert isinstance(removal_error, str)
-    assert status == 2 and "requires --yes" in removal_error
+    assert status == 2 and "--review-digest SHA256 --yes" in removal_error
     assert model.calls == []
 
     recipe = FakeClient({})

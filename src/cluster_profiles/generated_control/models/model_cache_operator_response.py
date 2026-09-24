@@ -52,6 +52,7 @@ class ModelCacheOperatorResponse:
             operation_id (Union[None, Unset, str]):
             preserved (Union[Unset, list[str]]):
             result (Union['ModelCacheDownloadResult', 'ModelCacheRemovalResult', None, Unset]):
+            review_digest (Union[None, Unset, str]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
             total_bytes (Union[None, Unset, int]):
      """
@@ -72,6 +73,7 @@ class ModelCacheOperatorResponse:
     operation_id: Union[None, Unset, str] = UNSET
     preserved: Union[Unset, list[str]] = UNSET
     result: Union['ModelCacheDownloadResult', 'ModelCacheRemovalResult', None, Unset] = UNSET
+    review_digest: Union[None, Unset, str] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
     total_bytes: Union[None, Unset, int] = UNSET
 
@@ -161,6 +163,12 @@ class ModelCacheOperatorResponse:
         else:
             result = self.result
 
+        review_digest: Union[None, Unset, str]
+        if isinstance(self.review_digest, Unset):
+            review_digest = UNSET
+        else:
+            review_digest = self.review_digest
+
         schema_version = self.schema_version
 
         total_bytes: Union[None, Unset, int]
@@ -199,6 +207,8 @@ class ModelCacheOperatorResponse:
             field_dict["preserved"] = preserved
         if result is not UNSET:
             field_dict["result"] = result
+        if review_digest is not UNSET:
+            field_dict["review_digest"] = review_digest
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
         if total_bytes is not UNSET:
@@ -348,6 +358,16 @@ class ModelCacheOperatorResponse:
         result = _parse_result(d.pop("result", UNSET))
 
 
+        def _parse_review_digest(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        review_digest = _parse_review_digest(d.pop("review_digest", UNSET))
+
+
         schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
@@ -379,6 +399,7 @@ class ModelCacheOperatorResponse:
             operation_id=operation_id,
             preserved=preserved,
             result=result,
+            review_digest=review_digest,
             schema_version=schema_version,
             total_bytes=total_bytes,
         )

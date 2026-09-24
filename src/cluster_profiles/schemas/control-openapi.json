@@ -1761,6 +1761,282 @@
         "title": "BuildPatch",
         "type": "object"
       },
+      "CacheRemovalAsset": {
+        "additionalProperties": false,
+        "description": "One exact cache identity and its owner-reported storage condition.",
+        "properties": {
+          "availability": {
+            "enum": [
+              "verified",
+              "partial",
+              "missing",
+              "unknown"
+            ],
+            "title": "Availability",
+            "type": "string"
+          },
+          "available_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Bytes"
+          },
+          "disposition": {
+            "enum": [
+              "remove",
+              "retain-shared"
+            ],
+            "title": "Disposition",
+            "type": "string"
+          },
+          "expected_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Bytes"
+          },
+          "kind": {
+            "enum": [
+              "model-set",
+              "model-object",
+              "runtime-image"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "sha256",
+          "availability",
+          "disposition"
+        ],
+        "title": "CacheRemovalAsset",
+        "type": "object"
+      },
+      "CacheRemovalBlocker": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,95}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "recovery_actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recovery Actions",
+            "type": "array"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "retryable"
+        ],
+        "title": "CacheRemovalBlocker",
+        "type": "object"
+      },
+      "CacheRemovalFinding": {
+        "additionalProperties": false,
+        "description": "One existing owner predicate's exact reference or active-work finding.",
+        "properties": {
+          "asset_kind": {
+            "enum": [
+              "model-set",
+              "model-object",
+              "runtime-image"
+            ],
+            "title": "Asset Kind",
+            "type": "string"
+          },
+          "asset_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Asset Sha256",
+            "type": "string"
+          },
+          "classification": {
+            "enum": [
+              "saved-reference",
+              "active-work"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "owner_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "maxLength": 96,
+            "minLength": 1,
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "classification",
+          "asset_kind",
+          "asset_sha256",
+          "owner_kind",
+          "owner_id",
+          "state",
+          "detail",
+          "reason"
+        ],
+        "title": "CacheRemovalFinding",
+        "type": "object"
+      },
+      "CacheRemovalReview": {
+        "additionalProperties": false,
+        "description": "A complete review whose digest is verified during model validation.",
+        "properties": {
+          "action": {
+            "const": "remove",
+            "default": "remove",
+            "title": "Action",
+            "type": "string"
+          },
+          "active_work": {
+            "items": {
+              "$ref": "#/components/schemas/CacheRemovalFinding"
+            },
+            "title": "Active Work",
+            "type": "array"
+          },
+          "assets": {
+            "items": {
+              "$ref": "#/components/schemas/CacheRemovalAsset"
+            },
+            "title": "Assets",
+            "type": "array"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/CacheRemovalBlocker"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "observed_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Observed At",
+            "type": "string"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/CacheRemovalFinding"
+            },
+            "title": "References",
+            "type": "array"
+          },
+          "resource_kind": {
+            "enum": [
+              "model",
+              "recipe"
+            ],
+            "title": "Resource Kind",
+            "type": "string"
+          },
+          "review_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Review Digest",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selector": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "target_identity": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Target Identity",
+            "type": "string"
+          },
+          "with_model": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "With Model"
+          }
+        },
+        "required": [
+          "resource_kind",
+          "selector",
+          "target_identity",
+          "with_model",
+          "assets",
+          "references",
+          "active_work",
+          "blockers",
+          "observed_at",
+          "review_digest"
+        ],
+        "title": "CacheRemovalReview",
+        "type": "object"
+      },
       "CancelRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9676,6 +9952,18 @@
             ],
             "title": "Result"
           },
+          "review_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Digest"
+          },
           "schema_version": {
             "const": 2,
             "default": 2,
@@ -9746,6 +10034,11 @@
             "title": "Request Key",
             "type": "string"
           },
+          "review_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Review Digest",
+            "type": "string"
+          },
           "schema_version": {
             "const": 2,
             "default": 2,
@@ -9755,7 +10048,8 @@
         },
         "required": [
           "request_key",
-          "model_content_sha256"
+          "model_content_sha256",
+          "review_digest"
         ],
         "title": "ModelCacheRemovalRequest",
         "type": "object"
@@ -14660,6 +14954,11 @@
             "title": "Request Key",
             "type": "string"
           },
+          "review_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Review Digest",
+            "type": "string"
+          },
           "schema_version": {
             "const": 2,
             "default": 2,
@@ -14667,13 +14966,14 @@
             "type": "integer"
           },
           "with_model": {
-            "default": false,
             "title": "With Model",
             "type": "boolean"
           }
         },
         "required": [
-          "request_key"
+          "request_key",
+          "with_model",
+          "review_digest"
         ],
         "title": "RecipeOperatorRequest",
         "type": "object"
@@ -14762,6 +15062,11 @@
             "title": "Request Key",
             "type": "string"
           },
+          "review_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Review Digest",
+            "type": "string"
+          },
           "schema_version": {
             "const": 2,
             "default": 2,
@@ -14798,6 +15103,7 @@
           "request_key",
           "operation_id",
           "recipe_revision_id",
+          "review_digest",
           "with_model",
           "state",
           "progress",
@@ -27120,6 +27426,105 @@
         "summary": "Remove"
       }
     },
+    "/api/model/{selector}/remove-review": {
+      "get": {
+        "operationId": "reviewModelRemoval",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "selector",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Selector",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheRemovalReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Review Removal"
+      }
+    },
     "/api/operations": {
       "get": {
         "operationId": "listOperations",
@@ -29691,6 +30096,114 @@
           }
         ],
         "summary": "Remove"
+      }
+    },
+    "/api/recipe/{selector}/remove-review": {
+      "get": {
+        "operationId": "reviewRecipeRemoval",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "selector",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Selector",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "with_model",
+            "required": true,
+            "schema": {
+              "title": "With Model",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheRemovalReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Review Remove"
       }
     }
   }

@@ -25,11 +25,13 @@ class ModelCacheRemovalRequest:
         Attributes:
             model_content_sha256 (str):
             request_key (str):
+            review_digest (str):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
     model_content_sha256: str
     request_key: str
+    review_digest: str
     schema_version: Union[Literal[2], Unset] = 2
 
 
@@ -41,6 +43,8 @@ class ModelCacheRemovalRequest:
 
         request_key = self.request_key
 
+        review_digest = self.review_digest
+
         schema_version = self.schema_version
 
 
@@ -49,6 +53,7 @@ class ModelCacheRemovalRequest:
         field_dict.update({
             "model_content_sha256": model_content_sha256,
             "request_key": request_key,
+            "review_digest": review_digest,
         })
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
@@ -64,6 +69,8 @@ class ModelCacheRemovalRequest:
 
         request_key = d.pop("request_key")
 
+        review_digest = d.pop("review_digest")
+
         schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
@@ -71,6 +78,7 @@ class ModelCacheRemovalRequest:
         model_cache_removal_request = cls(
             model_content_sha256=model_content_sha256,
             request_key=request_key,
+            review_digest=review_digest,
             schema_version=schema_version,
         )
 

@@ -9,9 +9,9 @@ from typing import cast
 
 import pytest
 from sqlalchemy import Engine, Table, and_, or_, select
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
+from vonk_control.cache_removal_review import CacheRemovalReview
 from vonk_control.model_cache import (
     CacheOperationView,
     ModelCacheConflict,
@@ -29,7 +29,7 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import ModelDefinition, content_sha256
 
-from .test_model_cache import _artifact, _canonical_model, _download
+from .test_model_cache import _artifact, _canonical_model, _download, _remove_model
 
 
 def _removal_service(
@@ -169,20 +169,26 @@ def test_model_removal_reference_scan_failure_rolls_back_and_same_key_recovers(
 
     try:
         # Remove the actual owner tables queried by the production scanner.
-        # The next removal attempt reaches the real `FleetProfile` SELECT and
-        # receives PostgreSQL's undefined-table error inside the owner
-        # transaction; no removal intent or fence may survive that rollback.
+        # The owner must turn this incomplete reference observation into a
+        # typed blocker; it may not treat the unavailable scan as an empty set.
         cast(Table, FleetProfileApplication.__table__).drop(postgres_engine)
         cast(Table, FleetProfile.__table__).drop(postgres_engine)
-        with pytest.raises(ProgrammingError) as unavailable:
-            service.remove_model_selector(
+        with pytest.raises(ModelCacheConflict) as unavailable:
+            _remove_model(
+                service,
                 selector,
                 actor="operator",
                 request_key=request_key,
                 model_content_sha256=digest,
             )
-        assert getattr(unavailable.value.orig, "sqlstate", None) == "42P01"
-        assert "fleet_profiles" in str(unavailable.value).lower()
+        assert unavailable.value.code == "artifact.reference_scan_failed"
+        scan_review = service.review_model_removal(selector)
+        assert any(
+            blocker.code == "artifact.reference_scan_failed"
+            and blocker.retryable
+            and "retry" in blocker.recovery_actions
+            for blocker in scan_review.blockers
+        )
 
         with sessions() as session:
             assert (
@@ -214,7 +220,8 @@ def test_model_removal_reference_scan_failure_rolls_back_and_same_key_recovers(
         assert object_path.read_bytes() == b"abc"
 
         Base.metadata.create_all(postgres_engine)
-        accepted = service.remove_model_selector(
+        accepted = _remove_model(
+            service,
             selector,
             actor="operator",
             request_key=request_key,
@@ -254,7 +261,8 @@ def test_accepted_model_request_prevents_removal_before_any_bytes_change(
 
     try:
         with pytest.raises(ModelCacheConflict) as refused:
-            service.remove_model_selector(
+            _remove_model(
+                service,
                 selector,
                 actor="operator",
                 request_key="00000000-0000-4000-8000-000000000113",
@@ -312,12 +320,32 @@ def test_removing_one_set_leaves_shared_object_open_for_second_model(
         assert {item.artifact_set_sha256 for item in memberships} == {set_a, set_b}
         assert {item.artifact_sha256 for item in memberships} == {object_digest}
 
+        review = service.review_model_removal(selector_a)
+        shared_findings = [
+            finding
+            for finding in review.references
+            if finding.asset_kind == "model-object"
+            and finding.asset_sha256 == object_digest
+        ]
+        assert [
+            (finding.owner_kind, finding.owner_id, finding.state)
+            for finding in shared_findings
+        ] == [("model-cache-set-membership", set_b, "cached")]
+        assert review.blockers == []
+        assert any(
+            asset.kind == "model-object"
+            and asset.sha256 == object_digest
+            and asset.disposition == "retain-shared"
+            for asset in review.assets
+        )
+
     try:
         removing_a = service.remove_model_selector(
             selector_a,
             actor="operator",
             request_key="00000000-0000-4000-8000-000000000123",
             model_content_sha256=digest_a,
+            review_digest=review.review_digest,
         )
         assert removing_a.state == "queued"
 
@@ -348,6 +376,72 @@ def test_removing_one_set_leaves_shared_object_open_for_second_model(
                 )
                 is not None
             )
+        assert object_path.read_bytes() == b"abc"
+    finally:
+        service.close()
+
+
+def test_sibling_membership_change_after_review_refuses_model_removal(
+    postgres_engine: Engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    model_a = _one_model(tmp_path, "shared-review-a")
+    model_b = _one_model(tmp_path, "shared-review-b")
+    selector_a = _register_model(sessions, model_a)
+    _register_model(sessions, model_b)
+    digest_a, _artifact_a, set_a = _seed_model(
+        service,
+        tmp_path,
+        model_a,
+        "00000000-0000-4000-8000-000000000125",
+    )
+    _digest_b, _artifact_b, set_b = _seed_model(
+        service,
+        tmp_path,
+        model_b,
+        "00000000-0000-4000-8000-000000000126",
+    )
+    review = service.review_model_removal(selector_a)
+    object_digest = hashlib.sha256(b"abc").hexdigest()
+    object_path = service._object_path(object_digest)
+    original_review = service.review_model_removal
+
+    def review_then_change_sibling(selector: str) -> CacheRemovalReview:
+        current = original_review(selector)
+        with sessions.begin() as session:
+            sibling = session.get(ModelCacheSet, set_b)
+            assert sibling is not None
+            sibling.state = "failed"
+        return current
+
+    monkeypatch.setattr(service, "review_model_removal", review_then_change_sibling)
+    try:
+        with pytest.raises(ModelCacheConflict) as stale:
+            service.remove_model_selector(
+                selector_a,
+                actor="operator",
+                request_key="00000000-0000-4000-8000-000000000127",
+                model_content_sha256=digest_a,
+                review_digest=review.review_digest,
+            )
+        assert stale.value.code == "model_cache.removal_review_stale"
+        with sessions() as session:
+            assert session.get(ModelCacheSet, set_a) is not None
+            sibling = session.get(ModelCacheSet, set_b)
+            assert sibling is not None and sibling.state == "failed"
+            assert (
+                session.scalar(
+                    select(ModelCacheOperation).where(
+                        ModelCacheOperation.request_key
+                        == "00000000-0000-4000-8000-000000000127"
+                    )
+                )
+                is None
+            )
+            gates = tuple(session.scalars(select(ArtifactLifecycleGate)))
+        assert all(gate.removal_owner_id is None for gate in gates)
         assert object_path.read_bytes() == b"abc"
     finally:
         service.close()

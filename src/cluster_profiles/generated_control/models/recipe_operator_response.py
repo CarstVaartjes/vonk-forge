@@ -37,6 +37,7 @@ class RecipeOperatorResponse:
             recipe_revision_id (str):
             reclaimed_bytes (int):
             request_key (str):
+            review_digest (str):
             selector (str):
             state (RecipeOperatorResponseState):
             with_model (bool):
@@ -55,6 +56,7 @@ class RecipeOperatorResponse:
     recipe_revision_id: str
     reclaimed_bytes: int
     request_key: str
+    review_digest: str
     selector: str
     state: RecipeOperatorResponseState
     with_model: bool
@@ -84,6 +86,8 @@ class RecipeOperatorResponse:
         reclaimed_bytes = self.reclaimed_bytes
 
         request_key = self.request_key
+
+        review_digest = self.review_digest
 
         selector = self.selector
 
@@ -141,6 +145,7 @@ class RecipeOperatorResponse:
             "recipe_revision_id": recipe_revision_id,
             "reclaimed_bytes": reclaimed_bytes,
             "request_key": request_key,
+            "review_digest": review_digest,
             "selector": selector,
             "state": state,
             "with_model": with_model,
@@ -185,6 +190,8 @@ class RecipeOperatorResponse:
         reclaimed_bytes = d.pop("reclaimed_bytes")
 
         request_key = d.pop("request_key")
+
+        review_digest = d.pop("review_digest")
 
         selector = d.pop("selector")
 
@@ -241,6 +248,7 @@ class RecipeOperatorResponse:
             recipe_revision_id=recipe_revision_id,
             reclaimed_bytes=reclaimed_bytes,
             request_key=request_key,
+            review_digest=review_digest,
             selector=selector,
             state=state,
             with_model=with_model,

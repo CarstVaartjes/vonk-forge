@@ -42,6 +42,7 @@ from vonk_forge_contracts.model import ModelReference
 
 from .artifact_lifecycle import (
     ArtifactIdentity,
+    ArtifactKind,
     ArtifactLifecycleError,
     RemovalOwnerKind,
     check_removal_fence_nowait,
@@ -54,10 +55,21 @@ from .artifact_lifecycle import (
 )
 from .artifact_reference_scan import (
     model_set_objects,
+    model_set_reference_findings,
     model_set_reference_reasons,
     require_model_sets_open,
 )
 from .bounded_json import mapping, require_integer, require_mapping, require_sequence
+from .cache_removal_review import (
+    AssetAvailability,
+    AssetDisposition,
+    CacheRemovalAsset,
+    CacheRemovalBlocker,
+    CacheRemovalFinding,
+    CacheRemovalReview,
+    CacheRemovalReviewContent,
+    seal_cache_removal_review,
+)
 from .cached_file_verification import verified_files
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
@@ -86,6 +98,7 @@ from .model_cache_contract import (
 from .model_cache_progress import cache_phase, cache_progress
 from .model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
 from .models import (
+    ArtifactLifecycleGate,
     CatalogDocumentRevision,
     FleetProfile,
     ModelCacheOperation,
@@ -377,6 +390,32 @@ class ModelCacheRemovalScope:
     memberships: tuple[tuple[str, tuple[str, ...]], ...]
     selected_objects: tuple[str, ...]
     delete_objects: tuple[str, ...]
+    shared_memberships: tuple[tuple[str, str, str], ...]
+
+
+def _scope_matches_review(
+    scope: ModelCacheRemovalScope, review: CacheRemovalReview
+) -> bool:
+    """Compare the reviewed artifact identities with the current SQL scope."""
+
+    sets = {asset.sha256 for asset in review.assets if asset.kind == "model-set"}
+    objects = {asset.sha256 for asset in review.assets if asset.kind == "model-object"}
+    delete_objects = {
+        asset.sha256
+        for asset in review.assets
+        if asset.kind == "model-object" and asset.disposition == "remove"
+    }
+    shared_memberships = {
+        (item.asset_sha256, item.owner_id, item.state)
+        for item in review.references
+        if item.owner_kind == "model-cache-set-membership"
+    }
+    return (
+        sets == set(scope.selected_sets)
+        and objects == set(scope.selected_objects)
+        and delete_objects == set(scope.delete_objects)
+        and shared_memberships == set(scope.shared_memberships)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -612,6 +651,7 @@ class CacheOperationView:
     model_content_sha256: str | None
     artifact_set_sha256: str | None
     plan_digest: str | None
+    review_digest: str | None
     progress: Mapping[str, object]
     result: ModelCacheOperationResult | None
     last_error: str | None
@@ -1797,6 +1837,7 @@ class ModelCacheService:
         actor: str,
         request_key: str,
         model_content_sha256: str,
+        review_digest: str,
     ) -> CacheOperationView:
         """Accept one exact durable removal without cancelling active work."""
 
@@ -1807,6 +1848,12 @@ class ModelCacheService:
             raise ModelCacheResolutionError(
                 "model_cache.digest_invalid",
                 "model removal requires an exact model content SHA-256",
+            )
+        supplied_review_digest = _optional_digest(review_digest)
+        if supplied_review_digest is None:
+            raise ModelCacheResolutionError(
+                "model_cache.review_digest_invalid",
+                "model removal requires the exact current review digest",
             )
         with self._session() as session:
             existing = session.scalar(
@@ -1821,7 +1868,24 @@ class ModelCacheService:
                     selector=normalized_selector,
                     model_content_sha256=digest,
                     selected_sets=None,
+                    review_digest=supplied_review_digest,
                 )
+
+        reviewed = self.review_model_removal(normalized_selector)
+        if reviewed.target_identity != digest:
+            raise ModelCacheConflict(
+                "model_cache.removal_identity_mismatch",
+                "model selector no longer resolves to the reviewed content digest",
+            )
+        if reviewed.review_digest != supplied_review_digest:
+            raise ModelCacheConflict(
+                "model_cache.removal_review_stale",
+                "model cache removal effects changed after review; review them again",
+            )
+        if reviewed.blockers:
+            first = reviewed.blockers[0]
+            raise ModelCacheConflict(first.code, first.detail)
+
         try:
             with self._lock, self._session(write=True) as session:
                 existing = session.scalar(
@@ -1836,6 +1900,7 @@ class ModelCacheService:
                         selector=normalized_selector,
                         model_content_sha256=digest,
                         selected_sets=None,
+                        review_digest=supplied_review_digest,
                     )
                 resolved_digest = self._resolve_model_selector_in_session(
                     session, normalized_selector
@@ -1845,6 +1910,21 @@ class ModelCacheService:
                         "model_cache.removal_identity_mismatch",
                         "model selector no longer resolves to the reviewed content digest",
                     )
+                selected_sets = tuple(
+                    session.scalars(
+                        select(ModelCacheSet.artifact_set_sha256)
+                        .where(ModelCacheSet.model_content_sha256 == digest)
+                        .order_by(ModelCacheSet.artifact_set_sha256)
+                    )
+                )
+                expected_scope = self._model_removal_scope_for_sets(
+                    session, selected_sets
+                )
+                if not _scope_matches_review(expected_scope, reviewed):
+                    raise ModelCacheConflict(
+                        "model_cache.removal_review_stale",
+                        "model cache removal effects changed after review; review them again",
+                    )
                 operation = self._accept_model_removal(
                     session,
                     actor=actor,
@@ -1852,6 +1932,8 @@ class ModelCacheService:
                     selector=normalized_selector,
                     model_content_sha256=digest,
                     selected_sets=None,
+                    review_digest=supplied_review_digest,
+                    expected_scope=expected_scope,
                 )
                 operation_id = operation.id
         except IntegrityError:
@@ -1863,11 +1945,263 @@ class ModelCacheService:
                 selector=normalized_selector,
                 model_content_sha256=digest,
                 selected_sets=None,
+                review_digest=supplied_review_digest,
             )
             if replay is None:
                 raise
             return replay
         return self.get_operation(operation_id)
+
+    def review_model_removal(self, selector: str) -> CacheRemovalReview:
+        """Return the current owner-derived model removal impact without writes."""
+
+        normalized_selector = _model_selector(selector).casefold()
+        with self._session() as session:
+            digest = self._resolve_model_selector_in_session(
+                session, normalized_selector
+            )
+            selected_sets = tuple(
+                session.scalars(
+                    select(ModelCacheSet.artifact_set_sha256)
+                    .where(ModelCacheSet.model_content_sha256 == digest)
+                    .order_by(ModelCacheSet.artifact_set_sha256)
+                )
+            )
+            scope = self._model_removal_scope_for_sets(session, selected_sets)
+            findings: list[CacheRemovalFinding] = []
+            blockers: list[CacheRemovalBlocker] = []
+            try:
+                with session.begin_nested():
+                    by_set = model_set_reference_findings(session, scope.selected_sets)
+            except ArtifactLifecycleError as error:
+                by_set = {}
+                blockers.append(
+                    CacheRemovalBlocker(
+                        code=error.code,
+                        detail=error.detail,
+                        retryable=error.retryable,
+                        recovery_actions=["retry"] if error.retryable else [],
+                    )
+                )
+            try:
+                with session.begin_nested():
+                    active_removals = self.removal_owner_findings_in_session(
+                        session, scope
+                    )
+            except ArtifactLifecycleError as error:
+                active_removals = ()
+                blockers.append(
+                    CacheRemovalBlocker(
+                        code=error.code,
+                        detail=error.detail,
+                        retryable=error.retryable,
+                        recovery_actions=["retry"] if error.retryable else [],
+                    )
+                )
+            for entries in by_set.values():
+                for entry in entries:
+                    finding = CacheRemovalFinding(
+                        classification=entry.classification,
+                        asset_kind=entry.asset.kind,
+                        asset_sha256=entry.asset.sha256,
+                        owner_kind=entry.owner_kind,
+                        owner_id=entry.owner_id,
+                        state=entry.state,
+                        detail=entry.detail,
+                        reason=entry.reason,
+                    )
+                    findings.append(finding)
+                    blockers.append(
+                        CacheRemovalBlocker(
+                            code="model_cache.removal_referenced",
+                            detail=entry.reason,
+                            retryable=False,
+                            recovery_actions=["resolve_reference"],
+                        )
+                    )
+            findings.extend(active_removals)
+            findings.extend(self.retained_model_object_findings(scope))
+            blockers.extend(
+                CacheRemovalBlocker(
+                    code="artifact.deletion_in_progress",
+                    detail=finding.reason,
+                    retryable=True,
+                    recovery_actions=["observe_removal_operation"],
+                )
+                for finding in active_removals
+            )
+
+        assets = self.removal_asset_status(scope)
+        content = CacheRemovalReviewContent(
+            resource_kind="model",
+            selector=normalized_selector,
+            target_identity=digest,
+            with_model=None,
+            assets=list(assets),
+            references=[
+                item for item in findings if item.classification == "saved-reference"
+            ],
+            active_work=[
+                item for item in findings if item.classification == "active-work"
+            ],
+            blockers=blockers,
+            observed_at=self._clock().isoformat(),
+        )
+        review = seal_cache_removal_review(content)
+        return review
+
+    def removal_owner_findings_in_session(
+        self, session: Session, scope: ModelCacheRemovalScope
+    ) -> tuple[CacheRemovalFinding, ...]:
+        """Project the exact accepted removal owners fencing this model scope.
+
+        The lifecycle gate is the authority for a live deletion fence. Each
+        owner is then validated against its durable typed operation intent so
+        stale or malformed gate rows fail closed instead of disappearing from
+        review output.
+        """
+
+        identities = {("model-set", digest) for digest in scope.selected_sets} | {
+            ("model-object", digest) for digest in scope.delete_objects
+        }
+        if not identities:
+            return ()
+        digests = {digest for _kind, digest in identities}
+        gates = tuple(
+            session.scalars(
+                select(ArtifactLifecycleGate)
+                .where(
+                    ArtifactLifecycleGate.artifact_kind.in_(
+                        ("model-set", "model-object")
+                    ),
+                    ArtifactLifecycleGate.artifact_sha256.in_(digests),
+                    ArtifactLifecycleGate.removal_owner_id.is_not(None),
+                )
+                .order_by(
+                    ArtifactLifecycleGate.artifact_kind,
+                    ArtifactLifecycleGate.artifact_sha256,
+                )
+            )
+        )
+        selected_gates = [
+            gate
+            for gate in gates
+            if (gate.artifact_kind, gate.artifact_sha256) in identities
+        ]
+        findings: list[CacheRemovalFinding] = []
+        owners: dict[str, tuple[ModelCacheOperation, dict[str, object]]] = {}
+        for gate in selected_gates:
+            owner_id = gate.removal_owner_id
+            if (
+                gate.removal_owner_kind != "model-cache-operation"
+                or not isinstance(owner_id, str)
+                or not owner_id
+                or not isinstance(gate.removal_fence, str)
+                or not gate.removal_fence
+            ):
+                raise ArtifactLifecycleError(
+                    "artifact.removal_owner_unresolved",
+                    "a selected cache identity has an unreadable removal owner; retry after the owner is reconciled",
+                    retryable=True,
+                )
+            cached = owners.get(owner_id)
+            if cached is None:
+                operation = session.get(ModelCacheOperation, owner_id)
+                if operation is None or operation.kind != "remove":
+                    raise ArtifactLifecycleError(
+                        "artifact.removal_owner_unresolved",
+                        "a selected cache identity has no readable removal operation owner",
+                        retryable=True,
+                    )
+                try:
+                    payload = _validated_operation_payload(operation)
+                except (ModelCacheError, TypeError, ValueError) as error:
+                    raise ArtifactLifecycleError(
+                        "artifact.removal_owner_invalid",
+                        "a selected cache identity has a malformed removal owner",
+                        retryable=True,
+                    ) from error
+                if payload.get("removal_fence") != gate.removal_fence:
+                    raise ArtifactLifecycleError(
+                        "artifact.removal_owner_invalid",
+                        "a selected cache identity removal fence disagrees with its owner",
+                        retryable=True,
+                    )
+                cached = (operation, payload)
+                owners[owner_id] = cached
+            operation, payload = cached
+            selected = payload.get("selected")
+            delete_objects = payload.get("delete_objects")
+            expected_target = (
+                selected if gate.artifact_kind == "model-set" else delete_objects
+            )
+            if (
+                not isinstance(expected_target, list)
+                or gate.artifact_sha256 not in expected_target
+            ):
+                raise ArtifactLifecycleError(
+                    "artifact.removal_owner_invalid",
+                    "a selected cache identity is not covered by its stored removal plan",
+                    retryable=True,
+                )
+            if operation.state not in {"queued", "running", "partial"}:
+                raise ArtifactLifecycleError(
+                    "artifact.removal_owner_unresolved",
+                    "a selected cache identity remains fenced by a non-active removal owner",
+                    retryable=True,
+                )
+            try:
+                identity = ArtifactIdentity(
+                    kind=cast(ArtifactKind, gate.artifact_kind),
+                    sha256=gate.artifact_sha256,
+                )
+            except ValueError as error:
+                raise ArtifactLifecycleError(
+                    "artifact.removal_owner_invalid",
+                    "a selected cache identity has an invalid removal gate",
+                    retryable=True,
+                ) from error
+            identity_kind = identity.kind
+            identity_digest = identity.sha256
+            reason = (
+                f"removal operation {operation.id} is {operation.state} and owns "
+                f"{identity_kind} {identity_digest}"
+            )
+            findings.append(
+                CacheRemovalFinding(
+                    classification="active-work",
+                    asset_kind=identity_kind,
+                    asset_sha256=identity_digest,
+                    owner_kind="model-cache-operation",
+                    owner_id=operation.id,
+                    state=operation.state,
+                    detail="accepted model removal retains this deletion fence",
+                    reason=reason,
+                )
+            )
+        return tuple(findings)
+
+    @staticmethod
+    def retained_model_object_findings(
+        scope: ModelCacheRemovalScope,
+    ) -> tuple[CacheRemovalFinding, ...]:
+        """Explain retained objects through their exact sibling-set owners."""
+
+        selected_objects = set(scope.selected_objects)
+        return tuple(
+            CacheRemovalFinding(
+                classification="saved-reference",
+                asset_kind="model-object",
+                asset_sha256=object_digest,
+                owner_kind="model-cache-set-membership",
+                owner_id=set_digest,
+                state=state,
+                detail="another cached model set shares this object; removal will retain it",
+                reason=f"shared object is retained by model set {set_digest}",
+            )
+            for object_digest, set_digest, state in scope.shared_memberships
+            if object_digest in selected_objects
+        )
 
     def accept_removal_for_sets_in_session(
         self,
@@ -1978,13 +2312,29 @@ class ModelCacheService:
         selected_objects = tuple(
             sorted({digest for values in objects_by_set.values() for digest in values})
         )
-        external_memberships = set(
-            session.scalars(
-                select(ModelCacheSetArtifact.artifact_sha256).where(
-                    ModelCacheSetArtifact.artifact_set_sha256.not_in(normalized_sets)
+        shared_memberships = tuple(
+            session.execute(
+                select(
+                    ModelCacheSetArtifact.artifact_sha256,
+                    ModelCacheSetArtifact.artifact_set_sha256,
+                    ModelCacheSet.state,
+                )
+                .join(
+                    ModelCacheSet,
+                    ModelCacheSet.artifact_set_sha256
+                    == ModelCacheSetArtifact.artifact_set_sha256,
+                )
+                .where(
+                    ModelCacheSetArtifact.artifact_sha256.in_(selected_objects),
+                    ModelCacheSetArtifact.artifact_set_sha256.not_in(normalized_sets),
+                )
+                .order_by(
+                    ModelCacheSetArtifact.artifact_sha256,
+                    ModelCacheSetArtifact.artifact_set_sha256,
                 )
             )
         )
+        external_memberships = {row[0] for row in shared_memberships}
         return ModelCacheRemovalScope(
             selected_sets=normalized_sets,
             memberships=tuple(sorted(objects_by_set.items())),
@@ -1994,7 +2344,174 @@ class ModelCacheService:
                 for digest in selected_objects
                 if digest not in external_memberships
             ),
+            shared_memberships=tuple(
+                (object_digest, set_digest, state)
+                for object_digest, set_digest, state in shared_memberships
+            ),
         )
+
+    def removal_asset_status(
+        self, scope: ModelCacheRemovalScope
+    ) -> tuple[CacheRemovalAsset, ...]:
+        """Project exact model removal identities and managed-storage status.
+
+        Manifest and membership reads happen in a short SQL context. That
+        context closes before receipt or filesystem observations begin.
+        """
+
+        expected_by_set: dict[str, dict[str, int]] = {}
+        expected_by_object: dict[str, int] = {}
+        memberships_by_set = dict(scope.memberships)
+        with self._session() as session:
+            for set_digest in scope.selected_sets:
+                row = session.get(ModelCacheSet, set_digest)
+                if row is None:
+                    raise ModelCacheStorageError(
+                        "model_cache.removal_scope_unavailable",
+                        f"selected model set {set_digest} is no longer available",
+                    )
+                manifest = ArtifactSetManifest.from_document(row.manifest)
+                specs = _unique_artifacts(manifest.artifacts)
+                expected = {
+                    digest: spec.expected_bytes for digest, spec in specs.items()
+                }
+                if set(expected) != set(memberships_by_set.get(set_digest, ())):
+                    raise ModelCacheStorageError(
+                        "model_cache.removal_scope_invalid",
+                        f"model set {set_digest} membership disagrees with its manifest",
+                    )
+                for digest, expected_bytes in expected.items():
+                    previous = expected_by_object.setdefault(digest, expected_bytes)
+                    if previous != expected_bytes:
+                        raise ModelCacheStorageError(
+                            "model_cache.removal_scope_invalid",
+                            f"model object {digest} has inconsistent expected lengths",
+                        )
+                expected_by_set[set_digest] = expected
+
+        object_status: dict[str, tuple[AssetAvailability, int | None]] = {}
+        for digest, expected_bytes in sorted(expected_by_object.items()):
+            try:
+                verified_bytes = self._stored_object(digest, expected_bytes)
+            except OSError:
+                object_status[digest] = ("unknown", None)
+                continue
+            if verified_bytes is not None:
+                object_status[digest] = ("verified", verified_bytes)
+                continue
+            try:
+                metadata = self._object_path(digest).lstat()
+            except (FileNotFoundError, NotADirectoryError):
+                object_status[digest] = ("missing", 0)
+                continue
+            except OSError:
+                object_status[digest] = ("unknown", None)
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
+                object_status[digest] = ("unknown", None)
+                continue
+            observed_bytes = metadata.st_size
+            if observed_bytes < expected_bytes:
+                availability: AssetAvailability = "partial"
+            else:
+                # Includes an exact-size file without its verified receipt
+                # and a file larger than the expected length. Neither is ready.
+                availability = "unknown"
+            object_status[digest] = (availability, observed_bytes)
+
+        def partial_status(
+            set_digest: str, digest: str, expected_bytes: int
+        ) -> tuple[AssetAvailability, int | None]:
+            partial = self._partial_path(set_digest, digest)
+            if expected_bytes >= _PARALLEL_RANGE_MIN_BYTES:
+                try:
+                    available = range_partial_bytes(
+                        partial,
+                        expected_bytes,
+                        workers=_PARALLEL_RANGE_WORKERS,
+                    )
+                except (OSError, ValueError):
+                    return "unknown", None
+                if available == 0:
+                    return "missing", 0
+                return (
+                    "partial" if available < expected_bytes else "unknown",
+                    available,
+                )
+            try:
+                metadata = partial.lstat()
+            except (FileNotFoundError, NotADirectoryError):
+                return "missing", 0
+            except OSError:
+                return "unknown", None
+            if not stat.S_ISREG(metadata.st_mode):
+                return "unknown", None
+            observed = metadata.st_size
+            if observed < expected_bytes:
+                return "partial", observed
+            return "unknown", observed
+
+        assets: list[CacheRemovalAsset] = []
+        delete_objects = set(scope.delete_objects)
+        for set_digest, expected in sorted(expected_by_set.items()):
+            statuses = []
+            for digest, expected_bytes in expected.items():
+                final_status = object_status[digest]
+                statuses.append(
+                    partial_status(set_digest, digest, expected_bytes)
+                    if final_status[0] == "missing"
+                    else final_status
+                )
+            expected_bytes = sum(expected.values())
+            observed_counts = [count for _availability, count in statuses]
+            available_bytes = (
+                None
+                if any(count is None for count in observed_counts)
+                else sum(count for count in observed_counts if count is not None)
+            )
+            if statuses and all(item[0] == "verified" for item in statuses):
+                availability: AssetAvailability = "verified"
+            elif statuses and all(item[0] == "missing" for item in statuses):
+                availability = "missing"
+            elif any(item[0] == "unknown" for item in statuses):
+                availability = "unknown"
+            elif statuses:
+                availability = "partial"
+            else:
+                availability = "unknown"
+            assets.append(
+                CacheRemovalAsset(
+                    kind="model-set",
+                    sha256=set_digest,
+                    expected_bytes=expected_bytes,
+                    availability=availability,
+                    available_bytes=available_bytes,
+                    disposition="remove",
+                )
+            )
+
+        for digest in scope.selected_objects:
+            expected_bytes = expected_by_object.get(digest)
+            if expected_bytes is None:
+                raise ModelCacheStorageError(
+                    "model_cache.removal_scope_invalid",
+                    f"model object {digest} has no validated manifest length",
+                )
+            availability, available_bytes = object_status[digest]
+            disposition: AssetDisposition = (
+                "remove" if digest in delete_objects else "retain-shared"
+            )
+            assets.append(
+                CacheRemovalAsset(
+                    kind="model-object",
+                    sha256=digest,
+                    expected_bytes=expected_bytes,
+                    availability=availability,
+                    available_bytes=available_bytes,
+                    disposition=disposition,
+                )
+            )
+        return tuple(assets)
 
     def _model_removal_by_request(
         self,
@@ -2003,6 +2520,7 @@ class ModelCacheService:
         actor: str,
         selector: str,
         model_content_sha256: str | None,
+        review_digest: str | None,
         selected_sets: Sequence[str] | None,
     ) -> CacheOperationView | None:
         with self._session() as session:
@@ -2018,6 +2536,7 @@ class ModelCacheService:
                 actor=actor,
                 selector=selector,
                 model_content_sha256=model_content_sha256,
+                review_digest=review_digest,
                 selected_sets=selected_sets,
             )
 
@@ -2028,6 +2547,7 @@ class ModelCacheService:
         actor: str,
         selector: str,
         model_content_sha256: str | None,
+        review_digest: str | None,
         selected_sets: Sequence[str] | None,
     ) -> CacheOperationView:
         if operation.kind != "remove" or operation.actor != actor:
@@ -2039,6 +2559,7 @@ class ModelCacheService:
         if (
             payload.get("selector") != selector
             or payload.get("model_content_sha256") != model_content_sha256
+            or payload.get("review_digest") != review_digest
             or (
                 selected_sets is not None
                 and payload.get("selected") != list(selected_sets)
@@ -2059,6 +2580,7 @@ class ModelCacheService:
         selector: str,
         model_content_sha256: str | None,
         selected_sets: Sequence[str] | None,
+        review_digest: str | None = None,
         operation_id: str | None = None,
         removal_fence: str | None = None,
         gates_reserved: bool = False,
@@ -2075,11 +2597,17 @@ class ModelCacheService:
                 actor=actor,
                 selector=selector,
                 model_content_sha256=model_content_sha256,
+                review_digest=review_digest,
                 selected_sets=selected_sets,
             )
             return existing
 
         if selected_sets is None:
+            if review_digest is None:
+                raise ModelCacheResolutionError(
+                    "model_cache.review_digest_invalid",
+                    "direct model removal requires its reviewed effect digest",
+                )
             selected = tuple(
                 session.scalars(
                     select(ModelCacheSet.artifact_set_sha256)
@@ -2187,6 +2715,7 @@ class ModelCacheService:
             "selector": selector,
             "model_content_sha256": model_content_sha256,
             "operator_action": "remove-model",
+            "review_digest": review_digest,
             "removal_fence": fence,
             "selected": list(scope.selected_sets),
             "selected_objects": list(scope.selected_objects),
@@ -5833,6 +6362,7 @@ class ModelCacheService:
         result = payload.get("result")
         failure = ModelCacheService._canonical_failure(operation)
         model_digest = payload.get("model_content_sha256")
+        stored_review_digest = payload.get("review_digest")
         view = CacheOperationView(
             id=operation.id,
             request_key=operation.request_key,
@@ -5848,6 +6378,9 @@ class ModelCacheService:
             ),
             artifact_set_sha256=operation.artifact_set_sha256,
             plan_digest=operation.plan_digest,
+            review_digest=(
+                stored_review_digest if isinstance(stored_review_digest, str) else None
+            ),
             progress=serialize_json_value(progress),  # type: ignore[arg-type]
             result=(
                 parse_model_cache_result(operation.kind, result)

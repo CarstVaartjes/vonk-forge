@@ -29,6 +29,7 @@ class RecipeCacheRemovalIntent(StrictJSONModel):
     selector: Selector
     actor: Annotated[str, Field(min_length=1, max_length=200)]
     request_key: RequestKey
+    review_digest: Digest
     recipe_revision_id: Identifier
     with_model: bool
     removal_fence: RequestKey
@@ -131,6 +132,7 @@ class RecipeCacheRemovalResult(StrictJSONModel):
     action: Literal["remove"]
     selector: Selector
     request_key: RequestKey
+    review_digest: Digest
     operation_id: RequestKey
     recipe_revision_id: Identifier
     with_model: bool

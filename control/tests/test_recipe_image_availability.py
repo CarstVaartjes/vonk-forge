@@ -21,7 +21,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import artifact_reference_scan, runtime_image_preparation
 from vonk_control.artifact_lifecycle import ArtifactLifecycleError
-from vonk_control.artifact_reference_scan import runtime_image_reference_reasons
+from vonk_control.artifact_reference_scan import (
+    runtime_image_reference_findings,
+    runtime_image_reference_reasons,
+)
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import _build_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
@@ -69,6 +72,8 @@ from vonk_control.runtime_image_preparation import (
     resolve_persisted_runtime_image_receipt,
 )
 from vonk_forge_contracts import RecipeDefinition, content_sha256
+
+from .recipe_removal_review_support import remove_after_review
 
 IMAGE_DIGEST = "sha256:" + "d" * 64
 PLATFORM_DIGEST = "sha256:" + "e" * 64
@@ -584,7 +589,8 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
         execution_key = authorization.effective_execution_key
         if revoked is not None:
             authorization.state = "revoked"
-    removal = service.remove_selector(
+    removal = remove_after_review(
+        service,
         recipe.identity.slug,
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000022",
@@ -1017,7 +1023,8 @@ def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
             )
         )
 
-    result = service.remove_selector(
+    result = remove_after_review(
+        service,
         recipe.identity.slug,
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000023",
@@ -1134,28 +1141,23 @@ def test_recipe_removal_fails_closed_on_symlinked_archive(
         clock=lambda: now,
     )
 
-    accepted = service.remove_selector(
-        recipe.identity.slug,
-        actor="operator",
-        request_id="00000000-0000-4000-8000-000000000034",
-        with_model=False,
-    )
-    assert accepted["state"] == "queued"
-    assert service.advance_removals(limit=1) == 1
+    with pytest.raises(RecipeImageAvailabilityError) as refused:
+        remove_after_review(
+            service,
+            recipe.identity.slug,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000034",
+            with_model=False,
+        )
 
+    assert refused.value.code == "runtime_image.removal_path_unsafe"
     with sessions() as session:
         operation = session.scalar(
             select(Job).where(Job.request_id == "00000000-0000-4000-8000-000000000034")
         )
         gate = session.get(ArtifactLifecycleGate, ("runtime-image", ARCHIVE_SHA))
-        assert operation is not None and operation.state == "failed"
-        owner = RecipeCacheRemovalOwner.model_validate_json(
-            json.dumps(operation.payload)
-        )
-        assert owner.checkpoint.failure is not None
-        assert owner.checkpoint.failure.code == "runtime_image.removal_path_unsafe"
-        assert operation.result is None
-        assert gate is not None and gate.removal_owner_id == operation.id
+        assert operation is None
+        assert gate is None or gate.removal_owner_id is None
     assert archive.is_symlink()
     assert outside.read_bytes() == ARCHIVE
     assert receipt_path.exists()
@@ -1196,13 +1198,14 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     receipt_path = storage.root / f"{ARCHIVE_SHA}.receipt.json"
     receipt_path.write_text(json.dumps(receipt.model_dump(mode="json")))
     failure_code = "runtime_image.publication_contended"
+    removal_started = False
     if fault == "publication-lock":
         original_lock = storage.publication_lock
         contended = False
 
         def contend_once(archive_sha256: str):
             nonlocal contended
-            if not contended:
+            if removal_started and not contended:
                 contended = True
                 raise RuntimeImagePreparationError(
                     failure_code,
@@ -1225,7 +1228,12 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
             follow_symlinks: bool = True,
         ) -> os.stat_result:
             nonlocal stat_failed
-            if path == ARCHIVE_SHA and dir_fd is not None and not stat_failed:
+            if (
+                removal_started
+                and path == ARCHIVE_SHA
+                and dir_fd is not None
+                and not stat_failed
+            ):
                 stat_failed = True
                 raise PermissionError("injected archive-stat failure")
             return original_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
@@ -1238,13 +1246,15 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
         clock=lambda: now[0],
     )
     request_key = "00000000-0000-4000-8000-000000000037"
-    accepted = service.remove_selector(
+    accepted = remove_after_review(
+        service,
         recipe.identity.slug,
         actor="operator",
         request_id=request_key,
         with_model=False,
     )
     assert accepted["state"] == "queued"
+    removal_started = True
     assert service.advance_removals(limit=1) == 1
     waiting = service.get_operator_request(request_key, actor="operator")
     assert isinstance(waiting, dict)
@@ -1276,8 +1286,8 @@ def test_oversized_removal_owner_does_not_hold_up_later_request(
     sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
     bad_key = "00000000-0000-4000-8000-000000000035"
     good_key = "00000000-0000-4000-8000-000000000036"
-    service.remove_selector(selector, actor="operator", request_id=bad_key)
-    service.remove_selector(selector, actor="operator", request_id=good_key)
+    remove_after_review(service, selector, actor="operator", request_id=bad_key)
+    remove_after_review(service, selector, actor="operator", request_id=good_key)
     monkeypatch.setattr(artifact_reference_scan, "MAX_ARTIFACT_OWNER_SCAN_BYTES", 4096)
     with sessions.begin() as session:
         bad = session.scalar(select(Job).where(Job.request_id == bad_key))
@@ -1351,7 +1361,8 @@ def test_recipe_removal_request_key_rejects_changed_intent(
         tmp_path
     )
     request_id = "00000000-0000-4000-8000-000000000016"
-    original = service.remove_selector(
+    original = remove_after_review(
+        service,
         original_selector,
         actor="operator",
         request_id=request_id,
@@ -1367,11 +1378,13 @@ def test_recipe_removal_request_key_rejects_changed_intent(
     assert not any(path.is_file() for path in storage.root.rglob("*"))
 
     with pytest.raises(RecipeImageAvailabilityError) as refused:
-        service.remove_selector(
+        remove_after_review(
+            service,
             replay_selector,
             actor=replay_actor,
             request_id=request_id,
             with_model=replay_with_model,
+            review_digest=str(original["review_digest"]),
         )
     assert refused.value.code == "recipe_image.request_key_reused"
 
@@ -1381,12 +1394,14 @@ def test_recipe_removal_request_key_replays_before_resolving_current_head(
 ) -> None:
     sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
     request_id = "00000000-0000-4000-8000-000000000017"
-    original = service.remove_selector(
-        selector, actor="operator", request_id=request_id, with_model=False
+    original = remove_after_review(
+        service, selector, actor="operator", request_id=request_id, with_model=False
     )
     assert original["state"] == "queued"
     assert service.advance_removals(limit=1) == 1
-    original = service.get_operator_request(request_id, actor="operator")
+    observed = service.get_operator_request(request_id, actor="operator")
+    assert isinstance(observed, dict)
+    original = observed
     with sessions.begin() as session:
         head = session.scalar(
             select(CatalogDocumentHead).where(
@@ -1396,12 +1411,110 @@ def test_recipe_removal_request_key_replays_before_resolving_current_head(
         assert head is not None
         head.active_revision_id = None
 
-    replay = service.remove_selector(
-        selector, actor="operator", request_id=request_id, with_model=False
+    replay = remove_after_review(
+        service,
+        selector,
+        actor="operator",
+        request_id=request_id,
+        with_model=False,
+        review_digest=str(original["review_digest"]),
     )
 
     assert replay == original
     assert replay["with_model"] is False
+
+
+def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An existing deletion fence is visible, while its accepted key still recovers."""
+
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'active-review.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+    receipt = _reference_receipt()
+    with sessions.begin() as session:
+        revision = _add_revision(session, "revision-active-review", recipe)
+        _add_head(session, revision)
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=revision.id,
+                source="published",
+                original_content_digest=content_sha256(recipe),
+                effective_execution_key=revision.execution_key,
+                registry_manifest_digest=receipt.registry_manifest_digest,
+                platform_manifest_digest=receipt.platform_manifest_digest,
+                local_image_config_id=receipt.local_image_config_id,
+                oci_archive_sha256=receipt.oci_archive_sha256,
+                image_bytes=receipt.image_bytes,
+                build_id=None,
+                authorized_at=now,
+            )
+        )
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "review-managed")
+    (storage.root / ARCHIVE_SHA).write_bytes(ARCHIVE)
+    (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text(
+        json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
+    )
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: now,
+    )
+    selector = recipe.identity.slug
+    before = service.review_removal(selector, with_model=False)
+    assert before.blockers == []
+    request_key = "00000000-0000-4000-8000-000000000041"
+    accepted = service.remove_selector(
+        selector,
+        actor="operator",
+        request_id=request_key,
+        with_model=False,
+        review_digest=before.review_digest,
+    )
+    assert accepted["state"] == "queued"
+
+    changed_key = "00000000-0000-4000-8000-000000000042"
+    with pytest.raises(RecipeImageAvailabilityError) as stale:
+        service.remove_selector(
+            selector,
+            actor="operator",
+            request_id=changed_key,
+            with_model=False,
+            review_digest=before.review_digest,
+        )
+    assert stale.value.code == "recipe_image.review_stale"
+    with sessions() as session:
+        assert session.scalar(select(Job).where(Job.request_id == changed_key)) is None
+        existing = session.scalar(select(Job).where(Job.request_id == request_key))
+        gate = session.get(ArtifactLifecycleGate, ("runtime-image", ARCHIVE_SHA))
+        assert existing is not None and gate is not None
+        assert gate.removal_owner_id == existing.id
+    assert (storage.root / ARCHIVE_SHA).read_bytes() == ARCHIVE
+
+    during = service.review_removal(selector, with_model=False)
+    assert any(
+        blocker.code == "artifact.deletion_in_progress" for blocker in during.blockers
+    )
+    assert during.review_digest != before.review_digest
+
+    def no_mutable_review(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("same-key recovery must precede mutable review")
+
+    monkeypatch.setattr(service, "review_removal", no_mutable_review)
+    replay = service.remove_selector(
+        selector,
+        actor="operator",
+        request_id=request_key,
+        with_model=False,
+        review_digest=str(accepted["review_digest"]),
+    )
+    assert replay["operation_id"] == accepted["operation_id"]
+    assert replay["review_digest"] == before.review_digest
 
 
 def test_postgres_recipe_removal_persists_owner_before_first_unlink(
@@ -1474,7 +1587,8 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
         storage, "remove_published", require_committed_checkpoint_before_unlink
     )
     try:
-        accepted = service.remove_selector(
+        accepted = remove_after_review(
+            service,
             recipe.identity.slug,
             actor=actor,
             request_id=request_id,
@@ -1536,7 +1650,8 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
         clock=lambda: now,
     )
-    accepted = service.remove_selector(
+    accepted = remove_after_review(
+        service,
         recipe.identity.slug,
         actor="operator",
         request_id=request_id,
@@ -1629,7 +1744,8 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
         clock=lambda: now[0],
     )
     request_key = str(uuid.uuid4())
-    accepted = service.remove_selector(
+    accepted = remove_after_review(
+        service,
         recipe.identity.slug,
         actor="operator",
         request_id=request_key,
@@ -1672,8 +1788,8 @@ def test_recipe_removal_replay_rejects_malformed_stored_intent(
 ) -> None:
     sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
     request_id = "00000000-0000-4000-8000-000000000018"
-    service.remove_selector(
-        selector, actor="operator", request_id=request_id, with_model=False
+    accepted = remove_after_review(
+        service, selector, actor="operator", request_id=request_id, with_model=False
     )
     assert service.advance_removals(limit=1) == 1
     with sessions.begin() as session:
@@ -1688,8 +1804,13 @@ def test_recipe_removal_replay_rejects_malformed_stored_intent(
         operation.payload = malformed_payload
 
     with pytest.raises(RecipeImageAvailabilityError) as refused:
-        service.remove_selector(
-            selector, actor="operator", request_id=request_id, with_model=False
+        remove_after_review(
+            service,
+            selector,
+            actor="operator",
+            request_id=request_id,
+            with_model=False,
+            review_digest=str(accepted["review_digest"]),
         )
 
     assert refused.value.code == "recipe_image.operation_invalid"
@@ -1700,8 +1821,8 @@ def test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope(
 ) -> None:
     sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
     request_id = "00000000-0000-4000-8000-000000000019"
-    service.remove_selector(
-        selector, actor="operator", request_id=request_id, with_model=False
+    accepted = remove_after_review(
+        service, selector, actor="operator", request_id=request_id, with_model=False
     )
     assert service.advance_removals(limit=1) == 1
     with sessions.begin() as session:
@@ -1710,8 +1831,13 @@ def test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope(
         operation.actor = "another-issuer"
 
     with pytest.raises(RecipeImageAvailabilityError) as refused:
-        service.remove_selector(
-            selector, actor="operator", request_id=request_id, with_model=False
+        remove_after_review(
+            service,
+            selector,
+            actor="operator",
+            request_id=request_id,
+            with_model=False,
+            review_digest=str(accepted["review_digest"]),
         )
 
     assert refused.value.code == "recipe_image.operation_invalid"
@@ -1722,8 +1848,8 @@ def test_recipe_removal_replay_rejects_integer_stored_model_choice(
 ) -> None:
     sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
     request_id = "00000000-0000-4000-8000-000000000020"
-    service.remove_selector(
-        selector, actor="operator", request_id=request_id, with_model=False
+    accepted = remove_after_review(
+        service, selector, actor="operator", request_id=request_id, with_model=False
     )
     assert service.advance_removals(limit=1) == 1
     with sessions.begin() as session:
@@ -1742,8 +1868,13 @@ def test_recipe_removal_replay_rejects_integer_stored_model_choice(
         assert isinstance(stored_choice, int) and not isinstance(stored_choice, bool)
 
     with pytest.raises(RecipeImageAvailabilityError) as refused:
-        service.remove_selector(
-            selector, actor="operator", request_id=request_id, with_model=False
+        remove_after_review(
+            service,
+            selector,
+            actor="operator",
+            request_id=request_id,
+            with_model=False,
+            review_digest=str(accepted["review_digest"]),
         )
 
     assert refused.value.code == "recipe_image.operation_invalid"
@@ -2997,6 +3128,29 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
         assert runtime_image_reference_reasons(session, [ARCHIVE_SHA]) == {
             ARCHIVE_SHA: (f"image publication operation {operation.id}",)
         }
+        findings = runtime_image_reference_findings(session, [ARCHIVE_SHA])
+        assert [
+            (
+                item.asset.kind,
+                item.asset.sha256,
+                item.owner_kind,
+                item.owner_id,
+                item.state,
+                item.classification,
+                item.reason,
+            )
+            for item in findings[ARCHIVE_SHA]
+        ] == [
+            (
+                "runtime-image",
+                ARCHIVE_SHA,
+                "recipe-image-availability-operation",
+                operation.id,
+                "cancelling",
+                "active-work",
+                f"image publication operation {operation.id}",
+            )
+        ]
         persisted_reference = reference.model_dump(mode="json")
 
     with sessions.begin() as session:

@@ -205,6 +205,7 @@ class ModelCacheRemovalPayload(_ModelCacheOperationPayload):
 
     selector: str = Field(..., min_length=1, max_length=256)
     model_content_sha256: Digest | None = None
+    review_digest: Digest | None
     removal_fence: str = Field(..., pattern=UUID_PATTERN)
     selected: list[Digest]
     selected_objects: list[Digest]
@@ -352,6 +353,7 @@ class ModelCacheRemovalRequest(StrictModel):
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
     model_content_sha256: Digest
+    review_digest: Digest
 
 
 class ModelCacheCancellationRequest(StrictModel):
@@ -370,6 +372,7 @@ class ModelCacheOperatorResponse(StrictModel):
     selector: str = Field(min_length=1, max_length=256)
     request_key: str = Field(pattern=UUID_PATTERN)
     model_content_sha256: Digest | None = None
+    review_digest: Digest | None = None
     operation_id: str | None = Field(default=None, pattern=UUID_PATTERN)
     state: ModelCacheOperatorState
     phase: str = Field(min_length=1, max_length=64)
@@ -517,6 +520,7 @@ class ModelCacheOperationResponse(StrictModel):
     attempt: int = Field(ge=1)
     artifact_set_sha256: Digest | None
     plan_digest: Digest | None
+    review_digest: Digest | None = None
     progress: ModelCacheOperationProgress
     result: ModelCacheOperationResult | None = None
     failure: AvailabilityOperationFailure | None = None

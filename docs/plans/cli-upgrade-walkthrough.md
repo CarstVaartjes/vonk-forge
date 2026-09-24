@@ -3,8 +3,9 @@
 This facilitator adds a disposable installed-CLI session for the upgrade part
 of U8. It does not replace the original U8 outcome card in the
 [W19 protocol](cli-operator-walkthrough.md), and it does not close the
-human scorecard. Cleanup remains blocked until the W09/W17 reference and
-removal gates close. Do not perform a cleanup mutation in this scenario.
+human scorecard. The separate [cleanup setup](cli-cleanup-walkthrough.md) owns
+the disposable cleanup scenario; do not perform a cleanup mutation in this
+upgrade fixture.
 
 Give a participant only the shipped [`vonkctl` runbook](../runbooks/vonkctl.md),
 the installed executable, private connection details, and the original U8 task

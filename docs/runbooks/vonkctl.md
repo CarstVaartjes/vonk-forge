@@ -200,7 +200,8 @@ vonkctl model progress OPERATION_ID --follow
 vonkctl model progress --request-key REQUEST_UUID --follow
 vonkctl model cancel OPERATION_UUID --yes --request-key CANCEL_UUID --reason "No longer needed"
 vonkctl model download qwen-3.8-nvfp4   # repeat to refresh a completed copy
-vonkctl model remove qwen-3.8-nvfp4 --yes
+vonkctl model remove qwen-3.8-nvfp4 --review
+vonkctl model remove qwen-3.8-nvfp4
 ```
 
 The overview combines downloading, cached, and running variants. Reusing the
@@ -216,11 +217,25 @@ idempotent; a different request cannot replace it. Cancellation may remain
 partial files are retained; cancellation does not evict them. Reconnect with
 `model progress OPERATION_ID --follow` to observe settlement.
 
-Removal requests eviction of the selected revision from the Controller cache.
-The Controller records the exact request and its deletion targets before
-removing bytes. Accepted references can block removal; an unavailable reference
-scan is an explicit refusal. Removal does not cancel another download or build,
-stop a Spark workload, or erase a saved profile.
+Removal first presents the Controller-owned review: exact assets, their
+verified/partial/missing/unknown readiness and byte counts, saved references,
+active work, and blockers. `model remove SELECTOR --review` is read-only and
+prints the review digest for scripts. In a terminal, `model remove SELECTOR`
+shows the same impact before asking for consent. A scripted request must pass
+the exact digest and explicit consent:
+
+```bash
+REVIEW=$(vonkctl --json model remove qwen-3.8-nvfp4 --review)
+REVIEWED_DIGEST=$(printf '%s' "$REVIEW" | jq -r .review_digest)
+vonkctl --json model remove qwen-3.8-nvfp4 \
+  --review-digest "$REVIEWED_DIGEST" --yes --request-key REQUEST_UUID --detach
+```
+
+The Controller rechecks the same digest at acceptance. If the reviewed impact
+changed, the CLI refuses without retrying against the new review; inspect it and
+make a new explicit decision. Accepted references can block removal, and an
+unavailable reference scan is an explicit refusal. Removal does not cancel
+another download or build, stop a Spark workload, or erase a saved profile.
 
 Keep the request key printed by the CLI. Reuse it to reconnect after a lost
 response; `model progress --request-key REQUEST_UUID --follow` observes the
@@ -246,13 +261,30 @@ vonkctl recipe progress --request-key REQUEST_UUID --follow
 vonkctl recipe cancel OPERATION_UUID --yes --request-key CANCEL_UUID --reason "No longer needed"
 vonkctl recipe update publisher/recipe
 vonkctl recipe update --all
-vonkctl recipe remove qwen-code --keep-model --yes
-vonkctl recipe remove qwen-code --with-model --yes
+vonkctl recipe remove qwen-code --keep-model --review
+vonkctl recipe remove qwen-code --with-model --review
+vonkctl recipe remove qwen-code --keep-model
+vonkctl recipe remove qwen-code --with-model
 ```
 
 Recipe removal requires an explicit `--keep-model` or `--with-model` choice.
-The latter binds an exact model-removal child and completes only after that
-child settles. Shared model files needed by retained cache entries are preserved.
+The read-only `--review` form reports the exact recipe revision and affected
+archives/model assets, readiness, references, active work, blockers, and digest.
+In a terminal, the removal command shows that impact before asking for consent.
+For a scripted request, first capture the review and pass its exact digest with
+`--yes`:
+
+```bash
+REVIEW=$(vonkctl --json recipe remove qwen-code --keep-model --review)
+REVIEWED_DIGEST=$(printf '%s' "$REVIEW" | jq -r .review_digest)
+vonkctl --json recipe remove qwen-code --keep-model \
+  --review-digest "$REVIEWED_DIGEST" --yes --request-key REQUEST_UUID --detach
+```
+
+The Controller rechecks the review digest before accepting removal. A changed
+review is refused and is never automatically resubmitted. `--with-model` binds
+the exact reviewed model-removal child and completes only after that child
+settles. Shared model files needed by retained cache entries are preserved.
 Use `recipe progress --request-key REQUEST_UUID --follow` to reconnect to the
 same operation and inspect a waiting dependency or failure.
 

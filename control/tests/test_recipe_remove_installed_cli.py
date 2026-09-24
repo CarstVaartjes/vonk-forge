@@ -131,6 +131,30 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         ),
     ):
         environment = _process_environment(tmp_path, url, certificate, headers)
+        review_process = subprocess.run(
+            [
+                str(installed_vonkctl),
+                "--json",
+                "recipe",
+                "remove",
+                selector,
+                "--keep-model",
+                "--review",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env=environment,
+            cwd=tmp_path,
+        )
+        assert review_process.returncode == 0, (
+            review_process.stdout + review_process.stderr
+        )
+        review = json.loads(review_process.stdout)
+        assert review["with_model"] is False
+        assert review["blockers"] == []
+        assert all(method == "GET" for method, _, _ in peer.calls)
         arguments = [
             str(installed_vonkctl),
             "--json",
@@ -139,6 +163,8 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
             selector,
             "--keep-model",
             "--yes",
+            "--review-digest",
+            review["review_digest"],
             "--request-key",
             _REMOVE_KEY,
             "--detach",
@@ -181,6 +207,7 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         assert first_receipt["operation_id"] == operation_id
         assert first_receipt["selector"] == selector
         assert first_receipt["with_model"] is False
+        assert first_receipt["review_digest"] == review["review_digest"]
         assert first_receipt["state"] == "queued"
         assert first_receipt["reclaimed_bytes"] == 0
         assert peer.discard_held_response

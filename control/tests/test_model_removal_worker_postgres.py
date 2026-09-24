@@ -25,7 +25,7 @@ from vonk_control.model_cache_contract import (
 from vonk_control.models import ModelCacheOperation
 from vonk_forge_contracts import content_sha256
 
-from .test_model_cache import _artifact, _download
+from .test_model_cache import _artifact, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (
     _one_model,
     _register_model,
@@ -87,7 +87,8 @@ def _prepare_removal_target(
 def _accept_removal(
     service: ModelCacheService, selector: str, model_digest: str
 ) -> CacheOperationView:
-    accepted = service.remove_model_selector(
+    accepted = _remove_model(
+        service,
         selector,
         actor="operator",
         request_key=str(uuid4()),

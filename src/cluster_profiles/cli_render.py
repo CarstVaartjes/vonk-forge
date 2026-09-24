@@ -662,6 +662,66 @@ def _preview(payload: Mapping[str, object]) -> None:
     _reasons(payload.get("reasons"))
 
 
+def _cache_removal_review(payload: Mapping[str, object]) -> None:
+    """Present the owning cache policy's removal review without interpretation."""
+    _field("Action", payload.get("action"))
+    _field("Resource", payload.get("resource_kind"))
+    _field("Selector", payload.get("selector"))
+    _field("Target identity", payload.get("target_identity"))
+    if payload.get("with_model") is not None:
+        _field("Remove dependent model", payload.get("with_model"))
+    _field("Review digest", payload.get("review_digest"))
+    _field("Observed", _time(payload.get("observed_at")))
+
+    assets = _records(payload, "assets")
+    if not assets:
+        print("Assets: none")
+    for asset in assets:
+        print("Asset:")
+        _field("  Kind", asset.get("kind"))
+        _field("  SHA-256", asset.get("sha256"))
+        _field("  Disposition", asset.get("disposition"))
+        _field("  Readiness", asset.get("availability"))
+        _field("  Expected bytes", _bytes(asset.get("expected_bytes")))
+        _field("  Available bytes", _bytes(asset.get("available_bytes")))
+
+    for field, heading in (
+        ("references", "Saved references"),
+        ("active_work", "Active work"),
+    ):
+        records = _records(payload, field)
+        if not records:
+            print(f"{heading}: none")
+        for record in records:
+            print(f"{heading}:")
+            _field("  Classification", record.get("classification"))
+            _field(
+                "  Asset",
+                f"{_text(record.get('asset_kind'))} "
+                f"{_text(record.get('asset_sha256'))}",
+            )
+            _field(
+                "  Owner",
+                f"{_text(record.get('owner_kind'))} {_text(record.get('owner_id'))}",
+            )
+            _field("  State", record.get("state"))
+            if record.get("detail") is not None:
+                _field("  Detail", record.get("detail"))
+            if record.get("reason") is not None:
+                _field("  Reason", record.get("reason"))
+
+    blockers = _records(payload, "blockers")
+    if not blockers:
+        print("Blockers: none")
+    for blocker in blockers:
+        _field(
+            "Blocker",
+            f"{_text(blocker.get('code'))}: {_text(blocker.get('detail'))}",
+        )
+        _field("  Retryable", blocker.get("retryable"))
+        _actions(blocker.get("recovery_actions"))
+
+
 def _application(payload: Mapping[str, object]) -> None:
     _field("Application", payload.get("id"))
     _field("State", payload.get("state"))
@@ -1192,7 +1252,9 @@ def render_payload(
     elif noun == "recipe" and artifact_job_action is not None:
         _artifact_job(payload, artifact_job_action)
     elif noun in {"model", "recipe"}:
-        if action in {None, "library", "detail"}:
+        if action == "preview":
+            _cache_removal_review(payload)
+        elif action in {None, "library", "detail"}:
             _library(payload, noun, detail=action == "detail", wide=wide)
         else:
             _operation(payload, noun)

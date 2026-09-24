@@ -38,21 +38,22 @@ Use these entry points to review or execute the plan:
 
 Execution checkpoint: 2026-09-24. Continue from the integrated evidence in the
 [package status](cli-operator-status.md#package-state), rather than restarting
-implemented packages. Remaining work is admission and asset lifetime (W09),
-its shared-removal dependencies (W12/W17), and the final connected handoff and
-independent operator walkthrough (W19). Definitive-refusal recovery guidance
-(W16) has been corrected and qualified. A package with passing local criteria can still depend on an open owner
-contract; the status table makes those dependencies explicit.
+implemented packages. Admission locking, memory uncertainty policy, durable
+removal and recovery are implemented and the combined source at `c1a92c29`
+passes full CI. The final acceptance audit identified two remaining concrete
+boundaries: W17 must display and bind the exact removal impact before consent,
+and W12 needs a connected cancellation-versus-removal race. Both increments
+and W19's disposable cleanup facilitator now pass local integrated checks;
+the follow-up PR revision needs its own combined CI before handoff.
 
 The [shared-build closure checklist](#shared-build-closure-checklist) retains
-the detailed admission work. Its earlier checkpoints are historical evidence,
-not a direction to repeat completed cancellation or process-recovery work.
-Disposable U1/U3, U4, U5, U6 and U7 facilitators now have connected evidence;
-U8's upgrade and read-only pipeline portions pass. The user chose warnings for
-uncertain memory estimates and explicitly approved the admission-locking and
-crash-safe removal implementations. Their implementation and qualification remain
-open. Preserve the original acceptance cards: a test fixture or a queued
-request alone does not establish a usable recipe or human usability.
+historical implementation detail. It does not supersede the current status.
+Six existing disposable walkthrough smoke scenarios pass together, and the
+read-only JSON pipeline passes. U2's later-page fixture is cache-ready, but its
+empty OCI image does not prove a runnable model. The user will run every model;
+that campaign and an independent human U1–U8 scorecard remain separate evidence.
+Do not replace either with a synthetic success or mark W19 complete from smoke
+checks alone.
 
 ## 1. Scope and completion rule
 
@@ -167,36 +168,24 @@ and this remaining execution order. The detailed requirements below remain in
 scope; passing an individual package's own criteria does not close its open
 admission or storage dependency.
 
-1. Implement W09d C/D's approved warnings policy. Current aggregate free-memory
-   measurements and signed run liveness do not prove an atomic, attributed
-   snapshot. Warn about uncertain estimates while retaining actual capacity,
-   reservation, system-reserve and exact-plan checks. Do not
-   claim both zero false refusals and zero overcommit from the current evidence.
-2. Complete W09d F's common SQL acquisition order across admission and all
-   competing writers. Retain the current PostgreSQL contention reproduction;
-   prove bounded refusal/retry, transaction release and preservation of the
-   exact reviewed request. Explicit user approval on 2026-09-24 supersedes the
-   earlier insufficient-authorization rejection for this repository work.
-3. Complete W09e's shared reference/removal protocol and W17's durable pre-effect
-   removal intent, first-submission arbitration and restart recovery. Move
-   producers, readers, cancellation and collection together. Prove actual
-   removal cannot invalidate an admitted reference, cancellation preserves
-   another consumer's assets, and unavailable reference scans never authorize
-   deletion. This also closes W12's remaining removal-race dependency. The
-   stored receipt validation already implemented does not replace these gates.
-4. Run W09g's combined concurrency and recovery acceptance at one integrated
-   revision, including the existing disk/port/build inheritance, exact rebuilt
-   image consent and post-stop evidence. Requalify affected W10 review and W13
-   cancellation boundaries against that completed admission/storage behavior.
-5. Finish W19's disposable U1–U8 scenario setup and independent operator
-   walkthrough, correct observed defects, then repeat the affected installed
-   and connected gates. U1/U3, U4, observer-only U5, U6 and U7 setup now pass,
-   as do U8's upgrade and read-only pipeline portions. U2 remains partial until
-   a usable later-page candidate exists; U8 cleanup depends on W09/W17. The
-   planned every-model campaign and independent human usability scorecard are
-   separate evidence. Complete the W18/W19 handoff from the final
-   contracts and evidence, keeping repository, deployment and physical
-   qualification distinct. Web implementation remains outside this CLI scope.
+1. Finish W17's Controller-owned pre-removal impact review and exact review
+   binding, including interactive consent, scripted review/acceptance, changed
+   scope refusal and same-key recovery. Preserve current durable intent,
+   reference fencing and crash-safe worker checkpoints.
+2. Qualify W12's cancellation/removal race through actual PostgreSQL and
+   managed-storage owners. Pending cancellation must retain its references;
+   removing one intent must not delete another consumer's artifacts.
+3. Complete the disposable U8 cleanup setup and repeat the affected installed
+   and connected gates at one integrated revision. Record final required CI
+   against that revision before promoting package evidence.
+4. Supply U2 with an exact compatible image/model pair that really starts and
+   computes a result. Its current verified empty image is insufficient. Keep
+   the later-page selection and distinct cache-blocked candidate intact.
+5. Run the independent U1–U8 operator walkthrough, correct dangerous or blocked
+   tasks, and record the scorecard without implementation coaching. The
+   every-model campaign, release merge/publication, deployment and physical
+   qualification each retain their own evidence. Web redesign remains outside
+   this CLI scope.
 
 Completed increments and exact validation commands are recorded in the
 [current status record](cli-operator-status.md); historical checkpoints below
@@ -1848,10 +1837,11 @@ it must not introduce a second collector or postpone that prerequisite.
    its Job envelope. It refuses changed or malformed replays before mutable
    catalog resolution; the API projects the stored choice and the CLI checks
    it before following. Those deterministic replay/receipt tests pass. The
-   remover still creates its Job after effects: pre-effect persistence,
-   simultaneous first-submission arbitration and crash-safe resumption remain
-   required. Do not manufacture receipt proof by echoing an incoming request
-   or treat the completed replay check as proof of those pending guarantees.
+   durable remover now persists its Job before effects, arbitrates simultaneous
+   first submissions, and resumes exact checkpoints after process death or
+   contention. The remaining review increment must bind its accepted review
+   digest as well; do not manufacture receipt proof by echoing an incoming
+   request.
 
 **Tests:** reference appears between inspection/removal, failed scan,
 keep-model semantics, active transfer, denied eviction, two-Spark sequential

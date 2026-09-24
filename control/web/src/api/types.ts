@@ -31,6 +31,7 @@ export type ModelDetail = components["schemas"]["ModelDetailResponse"];
 export type RecipeStatus = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
+export type CacheRemovalReview = components["schemas"]["CacheRemovalReview"];
 export type ModelCacheOperatorResponse = components["schemas"]["ModelCacheOperatorResponse"];
 export type RecipeImageAvailabilityResponse = components["schemas"]["RecipeImageAvailabilityResponse"];
 export type RecipeOperatorResponse = components["schemas"]["RecipeOperatorResponse"];
@@ -160,10 +161,12 @@ export interface LibraryApi {
   artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobResultUrl(jobId: string, name: string, sha256: string): string;
   prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
-  removeModelCache(selector: string, modelContentSha256: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  modelRemovalReview(selector: string, signal?: AbortSignal): Promise<CacheRemovalReview>;
+  removeModelCache(selector: string, modelContentSha256: string, requestKey: string, reviewDigest: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   downloadRecipe(selector: string, requestKey: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityResponse>;
-  removeRecipe(selector: string, requestKey: string, withModel: boolean, signal?: AbortSignal): Promise<RecipeOperatorResponse>;
+  recipeRemovalReview(selector: string, withModel: boolean, signal?: AbortSignal): Promise<CacheRemovalReview>;
+  removeRecipe(selector: string, requestKey: string, withModel: boolean, reviewDigest: string, signal?: AbortSignal): Promise<RecipeOperatorResponse>;
   updateRecipes(all: boolean, selectors: string[], requestKey: string, signal?: AbortSignal): Promise<RecipeUpdateResponse>;
   recipeCacheOperation(operationId: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
 }

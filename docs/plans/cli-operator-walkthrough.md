@@ -62,10 +62,12 @@ and [U7 results setup](cli-results-walkthrough.md) exercise stale-review consent
 exact-ID reconnect, cancellation across worker restart, and result retrieval. The [U8 read-only pipeline](cli-operator-u8-readonly.md)
 checks actual process composition. The [U8 upgrade setup](cli-upgrade-walkthrough.md)
 provides a separate disposable shell with two test nodes and a controlled first-target
-failure through the real job owner; cleanup remains gated. W19 stays open and starting any shell does not imply a participant
-result.
+failure through the real job owner. The [U8 cleanup setup](cli-cleanup-walkthrough.md)
+adds a disposable review, consent and removal scenario; its integrated smoke
+qualification is recorded in the current status document. W19 stays open and
+starting any shell does not imply a participant result.
 
-From the repository root, launch the noninteractive cleanup smoke with:
+From the repository root, launch the noninteractive connection/discovery/authoring smoke with:
 
 ```bash
 VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes \
@@ -108,7 +110,7 @@ Seed the following boundaries and confirm they work before the session:
 | U5 | An accepted application that remains observable long enough to interrupt local follow; a new shell must be able to query the same application ID while a newer application can exist. |
 | U6 | A durable blocker with an advertised action; a cancellation scenario with issued and unissued effects, a shared or reusable verified asset, and truthful settlement after restart. |
 | U7 | A Profile-owned current published route; a succeeded artifact job with verified files; and an unavailable or empty-result case that distinguishes those states. |
-| U8 | Disposable cleanup and upgrade targets, an authorized package source, a safe first-target failure case, and a read-only JSON command suitable for a pipe. Current W09/W17 ownership and removal gates must be closed before any cleanup mutation is attempted. |
+| U8 | Disposable cleanup and upgrade targets, an authorized package source, a safe first-target failure case, and a read-only JSON command suitable for a pipe. Use the dedicated disposable cleanup fixture and check its integrated qualification in the current status record before scheduling a participant. |
 
 The existing W19 plan permits a deterministic executor to isolate
 control-plane behavior, but it must exercise the registered API and service

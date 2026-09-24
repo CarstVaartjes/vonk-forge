@@ -39,6 +39,16 @@ from .build_context import BuildContext
 from .build_network import BuildNetwork
 from .build_network_mode import BuildNetworkMode
 from .build_patch import BuildPatch
+from .cache_removal_asset import CacheRemovalAsset
+from .cache_removal_asset_availability import CacheRemovalAssetAvailability
+from .cache_removal_asset_disposition import CacheRemovalAssetDisposition
+from .cache_removal_asset_kind import CacheRemovalAssetKind
+from .cache_removal_blocker import CacheRemovalBlocker
+from .cache_removal_finding import CacheRemovalFinding
+from .cache_removal_finding_asset_kind import CacheRemovalFindingAssetKind
+from .cache_removal_finding_classification import CacheRemovalFindingClassification
+from .cache_removal_review import CacheRemovalReview
+from .cache_removal_review_resource_kind import CacheRemovalReviewResourceKind
 from .cancel_request import CancelRequest
 from .capacity_reservations import CapacityReservations
 from .catalog_problem import CatalogProblem
@@ -594,6 +604,16 @@ __all__ = (
     "BuildNetwork",
     "BuildNetworkMode",
     "BuildPatch",
+    "CacheRemovalAsset",
+    "CacheRemovalAssetAvailability",
+    "CacheRemovalAssetDisposition",
+    "CacheRemovalAssetKind",
+    "CacheRemovalBlocker",
+    "CacheRemovalFinding",
+    "CacheRemovalFindingAssetKind",
+    "CacheRemovalFindingClassification",
+    "CacheRemovalReview",
+    "CacheRemovalReviewResourceKind",
     "CancelRequest",
     "CapacityReservations",
     "CatalogProblem",

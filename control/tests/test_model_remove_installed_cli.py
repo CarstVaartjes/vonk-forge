@@ -130,6 +130,31 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             ),
         ):
             environment = _process_environment(tmp_path, url, certificate, headers)
+            review_process = subprocess.run(
+                [
+                    str(installed_vonkctl),
+                    "--json",
+                    "model",
+                    "remove",
+                    selector,
+                    "--review",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+                env=environment,
+                cwd=tmp_path,
+            )
+            assert review_process.returncode == 0, (
+                review_process.stdout + review_process.stderr
+            )
+            review = json.loads(review_process.stdout)
+            assert review["target_identity"] == original_digest
+            assert review["blockers"] == []
+            assert managed_object.read_bytes() == _PAYLOAD
+            assert all(method == "GET" for method, _, _ in peer.calls)
+            reviewed_call_count = len(peer.calls)
             peer.held_response = ("POST", remove_path)
             peer.discard_held_response = True
             process = subprocess.Popen(
@@ -140,6 +165,8 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
                     "remove",
                     selector,
                     "--yes",
+                    "--review-digest",
+                    review["review_digest"],
                     "--request-key",
                     _REMOVE_KEY,
                     "--detach",
@@ -182,18 +209,21 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             assert first_receipt["phase"] == "queued"
             assert peer.response_accepted.is_set()
             assert peer.discard_held_response
-            assert [(method, path) for method, path, _ in peer.calls] == [
+            assert [
+                (method, path) for method, path, _ in peer.calls[reviewed_call_count:]
+            ] == [
                 ("GET", request_path),
-                ("GET", selector_path),
+                ("GET", f"{selector_path}/remove-review"),
                 ("POST", remove_path),
                 ("GET", request_path),
             ]
-            submitted = peer.calls[2][2]
+            submitted = peer.calls[reviewed_call_count + 2][2]
             assert isinstance(submitted, dict)
             assert submitted == {
                 "schema_version": 2,
                 "request_key": _REMOVE_KEY,
                 "model_content_sha256": original_digest,
+                "review_digest": review["review_digest"],
             }
 
             # A second installed process with the same key reconnects to the
@@ -207,6 +237,8 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
                     "remove",
                     selector,
                     "--yes",
+                    "--review-digest",
+                    review["review_digest"],
                     "--request-key",
                     _REMOVE_KEY,
                     "--detach",

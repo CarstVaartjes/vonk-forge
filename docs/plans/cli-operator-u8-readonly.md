@@ -28,6 +28,6 @@ It connects the installed wheel to a disposable HTTPS API and PostgreSQL Fleet
 owner, pipes the actual CLI output into a separate JSON consumer, and checks
 both process exits and unchanged operation counts.
 
-This does not authorize a cleanup attempt. The runbook says cache removal must
-wait for W09/W17's shared reference and impact protections; keep that boundary
-in place until those packages close.
+This read-only exercise does not authorize cleanup. Use the separate
+[disposable cleanup setup](cli-cleanup-walkthrough.md) for that part of U8 and
+check its integrated qualification in the [current status](cli-operator-status.md).

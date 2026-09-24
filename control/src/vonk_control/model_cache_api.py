@@ -11,6 +11,7 @@ from vonk_agent_protocol import OperationProgress
 from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
 from .bounded_json import require_integer, require_sequence
+from .cache_removal_review import CacheRemovalReview
 from .model_cache import (
     ModelCacheConflict,
     ModelCacheError,
@@ -40,6 +41,7 @@ from .operation_contract import AvailabilityOperationFailure
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/model/operations/{operation_id}"): "getModelOperation",
     ("get", "/api/model/requests/{request_key}"): "getModelRequest",
+    ("get", "/api/model/{selector}/remove-review"): "reviewModelRemoval",
     ("post", "/api/model/{selector}/download"): "downloadModel",
     ("post", "/api/model/{selector}/remove"): "removeModel",
     ("post", "/api/model/operations/{operation_id}/cancel"): "cancelModelOperation",
@@ -62,6 +64,7 @@ def _model_operator_response(
         selector=selector,
         request_key=operation.request_key,
         model_content_sha256=operation.model_content_sha256,
+        review_digest=operation.review_digest,
         operation_id=operation.id,
         state=operation.state,
         phase=str(raw.get("phase", progress.phase)),
@@ -178,6 +181,24 @@ def install_model_operator_routes(
         except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise failure(error) from None
 
+    @app.get(
+        "/api/model/{selector:path}/remove-review",
+        response_model=CacheRemovalReview,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="reviewModelRemoval",
+    )
+    def review_removal(
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
+        actor: Actor = actor_dependency,
+    ) -> CacheRemovalReview:
+        require_operator(actor, "/api/model/{selector:path}/remove")
+        try:
+            return cache().review_model_removal(selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise failure(error) from None
+
     @app.post(
         "/api/model/{selector:path}/download",
         response_model=ModelCacheOperatorResponse,
@@ -228,6 +249,7 @@ def install_model_operator_routes(
                 actor=actor.subject,
                 request_key=body.request_key,
                 model_content_sha256=body.model_content_sha256,
+                review_digest=body.review_digest,
             )
             audit(request, actor, "model.remove", selector, operation.id)
             return _model_operator_response(

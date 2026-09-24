@@ -8,7 +8,9 @@ table.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
@@ -61,6 +63,50 @@ _ACTIVE_ARTIFACT_JOBS = (
 )
 _PROFILE_PAYLOAD_BUDGET = 16 * 1024 * 1024
 MAX_ARTIFACT_OWNER_SCAN_BYTES = 16 * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactReferenceFinding:
+    """One validated existing owner of an exact managed artifact identity."""
+
+    asset: ArtifactIdentity
+    owner_kind: str
+    owner_id: str
+    state: str
+    classification: Literal["saved-reference", "active-work"]
+    detail: str
+    reason: str
+
+
+def _finding(
+    kind: Literal["model-set", "model-object", "runtime-image"],
+    digest: str,
+    *,
+    owner_kind: str,
+    owner_id: str,
+    state: str,
+    classification: Literal["saved-reference", "active-work"],
+    detail: str,
+    reason: str,
+) -> ArtifactReferenceFinding:
+    return ArtifactReferenceFinding(
+        asset=ArtifactIdentity(kind, digest),
+        owner_kind=owner_kind,
+        owner_id=owner_id,
+        state=state,
+        classification=classification,
+        detail=detail,
+        reason=reason,
+    )
+
+
+def _reason_projection(
+    findings: Mapping[str, tuple[ArtifactReferenceFinding, ...]],
+) -> dict[str, tuple[str, ...]]:
+    return {
+        digest: tuple(sorted({finding.reason for finding in values}))
+        for digest, values in findings.items()
+    }
 
 
 def require_model_sets_open(
@@ -192,10 +238,10 @@ def model_set_objects(
     return result
 
 
-def model_set_reference_reasons(
+def model_set_reference_findings(
     session: Session, set_digests: Iterable[str]
-) -> dict[str, tuple[str, ...]]:
-    """Find saved-profile and active accepted references to model sets."""
+) -> dict[str, tuple[ArtifactReferenceFinding, ...]]:
+    """Find typed saved-profile and active owners of exact model sets."""
 
     selected = set(set_digests)
     if not selected:
@@ -214,7 +260,9 @@ def model_set_reference_reasons(
             "model-set owners could not be read; removal was deferred",
             retryable=True,
         )
-    reasons: dict[str, set[str]] = {digest: set() for digest in selected}
+    findings: dict[str, set[ArtifactReferenceFinding]] = {
+        digest: set() for digest in selected
+    }
 
     # A saved profile remains a protective selector reference. Resolve it
     # against the current active recipe head and protect every exact cache set
@@ -222,8 +270,8 @@ def model_set_reference_reasons(
     # current variants is deliberately conservative until the operator edits
     # the profile or reviews a new exact application.
     profile_bytes = 0
-    profile_rows = session.scalars(select(FleetProfile).order_by(FleetProfile.id))
     try:
+        profile_rows = session.scalars(select(FleetProfile).order_by(FleetProfile.id))
         for profile in profile_rows:
             encoded = canonical_message(profile.assignments)
             profile_bytes += len(encoded)
@@ -264,7 +312,21 @@ def model_set_reference_reasons(
                     )
                 for set_digest, row in sets.items():
                     if row.recipe_revision_sha256 == revision.content_digest:
-                        reasons[set_digest].add(f"saved profile {profile.id}")
+                        findings[set_digest].add(
+                            _finding(
+                                "model-set",
+                                set_digest,
+                                owner_kind="fleet-profile",
+                                owner_id=profile.id,
+                                state="saved",
+                                classification="saved-reference",
+                                detail=(
+                                    "saved profile assignment resolves to this "
+                                    "active recipe revision"
+                                ),
+                                reason=f"saved profile {profile.id}",
+                            )
+                        )
     except ArtifactLifecycleError:
         raise
     except Exception as error:
@@ -303,8 +365,17 @@ def model_set_reference_reasons(
         for preparation in plan.preparation_decisions:
             identity = preparation.model
             if identity.artifact_set_sha256 in selected:
-                reasons[identity.artifact_set_sha256].add(
-                    f"profile application {application.id}"
+                findings[identity.artifact_set_sha256].add(
+                    _finding(
+                        "model-set",
+                        identity.artifact_set_sha256,
+                        owner_kind="fleet-profile-application",
+                        owner_id=application.id,
+                        state=application.state,
+                        classification="active-work",
+                        detail="accepted profile application prepares this model set",
+                        reason=f"profile application {application.id}",
+                    )
                 )
 
     run_switch_kinds = _run_switch_kinds()
@@ -321,7 +392,18 @@ def model_set_reference_reasons(
             plan = _run_switch_plan(operation.payload)
             set_digest = plan.storage.artifact_set_sha256
             if set_digest in selected:
-                reasons[set_digest].add(f"run/switch operation {operation.id}")
+                findings[set_digest].add(
+                    _finding(
+                        "model-set",
+                        set_digest,
+                        owner_kind="run-switch-operation",
+                        owner_id=operation.id,
+                        state=operation.state,
+                        classification="active-work",
+                        detail="accepted Run/Switch operation uses this model set",
+                        reason=f"run/switch operation {operation.id}",
+                    )
+                )
 
     for installation in session.scalars(
         select(RecipeInstallation)
@@ -332,7 +414,18 @@ def model_set_reference_reasons(
         plan = _run_switch_plan({"plan": installation.plan})
         set_digest = plan.storage.artifact_set_sha256
         if set_digest in selected:
-            reasons[set_digest].add(f"installation {installation.id}")
+            findings[set_digest].add(
+                _finding(
+                    "model-set",
+                    set_digest,
+                    owner_kind="recipe-installation",
+                    owner_id=installation.id,
+                    state=installation.state,
+                    classification="active-work",
+                    detail="accepted installation uses this model set",
+                    reason=f"installation {installation.id}",
+                )
+            )
 
     for distribution in session.scalars(
         select(ArtifactDistributionAssignment)
@@ -343,8 +436,17 @@ def model_set_reference_reasons(
     ):
         account(distribution.objects)
         if distribution.model_artifact_set_sha256 in selected:
-            reasons[distribution.model_artifact_set_sha256].add(
-                f"active distribution assignment {distribution.id}"
+            findings[distribution.model_artifact_set_sha256].add(
+                _finding(
+                    "model-set",
+                    distribution.model_artifact_set_sha256,
+                    owner_kind="artifact-distribution-assignment",
+                    owner_id=distribution.id,
+                    state=distribution.state,
+                    classification="active-work",
+                    detail="accepted distribution assignment retains the model set",
+                    reason=f"active distribution assignment {distribution.id}",
+                )
             )
 
     for operation in session.scalars(
@@ -357,20 +459,54 @@ def model_set_reference_reasons(
     ):
         if operation.artifact_set_sha256 in selected:
             account(operation.payload)
-            reasons[operation.artifact_set_sha256].add(
-                f"model-cache operation {operation.id}"
+            findings[operation.artifact_set_sha256].add(
+                _finding(
+                    "model-set",
+                    operation.artifact_set_sha256,
+                    owner_kind="model-cache-operation",
+                    owner_id=operation.id,
+                    state=operation.state,
+                    classification="active-work",
+                    detail="active model-cache download or repair owns this set",
+                    reason=f"model-cache operation {operation.id}",
+                )
             )
 
-    return {digest: tuple(sorted(value)) for digest, value in reasons.items()}
+    return {
+        digest: tuple(
+            sorted(
+                value,
+                key=lambda item: (
+                    item.classification,
+                    item.owner_kind,
+                    item.owner_id,
+                    item.state,
+                    item.detail,
+                    item.reason,
+                ),
+            )
+        )
+        for digest, value in findings.items()
+    }
 
 
-def runtime_image_reference_reasons(
-    session: Session, archive_digests: Iterable[str]
+def model_set_reference_reasons(
+    session: Session, set_digests: Iterable[str]
 ) -> dict[str, tuple[str, ...]]:
-    """Find saved-profile and active exact owners of runtime-image bytes."""
+    """Project typed model-set findings into existing presentation reasons."""
+
+    return _reason_projection(model_set_reference_findings(session, set_digests))
+
+
+def runtime_image_reference_findings(
+    session: Session, archive_digests: Iterable[str]
+) -> dict[str, tuple[ArtifactReferenceFinding, ...]]:
+    """Find typed saved-profile and active owners of exact runtime-image bytes."""
 
     selected = set(archive_digests)
-    reasons: dict[str, set[str]] = {digest: set() for digest in selected}
+    findings: dict[str, set[ArtifactReferenceFinding]] = {
+        digest: set() for digest in selected
+    }
     if not selected:
         return {}
 
@@ -424,8 +560,20 @@ def runtime_image_reference_reasons(
                         RuntimeImageAuthorization.oci_archive_sha256.in_(selected),
                     )
                 ):
-                    reasons[authorization.oci_archive_sha256].add(
-                        f"saved profile {profile.id}"
+                    findings[authorization.oci_archive_sha256].add(
+                        _finding(
+                            "runtime-image",
+                            authorization.oci_archive_sha256,
+                            owner_kind="fleet-profile",
+                            owner_id=profile.id,
+                            state="saved",
+                            classification="saved-reference",
+                            detail=(
+                                "saved profile assignment resolves to this "
+                                "authorized active recipe image"
+                            ),
+                            reason=f"saved profile {profile.id}",
+                        )
                     )
     except ArtifactLifecycleError:
         raise
@@ -462,7 +610,18 @@ def runtime_image_reference_reasons(
         for preparation in _profile_plan(application.plan).preparation_decisions:
             archive = preparation.runtime_image.oci_layout_sha256
             if archive in selected:
-                reasons[archive].add(f"profile application {application.id}")
+                findings[archive].add(
+                    _finding(
+                        "runtime-image",
+                        archive,
+                        owner_kind="fleet-profile-application",
+                        owner_id=application.id,
+                        state=application.state,
+                        classification="active-work",
+                        detail="accepted profile application prepares this runtime image",
+                        reason=f"profile application {application.id}",
+                    )
+                )
 
     run_switch_kinds = _run_switch_kinds()
     if run_switch_kinds:
@@ -479,11 +638,34 @@ def runtime_image_reference_reasons(
             plan = _run_switch_plan(operation.payload)
             archive = plan.runtime_storage.oci_layout_sha256
             if archive in selected:
-                reasons[archive].add(f"run/switch operation {operation.id}")
+                findings[archive].add(
+                    _finding(
+                        "runtime-image",
+                        archive,
+                        owner_kind="run-switch-operation",
+                        owner_id=operation.id,
+                        state=operation.state,
+                        classification="active-work",
+                        detail="accepted Run/Switch operation uses this runtime image",
+                        reason=f"run/switch operation {operation.id}",
+                    )
+                )
             intent = _run_switch_runtime_image_intent(operation, plan)
             if intent is not None and intent.archive_sha256 in selected:
-                reasons[intent.archive_sha256].add(
-                    f"run/switch operation {operation.id} runtime image preparation"
+                findings[intent.archive_sha256].add(
+                    _finding(
+                        "runtime-image",
+                        intent.archive_sha256,
+                        owner_kind="run-switch-operation",
+                        owner_id=operation.id,
+                        state=operation.state,
+                        classification="active-work",
+                        detail="accepted Run/Switch operation is preparing this runtime image",
+                        reason=(
+                            f"run/switch operation {operation.id} "
+                            "runtime image preparation"
+                        ),
+                    )
                 )
 
     for installation in session.scalars(
@@ -496,7 +678,18 @@ def runtime_image_reference_reasons(
             {"plan": installation.plan}
         ).runtime_storage.oci_layout_sha256
         if archive in selected:
-            reasons[archive].add(f"installation {installation.id}")
+            findings[archive].add(
+                _finding(
+                    "runtime-image",
+                    archive,
+                    owner_kind="recipe-installation",
+                    owner_id=installation.id,
+                    state=installation.state,
+                    classification="active-work",
+                    detail="accepted installation uses this runtime image",
+                    reason=f"installation {installation.id}",
+                )
+            )
 
     for distribution in session.scalars(
         select(ArtifactDistributionAssignment)
@@ -505,8 +698,17 @@ def runtime_image_reference_reasons(
         .order_by(ArtifactDistributionAssignment.id)
     ):
         if distribution.oci_archive_sha256 in selected:
-            reasons[distribution.oci_archive_sha256].add(
-                f"active distribution assignment {distribution.id}"
+            findings[distribution.oci_archive_sha256].add(
+                _finding(
+                    "runtime-image",
+                    distribution.oci_archive_sha256,
+                    owner_kind="artifact-distribution-assignment",
+                    owner_id=distribution.id,
+                    state=distribution.state,
+                    classification="active-work",
+                    detail="accepted distribution assignment retains the runtime image",
+                    reason=f"active distribution assignment {distribution.id}",
+                )
             )
 
     for run in session.scalars(
@@ -526,7 +728,18 @@ def runtime_image_reference_reasons(
             {"plan": installation.plan}
         ).runtime_storage.oci_layout_sha256
         if archive in selected:
-            reasons[archive].add(f"active run {run.id}")
+            findings[archive].add(
+                _finding(
+                    "runtime-image",
+                    archive,
+                    owner_kind="recipe-run",
+                    owner_id=run.id,
+                    state=run.state,
+                    classification="active-work",
+                    detail="active recipe run retains its installed runtime image",
+                    reason=f"active run {run.id}",
+                )
+            )
 
     from .recipe_image_availability import OPERATION_KIND
 
@@ -564,8 +777,20 @@ def runtime_image_reference_reasons(
         if associated_archives:
             account(payload)
             for archive in associated_archives:
-                reasons[archive].add(
-                    f"active image preparation {operation.id} for recipe revision"
+                findings[archive].add(
+                    _finding(
+                        "runtime-image",
+                        archive,
+                        owner_kind="recipe-image-availability-operation",
+                        owner_id=operation.id,
+                        state=operation.state,
+                        classification="active-work",
+                        detail="active image preparation is authorized for this revision",
+                        reason=(
+                            f"active image preparation {operation.id} "
+                            "for recipe revision"
+                        ),
+                    )
                 )
         raw_reference = payload.get("image_reference_intent")
         if raw_reference is not None:
@@ -591,17 +816,62 @@ def runtime_image_reference_reasons(
                 )
             account(reference)
             if reference.oci_archive_sha256 in selected:
-                reasons[reference.oci_archive_sha256].add(
-                    f"image publication operation {operation.id}"
+                findings[reference.oci_archive_sha256].add(
+                    _finding(
+                        "runtime-image",
+                        reference.oci_archive_sha256,
+                        owner_kind="recipe-image-availability-operation",
+                        owner_id=operation.id,
+                        state=operation.state,
+                        classification="active-work",
+                        detail="active image operation has an exact publication intent",
+                        reason=f"image publication operation {operation.id}",
+                    )
                 )
         image_result = payload.get("image_result")
         if isinstance(image_result, Mapping):
             archive = image_result.get("oci_archive_sha256")
             if isinstance(archive, str) and archive in selected:
                 account(image_result)
-                reasons[archive].add(f"image operation {operation.id}")
+                findings[archive].add(
+                    _finding(
+                        "runtime-image",
+                        archive,
+                        owner_kind="recipe-image-availability-operation",
+                        owner_id=operation.id,
+                        state=operation.state,
+                        classification="active-work",
+                        detail="active image operation has a verified publication result",
+                        reason=f"image operation {operation.id}",
+                    )
+                )
 
-    return {digest: tuple(sorted(value)) for digest, value in reasons.items()}
+    return {
+        digest: tuple(
+            sorted(
+                value,
+                key=lambda item: (
+                    item.classification,
+                    item.owner_kind,
+                    item.owner_id,
+                    item.state,
+                    item.detail,
+                    item.reason,
+                ),
+            )
+        )
+        for digest, value in findings.items()
+    }
+
+
+def runtime_image_reference_reasons(
+    session: Session, archive_digests: Iterable[str]
+) -> dict[str, tuple[str, ...]]:
+    """Project typed runtime-image findings into existing presentation reasons."""
+
+    return _reason_projection(
+        runtime_image_reference_findings(session, archive_digests)
+    )
 
 
 def _profile_plan(value: object) -> FleetProfilePreview:
@@ -736,8 +1006,11 @@ def _run_switch_kinds() -> frozenset[str]:
 
 __all__ = [
     "MAX_ARTIFACT_OWNER_SCAN_BYTES",
+    "ArtifactReferenceFinding",
     "model_set_objects",
+    "model_set_reference_findings",
     "model_set_reference_reasons",
     "require_model_sets_open",
+    "runtime_image_reference_findings",
     "runtime_image_reference_reasons",
 ]

@@ -9,6 +9,10 @@ from fastapi.testclient import TestClient
 from httpx import Response
 from pydantic import ValidationError
 from vonk_control.auth import Actor
+from vonk_control.cache_removal_review import (
+    CacheRemovalReviewContent,
+    seal_cache_removal_review,
+)
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
@@ -174,7 +178,11 @@ def test_openapi_uses_typed_recipe_models_and_conflict_schema() -> None:
     ]["content"]["application/json"]["schema"]["$ref"].endswith(
         "RecipeCancellationRequest"
     )
-    assert RecipeOperatorRequest.model_fields.keys() >= {"request_key", "with_model"}
+    assert RecipeOperatorRequest.model_fields.keys() >= {
+        "request_key",
+        "with_model",
+        "review_digest",
+    }
     assert RecipeUpdateRequest.model_fields.keys() >= {
         "request_key",
         "selectors",
@@ -336,7 +344,12 @@ def test_remove_names_a_terminal_availability_refusal() -> None:
 
     response = _operator_client(service).post(
         "/api/recipe/example/remove",
-        json={"schema_version": 2, "request_key": _REQUEST_KEY},
+        json={
+            "schema_version": 2,
+            "request_key": _REQUEST_KEY,
+            "with_model": False,
+            "review_digest": "a" * 64,
+        },
     )
 
     assert response.status_code == 409, response.text
@@ -354,6 +367,7 @@ def test_remove_response_projects_the_stored_model_choice_not_the_request() -> N
         "request_key": _REQUEST_KEY,
         "operation_id": "00000000-0000-4000-8000-000000000002",
         "recipe_revision_id": "revision-example",
+        "review_digest": "a" * 64,
         "with_model": False,
         "state": "succeeded",
         "progress": {
@@ -378,11 +392,20 @@ def test_remove_response_projects_the_stored_model_choice_not_the_request() -> N
             "schema_version": 2,
             "request_key": _REQUEST_KEY,
             "with_model": True,
+            "review_digest": "b" * 64,
         },
     )
 
     assert response.status_code == 202, response.text
     assert response.json()["with_model"] is False
+    assert response.json()["review_digest"] == "a" * 64
+    service.remove_selector.assert_called_once_with(
+        "example",
+        actor="operator",
+        request_id=_REQUEST_KEY,
+        with_model=True,
+        review_digest="b" * 64,
+    )
 
 
 def test_remove_response_preserves_partial_progress_and_failure() -> None:
@@ -394,6 +417,7 @@ def test_remove_response_preserves_partial_progress_and_failure() -> None:
         "request_key": _REQUEST_KEY,
         "operation_id": "00000000-0000-4000-8000-000000000002",
         "recipe_revision_id": "revision-example",
+        "review_digest": "c" * 64,
         "with_model": False,
         "state": "partial",
         "progress": {
@@ -422,7 +446,12 @@ def test_remove_response_preserves_partial_progress_and_failure() -> None:
 
     response = _operator_client(service).post(
         "/api/recipe/example/remove",
-        json={"schema_version": 2, "request_key": _REQUEST_KEY},
+        json={
+            "schema_version": 2,
+            "request_key": _REQUEST_KEY,
+            "with_model": False,
+            "review_digest": "c" * 64,
+        },
     )
 
     assert response.status_code == 202, response.text
@@ -433,6 +462,51 @@ def test_remove_response_preserves_partial_progress_and_failure() -> None:
     assert body["progress"]["total_bytes"] is None
     assert body["failure"]["retryable"] is True
     assert body["next_actions"] == ["retry"]
+
+
+def test_remove_review_is_read_only_and_returns_the_canonical_digest() -> None:
+    service = Mock()
+    review = seal_cache_removal_review(
+        CacheRemovalReviewContent(
+            schema_version=2,
+            action="remove",
+            resource_kind="recipe",
+            selector="example",
+            target_identity="revision-example",
+            with_model=False,
+            assets=[],
+            references=[],
+            active_work=[],
+            blockers=[],
+            observed_at="2026-09-24T00:00:00+00:00",
+        )
+    )
+    service.review_removal.return_value = review
+
+    response = _operator_client(service).get(
+        "/api/recipe/example/remove-review?with_model=false"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["review_digest"] == review.review_digest
+    service.review_removal.assert_called_once_with("example", with_model=False)
+    service.remove_selector.assert_not_called()
+
+
+def test_remove_review_requires_the_same_operator_role_as_removal() -> None:
+    service = Mock()
+    app = FastAPI()
+    install_recipe_operator_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("viewer", "viewer")),
+        service=service,
+    )
+
+    response = TestClient(app).get("/api/recipe/example/remove-review?with_model=false")
+
+    assert response.status_code == 403
+    service.review_removal.assert_not_called()
+    service.remove_selector.assert_not_called()
 
 
 def test_operation_observation_names_a_transient_availability_refusal() -> None:

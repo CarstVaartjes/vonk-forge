@@ -72,6 +72,8 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
+from .recipe_removal_review_support import remove_after_review
+
 _CACHED_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
 
 
@@ -1249,7 +1251,8 @@ def test_removal_does_not_corrupt_the_stored_build_envelope(tmp_path: Path) -> N
         clock=lambda: now,
     )
 
-    result = availability.remove_selector(
+    result = remove_after_review(
+        availability,
         recipe.identity.slug,
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000024",

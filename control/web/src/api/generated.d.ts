@@ -721,6 +721,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model/{selector}/remove-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Removal */
+        get: operations["reviewModelRemoval"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operations": {
         parameters: {
             query?: never;
@@ -1128,6 +1145,23 @@ export interface paths {
         put?: never;
         /** Remove */
         post: operations["removeRecipe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recipe/{selector}/remove-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Remove */
+        get: operations["reviewRecipeRemoval"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1654,6 +1688,113 @@ export interface components {
         BuildPatch: {
             /** Path */
             path: string;
+        };
+        /**
+         * CacheRemovalAsset
+         * @description One exact cache identity and its owner-reported storage condition.
+         */
+        CacheRemovalAsset: {
+            /**
+             * Availability
+             * @enum {string}
+             */
+            availability: "verified" | "partial" | "missing" | "unknown";
+            /** Available Bytes */
+            available_bytes?: number | null;
+            /**
+             * Disposition
+             * @enum {string}
+             */
+            disposition: "remove" | "retain-shared";
+            /** Expected Bytes */
+            expected_bytes?: number | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "model-set" | "model-object" | "runtime-image";
+            /** Sha256 */
+            sha256: string;
+        };
+        /** CacheRemovalBlocker */
+        CacheRemovalBlocker: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Recovery Actions */
+            recovery_actions?: string[];
+            /** Retryable */
+            retryable: boolean;
+        };
+        /**
+         * CacheRemovalFinding
+         * @description One existing owner predicate's exact reference or active-work finding.
+         */
+        CacheRemovalFinding: {
+            /**
+             * Asset Kind
+             * @enum {string}
+             */
+            asset_kind: "model-set" | "model-object" | "runtime-image";
+            /** Asset Sha256 */
+            asset_sha256: string;
+            /**
+             * Classification
+             * @enum {string}
+             */
+            classification: "saved-reference" | "active-work";
+            /** Detail */
+            detail: string;
+            /** Owner Id */
+            owner_id: string;
+            /** Owner Kind */
+            owner_kind: string;
+            /** Reason */
+            reason: string;
+            /** State */
+            state: string;
+        };
+        /**
+         * CacheRemovalReview
+         * @description A complete review whose digest is verified during model validation.
+         */
+        CacheRemovalReview: {
+            /**
+             * Action
+             * @default remove
+             * @constant
+             */
+            action: "remove";
+            /** Active Work */
+            active_work: components["schemas"]["CacheRemovalFinding"][];
+            /** Assets */
+            assets: components["schemas"]["CacheRemovalAsset"][];
+            /** Blockers */
+            blockers: components["schemas"]["CacheRemovalBlocker"][];
+            /** Observed At */
+            observed_at: string;
+            /** References */
+            references: components["schemas"]["CacheRemovalFinding"][];
+            /**
+             * Resource Kind
+             * @enum {string}
+             */
+            resource_kind: "model" | "recipe";
+            /** Review Digest */
+            review_digest: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Selector */
+            selector: string;
+            /** Target Identity */
+            target_identity: string;
+            /** With Model */
+            with_model: boolean | null;
         };
         /** CancelRequest */
         CancelRequest: {
@@ -4269,6 +4410,8 @@ export interface components {
             request_key: string;
             /** Result */
             result?: components["schemas"]["ModelCacheDownloadResult"] | components["schemas"]["ModelCacheRemovalResult"] | null;
+            /** Review Digest */
+            review_digest?: string | null;
             /**
              * Schema Version
              * @default 2
@@ -4296,6 +4439,8 @@ export interface components {
             model_content_sha256: string;
             /** Request Key */
             request_key: string;
+            /** Review Digest */
+            review_digest: string;
             /**
              * Schema Version
              * @default 2
@@ -5778,16 +5923,15 @@ export interface components {
         RecipeOperatorRequest: {
             /** Request Key */
             request_key: string;
+            /** Review Digest */
+            review_digest: string;
             /**
              * Schema Version
              * @default 2
              * @constant
              */
             schema_version: 2;
-            /**
-             * With Model
-             * @default false
-             */
+            /** With Model */
             with_model: boolean;
         };
         /** RecipeOperatorResponse */
@@ -5817,6 +5961,8 @@ export interface components {
             reclaimed_bytes: number;
             /** Request Key */
             request_key: string;
+            /** Review Digest */
+            review_digest: string;
             /**
              * Schema Version
              * @default 2
@@ -11005,6 +11151,82 @@ export interface operations {
             };
         };
     };
+    reviewModelRemoval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheRemovalReview"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     listOperations: {
         parameters: {
             query?: {
@@ -12614,6 +12836,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecipeOperatorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    reviewRecipeRemoval: {
+        parameters: {
+            query: {
+                with_model: boolean;
+            };
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheRemovalReview"];
                 };
             };
             /** @description Unauthorized */

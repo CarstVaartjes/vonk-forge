@@ -49,27 +49,49 @@ allows, for up to 32 simultaneous data requests. The
 
 ## Remove and cancel
 
+Inspect the Controller-owned impact before accepting removal:
+
 ```bash
-vonkctl model remove MODEL --yes
-vonkctl recipe remove RECIPE --keep-model --yes
-vonkctl recipe remove RECIPE --with-model --yes
+vonkctl model remove MODEL --review
+vonkctl recipe remove RECIPE --keep-model --review
+vonkctl recipe remove RECIPE --with-model --review
 ```
 
-Removal cancels the corresponding download or build and removes the Controller
-cache entry when it is no longer referenced. It does not use a Spark-local copy
-to restore the entry. Applying a profile with a missing or invalidated entry is
-blocked with the missing asset and a cache-preparation action; it does not
-silently fetch upstream. A late worker completion must not republish a removed
-entry.
+The review shows exact assets and storage observations, shared objects retained,
+references, active work and blockers. In a terminal, omit `--review` to display
+that impact and answer the confirmation. Recipe removal always requires the
+explicit `--keep-model` or `--with-model` choice.
 
-When removing the last cached recipe for a model, the CLI does not prompt: it
-fails closed and requires `--keep-model` or `--with-model`. Removal is
-non-interactive and needs `--yes`.
-Shared physical objects remain while another cache entry, saved profile, active
-workload, or preparation operation still requires them. NAS garbage collection
-may remove unused local model objects after those references are gone. It does
-not make Spark copies authoritative or require their deletion to complete a
-cache operation.
+Scripts must obtain the review first, then pass its exact digest with explicit
+consent. For example, after reviewing the model response:
+
+```bash
+vonkctl model remove MODEL --review-digest REVIEW_SHA256 --yes
+```
+
+Replace `REVIEW_SHA256` with the digest returned by the review. Recipe scripts
+also pass the same retention choice they reviewed. Changed effects are refused
+and require a new review; `--yes` alone is insufficient. See the
+[CLI runbook](vonkctl.md) for complete JSON examples and request-key recovery.
+
+Removal persists exact intent before deleting bytes and reports accepted,
+waiting, partial and completed work separately. A lost response reconnects to
+the same request. Local timeout or interruption stops observation only. Active
+preparation, saved profiles and workload references can block removal; eviction
+does not cancel their owners. Use the noun's explicit `cancel` command for
+cancellation and observe its settlement before reviewing removal again.
+
+Shared physical objects remain while another cache entry requires them. The
+review names the protecting owner; successful removal of the selected entry
+does not imply those shared bytes were reclaimed. Worker recovery retains its
+original scope and checkpoints, and late publication cannot cross a deletion
+fence. No Spark-local copy becomes an authority or fallback for profile cache
+readiness. A profile with a missing asset exposes its cache-preparation action
+instead of silently fetching upstream.
+
+NAS garbage collection remains separate from explicit removal and may collect
+unused local objects only after authoritative references are gone. It does not
+require Spark copies to be deleted to finish a Controller cache operation.
 
 Profiles persist exact cached model/recipe-image choices and show cache state
 alongside observed Spark running state. Loading a profile does not resolve a

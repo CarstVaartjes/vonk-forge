@@ -1,5 +1,8 @@
 import {useCallback, useEffect, useRef, useState} from "react";
-import type {ControlApi, ModelCacheOperatorResponse} from "../api/types";
+import type {CacheRemovalReview, ControlApi, ModelCacheOperatorResponse} from "../api/types";
+
+import {CacheRemovalProgress} from "./cache-removal-progress";
+import {CacheRemovalReviewDetails} from "./cache-removal-review";
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 const POLL_INTERVAL_MS = 1_000;
@@ -39,11 +42,20 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
 }) {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [removal, setRemoval] = useState<ModelCacheOperatorResponse | null>(null);
+  const [review, setReview] = useState<CacheRemovalReview | null>(null);
   const [phase, setPhase] = useState("");
   const [error, setError] = useState("");
   const abort = useRef<AbortController | undefined>(undefined);
 
-  useEffect(() => () => abort.current?.abort(), []);
+  useEffect(() => {
+    setReview(null);
+    setRemoval(null);
+    setConfirming(false);
+    setBusy(false);
+    setError("");
+    return () => abort.current?.abort();
+  }, [api, selector, modelContentSha256]);
 
   const prepare = useCallback(async () => {
     abort.current?.abort();
@@ -77,43 +89,73 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
     }
   }, [api, onPrepared, selector]);
 
+  const reviewRemoval = useCallback(async () => {
+    abort.current?.abort();
+    const controller = new AbortController();
+    abort.current = controller;
+    setConfirming(true);
+    setReview(null);
+    setBusy(true);
+    setError("");
+    try {
+      const current = await api.modelRemovalReview(selector, controller.signal);
+      if (controller.signal.aborted) return;
+      if (current.resource_kind !== "model" || current.target_identity !== modelContentSha256) {
+        throw new Error("Model identity changed. Refresh the Library and review again.");
+      }
+      setReview(current);
+    } catch (value) {
+      if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Cache removal review failed");
+    } finally {
+      if (!controller.signal.aborted) setBusy(false);
+    }
+  }, [api, modelContentSha256, selector]);
+
   const remove = useCallback(async () => {
+    if (!review || review.blockers.length || review.target_identity !== modelContentSha256) return;
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
     setBusy(true);
     setError("");
     try {
-      const result = await api.removeModelCache(selector, modelContentSha256, crypto.randomUUID(), controller.signal);
+      const result = await api.removeModelCache(selector, review.target_identity, crypto.randomUUID(), review.review_digest, controller.signal);
       if (controller.signal.aborted) return;
       setBusy(false);
       setConfirming(false);
-      if (result.state === "failed" || result.state === "cancelled") {
-        setError(failureText(result));
+      setReview(null);
+      if (result.state === "succeeded") {
+        onPrepared();
         return;
       }
-      onPrepared();
+      if (!result.operation_id) throw new Error("Removal receipt has no operation identity.");
+      setRemoval(result);
     } catch (value) {
       if (controller.signal.aborted) return;
       setBusy(false);
-      setError(value instanceof Error ? value.message.slice(0, 256) : "Cache removal failed");
+      setReview(null);
+      setError(value instanceof Error ? value.message : "Cache removal failed; review again before retrying.");
     }
-  }, [api, modelContentSha256, onPrepared, selector]);
+  }, [api, modelContentSha256, onPrepared, review, selector]);
+
+  if (removal) return <CacheRemovalProgress api={api} kind="model" initial={removal}
+    onComplete={() => {setRemoval(null); onPrepared();}} onDismiss={() => setRemoval(null)}/>;
 
   if (state === "cached") {
-    // Removal is destructive, so it takes an explicit second action rather
-    // than a single click, matching the CLI's mandatory --yes.
+    // Confirmation accepts exactly the Controller review shown here.
     return <div className="library-cache-action">
       <span className="library-cache-state is-ready">Cached</span>
       {confirming
         ? <>
-            <button type="button" className="button secondary" disabled={busy} onClick={() => void remove()}>
-              {busy ? "Removing…" : "Confirm remove"}
+            <button type="button" className="button secondary" disabled={busy || !review || review.blockers.length > 0} onClick={() => void remove()}>
+              Confirm remove
             </button>
             <button type="button" className="button secondary" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
           </>
-        : <button type="button" className="button secondary" onClick={() => setConfirming(true)}>Remove from cache</button>}
-      {confirming && <span className="library-cache-missing">Referenced profiles and running workloads keep the entry.</span>}
+        : <button type="button" className="button secondary" disabled={busy} onClick={() => void reviewRemoval()}>Remove from cache</button>}
+      {confirming && busy && <span role="status">Waiting for Controller…</span>}
+      {confirming && review && <CacheRemovalReviewDetails review={review}/> }
+      {confirming && !review && !busy && <button type="button" className="button secondary" onClick={() => void reviewRemoval()}>Review again</button>}
       {error && <span className="library-cache-error" role="alert">{error}</span>}
     </div>;
   }

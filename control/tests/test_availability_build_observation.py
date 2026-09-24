@@ -12,6 +12,7 @@ from vonk_control.bounded_json import require_mapping
 from vonk_control.models import Job, NodeInventorySnapshot, RecipeBuild
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityError
 
+from .recipe_removal_review_support import remove_after_review
 from .test_build_cancellation_recovery import _active_claims, _evidence, _services
 from .test_build_consumer_ownership import _availability
 from .test_recipe_builds import _write_controller_build_receipt
@@ -352,8 +353,8 @@ def test_new_availability_intent_after_removal_joins_the_accepted_build(
         child_payload = dict(child.payload)
         child_state = child.state
         child_result = child.result
-    removal = production.service.remove_selector(
-        revision.id, actor="operator", request_id=str(uuid.uuid4())
+    removal = remove_after_review(
+        production.service, revision.id, actor="operator", request_id=str(uuid.uuid4())
     )
     assert removal["cancelled_builds"] == []
     assert not operations.reconcile_cancelled_builds()

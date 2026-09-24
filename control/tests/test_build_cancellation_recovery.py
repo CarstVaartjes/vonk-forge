@@ -28,6 +28,7 @@ from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
+from .recipe_removal_review_support import remove_after_review
 from .test_recipe_builds import RecordingQueue, _write_controller_build_receipt, setup
 
 
@@ -181,8 +182,11 @@ def test_cache_removal_preserves_an_accepted_build_and_its_claim(
         authority=lambda *_args, **_kwargs: (recipe, {}),
         clock=lambda: now,
     )
-    removal = availability.remove_selector(
-        recipe.identity.slug, actor="operator", request_id=str(uuid.uuid4())
+    removal = remove_after_review(
+        availability,
+        recipe.identity.slug,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
     )
 
     assert removal["action"] == "remove"
@@ -376,8 +380,11 @@ def test_removal_of_an_unissued_plan_does_not_invent_a_failed_attempt(
         authority=lambda *_args, **_kwargs: (recipe, {}),
         clock=lambda: now,
     )
-    availability.remove_selector(
-        recipe.identity.slug, actor="operator", request_id=str(uuid.uuid4())
+    remove_after_review(
+        availability,
+        recipe.identity.slug,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
     )
     assert not operations.reconcile_cancelled_builds()
     with sessions() as session:
@@ -433,8 +440,11 @@ def test_removal_does_not_lock_or_mutate_an_accepted_build_owner(
             else select(RecipeBuild).where(RecipeBuild.id == plan.build_id)
         )
         blocker.scalar(statement.with_for_update())
-        removal = availability.remove_selector(
-            recipe.identity.slug, actor="operator", request_id=str(uuid.uuid4())
+        removal = remove_after_review(
+            availability,
+            recipe.identity.slug,
+            actor="operator",
+            request_id=str(uuid.uuid4()),
         )
         assert removal["action"] == "remove"
         assert removal["cancelled_builds"] == []

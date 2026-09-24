@@ -1,6 +1,7 @@
 import {fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {vi} from "vitest";
 import type {ControlApi} from "../api/types";
+import {cacheRemovalReview} from "../test-fixtures/cache-removal";
 import {libraryViewSnapshot} from "../test-fixtures/library";
 import {buildLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS} from "./library-workcell";
 import {LibraryModelsView} from "./library-models-view";
@@ -74,19 +75,25 @@ test("prepares the Controller cache for an uncached model", async () => {
 
 test("removes a cached model only after an explicit confirmation", async () => {
   const removeModelCache = vi.fn().mockResolvedValue({...prepared, action: "remove" as const});
-  const api = {removeModelCache} as unknown as ControlApi;
   const base = libraryViewSnapshot.models[0]!;
+  const review = cacheRemovalReview({resource_kind: "model", target_identity: base.model.content_sha256, with_model: null});
+  const modelRemovalReview = vi.fn().mockResolvedValue(review);
+  const api = {removeModelCache, modelRemovalReview} as unknown as ControlApi;
   const inventory = [{...base, local: {...base.local, controller: "cached" as const}}];
   render(<LibraryModelsView api={api} entries={[]} modelInventory={inventory} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} onRefresh={async () => undefined} path="/library?view=models" query=""/>);
 
   // Removal is destructive, so the first click only asks for confirmation.
   fireEvent.click(screen.getByRole("button", {name: "Remove from cache"}));
   expect(removeModelCache).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", {name: "Confirm remove"})).toBeDisabled();
+  await waitFor(() => expect(screen.getByRole("button", {name: "Confirm remove"})).toBeEnabled());
+  expect(screen.getByLabelText("Cache removal review")).toHaveTextContent("42 bytes");
+  expect(removeModelCache).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", {name: "Confirm remove"}));
   await waitFor(() => expect(removeModelCache).toHaveBeenCalledTimes(1));
   expect(removeModelCache).toHaveBeenCalledWith(
     `${base.model.publisher}/${base.model.slug}`, base.model.content_sha256,
-    expect.any(String), expect.anything(),
+    expect.any(String), review.review_digest, expect.anything(),
   );
 });
 

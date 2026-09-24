@@ -6,9 +6,10 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import Table, func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import (
@@ -18,6 +19,8 @@ from vonk_control.model_cache_contract import (
 )
 from vonk_control.models import (
     Base,
+    FleetProfile,
+    FleetProfileApplication,
     Job,
     ModelCacheOperation,
     ModelCacheSet,
@@ -32,6 +35,7 @@ from vonk_control.recipe_image_removal_contract import (
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
+from .recipe_removal_review_support import remove_after_review
 from .test_model_removal_reference_lifecycle import (
     _one_model,
     _register_model,
@@ -49,7 +53,9 @@ from .test_recipe_image_availability import (
 )
 
 
-def _recipe_using_model(model_digest: str, publisher: str, slug: str) -> RecipeDefinition:
+def _recipe_using_model(
+    model_digest: str, publisher: str, slug: str
+) -> RecipeDefinition:
     document = json.loads(_recipe("recipe-image.json").model_dump_json())
     assert isinstance(document, dict)
     models = document.get("models")
@@ -157,11 +163,29 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
 
     recipe_service = new_recipe_service(model_service)
     request_id = str(uuid4())
-    accepted = recipe_service.remove_selector(
+    review = recipe_service.review_removal(recipe.identity.slug, with_model=True)
+    retained_object = next(
+        asset
+        for asset in review.assets
+        if asset.kind == "model-object" and asset.sha256 == shared_object_digest
+    )
+    assert retained_object.disposition == "retain-shared"
+    assert retained_object.availability == "verified"
+    assert any(
+        finding.classification == "saved-reference"
+        and finding.asset_kind == "model-object"
+        and finding.asset_sha256 == shared_object_digest
+        and finding.owner_kind == "model-cache-set-membership"
+        and finding.owner_id == sibling_set
+        for finding in review.references
+    )
+    accepted = remove_after_review(
+        recipe_service,
         recipe.identity.slug,
         actor="operator",
         request_id=request_id,
         with_model=True,
+        review_digest=review.review_digest,
     )
     assert accepted["state"] == "queued"
     parent_id = str(accepted["operation_id"])
@@ -214,7 +238,9 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         assert pending_owner.checkpoint.model_index == 0
         assert pending_owner.checkpoint.model_reclaimed_bytes == 0
         assert pending_owner.checkpoint.failure is not None
-        assert pending_owner.checkpoint.failure.code == "model_cache.removal_child_pending"
+        assert (
+            pending_owner.checkpoint.failure.code == "model_cache.removal_child_pending"
+        )
         pending_child = session.get(ModelCacheOperation, child_id)
         assert pending_child is not None and pending_child.state == "queued"
         assert pending_child.request_key == child_request_key
@@ -233,11 +259,13 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         clock=lambda: now[0],
     )
     restarted_recipe_service = new_recipe_service(restarted_cache)
-    replay = restarted_recipe_service.remove_selector(
+    replay = remove_after_review(
+        restarted_recipe_service,
         recipe.identity.slug,
         actor="operator",
         request_id=request_id,
         with_model=True,
+        review_digest=str(accepted["review_digest"]),
     )
     assert isinstance(replay, dict)
     assert replay["operation_id"] == parent_id
@@ -253,11 +281,14 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         assert replayed_child.operation_id == child_id
         assert replayed_child.request_key == child_request_key
         assert replayed_child.plan_digest == child_plan_digest
-        assert session.scalar(
-            select(func.count())
-            .select_from(ModelCacheOperation)
-            .where(ModelCacheOperation.request_key == child_request_key)
-        ) == 1
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(ModelCacheOperation)
+                .where(ModelCacheOperation.request_key == child_request_key)
+            )
+            == 1
+        )
 
     child_view = restarted_cache.get_operation(child_id)
     for _ in range(8):
@@ -276,16 +307,21 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     with sessions() as session:
         assert session.get(ModelCacheSet, selected_set) is None
         assert session.get(ModelCacheSet, sibling_set) is not None
-        assert session.scalar(
-            select(func.count())
-            .select_from(ModelCacheSetArtifact)
-            .where(ModelCacheSetArtifact.artifact_sha256 == shared_object_digest)
-        ) == 1
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(ModelCacheSetArtifact)
+                .where(ModelCacheSetArtifact.artifact_sha256 == shared_object_digest)
+            )
+            == 1
+        )
 
     now[0] += timedelta(seconds=10)
     for _ in range(3):
         restarted_recipe_service.advance_removals(limit=1)
-        final = restarted_recipe_service.get_operator_request(request_id, actor="operator")
+        final = restarted_recipe_service.get_operator_request(
+            request_id, actor="operator"
+        )
         assert isinstance(final, dict)
         if final["state"] == "succeeded":
             break
@@ -312,12 +348,84 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
             final_owner.plan.model_children
         )
         assert final_owner.checkpoint.image_reclaimed_bytes == len(ARCHIVE)
-        assert final_owner.checkpoint.model_reclaimed_bytes == child_view.result.reclaimed_bytes
+        assert (
+            final_owner.checkpoint.model_reclaimed_bytes
+            == child_view.result.reclaimed_bytes
+        )
         assert final_result.reclaimed_bytes == final["reclaimed_bytes"]
-        assert session.scalar(
-            select(func.count()).select_from(Job).where(Job.request_id == request_id)
-        ) == 1
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(Job)
+                .where(Job.request_id == request_id)
+            )
+            == 1
+        )
     assert not archive.exists()
     assert not receipt_path.exists()
     assert shared_object.read_bytes() == model_bytes
     restarted_cache.close()
+
+
+def test_postgres_recipe_review_recovers_from_failed_profile_scan(
+    postgres_engine, tmp_path: Path
+) -> None:
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    recipe = _recipe("recipe-image.json")
+    revision_id = "rev-review-savepoint-001"
+    receipt = _reference_receipt()
+    with sessions.begin() as session:
+        revision = _add_revision(session, revision_id, recipe)
+        _add_head(session, revision)
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=revision.id,
+                source="published",
+                original_content_digest=revision.content_digest,
+                effective_execution_key=revision.execution_key,
+                registry_manifest_digest=receipt.registry_manifest_digest,
+                platform_manifest_digest=receipt.platform_manifest_digest,
+                local_image_config_id=receipt.local_image_config_id,
+                oci_archive_sha256=receipt.oci_archive_sha256,
+                image_bytes=receipt.image_bytes,
+                build_id=None,
+                authorized_at=datetime.now(UTC),
+                state="authorized",
+            )
+        )
+
+    image_root = tmp_path / "review-runtime-images"
+    storage = FilesystemRuntimeImageStorage(image_root)
+    archive = storage.root / ARCHIVE_SHA
+    receipt_path = storage.root / f"{ARCHIVE_SHA}.receipt.json"
+    archive.write_bytes(ARCHIVE)
+    receipt_path.write_text(json.dumps(receipt.model_dump(mode="json")))
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: datetime.now(UTC),
+    )
+
+    # The real profile owner query fails with PostgreSQL undefined_table. The
+    # review must roll back that scanner savepoint before it reads lifecycle
+    # gates and returns a fail-closed blocker.
+    cast(Table, FleetProfileApplication.__table__).drop(postgres_engine)
+    cast(Table, FleetProfile.__table__).drop(postgres_engine)
+    try:
+        refused = service.review_removal(recipe.identity.slug, with_model=False)
+        assert any(
+            blocker.code == "artifact.reference_scan_failed"
+            for blocker in refused.blockers
+        )
+        assert archive.read_bytes() == ARCHIVE
+
+        Base.metadata.create_all(postgres_engine)
+        recovered = service.review_removal(recipe.identity.slug, with_model=False)
+        assert all(
+            blocker.code != "artifact.reference_scan_failed"
+            for blocker in recovered.blockers
+        )
+    finally:
+        Base.metadata.create_all(postgres_engine)

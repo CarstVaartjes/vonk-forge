@@ -48,6 +48,7 @@ from vonk_control.model_cache_contract import (
 )
 from vonk_control.models import (
     AgentNode,
+    ArtifactLifecycleGate,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -231,6 +232,245 @@ def _download(
         service.run_pending()
         operation = service.get_operation(operation.id)
     return operation
+
+
+def _remove_model(
+    service: ModelCacheService,
+    selector: str,
+    *,
+    actor: str,
+    request_key: str,
+    model_content_sha256: str,
+):
+    review = service.review_model_removal(selector)
+    return service.remove_model_selector(
+        selector,
+        actor=actor,
+        request_key=request_key,
+        model_content_sha256=model_content_sha256,
+        review_digest=review.review_digest,
+    )
+
+
+def test_model_removal_review_binds_exact_assets_without_mutation(cache, tmp_path):
+    service, sessions = cache
+    data = b"reviewed model cache bytes"
+    artifact = _artifact(tmp_path, data)
+    downloaded = _download(
+        service,
+        [artifact],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001062",
+    )
+    assert downloaded.state == "succeeded"
+    assert downloaded.artifact_set_sha256 is not None
+    object_digest = str(artifact["sha256"])
+
+    with sessions() as session:
+        before = (
+            session.scalar(select(func.count()).select_from(ModelCacheOperation)),
+            session.scalar(select(func.count()).select_from(ModelCacheSet)),
+            session.scalar(select(func.count()).select_from(ArtifactLifecycleGate)),
+            tuple(
+                session.scalars(
+                    select(ArtifactLifecycleGate.removal_owner_id).order_by(
+                        ArtifactLifecycleGate.artifact_kind,
+                        ArtifactLifecycleGate.artifact_sha256,
+                    )
+                )
+            ),
+        )
+
+    review = service.review_model_removal("a" * 64)
+
+    with sessions() as session:
+        after = (
+            session.scalar(select(func.count()).select_from(ModelCacheOperation)),
+            session.scalar(select(func.count()).select_from(ModelCacheSet)),
+            session.scalar(select(func.count()).select_from(ArtifactLifecycleGate)),
+            tuple(
+                session.scalars(
+                    select(ArtifactLifecycleGate.removal_owner_id).order_by(
+                        ArtifactLifecycleGate.artifact_kind,
+                        ArtifactLifecycleGate.artifact_sha256,
+                    )
+                )
+            ),
+        )
+
+    assert after == before
+    assert service._object_path(object_digest).read_bytes() == data
+    assert review.resource_kind == "model"
+    assert review.target_identity == "a" * 64
+    assert review.blockers == []
+    assert {
+        (item.kind, item.sha256, item.expected_bytes, item.disposition)
+        for item in review.assets
+    } == {
+        (
+            "model-set",
+            downloaded.artifact_set_sha256,
+            len(data),
+            "remove",
+        ),
+        ("model-object", object_digest, len(data), "remove"),
+    }
+    assert all(item.availability == "verified" for item in review.assets)
+
+
+def test_model_removal_review_counts_resumable_partial_set_bytes(cache, tmp_path):
+    service, _sessions = cache
+    data = bytes(range(256)) * 12_000
+    artifact = _artifact(tmp_path, data, model_content_sha256="b" * 64)
+    operation = _download(
+        service,
+        [artifact],
+        model_content_sha256="b" * 64,
+        request_key="00000000-0000-4000-8000-000000001067",
+        interrupt_after_bytes=1_100_000,
+    )
+    assert operation.state == "partial"
+    assert operation.artifact_set_sha256 is not None
+    object_digest = str(artifact["sha256"])
+    partial = service._partial_path(operation.artifact_set_sha256, object_digest)
+    observed_bytes = partial.stat().st_size
+    assert 0 < observed_bytes < len(data)
+
+    review = service.review_model_removal("b" * 64)
+    set_asset = next(item for item in review.assets if item.kind == "model-set")
+    object_asset = next(
+        item
+        for item in review.assets
+        if item.kind == "model-object" and item.sha256 == object_digest
+    )
+
+    assert set_asset.availability == "partial"
+    assert set_asset.expected_bytes == len(data)
+    assert set_asset.available_bytes == observed_bytes
+    assert object_asset.availability == "missing"
+    assert object_asset.available_bytes == 0
+
+
+@pytest.mark.parametrize("unavailable", ["unreadable", "nonregular"])
+def test_model_removal_review_preserves_unknown_storage_observation(
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unavailable: str
+):
+    service, _sessions = cache
+    data = b"observed model cache bytes"
+    artifact = _artifact(tmp_path, data)
+    downloaded = _download(
+        service,
+        [artifact],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001068",
+    )
+    assert downloaded.state == "succeeded"
+    object_digest = str(artifact["sha256"])
+    object_path = service._object_path(object_digest)
+    if unavailable == "nonregular":
+        object_path.unlink()
+        object_path.mkdir()
+    else:
+        service._receipt_path(object_digest).unlink()
+        original_lstat = Path.lstat
+
+        def unreadable_lstat(path: Path):
+            if path == object_path:
+                raise PermissionError("fixture denies object metadata")
+            return original_lstat(path)
+
+        monkeypatch.setattr(Path, "lstat", unreadable_lstat)
+
+    review = service.review_model_removal("a" * 64)
+    set_asset = next(item for item in review.assets if item.kind == "model-set")
+    object_asset = next(
+        item
+        for item in review.assets
+        if item.kind == "model-object" and item.sha256 == object_digest
+    )
+
+    assert set_asset.availability == "unknown"
+    assert set_asset.available_bytes is None
+    assert object_asset.availability == "unknown"
+    assert object_asset.available_bytes is None
+
+
+def test_model_removal_review_rejects_changed_storage_before_owner_write(
+    cache, tmp_path: Path
+):
+    service, sessions = cache
+    data = b"review must not accept missing bytes"
+    artifact = _artifact(tmp_path, data)
+    downloaded = _download(
+        service,
+        [artifact],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001063",
+    )
+    assert downloaded.state == "succeeded"
+    assert downloaded.artifact_set_sha256 is not None
+    digest = str(artifact["sha256"])
+    reviewed = service.review_model_removal("a" * 64)
+    assert all(item.availability == "verified" for item in reviewed.assets)
+
+    service._object_path(digest).unlink()
+    receipt = service.root / "objects" / digest[:2] / f"{digest}.receipt.json"
+    receipt.unlink()
+    with pytest.raises(ModelCacheConflict) as stale:
+        service.remove_model_selector(
+            "a" * 64,
+            actor="operator",
+            request_key="00000000-0000-4000-8000-000000001064",
+            model_content_sha256="a" * 64,
+            review_digest=reviewed.review_digest,
+        )
+    assert stale.value.code == "model_cache.removal_review_stale"
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key
+                    == "00000000-0000-4000-8000-000000001064"
+                )
+            )
+            is None
+        )
+        assert all(
+            row.removal_owner_id is None
+            for row in session.scalars(select(ArtifactLifecycleGate))
+        )
+
+
+def test_model_removal_review_reports_exact_live_deletion_owner(cache, tmp_path):
+    service, _sessions = cache
+    data = b"active deletion owner bytes"
+    artifact = _artifact(tmp_path, data)
+    _download(
+        service,
+        [artifact],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001065",
+    )
+    before = service.review_model_removal("a" * 64)
+    accepted = service.remove_model_selector(
+        "a" * 64,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000001066",
+        model_content_sha256="a" * 64,
+        review_digest=before.review_digest,
+    )
+
+    blocked = service.review_model_removal("a" * 64)
+
+    assert any(
+        item.classification == "active-work"
+        and item.owner_kind == "model-cache-operation"
+        and item.owner_id == accepted.id
+        for item in blocked.active_work
+    )
+    assert any(
+        item.code == "artifact.deletion_in_progress" for item in blocked.blockers
+    )
 
 
 def _manifest_document(tmp_path: Path) -> dict[str, object]:
@@ -3074,7 +3314,8 @@ def test_remove_model_refuses_active_preparation_without_cancelling_it(
         selector="vonk-forge/remove-model-a",
     )
     with pytest.raises(ModelCacheConflict) as refused:
-        service.remove_model_selector(
+        _remove_model(
+            service,
             "vonk-forge/remove-model-a",
             actor="operator",
             request_key="00000000-0000-4000-8000-000000001033",
@@ -3256,7 +3497,8 @@ def test_model_removal_binds_digest_before_mutable_selector_resolution(
 
     request_key = "00000000-0000-4000-8000-000000001052"
     with pytest.raises(ModelCacheConflict) as mismatch:
-        service.remove_model_selector(
+        _remove_model(
+            service,
             "vonk-forge/exact-removal",
             actor="operator",
             request_key=request_key,
@@ -3268,13 +3510,17 @@ def test_model_removal_binds_digest_before_mutable_selector_resolution(
             session.scalar(select(func.count()).select_from(ModelCacheOperation)) == 0
         )
 
+    reviewed = service.review_model_removal("vonk-forge/exact-removal")
     accepted = service.remove_model_selector(
         "vonk-forge/exact-removal",
         actor="operator",
         request_key=request_key,
         model_content_sha256=digest_a,
+        review_digest=reviewed.review_digest,
     )
     assert accepted.model_content_sha256 == digest_a
+    assert accepted.review_digest == reviewed.review_digest
+    assert service.get_operation(accepted.id).review_digest == reviewed.review_digest
 
     with sessions.begin() as session:
         session.add(
@@ -3300,6 +3546,7 @@ def test_model_removal_binds_digest_before_mutable_selector_resolution(
         actor="operator",
         request_key=request_key,
         model_content_sha256=digest_a,
+        review_digest=reviewed.review_digest,
     )
     assert replay.id == accepted.id
     with pytest.raises(ModelCacheConflict) as reused:
@@ -3308,6 +3555,7 @@ def test_model_removal_binds_digest_before_mutable_selector_resolution(
             actor="operator",
             request_key=request_key,
             model_content_sha256=digest_b,
+            review_digest="f" * 64,
         )
     assert reused.value.code == "model_cache.request_key_reused"
 

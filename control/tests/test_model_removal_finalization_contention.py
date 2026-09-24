@@ -14,7 +14,7 @@ from vonk_control.model_cache_contract import ModelCacheRemovalResult
 from vonk_control.models import ModelCacheSet
 from vonk_forge_contracts import ModelDefinition, content_sha256
 
-from .test_model_cache import _artifact, _canonical_model, _download
+from .test_model_cache import _artifact, _canonical_model, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (
     _register_model,
     _removal_service,
@@ -76,7 +76,8 @@ def test_finalization_gate_contention_defers_without_blocking_unrelated_removal(
             service, sessions, tmp_path
         )
         request_key_a = "00000000-0000-4000-8000-000000000203"
-        removal_a = service.remove_model_selector(
+        removal_a = _remove_model(
+            service,
             selector_a,
             actor="operator",
             request_key=request_key_a,
@@ -96,7 +97,8 @@ def test_finalization_gate_contention_defers_without_blocking_unrelated_removal(
         # set checkpoints, so its later progress proves scheduler isolation.
         clock[0] += timedelta(seconds=1)
         request_key_b = "00000000-0000-4000-8000-000000000204"
-        removal_b = service.remove_model_selector(
+        removal_b = _remove_model(
+            service,
             selector_b,
             actor="operator",
             request_key=request_key_b,

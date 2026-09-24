@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
-from fastapi import FastAPI, HTTPException, Path, Request, status
+from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .auth import MUTATION_ROLES
 from .bounded_json import integer, require_integer, require_sequence
+from .cache_removal_review import CacheRemovalReview
 from .logging import redact_text
 from .model_cache_contract import UUID_PATTERN, Digest
 from .operation_api import bounded_error_responses
@@ -154,7 +155,8 @@ class RecipeDownloadRequest(StrictJSONModel):
 
 
 class RecipeOperatorRequest(RecipeDownloadRequest):
-    with_model: bool = False
+    with_model: bool
+    review_digest: Digest
 
 
 class RecipeCancellationRequest(RecipeDownloadRequest):
@@ -170,6 +172,7 @@ class RecipeOperatorResponse(StrictJSONModel):
     request_key: str = Field(min_length=1, max_length=128)
     operation_id: str = Field(min_length=1, max_length=128)
     recipe_revision_id: str = Field(min_length=1, max_length=128)
+    review_digest: Digest
     with_model: bool
     state: RecipeOperatorState
     progress: OperationProgress
@@ -208,6 +211,7 @@ RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS = {
     ("post", "/api/recipe/operations/{operation_id}/cancel"): "cancelRecipeOperation",
     ("post", "/api/recipe/{selector}/download"): "downloadRecipe",
     ("post", "/api/recipe/{selector}/remove"): "removeRecipe",
+    ("get", "/api/recipe/{selector}/remove-review"): "reviewRecipeRemoval",
     ("post", "/api/recipe/update"): "updateRecipes",
 }
 
@@ -420,6 +424,7 @@ def install_recipe_operator_routes(
                 "request_key": str(result["request_key"]),
                 "operation_id": str(result["operation_id"]),
                 "recipe_revision_id": str(result["recipe_revision_id"]),
+                "review_digest": str(result["review_digest"]),
                 "with_model": with_model,
                 "state": result["state"],
                 "progress": progress,
@@ -580,8 +585,33 @@ def install_recipe_operator_routes(
                 actor=actor.subject,
                 request_id=body.request_key,
                 with_model=body.with_model,
+                review_digest=body.review_digest,
             )
             return removal_document(result)
+        except HTTPException:
+            raise
+        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+            raise _recipe_error(error) from None
+
+    @app.get(
+        "/api/recipe/{selector:path}/remove-review",
+        response_model=CacheRemovalReview,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="reviewRecipeRemoval",
+    )
+    def review_remove(
+        _request: Request,
+        selector: str = Path(min_length=1, max_length=256),
+        with_model: bool = Query(...),
+        actor: Any = actor_dependency,
+    ) -> CacheRemovalReview:
+        _mutating(actor, "/api/recipe/{selector:path}/remove")
+        try:
+            if service is None:
+                raise HTTPException(
+                    status_code=503, detail="recipe image availability is unavailable"
+                )
+            return service.review_removal(selector, with_model=with_model)
         except HTTPException:
             raise
         except (RecipeImageAvailabilityError, KeyError, ValueError) as error:

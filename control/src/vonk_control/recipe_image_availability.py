@@ -49,9 +49,23 @@ from .artifact_lifecycle import (
 )
 from .artifact_reference_scan import (
     MAX_ARTIFACT_OWNER_SCAN_BYTES,
+    ArtifactReferenceFinding,
+    model_set_reference_findings,
+    runtime_image_reference_findings,
     runtime_image_reference_reasons,
 )
 from .bounded_json import mapping, require_mapping, require_sequence
+from .cache_removal_review import (
+    ArtifactKind,
+    AssetAvailability,
+    AssetDisposition,
+    CacheRemovalAsset,
+    CacheRemovalBlocker,
+    CacheRemovalFinding,
+    CacheRemovalReview,
+    CacheRemovalReviewContent,
+    seal_cache_removal_review,
+)
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
 from .model_cache import (
@@ -63,6 +77,7 @@ from .model_cache import (
 from .model_cache_contract import ModelCacheCancellation, ModelCacheRemovalResult
 from .model_cache_progress import project_cache_progress
 from .models import (
+    ArtifactLifecycleGate,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     Job,
@@ -297,6 +312,18 @@ class ModelCacheRemovalCoordinator(Protocol):
         self, session: Session, *, recipe_revision_id: str
     ) -> ModelCacheRemovalScope | None: ...
 
+    def removal_owner_findings_in_session(
+        self, session: Session, scope: ModelCacheRemovalScope
+    ) -> tuple[CacheRemovalFinding, ...]: ...
+
+    def removal_asset_status(
+        self, scope: ModelCacheRemovalScope
+    ) -> tuple[CacheRemovalAsset, ...]: ...
+
+    def retained_model_object_findings(
+        self, scope: ModelCacheRemovalScope
+    ) -> tuple[CacheRemovalFinding, ...]: ...
+
     def accept_recipe_removal_child_in_session(
         self,
         session: Session,
@@ -395,6 +422,17 @@ class RecipeImageAvailabilityClaim:
     build_input_sha256: str | None
     claim_owner: str
     execution_attempt: int
+
+
+@dataclass(frozen=True, slots=True)
+class _RecipeRemovalSelection:
+    """One read of the current immutable recipe and its exact cache targets."""
+
+    revision_id: str
+    revision_content_sha256: str
+    image_archives: tuple[str, ...]
+    image_expected_bytes: tuple[tuple[str, int], ...]
+    model_scope: ModelCacheRemovalScope | None
 
 
 class _AvailabilityClaimLost(RuntimeImagePreparationError):
@@ -669,6 +707,89 @@ class RecipeImageAvailabilityService:
 
         self._updates = RecipeUpdateBatches(self, sessions)
 
+    def _recipe_removal_selection_in_session(
+        self,
+        session: Session,
+        selector: str,
+        *,
+        with_model: bool,
+    ) -> _RecipeRemovalSelection:
+        revision_id = self._resolve_recipe_selector_in_session(session, selector)
+        revision = session.get(
+            CatalogDocumentRevision,
+            revision_id,
+            populate_existing=True,
+        )
+        if (
+            revision is None
+            or revision.kind != "recipe"
+            or revision.state != "active"
+            or not isinstance(revision.content_digest, str)
+        ):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.selector_missing",
+                "selected recipe revision is not active",
+            )
+        try:
+            recipe = read_catalog_document(revision)
+            if not isinstance(recipe, RecipeDefinition):
+                raise TypeError("catalog revision is not a Recipe")
+        except (TypeError, ValueError) as error:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.recipe_invalid",
+                "selected canonical recipe revision is invalid",
+            ) from error
+
+        authorizations = tuple(
+            session.scalars(
+                select(RuntimeImageAuthorization)
+                .where(RuntimeImageAuthorization.recipe_revision_id == revision_id)
+                .order_by(
+                    RuntimeImageAuthorization.oci_archive_sha256,
+                    RuntimeImageAuthorization.id,
+                )
+            )
+        )
+        image_sizes: dict[str, int] = {}
+        for authorization in authorizations:
+            archive = _digest(
+                authorization.oci_archive_sha256,
+                field="runtime image archive digest",
+            )
+            if (
+                authorization.original_content_digest != revision.content_digest
+                or authorization.effective_execution_key != revision.execution_key
+                or authorization.state not in {"authorized", "revoked"}
+            ):
+                raise RecipeImageAvailabilityError(
+                    "runtime_image.authorization_invalid",
+                    "stored recipe image authorization does not match its exact revision",
+                )
+            observed_size = image_sizes.setdefault(archive, authorization.image_bytes)
+            if observed_size != authorization.image_bytes:
+                raise RecipeImageAvailabilityError(
+                    "runtime_image.authorization_invalid",
+                    "stored recipe image authorizations disagree on archive size",
+                )
+
+        model_scope: ModelCacheRemovalScope | None = None
+        if with_model:
+            if self._model_cache is None:
+                raise RecipeImageAvailabilityError(
+                    "model_cache.unavailable",
+                    "model cache removal is unavailable",
+                )
+            model_scope = cast(
+                ModelCacheRemovalCoordinator, self._model_cache
+            ).recipe_removal_scope_in_session(session, recipe_revision_id=revision_id)
+        return _RecipeRemovalSelection(
+            revision_id=revision_id,
+            revision_content_sha256=revision.content_digest,
+            image_archives=tuple(sorted(image_sizes)),
+            image_expected_bytes=tuple(sorted(image_sizes.items())),
+            model_scope=model_scope,
+        )
+
     def _resolve_recipe_selector(self, selector: str) -> str:
         """Resolve logical selectors to the current head, retaining exact pins."""
 
@@ -876,6 +997,7 @@ class RecipeImageAvailabilityService:
                 or result.request_key != intent.request_key
                 or result.operation_id != operation.id
                 or result.recipe_revision_id != intent.recipe_revision_id
+                or result.review_digest != intent.review_digest
                 or result.with_model is not intent.with_model
                 or result.reclaimed_bytes
                 != owner.checkpoint.image_reclaimed_bytes
@@ -905,6 +1027,7 @@ class RecipeImageAvailabilityService:
             "request_key": intent.request_key,
             "operation_id": operation.id,
             "recipe_revision_id": intent.recipe_revision_id,
+            "review_digest": intent.review_digest,
             "with_model": intent.with_model,
             "state": operation.state,
             "progress": self._removal_progress_document(operation, owner),
@@ -941,6 +1064,7 @@ class RecipeImageAvailabilityService:
         actor: str,
         request_id: str,
         with_model: bool,
+        review_digest: str,
     ) -> dict[str, object]:
         if operation.kind != REMOVE_OPERATION_KIND:
             raise RecipeImageAvailabilityError(
@@ -954,6 +1078,7 @@ class RecipeImageAvailabilityService:
             or intent.actor != actor
             or intent.request_key != request_id
             or intent.with_model is not with_model
+            or intent.review_digest != review_digest
         ):
             raise RecipeImageAvailabilityError(
                 "recipe_image.request_key_reused",
@@ -961,12 +1086,566 @@ class RecipeImageAvailabilityService:
             )
         return self._read_removal_result(operation, intent)
 
+    @staticmethod
+    def _cache_removal_finding(
+        finding: ArtifactReferenceFinding,
+    ) -> CacheRemovalFinding:
+        return CacheRemovalFinding(
+            classification=finding.classification,
+            asset_kind=finding.asset.kind,
+            asset_sha256=finding.asset.sha256,
+            owner_kind=finding.owner_kind,
+            owner_id=finding.owner_id,
+            state=finding.state,
+            detail=finding.detail,
+            reason=finding.reason,
+        )
+
+    def _recipe_removal_impact_in_session(
+        self,
+        session: Session,
+        selector: str,
+        *,
+        with_model: bool,
+        own_assignments: Sequence[
+            tuple[ArtifactIdentity, RemovalOwnerKind, str, str]
+        ] = (),
+    ) -> tuple[
+        _RecipeRemovalSelection,
+        tuple[CacheRemovalFinding, ...],
+        tuple[CacheRemovalFinding, ...],
+        tuple[CacheRemovalBlocker, ...],
+    ]:
+        selection = self._recipe_removal_selection_in_session(
+            session, selector, with_model=with_model
+        )
+        expected_owners = {
+            identity: (owner_kind, owner_id, fence)
+            for identity, owner_kind, owner_id, fence in own_assignments
+        }
+        image_findings: dict[str, tuple[ArtifactReferenceFinding, ...]] = {}
+        model_findings: dict[str, tuple[ArtifactReferenceFinding, ...]] = {}
+        model_owner_findings: tuple[CacheRemovalFinding, ...] = ()
+        retained_model_findings: tuple[CacheRemovalFinding, ...] = ()
+        scan_blockers: list[CacheRemovalBlocker] = []
+        try:
+            # Caught owner-scan errors must roll back their PostgreSQL
+            # subtransaction before the independent lifecycle-gate scan runs.
+            with session.begin_nested():
+                image_findings = runtime_image_reference_findings(
+                    session, selection.image_archives
+                )
+                model_findings = (
+                    {}
+                    if selection.model_scope is None
+                    else model_set_reference_findings(
+                        session, selection.model_scope.selected_sets
+                    )
+                )
+                if selection.model_scope is not None:
+                    if self._model_cache is None:
+                        raise ArtifactLifecycleError(
+                            "model_cache.review_unavailable",
+                            "ModelCache cannot explain shared retained model objects",
+                            retryable=True,
+                        )
+                    model_coordinator = cast(
+                        ModelCacheRemovalCoordinator, self._model_cache
+                    )
+                    retained_model_findings = (
+                        model_coordinator.retained_model_object_findings(
+                            selection.model_scope
+                        )
+                    )
+                    model_identities = {
+                        ArtifactIdentity("model-set", digest)
+                        for digest in selection.model_scope.selected_sets
+                    } | {
+                        ArtifactIdentity("model-object", digest)
+                        for digest in selection.model_scope.delete_objects
+                    }
+                    own_model_identities = {
+                        identity
+                        for identity in expected_owners
+                        if identity.kind in {"model-set", "model-object"}
+                    }
+                    if not model_identities <= own_model_identities:
+                        if own_model_identities:
+                            raise ArtifactLifecycleError(
+                                "artifact.removal_owner_unresolved",
+                                "recipe removal holds an incomplete model deletion fence",
+                                retryable=True,
+                            )
+                        model_owner_findings = (
+                            model_coordinator.removal_owner_findings_in_session(
+                                session, selection.model_scope
+                            )
+                        )
+        except ArtifactLifecycleError as error:
+            image_findings = {}
+            model_findings = {}
+            model_owner_findings = ()
+            retained_model_findings = ()
+            scan_blockers.append(
+                CacheRemovalBlocker(
+                    code=error.code,
+                    detail=error.detail,
+                    retryable=error.retryable,
+                    recovery_actions=(["retry"] if error.retryable else ["inspect"]),
+                )
+            )
+        except DBAPIError as error:
+            image_findings = {}
+            model_findings = {}
+            model_owner_findings = ()
+            retained_model_findings = ()
+            translated = retryable_artifact_database_error(error)
+            scan_blockers.append(
+                CacheRemovalBlocker(
+                    code=(
+                        translated.code
+                        if translated is not None
+                        else "artifact.reference_scan_failed"
+                    ),
+                    detail=(
+                        translated.detail
+                        if translated is not None
+                        else "recipe cache reference scan could not be completed; removal was deferred"
+                    ),
+                    retryable=True,
+                    recovery_actions=["retry"],
+                )
+            )
+
+        all_findings = (
+            tuple(
+                self._cache_removal_finding(finding)
+                for mapping_by_asset in (image_findings, model_findings)
+                for findings in mapping_by_asset.values()
+                for finding in findings
+            )
+            + model_owner_findings
+            + retained_model_findings
+        )
+        references = tuple(
+            finding
+            for finding in all_findings
+            if finding.classification == "saved-reference"
+        )
+        active_work = tuple(
+            finding
+            for finding in all_findings
+            if finding.classification == "active-work"
+        )
+        blockers: list[CacheRemovalBlocker] = []
+        blockers.extend(
+            CacheRemovalBlocker(
+                code="artifact.deletion_in_progress",
+                detail=finding.reason,
+                retryable=True,
+                recovery_actions=["observe_removal_operation"],
+            )
+            for finding in model_owner_findings
+        )
+        for kind, findings_by_asset, label, code in (
+            (
+                "runtime-image",
+                image_findings,
+                "runtime image",
+                "recipe_image.removal_referenced",
+            ),
+            (
+                "model-set",
+                model_findings,
+                "model cache set",
+                "model_cache.removal_referenced",
+            ),
+        ):
+            reasons = [
+                finding.reason
+                for values in findings_by_asset.values()
+                for finding in values
+            ]
+            if reasons:
+                unique_reasons = sorted(set(reasons))
+                blockers.append(
+                    CacheRemovalBlocker(
+                        code=code,
+                        detail=(
+                            f"{label} references prevent removal "
+                            f"({len(unique_reasons)} owner(s)): "
+                            + "; ".join(unique_reasons[:4])
+                        )[:512],
+                        retryable=True,
+                        recovery_actions=(
+                            ["inspect"]
+                            if any(
+                                finding.classification == "saved-reference"
+                                for values in findings_by_asset.values()
+                                for finding in values
+                            )
+                            else ["retry"]
+                        ),
+                    )
+                )
+
+        identity_groups: dict[str, set[str]] = {}
+        if selection.image_archives:
+            identity_groups["runtime-image"] = set(selection.image_archives)
+        gate_conditions = [
+            and_(
+                ArtifactLifecycleGate.artifact_kind == kind,
+                ArtifactLifecycleGate.artifact_sha256.in_(digests),
+            )
+            for kind, digests in identity_groups.items()
+        ]
+        gate_owners: list[str] = []
+        try:
+            with session.begin_nested():
+                if gate_conditions:
+                    for row in session.scalars(
+                        select(ArtifactLifecycleGate)
+                        .where(or_(*gate_conditions))
+                        .order_by(
+                            ArtifactLifecycleGate.artifact_kind,
+                            ArtifactLifecycleGate.artifact_sha256,
+                        )
+                    ):
+                        if row.removal_owner_id is None:
+                            continue
+                        identity = ArtifactIdentity(
+                            cast(ArtifactKind, row.artifact_kind), row.artifact_sha256
+                        )
+                        expected = expected_owners.get(identity)
+                        actual = (
+                            row.removal_owner_kind,
+                            row.removal_owner_id,
+                            row.removal_fence,
+                        )
+                        if expected != actual:
+                            gate_owners.append(
+                                f"{row.artifact_kind} {row.artifact_sha256}: "
+                                f"{row.removal_owner_kind} {row.removal_owner_id}"
+                            )
+        except DBAPIError as error:
+            gate_owners = []
+            translated = retryable_artifact_database_error(error)
+            scan_blockers.append(
+                CacheRemovalBlocker(
+                    code=(
+                        translated.code
+                        if translated is not None
+                        else "artifact.reference_scan_failed"
+                    ),
+                    detail=(
+                        translated.detail
+                        if translated is not None
+                        else "recipe removal-owner scan could not be completed; removal was deferred"
+                    ),
+                    retryable=True,
+                    recovery_actions=["retry"],
+                )
+            )
+        blockers.extend(scan_blockers)
+        if gate_owners:
+            blockers.append(
+                CacheRemovalBlocker(
+                    code="artifact.deletion_in_progress",
+                    detail=(
+                        f"{len(gate_owners)} cache identity/identities are reserved "
+                        "for another removal: " + "; ".join(sorted(gate_owners)[:4])
+                    )[:512],
+                    retryable=True,
+                    recovery_actions=["retry"],
+                )
+            )
+        return selection, references, active_work, tuple(blockers)
+
+    def _runtime_image_removal_assets(
+        self, selection: _RecipeRemovalSelection
+    ) -> tuple[tuple[CacheRemovalAsset, ...], tuple[CacheRemovalBlocker, ...]]:
+        assets: list[CacheRemovalAsset] = []
+        blockers: list[CacheRemovalBlocker] = []
+        for archive, expected_bytes in selection.image_expected_bytes:
+            availability: AssetAvailability = "unknown"
+            available_bytes: int | None = None
+            try:
+                with self._storage.publication_lock(archive):
+                    observed_bytes = self._storage.published_archive_bytes(archive)
+                    if observed_bytes == 0:
+                        availability = "missing"
+                        available_bytes = 0
+                    elif observed_bytes < expected_bytes:
+                        availability = "partial"
+                        available_bytes = observed_bytes
+                    elif observed_bytes > expected_bytes:
+                        blockers.append(
+                            CacheRemovalBlocker(
+                                code="runtime_image.archive_size_mismatch",
+                                detail=(
+                                    f"runtime image {archive} has {observed_bytes} bytes; "
+                                    f"the authorized size is {expected_bytes}"
+                                ),
+                                retryable=False,
+                                recovery_actions=["inspect"],
+                            )
+                        )
+                    else:
+                        receipt = self._storage.read_receipt(archive)
+                        if (
+                            receipt.oci_archive_sha256 == archive
+                            and receipt.image_bytes == expected_bytes
+                        ):
+                            # Managed publication records only verified bytes;
+                            # the exact receipt plus regular-file size is the
+                            # cheap readiness check for this operator review.
+                            availability = "verified"
+                            available_bytes = expected_bytes
+                        else:
+                            blockers.append(
+                                CacheRemovalBlocker(
+                                    code="runtime_image.receipt_identity_conflict",
+                                    detail=(
+                                        f"runtime image {archive} receipt does not "
+                                        "match the authorized identity"
+                                    ),
+                                    retryable=False,
+                                    recovery_actions=["inspect"],
+                                )
+                            )
+            except RuntimeImagePreparationError as error:
+                blockers.append(
+                    CacheRemovalBlocker(
+                        code=error.code,
+                        detail=f"runtime image {archive}: {error.detail}",
+                        retryable=error.retryable,
+                        recovery_actions=list(error.recovery_actions)
+                        or (["retry"] if error.retryable else ["inspect"]),
+                    )
+                )
+            assets.append(
+                CacheRemovalAsset(
+                    kind="runtime-image",
+                    sha256=archive,
+                    expected_bytes=expected_bytes,
+                    availability=availability,
+                    available_bytes=available_bytes,
+                    disposition="remove",
+                )
+            )
+        return tuple(assets), tuple(blockers)
+
+    def _model_removal_assets(
+        self, scope: ModelCacheRemovalScope | None
+    ) -> tuple[CacheRemovalAsset, ...]:
+        if scope is None:
+            return ()
+        if self._model_cache is None:
+            raise RecipeImageAvailabilityError(
+                "model_cache.unavailable", "model cache removal is unavailable"
+            )
+        assets = cast(
+            ModelCacheRemovalCoordinator, self._model_cache
+        ).removal_asset_status(scope)
+        expected: dict[tuple[str, str], str] = {
+            ("model-set", digest): "remove" for digest in scope.selected_sets
+        }
+        expected.update(
+            {
+                ("model-object", digest): (
+                    "remove" if digest in scope.delete_objects else "retain-shared"
+                )
+                for digest in scope.selected_objects
+            }
+        )
+        observed: dict[tuple[str, str], CacheRemovalAsset] = {}
+        for asset in assets:
+            if not isinstance(asset, CacheRemovalAsset):
+                raise RecipeImageAvailabilityError(
+                    "model_cache.review_invalid",
+                    "ModelCache returned an invalid typed asset status",
+                )
+            identity = (asset.kind, asset.sha256)
+            if identity in observed:
+                raise RecipeImageAvailabilityError(
+                    "model_cache.review_invalid",
+                    "ModelCache returned duplicate reviewed asset identities",
+                )
+            if expected.get(identity) != asset.disposition:
+                raise RecipeImageAvailabilityError(
+                    "model_cache.review_invalid",
+                    "ModelCache asset status does not match the exact removal scope",
+                )
+            observed[identity] = asset
+        if set(observed) != set(expected):
+            raise RecipeImageAvailabilityError(
+                "model_cache.review_invalid",
+                "ModelCache asset status is incomplete for the exact removal scope",
+            )
+        return tuple(observed[key] for key in sorted(observed))
+
+    @staticmethod
+    def _review_assets_for_selection(
+        selection: _RecipeRemovalSelection,
+        observed_assets: Sequence[CacheRemovalAsset],
+    ) -> tuple[CacheRemovalAsset, ...]:
+        by_identity = {(asset.kind, asset.sha256): asset for asset in observed_assets}
+        expected: dict[
+            tuple[ArtifactKind, str], tuple[int | None, AssetDisposition]
+        ] = {
+            ("runtime-image", digest): (size, "remove")
+            for digest, size in selection.image_expected_bytes
+        }
+        if selection.model_scope is not None:
+            expected.update(
+                {
+                    ("model-set", digest): (None, "remove")
+                    for digest in selection.model_scope.selected_sets
+                }
+            )
+            expected.update(
+                {
+                    ("model-object", digest): (
+                        None,
+                        "remove"
+                        if digest in selection.model_scope.delete_objects
+                        else "retain-shared",
+                    )
+                    for digest in selection.model_scope.selected_objects
+                }
+            )
+        assets: list[CacheRemovalAsset] = []
+        for identity, (expected_bytes, disposition) in sorted(expected.items()):
+            observed = by_identity.get(identity)
+            if observed is None or observed.disposition != disposition:
+                assets.append(
+                    CacheRemovalAsset(
+                        kind=identity[0],
+                        sha256=identity[1],
+                        expected_bytes=expected_bytes,
+                        availability="unknown",
+                        available_bytes=None,
+                        disposition=disposition,
+                    )
+                )
+            else:
+                if (
+                    expected_bytes is not None
+                    and observed.expected_bytes != expected_bytes
+                ):
+                    assets.append(
+                        CacheRemovalAsset(
+                            kind=identity[0],
+                            sha256=identity[1],
+                            expected_bytes=expected_bytes,
+                            availability="unknown",
+                            available_bytes=None,
+                            disposition=disposition,
+                        )
+                    )
+                else:
+                    assets.append(observed)
+        return tuple(assets)
+
+    def _sealed_recipe_removal_review(
+        self,
+        *,
+        selector: str,
+        with_model: bool,
+        selection: _RecipeRemovalSelection,
+        references: Sequence[CacheRemovalFinding],
+        active_work: Sequence[CacheRemovalFinding],
+        blockers: Sequence[CacheRemovalBlocker],
+        assets: Sequence[CacheRemovalAsset],
+        now: datetime,
+    ) -> CacheRemovalReview:
+        known_asset_blockers = {
+            asset.sha256
+            for asset in assets
+            if any(asset.sha256 in blocker.detail for blocker in blockers)
+        }
+        asset_blockers = [
+            CacheRemovalBlocker(
+                code="artifact.asset_availability_unknown",
+                detail=(f"{asset.kind} {asset.sha256} storage readiness is unknown"),
+                retryable=True,
+                recovery_actions=["retry"],
+            )
+            for asset in assets
+            if asset.availability == "unknown"
+            and asset.sha256 not in known_asset_blockers
+        ]
+        blockers_by_identity = {
+            (blocker.code, blocker.detail): blocker
+            for blocker in (*blockers, *asset_blockers)
+        }
+        return seal_cache_removal_review(
+            CacheRemovalReviewContent(
+                schema_version=SCHEMA_VERSION,
+                action="remove",
+                resource_kind="recipe",
+                selector=selector,
+                target_identity=selection.revision_id,
+                with_model=with_model,
+                assets=list(assets),
+                references=list(references),
+                active_work=list(active_work),
+                blockers=list(blockers_by_identity.values()),
+                observed_at=_iso(now),
+            )
+        )
+
+    def review_removal(self, selector: str, *, with_model: bool) -> CacheRemovalReview:
+        """Return one complete read-only review of exact recipe cache effects."""
+
+        if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.selector_invalid", "recipe selector is required"
+            )
+        if type(with_model) is not bool:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.removal_choice_invalid",
+                "with_model must be an explicit boolean",
+            )
+        normalized = selector.strip().casefold()
+        now = self._clock()
+        now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        try:
+            with self._sessions.begin() as session:
+                selection, references, active_work, blockers = (
+                    self._recipe_removal_impact_in_session(
+                        session,
+                        normalized,
+                        with_model=with_model,
+                    )
+                )
+        except ArtifactLifecycleError as error:
+            raise RecipeImageAvailabilityError(
+                error.code,
+                error.detail,
+                retryable=error.retryable,
+                recovery_actions=("retry",) if error.retryable else ("inspect",),
+            ) from error
+        image_assets, image_blockers = self._runtime_image_removal_assets(selection)
+        model_assets = self._model_removal_assets(selection.model_scope)
+        return self._sealed_recipe_removal_review(
+            selector=normalized,
+            with_model=with_model,
+            selection=selection,
+            references=references,
+            active_work=active_work,
+            blockers=tuple(blockers) + image_blockers,
+            assets=image_assets + model_assets,
+            now=now,
+        )
+
     def remove_selector(
         self,
         selector: str,
         *,
         actor: str,
         request_id: str,
+        review_digest: str,
         with_model: bool = False,
     ) -> dict[str, object]:
         """Accept one exact, restart-safe cache removal before any byte effect."""
@@ -976,6 +1655,14 @@ class RecipeImageAvailabilityService:
                 "recipe_image.selector_invalid", "recipe selector is required"
             )
         selector = selector.strip().casefold()
+        if (
+            not isinstance(review_digest, str)
+            or _SHA256.fullmatch(review_digest) is None
+        ):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.review_invalid",
+                "removal requires a valid cache-review digest",
+            )
         with self._sessions() as session:
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if existing is not None:
@@ -985,7 +1672,23 @@ class RecipeImageAvailabilityService:
                     actor=actor,
                     request_id=request_id,
                     with_model=with_model,
+                    review_digest=review_digest,
                 )
+
+        observed_review = self.review_removal(selector, with_model=with_model)
+        if observed_review.review_digest != review_digest:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.review_stale",
+                "recipe removal impact changed after review; inspect a fresh review",
+            )
+        if observed_review.blockers:
+            first_blocker = observed_review.blockers[0]
+            raise RecipeImageAvailabilityError(
+                first_blocker.code,
+                first_blocker.detail,
+                retryable=first_blocker.retryable,
+                recovery_actions=first_blocker.recovery_actions,
+            )
 
         operation_id = str(uuid.uuid4())
         try:
@@ -1000,83 +1703,15 @@ class RecipeImageAvailabilityService:
                         actor=actor,
                         request_id=request_id,
                         with_model=with_model,
+                        review_digest=review_digest,
                     )
 
-                revision_id = self._resolve_recipe_selector_in_session(
-                    session, selector
+                selection = self._recipe_removal_selection_in_session(
+                    session, selector, with_model=with_model
                 )
-                revision = session.get(
-                    CatalogDocumentRevision,
-                    revision_id,
-                    populate_existing=True,
-                )
-                if (
-                    revision is None
-                    or revision.kind != "recipe"
-                    or revision.state != "active"
-                    or not isinstance(revision.content_digest, str)
-                ):
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.selector_missing",
-                        "selected recipe revision is not active",
-                    )
-                try:
-                    recipe = read_catalog_document(revision)
-                    if not isinstance(recipe, RecipeDefinition):
-                        raise TypeError("catalog revision is not a Recipe")
-                except (TypeError, ValueError) as error:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.recipe_invalid",
-                        "selected canonical recipe revision is invalid",
-                    ) from error
-
-                authorizations = tuple(
-                    session.scalars(
-                        select(RuntimeImageAuthorization)
-                        .where(
-                            RuntimeImageAuthorization.recipe_revision_id == revision_id
-                        )
-                        .order_by(
-                            RuntimeImageAuthorization.oci_archive_sha256,
-                            RuntimeImageAuthorization.id,
-                        )
-                    )
-                )
-                image_archives = tuple(
-                    sorted(
-                        {
-                            _digest(
-                                authorization.oci_archive_sha256,
-                                field="runtime image archive digest",
-                            )
-                            for authorization in authorizations
-                        }
-                    )
-                )
-                for authorization in authorizations:
-                    if (
-                        authorization.original_content_digest != revision.content_digest
-                        or authorization.effective_execution_key
-                        != revision.execution_key
-                        or authorization.state not in {"authorized", "revoked"}
-                    ):
-                        raise RecipeImageAvailabilityError(
-                            "runtime_image.authorization_invalid",
-                            "stored recipe image authorization does not match its exact revision",
-                        )
-
-                model_scope: ModelCacheRemovalScope | None = None
-                if with_model:
-                    if self._model_cache is None:
-                        raise RecipeImageAvailabilityError(
-                            "model_cache.unavailable",
-                            "model cache removal is unavailable",
-                        )
-                    model_scope = cast(
-                        ModelCacheRemovalCoordinator, self._model_cache
-                    ).recipe_removal_scope_in_session(
-                        session, recipe_revision_id=revision_id
-                    )
+                revision_id = selection.revision_id
+                image_archives = selection.image_archives
+                model_scope = selection.model_scope
 
                 removal_fence = str(uuid.uuid4())
                 model_operation_id = (
@@ -1122,31 +1757,42 @@ class RecipeImageAvailabilityService:
                 now = self._clock()
                 now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
                 reserve_removal_owners(session, assignments, now=now)
-
-                try:
-                    references = runtime_image_reference_reasons(
-                        session, image_archives
+                (
+                    current_selection,
+                    references,
+                    active_work,
+                    current_blockers,
+                ) = self._recipe_removal_impact_in_session(
+                    session,
+                    selector,
+                    with_model=with_model,
+                    own_assignments=assignments,
+                )
+                current_assets = self._review_assets_for_selection(
+                    current_selection, observed_review.assets
+                )
+                current_review = self._sealed_recipe_removal_review(
+                    selector=selector,
+                    with_model=with_model,
+                    selection=current_selection,
+                    references=references,
+                    active_work=active_work,
+                    blockers=current_blockers,
+                    assets=current_assets,
+                    now=now,
+                )
+                if current_review.review_digest != review_digest:
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.review_stale",
+                        "recipe removal impact changed while acceptance was being checked",
                     )
-                except ArtifactLifecycleError as error:
+                if current_review.blockers:
+                    first_blocker = current_review.blockers[0]
                     raise RecipeImageAvailabilityError(
-                        error.code,
-                        error.detail,
-                        retryable=error.retryable,
-                        recovery_actions=("retry",) if error.retryable else (),
-                    ) from error
-                blocked = {
-                    archive: reasons
-                    for archive, reasons in references.items()
-                    if reasons
-                }
-                if blocked:
-                    archive = min(blocked)
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.removal_referenced",
-                        f"runtime image {archive} is still referenced: "
-                        + ", ".join(blocked[archive][:4]),
-                        retryable=True,
-                        recovery_actions=("retry",),
+                        first_blocker.code,
+                        first_blocker.detail,
+                        retryable=first_blocker.retryable,
+                        recovery_actions=first_blocker.recovery_actions,
                     )
 
                 model_children: list[RecipeCacheRemovalModelChild] = []
@@ -1201,6 +1847,7 @@ class RecipeImageAvailabilityService:
                     selector=selector,
                     actor=actor,
                     request_key=request_id,
+                    review_digest=review_digest,
                     recipe_revision_id=revision_id,
                     with_model=with_model,
                     removal_fence=removal_fence,
@@ -1267,6 +1914,7 @@ class RecipeImageAvailabilityService:
                     actor=actor,
                     request_id=request_id,
                     with_model=with_model,
+                    review_digest=review_digest,
                 )
         except ArtifactLifecycleError as error:
             raise RecipeImageAvailabilityError(
@@ -1847,6 +2495,7 @@ class RecipeImageAvailabilityService:
                     action="remove",
                     selector=intent.selector,
                     request_key=intent.request_key,
+                    review_digest=intent.review_digest,
                     operation_id=operation.id,
                     recipe_revision_id=intent.recipe_revision_id,
                     with_model=intent.with_model,
