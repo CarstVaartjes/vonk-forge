@@ -2831,6 +2831,9 @@ def _exact_nodes(
 
 
 def _operator_gate(args: argparse.Namespace, row: RecipeAuthorityRow) -> None:
+    # Preview supplies the evidence needed for acceptance; only apply consumes it.
+    if not args.apply:
+        return
     acknowledgments = set(args.accept_operator_gate)
     if acknowledgments - {row.key}:
         raise QualificationError(

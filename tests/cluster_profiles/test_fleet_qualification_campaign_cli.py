@@ -1756,14 +1756,36 @@ def test_review_gates_must_be_acknowledged_for_the_exact_recipe() -> None:
         smoke_cases=("health",),
         raw={},
     )
+    preview = campaign_cli._arguments(
+        [
+            "--manifest",
+            "campaign.json",
+            "--library-root",
+            "recipes",
+            "--ledger",
+            "evidence.jsonl",
+            "--profile-number",
+            "7",
+            "--spark",
+            NODE_A,
+        ]
+    )
+    campaign_cli._operator_gate(preview, row)
+    with pytest.raises(QualificationError, match="accept-operator-gate"):
+        campaign_cli._operator_gate(
+            Namespace(apply=True, accept_operator_gate=[], accept_capacity_review=[]),
+            row,
+        )
     missing_capacity = Namespace(
-        accept_operator_gate=[RECIPE_KEY], accept_capacity_review=[]
+        apply=True, accept_operator_gate=[RECIPE_KEY], accept_capacity_review=[]
     )
     with pytest.raises(QualificationError, match="accept-capacity-review"):
         campaign_cli._operator_gate(missing_capacity, row)
 
     accepted = Namespace(
-        accept_operator_gate=[RECIPE_KEY], accept_capacity_review=[RECIPE_KEY]
+        apply=True,
+        accept_operator_gate=[RECIPE_KEY],
+        accept_capacity_review=[RECIPE_KEY],
     )
     campaign_cli._operator_gate(accepted, row)
 
