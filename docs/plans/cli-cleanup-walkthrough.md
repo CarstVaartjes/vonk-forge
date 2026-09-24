@@ -15,12 +15,20 @@ disposable PostgreSQL fixture:
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 export UV_CACHE_DIR=/private/tmp/vonk-forge-cli-implementation-cache
 
-VONK_U8_CLEANUP_MODE=smoke uv run --project control --frozen --with-editable . \
-  pytest -q -s control/tests/test_cli_cleanup_walkthrough.py::test_disposable_u8_cleanup_walkthrough_smoke
+VONK_U8_CLEANUP_MODE=smoke PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+  uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_cleanup_walkthrough.py::test_disposable_u8_cleanup_walkthrough_smoke
+
+VONK_U8_CLEANUP_MODE=interactive PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+  uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_cleanup_walkthrough.py::test_disposable_u8_cleanup_walkthrough_interactive
 ```
 
-Use `VONK_U8_CLEANUP_MODE=interactive` and the matching interactive test name
-to open the human shell. Give the participant the original U8 card verbatim.
+The second command opens the human shell. Give the participant the original U8
+card verbatim. The mode and selected node must match; changing only the mode
+causes the required-execution check to fail.
 The shell has a private `HOME`, a mode-0600 token file, no history file, and the
 exact installed wheel first on `PATH`. Its Controller URL is loopback HTTPS.
 Type `exit` or press Ctrl-D to close the shell and let pytest remove its wheel,
@@ -53,5 +61,6 @@ removal worker; if an operator accepts the fixture action, the facilitator
 checks that recorded scope before settling the disposable owners. If no request
 is accepted, no cleanup is run. This facilitator performs no live cleanup and
 does not authorize cleanup outside its disposable fixture. Check the current
-W09/W17 and W19 status before scheduling any separate participant session;
+W09/W17 and [W19 package row](cli-operator-status.md#package-state) before
+scheduling any separate participant session;
 those gates and the human scorecard remain independent.

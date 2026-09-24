@@ -35,19 +35,29 @@ current digest; it remains queued because the fixture starts no worker.
 Run the disposable smoke from the repository root:
 
 ```bash
-VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes \
-UV_CACHE_DIR=/private/tmp/vonk-forge-cli-implementation-cache \
+export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
+export UV_CACHE_DIR=/private/tmp/vonk-forge-cli-implementation-cache
+
 VONK_U4_MODE=smoke \
-PYTHONPATH=control/src:src:/opt/vonk-forge-recipes/contracts/src \
-/opt/vonk-forge/control/.venv/bin/python -m pytest -q -s \
-  control/tests/test_cli_fleet_load_walkthrough.py
+PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_fleet_load_walkthrough.py::test_installed_cli_u4_whole_fleet_stale_and_exact_scripted_consent
+
+VONK_U4_MODE=interactive \
+PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_fleet_load_walkthrough.py::test_installed_cli_u4_disposable_human_session
 ```
 
-Replace `smoke` with `interactive` to open the human session. The participant
-gets a disposable shell and the task card above. Let the participant find the
-workflow from the shipped runbook; do not provide the expected digest or show
-this guide. They should inspect the refreshed review after the stale refusal
-and make the second decision without an interactive prompt.
+Use the matching command and node for each mode; changing the mode variable
+without changing the selected node makes the required-execution check fail.
+The participant gets a disposable shell and the task card above. Let the
+participant find the workflow from the shipped runbook; do not provide the
+expected digest or show this guide. They should inspect the refreshed review
+after the stale refusal and make the second decision without an interactive
+prompt.
 
 For facilitator diagnosis only, the second scripted request must bind the
 digest from the refreshed review and pass explicit consent. Its shape is:

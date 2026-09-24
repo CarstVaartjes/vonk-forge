@@ -26,11 +26,26 @@ Run the noninteractive setup smoke from the repository root:
 VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes \
 UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
 VONK_RESULTS_WALKTHROUGH_MODE=smoke \
+PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
 uv run --project control --frozen --with-editable . \
-  pytest -q -s control/tests/test_cli_results_walkthrough.py
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_results_walkthrough.py::test_disposable_cli_results_walkthrough_smoke
 ```
 
-Replace `smoke` with `interactive` to open the disposable shell. It prints the
+For the human session, change the mode and selected node together:
+
+```bash
+VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes \
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+VONK_RESULTS_WALKTHROUGH_MODE=interactive \
+PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_results_walkthrough.py::test_disposable_cli_results_walkthrough_interactive
+```
+
+Changing only `VONK_RESULTS_WALKTHROUGH_MODE` while leaving the smoke node
+selected makes the required-execution check fail. The interactive setup prints the
 Profile number and artifact run ID; give the participant only the shipped
 runbook and the U7 outcome card. The smoke checks the exact Profile-owned
 published endpoint, verifies the ready draft remains unavailable, distinguishes

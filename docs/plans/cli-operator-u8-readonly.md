@@ -28,6 +28,18 @@ It connects the installed wheel to a disposable HTTPS API and PostgreSQL Fleet
 owner, pipes the actual CLI output into a separate JSON consumer, and checks
 both process exits and unchanged operation counts.
 
+Run exactly this node from the repository root. The required-execution plugin
+turns a skipped PostgreSQL/Docker-dependent selection into a failed command:
+
+```bash
+PYTHONPATH="$PWD:$PWD/src:$PWD/control/src" \
+VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes \
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+uv run --project control --frozen --with-editable . \
+  pytest -p control.tests.required_execution -q -s \
+  control/tests/test_cli_json_pipeline_installed.py::test_installed_no_input_fleet_json_pipeline_is_read_only
+```
+
 This read-only exercise does not authorize cleanup. Use the separate
 [disposable cleanup setup](cli-cleanup-walkthrough.md) for that part of U8 and
-check its integrated qualification in the [current status](cli-operator-status.md).
+check its qualification in the [current W19 package row](cli-operator-status.md#package-state).
