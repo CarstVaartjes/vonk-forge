@@ -38,9 +38,16 @@ test("keeps URL-selected Models in the paired right pane", () => {
 });
 
 test("removes a recipe only after an explicit model choice", async () => {
-  const removeRecipe = vi.fn().mockResolvedValue({action: "remove", operation_id: "op", recipe_revision_id: "rev", reclaimed_bytes: 0, request_key: "k", schema_version: 2, selector: "s", state: "succeeded", progress: {phase: "complete"}});
-  const review = cacheRemovalReview();
-  const recipeRemovalReview = vi.fn().mockResolvedValue(review);
+  let review = cacheRemovalReview();
+  const recipeRemovalReview = vi.fn().mockImplementation(async (selector: string, withModel: boolean) => {
+    review = cacheRemovalReview({selector, with_model: withModel});
+    return review;
+  });
+  const removeRecipe = vi.fn().mockImplementation(async (selector: string, requestKey: string, withModel: boolean, reviewDigest: string) => ({
+    action: "remove", operation_id: "op", recipe_revision_id: review.target_identity,
+    reclaimed_bytes: 0, request_key: requestKey, schema_version: 2, selector,
+    review_digest: reviewDigest, with_model: withModel, state: "succeeded", progress: {phase: "complete"},
+  }));
   const api = {removeRecipe, recipeRemovalReview} as unknown as ControlApi;
   const base = libraryViewSnapshot.models.find(entry => entry.recipes.length > 0)!;
   render(<LibraryWorkcell api={api} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: modelKey(base.model)}} snapshot={libraryViewSnapshot}/>);

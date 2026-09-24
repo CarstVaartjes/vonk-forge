@@ -74,9 +74,22 @@ test("prepares the Controller cache for an uncached model", async () => {
 });
 
 test("removes a cached model only after an explicit confirmation", async () => {
-  const removeModelCache = vi.fn().mockResolvedValue({...prepared, action: "remove" as const});
-  const base = libraryViewSnapshot.models[0]!;
-  const review = cacheRemovalReview({resource_kind: "model", target_identity: base.model.content_sha256, with_model: null});
+  const original = libraryViewSnapshot.models[0]!;
+  const base = {...original, model: {...original.model, content_sha256: "f".repeat(64)}};
+  const selector = `${base.model.publisher}/${base.model.slug}`;
+  const review = cacheRemovalReview({resource_kind: "model", selector, target_identity: base.model.content_sha256, with_model: null});
+  const removeModelCache = vi.fn().mockImplementation(async (submittedSelector: string, modelContentSha256: string, requestKey: string, reviewDigest: string) => ({
+    action: "remove" as const,
+    operation_id: "removed-model-operation",
+    request_key: requestKey,
+    selector: submittedSelector,
+    review_digest: reviewDigest,
+    model_content_sha256: modelContentSha256,
+    reclaimed_bytes: 1,
+    schema_version: 2 as const,
+    state: "succeeded" as const,
+    progress: {phase: "complete"},
+  }));
   const modelRemovalReview = vi.fn().mockResolvedValue(review);
   const api = {removeModelCache, modelRemovalReview} as unknown as ControlApi;
   const inventory = [{...base, local: {...base.local, controller: "cached" as const}}];

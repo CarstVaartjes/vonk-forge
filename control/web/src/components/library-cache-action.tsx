@@ -2,6 +2,13 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import type {CacheRemovalReview, ControlApi, ModelCacheOperatorResponse} from "../api/types";
 
 import {CacheRemovalProgress} from "./cache-removal-progress";
+import {
+  CacheRemovalOutcomeUnknown,
+  submitReviewedRemoval,
+  validateRemovalReview,
+  type CacheRemovalIntent,
+  type CacheRemovalReceipt,
+} from "./cache-removal-operations";
 import {CacheRemovalReviewDetails} from "./cache-removal-review";
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
@@ -42,7 +49,11 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
 }) {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [removal, setRemoval] = useState<ModelCacheOperatorResponse | null>(null);
+  const [removal, setRemoval] = useState<{
+    intent: Extract<CacheRemovalIntent, {kind: "model"}>;
+    initial: CacheRemovalReceipt | null;
+    initialError?: string;
+  } | null>(null);
   const [review, setReview] = useState<CacheRemovalReview | null>(null);
   const [phase, setPhase] = useState("");
   const [error, setError] = useState("");
@@ -100,9 +111,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
     try {
       const current = await api.modelRemovalReview(selector, controller.signal);
       if (controller.signal.aborted) return;
-      if (current.resource_kind !== "model" || current.target_identity !== modelContentSha256) {
-        throw new Error("Model identity changed. Refresh the Library and review again.");
-      }
+      validateRemovalReview(current, {kind: "model", selector, modelContentSha256});
       setReview(current);
     } catch (value) {
       if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Cache removal review failed");
@@ -118,8 +127,14 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
     abort.current = controller;
     setBusy(true);
     setError("");
+    const intent: Extract<CacheRemovalIntent, {kind: "model"}> = {
+      kind: "model",
+      selector,
+      requestKey: crypto.randomUUID(),
+      review,
+    };
     try {
-      const result = await api.removeModelCache(selector, review.target_identity, crypto.randomUUID(), review.review_digest, controller.signal);
+      const result = await submitReviewedRemoval(api, intent, controller.signal);
       if (controller.signal.aborted) return;
       setBusy(false);
       setConfirming(false);
@@ -128,18 +143,25 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
         onPrepared();
         return;
       }
-      if (!result.operation_id) throw new Error("Removal receipt has no operation identity.");
-      setRemoval(result);
+      setRemoval({intent, initial: result});
     } catch (value) {
       if (controller.signal.aborted) return;
       setBusy(false);
       setReview(null);
-      setError(value instanceof Error ? value.message : "Cache removal failed; review again before retrying.");
+      if (value instanceof CacheRemovalOutcomeUnknown) {
+        setConfirming(false);
+        setRemoval({intent, initial: null, initialError: value.message});
+      } else {
+        setError(value instanceof Error ? value.message : "Cache removal failed; review again before retrying.");
+      }
     }
   }, [api, modelContentSha256, onPrepared, review, selector]);
 
-  if (removal) return <CacheRemovalProgress api={api} kind="model" initial={removal}
-    onComplete={() => {setRemoval(null); onPrepared();}} onDismiss={() => setRemoval(null)}/>;
+  if (removal) return <CacheRemovalProgress api={api} intent={removal.intent} initial={removal.initial}
+    initialError={removal.initialError}
+    onComplete={() => {setRemoval(null); onPrepared();}}
+    onDismiss={() => setRemoval(null)}
+    onRejected={message => {setRemoval(null); setError(message);}}/>;
 
   if (state === "cached") {
     // Confirmation accepts exactly the Controller review shown here.

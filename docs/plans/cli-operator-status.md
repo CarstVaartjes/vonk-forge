@@ -96,7 +96,11 @@ active work and blockers. Acceptance rejects changed effects and same-key
 replay recovers stored intent before mutable catalog resolution. Failed
 reference scans remain visible blockers and can recover after the fault clears.
 The CLI preserves typed review failures and refuses blocked work before consent.
-Generated API clients and existing web consumers are updated together.
+Generated API clients and existing web consumers are updated together. The
+existing web callers validate initial receipts against submitted intent and
+retain the exact request key after a lost or timed-out response, reconciling
+through a read-only lookup before any same-key retry. All 173 web tests and the
+production build pass on the integrated follow-up.
 
 Local integrated validation for that follow-up passes **2,477 Controller fast
 tests, three skips**, plus **1,087 standalone fast tests, 12 skips and 45

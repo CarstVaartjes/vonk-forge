@@ -163,10 +163,12 @@ export interface LibraryApi {
   prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelRemovalReview(selector: string, signal?: AbortSignal): Promise<CacheRemovalReview>;
   removeModelCache(selector: string, modelContentSha256: string, requestKey: string, reviewDigest: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  modelCacheRequest(requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   downloadRecipe(selector: string, requestKey: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityResponse>;
   recipeRemovalReview(selector: string, withModel: boolean, signal?: AbortSignal): Promise<CacheRemovalReview>;
   removeRecipe(selector: string, requestKey: string, withModel: boolean, reviewDigest: string, signal?: AbortSignal): Promise<RecipeOperatorResponse>;
+  recipeCacheRequest(requestKey: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
   updateRecipes(all: boolean, selectors: string[], requestKey: string, signal?: AbortSignal): Promise<RecipeUpdateResponse>;
   recipeCacheOperation(operationId: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
 }

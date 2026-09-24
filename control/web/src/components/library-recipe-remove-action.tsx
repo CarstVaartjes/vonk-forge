@@ -1,6 +1,13 @@
 import {useCallback, useEffect, useRef, useState} from "react";
-import type {CacheRemovalReview, ControlApi, RecipeOperatorResponse} from "../api/types";
+import type {CacheRemovalReview, ControlApi} from "../api/types";
 import {CacheRemovalProgress} from "./cache-removal-progress";
+import {
+  CacheRemovalOutcomeUnknown,
+  submitReviewedRemoval,
+  validateRemovalReview,
+  type CacheRemovalIntent,
+  type CacheRemovalReceipt,
+} from "./cache-removal-operations";
 import {CacheRemovalReviewDetails} from "./cache-removal-review";
 
 /** Choose retention, inspect the Controller decision, then accept that review. */
@@ -10,7 +17,11 @@ export function LibraryRecipeRemoveAction({api, selector, onRemoved}: {
   onRemoved(): void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [removal, setRemoval] = useState<RecipeOperatorResponse | null>(null);
+  const [removal, setRemoval] = useState<{
+    intent: Extract<CacheRemovalIntent, {kind: "recipe"}>;
+    initial: CacheRemovalReceipt | null;
+    initialError?: string;
+  } | null>(null);
   const [review, setReview] = useState<CacheRemovalReview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -35,9 +46,7 @@ export function LibraryRecipeRemoveAction({api, selector, onRemoved}: {
     try {
       const current = await api.recipeRemovalReview(selector, withModel, controller.signal);
       if (controller.signal.aborted) return;
-      if (current.resource_kind !== "recipe" || current.with_model !== withModel) {
-        throw new Error("Recipe removal review does not match the selected scope.");
-      }
+      validateRemovalReview(current, {kind: "recipe", selector, withModel});
       setReview(current);
     } catch (value) {
       if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Recipe removal review failed");
@@ -53,8 +62,14 @@ export function LibraryRecipeRemoveAction({api, selector, onRemoved}: {
     abort.current = controller;
     setBusy(true);
     setError("");
+    const intent: Extract<CacheRemovalIntent, {kind: "recipe"}> = {
+      kind: "recipe",
+      selector,
+      requestKey: crypto.randomUUID(),
+      review,
+    };
     try {
-      const result = await api.removeRecipe(selector, crypto.randomUUID(), review.with_model, review.review_digest, controller.signal);
+      const result = await submitReviewedRemoval(api, intent, controller.signal);
       if (controller.signal.aborted) return;
       setBusy(false);
       setConfirming(false);
@@ -63,18 +78,25 @@ export function LibraryRecipeRemoveAction({api, selector, onRemoved}: {
         onRemoved();
         return;
       }
-      if (!result.operation_id) throw new Error("Removal receipt has no operation identity.");
-      setRemoval(result);
+      setRemoval({intent, initial: result});
     } catch (value) {
       if (controller.signal.aborted) return;
       setBusy(false);
       setReview(null);
-      setError(value instanceof Error ? value.message : "Recipe removal failed; review again before retrying.");
+      if (value instanceof CacheRemovalOutcomeUnknown) {
+        setConfirming(false);
+        setRemoval({intent, initial: null, initialError: value.message});
+      } else {
+        setError(value instanceof Error ? value.message : "Recipe removal failed; review again before retrying.");
+      }
     }
   }, [api, onRemoved, review, selector]);
 
-  if (removal) return <CacheRemovalProgress api={api} kind="recipe" initial={removal}
-    onComplete={() => {setRemoval(null); onRemoved();}} onDismiss={() => setRemoval(null)}/>;
+  if (removal) return <CacheRemovalProgress api={api} intent={removal.intent} initial={removal.initial}
+    initialError={removal.initialError}
+    onComplete={() => {setRemoval(null); onRemoved();}}
+    onDismiss={() => setRemoval(null)}
+    onRejected={message => {setRemoval(null); setError(message);}}/>;
 
   if (!confirming) {
     return <div className="library-cache-action">

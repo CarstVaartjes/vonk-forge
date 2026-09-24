@@ -322,6 +322,12 @@ export class ApiClient implements ControlApi {
     }));
   }
 
+  async modelCacheRequest(requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
+    return resultData(await this.generated.GET("/api/model/requests/{request_key}", {
+      params: {path: {request_key: requestKey}}, signal,
+    }));
+  }
+
   async modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
     return resultData(await this.generated.GET("/api/model/operations/{operation_id}", {
       params: {path: {operation_id: operationId}},
@@ -370,6 +376,12 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.GET("/api/recipe/operations/{operation_id}", {
       params: {path: {operation_id: operationId}},
       signal,
+    }));
+  }
+
+  async recipeCacheRequest(requestKey: string, signal?: AbortSignal): Promise<RecipeCacheOperation> {
+    return resultData(await this.generated.GET("/api/recipe/requests/{request_key}", {
+      params: {path: {request_key: requestKey}}, signal,
     }));
   }
 
