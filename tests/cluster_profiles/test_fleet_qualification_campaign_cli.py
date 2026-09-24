@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
+import io
 import json
+import os
+import shutil
+import tarfile
 from argparse import Namespace
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -30,10 +35,47 @@ CONTENT_SHA = "c" * 64
 
 
 def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
-    package = b"reviewed recipe package"
-    package_path = root / "packages" / "test-model.tar.gz"
-    package_path.parent.mkdir(parents=True, exist_ok=True)
-    package_path.write_bytes(package)
+    library_root = Path(os.environ["VONK_RECIPE_LIBRARY_ROOT"]).resolve()
+    (root / "tools").mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(
+        library_root / "tools/build-catalog-index", root / "tools/build-catalog-index"
+    )
+    contract_source = root / "contracts" / "src"
+    contract_source.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        library_root / "contracts/src/vonk_forge_contracts",
+        contract_source / "vonk_forge_contracts",
+    )
+    reviewed_authority = json.loads(
+        (
+            library_root / "qualification/authorities/nl-sequential-2c118a99.json"
+        ).read_text(encoding="utf-8")
+    )
+    reviewed_catalog = json.loads(
+        (library_root / "catalog-index.json").read_text(encoding="utf-8")
+    )
+    candidates = {
+        row["key"]: row
+        for row in reviewed_authority["recipes"]
+        if row["interface"] == "openai-service"
+    }
+    selected_row = candidates[
+        "vonk-forge/laguna-s-2-1-nvfp4-vllm-low-memory-canary-single"
+    ]
+    alternate_row = candidates["vonk-forge/laguna-s-2-1-nvfp4-vllm-single"]
+    recipe_entries = {
+        f"{entry['document']['identity']['publisher']}/{entry['document']['identity']['slug']}": entry
+        for entry in reviewed_catalog["recipes"]
+    }
+    selected_entry = recipe_entries[selected_row["key"]]
+    alternate_entry = recipe_entries[alternate_row["key"]]
+    assert selected_entry["package"]["path"] != alternate_entry["package"]["path"]
+
+    package = (library_root / selected_entry["package"]["path"]).read_bytes()
+    for entry in (selected_entry, alternate_entry):
+        package_path = root / entry["package"]["path"]
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        package_path.write_bytes((library_root / entry["package"]["path"]).read_bytes())
 
     index = {
         "schema_version": 2,
@@ -48,58 +90,40 @@ def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
     fixture_path.parent.mkdir(parents=True, exist_ok=True)
     fixture_path.write_bytes(fixture_raw)
 
-    source_commit = "1" * 40
-    catalog_raw = json.dumps({"source_commit": source_commit}, sort_keys=True).encode()
+    source_commit = reviewed_authority["catalog"]["source_commit"]
+    catalog_document = {
+        "schema_version": reviewed_catalog["schema_version"],
+        "kind": reviewed_catalog["kind"],
+        "source_commit": source_commit,
+        "recipes": [selected_entry, alternate_entry],
+        "catalog_entities": reviewed_catalog["catalog_entities"],
+    }
+    catalog_raw = json.dumps(
+        catalog_document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
     (root / "catalog-index.json").write_bytes(catalog_raw)
+
+    selected_row = json.loads(json.dumps(selected_row))
+    selected_row["sequence"] = 1
 
     authority = {
         "schema_version": 3,
         "authority_id": "test-authority",
         "catalog": {
-            "repository": "test/recipes",
-            "commit": "2" * 40,
-            "release_tag": "v1.0.0",
+            "repository": reviewed_authority["catalog"]["repository"],
+            "commit": reviewed_authority["catalog"]["commit"],
+            "release_tag": reviewed_authority["catalog"]["release_tag"],
             "source_commit": source_commit,
             "catalog_index_sha256": hashlib.sha256(catalog_raw).hexdigest(),
             "qualification_index_sha256": hashlib.sha256(fixture_raw).hexdigest(),
-            "recipe_count": 1,
+            "recipe_count": len(catalog_document["recipes"]),
         },
         "scope": {
             "maximum_node_count": 2,
             "recipe_count": 1,
-            "excluded_topology_recipe_keys": [],
+            "excluded_topology_recipe_keys": [alternate_row["key"]],
         },
-        "recipes": [
-            {
-                "sequence": 1,
-                "key": RECIPE_KEY,
-                "recipe_version": "1.0.0",
-                "content_sha256": CONTENT_SHA,
-                "package": {
-                    "path": "packages/test-model.tar.gz",
-                    "sha256": hashlib.sha256(package).hexdigest(),
-                    "expected_bytes": len(package),
-                    "media_type": "application/vnd.vonk-forge.recipe-package.v2+tar+gzip",
-                },
-                "node_count": 1,
-                "interface": "openai-service",
-                "disposition": "actionable",
-                "operator_acceptance_required": False,
-                "model_license_refs": [
-                    {
-                        "key": "test/model",
-                        "content_sha256": "d" * 64,
-                        "spdx": "Apache-2.0",
-                        "url": "https://example.invalid/license",
-                        "attribution": [],
-                        "operator_acceptance_required": False,
-                    }
-                ],
-                "qualification_inputs": [],
-                "smoke_cases": ["health"],
-                "review_gates": [],
-            }
-        ],
+        "recipes": [selected_row],
     }
     authority_path = root / "qualification" / "authorities" / "test.json"
     authority_path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,6 +143,93 @@ def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
         encoding="utf-8",
     )
     return campaign_path, package, fixture_raw
+
+
+def _rewrite_package(payload: bytes, mutation: str) -> bytes:
+    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+        files = {
+            member.name: archive.extractfile(member).read()
+            for member in archive.getmembers()
+            if archive.extractfile(member) is not None
+        }
+    package_manifest = json.loads(files["manifest.json"])
+    if mutation == "recipe-document":
+        recipe = json.loads(files["recipe.json"])
+        recipe["metadata"]["title"] += " altered"
+        files["recipe.json"] = json.dumps(
+            recipe, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+        recipe_entry = next(
+            entry
+            for entry in package_manifest["files"]
+            if entry["path"] == "recipe.json"
+        )
+        recipe_entry["size"] = len(files["recipe.json"])
+        recipe_entry["sha256"] = hashlib.sha256(files["recipe.json"]).hexdigest()
+    elif mutation == "manifest-recipe-digest":
+        package_manifest["recipe_content_sha256"] = "f" * 64
+    elif mutation == "extra-member":
+        files["untrusted.txt"] = b"extra package member"
+        package_manifest["files"].append(
+            {
+                "path": "untrusted.txt",
+                "size": len(files["untrusted.txt"]),
+                "sha256": hashlib.sha256(files["untrusted.txt"]).hexdigest(),
+            }
+        )
+    else:
+        raise AssertionError(f"unknown package mutation: {mutation}")
+
+    files["manifest.json"] = json.dumps(
+        package_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
+    output = io.BytesIO()
+    with (
+        gzip.GzipFile(fileobj=output, mode="wb", mtime=0) as compressed,
+        tarfile.open(
+            fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT
+        ) as archive,
+    ):
+        for name, content in files.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            member.mode = 0o644
+            member.uid = member.gid = 0
+            member.uname = member.gname = ""
+            member.mtime = 0
+            archive.addfile(member, io.BytesIO(content))
+    return output.getvalue()
+
+
+def _rebind_package_digests(root: Path, payload: bytes) -> None:
+    authority_path = root / "qualification" / "authorities" / "test.json"
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    row = authority["recipes"][0]
+    package = row["package"]
+    package_path = root / package["path"]
+    package_path.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    package["sha256"] = digest
+    package["expected_bytes"] = len(payload)
+
+    catalog_path = root / "catalog-index.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    entry = next(
+        item
+        for item in catalog["recipes"]
+        if f"{item['document']['identity']['publisher']}/{item['document']['identity']['slug']}"
+        == row["key"]
+    )
+    entry["package"]["sha256"] = digest
+    entry["package"]["expected_bytes"] = len(payload)
+    catalog_raw = json.dumps(
+        catalog, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
+    catalog_path.write_bytes(catalog_raw)
+    authority["catalog"]["catalog_index_sha256"] = hashlib.sha256(
+        catalog_raw
+    ).hexdigest()
+    authority_path.write_text(json.dumps(authority), encoding="utf-8")
 
 
 def _row(
@@ -292,6 +403,77 @@ def test_manifest_loads_confined_parent_references_and_binds_all_local_inputs(
     assert len(manifest.authority.rows) == 1
     assert manifest.authority.rows[0].interface == "openai-service"
     assert fixtures.manifest_sha256 == manifest.authority.catalog["qualification_index_sha256"]
+
+
+def test_repository_binding_rejects_a_swapped_valid_recipe_package(
+    tmp_path: Path,
+) -> None:
+    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
+    authority_path = tmp_path / "qualification" / "authorities" / "test.json"
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    catalog = json.loads((tmp_path / "catalog-index.json").read_text(encoding="utf-8"))
+    row = authority["recipes"][0]
+    alternate_entry = next(
+        entry
+        for entry in catalog["recipes"]
+        if f"{entry['document']['identity']['publisher']}/{entry['document']['identity']['slug']}"
+        != row["key"]
+    )
+    row["package"] = {
+        field: alternate_entry["package"][field]
+        for field in ("path", "sha256", "expected_bytes", "media_type")
+    }
+    authority_path.write_text(json.dumps(authority), encoding="utf-8")
+
+    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
+    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
+    with pytest.raises(QualificationError, match="package path differs from catalog"):
+        campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
+
+
+def test_repository_binding_rejects_valid_archive_for_another_recipe(
+    tmp_path: Path,
+) -> None:
+    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
+    authority_path = tmp_path / "qualification" / "authorities" / "test.json"
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    catalog = json.loads((tmp_path / "catalog-index.json").read_text(encoding="utf-8"))
+    row = authority["recipes"][0]
+    alternate_entry = next(
+        entry
+        for entry in catalog["recipes"]
+        if f"{entry['document']['identity']['publisher']}/{entry['document']['identity']['slug']}"
+        != row["key"]
+    )
+    alternate_archive = (tmp_path / alternate_entry["package"]["path"]).read_bytes()
+    _rebind_package_digests(tmp_path, alternate_archive)
+
+    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
+    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
+    with pytest.raises(
+        QualificationError, match="recipe package recipe does not match"
+    ):
+        campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("recipe-document", "recipe package recipe does not match"),
+        ("manifest-recipe-digest", "recipe package recipe digest is stale"),
+        ("extra-member", "member is outside declared namespaces"),
+    ],
+)
+def test_repository_binding_rejects_rehashed_packages_outside_recipe_closure(
+    tmp_path: Path, mutation: str, message: str
+) -> None:
+    campaign_path, package, _fixture_raw = _catalog_inputs(tmp_path)
+    _rebind_package_digests(tmp_path, _rewrite_package(package, mutation))
+
+    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
+    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
+    with pytest.raises(QualificationError, match=message):
+        campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
 
 
 def test_manifest_rejects_parent_references_that_escape_or_follow_symlinks(

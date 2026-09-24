@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .control_client import (
     ControlClient,
@@ -574,6 +574,193 @@ def _safe_file_digest(path: Path, expected_bytes: int) -> str:
     return digest.hexdigest()
 
 
+def _read_verified_package(
+    path: Path, expected_bytes: int, expected_sha256: str
+) -> bytes:
+    digest = hashlib.sha256()
+    chunks: list[bytes] = []
+    observed = 0
+    try:
+        with path.open("rb") as source:
+            while True:
+                chunk = source.read(min(1024 * 1024, expected_bytes - observed + 1))
+                if not chunk:
+                    break
+                observed += len(chunk)
+                if observed > expected_bytes:
+                    raise QualificationError(
+                        "recipe package byte count changed: "
+                        f"expected {expected_bytes}, observed more than expected"
+                    )
+                digest.update(chunk)
+                chunks.append(chunk)
+    except OSError as error:
+        raise QualificationError(f"recipe package cannot be read: {path}") from error
+    if observed != expected_bytes:
+        raise QualificationError(
+            f"recipe package byte count changed: expected {expected_bytes}, observed {observed}"
+        )
+    observed_sha256 = digest.hexdigest()
+    if observed_sha256 != expected_sha256:
+        raise QualificationError("recipe package digest differs from authority")
+    return b"".join(chunks)
+
+
+def _canonical_recipe_package_tools(
+    library_root: Path,
+) -> tuple[
+    Callable[[bytes, dict[str, object], dict[str, dict[str, object]]], None],
+    Any,
+    Any,
+    Callable[[Any], str],
+    str,
+]:
+    import runpy
+
+    validator_path = _relative_path(
+        library_root,
+        "tools/build-catalog-index",
+        "canonical recipe package validator",
+    )
+    contracts_init = _relative_path(
+        library_root,
+        "contracts/src/vonk_forge_contracts/__init__.py",
+        "canonical recipe contracts",
+    )
+    try:
+        tool_namespace = runpy.run_path(str(validator_path))
+        contract_source = str(contracts_init.parent.parent)
+        sys.path[:] = [entry for entry in sys.path if entry != contract_source]
+        sys.path.insert(0, contract_source)
+        for module_name in tuple(sys.modules):
+            if module_name == "vonk_forge_contracts" or module_name.startswith(
+                "vonk_forge_contracts."
+            ):
+                del sys.modules[module_name]
+        import vonk_forge_contracts
+        from vonk_forge_contracts import (
+            ModelDefinition,
+            RecipeDefinition,
+            content_sha256,
+        )
+    except Exception as error:
+        raise QualificationError(
+            "canonical recipe contracts or package validator cannot be loaded"
+        ) from error
+    if Path(vonk_forge_contracts.__file__).resolve() != contracts_init:
+        raise QualificationError(
+            "loaded recipe contracts do not belong to the reviewed recipe repository"
+        )
+    candidate_validator = tool_namespace.get("validate_recipe_archive")
+    if not callable(candidate_validator):
+        raise QualificationError("canonical recipe package validator is unavailable")
+    validator = cast(
+        Callable[[bytes, dict[str, object], dict[str, dict[str, object]]], None],
+        candidate_validator,
+    )
+    package_media_type = _string(
+        tool_namespace.get("PACKAGE_MEDIA_TYPE"),
+        "canonical recipe package media type",
+    )
+    return (
+        validator,
+        RecipeDefinition,
+        ModelDefinition,
+        content_sha256,
+        package_media_type,
+    )
+
+
+def _catalog_recipe_entries(
+    catalog_document: Mapping[str, object],
+) -> dict[str, tuple[Mapping[str, object], Mapping[str, object]]]:
+    raw_entries = catalog_document.get("recipes")
+    if not isinstance(raw_entries, list):
+        raise QualificationError("catalog index recipes must be an array")
+    entries: dict[str, tuple[Mapping[str, object], Mapping[str, object]]] = {}
+    for position, raw_entry in enumerate(raw_entries):
+        entry = _object(raw_entry, f"catalog recipe {position}")
+        recipe = _object(entry.get("document"), f"catalog recipe {position} document")
+        identity = _object(
+            recipe.get("identity"), f"catalog recipe {position} identity"
+        )
+        publisher = _string(
+            identity.get("publisher"), f"catalog recipe {position} publisher"
+        )
+        slug = _string(identity.get("slug"), f"catalog recipe {position} slug")
+        key = f"{publisher}/{slug}"
+        if key in entries:
+            raise QualificationError(f"catalog index repeats recipe identity {key}")
+        entries[key] = (entry, recipe)
+    return entries
+
+
+def _catalog_model_entries(
+    catalog_document: Mapping[str, object],
+) -> dict[str, tuple[Mapping[str, object], Mapping[str, object]]]:
+    raw_entries = catalog_document.get("catalog_entities")
+    if not isinstance(raw_entries, list):
+        raise QualificationError("catalog index catalog_entities must be an array")
+    entries: dict[str, tuple[Mapping[str, object], Mapping[str, object]]] = {}
+    for position, raw_entry in enumerate(raw_entries):
+        entry = _object(raw_entry, f"catalog entity {position}")
+        model = _object(entry.get("document"), f"catalog entity {position} document")
+        identity = _object(model.get("identity"), f"catalog entity {position} identity")
+        publisher = _string(
+            identity.get("publisher"), f"catalog entity {position} publisher"
+        )
+        slug = _string(identity.get("slug"), f"catalog entity {position} slug")
+        key = f"{publisher}/{slug}"
+        if key in entries:
+            raise QualificationError(f"catalog index repeats Model identity {key}")
+        entries[key] = (entry, model)
+    return entries
+
+
+def _recipe_model_closure(
+    recipe: Any,
+    catalog_models: Mapping[str, tuple[Mapping[str, object], Mapping[str, object]]],
+    model_type: Any,
+    content_sha256: Callable[[Any], str],
+    recipe_key: str,
+) -> dict[str, dict[str, object]]:
+    pending: list[tuple[str, str]] = [
+        (selection.model.publisher, selection.model.slug) for selection in recipe.models
+    ]
+    result: dict[str, dict[str, object]] = {}
+    while pending:
+        publisher, slug = pending.pop()
+        key = f"{publisher}/{slug}"
+        if key in result:
+            continue
+        catalog_entry = catalog_models.get(key)
+        if catalog_entry is None:
+            raise QualificationError(
+                f"{recipe_key} catalog is missing exact Model {key}"
+            )
+        raw_entry, raw_model = catalog_entry
+        try:
+            model = model_type.model_validate(raw_model)
+        except Exception as error:
+            raise QualificationError(
+                f"{recipe_key} catalog Model {key} is invalid"
+            ) from error
+        model_digest = content_sha256(model)
+        if raw_entry.get("content_sha256") != model_digest:
+            raise QualificationError(
+                f"{recipe_key} catalog Model {key} digest is stale"
+            )
+        result[key] = model.model_dump(
+            mode="json", exclude_unset=False, exclude_none=False
+        )
+        pending.extend(
+            (reference.publisher, reference.slug) for reference in model.dependencies
+        )
+        if model.supersedes is not None:
+            pending.append((model.supersedes.publisher, model.supersedes.slug))
+    return result
+
+
 def _bind_repository_inputs(
     manifest: CampaignManifest, library_root: Path, fixtures: FixtureRegistry
 ) -> None:
@@ -581,10 +768,16 @@ def _bind_repository_inputs(
     if not root.is_dir():
         raise QualificationError("recipe library root must be a directory")
     if not manifest.path.is_relative_to(root):
-        raise QualificationError("campaign manifest must be inside the recipe repository")
+        raise QualificationError(
+            "campaign manifest must be inside the recipe repository"
+        )
     if not manifest.fixture_manifest.is_relative_to(root):
-        raise QualificationError("fixture manifest must be inside the recipe repository")
-    manifest_value = _object(_strict_read(manifest.path, "campaign manifest")[0], "manifest")
+        raise QualificationError(
+            "fixture manifest must be inside the recipe repository"
+        )
+    manifest_value = _object(
+        _strict_read(manifest.path, "campaign manifest")[0], "manifest"
+    )
     resolved_authority = _relative_path(
         root,
         manifest_value["qualification_authority"],
@@ -593,7 +786,9 @@ def _bind_repository_inputs(
         base=manifest.path.parent,
     )
     if not resolved_authority.is_relative_to(root):
-        raise QualificationError("qualification authority must be inside the recipe repository")
+        raise QualificationError(
+            "qualification authority must be inside the recipe repository"
+        )
 
     catalog_path = _relative_path(root, "catalog-index.json", "catalog index")
     index_path = _relative_path(
@@ -626,13 +821,113 @@ def _bind_repository_inputs(
     source_commit = catalog_document.get("source_commit")
     if source_commit != manifest.authority.catalog["source_commit"]:
         raise QualificationError("catalog source commit differs from its authority")
+
+    recipe_entries = _catalog_recipe_entries(catalog_document)
+    catalog_models = _catalog_model_entries(catalog_document)
+    (
+        validate_recipe_archive,
+        recipe_type,
+        model_type,
+        content_sha256,
+        expected_package_media_type,
+    ) = _canonical_recipe_package_tools(root)
     for row in manifest.authority.rows:
+        catalog_recipe = recipe_entries.get(row.key)
+        if catalog_recipe is None:
+            raise QualificationError(f"{row.key} is absent from the catalog index")
+        catalog_entry, recipe_document = catalog_recipe
+        try:
+            recipe = recipe_type.model_validate(recipe_document)
+        except Exception as error:
+            raise QualificationError(f"{row.key} catalog Recipe is invalid") from error
+        canonical_recipe_digest = content_sha256(recipe)
+        catalog_digest = _string(
+            catalog_entry.get("content_sha256"), f"{row.key} catalog recipe digest"
+        )
+        if catalog_digest != canonical_recipe_digest:
+            raise QualificationError(f"{row.key} catalog Recipe digest is stale")
+        recipe_identity = f"{recipe.identity.publisher}/{recipe.identity.slug}"
+        if recipe_identity != row.key:
+            raise QualificationError(f"{row.key} catalog Recipe identity differs")
+        if row.content_sha256 != canonical_recipe_digest:
+            raise QualificationError(f"{row.key} Recipe digest differs from catalog")
+        if row.recipe_version != recipe.release.version:
+            raise QualificationError(f"{row.key} Recipe version differs from catalog")
+
+        catalog_package = _object(
+            catalog_entry.get("package"), f"{row.key} catalog package"
+        )
+        catalog_package_path = _string(
+            catalog_package.get("path"), f"{row.key} catalog package path"
+        )
+        catalog_package_digest = _string(
+            catalog_package.get("sha256"), f"{row.key} catalog package digest"
+        )
+        if _SHA256.fullmatch(catalog_package_digest) is None:
+            raise QualificationError(f"{row.key} catalog package digest is invalid")
+        catalog_package_bytes = _integer(
+            catalog_package.get("expected_bytes"),
+            f"{row.key} catalog package bytes",
+            1,
+            2**63 - 1,
+        )
+        catalog_package_media_type = _string(
+            catalog_package.get("media_type"),
+            f"{row.key} catalog package media type",
+        )
+        if catalog_package_media_type != expected_package_media_type:
+            raise QualificationError(
+                f"{row.key} catalog package media type is not canonical"
+            )
+        if catalog_package_path != row.package["path"]:
+            raise QualificationError(f"{row.key} package path differs from catalog")
+        if catalog_package_digest != row.package["sha256"]:
+            raise QualificationError(f"{row.key} package sha256 differs from catalog")
+        if catalog_package_bytes != row.package["expected_bytes"]:
+            raise QualificationError(
+                f"{row.key} package expected_bytes differs from catalog"
+            )
+        if catalog_package_media_type != row.package["media_type"]:
+            raise QualificationError(
+                f"{row.key} package media_type differs from catalog"
+            )
+        catalog_recipe_digest = _string(
+            catalog_package.get("recipe_content_sha256"),
+            f"{row.key} catalog package Recipe digest",
+        )
+        if catalog_recipe_digest != canonical_recipe_digest:
+            raise QualificationError(
+                f"{row.key} catalog package Recipe digest differs from catalog"
+            )
+
         package_path = _relative_path(root, row.package["path"], f"{row.key} package")
         expected_bytes = _integer(
             row.package["expected_bytes"], f"{row.key} package bytes", 1, 2**63 - 1
         )
-        if _safe_file_digest(package_path, expected_bytes) != row.package["sha256"]:
-            raise QualificationError(f"{row.key} package digest differs from authority")
+        package_payload = _read_verified_package(
+            package_path, expected_bytes, str(row.package["sha256"])
+        )
+        model_closure = _recipe_model_closure(
+            recipe,
+            catalog_models,
+            model_type,
+            content_sha256,
+            row.key,
+        )
+        try:
+            validate_recipe_archive(
+                package_payload,
+                recipe.model_dump(mode="json", exclude_unset=False, exclude_none=False),
+                model_closure,
+            )
+        except SystemExit as error:
+            raise QualificationError(
+                f"{row.key} package closure is invalid: {error}"
+            ) from error
+        except Exception as error:
+            raise QualificationError(
+                f"{row.key} package closure is invalid: {error}"
+            ) from error
 
 
 def _service_fixture_inputs(value: object, result: list[str]) -> None:
