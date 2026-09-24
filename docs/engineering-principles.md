@@ -188,8 +188,11 @@ for accepted publication, deployment, or physical acceptance.
 - The platform update plane is separate from the workload plane.
   `agent.update` updates Vonk Forge itself and must never deliver an ordinary
   workload family, adapter, runtime, container, dependency, or model release.
-- Routine operation does not require SSH. The Spark agent connects outbound,
-  and SSH stays diagnostic and bootstrap-only.
+- Routine Spark operation does not require SSH. The Spark agent connects
+  outbound, and Spark SSH stays diagnostic and bootstrap-only. An explicitly
+  authorized NAS Compose redeploy may use authenticated SSH as its host
+  transport under the [operator procedure](runbooks/operator-cli-access.md#nas-compose-redeployment).
+  This does not bypass Controller authorization or permit SSH Spark rollouts.
 
 ## Every frontier recipe must remain runnable
 

@@ -5,6 +5,20 @@ recipe definitions live in the sibling `/opt/vonk-forge-recipes` checkout.
 Keep repository, CI/publication, Controller deployment, and physical Spark
 qualification as separate evidence boundaries.
 
+## Operator access
+
+Prefer authenticated CLIs and HTTP APIs for operational work. Follow the
+[operator CLI runbook](docs/runbooks/operator-cli-access.md) and, when present,
+the execution host's `~/.config/cli-access/README.md` for configured access.
+Use installed command help; do not open a browser or desktop app for an
+operation the configured CLI supports. Documentation research is separate.
+
+Distinguish sandbox/network/socket denial from missing authentication before
+requesting login. Keep credentials out of output, arguments, and tracked files;
+never fall back from a scoped service account to a personal desktop session.
+Existing credentials do not authorize unrelated remote changes. A locked,
+awake user session is not proof of availability after logout, sleep, or reboot.
+
 ## Engineering stance
 
 Vonk Forge optimizes for simplicity, stability, security, and automatic recovery
@@ -29,7 +43,8 @@ structural choice. The short form:
 - **Security:** fail closed. Never soften a `PermissionDenied`, never clamp an
   invalid request into a valid one, keep the update-signing key separate from
   administrative authorization, and never let candidate tooling install itself.
-  SSH is diagnostic and bootstrap-only.
+  Spark SSH is diagnostic and bootstrap-only. NAS Compose redeployment follows
+  the explicit host-operation boundary below.
 - **Every frontier recipe:** the curated library exists to make any model
   reproducible, not to restrict what can run. Missing assets are actionable
   cache blockers and never a problem deferred to a Spark. Runnable, cache-ready,
@@ -288,11 +303,15 @@ vonkctl fleet upgrade --all --strategy one-at-a-time --json
 
 For a mounted controller project, consume the signed NAS installer from the
 directory containing the existing bundle, preserve `.env`, `secrets/`, and
-named volumes, then redeploy through Docker Compose/UI. Inspect the published
-manifest first: it must be schema 2 and bind the intended current source and
-artifacts. Do not delete PostgreSQL volumes or run `docker compose down -v` for
-a normal upgrade. SSH is diagnostic/bootstrap-only, never a hidden fallback
-for an authorized Controller operation.
+named volumes, then redeploy through Docker Compose over approved host access.
+Prefer the configured headless CLI to the NAS browser interface; follow the
+[NAS redeployment procedure](docs/runbooks/operator-cli-access.md#nas-compose-redeployment).
+Inspect the published manifest first: it must be schema 2 and bind the intended
+current source and artifacts. Do not delete PostgreSQL volumes or run `docker compose down -v` for
+a normal upgrade. An explicitly authorized NAS Compose redeploy may use SSH as
+its host transport; do not request another approval merely for that transport
+when the operation is already authorized. This exception does not permit SSH
+Spark rollouts or bypass a Controller authorization decision.
 
 ## Profile cache contract
 
@@ -333,8 +352,10 @@ work and after merges. A fetch updates `origin/main`, not local `main`. One
 coordinator updates the canonical checkout while it is idle; agents must not
 switch it to feature branches or use it as an integration workspace.
 
-All implementation work, including lead-agent and subagent work, uses an
-isolated `codex/` branch/worktree based on freshly fetched `origin/main`.
+All repository edits, including documentation, agent instructions, lead-agent
+and subagent work, use an isolated `codex/` branch/worktree based on freshly
+fetched `origin/main`. Create it before the first edit; read-only inspection
+does not require another worktree.
 Dependent work may use an explicitly coordinated integration base. Each tree
 has one active owner. Do not edit another agent's tree or shared uncommitted
 files. If the canonical checkout is already dirty or on another branch,
