@@ -2,6 +2,33 @@
 
 ## Active integration checkpoint — 2026-09-24
 
+The final automated fixture integration is committed at `b1eee312`, based on
+the conflict-resolved merge `5754ed30` of remote main `d08d8b31`. The recipe
+input is exactly `706fb4df839e33f1917046f8ae63d46ed7484bb1`; its rebuilt index
+and platform validation pass for 85 recipes and 102 catalog entities. The merge
+preserves both signed cursor bounds and byte-bounded Library pages; 20
+Library/authentication checks and 113 supply-chain tests pass. Generated clients
+reproduce without drift.
+
+The combined installed-CLI/HTTPS/PostgreSQL walkthrough run passes **4 tests,
+2 human sessions intentionally skipped**, in 193.10 seconds. It includes the
+same-profile journey and actual local Qwen3-0.6B CPU inference from verified
+managed assets, with a blocked candidate before the usable later-page choice.
+The model snapshot, derived image manifest and archive are pinned in the
+[walkthrough guide](cli-operator-walkthrough.md). The runtime uses the compiled
+command/environment, read-only root/model, non-root identity, no network and
+canonical writable mounts. It returns a nonempty completion within the recipe
+bound; its disposable container and workspace are removed afterward. This
+qualifies U2's runnable fixture locally, not physical Spark or model quality.
+The human launcher exposes the same candidate only when its explicit verified
+asset-root option is supplied; it starts no runtime or workload application.
+
+Pinned lint, the full type gate (one reviewed exception, no unlisted errors),
+and supply verification pass after integration. CI for this new checkpoint is
+pending. The **independent human U1–U8 walkthrough remains unperformed**, so
+W19 and the CLI handoff remain open. Earlier checkpoint evidence below is
+retained with its exact scope and revision.
+
 All 23 applicable PR checks pass at recovery source
 `134bcbf9fd54a70da2be8204a805dfd5c34feccc`:
 [full CI](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36011809072),
@@ -9,8 +36,8 @@ All 23 applicable PR checks pass at recovery source
 and [ARM64 signed helper](https://github.com/CarstVaartjes/vonk-forge/actions/runs/36011808590).
 The refreshed [handoff examples](../examples/cli-operator/README.md) retain
 32 actual installed-CLI observations from seven passing scenarios at this
-revision. Publication remains skipped for the PR. The runnable U2 fixture integration and independent human scorecard remain
-open. The same-profile owner journey is qualified locally below.
+revision. Publication remains skipped for the PR. The same-profile owner journey and runnable U2 fixture are qualified locally
+above. The independent human scorecard remains open.
 
 The native build-failure audit found two connected recovery defects. Source
 fetch and image-upload failures lost their typed causes at the Rust producer;
@@ -65,8 +92,8 @@ interactive-clock regression pass: **3 passed, 2 interactive cases skipped**.
 Interactive mode leaves consent to the operator, follows elapsed time, and
 refreshes simulated inventory through its registered owner route. These are
 disposable Controller-owner checks; the projected endpoint is not a running
-inference service. The genuine runnable U2 fixture integration and independent
-human walkthrough remain required.
+inference service. The runnable U2 integration is qualified above; the independent human
+walkthrough remains required.
 
 The active candidate is `codex/cli-approved-integration` in
 `/private/tmp/vonk-cli-approved-integration`. The connected-journey checkpoint

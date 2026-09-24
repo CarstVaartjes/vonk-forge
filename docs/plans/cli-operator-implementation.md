@@ -48,14 +48,17 @@ same Profile, a new CLI process reconnects by application ID, and endpoint
 discovery follows current signed observation and route ownership. The existing
 walkthrough smoke and interactive-clock regression also pass. This is
 Controller-owner evidence, not a running model or independent human result.
-The genuine runnable U2 fixture integration and the human U1–U8 scorecard remain
-open. Exact checks and remaining evidence boundaries are in the status document.
+The genuine U2 fixture now also passes at `b1eee312`, including later-page
+discovery, verified managed assets and actual bounded Qwen CPU inference. The
+combined automated walkthroughs pass four tests; two human sessions are
+intentionally skipped. The independent human U1–U8 scorecard remains open.
+Exact checks and remaining evidence boundaries are in the status document.
 
 The [shared-build closure checklist](#shared-build-closure-checklist) retains
 historical implementation detail. It does not supersede the current status.
 Six existing disposable walkthrough smoke scenarios pass together, and the
-read-only JSON pipeline passes. U2's later-page fixture is cache-ready, but its
-empty OCI image does not prove a runnable model. The user will run every model;
+read-only JSON pipeline passes. The default synthetic U2 fixture proves cache readiness only; the explicit
+Qwen asset option now supplies a locally verified runnable candidate. The user will run every model;
 that campaign and an independent human U1–U8 scorecard remain separate evidence.
 Do not replace either with a synthetic success or mark W19 complete from smoke
 checks alone.
