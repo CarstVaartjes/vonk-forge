@@ -17,31 +17,52 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable
-from dataclasses import replace
-from datetime import UTC, datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 
 import httpx
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
+from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import SqlAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.database_authority import DatabaseAuthorityService
-from vonk_control.distribution import build_distribution_service_from_components
+from vonk_control.distribution import (
+    DistributionService,
+    build_distribution_service_from_components,
+)
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.fleet_profiles import (
+    FleetProfileService,
+    build_production_fleet_profile_service,
+)
 from vonk_control.fleet_projection import FleetProjection
+from vonk_control.host_helper_authority import (
+    HostHelperGrantIssuer,
+    HostRuntimeAuthorityService,
+)
+from vonk_control.install_admission import (
+    InstallAdmissionService,
+    authorize_installation_runtime_images,
+)
 from vonk_control.jobs import JobService
 from vonk_control.library_assessment import LibraryAssessment
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
+    AgentNode,
     AgentNodeProfile,
     CatalogDocumentHead,
     CatalogDocumentRevision,
@@ -50,19 +71,29 @@ from vonk_control.models import (
     RecipeRun,
     User,
 )
+from vonk_control.operation_api import durable_operation_services
+from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
+from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
 from vonk_control.recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
 )
+from vonk_control.route_runtime import AtomicRouteBundlePublisher
+from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
     RuntimeImagePreparationError,
     SkopeoOCIImageTransport,
+    make_runtime_image_receipt_preparer,
+    resolve_persisted_runtime_image_receipt,
     runtime_image_expectations,
 )
+from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .test_profile_load_installed_cli import (
@@ -70,7 +101,7 @@ from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,
 )
-from .test_recipe_operations import NOW, setup_services
+from .test_recipe_operations import NOW, RECEIPT_SIGNER, setup_services
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
@@ -94,6 +125,54 @@ _READY_MODEL_REVISION = "a" * 40
 _READY_MODEL_SELECTOR = "walkthrough-synthetic-tiny-ready-fp16"
 _READY_RECIPE_SELECTOR = "qwen3-vllm-a-ready"
 _BLOCKED_RECIPE_SELECTOR = "qwen3-vllm-z-candidate"
+# Match the fingerprint seeded by the shared disposable-host fixture; this is
+# not a physical host observation. Newly issued probe operations still travel
+# through AgentJobService with typed receipts in the linked journey.
+_LINKED_PREFLIGHT_FINGERPRINT = "a" * 64
+
+
+@dataclass(frozen=True)
+class _LinkedProfileOwners:
+    """Real owners used only by the installed linked-journey facilitator."""
+
+    sessions: sessionmaker[Session]
+    agent_jobs: AgentJobService
+    recipe_operations: RecipeOperationService
+    run_switch_operations: RunSwitchOperationService
+    profiles: FleetProfileService
+    routes: RecipeRouteService
+    worker: RecipeOperationWorker
+    model_cache: ModelCacheService
+    distribution: DistributionService
+    image_inspector: SkopeoOCIImageTransport
+    image_evidence: PulledImageEvidence
+    target_root: Path
+    events: list[str]
+    clock: Callable[[], datetime]
+    interactive_clock: bool
+    advance_clock: Callable[[], None]
+
+
+def _walkthrough_clock(
+    *,
+    interactive: bool,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> tuple[Callable[[], datetime], Callable[[], None]]:
+    """Use a virtual clock in smoke and elapsed time in an operator shell."""
+
+    virtual_time = [NOW]
+    started_at = monotonic()
+
+    def clock() -> datetime:
+        if interactive:
+            return NOW + timedelta(seconds=max(0.0, monotonic() - started_at))
+        return virtual_time[0]
+
+    def advance_clock() -> None:
+        if not interactive:
+            virtual_time[0] += timedelta(seconds=1)
+
+    return clock, advance_clock
 
 
 class _LocalOCIFileTransport:
@@ -351,9 +430,14 @@ def _run_cli(
     return result
 
 
-def _walkthrough_app(postgres_engine, owner_root: Path):
-    def clock() -> datetime:
-        return NOW
+def _walkthrough_app(
+    postgres_engine,
+    owner_root: Path,
+    *,
+    linked_profile: bool = False,
+    interactive_clock: bool = False,
+):
+    clock, advance_clock = _walkthrough_clock(interactive=interactive_clock)
 
     def now() -> int:
         return int(datetime.now(UTC).timestamp())
@@ -391,6 +475,21 @@ def _walkthrough_app(postgres_engine, owner_root: Path):
     node_id = node_ids[0]
     with sessions.begin() as session:
         session.add(User(subject="test", role="administrator"))
+        if linked_profile:
+            node = session.get(AgentNode, node_id)
+            if node is None:
+                raise AssertionError("linked walkthrough agent node is missing")
+            node.capabilities = sorted(
+                set(node.capabilities or ())
+                | {
+                    "runtime.preflight.v1",
+                    "recipe.run.inspect.exact.v1",
+                    f"runtime.preflight.fingerprint.{_LINKED_PREFLIGHT_FINGERPRINT}",
+                }
+            )
+            node.observation_receipt_public_key = (
+                RECEIPT_SIGNER.public_key().public_bytes_raw().hex()
+            )
         session.add(
             AgentNodeProfile(
                 node_id=node_id,
@@ -647,6 +746,97 @@ def _walkthrough_app(postgres_engine, owner_root: Path):
     # wires real durable AgentJob and verified-object owners, but no scheduler
     # is started and LibraryAssessment only inspects a plan.
     agent_operations = AgentJobService(sessions, clock=clock)
+    runtime_image_preparer = make_runtime_image_receipt_preparer(
+        sessions,
+        runtime_storage,
+        SkopeoOCIImageTransport(),
+        clock=clock,
+    )
+
+    def resolve_runtime_image_receipt(document, image_digest, runtime_spec):
+        runtime = runtime_spec.get("runtime")
+        if not isinstance(runtime, dict):
+            raise TypeError("runtime image projection is unavailable")
+        expectations = runtime_image_expectations(runtime)
+        receipt = runtime_storage.find_verified(
+            image_digest,
+            expected_architecture=expectations["architecture"],
+            expected_runtime_interface=expectations["interface"],
+        )
+        if receipt is None:
+            raise ValueError("prepared runtime image receipt is unavailable")
+        identity = runtime_spec.get("identity")
+        execution_key = (
+            identity.get("execution_sha256") if isinstance(identity, dict) else None
+        )
+        recipe_digest = content_sha256(
+            RecipeDefinition.model_validate_json(
+                canonical_message(document), strict=True
+            )
+        )
+        if not isinstance(execution_key, str):
+            raise TypeError("runtime image execution identity is unavailable")
+        with sessions() as session:
+            revision = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.content_digest == recipe_digest,
+                )
+            )
+            if revision is None or revision.content_digest is None:
+                raise ValueError("active recipe revision is unavailable")
+            resolve_persisted_runtime_image_receipt(
+                session,
+                recipe_revision_id=revision.id,
+                current_content_digest=revision.content_digest,
+                effective_execution_key=execution_key,
+                receipt=receipt,
+            )
+        return receipt
+
+    routes: RecipeRouteService | None = None
+    route_root: Path | None = None
+    if linked_profile:
+        route_root = owner_root / "route-bundles"
+        routes = RecipeRouteService(
+            sessions,
+            publisher=AtomicRecipeRoutePublisher(
+                AtomicRouteBundlePublisher(route_root, clock=clock), clock=clock
+            ),
+            management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+            clock=clock,
+            maximum_age_seconds=120,
+        )
+        # setup_services supplies the same admissions and PostgreSQL schema as
+        # the existing recipe-operation tests, while this connected journey
+        # replaces their recording queue with the real claim/result owner.
+        lifecycle = RecipeOperationService(
+            sessions,
+            install_admission=InstallAdmissionService(
+                sessions,
+                inventory_max_age=300,
+                disk_floor_bytes=10,
+                compiled_plan_provider=ControllerExecutionPlanService(
+                    model_cache,
+                    runtime_image_resolver=resolve_runtime_image_receipt,
+                ).compile_installation,
+                runtime_image_authorizer=authorize_installation_runtime_images,
+            ),
+            run_admission=RunAdmissionService(
+                sessions, inventory_max_age=300, memory_floor_bytes=50
+            ),
+            agent_jobs=agent_operations,
+            clock=clock,
+            route_publications=routes,
+            builds=lifecycle._builds,
+            mappings=lifecycle._mappings,
+            distributed_start_timeout_seconds=(
+                lifecycle._distributed_start_timeout_seconds
+            ),
+        )
+        agent_operations.set_result_consumer(lifecycle.consume_agent_result)
+
     distribution = build_distribution_service_from_components(
         model_cache,
         sessions,
@@ -658,6 +848,7 @@ def _walkthrough_app(postgres_engine, owner_root: Path):
         agent_operations,
         distribution,
         model_cache=model_cache,
+        runtime_image_preparer=runtime_image_preparer if linked_profile else None,
         clock=clock,
     )
     run_switch = RunSwitchOperationService(
@@ -684,7 +875,16 @@ def _walkthrough_app(postgres_engine, owner_root: Path):
         runtime_archive_available=runtime_storage.build_archive_available,
         assessment=assessment,
     )
-    profiles = FleetProfileService(sessions, clock=clock)
+    profiles = (
+        build_production_fleet_profile_service(
+            sessions,
+            clock=clock,
+            run_switch_operations=run_switch,
+            cache_resolver=model_cache.resolve_latest_cached,
+        )
+        if linked_profile
+        else FleetProfileService(sessions, clock=clock)
+    )
 
     def resolve_recipe(
         recipe_revision_id: str, *, force: bool = False
@@ -738,6 +938,76 @@ def _walkthrough_app(postgres_engine, owner_root: Path):
     stored_image = runtime_storage.verify_existing(archive_digest, archive_bytes)
     assert stored_image.is_file()
     assert hashlib.sha256(stored_image.read_bytes()).hexdigest() == archive_digest
+    linked_owners: _LinkedProfileOwners | None = None
+    linked_operations = None
+    if linked_profile:
+        if routes is None or route_root is None:
+            raise AssertionError("linked profile route owner was not initialized")
+        linked_operations = durable_operation_services(
+            sessions,
+            route_root,
+            clock=clock,
+            cursors=cursor_codec,
+            operation_providers=(
+                profiles.operation_provider(),
+                run_switch.activity_provider(),
+            ),
+            profile_endpoint_intent=profiles.endpoint_intent,
+        )
+        linked_owners = _LinkedProfileOwners(
+            sessions=sessions,
+            agent_jobs=agent_operations,
+            recipe_operations=lifecycle,
+            run_switch_operations=run_switch,
+            profiles=profiles,
+            routes=routes,
+            worker=RecipeOperationWorker(
+                sessions,
+                routes,
+                clock=clock,
+                fleet_profiles=profiles,
+                run_switches=run_switch,
+            ),
+            model_cache=model_cache,
+            distribution=distribution,
+            image_inspector=image_inspector,
+            image_evidence=image_evidence,
+            target_root=owner_root / "simulated-target" / node_id,
+            events=[],
+            clock=clock,
+            interactive_clock=interactive_clock,
+            advance_clock=advance_clock,
+        )
+    agent_api_services = None
+    if linked_profile:
+        agent_roots = {
+            name: owner_root / "agent" / name
+            for name in ("artifacts", "source-bundles", "tuf-metadata", "tuf-targets")
+        }
+        for root in agent_roots.values():
+            root.mkdir(parents=True, exist_ok=True)
+        agent_api_services = AgentApiServices(
+            enrollment=None,
+            operations=agent_operations,
+            sessions=sessions,
+            clock=clock,
+            presence=AgentPresenceService(
+                sessions, ManagementAddressPolicy.parse("10.0.0.0/24"), clock=clock
+            ),
+            artifact_root=agent_roots["artifacts"],
+            source_bundles=SourceBundleStore(agent_roots["source-bundles"]),
+            workload_tuf_metadata_root=agent_roots["tuf-metadata"],
+            workload_tuf_target_root=agent_roots["tuf-targets"],
+            host_runtime_authority=HostRuntimeAuthorityService(
+                sessions,
+                HostHelperGrantIssuer(
+                    ed25519.Ed25519PrivateKey.from_private_bytes(b"g" * 32),
+                    clock=clock,
+                ),
+                clock=clock,
+            ),
+            fabric_policy=ManagementAddressPolicy.parse("192.168.100.0/24"),
+        )
     app = create_app(
         jobs=JobService(sessions, clock=clock, cursors=cursor_codec),
         tokens=codec,
@@ -745,10 +1015,17 @@ def _walkthrough_app(postgres_engine, owner_root: Path):
         fleet_projection=fleet_projection,
         library_projection=library_projection,
         fleet_profiles=profiles,
+        recipe_operations=lifecycle if linked_profile else None,
+        run_switch_operations=run_switch if linked_profile else None,
+        operations=linked_operations,
         model_cache=model_cache,
         recipe_image_availability=recipe_preparation,
         now=now,
+        agent=agent_api_services,
+        trusted_agent_proxy_auth=b"p" * 32,
     )
+    if linked_owners is not None:
+        app.state.linked_profile_owners = linked_owners
     actor = Actor("test", "administrator")
     token = codec.issue(actor, ttl_seconds=4 * 60 * 60, now=now())
     return (

@@ -67,6 +67,40 @@ adds a disposable review, consent and removal scenario; its integrated smoke
 qualification is recorded in the current status document. W19 stays open and
 starting any shell does not imply a participant result.
 
+The separate opt-in
+[`test_cli_linked_profile_journey.py`](../../control/tests/test_cli_linked_profile_journey.py)
+connects Profile authoring and import to a reviewed application, exact-ID
+progress lookup, and that same Profile's published endpoint. Its smoke mode
+accepts a fresh reviewed running revision and follows the resulting application
+ID from a new installed-CLI process. Its interactive mode stops after importing
+the Profile in installed-only state and leaves the edit, review, consent,
+progress, and endpoint discovery to the operator. A bounded local facilitator
+process advances only issued owner work and posts a genuine grant-bound run
+observation through the registered API. Its typed local agent receipts exercise
+the Controller owner chain; they do not launch a runtime, start a model, or
+contact a Spark. The published route is consequently an ownership and identity
+projection, not a usable inference endpoint. This covers the connected
+Profile-to-endpoint process seam; it does not complete U2's runnable-candidate
+prerequisite, artifact-result retrieval in U7, or the U1–U8 human scorecard.
+
+Launch the linked owner-boundary smoke with:
+
+```bash
+VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes \
+UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
+VONK_LINKED_PROFILE_JOURNEY_MODE=smoke \
+uv run --project control --frozen --with-editable . \
+  pytest -q -s control/tests/test_cli_linked_profile_journey.py -m lane
+```
+
+Replace `smoke` with `interactive` for the independent human sequence. The
+interactive session begins with the imported Profile still installed-only; the
+facilitator process is bounded by shell lifetime, rate-limits its polling, and
+refreshes the fixture node's inventory through the registered agent route once
+per minute. Its clock follows elapsed time while the operator reads instead of
+fast-forwarding the age of saved inventory. Use only the printed loopback
+Controller and disposable credential.
+
 From the repository root, launch the noninteractive connection/discovery/authoring smoke with:
 
 ```bash
