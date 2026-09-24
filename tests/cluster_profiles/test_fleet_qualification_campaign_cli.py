@@ -6,6 +6,7 @@ from argparse import Namespace
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 from urllib.parse import unquote
 
 import pytest
@@ -493,18 +494,16 @@ class _NoRequests:
 
     def request(self, method: str, path: str, *args: object, **kwargs: object):
         self.calls.append((method, path))
-        raise AssertionError("profile load guard must run before a Controller request")
+        raise AssertionError("this boundary must run before a Controller request")
 
 
-def test_apply_fails_before_constructing_controller_client_or_reading_inputs(
+def test_apply_requires_campaign_digest_before_constructing_controller_client_or_reading_inputs(
     tmp_path: Path,
 ) -> None:
     def unexpected_client() -> _NoRequests:
         pytest.fail("apply must fail before creating a Controller client")
 
-    with pytest.raises(
-        QualificationError, match="does not compare the reviewed plan_digest"
-    ):
+    with pytest.raises(SystemExit):
         campaign_cli.run(
             [
                 "--manifest",
@@ -518,57 +517,235 @@ def test_apply_fails_before_constructing_controller_client_or_reading_inputs(
                 "--spark",
                 NODE_A,
                 "--apply",
-                "--campaign-digest",
-                "a" * 64,
             ],
             client_factory=unexpected_client,
         )
 
 
-def test_unbound_load_resume_and_cleanup_fail_before_controller_mutation(
+def test_resume_and_cleanup_require_durable_intent_before_controller_mutation(
     tmp_path: Path,
 ) -> None:
     client = _NoRequests()
-    with pytest.raises(
-        QualificationError, match="does not compare a reviewed plan_digest"
-    ):
-        campaign_cli._submit_load(client, 7, "request-key")
-
     ledger = EvidenceLedger(tmp_path / "pending-load.jsonl")
-    ledger.append(
-        "profile.load.requested",
-        plan_digest=CAMPAIGN_ID,
-        recipe=RECIPE_KEY,
-        payload={"request_key": "request-key"},
-    )
-    ledger.append(
-        "profile.application.observed",
-        plan_digest=CAMPAIGN_ID,
-        recipe=RECIPE_KEY,
-        payload={"application_id": "failed-app", "state": "failed"},
-    )
-    with pytest.raises(QualificationError, match="request key cannot be replayed"):
+    with pytest.raises(QualificationError, match="no durable profile load intent"):
         campaign_cli._resume_load_and_smoke(
+            client=client,
+            manifest=cast(campaign_cli.CampaignManifest, None),
+            fixtures=cast(FixtureRegistry, None),
             row=_row(),
             campaign_id=CAMPAIGN_ID,
             ledger=ledger,
+            profile_number=7,
+            clock=lambda: 0.0,
+            sleeper=lambda _delay: None,
         )
 
     empty_ledger = EvidenceLedger(tmp_path / "cleanup.jsonl")
-    with pytest.raises(QualificationError, match="cleanup is disabled"):
+    with pytest.raises(
+        QualificationError, match="durable reviewed load and canary receipts"
+    ):
         campaign_cli._profile_cleanup(
             client=client,
+            profile_number=7,
+            authority_id="authority",
+            ledger_id="ledger",
             row=_row(),
             campaign_id=CAMPAIGN_ID,
             run_id=RUN_ID,
             alias="test-alias",
             node_ids=[NODE_A],
             ledger=empty_ledger,
+            options=cast(campaign_cli.CampaignManifest, None),
+            clock=lambda: 0.0,
+            sleeper=lambda _delay: None,
         )
     assert client.calls == []
 
 
-def test_cleanup_preview_with_unidentified_stop_effect_is_rejected() -> None:
+class _LoadRequestClient:
+    def __init__(self, *results: dict[str, object] | Exception) -> None:
+        self.results = list(results)
+        self.calls: list[tuple[str, str, object]] = []
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        payload: object = None,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        self.calls.append((method, path, payload))
+        result = self.results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+def _load_application(
+    *, request_key: str, plan_digest: str, profile_id: str, profile_digest: str
+) -> dict[str, object]:
+    return {
+        "id": "22345678-1234-4234-8234-123456789abc",
+        "profile_id": profile_id,
+        "profile_digest": profile_digest,
+        "plan_digest": campaign_cli._application_plan_digest(plan_digest, request_key),
+    }
+
+
+def test_submit_load_looks_up_first_and_posts_exact_reviewed_digest() -> None:
+    request_key = campaign_cli._request_key(CAMPAIGN_ID, RECIPE_KEY, "load")
+    plan_digest = "b" * 64
+    profile_id = "12345678-1234-4123-8123-123456789abc"
+    profile_digest = "c" * 64
+    client = _LoadRequestClient(
+        campaign_cli.ControlNotFound(404, "not found"),
+        _load_application(
+            request_key=request_key,
+            plan_digest=plan_digest,
+            profile_id=profile_id,
+            profile_digest=profile_digest,
+        ),
+    )
+
+    accepted = campaign_cli._submit_load(
+        client,
+        7,
+        request_key,
+        plan_digest=plan_digest,
+        profile_id=profile_id,
+        profile_digest=profile_digest,
+    )
+
+    assert accepted["id"] == "22345678-1234-4234-8234-123456789abc"
+    assert client.calls == [
+        ("GET", f"/api/profile/7/requests/{request_key}", None),
+        (
+            "POST",
+            "/api/profile/7/load",
+            {"plan_digest": plan_digest, "request_key": request_key},
+        ),
+    ]
+
+
+def test_submit_load_adopts_existing_exact_application_without_post() -> None:
+    request_key = campaign_cli._request_key(CAMPAIGN_ID, RECIPE_KEY, "load")
+    plan_digest = "b" * 64
+    profile_id = "12345678-1234-4123-8123-123456789abc"
+    profile_digest = "c" * 64
+    client = _LoadRequestClient(
+        _load_application(
+            request_key=request_key,
+            plan_digest=plan_digest,
+            profile_id=profile_id,
+            profile_digest=profile_digest,
+        )
+    )
+
+    accepted = campaign_cli._submit_load(
+        client,
+        7,
+        request_key,
+        plan_digest=plan_digest,
+        profile_id=profile_id,
+        profile_digest=profile_digest,
+    )
+
+    assert accepted["plan_digest"] == campaign_cli._application_plan_digest(
+        plan_digest, request_key
+    )
+    assert [method for method, _path, _payload in client.calls] == ["GET"]
+
+
+def test_ambiguous_load_retries_only_after_lookup_and_reuses_exact_identity() -> None:
+    request_key = campaign_cli._request_key(CAMPAIGN_ID, RECIPE_KEY, "load")
+    plan_digest = "b" * 64
+    profile_id = "12345678-1234-4123-8123-123456789abc"
+    profile_digest = "c" * 64
+    payload = {"plan_digest": plan_digest, "request_key": request_key}
+    client = _LoadRequestClient(
+        campaign_cli.ControlNotFound(404, "not found"),
+        campaign_cli.ControlTransportError("response lost"),
+        campaign_cli.ControlNotFound(404, "not found"),
+        _load_application(
+            request_key=request_key,
+            plan_digest=plan_digest,
+            profile_id=profile_id,
+            profile_digest=profile_digest,
+        ),
+    )
+
+    accepted = campaign_cli._submit_load(
+        client,
+        7,
+        request_key,
+        plan_digest=plan_digest,
+        profile_id=profile_id,
+        profile_digest=profile_digest,
+    )
+
+    assert accepted["id"] == "22345678-1234-4234-8234-123456789abc"
+    assert [method for method, _path, _payload in client.calls] == [
+        "GET",
+        "POST",
+        "GET",
+        "POST",
+    ]
+    assert client.calls[1][2] == payload
+    assert client.calls[3][2] == payload
+
+
+def test_ambiguous_load_does_not_replay_when_request_lookup_is_unavailable() -> None:
+    request_key = campaign_cli._request_key(CAMPAIGN_ID, RECIPE_KEY, "load")
+    client = _LoadRequestClient(
+        campaign_cli.ControlNotFound(404, "not found"),
+        campaign_cli.ControlTransportError("response lost"),
+        campaign_cli.ControlUnavailable(503, "request lookup unavailable"),
+    )
+
+    with pytest.raises(campaign_cli.ControlTransportError, match="response lost"):
+        campaign_cli._submit_load(
+            client,
+            7,
+            request_key,
+            plan_digest="b" * 64,
+            profile_id="12345678-1234-4123-8123-123456789abc",
+            profile_digest="c" * 64,
+        )
+
+    assert [method for method, _path, _payload in client.calls] == [
+        "GET",
+        "POST",
+        "GET",
+    ]
+
+
+def test_submit_load_rejects_request_lookup_with_a_different_bound_plan() -> None:
+    request_key = campaign_cli._request_key(CAMPAIGN_ID, RECIPE_KEY, "load")
+    plan_digest = "b" * 64
+    profile_id = "12345678-1234-4123-8123-123456789abc"
+    profile_digest = "c" * 64
+    client = _LoadRequestClient(
+        _load_application(
+            request_key=request_key,
+            plan_digest="d" * 64,
+            profile_id=profile_id,
+            profile_digest=profile_digest,
+        )
+    )
+
+    with pytest.raises(QualificationError, match="exact reviewed plan and request"):
+        campaign_cli._submit_load(
+            client,
+            7,
+            request_key,
+            plan_digest=plan_digest,
+            profile_id=profile_id,
+            profile_digest=profile_digest,
+        )
+    assert [method for method, _path, _payload in client.calls] == ["GET"]
+
+
+def test_cleanup_preview_stop_scope_must_match_exact_campaign_run() -> None:
     from datetime import UTC, datetime
 
     from cluster_profiles.generated_control.models.fleet_profile_plan_step import (
@@ -611,17 +788,31 @@ def test_cleanup_preview_with_unidentified_stop_effect_is_rejected() -> None:
             uninstalls=0,
         ),
     ).to_dict()
-    with pytest.raises(
-        QualificationError, match="does not identify the exact campaign run"
-    ):
+    fleet = {"nodes": [_node(NODE_A, loaded=[{"run_id": RUN_ID}])]}
+    profile_view = {
+        "id": "12345678-1234-4123-8123-123456789abc",
+        "profile_digest": "b" * 64,
+        "assignments": [],
+    }
+    assert campaign_cli._check_preview(
+        preview,
+        profile=profile_view,
+        fleet=fleet,
+        row=_row(),
+        node_ids=[NODE_A],
+        cleanup=True,
+        owned_run_ids={RUN_ID},
+    )["plan_digest"] == "a" * 64
+
+    wrong_scope = {
+        **preview,
+        "steps": [{**preview["steps"][0], "node_ids": [NODE_B]}],
+    }
+    with pytest.raises(QualificationError, match="exact campaign run's Sparks"):
         campaign_cli._check_preview(
-            preview,
-            profile={
-                "id": "12345678-1234-4123-8123-123456789abc",
-                "profile_digest": "b" * 64,
-                "assignments": [],
-            },
-            fleet={"nodes": [_node(NODE_A, loaded=[{"run_id": RUN_ID}])]},
+            wrong_scope,
+            profile=profile_view,
+            fleet=fleet,
             row=_row(),
             node_ids=[NODE_A],
             cleanup=True,
@@ -860,6 +1051,9 @@ def _append_single_recipe_evidence(
         "uninstalls": 0,
         "route_withdrawn": True,
         "run_absent_from_fleet": True,
+        "run_id": RUN_ID,
+        "alias": "test-alias",
+        "node_ids": [NODE_A],
     }
     baseline_payload = {
         "nodes": {NODE_A: "boot-before"},
