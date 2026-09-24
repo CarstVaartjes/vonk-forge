@@ -185,14 +185,19 @@ admission or storage dependency.
    removing one intent must not delete another consumer's artifacts.
 3. **Complete at `ab25b1d7`:** the disposable U8 cleanup setup, affected
    installed and connected gates, and required full CI at one source revision.
-4. Supply U2 with an exact compatible image/model pair that really starts and
-   computes a result. Its current verified empty image is insufficient. Keep
-   the later-page selection and distinct cache-blocked candidate intact.
+4. **Complete at `b1eee312`, merged in #883:** U2 has an exact pinned Qwen3-0.6B
+   CPU model/image pair that starts and returns a bounded nonempty completion.
+   Later-page selection and a distinct cache-blocked candidate are retained.
+   The default synthetic fixture remains a separate control-plane fixture.
 5. Run the independent U1–U8 operator walkthrough, correct dangerous or blocked
    tasks, and record the scorecard without implementation coaching. The
    every-model campaign, release merge/publication, deployment and physical
    qualification each retain their own evidence. Web redesign remains outside
    this CLI scope.
+
+Source merge and accepted development publication are recorded at `eafd2107`
+in the [current handoff checkpoint](cli-operator-status.md#current-handoff-checkpoint--2026-09-24).
+The human scorecard remains the open CLI handoff gate.
 
 Completed increments and exact validation commands are recorded in the
 [current status record](cli-operator-status.md); historical checkpoints below
