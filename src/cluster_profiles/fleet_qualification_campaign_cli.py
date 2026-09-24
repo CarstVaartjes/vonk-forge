@@ -62,6 +62,7 @@ _TERMINAL_APPLICATIONS = frozenset(
 _MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 _MAX_CATALOG_FILE_BYTES = 64 * 1024 * 1024
 _MAX_FIXTURE_MANIFEST_BYTES = 2 * 1024 * 1024
+_CANONICAL_GIT_READ_TIMEOUT_SECONDS = 30
 _PROFILE_AUTHORITY_LABEL = "qualification-authority"
 _PROFILE_LEDGER_LABEL = "qualification-ledger"
 
@@ -655,6 +656,8 @@ def _canonical_recipe_package_tools(
     }
     git_environment["GIT_CONFIG_NOSYSTEM"] = "1"
     git_environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    git_environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+    git_environment["GIT_NO_LAZY_FETCH"] = "1"
 
     def git(*arguments: str) -> subprocess.CompletedProcess[bytes]:
         try:
@@ -663,7 +666,16 @@ def _canonical_recipe_package_tools(
                 check=False,
                 capture_output=True,
                 env=git_environment,
+                timeout=_CANONICAL_GIT_READ_TIMEOUT_SECONDS,
             )
+        except subprocess.TimeoutExpired as error:
+            operation = arguments[0] if arguments else "read"
+            raise QualificationError(
+                "canonical recipe Git "
+                f"{operation} timed out after "
+                f"{_CANONICAL_GIT_READ_TIMEOUT_SECONDS} seconds; verify the pinned "
+                "local repository/object store is responsive, then retry"
+            ) from error
         except OSError as error:
             raise QualificationError(
                 "canonical recipe source repository cannot be read"
@@ -2356,9 +2368,7 @@ def _require_rank_presence_bindings(
     label: str,
 ) -> None:
     if _rank_presence_bindings(raw_presences) != dict(expected_node_to_rank):
-        raise QualificationError(
-            f"{label} changed the exact canary Spark/rank mapping"
-        )
+        raise QualificationError(f"{label} changed the exact canary Spark/rank mapping")
 
 
 def _assert_no_campaign_run(

@@ -909,16 +909,100 @@ def test_repository_binding_rejects_rehashed_packages_outside_recipe_closure(
         campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
 
 
+def test_canonical_recipe_git_reads_are_bounded_and_fail_actionably(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed: dict[str, object] = {}
+
+    def timeout_run(
+        command: Sequence[str], *args: object, **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        observed["timeout"] = kwargs.get("timeout")
+        observed["env"] = kwargs.get("env")
+        raise subprocess.TimeoutExpired(
+            cmd=command,
+            timeout=cast(float, kwargs.get("timeout")),
+        )
+
+    monkeypatch.setattr(campaign_cli.subprocess, "run", timeout_run)
+    with (
+        pytest.raises(
+            QualificationError,
+            match="Git rev-parse timed out after 30 seconds.*local repository/object store",
+        ),
+        campaign_cli._canonical_recipe_package_tools(tmp_path, "a" * 40),
+    ):
+        pytest.fail("timed-out local Git read unexpectedly yielded tools")
+
+    assert observed["timeout"] == 30
+    environment = observed["env"]
+    assert isinstance(environment, Mapping)
+    assert environment["GIT_NO_REPLACE_OBJECTS"] == "1"
+    assert environment["GIT_NO_LAZY_FETCH"] == "1"
+
+
 def test_repository_binding_does_not_execute_tampered_working_tree_tools(
     tmp_path: Path,
 ) -> None:
     campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
     tool_marker = tmp_path / "working-tree-validator-executed"
     contracts_marker = tmp_path / "working-tree-contracts-executed"
+    replacement_tool_marker = tmp_path / "replace-ref-validator-executed"
+    replacement_contracts_marker = tmp_path / "replace-ref-contracts-executed"
     tool_path = tmp_path / "tools" / "build-catalog-index"
     contracts_init = (
         tmp_path / "contracts" / "src" / "vonk_forge_contracts" / "__init__.py"
     )
+
+    source_commit = json.loads(
+        (tmp_path / "catalog-index.json").read_text(encoding="utf-8")
+    )["source_commit"]
+
+    def install_blob_replacement(relative_path: str, marker: Path) -> None:
+        original_blob = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "rev-parse",
+                f"{source_commit}:{relative_path}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        original_content = subprocess.run(
+            ["git", "-C", str(tmp_path), "cat-file", "blob", original_blob],
+            check=True,
+            capture_output=True,
+        ).stdout
+        replacement_content = (
+            original_content
+            + b"\n__import__('pathlib').Path("
+            + json.dumps(str(marker)).encode("utf-8")
+            + b").write_text('executed')\n"
+        )
+        replacement_blob = (
+            subprocess.run(
+                ["git", "-C", str(tmp_path), "hash-object", "-w", "--stdin"],
+                input=replacement_content,
+                check=True,
+                capture_output=True,
+                text=False,
+            )
+            .stdout.decode("ascii")
+            .strip()
+        )
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "replace", original_blob, replacement_blob],
+            check=True,
+        )
+
+    install_blob_replacement("tools/build-catalog-index", replacement_tool_marker)
+    install_blob_replacement(
+        "contracts/src/vonk_forge_contracts/__init__.py", replacement_contracts_marker
+    )
+
     tool_path.write_text(
         tool_path.read_text(encoding="utf-8")
         + "\nfrom pathlib import Path as _MarkerPath\n"
@@ -938,6 +1022,8 @@ def test_repository_binding_does_not_execute_tampered_working_tree_tools(
 
     assert not tool_marker.exists()
     assert not contracts_marker.exists()
+    assert not replacement_tool_marker.exists()
+    assert not replacement_contracts_marker.exists()
 
 
 def test_manifest_rejects_parent_references_that_escape_or_follow_symlinks(
@@ -1817,7 +1903,9 @@ def _append_two_node_recipe_evidence(
         payload={"request_key": request_key},
     )
 
-    def presence(node_id: str, rank: int, *, recovered: bool = False) -> dict[str, object]:
+    def presence(
+        node_id: str, rank: int, *, recovered: bool = False
+    ) -> dict[str, object]:
         result = _loaded_run_presence(rank=rank)
         result.update(
             {
@@ -1845,8 +1933,7 @@ def _append_two_node_recipe_evidence(
             "recipe_revision_id": REVISION_ID,
             "node_to_rank": node_to_rank,
             "fleet_rank_presence": [
-                presence(node_id, rank)
-                for node_id, rank in node_to_rank.items()
+                presence(node_id, rank) for node_id, rank in node_to_rank.items()
             ],
             "application": {
                 "state": "succeeded",
@@ -1992,10 +2079,10 @@ def test_spark_acceptance_rejects_permuted_recovered_rank_mapping(
     with pytest.raises(QualificationError, match="exact canary Spark/rank mapping"):
         campaign_cli._accept_if_complete(
             row=_row(node_count=2),
-        campaign_id=CAMPAIGN_ID,
-        ledger=permuted,
-        node_ids=[NODE_A, NODE_B],
-    )
+            campaign_id=CAMPAIGN_ID,
+            ledger=permuted,
+            node_ids=[NODE_A, NODE_B],
+        )
 
 
 def test_spark_accepted_requires_the_offline_event_and_changed_boot_id(
