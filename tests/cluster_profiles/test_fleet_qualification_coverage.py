@@ -155,7 +155,9 @@ def _preparation(row: dict[str, object]) -> dict[str, object]:
 
 
 def _provenance(row: dict[str, object]) -> dict[str, dict[str, object]]:
-    package_sha = row["package"]["sha256"]  # type: ignore[index]
+    # The authenticated Spark package receipt identifies the agent's Debian
+    # package, independently of this row's recipe source bundle digest.
+    agent_package_sha = "d" * 64
     return {
         _NODE: {
             "schema_version": 2,
@@ -175,10 +177,10 @@ def _provenance(row: dict[str, object]) -> dict[str, dict[str, object]]:
                     "state": "online",
                     "build_digest": "sha256:" + "9" * 64,
                     "binary_sha256": "b" * 64,
-                    "package_sha256": package_sha,
+                    "package_sha256": agent_package_sha,
                     "evidence": {"freshness": "current", "source": "test"},
-                    # Age is historical evidence; exact current contact and the
-                    # matched package/build fields own reuse validity.
+                    # Receipt age is historical; current contact and exact
+                    # observed build/binary identity own reuse validity.
                     "package_evidence": {"freshness": "stale", "source": "old"},
                 }
             ],
@@ -189,7 +191,7 @@ def _provenance(row: dict[str, object]) -> dict[str, dict[str, object]]:
 def _provenance_for_nodes(
     row: dict[str, object], node_ids: tuple[str, ...]
 ) -> dict[str, dict[str, object]]:
-    package_sha = row["package"]["sha256"]  # type: ignore[index]
+    agent_package_sha = "d" * 64
     return {
         node_id: {
             "schema_version": 2,
@@ -209,7 +211,7 @@ def _provenance_for_nodes(
                     "state": "online",
                     "build_digest": "sha256:" + ("9" if index == 0 else "a") * 64,
                     "binary_sha256": "b" * 64,
-                    "package_sha256": package_sha,
+                    "package_sha256": agent_package_sha,
                     "evidence": {"freshness": "current", "source": "test"},
                     "package_evidence": {"freshness": "stale", "source": "old"},
                 }

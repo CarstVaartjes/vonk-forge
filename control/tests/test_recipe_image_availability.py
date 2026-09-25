@@ -2286,6 +2286,189 @@ def test_postgres_claims_are_fenced_and_respect_build_capacity(
     assert first.claim_pending(limit=1, owner_id="pg-worker-e") == ()
 
 
+def test_postgres_model_child_lock_contention_resumes_same_preparation(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """NOWAIT contention must defer the parent and reuse its exact child."""
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    recipe = _recipe("recipe-image.json")
+    now = [datetime.now(UTC)]
+    with sessions.begin() as session:
+        revision = _add_revision(session, "revision-pg-model-lock", recipe)
+        _add_head(session, revision)
+
+    child = SimpleNamespace(
+        id="00000000-0000-4000-8000-000000000301",
+        request_key="00000000-0000-4000-8000-000000000302",
+        state="running",
+        artifact_set_sha256="c" * 64,
+        plan_digest="d" * 64,
+        progress=cache_progress(
+            {
+                "phase": "downloading",
+                "downloaded_bytes": 40,
+                "expected_bytes": 100,
+                "completed_artifacts": 0,
+                "total_artifacts": 1,
+            },
+            previous=None,
+            now=now[0],
+        ),
+        failure=None,
+    )
+    model_content_sha256 = recipe.models[0].model.content_sha256
+    _persist_fake_model_cache_child(
+        sessions,
+        child=child,
+        model_content_sha256=model_content_sha256,
+        now=now[0],
+    )
+
+    class ModelCache:
+        start_calls = 0
+
+        def download_preview(self, *, recipe_revision_id: str) -> dict[str, object]:
+            assert recipe_revision_id == revision.id
+            return {
+                "plan_digest": child.plan_digest,
+                "artifact_set_sha256": child.artifact_set_sha256,
+                "new_bytes": 0,
+            }
+
+        def resolve_artifact_set(self, *, recipe_revision_id: str) -> SimpleNamespace:
+            assert recipe_revision_id == revision.id
+            return SimpleNamespace(
+                digest=child.artifact_set_sha256,
+                document=lambda: {
+                    "model_content_digests": [model_content_sha256],
+                    "artifacts": [],
+                },
+            )
+
+        def list_operations(self, *, limit: int) -> tuple[object, ...]:
+            assert limit > 0
+            return (child,)
+
+        def start_download(self, **_: object) -> SimpleNamespace:
+            self.start_calls += 1
+            raise AssertionError("a lock retry must reuse the existing child")
+
+        def get_operation(self, operation_id: str) -> SimpleNamespace:
+            assert operation_id == child.id
+            return child
+
+    model_cache = ModelCache()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
+        transport=Transport(),
+        model_cache=model_cache,
+        clock=lambda: now[0],
+        claim_lease_seconds=10,
+    )
+    request_id = "10000000-0000-4000-8000-000000000301"
+    queued = service.start(revision.id, actor="operator", request_id=request_id)
+    claim = service.claim_pending(owner_id="lock-contention-worker")[0]
+
+    locker = sessions()
+    try:
+        locked_child = locker.scalar(
+            select(ModelCacheOperation)
+            .where(ModelCacheOperation.id == child.id)
+            .with_for_update()
+        )
+        assert locked_child is not None
+        service.run_claim(claim)
+    finally:
+        locker.rollback()
+        locker.close()
+
+    waiting = service.get(queued.id)
+    assert waiting.state == "queued"
+    assert waiting.failure is not None
+    assert waiting.failure["retryable"] is True
+    assert waiting.failure["code"] == "operationalerror"
+    with sessions() as session:
+        stored_waiting = session.get(Job, queued.id)
+        assert stored_waiting is not None
+        assert stored_waiting.request_id == request_id
+        assert stored_waiting.state == "queued"
+        retry_state = stored_waiting.payload["retry"]
+        assert isinstance(retry_state, Mapping)
+        assert retry_state["automatic_attempts"] == 1
+        retry_after_at = stored_waiting.payload["retry_after_at"]
+        assert isinstance(retry_after_at, str)
+        retry_at = datetime.fromisoformat(retry_after_at)
+        assert stored_waiting.payload.get("model_child") is None
+
+    assert service.claim_pending(owner_id="too-early-worker") == ()
+    with sessions() as session:
+        still_waiting = session.get(Job, queued.id)
+        assert still_waiting is not None
+        assert still_waiting.payload["retry_after_at"] == retry_at.isoformat()
+
+    # Let the original bounded retry deadline elapse. The retry must select the
+    # existing completed model operation under the same parent request.
+    _persist_fake_model_cache_child(
+        sessions,
+        child=SimpleNamespace(
+            id=child.id,
+            request_key=child.request_key,
+            state="succeeded",
+            artifact_set_sha256=child.artifact_set_sha256,
+            plan_digest=child.plan_digest,
+            progress=cache_progress(
+                {
+                    "phase": "completed",
+                    "downloaded_bytes": 100,
+                    "expected_bytes": 100,
+                    "completed_artifacts": 1,
+                    "total_artifacts": 1,
+                },
+                previous=None,
+                now=now[0],
+            ),
+            failure=None,
+        ),
+        model_content_sha256=model_content_sha256,
+        now=now[0],
+    )
+    child.state = "succeeded"
+    child.progress = cache_progress(
+        {
+            "phase": "completed",
+            "downloaded_bytes": 100,
+            "expected_bytes": 100,
+            "completed_artifacts": 1,
+            "total_artifacts": 1,
+        },
+        previous=None,
+        now=now[0],
+    )
+    now[0] = max(now[0] + timedelta(seconds=1), retry_at)
+    retry = service.claim_pending(owner_id="lock-contention-recovery-worker")
+    assert len(retry) == 1
+    assert retry[0].operation_id == queued.id
+    service.run_claim(retry[0])
+
+    recovered = service.get(queued.id)
+    assert recovered.state == "succeeded"
+    assert recovered.result is not None
+    recovered_child = require_mapping(
+        recovered.result["model_child"], "recovered model child"
+    )
+    assert recovered_child["id"] == child.id
+    assert model_cache.start_calls == 0
+    with sessions() as session:
+        stored_recovered = session.get(Job, queued.id)
+        assert stored_recovered is not None
+        assert stored_recovered.request_id == request_id
+        assert stored_recovered.current_attempt == 2
+
+
 def test_same_immutable_image_reuses_preparation_across_recipe_revisions(
     tmp_path: Path,
 ) -> None:
