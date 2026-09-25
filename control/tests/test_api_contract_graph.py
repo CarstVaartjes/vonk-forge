@@ -24,6 +24,7 @@ EXTENSION_OBJECTS = {
     "FleetProfileAssignmentView.properties.resources": "Current resource projection",
     "FleetProfileView.properties.cache_summary": "Current cache projection",
     "FleetProfileView.properties.fleet.items": "Current fleet projection",
+    "MappingSelection.properties.parameters": "Mapping-specific placement parameters",
 }
 
 

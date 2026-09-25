@@ -624,6 +624,7 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
             request_sha256: digest,
             observation_identity_sha256: request.observation.as_ref().map(|_| "e".repeat(64)),
             installation_id: request.installation_id,
+            reconciliation_identity: None,
         },
     )
 }
