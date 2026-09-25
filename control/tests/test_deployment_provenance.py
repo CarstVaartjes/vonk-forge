@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -203,6 +203,118 @@ def test_configured_malformed_evidence_is_not_silently_unknown(tmp_path, monkeyp
     monkeypatch.setenv("VONK_DEPLOYMENT_OBSERVATIONS_FILE", str(path))
     with pytest.raises(ValueError):
         local_deployment_observations()
+
+
+def test_old_named_volume_controller_is_invalidated_by_runtime_hostname(
+    tmp_path, monkeypatch
+):
+    from vonk_control import deployment_provenance as provenance
+
+    build_path = tmp_path / "controller-build.json"
+    build_path.write_text('{"source_commit":"' + "a" * 40 + '"}')
+    monkeypatch.setattr(provenance, "CONTROLLER_BUILD_METADATA", build_path)
+    monkeypatch.setattr(provenance.socket, "gethostname", lambda: "b" * 12)
+    monkeypatch.setenv("HOSTNAME", "c" * 12)
+    monkeypatch.setenv(
+        "VONK_DEPLOYMENT_OBSERVATIONS_FILE", str(tmp_path / "observations.json")
+    )
+    saved = DeploymentObservations(
+        repository=PlatformObservation(
+            source="GitHub main", observed_at=datetime.now(UTC), source_commit="d" * 40
+        ),
+        publication=PlatformObservation(
+            source="Signed publication",
+            observed_at=datetime.now(UTC),
+            source_commit="e" * 40,
+        ),
+        controller=PlatformObservation(
+            source="Prior deployed Controller",
+            observed_at=datetime.now(UTC),
+            source_commit="a" * 40,
+            image_digest="sha256:" + "f" * 64,
+            manifest_sha256="1" * 64,
+            container_id="c" * 64,
+        ),
+    )
+    (tmp_path / "observations.json").write_text(saved.model_dump_json() + "\n")
+
+    current = local_deployment_observations()
+
+    assert current.controller is not None
+    assert current.controller.source == "Running Controller image build metadata"
+    assert current.controller.source_commit == "a" * 40
+    assert current.controller.image_digest is None
+    assert current.publication == saved.publication
+    assert current.repository == saved.repository
+
+
+def test_active_container_binding_keeps_age_visible_without_going_stale(
+    tmp_path, monkeypatch
+):
+    from vonk_control import deployment_provenance as provenance
+
+    sessions, now, _, _ = deployment(tmp_path)
+    container_id = "a" * 64
+    monkeypatch.setattr(provenance.socket, "gethostname", lambda: container_id[:12])
+    observations = DeploymentObservations(
+        controller=PlatformObservation(
+            source="Verified accepted release and running Docker Controller instance",
+            observed_at=now - timedelta(hours=2),
+            source_commit="a" * 40,
+            image_digest="sha256:" + "b" * 64,
+            manifest_sha256="c" * 64,
+            container_id=container_id,
+        )
+    )
+
+    boundary = (
+        DeploymentProvenanceService(
+            sessions,
+            clock=lambda: now,
+            observations=lambda: observations,
+            stale_after_seconds=300,
+        )
+        .snapshot()
+        .platform[2]
+    )
+
+    assert boundary.state == "observed"
+    assert boundary.evidence.freshness == "current"
+    assert boundary.evidence.age_seconds == 7200
+    assert boundary.evidence.observed_at == now - timedelta(hours=2)
+
+
+def test_replaced_container_binding_is_stale_until_recaptured(tmp_path, monkeypatch):
+    from vonk_control import deployment_provenance as provenance
+
+    sessions, now, _, _ = deployment(tmp_path)
+    container_id = "a" * 64
+    monkeypatch.setattr(provenance.socket, "gethostname", lambda: "b" * 12)
+    observations = DeploymentObservations(
+        controller=PlatformObservation(
+            source="Verified accepted release and running Docker Controller instance",
+            observed_at=now - timedelta(hours=2),
+            source_commit="a" * 40,
+            image_digest="sha256:" + "b" * 64,
+            manifest_sha256="c" * 64,
+            container_id=container_id,
+        )
+    )
+
+    boundary = (
+        DeploymentProvenanceService(
+            sessions,
+            clock=lambda: now,
+            observations=lambda: observations,
+            stale_after_seconds=300,
+        )
+        .snapshot()
+        .platform[2]
+    )
+
+    assert boundary.state == "observed"
+    assert boundary.evidence.freshness == "stale"
+    assert boundary.evidence.age_seconds == 7200
 
 
 def test_package_receipt_must_match_the_current_authenticated_binary(tmp_path):
@@ -492,8 +604,9 @@ def test_invalid_old_recipe_start_document_is_exposed_without_blocking_fleet_det
     assert response.status_code == 200, response.text
     provenance = response.json()["provenance"]
     assert provenance["workloads"][0]["rank_agreement"] == "match"
-    assert provenance["workloads"][0]["ranks"][0]["observed_recipe_sha256"] == (
-        current.payload["recipe_content_sha256"]
+    assert (
+        provenance["workloads"][0]["ranks"][0]["observed_recipe_sha256"]
+        == (current.payload["recipe_content_sha256"])
     )
     assert provenance["invalid_operation_evidence"] == [
         {
@@ -594,9 +707,7 @@ def test_invalid_later_same_run_start_does_not_reuse_older_start_receipt(
             )
         )
 
-    snapshot = DeploymentProvenanceService(
-        sessions, clock=lambda: NOW
-    ).snapshot()
+    snapshot = DeploymentProvenanceService(sessions, clock=lambda: NOW).snapshot()
     rank = snapshot.workloads[0].ranks[0]
     assert rank.observed_recipe_sha256 is None
     assert rank.identity_agreement == "match"

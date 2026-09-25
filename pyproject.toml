@@ -37,6 +37,11 @@ path = "tools/hatch_build.py"
 "src/cluster_profiles/schemas/cluster-profile-v2.schema.json" = "cluster_profiles/schemas/cluster-profile-v2.schema.json"
 "src/cluster_profiles/schemas/workload-v2.schema.json" = "cluster_profiles/schemas/workload-v2.schema.json"
 "src/cluster_profiles/schemas/qualification-manifest-v2.schema.json" = "cluster_profiles/schemas/qualification-manifest-v2.schema.json"
+"src/cluster_profiles/schemas/qualification-authority-v4.schema.json" = "cluster_profiles/schemas/qualification-authority-v4.schema.json"
+"src/cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json" = "cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json"
+"src/cluster_profiles/schemas/recovery-coverage-receipt-v1.schema.json" = "cluster_profiles/schemas/recovery-coverage-receipt-v1.schema.json"
+"src/cluster_profiles/schemas/recovery-coverage-use-v1.schema.json" = "cluster_profiles/schemas/recovery-coverage-use-v1.schema.json"
+"src/cluster_profiles/schemas/recovery-coverage-consumption-v1.schema.json" = "cluster_profiles/schemas/recovery-coverage-consumption-v1.schema.json"
 "src/cluster_profiles/schemas/control-openapi.json" = "cluster_profiles/schemas/control-openapi.json"
 
 [tool.ruff]

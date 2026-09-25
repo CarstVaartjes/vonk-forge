@@ -1,0 +1,141 @@
+{
+  "$defs": {
+    "RecoveryNodeBuildIdentity": {
+      "additionalProperties": false,
+      "description": "The agent build running on a specific physical Spark.",
+      "properties": {
+        "agent_build_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Agent Build Sha256",
+          "type": "string"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "agent_build_sha256"
+      ],
+      "title": "RecoveryNodeBuildIdentity",
+      "type": "object"
+    }
+  },
+  "$id": "https://api.vonkforge.ai/contracts/recovery-coverage-use-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A durable, digest-addressed use of one representative receipt.",
+  "properties": {
+    "coverage_id": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Coverage Id",
+      "type": "string"
+    },
+    "failure_mode": {
+      "enum": [
+        "single-host-restart",
+        "dual-rank-loss-recovery",
+        "dual-host-restart"
+      ],
+      "title": "Failure Mode",
+      "type": "string"
+    },
+    "member_model_content_sha256s": {
+      "items": {
+        "pattern": "^[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "title": "Member Model Content Sha256S",
+      "type": "array"
+    },
+    "member_nodes": {
+      "items": {
+        "$ref": "#/$defs/RecoveryNodeBuildIdentity"
+      },
+      "maxItems": 2,
+      "minItems": 1,
+      "title": "Member Nodes",
+      "type": "array"
+    },
+    "member_package_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Member Package Sha256",
+      "type": "string"
+    },
+    "member_platform_build_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Member Platform Build Sha256",
+      "type": "string"
+    },
+    "member_recipe": {
+      "maxLength": 127,
+      "minLength": 5,
+      "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+      "title": "Member Recipe",
+      "type": "string"
+    },
+    "member_recipe_content_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Member Recipe Content Sha256",
+      "type": "string"
+    },
+    "member_runtime_image_digest": {
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "title": "Member Runtime Image Digest",
+      "type": "string"
+    },
+    "member_runtime_stack_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Member Runtime Stack Sha256",
+      "type": "string"
+    },
+    "member_smoke_receipt_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Member Smoke Receipt Sha256",
+      "type": "string"
+    },
+    "member_topology_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Member Topology Sha256",
+      "type": "string"
+    },
+    "representative_receipt_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Representative Receipt Sha256",
+      "type": "string"
+    },
+    "representative_recipe": {
+      "maxLength": 127,
+      "minLength": 5,
+      "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+      "title": "Representative Recipe",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "coverage_id",
+    "failure_mode",
+    "member_recipe",
+    "representative_recipe",
+    "representative_receipt_sha256",
+    "member_recipe_content_sha256",
+    "member_package_sha256",
+    "member_model_content_sha256s",
+    "member_runtime_stack_sha256",
+    "member_topology_sha256",
+    "member_runtime_image_digest",
+    "member_platform_build_sha256",
+    "member_nodes",
+    "member_smoke_receipt_sha256"
+  ],
+  "title": "RecoveryCoverageUse",
+  "type": "object"
+}

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import stat
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -343,6 +344,7 @@ class EvidenceLedger:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._ledger_lock_held = False
+        self._append_lock = threading.Lock()
         self._identity: tuple[int, int] | None = None
         self._file_size = 0
         self.records = self._read()
@@ -353,6 +355,7 @@ class EvidenceLedger:
         ledger = cls.__new__(cls)
         ledger.path = path
         ledger._ledger_lock_held = True
+        ledger._append_lock = threading.Lock()
         ledger._identity = None
         ledger._file_size = 0
         ledger.records = ledger._read_under_lock()
@@ -682,24 +685,25 @@ class EvidenceLedger:
         recipe: str | None = None,
         payload: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
-        if self._ledger_lock_held:
-            self._refresh_if_changed_under_lock()
-            return self._append_under_lock(
-                event,
-                plan_digest=plan_digest,
-                recipe=recipe,
-                payload=payload,
-            )
-        from .qualification_locking import ledger_lock
+        with self._append_lock:
+            if self._ledger_lock_held:
+                self._refresh_if_changed_under_lock()
+                return self._append_under_lock(
+                    event,
+                    plan_digest=plan_digest,
+                    recipe=recipe,
+                    payload=payload,
+                )
+            from .qualification_locking import ledger_lock
 
-        with ledger_lock(self.path):
-            self._refresh_if_changed_under_lock()
-            return self._append_under_lock(
-                event,
-                plan_digest=plan_digest,
-                recipe=recipe,
-                payload=payload,
-            )
+            with ledger_lock(self.path):
+                self._refresh_if_changed_under_lock()
+                return self._append_under_lock(
+                    event,
+                    plan_digest=plan_digest,
+                    recipe=recipe,
+                    payload=payload,
+                )
 
     def recipe_records(self, plan_digest: str, recipe: str) -> list[dict[str, object]]:
         return [

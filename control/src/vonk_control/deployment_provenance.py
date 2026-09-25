@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import socket
+import stat
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -64,21 +66,56 @@ def _utc(value: datetime) -> datetime:
 def local_deployment_observations() -> DeploymentObservations:
     """No GitHub/network reads; malformed configured evidence fails visibly."""
     path = os.environ.get("VONK_DEPLOYMENT_OBSERVATIONS_FILE")
-    observations = (
-        DeploymentObservations.model_validate_json(Path(path).read_bytes())
-        if path
-        else DeploymentObservations()
-    )
-    if observations.controller is None and CONTROLLER_BUILD_METADATA.is_file():
+    observations = DeploymentObservations()
+    if path:
+        observation_path = Path(path)
+        try:
+            metadata = observation_path.lstat()
+        except FileNotFoundError:
+            # A fresh named volume has no host capture until the deployment
+            # helper records the container after its first successful start.
+            pass
+        else:
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 1024 * 1024:
+                raise ValueError("configured deployment observations file is unsafe")
+            observations = DeploymentObservations.model_validate_json(
+                observation_path.read_bytes()
+            )
+    build = None
+    if CONTROLLER_BUILD_METADATA.is_file():
         build = ControllerBuildMetadata.model_validate_json(
             CONTROLLER_BUILD_METADATA.read_bytes()
         )
+    controller = observations.controller
+    if controller is not None and (
+        controller.container_id is None
+        or controller.source_commit is None
+        or build is None
+        or controller.source_commit != build.source_commit
+        or not _container_id_matches_hostname(
+            controller.container_id, socket.gethostname()
+        )
+    ):
+        # The mounted observation belongs to a different (or unbound) image
+        # instance. Never let it lend an old digest to this Controller process.
+        observations.controller = None
+    if observations.controller is None and build is not None:
         observations.controller = PlatformObservation(
             source="Running Controller image build metadata",
             observed_at=datetime.now(UTC),
             source_commit=build.source_commit,
         )
     return observations
+
+
+def _container_id_matches_hostname(container_id: str, hostname: str) -> bool:
+    """Docker's default container hostname is the first 12 ID characters."""
+
+    return (
+        len(hostname) == 12
+        and all(character in "0123456789abcdef" for character in hostname)
+        and container_id.startswith(hostname)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +191,12 @@ class DeploymentProvenanceService:
             if observations.publication is None:
                 observations.publication = stored_observation(session, "publication")
 
-        def age(source: str, observed_at: datetime | None = None) -> EvidenceAge:
+        def age(
+            source: str,
+            observed_at: datetime | None = None,
+            *,
+            active_instance: bool = False,
+        ) -> EvidenceAge:
             seconds = (
                 max(0, int((now - _utc(observed_at)).total_seconds()))
                 if observed_at
@@ -167,7 +209,7 @@ class DeploymentProvenanceService:
                 freshness="unknown"
                 if seconds is None
                 else "stale"
-                if seconds > self._stale_after_seconds
+                if seconds > self._stale_after_seconds and not active_instance
                 else "current",
             )
 
@@ -180,11 +222,26 @@ class DeploymentProvenanceService:
             ("controller_deployment", observations.controller),
         )
         for name, observation in boundary_observations:
+            active_controller_instance = bool(
+                name == "controller_deployment"
+                and observation is not None
+                and observation.container_id is not None
+                and _container_id_matches_hostname(
+                    observation.container_id, socket.gethostname()
+                )
+            )
+            # A Docker restart keeps this immutable container ID; a replacement
+            # receives a new ID. Keep the original capture time visible while
+            # the same active instance proves its accepted image is still live.
             platform.append(
                 PlatformBoundary(
                     boundary=name,
                     state="observed" if observation else "unknown",
-                    evidence=age(observation.source, observation.observed_at)
+                    evidence=age(
+                        observation.source,
+                        observation.observed_at,
+                        active_instance=active_controller_instance,
+                    )
                     if observation
                     else age("No Controller observation"),
                     source_commit=observation.source_commit if observation else None,

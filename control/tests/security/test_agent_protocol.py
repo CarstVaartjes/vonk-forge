@@ -307,7 +307,9 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     assert "*" in dockerignore
     lines = dockerignore_path.read_text().splitlines()
     last_include = max(
-        index for index, line in enumerate(lines) if line.startswith("!")
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("!") and line != "!install/installer-release-public.pem"
     )
     assert {
         "!control/src/**",
@@ -346,7 +348,9 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         "**/secrets.yml",
         "**/secrets.toml",
     } <= set(lines[last_include + 1 :])
-    assert all(not line.startswith("!") for line in lines[last_include + 1 :])
+    assert {line for line in lines[last_include + 1 :] if line.startswith("!")} == {
+        "!install/installer-release-public.pem"
+    }
 
 
 def test_control_environment_installs_the_verified_protocol_wheel() -> None:
@@ -507,6 +511,8 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
 @pytest.mark.parametrize(
     "relative_path",
     [
+        "install/private.pem",
+        "control/src/private.pem",
         "control/src/.npmrc",
         "control/src/.netrc",
         "control/src/credentials.json",

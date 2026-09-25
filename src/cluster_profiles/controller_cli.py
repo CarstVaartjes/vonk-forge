@@ -1541,7 +1541,7 @@ def _submit_cache_request(
                 and isinstance(intent, Mapping)
                 and intent.get("kind") == "selector"
                 and intent.get("selector") == args.selector
-                and intent.get("force") is True
+                and intent.get("force") is False
             )
         if not matches:
             raise ControlMalformedResponse(

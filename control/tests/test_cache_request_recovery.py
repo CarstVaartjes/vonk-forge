@@ -288,6 +288,7 @@ def test_recipe_lookup_preserves_id_visibility_and_private_request_correlation(
         accepted = client.post(path, json=body)
         assert accepted.status_code == 202, accepted.text
         receipt = accepted.json()
+        assert receipt["request"]["force"] is False
         assert client.get(f"/api/recipe/requests/{key}").json() == receipt
         assert client.post(path, json=body).json() == receipt
         assert client.post("/api/recipe/absent/download", json=body).status_code == 409

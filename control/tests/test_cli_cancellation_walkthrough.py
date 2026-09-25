@@ -1206,7 +1206,7 @@ def _smoke(
     assert preparation_receipt["request"] == {
         "kind": "selector",
         "selector": recipe_selector,
-        "force": True,
+        "force": False,
     }
 
     cancel_key = str(uuid4())

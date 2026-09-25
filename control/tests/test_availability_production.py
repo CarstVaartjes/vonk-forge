@@ -13,11 +13,13 @@ from typing import Any, cast
 
 import httpx
 import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentFailureResult
 from vonk_control import availability_production
-from vonk_control.auth import TokenCodec
+from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import (
     RecipeImageAvailabilityScheduler,
     build_recipe_image_availability,
@@ -35,14 +37,25 @@ from vonk_control.models import (
     RecipeBuild,
     RuntimeImageAuthorization,
 )
-from vonk_control.recipe_builds import RecipeBuildPlan, RecipeBuildResolution
+from vonk_control.recipe_builds import (
+    RecipeBuildPlan,
+    RecipeBuildResolution,
+    RecipeBuildService,
+)
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
 )
-from vonk_control.runtime_image_preparation import PulledImageEvidence
+from vonk_control.recipe_image_availability_api import install_recipe_operator_routes
+from vonk_control.runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    PulledImageEvidence,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+
+from .test_recipe_builds import _write_controller_build_receipt
+from .test_recipe_builds import setup as _build_setup
 
 
 class _Service(RecipeImageAvailabilityService):
@@ -217,6 +230,110 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
         )
         assert receipt.image_bytes == authorization.image_bytes
     production.close()
+
+
+def test_recipe_download_api_reuses_verified_cached_source_build(
+    tmp_path, monkeypatch
+) -> None:
+    sessions, bundles, now, node_id, revision = _build_setup(
+        tmp_path, recipe_slug="cached-source-image"
+    )
+    artifact_root = tmp_path / "artifacts"
+    storage = FilesystemRuntimeImageStorage(artifact_root)
+    builds = RecipeBuildService(
+        sessions,
+        bundles=bundles,
+        build_archive_available=storage.build_archive_available,
+        prepared_builds=storage.find_build,
+    )
+    plan = builds.plan(revision.id, node_id, now=now)
+    archive = b"verified cached source-build OCI archive"
+    archive_digest = hashlib.sha256(archive).hexdigest()
+    image_digest = "sha256:" + "b" * 64
+    builds.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest=image_digest,
+        oci_layout_sha256=archive_digest,
+        image_bytes=len(archive),
+        now=now,
+    )
+    stored_receipt = _write_controller_build_receipt(
+        storage,
+        archive=archive,
+        image_digest=image_digest,
+        build_id=plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        distribution_content_sha256=revision.content_digest,
+    )
+    resolved = builds.resolve(revision.id)
+    assert resolved.cached
+    assert resolved.oci_layout_sha256 == stored_receipt.oci_archive_sha256
+    assert storage.verify_existing(archive_digest, len(archive)).read_bytes() == archive
+
+    class NoNetworkTransport:
+        def inspect_archive(self, *_args, **_kwargs):
+            pytest.fail("a complete verified build receipt must be reused")
+
+        def pull_and_export(self, *_args, **_kwargs):
+            pytest.fail("source-build cache reuse must not download an image")
+
+    monkeypatch.setattr(
+        availability_production, "SkopeoOCIImageTransport", NoNetworkTransport
+    )
+
+    class Operations:
+        build_calls = 0
+
+        def build(self, *_args, **_kwargs):
+            self.build_calls += 1
+            raise AssertionError("a verified cached build must not be dispatched")
+
+    operations = Operations()
+    production = build_recipe_image_availability(
+        sessions,
+        artifact_root=artifact_root,
+        managed_catalog_sync=None,
+        recipe_builds=builds,
+        recipe_operations=operations,
+        clock=lambda: now,
+    )
+    app = FastAPI()
+    install_recipe_operator_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("operator", "operator")),
+        service=production.service,
+    )
+    request_key = str(uuid.uuid4())
+    try:
+        with TestClient(app) as client:
+            accepted = client.post(
+                f"/api/recipe/{revision.publisher}/{revision.slug}/download",
+                json={"request_key": request_key},
+            )
+            assert accepted.status_code == 202, accepted.text
+            assert accepted.json()["recipe_revision_id"] == revision.id
+            assert production.service.run_pending() == 1
+
+        completed = production.service.get(accepted.json()["id"])
+        assert completed.state == "succeeded", completed.failure
+        assert completed.result is not None
+        assert completed.result["build_id"] == plan.build_id
+        assert completed.result["build_input_sha256"] == plan.build_input_sha256
+        assert completed.result["image_digest"] == image_digest
+        assert completed.result["oci_archive_sha256"] == archive_digest
+        assert operations.build_calls == 0
+        with sessions() as session:
+            authorization = session.scalar(
+                select(RuntimeImageAuthorization).where(
+                    RuntimeImageAuthorization.recipe_revision_id == revision.id,
+                    RuntimeImageAuthorization.oci_archive_sha256 == archive_digest,
+                )
+            )
+            assert authorization is not None
+            assert authorization.state == "authorized"
+    finally:
+        production.close()
 
 
 def test_source_build_without_builder_queues_provisional_parent(
