@@ -38,7 +38,7 @@ def receipt(noun: str) -> dict[str, object]:
         "id": "original",
         "request_id": KEY,
         "state": "queued",
-        "request": {"kind": "selector", "selector": "chosen", "force": True},
+        "request": {"kind": "selector", "selector": "chosen", "force": False},
     }
 
 
