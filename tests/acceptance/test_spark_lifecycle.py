@@ -2644,7 +2644,11 @@ class SparkLifecycle:
             raise LifecycleError(f"{label} response is invalid") from error
         application_id = typed.id
         deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
-        while typed.state in {"queued", "running"}:
+        # Admission may be durably parked while an active workload owner
+        # finishes.  This is a recoverable state: the Controller owns the
+        # retry schedule and the same application identity must be observed
+        # until it reaches a terminal outcome.
+        while typed.state in {"queued", "running", "waiting-for-operator"}:
             if time.monotonic() >= deadline:
                 # Say where it stalled: a queued application with no step
                 # means nothing claimed it, while a running one names the step
