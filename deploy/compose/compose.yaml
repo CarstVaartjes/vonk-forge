@@ -261,7 +261,7 @@ services:
       retries: 12
 
   grafana:
-    image: ${GRAFANA_IMAGE:-grafana/grafana:13.2.0}
+    image: ${GRAFANA_IMAGE:-grafana/grafana:13.2.2}
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
