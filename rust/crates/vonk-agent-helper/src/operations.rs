@@ -21,8 +21,8 @@ use vonk_agent_protocol::generated::{
     ScheduleRebootOperation,
 };
 use vonk_agent_protocol::{
-    HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeRunObservationOutcome,
-    canonical_json, hex_sha256, parse_strict,
+    HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeReconciliationIdentity,
+    RecipeRunObservationOutcome, canonical_json, hex_sha256, parse_strict,
 };
 use wait_timeout::ChildExt;
 
@@ -43,6 +43,8 @@ const MAX_RUNTIME_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 const MAX_COMPILED_MODEL_FILES: usize = 4096;
 const MAX_COMPILED_MODEL_PATH_CHARS: usize = 512;
 const MAX_COMPILED_MODEL_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
+const INSTALLATION_RECONCILIATION_DIRECTORY: &str = "installation-reconciliation";
+const MAX_INSTALLATION_RECONCILIATION_IDENTITY_BYTES: u64 = 16 * 1024;
 const DOCKER_FIREWALL: &str = "/usr/lib/vonk-forge/vonk-forge-docker-firewall";
 const DOCKER_FIREWALL_CONFIG: &str = "/etc/vonk-forge-agent/docker-firewall.conf";
 const NATIVE_FABRIC_ROOT: &str = "/sys/class/infiniband";
@@ -91,6 +93,10 @@ pub enum OperationError {
     RuntimeFabricFirewallRejected,
     #[error("one-shot runtime could not be stopped safely")]
     StopUncertain,
+    #[error("installation runtime reconciliation is busy")]
+    InstallationReconciliationBusy,
+    #[error("installation runtime storage is temporarily unavailable")]
+    InstallationReconciliationStorageUnavailable,
     #[error("host mutation failed")]
     Io(#[from] std::io::Error),
 }
@@ -114,6 +120,10 @@ impl OperationError {
             Self::RuntimeFabricUnavailable => "helper.runtime_fabric_unavailable",
             Self::RuntimeFabricFirewallRejected => "helper.runtime_fabric_firewall_rejected",
             Self::StopUncertain => "helper.stop_uncertain",
+            Self::InstallationReconciliationBusy => "helper.installation_reconciliation_busy",
+            Self::InstallationReconciliationStorageUnavailable => {
+                "helper.installation_reconciliation_storage_unavailable"
+            }
             Self::Io(_) => "helper.io_failed",
         }
     }
@@ -136,6 +146,10 @@ impl OperationError {
             Self::RuntimeFabricUnavailable => "native fabric is unavailable or ambiguous",
             Self::RuntimeFabricFirewallRejected => "native fabric firewall rejected the placement",
             Self::StopUncertain => "one-shot runtime could not be stopped safely",
+            Self::InstallationReconciliationBusy => "installation runtime reconciliation is busy",
+            Self::InstallationReconciliationStorageUnavailable => {
+                "installation runtime storage is temporarily unavailable"
+            }
             Self::Io(_) => "host mutation I/O failed",
         }
     }
@@ -455,7 +469,19 @@ struct RuntimeRequestGrantBinding<'a> {
     attempt: u32,
     fence: &'a uuid::Uuid,
     installation_id: Option<&'a uuid::Uuid>,
+    reconciliation_identity: Option<&'a RecipeReconciliationIdentity>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct InstallationReconciliationReceipt {
+    schema_version: u8,
+    identity: RecipeReconciliationIdentity,
+    installation_device: u64,
+    installation_inode: u64,
+}
+
+const INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Default)]
 struct JobCancellationState {
@@ -747,6 +773,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     request_sha256,
                     observation_identity_sha256,
                     installation_id,
+                    reconciliation_identity,
                     ..
                 },
             ) => {
@@ -758,6 +785,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         attempt: *attempt,
                         fence,
                         installation_id: installation_id.as_ref(),
+                        reconciliation_identity: reconciliation_identity.as_ref(),
                     },
                     request_sha256,
                     observation_identity_sha256.as_deref(),
@@ -1043,6 +1071,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || request.attempt != binding.attempt
             || &request.fence != binding.fence
             || request.installation_id.as_ref() != binding.installation_id
+            || request.reconciliation_identity.as_ref() != binding.reconciliation_identity
         {
             return Err(OperationError::InvalidOperation);
         }
@@ -1144,7 +1173,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .installation_id
                     .as_ref()
                     .ok_or(OperationError::InvalidOperation)?;
-                self.runtime_installation_cleanup(&installation_id.to_string())?;
+                if let Some(identity) = request.reconciliation_identity.as_ref() {
+                    if identity.installation_id != *installation_id
+                        || Some(identity.node_id.as_str()) != observation_node_id
+                    {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                    self.runtime_reconcile_installation(identity)?;
+                } else {
+                    self.runtime_installation_cleanup(&installation_id.to_string())?;
+                }
                 Ok(RuntimeRequestOutcome {
                     exit_code: None,
                     recipe_run_observation: None,
@@ -1154,6 +1192,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn runtime_installation_cleanup(&self, installation_id: &str) -> Result<(), OperationError> {
+        self.runtime_installation_cleanup_bound(installation_id, None)
+    }
+
+    fn runtime_installation_cleanup_bound(
+        &self,
+        installation_id: &str,
+        expected_installation: Option<(u64, u64)>,
+    ) -> Result<(), OperationError> {
         if !valid_artifact_id(installation_id) {
             return Err(OperationError::InvalidOperation);
         }
@@ -1174,7 +1220,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             rustix::fs::Mode::empty(),
         ) {
             Ok(installations) => installations,
-            Err(rustix::io::Errno::NOENT) => return Ok(()),
+            Err(rustix::io::Errno::NOENT) if expected_installation.is_none() => return Ok(()),
+            Err(rustix::io::Errno::NOENT) => return Err(OperationError::InvalidArtifact),
             Err(error) => return Err(errno_io(error).into()),
         };
         let installation = match rustix::fs::openat(
@@ -1184,9 +1231,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
             rustix::fs::Mode::empty(),
         ) {
             Ok(installation) => installation,
-            Err(rustix::io::Errno::NOENT) => return Ok(()),
+            Err(rustix::io::Errno::NOENT) if expected_installation.is_none() => return Ok(()),
+            Err(rustix::io::Errno::NOENT) => return Err(OperationError::InvalidArtifact),
             Err(error) => return Err(errno_io(error).into()),
         };
+        if let Some((device, inode)) = expected_installation {
+            let metadata = rustix::fs::fstat(&installation).map_err(errno_io)?;
+            if (metadata.st_dev, metadata.st_ino) != (device, inode) {
+                return Err(OperationError::InvalidArtifact);
+            }
+        }
         let cache = match rustix::fs::openat(
             &installation,
             "runtime-cache",
@@ -1205,6 +1259,271 @@ impl<R: CommandRunner> OperationExecutor<R> {
             rustix::fs::AtFlags::REMOVEDIR,
         )
         .map_err(errno_io)?;
+        Ok(())
+    }
+
+    fn runtime_reconcile_installation(
+        &self,
+        identity: &RecipeReconciliationIdentity,
+    ) -> Result<(), OperationError> {
+        self.runtime_reconcile_installation_inner(identity)
+            .map_err(|error| match error {
+                OperationError::Io(error) if retryable_reconciliation_storage_io(&error) => {
+                    OperationError::InstallationReconciliationStorageUnavailable
+                }
+                // Permission failures, missing identity and other unexpected
+                // I/O refusals stay terminal rather than masquerading as a
+                // wait that could become successful after retry.
+                OperationError::Io(_) => OperationError::UnsafePath,
+                error => error,
+            })
+    }
+
+    fn runtime_reconcile_installation_inner(
+        &self,
+        identity: &RecipeReconciliationIdentity,
+    ) -> Result<(), OperationError> {
+        identity
+            .validate()
+            .map_err(|_| OperationError::InvalidOperation)?;
+        let installation_id = identity.installation_id.to_string();
+        let _lock = self.lock_installation_runtime(&installation_id)?;
+        let root = self.installation_reconciliation_root()?;
+        let receipt_path = root.join(format!("{installation_id}.json"));
+        let existing = read_helper_reconciliation_receipt(
+            &receipt_path,
+            Some(rustix::process::geteuid().as_raw()),
+        )?;
+        self.require_no_unclassified_installation_runtime(&installation_id)?;
+        if let Some(receipt) = existing {
+            if receipt.schema_version != INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION
+                || receipt.identity != *identity
+            {
+                return Err(OperationError::InvalidArtifact);
+            }
+            let installation = self
+                .roots
+                .agent_data
+                .join("installations")
+                .join(&installation_id);
+            match self.validate_reconciliation_installation_metadata(identity) {
+                Ok((device, inode))
+                    if (device, inode)
+                        == (receipt.installation_device, receipt.installation_inode) =>
+                {
+                    match fs::symlink_metadata(installation.join("runtime-cache")) {
+                        Ok(_) => return Err(OperationError::InvalidArtifact),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(OperationError::Io(error)),
+                    }
+                }
+                Err(OperationError::UnsafePath)
+                    if matches!(
+                        fs::symlink_metadata(&installation),
+                        Err(ref error) if error.kind() == std::io::ErrorKind::NotFound
+                    ) => {}
+                _ => return Err(OperationError::InvalidArtifact),
+            }
+        } else {
+            let (installation_device, installation_inode) =
+                self.validate_reconciliation_installation_metadata(identity)?;
+            // The helper owns the root-only runtime-cache ACL. Clear only this
+            // private installation cache under the same start/reconcile fence,
+            // before publishing the durable runtime tombstone. Shared model
+            // cache data lives outside `installations` and is preserved.
+            self.runtime_installation_cleanup_bound(
+                &installation_id,
+                Some((installation_device, installation_inode)),
+            )?;
+            write_helper_reconciliation_receipt(
+                &root,
+                &receipt_path,
+                &InstallationReconciliationReceipt {
+                    schema_version: INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION,
+                    identity: identity.clone(),
+                    installation_device,
+                    installation_inode,
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_reconciliation_installation_metadata(
+        &self,
+        identity: &RecipeReconciliationIdentity,
+    ) -> Result<(u64, u64), OperationError> {
+        let installation_id = identity.installation_id.to_string();
+        let installations = self.roots.agent_data.join("installations");
+        let installation = installations.join(&installation_id);
+        require_safe_directory(&self.roots.agent_data, self.runtime_request_owner_uid)?;
+        require_safe_directory(&installations, self.runtime_request_owner_uid)?;
+        let (installation_owner, installation_group) =
+            require_exact_directory(&installation, self.runtime_request_owner_uid, 0o700)?;
+        let installation_metadata =
+            fs::symlink_metadata(&installation).map_err(|_| OperationError::UnsafePath)?;
+        if installation_metadata.uid() != installation_owner
+            || installation_metadata.gid() != installation_group
+        {
+            return Err(OperationError::UnsafePath);
+        }
+        let canonical_agent_data = self
+            .roots
+            .agent_data
+            .canonicalize()
+            .map_err(|_| OperationError::UnsafePath)?;
+        let canonical_installations = installations
+            .canonicalize()
+            .map_err(|_| OperationError::UnsafePath)?;
+        let canonical_installation = installation
+            .canonicalize()
+            .map_err(|_| OperationError::UnsafePath)?;
+        if canonical_installations.parent() != Some(canonical_agent_data.as_path())
+            || canonical_installation.parent() != Some(canonical_installations.as_path())
+        {
+            return Err(OperationError::UnsafePath);
+        }
+
+        let spec_path = installation.join("spec.json");
+        let spec_bytes = read_agent_installation_file(
+            &spec_path,
+            self.runtime_request_owner_uid,
+            vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64,
+        )?;
+        let spec: serde_json::Value =
+            serde_json::from_slice(&spec_bytes).map_err(|_| OperationError::InvalidArtifact)?;
+        let canonical_spec = canonical_json(&spec).map_err(|_| OperationError::InvalidArtifact)?;
+        if hex_sha256(&canonical_spec) != identity.compiled_spec_canonical_sha256 {
+            return Err(OperationError::InvalidArtifact);
+        }
+        let embedded_digest = spec
+            .get("identity")
+            .and_then(|value| value.get("recipe_revision_sha256"))
+            .and_then(serde_json::Value::as_str);
+        let recipe_bytes = read_agent_installation_file(
+            &installation.join("recipe-content.sha256"),
+            self.runtime_request_owner_uid,
+            64,
+        )?;
+        let recipe_digest =
+            std::str::from_utf8(&recipe_bytes).map_err(|_| OperationError::InvalidArtifact)?;
+        if recipe_digest != identity.recipe_content_sha256
+            || embedded_digest != Some(identity.recipe_content_sha256.as_str())
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
+        Ok((installation_metadata.dev(), installation_metadata.ino()))
+    }
+
+    fn installation_reconciliation_root(&self) -> Result<PathBuf, OperationError> {
+        let root = self.roots.data.join(INSTALLATION_RECONCILIATION_DIRECTORY);
+        ensure_runtime_directory(&root)?;
+        require_exact_directory(&root, Some(rustix::process::geteuid().as_raw()), 0o700)?;
+        Ok(root)
+    }
+
+    fn lock_installation_runtime(&self, installation_id: &str) -> Result<File, OperationError> {
+        if !valid_artifact_id(installation_id) {
+            return Err(OperationError::InvalidOperation);
+        }
+        let root = self.installation_reconciliation_root()?;
+        let lock_path = root.join(format!("{installation_id}.lock"));
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .mode(0o600)
+            .open(lock_path)?;
+        let metadata = lock.metadata()?;
+        if !metadata.is_file()
+            || metadata.nlink() != 1
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.mode() & 0o777 != 0o600
+        {
+            return Err(OperationError::UnsafePath);
+        }
+        match rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+            Ok(()) => Ok(lock),
+            Err(error)
+                if error == rustix::io::Errno::AGAIN || error == rustix::io::Errno::WOULDBLOCK =>
+            {
+                Err(OperationError::InstallationReconciliationBusy)
+            }
+            Err(error) => Err(errno_io(error).into()),
+        }
+    }
+
+    fn refuse_reconciled_runtime(&self, installation_id: &str) -> Result<(), OperationError> {
+        let root = self.installation_reconciliation_root()?;
+        let path = root.join(format!("{installation_id}.json"));
+        if read_helper_reconciliation_receipt(&path, Some(rustix::process::geteuid().as_raw()))?
+            .is_some()
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
+        Ok(())
+    }
+
+    fn require_no_unclassified_installation_runtime(
+        &self,
+        installation_id: &str,
+    ) -> Result<(), OperationError> {
+        let output = self.run_docker(&[
+            "container".to_owned(),
+            "ls".to_owned(),
+            "--all".to_owned(),
+            "--no-trunc".to_owned(),
+            "--format".to_owned(),
+            "{{.ID}}\t{{.State}}\t{{.Names}}\t{{.Label \"ai.vonkforge.managed\"}}\t{{.Label \"ai.vonkforge.installation-id\"}}".to_owned(),
+        ])?;
+        if !output.success || output.stdout.len() as u64 > MAX_COMMAND_OUTPUT_BYTES {
+            return Err(OperationError::CommandFailed);
+        }
+        let rows =
+            std::str::from_utf8(&output.stdout).map_err(|_| OperationError::InvalidArtifact)?;
+        for row in rows.lines().filter(|row| !row.trim().is_empty()) {
+            let fields = row.split('\t').collect::<Vec<_>>();
+            if fields.len() != 5
+                || !lower_hex(fields[0], 64)
+                || !matches!(
+                    fields[1],
+                    "created"
+                        | "running"
+                        | "restarting"
+                        | "paused"
+                        | "exited"
+                        | "dead"
+                        | "removing"
+                )
+            {
+                return Err(OperationError::InvalidArtifact);
+            }
+            let is_vonk_named = fields[2].split(',').any(|name| name.starts_with("vonk-"));
+            let managed = fields[3] == "true";
+            if !managed && is_vonk_named {
+                // An older or damaged container can retain its Vonk name while
+                // losing the labels that bind it to an installation. Do not
+                // infer that it is unrelated just because the target label is
+                // missing.
+                return Err(OperationError::InvalidArtifact);
+            }
+            if !managed {
+                continue;
+            }
+            let found_installation = uuid::Uuid::parse_str(fields[4])
+                .ok()
+                .map(|value| value.to_string());
+            let Some(found_installation) = found_installation else {
+                return Err(OperationError::InvalidArtifact);
+            };
+            if found_installation != fields[4] {
+                return Err(OperationError::InvalidArtifact);
+            }
+            if found_installation == installation_id {
+                return Err(OperationError::InvalidArtifact);
+            }
+        }
         Ok(())
     }
 
@@ -1479,6 +1798,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
+        let _installation_guard = if fence_start {
+            let guard = self.lock_installation_runtime(&validated.installation_id)?;
+            self.refuse_reconciled_runtime(&validated.installation_id)?;
+            Some(guard)
+        } else {
+            None
+        };
         // Every START, including a pre-start hook, remains registered through
         // its Docker call. STOP hooks use the STOP action and do not acquire
         // the start fence. An exact cancellation STOP must wait out active
@@ -1503,11 +1829,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "container".to_owned(),
             "inspect".to_owned(),
             "--format".to_owned(),
-            "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
+            "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.installation-id\"}}".to_owned(),
             format!("vonk-{}", validated.run_id),
         ])?;
         if existing.success {
-            let expected = format!("true\t{semantic_digest}\ttrue\t{}", validated.run_id);
+            let expected = format!(
+                "true\t{semantic_digest}\ttrue\t{}\t{}",
+                validated.run_id, validated.installation_id
+            );
             if !validated.detached
                 || std::str::from_utf8(&existing.stdout).ok().map(str::trim)
                     != Some(expected.as_str())
@@ -1539,6 +1868,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     "ai.vonkforge.managed=true".to_owned(),
                     "--label".to_owned(),
                     format!("ai.vonkforge.run-id={}", validated.run_id),
+                    "--label".to_owned(),
+                    format!("ai.vonkforge.installation-id={}", validated.installation_id),
                 ],
             );
         }
@@ -2412,6 +2743,7 @@ struct ValidatedDockerRun {
     detached: bool,
     image_index: usize,
     run_id: String,
+    installation_id: String,
     uid: u32,
     models: Vec<PathBuf>,
     inputs: Option<PathBuf>,
@@ -2919,6 +3251,12 @@ fn validate_docker_run_with_archive(
     // an installation symlink to redirect the privileged mount and ACLs.
     let cache_installation = cache_root.parent().ok_or(OperationError::UnsafePath)?;
     require_safe_directory(cache_installation, agent_data_owner_uid)?;
+    let installation_id = cache_installation
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| valid_artifact_id(value))
+        .ok_or(OperationError::UnsafePath)?
+        .to_owned();
     let canonical_cache = cache_root
         .canonicalize()
         .map_err(|_| OperationError::UnsafePath)?;
@@ -3017,6 +3355,7 @@ fn validate_docker_run_with_archive(
         detached: detach,
         image_index: index,
         run_id: state_run_id.to_owned(),
+        installation_id,
         uid,
         models,
         inputs,
@@ -3154,6 +3493,18 @@ fn valid_runtime_cache_mount(source: &Path, roots: &ManagedRoots) -> bool {
 
 fn errno_io(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
+}
+
+fn retryable_reconciliation_storage_io(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::Interrupted
+            | std::io::ErrorKind::WouldBlock
+            | std::io::ErrorKind::TimedOut
+    ) || error.raw_os_error().is_some_and(|code| {
+        code == rustix::io::Errno::IO.raw_os_error()
+            || code == rustix::io::Errno::NOSPC.raw_os_error()
+    })
 }
 
 fn remove_directory_contents(
@@ -3707,6 +4058,111 @@ fn runtime_archive_identity(metadata: &fs::Metadata) -> RuntimeArchiveIdentity {
 fn sync_directory(path: &Path) -> Result<(), OperationError> {
     OpenOptions::new().read(true).open(path)?.sync_all()?;
     Ok(())
+}
+
+fn read_agent_installation_file(
+    path: &Path,
+    owner_uid: Option<u32>,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, OperationError> {
+    let path_metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
+    if path_metadata.file_type().is_symlink()
+        || !path_metadata.is_file()
+        || path_metadata.nlink() != 1
+        || path_metadata.mode() & 0o777 != 0o600
+        || owner_uid.is_some_and(|uid| path_metadata.uid() != uid)
+        || path_metadata.len() == 0
+        || path_metadata.len() > maximum_bytes
+    {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .open(path)
+        .map_err(|_| OperationError::UnsafePath)?;
+    let opened = file.metadata().map_err(|_| OperationError::UnsafePath)?;
+    if artifact_identity(&opened) != artifact_identity(&path_metadata) {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let mut bytes = Vec::with_capacity(path_metadata.len() as usize);
+    Read::by_ref(&mut file)
+        .take(maximum_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 != path_metadata.len() {
+        return Err(OperationError::InvalidArtifact);
+    }
+    Ok(bytes)
+}
+
+fn read_helper_reconciliation_receipt(
+    path: &Path,
+    owner_uid: Option<u32>,
+) -> Result<Option<InstallationReconciliationReceipt>, OperationError> {
+    let mut file = match OpenOptions::new()
+        .read(true)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let metadata = file.metadata()?;
+    if !safe_custody_file(&metadata, owner_uid, metadata.len())
+        || metadata.len() > MAX_INSTALLATION_RECONCILIATION_IDENTITY_BYTES
+    {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    Read::by_ref(&mut file)
+        .take(MAX_INSTALLATION_RECONCILIATION_IDENTITY_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 != metadata.len() {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let receipt: InstallationReconciliationReceipt =
+        parse_strict(&bytes).map_err(|_| OperationError::InvalidArtifact)?;
+    receipt
+        .identity
+        .validate()
+        .map_err(|_| OperationError::InvalidArtifact)?;
+    if receipt.schema_version != INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION
+        || receipt.installation_inode == 0
+        || canonical_json(&receipt).map_err(|_| OperationError::InvalidArtifact)? != bytes
+    {
+        return Err(OperationError::InvalidArtifact);
+    }
+    Ok(Some(receipt))
+}
+
+fn write_helper_reconciliation_receipt(
+    root: &Path,
+    path: &Path,
+    receipt: &InstallationReconciliationReceipt,
+) -> Result<(), OperationError> {
+    receipt
+        .identity
+        .validate()
+        .map_err(|_| OperationError::InvalidOperation)?;
+    let bytes = canonical_json(receipt).map_err(|_| OperationError::InvalidOperation)?;
+    if receipt.schema_version != INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION
+        || receipt.installation_inode == 0
+        || bytes.len() as u64 > MAX_INSTALLATION_RECONCILIATION_IDENTITY_BYTES
+    {
+        return Err(OperationError::InvalidOperation);
+    }
+    let temporary = root.join(format!(".receipt-{}.tmp", uuid::Uuid::new_v4()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .mode(0o600)
+        .open(&temporary)?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+    fs::rename(&temporary, path)?;
+    sync_directory(root)
 }
 
 #[cfg(test)]

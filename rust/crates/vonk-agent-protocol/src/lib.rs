@@ -18,10 +18,10 @@ pub use generated::{
     RecipeImageImportEvidence, RecipeImageImportRequest,
     RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence, RecipeJobFile,
     RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
-    RecipeJobRunRequest, RecipeJobRunResult, RecipeStartPayload as RecipeStartRequest,
+    RecipeJobRunRequest, RecipeJobRunResult, RecipeReconcilePayload as RecipeReconcileRequest,
+    RecipeReconcileResult, RecipeStartPayload as RecipeStartRequest,
     RecipeStartPayloadPhase as RecipeStartPhase, RecipeStopPayload as RecipeStopRequest,
     RecipeStopResult, RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
-    RecipeReconcilePayload as RecipeReconcileRequest, RecipeReconcileResult,
 };
 pub use generated::{
     ExecuteContainerRuntimeRequestOperationAction as HostHelperContainerRuntimeAction,
@@ -29,8 +29,7 @@ pub use generated::{
     HostHelperSignature as RecipeRunObservationReceiptSignature,
     HostOperation as HostHelperOperation, HostRuntimeRequest,
     HostRuntimeRequestAction as HostRuntimeAction, RecipeReconciliationIdentity,
-    RecipeRunInspectionBinding,
-    RecipeRunObservationReceiptClaims,
+    RecipeRunInspectionBinding, RecipeRunObservationReceiptClaims,
     RecipeRunObservationReceiptClaimsOutcome as RecipeRunObservationOutcome,
     RecipeRunObservationWire, RecipeRunObservationsWire,
     RestartVonkUnitOperationUnit as HostHelperRestartUnit, SignedHostHelperGrant,
@@ -161,6 +160,15 @@ impl HostHelperOperation {
                             operation.action == HostHelperContainerRuntimeAction::RunInspect
                                 && lower_hex(digest, 64)
                         })
+                    && operation
+                        .reconciliation_identity
+                        .as_ref()
+                        .is_none_or(|identity| {
+                            operation.action
+                                == HostHelperContainerRuntimeAction::InstallationCleanup
+                                && operation.installation_id == Some(identity.installation_id)
+                                && valid_reconciliation_identity(identity)
+                        })
             }
         };
         if valid {
@@ -182,7 +190,17 @@ impl HostHelperGrantClaims {
         {
             return Err(ProtocolError::Identity("host helper grant claims"));
         }
-        self.operation.validate()
+        self.operation.validate()?;
+        if let HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) =
+            &self.operation
+            && operation
+                .reconciliation_identity
+                .as_ref()
+                .is_some_and(|identity| identity.node_id != self.node_id)
+        {
+            return Err(ProtocolError::Identity("host helper reconciliation node"));
+        }
+        Ok(())
     }
 }
 
@@ -286,6 +304,13 @@ impl HostRuntimeRequest {
         if self.installation_id.is_some() != (self.action == HostRuntimeAction::InstallationCleanup)
         {
             return Err(HostRuntimeRequestRule::InstallationIdentity);
+        }
+        match (&self.action, &self.reconciliation_identity) {
+            (_, None) => {}
+            (HostRuntimeAction::InstallationCleanup, Some(identity))
+                if valid_reconciliation_identity(identity)
+                    && self.installation_id == Some(identity.installation_id) => {}
+            _ => return Err(HostRuntimeRequestRule::InstallationIdentity),
         }
         let encoded = canonical_json(self).map_err(|_| HostRuntimeRequestRule::Encoding)?;
         if encoded.len() > MAX_HOST_RUNTIME_REQUEST_BYTES {
@@ -1257,11 +1282,20 @@ impl RecipeReconcileResult {
             && lower_hex(&self.recipe_content_sha256, 64)
             && lower_hex(&self.compiled_spec_canonical_sha256, 64)
             && lower_hex(&self.cleanup_receipt_sha256, 64)
-            && self.removed_bytes <= 16 * 1024_u64.pow(4)
         {
             Ok(())
         } else {
             Err(ProtocolError::Identity("recipe reconciliation result"))
+        }
+    }
+}
+
+impl RecipeReconciliationIdentity {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if valid_reconciliation_identity(self) {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("recipe reconciliation identity"))
         }
     }
 }
@@ -1421,12 +1455,7 @@ impl RecipeOperationRequest {
                         .is_none_or(|digest| lower_hex(digest, 64))
             }
             Self::Reconcile(value) => {
-                value.schema_version == 1
-                    && valid_node_id(&value.node_id)
-                    && lower_hex(&value.install_operation_payload_sha256, 64)
-                    && lower_hex(&value.plan_digest, 64)
-                    && lower_hex(&value.recipe_content_sha256, 64)
-                    && lower_hex(&value.compiled_spec_canonical_sha256, 64)
+                valid_reconciliation_identity(&RecipeReconciliationIdentity::from(value))
             }
         };
         if valid {
@@ -2135,6 +2164,18 @@ fn valid_node_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
+fn valid_reconciliation_identity(value: &RecipeReconciliationIdentity) -> bool {
+    value.schema_version == 1
+        && valid_node_id(&value.node_id)
+        && !value.installation_id.is_nil()
+        && !value.install_operation_id.is_nil()
+        && !value.recipe_revision_id.is_nil()
+        && lower_hex(&value.install_operation_payload_sha256, 64)
+        && lower_hex(&value.plan_digest, 64)
+        && lower_hex(&value.recipe_content_sha256, 64)
+        && lower_hex(&value.compiled_spec_canonical_sha256, 64)
+}
+
 fn validate_attempt_identity(
     schema_version: u8,
     attempt: u32,
@@ -2597,6 +2638,80 @@ mod recipe_job_tests {
         };
 
         result.validate().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod host_helper_reconciliation_identity_tests {
+    use super::*;
+
+    fn identity(node_id: &str) -> RecipeReconciliationIdentity {
+        RecipeReconciliationIdentity {
+            schema_version: 1,
+            node_id: node_id.to_owned(),
+            installation_id: Uuid::from_u128(1),
+            install_operation_id: Uuid::from_u128(2),
+            install_operation_payload_sha256: "a".repeat(64),
+            plan_digest: "b".repeat(64),
+            recipe_revision_id: Uuid::from_u128(3),
+            recipe_content_sha256: "c".repeat(64),
+            compiled_spec_canonical_sha256: "d".repeat(64),
+        }
+    }
+
+    fn claims(identity: RecipeReconciliationIdentity) -> HostHelperGrantClaims {
+        HostHelperGrantClaims {
+            schema_version: 1,
+            authority: HOST_HELPER_AUTHORITY.to_owned(),
+            request_id: Uuid::from_u128(4),
+            node_id: identity.node_id.clone(),
+            issued_at: 2_100_000_000,
+            expires_at: 2_100_000_060,
+            operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
+                generated::ExecuteContainerRuntimeRequestOperation {
+                    type_: "execute-container-runtime-request".into(),
+                    action: HostHelperContainerRuntimeAction::InstallationCleanup,
+                    job_id: Uuid::from_u128(5),
+                    operation_id: Uuid::from_u128(6),
+                    attempt: 1,
+                    fence: Uuid::from_u128(7),
+                    request_sha256: "e".repeat(64),
+                    observation_identity_sha256: None,
+                    installation_id: Some(identity.installation_id),
+                    reconciliation_identity: Some(identity),
+                },
+            ),
+        }
+    }
+
+    #[test]
+    fn signed_cleanup_grant_identity_is_strictly_bound_to_action_install_and_node() {
+        let node = "spk_11111111111111111111111111111111";
+        let exact = claims(identity(node));
+        exact.validate().unwrap();
+
+        let mut wrong_node = exact.clone();
+        wrong_node.node_id = "spk_22222222222222222222222222222222".to_owned();
+        assert!(wrong_node.validate().is_err());
+
+        let mut wrong_installation = exact.clone();
+        let HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) =
+            &mut wrong_installation.operation
+        else {
+            unreachable!();
+        };
+        operation.installation_id = Some(Uuid::from_u128(8));
+        assert!(wrong_installation.validate().is_err());
+
+        let mut wrong_action = exact;
+        let HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) =
+            &mut wrong_action.operation
+        else {
+            unreachable!();
+        };
+        operation.action = HostHelperContainerRuntimeAction::Start;
+        operation.installation_id = None;
+        assert!(wrong_action.validate().is_err());
     }
 }
 

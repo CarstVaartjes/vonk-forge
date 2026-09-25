@@ -132,6 +132,12 @@ impl HelperRejection {
             OperationError::RuntimeFabricFirewallRejected => {
                 ("runtime_fabric_firewall_rejected", None)
             }
+            OperationError::InstallationReconciliationBusy => {
+                ("installation_reconciliation_busy", None)
+            }
+            OperationError::InstallationReconciliationStorageUnavailable => {
+                ("installation_reconciliation_storage_unavailable", None)
+            }
             OperationError::InvalidOperation => ("operation_invalid", None),
             OperationError::UnsafePath => ("operation_unsafe_path", None),
             OperationError::InvalidArtifact => ("operation_invalid_artifact", None),

@@ -13,8 +13,8 @@ use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
 use vonk_agent_protocol::{
     AgentClaim, HostRuntimeAction, HostRuntimeRequest, HostRuntimeRequestRule,
-    RecipeRunInspectionBinding, RecipeRunObservationOutcome, RecipeRunObservationReceipt,
-    SignedHostHelperGrant, canonical_json, hex_sha256, parse_strict,
+    RecipeReconciliationIdentity, RecipeRunInspectionBinding, RecipeRunObservationOutcome,
+    RecipeRunObservationReceipt, SignedHostHelperGrant, canonical_json, hex_sha256, parse_strict,
     recipe_run_observation_receipt_signing_bytes,
 };
 
@@ -339,7 +339,8 @@ impl HostRuntimeBoundary<'_> {
         action: HostRuntimeAction,
         arguments: Vec<String>,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
-        self.execute_bound(claim, action, arguments, None).await
+        self.execute_bound(claim, action, arguments, None, None)
+            .await
     }
 
     pub async fn cleanup_installation(
@@ -352,6 +353,22 @@ impl HostRuntimeBoundary<'_> {
             HostRuntimeAction::InstallationCleanup,
             Vec::new(),
             Some(installation_id),
+            None,
+        )
+        .await
+    }
+
+    pub async fn reconcile_installation(
+        &self,
+        claim: &AgentClaim,
+        identity: RecipeReconciliationIdentity,
+    ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
+        self.execute_bound(
+            claim,
+            HostRuntimeAction::InstallationCleanup,
+            Vec::new(),
+            Some(identity.installation_id),
+            Some(identity),
         )
         .await
     }
@@ -362,6 +379,7 @@ impl HostRuntimeBoundary<'_> {
         action: HostRuntimeAction,
         arguments: Vec<String>,
         installation_id: Option<uuid::Uuid>,
+        reconciliation_identity: Option<RecipeReconciliationIdentity>,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
         let helper_timeout = match action {
             HostRuntimeAction::RuntimePreflight => Duration::from_secs(14),
@@ -394,6 +412,7 @@ impl HostRuntimeBoundary<'_> {
             arguments,
             observation: None,
             installation_id,
+            reconciliation_identity: reconciliation_identity.clone(),
         };
         request
             .validate()
@@ -409,7 +428,13 @@ impl HostRuntimeBoundary<'_> {
         async {
             let grant = self
                 .client
-                .host_runtime_grant(claim, action, &digest, installation_id)
+                .host_runtime_grant(
+                    claim,
+                    action,
+                    &digest,
+                    installation_id,
+                    reconciliation_identity.as_ref(),
+                )
                 .await?;
             let request_id = grant.claims.request_id.to_string();
             let grant = canonical_json(&grant).map_err(|_| {
@@ -573,6 +598,8 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "runtime_run_missing"
             | "runtime_fabric_unavailable"
             | "runtime_fabric_firewall_rejected"
+            | "installation_reconciliation_busy"
+            | "installation_reconciliation_storage_unavailable"
             | "grant_invalid"
             | "grant_node_mismatch"
             | "grant_unauthorized"

@@ -34,8 +34,8 @@ use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, OperationProgress,
     ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
     RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
-    RecipeStartPhase, RecipeStartRequest, RecipeStopResult, RecipeUninstallResult, canonical_json,
-    hex_sha256,
+    RecipeReconcileResult, RecipeReconciliationIdentity, RecipeStartPhase, RecipeStartRequest,
+    RecipeStopResult, RecipeUninstallResult, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -485,6 +485,29 @@ impl<R> RecipeExecutor<'_, R> {
         })
     }
 
+    async fn reconcile_installation_runtime(
+        &self,
+        claim: &AgentClaim,
+        identity: RecipeReconciliationIdentity,
+    ) -> Result<(), crate::host_runtime::HostRuntimeError> {
+        let request_root = self.runtime_root.join("runtime-requests");
+        HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            observation_receipt_public_key: self.observation_receipt_public_key,
+        }
+        .reconcile_installation(claim, identity)
+        .await
+        .and_then(|outcome| {
+            if outcome.stop_uncertain {
+                Err(crate::host_runtime::HostRuntimeError::StopUncertain)
+            } else {
+                Ok(())
+            }
+        })
+    }
+
     async fn stop_start_run(
         &self,
         claim: &AgentClaim,
@@ -631,6 +654,28 @@ pub fn recipe_uninstall_success_body(removed_model_bytes: u64) -> Value {
     };
     result.validate().expect("valid uninstall result");
     serde_json::to_value(result).expect("serializable uninstall result")
+}
+
+fn recipe_reconcile_success_body(
+    identity: &RecipeReconciliationIdentity,
+    removed_bytes: u64,
+    cleanup_receipt_sha256: String,
+) -> Value {
+    let result = RecipeReconcileResult {
+        cleanup_receipt_sha256,
+        compiled_spec_canonical_sha256: identity.compiled_spec_canonical_sha256.clone(),
+        install_operation_id: identity.install_operation_id,
+        install_operation_payload_sha256: identity.install_operation_payload_sha256.clone(),
+        installation_id: identity.installation_id,
+        node_id: identity.node_id.clone(),
+        plan_digest: identity.plan_digest.clone(),
+        recipe_content_sha256: identity.recipe_content_sha256.clone(),
+        recipe_revision_id: identity.recipe_revision_id,
+        reconciled: true,
+        removed_bytes,
+    };
+    result.validate().expect("valid reconciliation result");
+    serde_json::to_value(result).expect("serializable reconciliation result")
 }
 
 pub fn recipe_start_success_body(
@@ -1708,6 +1753,132 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     body: recipe_install_success_body(installed_bytes),
                 }
             }
+            RecipeOperationRequest::Reconcile(request) => {
+                self.report_phase(claim, "reconciling-installation").await;
+                if *cancellation.borrow() {
+                    return cancelled("controller cancelled before installation reconciliation");
+                }
+                let identity = RecipeReconciliationIdentity::from(&request);
+                let prepared = match self.runtime.prepare_reconciliation(&identity) {
+                    Ok(progress) => progress,
+                    Err(OciError::ReconciliationBusy) => {
+                        return temporary_reconciliation_failure(
+                            "installation-reconciliation-lock",
+                            "installation_reconciliation_busy",
+                            "installation_reconciliation_busy",
+                        );
+                    }
+                    Err(error) if retryable_reconciliation_storage_error(&error) => {
+                        return temporary_reconciliation_failure(
+                            "installation-checkpoint-storage",
+                            "recipe_reconciliation_dependency_unavailable",
+                            "installation_storage_temporarily_unavailable",
+                        );
+                    }
+                    Err(error) => {
+                        return failed_stage(
+                            "managed installation does not match the reconciliation authority",
+                            "installation-validation",
+                            error.safe_category(),
+                        );
+                    }
+                };
+                if prepared.complete && prepared.cleanup_receipt_sha256.is_none() {
+                    return failed_stage(
+                        "completed installation cleanup has no durable receipt",
+                        "installation-receipt",
+                        "receipt-missing",
+                    );
+                }
+                // The local receipt is useful after an agent restart, but each
+                // attempt still obtains a fresh Controller-signed helper grant.
+                // The helper receipt proves there are no exact or unclassified
+                // managed containers before the installation tree is removed.
+                if *cancellation.borrow() {
+                    return cancelled(
+                        "controller cancelled after reconciliation checkpoint preparation",
+                    );
+                }
+                if let Err(error) = self
+                    .reconcile_installation_runtime(claim, identity.clone())
+                    .await
+                {
+                    if matches!(
+                        error,
+                        crate::host_runtime::HostRuntimeError::HelperRejected { ref code, .. }
+                            if code == "installation_reconciliation_busy"
+                    ) {
+                        return temporary_reconciliation_failure(
+                            "helper-runtime-reconciliation-lock",
+                            "installation_reconciliation_busy",
+                            "installation_reconciliation_busy",
+                        );
+                    }
+                    if temporary_observation_error(&error) {
+                        return temporary_reconciliation_failure(
+                            "helper-runtime-reconciliation",
+                            "recipe_reconciliation_dependency_unavailable",
+                            error.preflight_code(),
+                        );
+                    }
+                    return failed_stage_owned(
+                        "managed runtime effects could not be reconciled for installation removal",
+                        "helper-runtime-reconciliation",
+                        error.preflight_code(),
+                    );
+                }
+                if *cancellation.borrow() {
+                    return cancelled(
+                        "controller cancelled after runtime reconciliation; removal is resumable",
+                    );
+                }
+                let completed = match self.runtime.finalize_reconciliation(&identity) {
+                    Ok(progress) => progress,
+                    Err(OciError::ReconciliationBusy) => {
+                        return temporary_reconciliation_failure(
+                            "installation-reconciliation-lock",
+                            "installation_reconciliation_busy",
+                            "installation_reconciliation_busy",
+                        );
+                    }
+                    Err(error) if retryable_reconciliation_storage_error(&error) => {
+                        return temporary_reconciliation_failure(
+                            "installation-checkpoint-storage",
+                            "recipe_reconciliation_dependency_unavailable",
+                            "installation_storage_temporarily_unavailable",
+                        );
+                    }
+                    Err(error) => {
+                        return failed_stage(
+                            "reconciled installation cleanup could not be completed",
+                            "installation-removal",
+                            error.safe_category(),
+                        );
+                    }
+                };
+                let Some(cleanup_receipt_sha256) = completed.cleanup_receipt_sha256 else {
+                    return failed_stage(
+                        "installation cleanup completed without a durable receipt",
+                        "installation-receipt",
+                        "receipt-missing",
+                    );
+                };
+                if !completed.complete {
+                    return failed_stage(
+                        "installation cleanup did not reach its durable terminal state",
+                        "installation-receipt",
+                        "receipt-incomplete",
+                    );
+                }
+                ExecutionResult {
+                    state: "succeeded",
+                    body: recipe_reconcile_success_body(
+                        &identity,
+                        completed.removed_bytes,
+                        cleanup_receipt_sha256,
+                    ),
+                }
+            }
             RecipeOperationRequest::Start(request) => {
                 self.report_phase(claim, "starting").await;
                 let installation_id = request.installation_id.to_string();
@@ -2537,6 +2708,39 @@ fn cancelled(reason: &'static str) -> ExecutionResult {
     }
 }
 
+fn temporary_reconciliation_failure(
+    stage: &'static str,
+    error_code: &'static str,
+    diagnostic: impl Into<String>,
+) -> ExecutionResult {
+    ExecutionResult {
+        state: "failed",
+        body: json!({
+            "diagnostic": diagnostic.into(),
+            "error_code": error_code,
+            "failure_kind": "temporary-dependency",
+            "reason": "installation reconciliation is waiting for its local owner",
+            "retry_after_seconds": 2,
+            "stage": stage,
+        }),
+    }
+}
+
+fn retryable_reconciliation_storage_error(error: &OciError) -> bool {
+    let OciError::Io(error) = error else {
+        return false;
+    };
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::Interrupted
+            | std::io::ErrorKind::WouldBlock
+            | std::io::ErrorKind::TimedOut
+    ) || error.raw_os_error().is_some_and(|code| {
+        code == rustix::io::Errno::IO.raw_os_error()
+            || code == rustix::io::Errno::NOSPC.raw_os_error()
+    })
+}
+
 fn waiting_for_operator(reason: &'static str) -> ExecutionResult {
     ExecutionResult {
         state: "waiting-for-operator",
@@ -2555,7 +2759,12 @@ fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) ->
             false
         }
         HostRuntimeError::Controller(_) => true,
-        HostRuntimeError::HelperRejected { code, .. } => code == "operation_io",
+        HostRuntimeError::HelperRejected { code, .. } => {
+            matches!(
+                code.as_str(),
+                "operation_io" | "installation_reconciliation_storage_unavailable"
+            )
+        }
         HostRuntimeError::HelperProtocol(_) => false,
         HostRuntimeError::HelperProtocolBound { .. } => false,
         HostRuntimeError::StopUncertain => false,
@@ -3356,7 +3565,13 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         .get("error_code")
         .and_then(Value::as_str)
         .filter(|code| {
-            claim.operation == "recipe.start" && *code == "runtime_observation_unavailable"
+            (claim.operation == "recipe.start" && *code == "runtime_observation_unavailable")
+                || (claim.operation == "recipe.reconcile"
+                    && matches!(
+                        *code,
+                        "installation_reconciliation_busy"
+                            | "recipe_reconciliation_dependency_unavailable"
+                    ))
         })
         .unwrap_or_else(|| match claim.operation.as_str() {
             "agent.upgrade.v1" => "agent_upgrade_failed",

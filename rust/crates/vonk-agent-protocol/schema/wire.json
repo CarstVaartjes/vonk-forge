@@ -3492,6 +3492,17 @@
           "title": "Operation Id",
           "type": "string"
         },
+        "reconciliation_identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeReconciliationIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "request_sha256": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Request Sha256",
@@ -7120,6 +7131,7 @@
           "type": "boolean"
         },
         "removed_bytes": {
+          "description": "Measured bytes in the removed agent-owned installation tree, excluding the exact helper-managed runtime-cache subtree. The helper separately confirms removal of that private cache without reporting its byte count.",
           "maximum": 17592186044416,
           "minimum": 0,
           "title": "Removed Bytes",

@@ -2325,6 +2325,8 @@ pub struct HostRuntimeGrantRequest {
     pub job_id: ::uuid::Uuid,
     pub node_id: ::std::string::String,
     pub operation_id: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
 }
 #[derive(
@@ -8816,6 +8818,8 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             pub job_id: ::uuid::Uuid,
             pub node_id: ::std::string::String,
             pub operation_id: ::uuid::Uuid,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -8828,6 +8832,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             job_id: raw.job_id,
             node_id: raw.node_id,
             operation_id: raw.operation_id,
+            reconciliation_identity: raw.reconciliation_identity,
             request_sha256: raw.request_sha256,
         })
     }
