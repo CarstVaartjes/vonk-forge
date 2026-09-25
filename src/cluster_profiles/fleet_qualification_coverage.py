@@ -181,7 +181,7 @@ def build_recovery_coverage_receipt(
         exact_preparation, node_ids, scope
     )
     platform_build_sha256, agent_builds = _deployment_build_identities(
-        deployment_provenance_by_node, node_ids, str(scope["package_sha256"])
+        deployment_provenance_by_node, node_ids
     )
     if mode == "dual-rank-loss-recovery":
         if rank_recovery is None:
@@ -1537,7 +1537,6 @@ def _runtime_image_identity(
 def _deployment_build_identities(
     provenance_by_node: Mapping[str, Mapping[str, object]],
     node_ids: Sequence[str],
-    expected_package_sha256: str,
 ) -> tuple[str, dict[str, str]]:
     if set(provenance_by_node) != set(node_ids):
         raise QualificationError(
@@ -1608,10 +1607,9 @@ def _deployment_build_identities(
             or build_match is None
             or not isinstance(agent.get("binary_sha256"), str)
             or _SHA256.fullmatch(str(agent["binary_sha256"])) is None
-            or agent.get("package_sha256") != expected_package_sha256
         ):
             raise QualificationError(
-                f"agent build/package identity is unverified for {node_id}"
+                f"agent build/binary identity is unverified for {node_id}"
             )
         agent_builds[node_id] = build_match.group(1)
     if len(platform_builds) != 1:

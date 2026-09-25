@@ -322,6 +322,10 @@ def test_package_receipt_must_match_the_current_authenticated_binary(tmp_path):
 
     from vonk_control.models import AgentOperation, AgentOperationAttempt
 
+    from cluster_profiles.fleet_qualification_coverage import (
+        _deployment_build_identities,
+    )
+
     from .package_upgrade_fixtures import activation_receipt, source_transport
 
     sessions, now, node, _ = deployment(tmp_path)
@@ -368,11 +372,30 @@ def test_package_receipt_must_match_the_current_authenticated_binary(tmp_path):
                 },
             )
         )
-    service = DeploymentProvenanceService(sessions, clock=lambda: now)
-    bound = service.snapshot().agents[0]
+
+    def current_observations():
+        return DeploymentObservations(
+            controller=PlatformObservation(
+                source="Current Controller image",
+                observed_at=now,
+                image_digest="sha256:" + "8" * 64,
+            )
+        )
+
+    service = DeploymentProvenanceService(
+        sessions,
+        clock=lambda: now,
+        observations=current_observations,
+    )
+    provenance = service.snapshot()
+    bound = provenance.agents[0]
     assert bound.package_sha256 == "d" * 64
     assert bound.package_evidence.source == "Authenticated package upgrade receipt"
     assert bound.package_evidence.freshness == "current"
+    _, agent_builds = _deployment_build_identities(
+        {node: provenance.model_dump(mode="json")}, [node]
+    )
+    assert agent_builds[node] == "a" * 64
     with sessions.begin() as session:
         agent = session.get(AgentNode, node)
         assert agent is not None
@@ -392,6 +415,105 @@ def test_package_receipt_must_match_the_current_authenticated_binary(tmp_path):
     assert other_build.package_evidence.source == (
         "Package upgrade receipt does not match the observed binary"
     )
+
+
+def test_recovery_coverage_uses_current_agent_build_not_recipe_package_hash(
+    tmp_path,
+):
+    from cluster_profiles.fleet_qualification import QualificationError
+    from cluster_profiles.fleet_qualification_coverage import (
+        _deployment_build_identities,
+    )
+
+    sessions, now, node, _ = deployment(tmp_path)
+
+    def current_observations():
+        return DeploymentObservations(
+            controller=PlatformObservation(
+                source="Current Controller image",
+                observed_at=now,
+                image_digest="sha256:" + "8" * 64,
+            )
+        )
+
+    current = DeploymentProvenanceService(
+        sessions,
+        clock=lambda: now,
+        observations=current_observations,
+    ).snapshot()
+    assert current.agents[0].node_id == node
+    assert current.agents[0].connectivity == "recent"
+    assert current.agents[0].evidence.freshness == "current"
+    assert current.agents[0].build_digest == "sha256:" + "a" * 64
+    assert current.agents[0].binary_sha256 == "b" * 64
+    # The producer emits no agent .deb receipt here. The coverage contract
+    # requires current build and binary identity, not an agent package SHA.
+    assert current.agents[0].package_sha256 is None
+    provenance_by_node = {node: current.model_dump(mode="json")}
+    _, agent_builds = _deployment_build_identities(provenance_by_node, [node])
+    assert agent_builds[node] == "a" * 64
+
+    stale_at = now + timedelta(seconds=301)
+
+    def stale_controller_observations():
+        return DeploymentObservations(
+            controller=PlatformObservation(
+                source="Current Controller image",
+                observed_at=stale_at,
+                image_digest="sha256:" + "8" * 64,
+            )
+        )
+
+    stale = DeploymentProvenanceService(
+        sessions,
+        clock=lambda: stale_at,
+        observations=stale_controller_observations,
+    ).snapshot()
+    assert stale.agents[0].connectivity == "offline"
+    assert stale.agents[0].evidence.freshness == "stale"
+    with pytest.raises(QualificationError, match="agent build"):
+        _deployment_build_identities({node: stale.model_dump(mode="json")}, [node])
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("build_digest", None, "agent build/binary identity"),
+        ("build_digest", "not-a-build-digest", "agent build/binary identity"),
+        ("binary_sha256", None, "agent build/binary identity"),
+        ("binary_sha256", "not-a-binary-digest", "agent build/binary identity"),
+        ("evidence", None, "contact evidence"),
+    ],
+)
+def test_recovery_coverage_rejects_missing_or_malformed_agent_identity(
+    tmp_path, field, value, error
+):
+    from cluster_profiles.fleet_qualification import QualificationError
+    from cluster_profiles.fleet_qualification_coverage import (
+        _deployment_build_identities,
+    )
+
+    sessions, now, node, _ = deployment(tmp_path)
+    provenance = (
+        DeploymentProvenanceService(
+            sessions,
+            clock=lambda: now,
+            observations=lambda: DeploymentObservations(
+                controller=PlatformObservation(
+                    source="Current Controller image",
+                    observed_at=now,
+                    image_digest="sha256:" + "8" * 64,
+                )
+            ),
+        )
+        .snapshot()
+        .model_dump(mode="json")
+    )
+    agent = next(item for item in provenance["agents"] if item["node_id"] == node)
+    agent[field] = value
+
+    with pytest.raises(QualificationError, match=error):
+        _deployment_build_identities({node: provenance}, [node])
 
 
 def test_cli_human_view_preserves_evidence_boundaries(tmp_path):
