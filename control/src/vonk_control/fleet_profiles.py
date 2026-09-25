@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
@@ -171,6 +172,11 @@ _OPERATION_STATE_ADAPTER = TypeAdapter(FleetProfileOperationState)
 _PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
 _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
 _MAX_CACHE_RECOVERY_DELAY_SECONDS = 60
+# A profile request may race a short heartbeat, telemetry write, or worker
+# transaction while taking the reviewed admission snapshot.  Retry the whole
+# SQL transaction after releasing it; the request key keeps a later successful
+# attempt idempotent.  A persistent owner still reaches the normal busy error.
+_PROFILE_ADMISSION_RETRY_DELAYS_SECONDS = (0.05, 0.15, 0.35)
 #: How many parked applications one worker tick observes for a terminal child.
 #: Bounded so a large parked backlog cannot turn one tick into an unbounded
 #: scan, while still letting every parked order record its own ending.
@@ -376,6 +382,12 @@ _PROFILE_PHASE_BY_RUN_PHASE = {
 
 class FleetProfileConflict(RuntimeError):
     """A Fleet profile is invalid, stale, or cannot be safely applied."""
+
+
+class FleetProfileAdmissionBusy(FleetProfileConflict):
+    """A transient admission owner must finish before the plan can be bound."""
+
+    code = "profile.admission_busy"
 
 
 class FleetProfileStalePlanConflict(FleetProfileConflict):
@@ -2006,12 +2018,12 @@ class FleetProfileService:
                     )
                 yield session
         except AdmissionLockBusy as error:
-            raise FleetProfileConflict(
+            raise FleetProfileAdmissionBusy(
                 "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
             ) from error
         except OperationalError as error:
             if is_admission_contention(error):
-                raise FleetProfileConflict(
+                raise FleetProfileAdmissionBusy(
                     "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
                 ) from None
             raise
@@ -3335,11 +3347,23 @@ class FleetProfileService:
                 raise FleetProfileConflict(
                     "Fleet profile preview is blocked; review the current blockers before loading"
                 )
-            return self._queue_application(
-                preview,
-                request_key=request_key,
-                actor=actor,
-                operation_kind="fleet-profile.apply",
+            for retry_delay in (
+                *_PROFILE_ADMISSION_RETRY_DELAYS_SECONDS,
+                None,
+            ):
+                try:
+                    return self._queue_application(
+                        preview,
+                        request_key=request_key,
+                        actor=actor,
+                        operation_kind="fleet-profile.apply",
+                    )
+                except FleetProfileAdmissionBusy:
+                    if retry_delay is None:
+                        raise
+                    time.sleep(retry_delay)
+            raise FleetProfileAdmissionBusy(
+                "Profile admission retry schedule was exhausted"
             )
         except (FleetProfileConflict, KeyError):
             # Another identical submission can commit after our first lookup.
@@ -5703,6 +5727,7 @@ class FleetProfileService:
 
 
 __all__ = [
+    "FleetProfileAdmissionBusy",
     "FleetProfileConflict",
     "FleetProfileService",
     "FleetProfileStalePlanConflict",
