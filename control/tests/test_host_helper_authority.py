@@ -18,7 +18,10 @@ from vonk_agent_protocol import (
     canonical_message,
     host_helper_grant_signing_bytes,
 )
-from vonk_agent_protocol.host_helper import HostRuntimeRequest
+from vonk_agent_protocol.host_helper import (
+    HostRuntimeRequest,
+    RecipeReconciliationIdentity,
+)
 from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallPayload,
 )
@@ -675,3 +678,147 @@ def test_runtime_grant_request_enforces_cleanup_identity_and_null_policy() -> No
     )
     assert canonical_message(omitted) == canonical_message(explicit_null)
     assert "installation_id" not in json.loads(canonical_message(explicit_null))
+
+
+def reconciliation_identity() -> RecipeReconciliationIdentity:
+    return RecipeReconciliationIdentity(
+        schema_version=1,
+        node_id="spk_" + "1" * 32,
+        installation_id=INSTALLATION_ID,
+        install_operation_id="a0000000-0000-4000-8000-00000000000a",
+        install_operation_payload_sha256="a" * 64,
+        plan_digest="b" * 64,
+        recipe_revision_id="b0000000-0000-4000-8000-00000000000b",
+        recipe_content_sha256="c" * 64,
+        compiled_spec_canonical_sha256="d" * 64,
+    )
+
+
+def reconciliation_service(
+    *, cancel_requested: bool = False, lease_seconds: int = 60
+) -> HostRuntimeAuthorityService:
+    identity = reconciliation_identity()
+    service = runtime_service(
+        operation_kind="recipe.reconcile",
+        operation_payload=json.loads(canonical_message(identity)),
+        cancel_requested=cancel_requested,
+        lease_seconds=lease_seconds,
+    )
+    with service._sessions.begin() as session:
+        operation = session.get(AgentOperation, "30000000-0000-4000-8000-000000000003")
+        assert operation is not None
+        operation.payload_digest = hashlib.sha256(
+            canonical_message(identity)
+        ).hexdigest()
+    return service
+
+
+class _ReconciliationGrantArguments(_CleanupGrantArguments):
+    reconciliation_identity: RecipeReconciliationIdentity
+
+
+def reconciliation_grant_arguments(
+    identity: RecipeReconciliationIdentity,
+) -> _ReconciliationGrantArguments:
+    arguments = cleanup_grant_arguments(identity.installation_id)
+    request = HostRuntimeRequest(
+        schema_version=1,
+        action="installation-cleanup",
+        job_id=arguments["job_id"],
+        operation_id=arguments["operation_id"],
+        attempt=arguments["attempt"],
+        fence=arguments["fence"],
+        arguments=[],
+        installation_id=identity.installation_id,
+        reconciliation_identity=identity,
+    )
+    return {
+        **arguments,
+        "reconciliation_identity": identity,
+        "request_sha256": hashlib.sha256(canonical_message(request)).hexdigest(),
+    }
+
+
+def test_reconciliation_grant_signs_the_exact_leased_cleanup_identity() -> None:
+    identity = reconciliation_identity()
+    arguments = reconciliation_grant_arguments(identity)
+    grant = reconciliation_service().issue_grant(**arguments)
+    operation = grant.claims.operation
+    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+    assert operation.reconciliation_identity == identity
+    assert operation.request_sha256 == arguments["request_sha256"]
+    issuer().public_key.verify(
+        bytes.fromhex(grant.signature.value),
+        host_helper_grant_signing_bytes(grant.claims),
+    )
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"node_id": "spk_" + "2" * 32},
+        {"installation_id": SECOND_INSTALLATION_ID},
+        {"install_operation_id": OUTSIDE_INSTALLATION_ID},
+        {"install_operation_payload_sha256": "e" * 64},
+        {"plan_digest": "e" * 64},
+        {"recipe_revision_id": OUTSIDE_INSTALLATION_ID},
+        {"recipe_content_sha256": "e" * 64},
+        {"compiled_spec_canonical_sha256": "e" * 64},
+    ],
+)
+def test_reconciliation_grant_refuses_substituted_source_identity(changed) -> None:
+    identity = reconciliation_identity().model_copy(update=changed)
+    with pytest.raises(HostHelperAuthorityError):
+        reconciliation_service().issue_grant(**reconciliation_grant_arguments(identity))
+
+
+def test_reconciliation_grant_refuses_missing_identity_or_unbound_request() -> None:
+    service = reconciliation_service()
+    with pytest.raises(HostHelperAuthorityError):
+        service.issue_grant(**cleanup_grant_arguments(INSTALLATION_ID))
+    arguments = reconciliation_grant_arguments(reconciliation_identity())
+    wrong_request = arguments.copy()
+    wrong_request["request_sha256"] = "f" * 64
+    with pytest.raises(HostHelperAuthorityError):
+        service.issue_grant(**wrong_request)
+    with service._sessions.begin() as session:
+        operation = session.get(AgentOperation, "30000000-0000-4000-8000-000000000003")
+        assert operation is not None
+        operation.payload_digest = "f" * 64
+    with pytest.raises(HostHelperAuthorityError):
+        service.issue_grant(**arguments)
+
+
+@pytest.mark.parametrize(
+    "changes", [{"fence": OUTSIDE_INSTALLATION_ID}, {"attempt": 1}]
+)
+def test_reconciliation_grant_refuses_stale_attempt(changes) -> None:
+    arguments = reconciliation_grant_arguments(reconciliation_identity())
+    with pytest.raises(HostHelperAuthorityError):
+        reconciliation_service().issue_grant(**(arguments | changes))
+
+
+def test_reconciliation_grant_refuses_cancelled_or_expired_authority() -> None:
+    arguments = reconciliation_grant_arguments(reconciliation_identity())
+    for service in (
+        reconciliation_service(cancel_requested=True),
+        reconciliation_service(lease_seconds=-1),
+    ):
+        with pytest.raises(HostHelperAuthorityError):
+            service.issue_grant(**arguments)
+
+
+def test_ordinary_uninstall_cannot_supply_reconciliation_authority() -> None:
+    payload = RecipeUninstallPayload(
+        schema_version=1,
+        installation_id=INSTALLATION_ID,
+        plan_digest="a" * 64,
+        recipe_content_sha256="b" * 64,
+        cleanup_model_content_sha256=None,
+    )
+    service = runtime_service(
+        operation_kind="recipe.uninstall",
+        operation_payload=json.loads(canonical_message(payload)),
+    )
+    with pytest.raises(HostHelperAuthorityError):
+        service.issue_grant(**reconciliation_grant_arguments(reconciliation_identity()))

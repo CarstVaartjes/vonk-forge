@@ -25,7 +25,9 @@ from vonk_agent_protocol.host_helper import (
     HostHelperGrantClaims,
     HostHelperSignature,
     HostOperationKind,
+    HostRuntimeRequest,
     InstallVonkDebOperation,
+    RecipeReconciliationIdentity,
     RestartVonkUnitOperation,
     ScheduleRebootOperation,
     SignedHostHelperGrant,
@@ -36,6 +38,7 @@ from vonk_agent_protocol.host_helper import (
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationIdentity
 from vonk_agent_protocol.recipe_operations import (
+    RecipeReconcilePayload,
     RecipeUninstallPayload,
 )
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -223,7 +226,9 @@ class HostRuntimeAuthorityService:
         ContainerRuntimeAction.STOP: frozenset(
             {"recipe.start", "recipe.stop", "recipe.job.run.v1"}
         ),
-        ContainerRuntimeAction.INSTALLATION_CLEANUP: frozenset({"recipe.uninstall"}),
+        ContainerRuntimeAction.INSTALLATION_CLEANUP: frozenset(
+            {"recipe.uninstall", "recipe.reconcile"}
+        ),
     }
 
     def __init__(
@@ -259,6 +264,7 @@ class HostRuntimeAuthorityService:
         request_sha256: str,
         certificate_serial: str,
         installation_id: str | None = None,
+        reconciliation_identity: RecipeReconciliationIdentity | None = None,
         expires_in_seconds: int = 30,
     ) -> SignedHostHelperGrant:
         if type(action) is not ContainerRuntimeAction:
@@ -271,6 +277,8 @@ class HostRuntimeAuthorityService:
             fence=fence,
             action=action,
             installation_id=installation_id,
+            reconciliation_identity=reconciliation_identity,
+            request_sha256=request_sha256,
             certificate_serial=certificate_serial,
         )
         grant = self._issuer.issue_grant(
@@ -284,6 +292,7 @@ class HostRuntimeAuthorityService:
                 fence=fence,
                 request_sha256=request_sha256,
                 installation_id=installation_id,
+                reconciliation_identity=reconciliation_identity,
             ),
             expires_in_seconds=expires_in_seconds,
         )
@@ -747,6 +756,8 @@ class HostRuntimeAuthorityService:
         fence: str,
         action: ContainerRuntimeAction,
         installation_id: str | None,
+        reconciliation_identity: RecipeReconciliationIdentity | None,
+        request_sha256: str,
         certificate_serial: str,
     ) -> datetime:
         now = self._clock()
@@ -839,11 +850,52 @@ class HostRuntimeAuthorityService:
                 )
             if action is ContainerRuntimeAction.INSTALLATION_CLEANUP:
                 try:
-                    authorized = {
-                        RecipeUninstallPayload.model_validate_json(
-                            canonical_message(operation.payload)
-                        ).installation_id
-                    }
+                    payload_bytes = canonical_message(operation.payload)
+                    if operation.kind == "recipe.reconcile":
+                        payload = RecipeReconcilePayload.model_validate_json(
+                            payload_bytes
+                        )
+                        if (
+                            not isinstance(
+                                reconciliation_identity,
+                                RecipeReconciliationIdentity,
+                            )
+                            or payload.node_id != node_id
+                            or canonical_message(reconciliation_identity)
+                            != canonical_message(payload)
+                            or hashlib.sha256(payload_bytes).hexdigest()
+                            != operation.payload_digest
+                        ):
+                            raise ValueError("reconciliation identity differs")
+                        expected_request = HostRuntimeRequest(
+                            schema_version=1,
+                            action="installation-cleanup",
+                            job_id=job_id,
+                            operation_id=operation_id,
+                            attempt=attempt,
+                            fence=fence,
+                            arguments=[],
+                            installation_id=installation_id,
+                            reconciliation_identity=reconciliation_identity,
+                        )
+                        if (
+                            hashlib.sha256(
+                                canonical_message(expected_request)
+                            ).hexdigest()
+                            != request_sha256
+                        ):
+                            raise ValueError("reconciliation request differs")
+                        authorized = {payload.installation_id}
+                    else:
+                        if reconciliation_identity is not None:
+                            raise ValueError(
+                                "ordinary uninstall has reconciliation identity"
+                            )
+                        authorized = {
+                            RecipeUninstallPayload.model_validate_json(
+                                payload_bytes
+                            ).installation_id
+                        }
                 except (TypeError, ValueError) as error:
                     raise HostHelperAuthorityError(
                         "container runtime cleanup authority is invalid"
@@ -852,7 +904,7 @@ class HostRuntimeAuthorityService:
                     raise HostHelperAuthorityError(
                         "container runtime cleanup installation is unauthorized"
                     )
-            elif installation_id is not None:
+            elif installation_id is not None or reconciliation_identity is not None:
                 raise HostHelperAuthorityError(
                     "container runtime installation binding is invalid"
                 )

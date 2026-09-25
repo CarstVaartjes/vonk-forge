@@ -59,7 +59,10 @@ from vonk_agent_protocol.enrollment import (
     IssuedCertificateResponse,
     RenewRequest,
 )
-from vonk_agent_protocol.host_helper import ContainerRuntimeActionName
+from vonk_agent_protocol.host_helper import (
+    ContainerRuntimeActionName,
+    RecipeReconciliationIdentity,
+)
 from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
@@ -354,6 +357,7 @@ class HostRuntimeGrantRequest(AgentGrantRequest):
     action: ContainerRuntimeActionName
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
+    reconciliation_identity: RecipeReconciliationIdentity | None = None
 
     @model_validator(mode="after")
     def installation_cleanup_binding(self) -> HostRuntimeGrantRequest:
@@ -361,6 +365,12 @@ class HostRuntimeGrantRequest(AgentGrantRequest):
             self.action == "installation-cleanup"
         ):
             raise ValueError("host runtime installation binding is invalid")
+        if self.reconciliation_identity is not None and (
+            self.action != "installation-cleanup"
+            or self.reconciliation_identity.installation_id != self.installation_id
+            or self.reconciliation_identity.node_id != self.node_id
+        ):
+            raise ValueError("host runtime reconciliation binding is invalid")
         return self
 
 
@@ -1870,6 +1880,7 @@ def install_agent_routes(
                 action=ContainerRuntimeAction(body.action),
                 request_sha256=body.request_sha256,
                 installation_id=body.installation_id,
+                reconciliation_identity=body.reconciliation_identity,
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
             )

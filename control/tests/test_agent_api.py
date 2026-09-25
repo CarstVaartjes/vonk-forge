@@ -41,6 +41,11 @@ from vonk_agent_protocol import (
     SignedPackageObjectReceipt,
     canonical_message,
 )
+from vonk_agent_protocol.host_helper import (
+    HostRuntimeRequest,
+    RecipeReconciliationIdentity,
+    host_helper_grant_signing_bytes,
+)
 from vonk_control.agent_api import (
     AgentApiServices,
     EnrollmentRateLimiter,
@@ -56,6 +61,7 @@ from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
+    HostRuntimeAuthorityService,
     RecipeRunObservationPendingError,
 )
 from vonk_control.models import (
@@ -818,6 +824,119 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
     )
 
 
+def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_system):
+    client, services, _, clock = agent_system
+    identity = RecipeReconciliationIdentity(
+        schema_version=1,
+        node_id=NODE_A,
+        installation_id="70000000-0000-4000-8000-000000000007",
+        install_operation_id="80000000-0000-4000-8000-000000000008",
+        install_operation_payload_sha256="a" * 64,
+        plan_digest="b" * 64,
+        recipe_revision_id="90000000-0000-4000-8000-000000000009",
+        recipe_content_sha256="c" * 64,
+        compiled_spec_canonical_sha256="d" * 64,
+    )
+    request = HostRuntimeRequest(
+        schema_version=1,
+        action="installation-cleanup",
+        job_id=str(uuid.uuid4()),
+        operation_id=str(uuid.uuid4()),
+        attempt=1,
+        fence=str(uuid.uuid4()),
+        arguments=[],
+        installation_id=identity.installation_id,
+        reconciliation_identity=identity,
+    )
+    with services.sessions.begin() as session:
+        session.add(
+            Job(
+                id=request.job_id,
+                request_id=str(uuid.uuid4()),
+                kind="recipe.reconcile",
+                state="running",
+                actor="admin",
+                authority_revision="e" * 64,
+                targets=[NODE_A],
+                payload_digest="f" * 64,
+                payload={"workload_intent_ordinal": 1},
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        session.add(
+            AgentOperation(
+                id=request.operation_id,
+                parent_job_id=request.job_id,
+                node_id=NODE_A,
+                kind="recipe.reconcile",
+                payload=json.loads(canonical_message(identity)),
+                payload_digest=hashlib.sha256(canonical_message(identity)).hexdigest(),
+                authority_revision="e" * 64,
+                workload_intent_ordinal=1,
+                state="running",
+                current_attempt=1,
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        session.add(
+            AgentOperationAttempt(
+                id=str(uuid.uuid4()),
+                operation_id=request.operation_id,
+                attempt=1,
+                fence=request.fence,
+                lease_deadline=clock.now + timedelta(minutes=1),
+                agent_certificate_serial="serial-a",
+                state="running",
+            )
+        )
+    signer = HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=clock)
+    authority = HostRuntimeAuthorityService(services.sessions, signer, clock=clock)
+    object.__setattr__(services, "host_runtime_authority", authority)
+    body = {
+        "node_id": NODE_A,
+        "job_id": request.job_id,
+        "operation_id": request.operation_id,
+        "attempt": request.attempt,
+        "fence": request.fence,
+        "action": request.action,
+        "installation_id": request.installation_id,
+        "reconciliation_identity": json.loads(canonical_message(identity)),
+        "request_sha256": hashlib.sha256(canonical_message(request)).hexdigest(),
+        "expires_in_seconds": 30,
+    }
+    response = client.post(
+        "/agent/host-runtime/grant",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=body,
+    )
+    assert response.status_code == 200, response.text
+    grant = SignedHostHelperGrant.parse(response.json()["grant"])
+    assert isinstance(grant.claims.operation, ExecuteContainerRuntimeRequestOperation)
+    assert grant.claims.operation.reconciliation_identity == identity
+    signer.public_key.verify(
+        bytes.fromhex(grant.signature.value),
+        host_helper_grant_signing_bytes(grant.claims),
+    )
+    assert (
+        client.post(
+            "/agent/host-runtime/grant",
+            headers=agent_headers(NODE_B, "serial-b"),
+            json=body,
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            "/agent/host-runtime/grant",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=body | {"reconciliation_identity": None},
+        ).status_code
+        == 409
+    )
+
+
 class _HostGrantKwargs(TypedDict):
     node_id: str
     job_id: str
@@ -828,6 +947,7 @@ class _HostGrantKwargs(TypedDict):
     request_sha256: str
     certificate_serial: str
     installation_id: str | None
+    reconciliation_identity: RecipeReconciliationIdentity | None
     expires_in_seconds: int
 
 
