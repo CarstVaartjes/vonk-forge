@@ -17,7 +17,11 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor
 from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
+from vonk_control.fleet_profiles import (
+    FleetProfileAdmissionBusy,
+    FleetProfileConflict,
+    FleetProfileService,
+)
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -207,6 +211,33 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
     assert calls[1][1].endswith(f"/api/profile/1/requests/{key}")
     with sessions() as session:
         assert len(list(session.scalars(select(FleetProfileApplication)))) == 1
+
+
+def test_load_retries_a_transient_admission_owner(
+    postgres_engine, monkeypatch
+) -> None:
+    sessions, api, _codec, headers, preview = _profile_api(postgres_engine)
+    original = FleetProfileService._queue_application
+    attempts = 0
+
+    def busy_then_queue(service, reviewed, **kwargs):
+        nonlocal attempts
+        if attempts < 2:
+            attempts += 1
+            raise FleetProfileAdmissionBusy("transient admission owner")
+        return original(service, reviewed, **kwargs)
+
+    monkeypatch.setattr(FleetProfileService, "_queue_application", busy_then_queue)
+    response = api.post(
+        "/api/profile/1/load",
+        headers=headers,
+        json={"request_key": str(uuid4()), "plan_digest": preview["plan_digest"]},
+    )
+
+    assert response.status_code == 202, response.text
+    assert attempts == 2
+    with sessions() as session:
+        assert session.scalar(select(FleetProfileApplication)) is not None
 
 
 @pytest.mark.parametrize("change", ["roster", "authority", "profile"])
