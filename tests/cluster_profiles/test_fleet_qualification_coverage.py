@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
-import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from cluster_profiles.fleet_qualification_dual_recovery import (
+    DualRecoveryTarget,
+    apply_dual_cleanup,
+    observe_dual_batch,
+    review_dual_cleanup,
+)
 from vonk_forge_contracts.qualification_authority import (
     RecoveryCoverageDefinition,
     RecoveryCoverageReceiptEnvelope,
@@ -18,7 +22,6 @@ from vonk_forge_contracts.qualification_authority import (
     recovery_receipt_sha256,
 )
 
-import cluster_profiles
 from cluster_profiles.fleet_qualification import EvidenceLedger, QualificationError
 from cluster_profiles.fleet_qualification_coverage import (
     _normalize_receipt_for_hash,
@@ -34,15 +37,6 @@ _DUAL_NODES = (
 )
 _SHA = "a" * 64
 _DUAL_T0 = datetime(2026, 9, 25, tzinfo=UTC)
-
-for _path_entry in sys.path:
-    _package_path = Path(_path_entry) / "cluster_profiles"
-    if _package_path.is_dir() and str(_package_path) not in cluster_profiles.__path__:
-        cast(Any, cluster_profiles.__path__).append(str(_package_path))
-
-_dual_recovery = importlib.import_module(
-    "cluster_profiles.fleet_qualification_dual_recovery"
-)
 
 
 def _canonical_sha(value: object) -> str:
@@ -692,15 +686,14 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
             "node_to_rank": {node_a: 0, node_b: 1},
         },
     )
-    target_type = _dual_recovery.DualRecoveryTarget
-    target = target_type(
+    target = DualRecoveryTarget(
         campaign_id=campaign_id,
         batch_id=batch_id,
         lane_id=lane_id,
         recipe_key=_RECIPE,
-        recipe_content_sha256=rank_row["content_sha256"],
+        recipe_content_sha256=cast(str, rank_row["content_sha256"]),
         package_sha256=rank_row["package"]["sha256"],  # type: ignore[index]
-        canary_record_sha256=canary["record_sha256"],
+        canary_record_sha256=cast(str, canary["record_sha256"]),
         run_id=run_id,
         recipe_revision_id=revision_id,
         alias=alias,
@@ -714,7 +707,6 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
         profile_digest="d" * 64,
         plan_digest="e" * 64,
     )
-    observe_dual_batch = _dual_recovery.observe_dual_batch
     snapshot_index = 0
     snapshots = [
         _dual_snapshot(
@@ -865,8 +857,18 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
                         "state": "stopped",
                         "route_state": "withdrawn",
                         "ranks": [
-                            {"node_id": node_a, "rank": 0, "state": "stopped"},
-                            {"node_id": node_b, "rank": 1, "state": "stopped"},
+                            {
+                                "node_id": node_a,
+                                "rank": 0,
+                                "role": "entrypoint",
+                                "state": "stopped",
+                            },
+                            {
+                                "node_id": node_b,
+                                "rank": 1,
+                                "role": "worker",
+                                "state": "stopped",
+                            },
                         ],
                     },
                 }
@@ -874,8 +876,6 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
             "fleet_snapshot": fleet_snapshot,
         }
 
-    review_dual_cleanup = _dual_recovery.review_dual_cleanup
-    apply_dual_cleanup = _dual_recovery.apply_dual_cleanup
     review_dual_cleanup(target, ledger, prepare_cleanup=prepare_cleanup)
     apply_dual_cleanup(
         target,
@@ -914,15 +914,7 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
         cleanup_to_idle=lambda _request: pytest.fail(
             "completed cleanup must not apply a second stop"
         ),
-        reconcile_cleanup=lambda request: {
-            **dict(request["prior_receipt"]),  # type: ignore[arg-type]
-            "fleet_snapshot": _dual_snapshot(
-                12,
-                state="idle",
-                cursor=12,
-                boots={node_a: "boot-a-2", node_b: "boot-b-2"},
-            ),
-        },
+        reconcile_cleanup=lambda request: _reconciled_cleanup(request, node_a, node_b),
         endpoint_exists=lambda _endpoint: False,
     )
 
@@ -946,3 +938,19 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
         canonical = RecoveryCoverageReceiptEnvelope.model_validate(envelope)
         assert canonical.receipt.failure_mode == expected_mode
         assert recovery_receipt_sha256(canonical.receipt) == envelope["receipt_sha256"]
+
+
+def _reconciled_cleanup(
+    request: Mapping[str, object], node_a: str, node_b: str
+) -> dict[str, object]:
+    prior_receipt = request.get("prior_receipt")
+    assert isinstance(prior_receipt, Mapping)
+    return {
+        **dict(prior_receipt),
+        "fleet_snapshot": _dual_snapshot(
+            12,
+            state="idle",
+            cursor=12,
+            boots={node_a: "boot-a-2", node_b: "boot-b-2"},
+        ),
+    }

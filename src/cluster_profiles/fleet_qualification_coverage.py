@@ -1153,10 +1153,33 @@ def _dual_stop_receipt_valid(
     if not isinstance(observation, Mapping):
         return False
     run_id = rank_loss_payload.get("run_id")
-    expected_ranks = [
-        {"node_id": node_id, "rank": rank, "state": "stopped"}
-        for node_id, rank in sorted(node_to_rank.items(), key=lambda item: item[1])
-    ]
+    raw_ranks = observation.get("ranks")
+    if not isinstance(raw_ranks, list) or len(raw_ranks) != len(node_to_rank):
+        return False
+    observed: dict[str, int] = {}
+    ranks_seen: set[int] = set()
+    for raw_rank in raw_ranks:
+        rank_record = _mapping(raw_rank, "dual cleanup stopped rank receipt")
+        node_id = _required_node(rank_record.get("node_id"), "stopped rank Spark")
+        rank = rank_record.get("rank")
+        _required_string(rank_record.get("role"), "stopped rank role")
+        if (
+            "fresh" in rank_record
+            and rank_record.get("fresh") is not None
+            and type(rank_record.get("fresh")) is not bool
+        ):
+            return False
+        if (
+            node_id not in node_to_rank
+            or type(rank) is not int
+            or node_to_rank[node_id] != rank
+            or node_id in observed
+            or rank in ranks_seen
+            or rank_record.get("state") != "stopped"
+        ):
+            return False
+        observed[node_id] = rank
+        ranks_seen.add(rank)
     return (
         receipt.get("run_id") == run_id
         and receipt.get("operation_state") == "succeeded"
@@ -1165,7 +1188,7 @@ def _dual_stop_receipt_valid(
         and observation.get("run_id") == run_id
         and observation.get("state") == "stopped"
         and observation.get("route_state") == "withdrawn"
-        and observation.get("ranks") == expected_ranks
+        and observed == dict(node_to_rank)
     )
 
 
