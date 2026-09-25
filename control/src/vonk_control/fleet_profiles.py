@@ -3101,7 +3101,11 @@ class FleetProfileService:
                 changed_nodes.update(members)
             for pending in session.scalars(
                 select(FleetProfileApplication).where(
-                    FleetProfileApplication.state.in_(("queued", "running"))
+                    FleetProfileApplication.state.in_(("queued", "running")),
+                    func.coalesce(
+                        FleetProfileApplication.progress["admission_pending"].as_boolean(),
+                        False,
+                    ).is_(False),
                 )
             ):
                 try:
@@ -3281,7 +3285,11 @@ class FleetProfileService:
                 )
         for pending in session.scalars(
             select(FleetProfileApplication).where(
-                FleetProfileApplication.state.in_(("queued", "running"))
+                FleetProfileApplication.state.in_(("queued", "running")),
+                func.coalesce(
+                    FleetProfileApplication.progress["admission_pending"].as_boolean(),
+                    False,
+                ).is_(False),
             )
         ):
             try:
@@ -3516,6 +3524,7 @@ class FleetProfileService:
                         return self._defer_pending_application(
                             pending.id,
                             "Profile admission is busy; the Controller will retry automatically.",
+                            retry_delay=timedelta(0),
                         )
                     time.sleep(retry_delay)
                 except FleetProfileAdmissionEffectBusy:
