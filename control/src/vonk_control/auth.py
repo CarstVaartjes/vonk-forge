@@ -70,6 +70,10 @@ MUTATION_ROLES = {
         "POST",
         "/api/recipe/installations/{installation_id}/reconcile",
     ): frozenset({"administrator"}),
+    (
+        "POST",
+        "/api/recipe/installations/{installation_id}/reconcile/preview",
+    ): frozenset({"administrator"}),
     ("POST", "/api/profile/applications/{application_id}/cancel"): frozenset(
         {"administrator"}
     ),
