@@ -1,0 +1,689 @@
+{
+  "$defs": {
+    "AuthorityCatalog": {
+      "additionalProperties": false,
+      "description": "The immutable catalog release used to derive the authority.",
+      "properties": {
+        "catalog_index_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Catalog Index Sha256",
+          "type": "string"
+        },
+        "commit": {
+          "pattern": "^[a-f0-9]{40}$",
+          "title": "Commit",
+          "type": "string"
+        },
+        "qualification_index_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Qualification Index Sha256",
+          "type": "string"
+        },
+        "recipe_count": {
+          "minimum": 1,
+          "title": "Recipe Count",
+          "type": "integer"
+        },
+        "release_tag": {
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "title": "Release Tag",
+          "type": "string"
+        },
+        "repository": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Repository",
+          "type": "string"
+        },
+        "source_commit": {
+          "pattern": "^[a-f0-9]{40}$",
+          "title": "Source Commit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "commit",
+        "release_tag",
+        "source_commit",
+        "catalog_index_sha256",
+        "qualification_index_sha256",
+        "recipe_count"
+      ],
+      "title": "AuthorityCatalog",
+      "type": "object"
+    },
+    "AuthorityPackage": {
+      "additionalProperties": false,
+      "description": "The exact published recipe package bound by a row.",
+      "properties": {
+        "expected_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Expected Bytes",
+          "type": "integer"
+        },
+        "media_type": {
+          "maxLength": 128,
+          "minLength": 3,
+          "title": "Media Type",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "expected_bytes",
+        "media_type"
+      ],
+      "title": "AuthorityPackage",
+      "type": "object"
+    },
+    "AuthorityScope": {
+      "additionalProperties": false,
+      "description": "The topology boundary for this physical campaign.",
+      "properties": {
+        "excluded_topology_recipe_keys": {
+          "items": {
+            "maxLength": 127,
+            "minLength": 5,
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+            "type": "string"
+          },
+          "title": "Excluded Topology Recipe Keys",
+          "type": "array"
+        },
+        "maximum_node_count": {
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Maximum Node Count",
+          "type": "integer"
+        },
+        "recipe_count": {
+          "minimum": 1,
+          "title": "Recipe Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "maximum_node_count",
+        "recipe_count",
+        "excluded_topology_recipe_keys"
+      ],
+      "title": "AuthorityScope",
+      "type": "object"
+    },
+    "ModelLicenseReference": {
+      "additionalProperties": false,
+      "description": "A Model identity and license fact shown at the operator gate.",
+      "properties": {
+        "attribution": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Attribution",
+          "type": "array"
+        },
+        "content_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 127,
+          "minLength": 5,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "operator_acceptance_required": {
+          "title": "Operator Acceptance Required",
+          "type": "boolean"
+        },
+        "spdx": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Spdx",
+          "type": "string"
+        },
+        "territorial_restrictions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelTerritorialRestrictions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "url": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "content_sha256",
+        "spdx",
+        "url",
+        "attribution",
+        "operator_acceptance_required"
+      ],
+      "title": "ModelLicenseReference",
+      "type": "object"
+    },
+    "ModelTerritorialRestrictions": {
+      "additionalProperties": false,
+      "properties": {
+        "denied_jurisdictions": {
+          "items": {
+            "pattern": "^[A-Z]{2,3}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Denied Jurisdictions",
+          "type": "array"
+        },
+        "notice": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Notice",
+          "type": "string"
+        }
+      },
+      "required": [
+        "denied_jurisdictions",
+        "notice"
+      ],
+      "title": "ModelTerritorialRestrictions",
+      "type": "object"
+    },
+    "QualificationBatch": {
+      "additionalProperties": false,
+      "description": "One paired single-Spark batch or exclusive topology assignment.",
+      "properties": {
+        "assignments": {
+          "items": {
+            "$ref": "#/$defs/QualificationBatchAssignment"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Assignments",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^batch-[0-9]{3,}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "paired-single",
+            "single",
+            "exclusive-dual"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sequence",
+        "id",
+        "mode",
+        "assignments"
+      ],
+      "title": "QualificationBatch",
+      "type": "object"
+    },
+    "QualificationBatchAssignment": {
+      "additionalProperties": false,
+      "description": "One exact recipe and lane assignment in an execution batch.",
+      "properties": {
+        "lane": {
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Lane",
+          "type": "integer"
+        },
+        "node_count": {
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Node Count",
+          "type": "integer"
+        },
+        "recipe": {
+          "maxLength": 127,
+          "minLength": 5,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Recipe",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recipe",
+        "lane",
+        "node_count"
+      ],
+      "title": "QualificationBatchAssignment",
+      "type": "object"
+    },
+    "RecipeAuthorityRow": {
+      "additionalProperties": false,
+      "description": "One recipe's exact catalog, policy and test identity.",
+      "properties": {
+        "content_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "disposition": {
+          "enum": [
+            "actionable",
+            "capacity-review",
+            "operator-acceptance-required"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "interface": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Interface",
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 127,
+          "minLength": 5,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "model_license_refs": {
+          "items": {
+            "$ref": "#/$defs/ModelLicenseReference"
+          },
+          "title": "Model License Refs",
+          "type": "array"
+        },
+        "node_count": {
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Node Count",
+          "type": "integer"
+        },
+        "operator_acceptance_required": {
+          "title": "Operator Acceptance Required",
+          "type": "boolean"
+        },
+        "package": {
+          "$ref": "#/$defs/AuthorityPackage"
+        },
+        "qualification_inputs": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Qualification Inputs",
+          "type": "array"
+        },
+        "recipe_version": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Recipe Version",
+          "type": "string"
+        },
+        "recovery_coverage_refs": {
+          "items": {
+            "$ref": "#/$defs/RecoveryCoverageRef"
+          },
+          "title": "Recovery Coverage Refs",
+          "type": "array"
+        },
+        "review_gates": {
+          "items": {
+            "$ref": "#/$defs/ReviewGate"
+          },
+          "title": "Review Gates",
+          "type": "array"
+        },
+        "runtime_stack_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Runtime Stack Sha256",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "smoke_cases": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Smoke Cases",
+          "type": "array"
+        },
+        "topology_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Topology Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence",
+        "key",
+        "content_sha256",
+        "node_count",
+        "interface",
+        "recipe_version",
+        "package",
+        "disposition",
+        "operator_acceptance_required",
+        "model_license_refs",
+        "qualification_inputs",
+        "smoke_cases",
+        "review_gates",
+        "runtime_stack_sha256",
+        "topology_sha256",
+        "recovery_coverage_refs"
+      ],
+      "title": "RecipeAuthorityRow",
+      "type": "object"
+    },
+    "RecoveryCoverage": {
+      "additionalProperties": false,
+      "description": "A reviewed equivalence group for one exact recovery failure mode.",
+      "properties": {
+        "coverage_id": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Coverage Id",
+          "type": "string"
+        },
+        "equivalence_rationale": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Equivalence Rationale",
+          "type": "string"
+        },
+        "failure_mode": {
+          "enum": [
+            "single-host-restart",
+            "dual-rank-loss-recovery",
+            "dual-host-restart"
+          ],
+          "title": "Failure Mode",
+          "type": "string"
+        },
+        "invalidated_by": {
+          "items": {
+            "enum": [
+              "recipe_content_sha256",
+              "package_sha256",
+              "model_content_sha256s",
+              "runtime_stack_sha256",
+              "topology_sha256",
+              "coverage_membership",
+              "runtime_image_digest",
+              "platform_build_sha256",
+              "agent_build_sha256",
+              "target_node_ids",
+              "smoke_receipt_sha256"
+            ],
+            "type": "string"
+          },
+          "title": "Invalidated By",
+          "type": "array"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/$defs/RecoveryCoverageMember"
+          },
+          "minItems": 1,
+          "title": "Members",
+          "type": "array"
+        },
+        "representative_recipe": {
+          "maxLength": 127,
+          "minLength": 5,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Representative Recipe",
+          "type": "string"
+        },
+        "shared": {
+          "title": "Shared",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "failure_mode",
+        "representative_recipe",
+        "members",
+        "shared",
+        "equivalence_rationale",
+        "invalidated_by",
+        "coverage_id"
+      ],
+      "title": "RecoveryCoverage",
+      "type": "object"
+    },
+    "RecoveryCoverageMember": {
+      "additionalProperties": false,
+      "description": "The exact identity of a recipe allowed to use one recovery proof.",
+      "properties": {
+        "model_content_sha256s": {
+          "items": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "title": "Model Content Sha256S",
+          "type": "array"
+        },
+        "package_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Package Sha256",
+          "type": "string"
+        },
+        "recipe": {
+          "maxLength": 127,
+          "minLength": 5,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Recipe",
+          "type": "string"
+        },
+        "recipe_content_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Recipe Content Sha256",
+          "type": "string"
+        },
+        "runtime_stack_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Runtime Stack Sha256",
+          "type": "string"
+        },
+        "topology_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Topology Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recipe",
+        "recipe_content_sha256",
+        "package_sha256",
+        "model_content_sha256s",
+        "runtime_stack_sha256",
+        "topology_sha256"
+      ],
+      "title": "RecoveryCoverageMember",
+      "type": "object"
+    },
+    "RecoveryCoverageRef": {
+      "additionalProperties": false,
+      "description": "A recipe row's typed reference to one recovery coverage definition.",
+      "properties": {
+        "coverage_id": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Coverage Id",
+          "type": "string"
+        },
+        "failure_mode": {
+          "enum": [
+            "single-host-restart",
+            "dual-rank-loss-recovery",
+            "dual-host-restart"
+          ],
+          "title": "Failure Mode",
+          "type": "string"
+        },
+        "representative_recipe": {
+          "maxLength": 127,
+          "minLength": 5,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Representative Recipe",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "representative",
+            "shared-member",
+            "dedicated"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "coverage_id",
+        "failure_mode",
+        "representative_recipe",
+        "role"
+      ],
+      "title": "RecoveryCoverageRef",
+      "type": "object"
+    },
+    "ReviewGate": {
+      "additionalProperties": false,
+      "description": "An explicit per-recipe operator review gate.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "capacity-review",
+            "operator-acceptance-required"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "reason"
+      ],
+      "title": "ReviewGate",
+      "type": "object"
+    }
+  },
+  "$id": "https://api.vonkforge.ai/contracts/qualification-authority-v4.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The current source of recipe qualification order and recovery references.",
+  "properties": {
+    "authority_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Authority Id",
+      "type": "string"
+    },
+    "batches": {
+      "items": {
+        "$ref": "#/$defs/QualificationBatch"
+      },
+      "minItems": 1,
+      "title": "Batches",
+      "type": "array"
+    },
+    "catalog": {
+      "$ref": "#/$defs/AuthorityCatalog"
+    },
+    "recipes": {
+      "items": {
+        "$ref": "#/$defs/RecipeAuthorityRow"
+      },
+      "minItems": 1,
+      "title": "Recipes",
+      "type": "array"
+    },
+    "recovery_coverage": {
+      "items": {
+        "$ref": "#/$defs/RecoveryCoverage"
+      },
+      "minItems": 1,
+      "title": "Recovery Coverage",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 4,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "scope": {
+      "$ref": "#/$defs/AuthorityScope"
+    }
+  },
+  "required": [
+    "schema_version",
+    "authority_id",
+    "catalog",
+    "scope",
+    "recipes",
+    "batches",
+    "recovery_coverage"
+  ],
+  "title": "QualificationAuthority",
+  "type": "object"
+}

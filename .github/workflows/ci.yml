@@ -482,6 +482,10 @@ jobs:
             run_full=true
           fi
           echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
+      - name: Verify canonical qualification campaign schemas
+        run: >-
+          uv run --project control --frozen --with-editable .
+          python scripts/export-qualification-campaign-schemas --check
       - name: Install pinned Node.js with generator dependency cache
         if: steps.generation.outputs.run_full == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
