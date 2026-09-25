@@ -494,7 +494,7 @@ impl CommandRunner for RecordingRunner {
                         String::new()
                     };
                     format!(
-                        "{prefix}{}\t{digest}\ttrue\t{run_id}\n",
+                        "{prefix}{}\t{digest}\ttrue\t{run_id}\tinstallation-1\n",
                         self.runtime_running.lock().unwrap()
                     )
                     .into_bytes()
