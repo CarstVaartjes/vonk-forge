@@ -126,6 +126,7 @@ class AgentOperation(StrEnum):
     RECIPE_JOB_RUN = "recipe.job.run.v1"
     RECIPE_STOP = "recipe.stop"
     RECIPE_UNINSTALL = "recipe.uninstall"
+    RECIPE_RECONCILE = "recipe.reconcile"
 
 
 class ArtifactDistributionPayload(WireModel):
@@ -878,6 +879,8 @@ from .recipe_operations import (
     RecipeStartPayload,
     RecipeStopPayload,
     RecipeStopResult,
+    RecipeReconcilePayload,
+    RecipeReconcileResult,
     RecipeUninstallPayload,
     RecipeUninstallResult,
 )
@@ -894,6 +897,7 @@ AgentPayload = (
     | RecipeInstallPayload
     | RecipeStartPayload
     | RecipeStopPayload
+    | RecipeReconcilePayload
     | RecipeUninstallPayload
 )
 AgentResultPayload = (
@@ -901,6 +905,7 @@ AgentResultPayload = (
     | AgentInstallResult
     | RecipeStartResult
     | RecipeStopResult
+    | RecipeReconcileResult
     | RecipeUninstallResult
     | RecipeBuildEvidence
     | RecipeBuildCleanupEvidence
@@ -922,6 +927,7 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RECIPE_START: RecipeStartPayload,
     AgentOperation.RECIPE_STOP: RecipeStopPayload,
     AgentOperation.RECIPE_UNINSTALL: RecipeUninstallPayload,
+    AgentOperation.RECIPE_RECONCILE: RecipeReconcilePayload,
 }
 
 
@@ -953,6 +959,7 @@ RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RECIPE_START: RecipeStartResult,
     AgentOperation.RECIPE_STOP: RecipeStopResult,
     AgentOperation.RECIPE_UNINSTALL: RecipeUninstallResult,
+    AgentOperation.RECIPE_RECONCILE: RecipeReconcileResult,
     AgentOperation.RECIPE_BUILD: RecipeBuildEvidence,
     AgentOperation.RECIPE_BUILD_CLEANUP: RecipeBuildCleanupEvidence,
     AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportEvidence,
@@ -1087,6 +1094,11 @@ class AgentClaim(_ProtocolEnvelopeModel):
             raise AgentProtocolError(
                 f"payload model is not registered for {self.operation.value}"
             )
+        if (
+            self.operation is AgentOperation.RECIPE_RECONCILE
+            and self.payload.node_id != self.node_id
+        ):
+            raise AgentProtocolError("reconciliation node does not match claim")
         payload_document = json.loads(canonical_message(self.payload))
         maximum_bytes = (
             MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES

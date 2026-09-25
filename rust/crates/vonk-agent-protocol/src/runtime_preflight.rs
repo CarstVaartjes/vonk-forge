@@ -87,6 +87,7 @@ mod tests {
             arguments: vec![],
             observation: None,
             installation_id: None,
+            reconciliation_identity: None,
         };
         assert!(request.validate().is_ok());
         request.arguments = vec!["--privileged".into()];

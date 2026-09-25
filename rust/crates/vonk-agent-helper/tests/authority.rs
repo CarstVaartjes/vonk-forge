@@ -186,6 +186,7 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
                 installation_id: None,
+                reconciliation_identity: None,
             },
         ),
     ];
@@ -638,6 +639,7 @@ fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRun
         arguments,
         observation: None,
         installation_id: None,
+        reconciliation_identity: None,
     }
 }
 

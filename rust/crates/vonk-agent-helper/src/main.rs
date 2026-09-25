@@ -740,6 +740,7 @@ mod tests {
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
                 installation_id: None,
+                reconciliation_identity: None,
             },
         );
         let rejection = HelperRejection::for_operation(
@@ -903,6 +904,7 @@ mod tests {
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
                 installation_id: None,
+                reconciliation_identity: None,
             },
         );
         for (error, code) in [

@@ -15,6 +15,7 @@ from .contracts import (
     AgentProtocolError,
     canonical_message,
 )
+from .host_helper import RecipeReconciliationIdentity
 from .wire_model import WireModel
 
 RECIPE_OPERATIONS = frozenset(
@@ -23,6 +24,7 @@ RECIPE_OPERATIONS = frozenset(
         AgentOperation.RECIPE_START,
         AgentOperation.RECIPE_STOP,
         AgentOperation.RECIPE_UNINSTALL,
+        AgentOperation.RECIPE_RECONCILE,
     }
 )
 
@@ -209,11 +211,30 @@ class RecipeUninstallResult(_StrictPayload):
     removed_model_bytes: int = Field(ge=0, le=16 * 1024**4)
 
 
+class RecipeReconcilePayload(RecipeReconciliationIdentity):
+    """Authority to remove one managed install with an invalid launch contract."""
+
+
+class RecipeReconcileResult(_StrictPayload):
+    reconciled: Literal[True]
+    node_id: Annotated[str, Field(pattern=r"^spk_[0-9a-f]{32}$")]
+    installation_id: CanonicalUuid
+    install_operation_id: CanonicalUuid
+    install_operation_payload_sha256: Digest
+    plan_digest: Digest
+    recipe_revision_id: CanonicalUuid
+    recipe_content_sha256: Digest
+    compiled_spec_canonical_sha256: Digest
+    removed_bytes: ByteCount
+    cleanup_receipt_sha256: Digest
+
+
 _REQUEST_MODELS = {
     AgentOperation.RECIPE_INSTALL: RecipeInstallPayload,
     AgentOperation.RECIPE_START: RecipeStartPayload,
     AgentOperation.RECIPE_STOP: RecipeStopPayload,
     AgentOperation.RECIPE_UNINSTALL: RecipeUninstallPayload,
+    AgentOperation.RECIPE_RECONCILE: RecipeReconcilePayload,
 }
 
 
@@ -226,6 +247,7 @@ class RecipeOperationRequest(_StrictPayload):
         | RecipeStartPayload
         | RecipeStopPayload
         | RecipeUninstallPayload
+        | RecipeReconcilePayload
     )
 
     @classmethod
@@ -359,12 +381,13 @@ class RecipeOperationRequest(_StrictPayload):
 
 def parse_recipe_operation_result(
     operation: AgentOperation, result: Any
-) -> RecipeStopResult | RecipeUninstallResult:
+) -> RecipeStopResult | RecipeUninstallResult | RecipeReconcileResult:
     """Parse a successful stop or uninstall result exactly."""
 
     result_models = {
         AgentOperation.RECIPE_STOP: RecipeStopResult,
         AgentOperation.RECIPE_UNINSTALL: RecipeUninstallResult,
+        AgentOperation.RECIPE_RECONCILE: RecipeReconcileResult,
     }
     try:
         model = result_models[operation]
@@ -380,6 +403,8 @@ __all__ = [
     "RecipeStartPayload",
     "RecipeStopPayload",
     "RecipeStopResult",
+    "RecipeReconcilePayload",
+    "RecipeReconcileResult",
     "RecipeUninstallPayload",
     "RecipeUninstallResult",
     "parse_recipe_operation_result",

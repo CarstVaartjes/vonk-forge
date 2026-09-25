@@ -21,13 +21,15 @@ pub use generated::{
     RecipeJobRunRequest, RecipeJobRunResult, RecipeStartPayload as RecipeStartRequest,
     RecipeStartPayloadPhase as RecipeStartPhase, RecipeStopPayload as RecipeStopRequest,
     RecipeStopResult, RecipeUninstallPayload as RecipeUninstallRequest, RecipeUninstallResult,
+    RecipeReconcilePayload as RecipeReconcileRequest, RecipeReconcileResult,
 };
 pub use generated::{
     ExecuteContainerRuntimeRequestOperationAction as HostHelperContainerRuntimeAction,
     HostHelperGrantClaims, HostHelperSignature as HostHelperGrantSignature,
     HostHelperSignature as RecipeRunObservationReceiptSignature,
     HostOperation as HostHelperOperation, HostRuntimeRequest,
-    HostRuntimeRequestAction as HostRuntimeAction, RecipeRunInspectionBinding,
+    HostRuntimeRequestAction as HostRuntimeAction, RecipeReconciliationIdentity,
+    RecipeRunInspectionBinding,
     RecipeRunObservationReceiptClaims,
     RecipeRunObservationReceiptClaimsOutcome as RecipeRunObservationOutcome,
     RecipeRunObservationWire, RecipeRunObservationsWire,
@@ -337,6 +339,7 @@ mod installation_cleanup_contract_tests {
             arguments: Vec::new(),
             observation: None,
             installation_id,
+            reconciliation_identity: None,
         }
     }
 
@@ -412,6 +415,7 @@ mod host_runtime_request_bound_tests {
             arguments,
             observation: None,
             installation_id: None,
+            reconciliation_identity: None,
         }
     }
 
@@ -463,6 +467,7 @@ mod host_runtime_request_bound_tests {
             arguments: Vec::new(),
             observation: Some(binding),
             installation_id: None,
+            reconciliation_identity: None,
         };
         let measured = canonical_length(&request);
         assert!(
@@ -680,6 +685,7 @@ impl AgentClaim {
                 | "recipe.start"
                 | "recipe.stop"
                 | "recipe.uninstall"
+                | "recipe.reconcile"
         ) {
             return Err(ProtocolError::Identity("claim operation"));
         }
@@ -990,6 +996,16 @@ impl AgentResult {
                     result.validate()?;
                     true
                 }
+                AgentOperation::RecipeReconcile => {
+                    let AgentResultResult::RecipeReconcileResult(result) = &self.result else {
+                        return Err(ProtocolError::Identity("result operation"));
+                    };
+                    result.validate()?;
+                    if result.node_id != self.node_id {
+                        return Err(ProtocolError::Identity("reconciliation result node"));
+                    }
+                    true
+                }
             },
             AgentResultState::Failed => match (&self.result, operation) {
                 (AgentResultResult::AgentFailureResult(result), _) => {
@@ -1151,6 +1167,7 @@ pub enum RecipeOperationRequest {
     Start(RecipeStartRequest),
     Stop(RecipeStopRequest),
     Uninstall(RecipeUninstallRequest),
+    Reconcile(RecipeReconcileRequest),
 }
 
 impl RecipeJobRunResult {
@@ -1231,6 +1248,24 @@ impl RecipeUninstallResult {
     }
 }
 
+impl RecipeReconcileResult {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.reconciled
+            && valid_node_id(&self.node_id)
+            && lower_hex(&self.install_operation_payload_sha256, 64)
+            && lower_hex(&self.plan_digest, 64)
+            && lower_hex(&self.recipe_content_sha256, 64)
+            && lower_hex(&self.compiled_spec_canonical_sha256, 64)
+            && lower_hex(&self.cleanup_receipt_sha256, 64)
+            && self.removed_bytes <= 16 * 1024_u64.pow(4)
+        {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("recipe reconciliation result"))
+        }
+    }
+}
+
 impl RecipeOperationRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
@@ -1265,9 +1300,17 @@ impl RecipeOperationRequest {
             ("recipe.uninstall", generated::AgentClaimPayload::RecipeUninstallPayload(value)) => {
                 Self::Uninstall(value.clone())
             }
+            ("recipe.reconcile", generated::AgentClaimPayload::RecipeReconcilePayload(value)) => {
+                Self::Reconcile(value.clone())
+            }
             _ => return Err(ProtocolError::Identity("recipe operation payload")),
         };
         request.validate()?;
+        if let Self::Reconcile(value) = &request
+            && value.node_id != claim.node_id
+        {
+            return Err(ProtocolError::Identity("reconciliation node"));
+        }
         Ok(request)
     }
 
@@ -1376,6 +1419,14 @@ impl RecipeOperationRequest {
                         .cleanup_model_content_sha256
                         .as_ref()
                         .is_none_or(|digest| lower_hex(digest, 64))
+            }
+            Self::Reconcile(value) => {
+                value.schema_version == 1
+                    && valid_node_id(&value.node_id)
+                    && lower_hex(&value.install_operation_payload_sha256, 64)
+                    && lower_hex(&value.plan_digest, 64)
+                    && lower_hex(&value.recipe_content_sha256, 64)
+                    && lower_hex(&value.compiled_spec_canonical_sha256, 64)
             }
         };
         if valid {
@@ -1760,6 +1811,49 @@ mod recipe_install_tests {
         };
         assert_eq!(request.schema_version, 2);
         assert_eq!(request.compiled_execution_plan.schema_version, 2);
+    }
+}
+
+#[cfg(test)]
+mod recipe_reconcile_tests {
+    use super::*;
+
+    fn claim(claim_node: &str, payload_node: &str) -> AgentClaim {
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "node_id": payload_node,
+            "installation_id": "00000000-0000-4000-8000-000000000001",
+            "install_operation_id": "00000000-0000-4000-8000-000000000002",
+            "install_operation_payload_sha256": "a".repeat(64),
+            "plan_digest": "b".repeat(64),
+            "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
+            "recipe_content_sha256": "c".repeat(64),
+            "compiled_spec_canonical_sha256": "d".repeat(64),
+        });
+        let typed: generated::AgentClaimPayload = serde_json::from_value(payload).unwrap();
+        AgentClaim {
+            attempt: 1,
+            authority_revision: "e".repeat(64),
+            deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
+            fence: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: claim_node.to_owned(),
+            operation: "recipe.reconcile".parse().unwrap(),
+            operation_id: Uuid::new_v4(),
+            payload_digest: hex_sha256(&canonical_json(&typed).unwrap()),
+            payload: typed,
+            schema_version: 1,
+        }
+    }
+
+    #[test]
+    fn claim_and_bound_identity_must_name_the_same_node() {
+        let node = "spk_0123456789abcdef0123456789abcdef";
+        let parsed = RecipeOperationRequest::parse(&claim(node, node)).unwrap();
+        assert!(matches!(parsed, RecipeOperationRequest::Reconcile(_)));
+
+        let mismatch = claim(node, "spk_abcdef0123456789abcdef0123456789");
+        assert!(RecipeOperationRequest::parse(&mismatch).is_err());
     }
 }
 
@@ -2552,6 +2646,7 @@ mod recipe_run_inspection_tests {
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
             observation: Some(binding.clone()),
             installation_id: None,
+            reconciliation_identity: None,
         };
         request.validate().unwrap();
 
@@ -2649,6 +2744,7 @@ mod recipe_run_inspection_tests {
                         request_sha256: "b".repeat(64),
                         observation_identity_sha256: Some(identity_sha256.clone()),
                         installation_id: None,
+                        reconciliation_identity: None,
                     },
                 ),
             },

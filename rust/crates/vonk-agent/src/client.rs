@@ -4530,6 +4530,7 @@ mod tests {
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
             observation: Some(binding.clone()),
             installation_id: None,
+            reconciliation_identity: None,
         };
         let digest = hex_sha256(&canonical_json(&request).unwrap());
         let request_id = Uuid::new_v4();
@@ -4681,6 +4682,7 @@ mod tests {
                             request_sha256: helper_receipt.claims.request_sha256.clone(),
                             observation_identity_sha256: Some("e".repeat(64)),
                             installation_id: None,
+                            reconciliation_identity: None,
                         },
                     ),
                 },

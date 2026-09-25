@@ -186,6 +186,9 @@
               "$ref": "#/$defs/RecipeStopPayload"
             },
             {
+              "$ref": "#/$defs/RecipeReconcilePayload"
+            },
+            {
               "$ref": "#/$defs/RecipeUninstallPayload"
             }
           ],
@@ -526,7 +529,8 @@
         "recipe.start",
         "recipe.job.run.v1",
         "recipe.stop",
-        "recipe.uninstall"
+        "recipe.uninstall",
+        "recipe.reconcile"
       ],
       "title": "AgentOperation",
       "type": "string"
@@ -703,6 +707,9 @@
             },
             {
               "$ref": "#/$defs/RecipeStopResult"
+            },
+            {
+              "$ref": "#/$defs/RecipeReconcileResult"
             },
             {
               "$ref": "#/$defs/RecipeUninstallResult"
@@ -2968,6 +2975,17 @@
           "title": "Operation Id",
           "type": "string"
         },
+        "reconciliation_identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeReconciliationIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "request_sha256": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Request Sha256",
@@ -3562,6 +3580,17 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Operation Id",
           "type": "string"
+        },
+        "reconciliation_identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeReconciliationIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "schema_version": {
           "const": 1,
@@ -6958,6 +6987,9 @@
             },
             {
               "$ref": "#/$defs/RecipeUninstallPayload"
+            },
+            {
+              "$ref": "#/$defs/RecipeReconcilePayload"
             }
           ],
           "title": "Payload"
@@ -6968,6 +7000,210 @@
         "payload"
       ],
       "title": "RecipeOperationRequest",
+      "type": "object"
+    },
+    "RecipeReconcilePayload": {
+      "additionalProperties": false,
+      "description": "Authority to remove one managed install with an invalid launch contract.",
+      "properties": {
+        "compiled_spec_canonical_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Compiled Spec Canonical Sha256",
+          "type": "string"
+        },
+        "install_operation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Install Operation Id",
+          "type": "string"
+        },
+        "install_operation_payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Install Operation Payload Sha256",
+          "type": "string"
+        },
+        "installation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Digest",
+          "type": "string"
+        },
+        "recipe_content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Recipe Content Sha256",
+          "type": "string"
+        },
+        "recipe_revision_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Recipe Revision Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "node_id",
+        "installation_id",
+        "install_operation_id",
+        "install_operation_payload_sha256",
+        "plan_digest",
+        "recipe_revision_id",
+        "recipe_content_sha256",
+        "compiled_spec_canonical_sha256"
+      ],
+      "title": "RecipeReconcilePayload",
+      "type": "object"
+    },
+    "RecipeReconcileResult": {
+      "additionalProperties": false,
+      "properties": {
+        "cleanup_receipt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Cleanup Receipt Sha256",
+          "type": "string"
+        },
+        "compiled_spec_canonical_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Compiled Spec Canonical Sha256",
+          "type": "string"
+        },
+        "install_operation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Install Operation Id",
+          "type": "string"
+        },
+        "install_operation_payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Install Operation Payload Sha256",
+          "type": "string"
+        },
+        "installation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Digest",
+          "type": "string"
+        },
+        "recipe_content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Recipe Content Sha256",
+          "type": "string"
+        },
+        "recipe_revision_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Recipe Revision Id",
+          "type": "string"
+        },
+        "reconciled": {
+          "const": true,
+          "title": "Reconciled",
+          "type": "boolean"
+        },
+        "removed_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Removed Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reconciled",
+        "node_id",
+        "installation_id",
+        "install_operation_id",
+        "install_operation_payload_sha256",
+        "plan_digest",
+        "recipe_revision_id",
+        "recipe_content_sha256",
+        "compiled_spec_canonical_sha256",
+        "removed_bytes",
+        "cleanup_receipt_sha256"
+      ],
+      "title": "RecipeReconcileResult",
+      "type": "object"
+    },
+    "RecipeReconciliationIdentity": {
+      "additionalProperties": false,
+      "description": "Exact old install authority carried through the signed cleanup grant.",
+      "properties": {
+        "compiled_spec_canonical_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Compiled Spec Canonical Sha256",
+          "type": "string"
+        },
+        "install_operation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Install Operation Id",
+          "type": "string"
+        },
+        "install_operation_payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Install Operation Payload Sha256",
+          "type": "string"
+        },
+        "installation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "plan_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Digest",
+          "type": "string"
+        },
+        "recipe_content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Recipe Content Sha256",
+          "type": "string"
+        },
+        "recipe_revision_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Recipe Revision Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "node_id",
+        "installation_id",
+        "install_operation_id",
+        "install_operation_payload_sha256",
+        "plan_digest",
+        "recipe_revision_id",
+        "recipe_content_sha256",
+        "compiled_spec_canonical_sha256"
+      ],
+      "title": "RecipeReconciliationIdentity",
       "type": "object"
     },
     "RecipeRunInspectionBinding": {
@@ -11158,6 +11394,9 @@
     "RecipeJobOutputManifest": [
       "RecipeJobOutputManifestContent"
     ],
+    "RecipeReconcilePayload": [
+      "RecipeReconciliationIdentity"
+    ],
     "RecipeRunObservationGrantRequest": [
       "RecipeRunObservationIdentity",
       "RecipeRunInspectionBinding"
@@ -11295,6 +11534,9 @@
     "RecipeJobRunRequest": "vonk_agent_protocol.recipe_jobs.RecipeJobRunRequest",
     "RecipeJobRunResult": "vonk_agent_protocol.recipe_jobs.RecipeJobRunResult",
     "RecipeOperationRequest": "vonk_agent_protocol.recipe_operations.RecipeOperationRequest",
+    "RecipeReconcilePayload": "vonk_agent_protocol.recipe_operations.RecipeReconcilePayload",
+    "RecipeReconcileResult": "vonk_agent_protocol.recipe_operations.RecipeReconcileResult",
+    "RecipeReconciliationIdentity": "vonk_agent_protocol.host_helper.RecipeReconciliationIdentity",
     "RecipeRunInspectionBinding": "vonk_agent_protocol.host_helper.RecipeRunInspectionBinding",
     "RecipeRunObservationGrantRequest": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantRequest",
     "RecipeRunObservationGrantWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantWire",
@@ -11462,6 +11704,9 @@
     "RecipeJobRunRequest": "#/$defs/RecipeJobRunRequest",
     "RecipeJobRunResult": "#/$defs/RecipeJobRunResult",
     "RecipeOperationRequest": "#/$defs/RecipeOperationRequest",
+    "RecipeReconcilePayload": "#/$defs/RecipeReconcilePayload",
+    "RecipeReconcileResult": "#/$defs/RecipeReconcileResult",
+    "RecipeReconciliationIdentity": "#/$defs/RecipeReconciliationIdentity",
     "RecipeRunInspectionBinding": "#/$defs/RecipeRunInspectionBinding",
     "RecipeRunObservationGrantRequest": "#/$defs/RecipeRunObservationGrantRequest",
     "RecipeRunObservationGrantWire": "#/$defs/RecipeRunObservationGrantWire",

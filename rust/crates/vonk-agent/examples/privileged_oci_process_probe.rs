@@ -94,6 +94,7 @@ fn main() {
         arguments: arguments.clone(),
         observation: None,
         installation_id: None,
+        reconciliation_identity: None,
     };
     request.validate().unwrap();
     let body = canonical_json(&request).unwrap();
@@ -127,6 +128,7 @@ fn main() {
             request_sha256: request_sha.clone(),
             observation_identity_sha256: None,
             installation_id: None,
+            reconciliation_identity: None,
         },
     );
     let claims = GrantClaims {

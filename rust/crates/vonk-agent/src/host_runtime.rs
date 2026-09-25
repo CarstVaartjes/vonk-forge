@@ -280,6 +280,7 @@ impl HostRuntimeBoundary<'_> {
             arguments,
             observation: Some(binding.clone()),
             installation_id: None,
+            reconciliation_identity: None,
         };
         request
             .validate()
@@ -1389,6 +1390,7 @@ mod tests {
             arguments: vec!["sha256:image".to_owned(), "run".to_owned()],
             observation: None,
             installation_id: None,
+            reconciliation_identity: None,
         }
     }
 

@@ -5802,6 +5802,7 @@ mod tests {
                 .collect(),
             observation: None,
             installation_id: None,
+            reconciliation_identity: None,
         };
         let body = vonk_agent_protocol::canonical_json(&request).unwrap();
         assert!(
