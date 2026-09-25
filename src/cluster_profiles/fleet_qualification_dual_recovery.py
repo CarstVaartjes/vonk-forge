@@ -2721,10 +2721,11 @@ def _validate_cleanup_receipt(
     if prior_recovery is None:
         raise QualificationError("dual cleanup has no recovered serving source")
     _require_snapshot_after(view, _payload(prior_recovery), "dual cleanup")
-    if view.generated_at < application_updated_at:
-        raise QualificationError(
-            "cleanup FleetSnapshot predates the successful application"
-        )
+    validate_dual_snapshot_not_before(
+        view.generated_at,
+        application_updated_at,
+        "cleanup FleetSnapshot",
+    )
     _require_idle_fleet(target, view)
     if _endpoint_presence(endpoint_exists, target.alias):
         raise QualificationError("dual cleanup left the exact recipe route published")
@@ -2824,10 +2825,11 @@ def _validate_cleanup_event(
     # Revalidate the cryptographically tied receipt without another remote read.
     _validate_cleanup_receipt_fields(target, ledger, review, receipt)
     view = _fleet_view(receipt.get("fleet_snapshot"), target.fleet_node_ids)
-    if view.generated_at < _timestamp(
-        receipt.get("application_updated_at"), "cleanup application update time"
-    ):
-        raise QualificationError("persisted cleanup snapshot predates its application")
+    validate_dual_snapshot_not_before(
+        view.generated_at,
+        receipt.get("application_updated_at"),
+        "persisted cleanup FleetSnapshot",
+    )
     _require_idle_fleet(target, view)
     if not _all_selected_live(view, target):
         raise QualificationError("persisted cleanup baseline lacks live selected hosts")
@@ -2988,6 +2990,11 @@ def _validate_offline_event(
 def _require_idle_fleet(
     target: DualRecoveryTarget | FailedDualCanaryTarget, view: _FleetView
 ) -> None:
+    del target
+    _require_idle_fleet_view(view)
+
+
+def _require_idle_fleet_view(view: _FleetView) -> None:
     if view.loaded or view.published_aliases:
         raise QualificationError("whole Fleet is not idle after dual cleanup")
     active_reservations = (
@@ -3007,7 +3014,11 @@ def _require_idle_fleet(
 def _all_selected_live(
     view: _FleetView, target: DualRecoveryTarget | FailedDualCanaryTarget
 ) -> bool:
-    return all(_node_live(view.nodes[node_id]) for node_id in target.node_ids)
+    return _selected_nodes_live(view, target.node_ids)
+
+
+def _selected_nodes_live(view: _FleetView, node_ids: Sequence[str]) -> bool:
+    return all(_node_live(view.nodes[node_id]) for node_id in node_ids)
 
 
 def _node_live(node: _FleetNode) -> bool:
@@ -3560,32 +3571,112 @@ def _baseline_boot(
 def _completion_refs(
     ledger: EvidenceLedger, target: DualRecoveryTarget, target_digest: str
 ) -> dict[str, str]:
-    names = (
-        _RANK_LOSS_EVENT,
-        _ROUTE_WITHDRAWAL_EVENT,
-        _RANK_RECOVERY_EVENT,
-        "dual_recovery.cleanup.plan_reviewed",
-        "dual_recovery.cleanup.completed",
-        "host-restart.baseline",
-    )
-    refs: dict[str, str] = {}
-    for name in names:
+    source_records: dict[str, Mapping[str, object]] = {}
+    for key, name in (
+        ("rank_loss", _RANK_LOSS_EVENT),
+        ("route_withdrawal", _ROUTE_WITHDRAWAL_EVENT),
+        ("rank_recovery", _RANK_RECOVERY_EVENT),
+        ("cleanup_review", "dual_recovery.cleanup.plan_reviewed"),
+        ("cleanup", "dual_recovery.cleanup.completed"),
+        ("baseline", "host-restart.baseline"),
+    ):
         record = _event(ledger, target, target_digest, name)
         if record is None:
             raise QualificationError(f"dual recovery completion lacks {name}")
-        refs[name] = _required_string(
-            record.get("record_sha256"), f"{name} record digest"
-        )
+        source_records[key] = record
+    offline_refs: dict[str, str] = {}
+    recovered_refs: dict[str, str] = {}
     for node_id, _rank in _rank_order(target):
-        for name in ("host-restart.offline", "host-restart.recovered"):
+        for name, destination in (
+            ("host-restart.offline", offline_refs),
+            ("host-restart.recovered", recovered_refs),
+        ):
             record = _node_event(ledger, target, target_digest, name, node_id)
             if record is None:
                 raise QualificationError(
                     f"dual recovery completion lacks {name} for {node_id}"
                 )
-            refs[f"{name}:{node_id}"] = _required_string(
+            destination[node_id] = _required_string(
                 record.get("record_sha256"), f"{name} record digest"
             )
+    return dual_completion_event_refs(
+        rank_loss_record_sha256=_required_string(
+            source_records["rank_loss"].get("record_sha256"),
+            "rank-loss record digest",
+        ),
+        route_withdrawal_record_sha256=_required_string(
+            source_records["route_withdrawal"].get("record_sha256"),
+            "route-withdrawal record digest",
+        ),
+        rank_recovery_record_sha256=_required_string(
+            source_records["rank_recovery"].get("record_sha256"),
+            "rank-recovery record digest",
+        ),
+        cleanup_review_record_sha256=_required_string(
+            source_records["cleanup_review"].get("record_sha256"),
+            "cleanup review record digest",
+        ),
+        cleanup_record_sha256=_required_string(
+            source_records["cleanup"].get("record_sha256"),
+            "cleanup record digest",
+        ),
+        baseline_record_sha256=_required_string(
+            source_records["baseline"].get("record_sha256"),
+            "host baseline record digest",
+        ),
+        offline_record_sha256_by_node=offline_refs,
+        recovered_record_sha256_by_node=recovered_refs,
+    )
+
+
+def dual_completion_event_refs(
+    *,
+    rank_loss_record_sha256: str,
+    route_withdrawal_record_sha256: str,
+    rank_recovery_record_sha256: str,
+    cleanup_review_record_sha256: str,
+    cleanup_record_sha256: str,
+    baseline_record_sha256: str,
+    offline_record_sha256_by_node: Mapping[str, str],
+    recovered_record_sha256_by_node: Mapping[str, str],
+) -> dict[str, str]:
+    """Build the canonical exact source-event references for dual completion."""
+
+    offline_nodes = set(offline_record_sha256_by_node)
+    recovered_nodes = set(recovered_record_sha256_by_node)
+    if (
+        not offline_nodes
+        or offline_nodes != recovered_nodes
+        or any(not isinstance(node_id, str) or not node_id for node_id in offline_nodes)
+    ):
+        raise QualificationError(
+            "dual completion references require matching restart evidence for each Spark"
+        )
+    refs = {
+        _RANK_LOSS_EVENT: _sha(rank_loss_record_sha256, "rank-loss record digest"),
+        _ROUTE_WITHDRAWAL_EVENT: _sha(
+            route_withdrawal_record_sha256, "route-withdrawal record digest"
+        ),
+        _RANK_RECOVERY_EVENT: _sha(
+            rank_recovery_record_sha256, "rank-recovery record digest"
+        ),
+        "dual_recovery.cleanup.plan_reviewed": _sha(
+            cleanup_review_record_sha256, "cleanup review record digest"
+        ),
+        "dual_recovery.cleanup.completed": _sha(
+            cleanup_record_sha256, "cleanup record digest"
+        ),
+        "host-restart.baseline": _sha(
+            baseline_record_sha256, "host baseline record digest"
+        ),
+    }
+    for node_id in offline_record_sha256_by_node:
+        refs[f"host-restart.offline:{node_id}"] = _sha(
+            offline_record_sha256_by_node[node_id], "host offline record digest"
+        )
+        refs[f"host-restart.recovered:{node_id}"] = _sha(
+            recovered_record_sha256_by_node[node_id], "host recovered record digest"
+        )
     return refs
 
 
@@ -3602,8 +3693,6 @@ def _validate_completion(
         payload.get("target_digest") != target_digest
         or payload.get("cleanup_record_sha256") != cleanup.get("record_sha256")
         or payload.get("canary_record_sha256") != target.canary_record_sha256
-        or payload.get("event_refs") != expected
-        or payload.get("endpoint_not_found") is not True
     ):
         raise QualificationError(
             "dual recovery completion receipt changed its source events"
@@ -3611,8 +3700,7 @@ def _validate_completion(
     baseline = _event(ledger, target, target_digest, "host-restart.baseline")
     if baseline is None:
         raise QualificationError("dual recovery completion lacks its idle baseline")
-    final_view = _fleet_view(payload.get("final_fleet_snapshot"), target.fleet_node_ids)
-    recovered = []
+    recovered_payloads: dict[str, Mapping[str, object]] = {}
     for node_id, _rank in _rank_order(target):
         recovered_event = _node_event(
             ledger, target, target_digest, "host-restart.recovered", node_id
@@ -3621,27 +3709,125 @@ def _validate_completion(
             raise QualificationError(
                 "dual recovery completion lacks a host restart receipt"
             )
-        recovered.append(_payload(recovered_event))
-    _require_snapshot_after(final_view, recovered[-1], "final idle Fleet")
-    _require_same_authority(
-        final_view,
-        _required_string(
+        recovered_payloads[node_id] = _payload(recovered_event)
+    validate_dual_completion_evidence(
+        payload,
+        target_digest=target_digest,
+        cleanup_record_sha256=_required_string(
+            cleanup.get("record_sha256"), "cleanup record digest"
+        ),
+        canary_record_sha256=target.canary_record_sha256,
+        expected_event_refs=expected,
+        fleet_node_ids=target.fleet_node_ids,
+        selected_node_ids=target.node_ids,
+        baseline_authority_revision=_required_string(
             _payload(baseline).get("authority_revision"),
             "baseline Fleet authority",
         ),
-    )
-    _require_idle_fleet(target, final_view)
-    if not _all_selected_live(final_view, target):
-        raise QualificationError(
-            "final dual Fleet lacks live telemetry from both Sparks"
-        )
-    for node_id, recovery in zip(
-        (node_id for node_id, _rank in _rank_order(target)), recovered, strict=True
-    ):
-        if final_view.nodes[node_id].boot_id != recovery.get("observed_boot_id"):
-            raise QualificationError(
-                "final dual Fleet boot ID changed after its restart receipt"
+        latest_recovery_payload=recovered_payloads[_rank_order(target)[-1][0]],
+        recovered_boot_ids_by_node={
+            node_id: _required_string(
+                recovered.get("observed_boot_id"), "recovered host boot ID"
             )
+            for node_id, recovered in recovered_payloads.items()
+        },
+    )
+
+
+def validate_dual_completion_evidence(
+    payload: Mapping[str, object],
+    *,
+    target_digest: str,
+    cleanup_record_sha256: str,
+    canary_record_sha256: str,
+    expected_event_refs: Mapping[str, str],
+    fleet_node_ids: Sequence[str],
+    selected_node_ids: Sequence[str],
+    baseline_authority_revision: str,
+    latest_recovery_payload: Mapping[str, object],
+    recovered_boot_ids_by_node: Mapping[str, str],
+) -> None:
+    """Validate the shared semantic contract for a completed dual recovery."""
+
+    if (
+        payload.get("target_digest") != target_digest
+        or payload.get("cleanup_record_sha256") != cleanup_record_sha256
+        or payload.get("canary_record_sha256") != canary_record_sha256
+        or payload.get("endpoint_not_found") is not True
+        or dict(_mapping(payload.get("event_refs"), "dual completion event refs"))
+        != dict(expected_event_refs)
+    ):
+        raise QualificationError(
+            "dual recovery completion receipt changed its exact source evidence"
+        )
+    if (
+        not selected_node_ids
+        or len(set(selected_node_ids)) != len(selected_node_ids)
+        or not set(selected_node_ids).issubset(fleet_node_ids)
+        or set(recovered_boot_ids_by_node) != set(selected_node_ids)
+    ):
+        raise QualificationError(
+            "dual recovery completion has incomplete selected Spark boot evidence"
+        )
+    final_view = _fleet_view(payload.get("final_fleet_snapshot"), fleet_node_ids)
+    _require_snapshot_after(final_view, latest_recovery_payload, "final idle Fleet")
+    _require_same_authority(final_view, baseline_authority_revision)
+    _require_idle_fleet_view(final_view)
+    if not _selected_nodes_live(final_view, selected_node_ids):
+        raise QualificationError(
+            "final dual Fleet lacks live telemetry from selected Sparks"
+        )
+    for node_id, recovered_boot_id in recovered_boot_ids_by_node.items():
+        if final_view.nodes[node_id].boot_id != recovered_boot_id:
+            raise QualificationError(
+                "final Fleet boot identity changed after its restart receipt"
+            )
+
+
+def validate_dual_idle_fleet_snapshot(
+    value: object,
+    *,
+    fleet_node_ids: Sequence[str],
+    selected_node_ids: Sequence[str],
+    after_snapshot: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Validate an idle whole-Fleet snapshot and project selected boot evidence."""
+
+    if (
+        not selected_node_ids
+        or len(set(selected_node_ids)) != len(selected_node_ids)
+        or not set(selected_node_ids).issubset(fleet_node_ids)
+    ):
+        raise QualificationError("dual recovery selected Spark roster is invalid")
+    view = _fleet_view(value, fleet_node_ids)
+    _require_idle_fleet_view(view)
+    if not _selected_nodes_live(view, selected_node_ids):
+        raise QualificationError("idle Fleet lacks live selected Spark telemetry")
+    if after_snapshot is not None:
+        _require_snapshot_after(view, after_snapshot, "idle Fleet reconciliation")
+    return {
+        **_snapshot_identity(view),
+        "nodes": {
+            node_id: {
+                "boot_id": view.nodes[node_id].boot_id,
+                "telemetry_observed_at": view.nodes[node_id].telemetry_observed_at,
+            }
+            for node_id in selected_node_ids
+        },
+    }
+
+
+def validate_dual_snapshot_not_before(
+    snapshot_time: object,
+    required_time: object,
+    label: str,
+) -> None:
+    """Reject a Fleet observation that predates the action it is meant to prove."""
+
+    if _timestamp(snapshot_time, f"{label} generated_at") < _timestamp(
+        required_time, f"{label} required time"
+    ):
+        raise QualificationError(f"{label} predates its required action")
 
 
 def _cleanup_request_key(target: DualRecoveryTarget, target_digest: str) -> str:

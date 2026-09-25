@@ -623,8 +623,9 @@ def test_builder_rejects_a_ledger_record_tampered_after_append(tmp_path: Path) -
         )
 
 
+@pytest.mark.parametrize("reconcile_before_baseline", [False, True])
 def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
-    tmp_path: Path,
+    tmp_path: Path, reconcile_before_baseline: bool
 ) -> None:
     rank_definition, rank_reference, rank_row = _scope_for_mode(
         "dual-rank-loss-recovery", node_count=2
@@ -723,24 +724,34 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
         ),
         _dual_snapshot(3, state="serving", cursor=3),
         _dual_snapshot(4, state="serving", cursor=4),
-        _dual_snapshot(6, state="idle", cursor=6, offline_node=node_a),
         _dual_snapshot(
-            7,
+            6 + int(reconcile_before_baseline),
             state="idle",
-            cursor=7,
+            cursor=6 + int(reconcile_before_baseline),
+            offline_node=node_a,
+        ),
+        _dual_snapshot(
+            7 + int(reconcile_before_baseline),
+            state="idle",
+            cursor=7 + int(reconcile_before_baseline),
             boots={node_a: "boot-a-2", node_b: "boot-b-1"},
         ),
-        _dual_snapshot(8, state="idle", cursor=8, offline_node=node_b),
         _dual_snapshot(
-            9,
+            8 + int(reconcile_before_baseline),
             state="idle",
-            cursor=9,
+            cursor=8 + int(reconcile_before_baseline),
+            offline_node=node_b,
+        ),
+        _dual_snapshot(
+            9 + int(reconcile_before_baseline),
+            state="idle",
+            cursor=9 + int(reconcile_before_baseline),
             boots={node_a: "boot-a-2", node_b: "boot-b-2"},
         ),
         _dual_snapshot(
-            10,
+            10 + int(reconcile_before_baseline),
             state="idle",
-            cursor=10,
+            cursor=10 + int(reconcile_before_baseline),
             boots={node_a: "boot-a-2", node_b: "boot-b-2"},
         ),
     ]
@@ -888,6 +899,27 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
         ),
         endpoint_exists=lambda _endpoint: False,
     )
+    if reconcile_before_baseline:
+        replay = apply_dual_cleanup(
+            target,
+            ledger,
+            prepare_cleanup=lambda _request: pytest.fail(
+                "completed cleanup must reconcile without another preview"
+            ),
+            apply_authorized=True,
+            cleanup_to_idle=lambda _request: pytest.fail(
+                "completed cleanup must not apply a second stop"
+            ),
+            reconcile_cleanup=lambda request: _reconciled_cleanup(
+                request,
+                node_a,
+                node_b,
+                minute=6,
+                boots={node_a: "boot-a-1", node_b: "boot-b-1"},
+            ),
+            endpoint_exists=lambda _endpoint: False,
+        )
+        assert replay.checkpoint == "host-restart-baseline"
     assert observe_dual_batch(target, ledger, **observe_kwargs).status == (
         "awaiting-host-offline"
     )
@@ -904,6 +936,7 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
         "host-restarts-complete"
     )
     assert observe_dual_batch(target, ledger, **observe_kwargs).status == "complete"
+    assert observe_dual_batch(target, ledger, **observe_kwargs).status == "complete"
     apply_dual_cleanup(
         target,
         ledger,
@@ -914,7 +947,12 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
         cleanup_to_idle=lambda _request: pytest.fail(
             "completed cleanup must not apply a second stop"
         ),
-        reconcile_cleanup=lambda request: _reconciled_cleanup(request, node_a, node_b),
+        reconcile_cleanup=lambda request: _reconciled_cleanup(
+            request,
+            node_a,
+            node_b,
+            minute=12 + int(reconcile_before_baseline),
+        ),
         endpoint_exists=lambda _endpoint: False,
     )
 
@@ -938,19 +976,146 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
         canonical = RecoveryCoverageReceiptEnvelope.model_validate(envelope)
         assert canonical.receipt.failure_mode == expected_mode
         assert recovery_receipt_sha256(canonical.receipt) == envelope["receipt_sha256"]
+        if expected_mode == "dual-host-restart":
+            for mutation in (
+                "endpoint-false",
+                "endpoint-absent",
+                "missing-event-ref",
+                "extra-event-ref",
+                "non-idle-final",
+                "authority-change",
+                "recovered-boot-change",
+                "stale-final-time",
+                "stale-final-cursor",
+                "cleanup-after-application",
+            ):
+                tampered_records = _tampered_dual_completion_ledger(
+                    ledger.records, mutation, node_a, node_b
+                )
+                with pytest.raises(QualificationError):
+                    build_recovery_coverage_receipt(
+                        coverage_definition=definition,
+                        coverage_reference=reference,
+                        authority_row=row,
+                        campaign_id=campaign_id,
+                        batch_id=batch_id,
+                        lane_id=lane_id,
+                        ledger_records=tampered_records,
+                        exact_preparation=prep,
+                        deployment_provenance_by_node=provenance,
+                        receipt_schema=recovery_coverage_receipt_json_schema(),
+                    )
 
 
 def _reconciled_cleanup(
-    request: Mapping[str, object], node_a: str, node_b: str
+    request: Mapping[str, object],
+    node_a: str,
+    node_b: str,
+    *,
+    minute: int = 12,
+    boots: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     prior_receipt = request.get("prior_receipt")
     assert isinstance(prior_receipt, Mapping)
     return {
         **dict(prior_receipt),
         "fleet_snapshot": _dual_snapshot(
-            12,
+            minute,
             state="idle",
-            cursor=12,
-            boots={node_a: "boot-a-2", node_b: "boot-b-2"},
+            cursor=minute,
+            boots=boots or {node_a: "boot-a-2", node_b: "boot-b-2"},
         ),
     }
+
+
+def _tampered_dual_completion_ledger(
+    records: list[dict[str, object]],
+    mutation: str,
+    node_a: str,
+    node_b: str,
+) -> list[dict[str, object]]:
+    raw = json.loads(json.dumps(records))
+    assert isinstance(raw, list)
+    copied = [cast(dict[str, object], item) for item in raw]
+    completion = next(
+        record for record in copied if record.get("event") == "dual_recovery.completed"
+    )
+    completion_payload = cast(dict[str, object], completion["payload"])
+    if mutation == "endpoint-false":
+        completion_payload["endpoint_not_found"] = False
+    elif mutation == "endpoint-absent":
+        completion_payload.pop("endpoint_not_found", None)
+    elif mutation in {"missing-event-ref", "extra-event-ref"}:
+        refs = cast(dict[str, object], completion_payload["event_refs"])
+        if mutation == "missing-event-ref":
+            refs.pop(f"host-restart.offline:{node_a}")
+        else:
+            refs["host-restart.extra"] = "f" * 64
+    else:
+        final = cast(dict[str, object], completion_payload["final_fleet_snapshot"])
+        final_nodes = cast(list[dict[str, object]], final["nodes"])
+        if mutation == "non-idle-final":
+            cast(dict[str, object], final_nodes[0])["loaded"] = [{"run_id": "other"}]
+        elif mutation == "authority-change":
+            final["authority_revision"] = "changed-authority"
+        elif mutation == "recovered-boot-change":
+            node = next(
+                cast(dict[str, object], item)
+                for item in final_nodes
+                if cast(dict[str, object], item).get("id") == node_a
+            )
+            telemetry = cast(dict[str, object], node["telemetry"])
+            cast(dict[str, object], telemetry["sample"])["boot_id"] = "boot-a-forged"
+        elif mutation in {"stale-final-time", "stale-final-cursor"}:
+            last_recovery = next(
+                record
+                for record in copied
+                if record.get("event") == "host-restart.recovered"
+                and cast(dict[str, object], record["payload"]).get("node_id") == node_b
+            )
+            last_payload = cast(dict[str, object], last_recovery["payload"])
+            if mutation == "stale-final-time":
+                final["generated_at"] = last_payload["generated_at"]
+            else:
+                final["event_cursor"] = cast(int, last_payload["event_cursor"]) - 1
+        elif mutation == "cleanup-after-application":
+            cleanup = next(
+                record
+                for record in copied
+                if record.get("event") == "dual_recovery.cleanup.completed"
+            )
+            cleanup_payload = cast(dict[str, object], cleanup["payload"])
+            receipt = cast(dict[str, object], cleanup_payload["receipt"])
+            later_application_time = (
+                datetime.fromisoformat(cast(str, receipt["application_updated_at"]))
+                + timedelta(minutes=1)
+            ).isoformat()
+            receipt["application_updated_at"] = later_application_time
+            reconciliation = next(
+                record
+                for record in copied
+                if record.get("event") == "dual_recovery.cleanup.reconciled"
+            )
+            cast(dict[str, object], reconciliation["payload"])[
+                "application_updated_at"
+            ] = later_application_time
+        else:
+            raise AssertionError(f"unknown completion mutation: {mutation}")
+    previous = "0" * 64
+    for sequence, record in enumerate(copied, start=1):
+        record["sequence"] = sequence
+        record["previous_sha256"] = previous
+        unsigned = {
+            key: value for key, value in record.items() if key != "record_sha256"
+        }
+        encoded = json.dumps(
+            unsigned,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        digest = hashlib.sha256(encoded).hexdigest()
+        record["record_sha256"] = digest
+        previous = digest
+    return copied

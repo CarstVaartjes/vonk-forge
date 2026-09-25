@@ -18,6 +18,12 @@ from typing import Any, cast
 from jsonschema.validators import validator_for
 
 from .fleet_qualification import QualificationError
+from .fleet_qualification_dual_recovery import (
+    dual_completion_event_refs,
+    validate_dual_completion_evidence,
+    validate_dual_idle_fleet_snapshot,
+    validate_dual_snapshot_not_before,
+)
 
 _SHA256 = re.compile(r"[a-f0-9]{64}\Z")
 _OCI_DIGEST = re.compile(r"sha256:([a-f0-9]{64})\Z")
@@ -954,6 +960,9 @@ def _dual_host_proof(
     completion_payload = _payload(completion)
     nodes = _string_sequence(rank.get("node_ids"), "dual host Spark IDs")
     node_to_rank = _rank_map(_payload(rank_loss).get("node_to_rank"), nodes)
+    fleet_node_ids = _string_sequence(
+        rank_loss_payload.get("fleet_node_ids"), "whole-Fleet node IDs"
+    )
     ordered: list[Mapping[str, object]] = [
         rank_loss,
         route,
@@ -1014,6 +1023,14 @@ def _dual_host_proof(
         raise QualificationError(
             "dual host baseline is not bound to completed cleanup and rank smoke"
         )
+    cleanup_fleet_snapshot = _mapping(
+        cleanup_receipt.get("fleet_snapshot"), "dual cleanup FleetSnapshot"
+    )
+    validate_dual_snapshot_not_before(
+        cleanup_fleet_snapshot.get("generated_at"),
+        cleanup_receipt.get("application_updated_at"),
+        "cleanup FleetSnapshot",
+    )
     if (
         reconciled_payload.get("request_key")
         != cleanup_review_payload.get("request_key")
@@ -1021,14 +1038,14 @@ def _dual_host_proof(
         != cleanup_review_payload.get("review_digest")
         or reconciled_payload.get("application_id")
         != cleanup_receipt.get("application_id")
+        or reconciled_payload.get("application_updated_at")
+        != cleanup_receipt.get("application_updated_at")
         or reconciled_payload.get("prior_cleanup_record_sha256") != _record_id(cleanup)
-        or not _reconciled_fleet_is_idle(
+        or not _dual_reconciliation_snapshot_is_valid(
             reconciled_payload.get("reconciled_fleet_snapshot"),
-            _string_sequence(
-                rank_loss_payload.get("fleet_node_ids"), "whole-Fleet node IDs"
-            ),
-            _mapping(baseline_payload.get("nodes"), "dual host baseline nodes"),
-            cleanup_receipt.get("application_updated_at"),
+            cleanup_fleet_snapshot,
+            fleet_node_ids,
+            nodes,
         )
     ):
         raise QualificationError(
@@ -1040,6 +1057,16 @@ def _dual_host_proof(
         raise QualificationError(
             "dual host baseline does not cover the exact Spark pair"
         )
+    if not _dual_baseline_matches_cleanup(
+        baseline_payload,
+        cleanup_fleet_snapshot,
+        baseline_nodes,
+        fleet_node_ids,
+        nodes,
+    ):
+        raise QualificationError(
+            "dual host baseline changed its exact cleanup Fleet observation"
+        )
     smoke_refs = _mapping(
         baseline_payload.get("rank_smoke_refs"), "rank smoke references"
     )
@@ -1048,9 +1075,13 @@ def _dual_host_proof(
             "dual host baseline omits per-node rank smoke references"
         )
     host_proofs: dict[str, dict[str, object]] = {}
+    offline_events: dict[str, Mapping[str, object]] = {}
+    recovered_events: dict[str, Mapping[str, object]] = {}
     for node_id in nodes:
         offline = _unique_node_event(records, "host-restart.offline", node_id)
         recovered = _unique_node_event(records, "host-restart.recovered", node_id)
+        offline_events[node_id] = offline
+        recovered_events[node_id] = recovered
         baseline_node = _mapping(baseline_nodes[node_id], "dual host baseline node")
         offline_payload = _payload(offline)
         recovered_payload = _payload(recovered)
@@ -1104,26 +1135,60 @@ def _dual_host_proof(
     for node_id in rank_order:
         host_sequence.extend(
             [
-                _unique_node_event(records, "host-restart.offline", node_id),
-                _unique_node_event(records, "host-restart.recovered", node_id),
+                offline_events[node_id],
+                recovered_events[node_id],
             ]
         )
-    # Cleanup reconciliation is replayed after the full rank and idle-host
-    # ladder is terminal; it validates the original stop application without
-    # changing the checkpoint ordering.
-    host_sequence.extend([completion, reconciliation])
-    if not _strictly_ordered(host_sequence):
+    # A replay may reconcile the completed stop before the baseline is
+    # observed, during the sequential restart ladder, or after completion.
+    # The immutable event is bound to the cleanup above; it is not a host
+    # restart checkpoint.
+    if not _strictly_ordered([cleanup, reconciliation]) or not _strictly_ordered(
+        [*host_sequence, completion]
+    ):
         raise QualificationError(
             "dual host restart events are not sequential or terminal"
         )
-    if completion_payload.get("cleanup_record_sha256") != _record_id(
-        cleanup
-    ) or _mapping(
-        completion_payload.get("event_refs"), "dual completion event refs"
-    ).get("host-restart.baseline") != _record_id(baseline):
-        raise QualificationError(
-            "dual recovery completion omits its exact cleanup or baseline"
-        )
+    expected_completion_refs = dual_completion_event_refs(
+        rank_loss_record_sha256=_record_id(rank_loss),
+        route_withdrawal_record_sha256=_record_id(route),
+        rank_recovery_record_sha256=_record_id(rank_recovery),
+        cleanup_review_record_sha256=_record_id(cleanup_review),
+        cleanup_record_sha256=_record_id(cleanup),
+        baseline_record_sha256=_record_id(baseline),
+        offline_record_sha256_by_node={
+            node_id: _record_id(offline_events[node_id]) for node_id in rank_order
+        },
+        recovered_record_sha256_by_node={
+            node_id: _record_id(recovered_events[node_id]) for node_id in rank_order
+        },
+    )
+    validate_dual_completion_evidence(
+        completion_payload,
+        target_digest=_required_string(
+            rank_loss_payload.get("target_digest"), "dual recovery target digest"
+        ),
+        cleanup_record_sha256=_record_id(cleanup),
+        canary_record_sha256=_required_string(
+            rank_loss_payload.get("canary_record_sha256"),
+            "dual recovery canary record digest",
+        ),
+        expected_event_refs=expected_completion_refs,
+        fleet_node_ids=fleet_node_ids,
+        selected_node_ids=rank_order,
+        baseline_authority_revision=_required_string(
+            baseline_payload.get("authority_revision"),
+            "dual host baseline Fleet authority",
+        ),
+        latest_recovery_payload=_payload(recovered_events[rank_order[-1]]),
+        recovered_boot_ids_by_node={
+            node_id: _required_string(
+                _payload(recovered_events[node_id]).get("observed_boot_id"),
+                "recovered event boot ID",
+            )
+            for node_id in rank_order
+        },
+    )
     checkpoint_ids = [_record_id(baseline)]
     for node_id in rank_order:
         checkpoint_ids.extend(
@@ -1605,77 +1670,74 @@ def _validate_ledger_chain(records: Sequence[Mapping[str, object]]) -> None:
         previous = _record_id(record)
 
 
-def _reconciled_fleet_is_idle(
+def _dual_reconciliation_snapshot_is_valid(
     value: object,
-    selected_nodes: Sequence[str],
-    baseline_nodes: Mapping[str, object],
-    application_updated_at: object,
+    prior_cleanup_snapshot: Mapping[str, object],
+    fleet_node_ids: Sequence[str],
+    selected_node_ids: Sequence[str],
 ) -> bool:
-    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
-        return False
     try:
-        generated_at = _timestamp(value.get("generated_at"), "reconciled Fleet time")
-        app_updated = _timestamp(application_updated_at, "cleanup application time")
-        cursor = value.get("event_cursor")
-        _positive_int(cursor, "reconciled Fleet event cursor")
-        _required_string(value.get("authority_revision"), "reconciled Fleet authority")
+        validate_dual_idle_fleet_snapshot(
+            value,
+            fleet_node_ids=fleet_node_ids,
+            selected_node_ids=selected_node_ids,
+            after_snapshot=prior_cleanup_snapshot,
+        )
     except QualificationError:
         return False
-    if generated_at < app_updated:
         return False
-    raw_nodes = value.get("nodes")
-    if not isinstance(raw_nodes, list):
-        return False
-    nodes: dict[str, Mapping[str, object]] = {}
-    for raw_node in raw_nodes:
-        if not isinstance(raw_node, Mapping):
-            return False
-        node_id = raw_node.get("id")
-        if not isinstance(node_id, str) or node_id in nodes:
-            return False
-        nodes[node_id] = raw_node
-    if set(nodes) != set(selected_nodes):
-        return False
-    for node_id, node in nodes.items():
-        connection = node.get("connection")
-        telemetry = node.get("telemetry")
-        loaded = node.get("loaded")
-        reservations = node.get("reservations")
-        if (
-            not isinstance(connection, Mapping)
-            or connection.get("online_state") != "online"
-            or not isinstance(telemetry, Mapping)
-            or telemetry.get("freshness") != "live"
-            or not isinstance(loaded, list)
-            or loaded
-            or not isinstance(reservations, Mapping)
-            or any(
-                reservations.get(name) != 0
-                for name in (
-                    "unified_memory_bytes",
-                    "host_memory_bytes",
-                    "gpu_memory_bytes",
-                    "port_count",
-                )
-            )
+    return True
+
+
+def _dual_baseline_matches_cleanup(
+    baseline_payload: Mapping[str, object],
+    cleanup_snapshot: Mapping[str, object],
+    baseline_nodes: Mapping[str, object],
+    fleet_node_ids: Sequence[str],
+    selected_node_ids: Sequence[str],
+) -> bool:
+    try:
+        cleanup_identity = validate_dual_idle_fleet_snapshot(
+            cleanup_snapshot,
+            fleet_node_ids=fleet_node_ids,
+            selected_node_ids=selected_node_ids,
+        )
+        baseline_identity = {
+            "generated_at": _timestamp(
+                baseline_payload.get("generated_at"),
+                "dual host baseline generated_at",
+            ).isoformat(),
+            "event_cursor": _positive_int(
+                baseline_payload.get("event_cursor"),
+                "dual host baseline event cursor",
+            ),
+            "authority_revision": _required_string(
+                baseline_payload.get("authority_revision"),
+                "dual host baseline authority",
+            ),
+        }
+        if any(
+            baseline_identity.get(key) != cleanup_identity.get(key)
+            for key in baseline_identity
         ):
             return False
-        if node_id in baseline_nodes:
-            sample = telemetry.get("sample")
-            baseline = baseline_nodes.get(node_id)
-            if not isinstance(sample, Mapping) or not isinstance(baseline, Mapping):
-                return False
-            baseline = _mapping(baseline_nodes.get(node_id), "baseline Fleet node")
-            if (
-                not isinstance(sample.get("boot_id"), str)
-                or not sample.get("boot_id")
-                or sample.get("boot_id") == baseline.get("boot_id")
+        for node_id in selected_node_ids:
+            baseline_node = _mapping(
+                baseline_nodes.get(node_id), "dual host baseline node"
+            )
+            cleanup_node = _mapping(
+                _mapping(cleanup_identity.get("nodes"), "cleanup Fleet nodes").get(
+                    node_id
+                ),
+                "cleanup Fleet node",
+            )
+            if any(
+                baseline_node.get(key) != cleanup_node.get(key)
+                for key in ("boot_id", "telemetry_observed_at")
             ):
                 return False
-            try:
-                _timestamp(sample.get("observed_at"), "reconciled telemetry time")
-            except QualificationError:
-                return False
+    except QualificationError:
+        return False
     return True
 
 
