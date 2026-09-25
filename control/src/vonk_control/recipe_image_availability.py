@@ -550,6 +550,8 @@ def _retryable(error: BaseException) -> bool:
     explicit_retryable = getattr(error, "retryable", None)
     if type(explicit_retryable) is bool:
         return explicit_retryable
+    if isinstance(error, DBAPIError) and retryable_artifact_database_error(error):
+        return True
     if isinstance(code, str) and code in _RECOVERABLE_MISS_CODES:
         return True
     status = getattr(error, "status_code", None)
