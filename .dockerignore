@@ -22,6 +22,8 @@ control/web/node_modules
 control/web/dist
 control/web/test-results
 control/web/playwright-report
+!install/
+install/*
 !schemas/
 schemas/*
 !schemas/global/
@@ -45,6 +47,8 @@ config/*
 **/.env
 **/.env.*
 **/*.pem
+# Public verification material only; private keys remain excluded.
+!install/installer-release-public.pem
 **/*.key
 **/*.pub
 **/*.p12
