@@ -334,10 +334,10 @@ def _snapshot(
             telemetry = None
         else:
             telemetry = {
-                "freshness": "stale",
+                "freshness": "live",
                 "sample": {
                     "boot_id": "other-boot",
-                    "observed_at": (at - timedelta(minutes=1)).isoformat(),
+                    "observed_at": (at - timedelta(seconds=1)).isoformat(),
                 },
             }
         reservations = {
@@ -689,6 +689,34 @@ def test_review_precedes_effects_and_preview_never_applies_or_observes(
         item for item in ledger.records if item["event"] == "lane_recovery.intent"
     )
     uuid.UUID(str(_record_payload(intent)["transition_request_key"]))
+
+
+def test_partner_canary_record_rejects_reference_that_drops_applied_run(
+    tmp_path: Path,
+) -> None:
+    ledger = EvidenceLedger(tmp_path / "dropped-partner-run.jsonl")
+    target = _target(ledger, partner_failed=True)
+    own, partner = target.canaries
+    assert partner.run_id == RUN_B
+    target = replace(
+        target,
+        canaries=(own, replace(partner, run_id=None)),
+        partner_run_ids=(),
+    )
+    callback_calls = 0
+
+    def forbidden(request: MappingLike) -> MappingLike:
+        nonlocal callback_calls
+        callback_calls += 1
+        return _review(target, request)
+
+    with pytest.raises(QualificationError, match="exact recipe/lane evidence"):
+        review_lane_transition(
+            target,
+            ledger,
+            prepare_transition=forbidden,
+        )
+    assert callback_calls == 0
 
 
 def test_offline_checkpoint_resumes_across_process_restart_and_accepts_equal_cursor(
@@ -1291,6 +1319,44 @@ def test_cleanup_rejects_boolean_only_or_misattributed_stop_receipt(
         )
 
 
+@pytest.mark.parametrize("missing_presence", ["offline", "stale", "missing"])
+def test_cleanup_rejects_empty_but_unobserved_locked_node(
+    tmp_path: Path, missing_presence: str
+) -> None:
+    ledger = EvidenceLedger(tmp_path / f"cleanup-unobserved-{missing_presence}.jsonl")
+    target = _target(ledger)
+    _recover_to_completion(ledger, target)
+
+    def prepare(request: MappingLike) -> MappingLike:
+        return _cleanup_review_receipt(
+            target, ledger, request, active=_identity(), partners=True
+        )
+
+    def apply(request: MappingLike) -> MappingLike:
+        result = _cleanup_application(target, request)
+        snapshot = result["fleet_snapshot"]
+        assert isinstance(snapshot, dict)
+        node = next(item for item in snapshot["nodes"] if item["id"] == NODE_B)
+        if missing_presence == "offline":
+            node["connection"]["online_state"] = "offline"
+        elif missing_presence == "stale":
+            telemetry = node["telemetry"]
+            assert isinstance(telemetry, dict)
+            telemetry["freshness"] = "stale"
+        else:
+            node["telemetry"] = None
+        return result
+
+    with pytest.raises(QualificationError, match="every locked Fleet node"):
+        record_lane_cleanup(
+            target,
+            ledger,
+            prepare_cleanup=prepare,
+            apply_authorized=True,
+            cleanup_to_idle=apply,
+        )
+
+
 def test_cleanup_completion_resumes_from_original_review_without_new_plan_or_apply(
     tmp_path: Path,
 ) -> None:
@@ -1480,6 +1546,26 @@ def test_lane_two_reactivation_uses_exact_prior_lane_release_after_restart(
     )
     with pytest.raises(QualificationError, match="fresh Fleet observation"):
         prior_partner_release_proofs(lane_two, ledger, stale)
+
+    fresh_but_unobserved = _snapshot(
+        lane_two,
+        active=None,
+        online=True,
+        boot_id="boot-after",
+        cursor=21,
+        at=T0 + timedelta(seconds=21),
+    )
+    nodes = fresh_but_unobserved["nodes"]
+    assert isinstance(nodes, list)
+    partner_node = next(
+        node for node in nodes if isinstance(node, dict) and node.get("id") == NODE_A
+    )
+    assert isinstance(partner_node, dict)
+    connection = partner_node["connection"]
+    assert isinstance(connection, dict)
+    connection["online_state"] = "offline"
+    with pytest.raises(QualificationError, match="every locked Fleet node"):
+        prior_partner_release_proofs(lane_two, ledger, fresh_but_unobserved)
 
     active = _identity(
         run_id="reactivated-lane-two",

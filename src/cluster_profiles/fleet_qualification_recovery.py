@@ -1325,21 +1325,14 @@ def _require_canary_records(target: LaneRecoveryTarget, ledger: EvidenceLedger) 
             or payload.get("package_sha256") != reference.package_sha256
             or payload.get("assigned_node_id") != reference.assigned_node_id
             or payload.get("assigned_rank") != reference.assigned_rank
-            or (
-                reference.run_id is not None
-                and payload.get("run_id") != reference.run_id
-            )
-            or (
-                reference.recipe_revision_id is not None
-                and payload.get("recipe_revision_id") != reference.recipe_revision_id
-            )
-            or (reference.alias is not None and payload.get("alias") != reference.alias)
-            or (
-                reference.node_to_rank is not None
-                and (
-                    not isinstance(ranks, Mapping)
-                    or dict(ranks) != dict(reference.node_to_rank)
-                )
+            or payload.get("run_id") != reference.run_id
+            or payload.get("recipe_revision_id") != reference.recipe_revision_id
+            or payload.get("alias") != reference.alias
+            or payload.get("node_to_rank")
+            != (
+                dict(reference.node_to_rank)
+                if reference.node_to_rank is not None
+                else None
             )
             or (
                 reference.outcome_event == "canary.completed"
@@ -1582,6 +1575,7 @@ def _validate_cleanup_review(
         if dict(proof) != expected_proof:
             raise QualificationError("cleanup prior release proof is misattributed")
     view = _fleet_view(receipt.get("pre_cleanup_fleet_snapshot"), target.fleet_node_ids)
+    _require_fresh_online_fleet(view)
     if set(view["loaded_runs"]) != set(actual_stops):
         raise QualificationError(
             "cleanup review stop set differs from fresh pre-cleanup Fleet"
@@ -1676,6 +1670,7 @@ def prior_partner_release_proofs(
         sorted(all_partners) if candidate_run_ids is None else sorted(candidate_run_ids)
     )
     current = _fleet_view(fleet_snapshot, target.fleet_node_ids)
+    _require_fresh_online_fleet(current)
     if len(candidates) != len(set(candidates)) or not set(candidates) <= (
         set(all_canaries) | set(current["loaded_runs"])
     ):
@@ -1840,6 +1835,7 @@ def _prior_partner_release_proof(
         )
         fleet_value = receipt.get("fleet_snapshot")
         source_fleet = _fleet_view(fleet_value, target.fleet_node_ids)
+        _require_fresh_online_fleet(source_fleet)
         application_updated_at = _timestamp(
             receipt.get("application_updated_at"), "prior stop application update time"
         )
@@ -2121,6 +2117,8 @@ def _validate_cleanup_application(
     pre_cleanup = _fleet_view(
         review.receipt.get("pre_cleanup_fleet_snapshot"), target.fleet_node_ids
     )
+    _require_fresh_online_fleet(fleet)
+    _require_fresh_online_fleet(pre_cleanup)
     if fleet["generated_at"] < _timestamp(
         application_updated_at, "completed cleanup application time"
     ):
@@ -2238,6 +2236,8 @@ def _validate_transition(
         receipt.get("pre_transition_fleet_snapshot"), target.fleet_node_ids
     )
     post = _fleet_view(receipt.get("fleet_snapshot"), target.fleet_node_ids)
+    _require_fresh_online_fleet(pre)
+    _require_fresh_online_fleet(post)
     keep_run_id = review.receipt.get("keep_run_id")
     expected_pre_runs = set(reviewed_stop_ids)
     if isinstance(keep_run_id, str):
@@ -2474,6 +2474,29 @@ def _fleet_view(value: object, expected_node_ids: Sequence[str]) -> _FleetView:
         "loaded_runs": all_loaded,
         "published_route_aliases": all_published_aliases,
     }
+
+
+def _require_fresh_online_fleet(view: _FleetView) -> None:
+    """Require current live telemetry before treating Fleet absence as proof."""
+
+    for node_id, node in view["nodes"].items():
+        if (
+            node["online_state"] != "online"
+            or node["telemetry_freshness"] != "live"
+            or not isinstance(node["boot_id"], str)
+            or not node["boot_id"]
+        ):
+            raise QualificationError(
+                "fresh Fleet observation requires every locked Fleet node to be online with live telemetry"
+            )
+        observed_at = _timestamp(
+            node["telemetry_observed_at"],
+            f"Fleet telemetry observed_at for {node_id}",
+        )
+        if observed_at > view["generated_at"]:
+            raise QualificationError(
+                "fresh Fleet observation contains telemetry newer than its snapshot"
+            )
 
 
 def _validate_lane_projection(
