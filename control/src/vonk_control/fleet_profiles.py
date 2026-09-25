@@ -172,6 +172,7 @@ _OPERATION_STATE_ADAPTER = TypeAdapter(FleetProfileOperationState)
 _PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
 _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
 _MAX_CACHE_RECOVERY_DELAY_SECONDS = 60
+_MAX_ADMISSION_RETRY_DELAY_SECONDS = 60
 # A profile request may race a short heartbeat, telemetry write, or worker
 # transaction while taking the reviewed admission snapshot.  Retry the whole
 # SQL transaction after releasing it; the request key keeps a later successful
@@ -390,6 +391,12 @@ class FleetProfileAdmissionBusy(FleetProfileConflict):
     code = "profile.admission_busy"
 
 
+class FleetProfileAdmissionEffectBusy(FleetProfileConflict):
+    """A live effect owner must finish before a superseding plan can bind."""
+
+    code = "profile.admission_effect_busy"
+
+
 class FleetProfileStalePlanConflict(FleetProfileConflict):
     """Admission refused because the caller's reviewed plan is no longer current."""
 
@@ -454,6 +461,13 @@ def _cache_recovery_delay(attempt: int) -> timedelta:
     # Bound exponent work as well as the retry rate for long-lived intent.
     exponent = min(attempt - 1, _MAX_CACHE_RECOVERY_DELAY_SECONDS.bit_length())
     return timedelta(seconds=min(_MAX_CACHE_RECOVERY_DELAY_SECONDS, 2**exponent))
+
+
+def _admission_retry_delay(attempt: int) -> timedelta:
+    """Bound parked admission retries while preserving the latest intent."""
+
+    exponent = min(attempt - 1, _MAX_ADMISSION_RETRY_DELAY_SECONDS.bit_length())
+    return timedelta(seconds=min(_MAX_ADMISSION_RETRY_DELAY_SECONDS, 2**exponent))
 
 
 def _require_recovery_preparations(
@@ -2029,12 +2043,12 @@ class FleetProfileService:
             try:
                 yield session
             except AdmissionLockBusy as error:
-                raise FleetProfileConflict(
+                raise FleetProfileAdmissionEffectBusy(
                     "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
                 ) from error
             except OperationalError as error:
                 if is_admission_contention(error):
-                    raise FleetProfileConflict(
+                    raise FleetProfileAdmissionEffectBusy(
                         "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
                     ) from None
                 raise
@@ -3340,6 +3354,115 @@ class FleetProfileService:
                 else None
             )
 
+    def _create_pending_application(
+        self,
+        preview: FleetProfilePreview,
+        *,
+        request_key: str,
+        actor: str,
+        operation_kind: FleetProfileOperationKind,
+    ) -> FleetProfileApplicationView:
+        """Persist reviewed intent before admission locks are reacquired.
+
+        The row owns no workload ordinal, reservation, or child effect until
+        the normal admission transaction binds it.  This lets the reconciler
+        retry after a transient owner clears without holding a SQL lock or
+        asking the operator to resubmit the same reviewed request.
+        """
+
+        now = _aware(self._clock())
+        application_id = str(uuid.uuid4())
+        with self._sessions.begin() as session:
+            self._authorize(session, actor)
+            existing = session.scalar(
+                select(FleetProfileApplication).where(
+                    FleetProfileApplication.request_key == request_key
+                )
+            )
+            if existing is not None:
+                return self._matching_application(
+                    existing,
+                    session=session,
+                    profile_id=preview.profile_id,
+                    reviewed_digest=preview.plan_digest,
+                    actor=actor,
+                )
+            profile = session.get(FleetProfile, preview.profile_id)
+            if profile is None:
+                raise KeyError(preview.profile_id)
+            if _digest(_profile_document(profile)) != preview.profile_digest:
+                raise FleetProfileStalePlanConflict(
+                    "Fleet profile changed before its admission intent was persisted"
+                )
+            intended = FleetProfileIntendedConfiguration(
+                profile_digest=preview.profile_digest,
+                reviewed_plan_digest=preview.plan_digest,
+                reviewed_application_id=application_id,
+                installation_policy=_INSTALLATION_POLICY_ADAPTER.validate_python(
+                    profile.installation_policy, strict=True
+                ),
+                scope=FleetProfileScope(node_ids=list(preview.scope.node_ids)),
+                assignments=list(preview.resolved_assignments),
+            )
+            next_retry = now + _admission_retry_delay(1)
+            row = FleetProfileApplication(
+                id=application_id,
+                request_key=request_key,
+                profile_id=preview.profile_id,
+                profile_digest=preview.profile_digest,
+                plan_digest=preview.plan_digest,
+                state="waiting-for-operator",
+                plan=preview.model_dump(mode="json"),
+                current_step=0,
+                current_operation_id=None,
+                progress=FleetProfileApplicationProgress(
+                    operation_kind=operation_kind,
+                    admission_pending=True,
+                    admission_attempt=0,
+                    admission_retry_at=next_retry,
+                    intended_profile=intended,
+                    completed_steps=0,
+                    total_steps=len(preview.steps),
+                ).model_dump(mode="json"),
+                result=None,
+                status_reason=(
+                    "Profile admission is busy; reviewed intent was accepted and "
+                    f"will retry automatically after {next_retry.isoformat()}."
+                )[:512],
+                actor=actor,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(row)
+            session.flush()
+            return self._application_view(row)
+
+    def _defer_pending_application(
+        self, application_id: str, reason: str
+    ) -> FleetProfileApplicationView:
+        """Record bounded retry state after a nonblocking admission refusal."""
+
+        now = _aware(self._clock())
+        with self._sessions.begin() as session:
+            row = session.get(FleetProfileApplication, application_id)
+            if row is None:
+                raise KeyError(application_id)
+            progress = _persisted_profile_progress(row)
+            attempt = progress.admission_attempt + 1
+            next_retry = now + _admission_retry_delay(attempt)
+            progress_data = progress.model_dump(mode="json")
+            progress_data["admission_pending"] = True
+            progress_data["admission_attempt"] = attempt
+            progress_data["admission_retry_at"] = next_retry.isoformat()
+            row.progress = FleetProfileApplicationProgress.model_validate_json(
+                canonical_message(progress_data), strict=True
+            ).model_dump(mode="json")
+            row.state = "waiting-for-operator"
+            row.status_reason = f"{reason} Next attempt: {next_retry.isoformat()}."[:512]
+            row.updated_at = now
+            session.flush()
+            return self._application_view(row)
+
     def apply(
         self, profile_id: str, *, plan_digest: str, request_key: str, actor: str
     ) -> FleetProfileApplicationView:
@@ -3358,6 +3481,12 @@ class FleetProfileService:
                 raise FleetProfileConflict(
                     "Fleet profile preview is blocked; review the current blockers before loading"
                 )
+            pending = self._create_pending_application(
+                preview,
+                request_key=request_key,
+                actor=actor,
+                operation_kind="fleet-profile.apply",
+            )
             for retry_delay in (
                 *_PROFILE_ADMISSION_RETRY_DELAYS_SECONDS,
                 None,
@@ -3368,11 +3497,20 @@ class FleetProfileService:
                         request_key=request_key,
                         actor=actor,
                         operation_kind="fleet-profile.apply",
+                        pending_application_id=pending.id,
                     )
                 except FleetProfileAdmissionBusy:
                     if retry_delay is None:
-                        raise
+                        return self._defer_pending_application(
+                            pending.id,
+                            "Profile admission is busy; the Controller will retry automatically.",
+                        )
                     time.sleep(retry_delay)
+                except FleetProfileAdmissionEffectBusy:
+                    return self._defer_pending_application(
+                        pending.id,
+                        "Profile admission is waiting for the active workload owner to finish; the Controller will retry automatically.",
+                    )
             raise FleetProfileAdmissionBusy(
                 "Profile admission retry schedule was exhausted"
             )
@@ -3387,6 +3525,14 @@ class FleetProfileService:
                 actor=actor,
             )
             if replay is not None:
+                if replay.state == "waiting-for-operator":
+                    with self._sessions.begin() as session:
+                        row = session.get(FleetProfileApplication, replay.id)
+                        if row is not None and _persisted_profile_progress(
+                            row
+                        ).admission_pending:
+                            session.delete(row)
+                    raise
                 return replay
             raise
 
@@ -3399,10 +3545,11 @@ class FleetProfileService:
         operation_kind: FleetProfileOperationKind,
         retry_of_application_id: str | None = None,
         automatic_cache_recovery: bool = False,
+        pending_application_id: str | None = None,
     ) -> FleetProfileApplicationView:
         now = _aware(self._clock())
         reviewed_plan_digest = preview.plan_digest
-        application_id = str(uuid.uuid4())
+        application_id = pending_application_id or str(uuid.uuid4())
         if preview.steps and self._switch_adapter is None:
             raise FleetProfileConflict(
                 "Fleet profile Run/Switch authority is unavailable"
@@ -3435,16 +3582,21 @@ class FleetProfileService:
                 )
             )
             if existing is not None:
-                return self._matching_application(
-                    existing,
-                    session=session,
-                    profile_id=preview.profile_id,
-                    reviewed_digest=reviewed_plan_digest
-                    if retry_of_application_id is None
-                    else None,
-                    actor=actor,
-                    retry_of_application_id=retry_of_application_id,
+                pending = (
+                    pending_application_id == existing.id
+                    and _persisted_profile_progress(existing).admission_pending
                 )
+                if not pending:
+                    return self._matching_application(
+                        existing,
+                        session=session,
+                        profile_id=preview.profile_id,
+                        reviewed_digest=reviewed_plan_digest
+                        if retry_of_application_id is None
+                        else None,
+                        actor=actor,
+                        retry_of_application_id=retry_of_application_id,
+                    )
             if _digest(_profile_document(profile)) != preview.profile_digest:
                 raise FleetProfileStalePlanConflict(
                     "Fleet profile changed during application admission; review again"
@@ -3671,6 +3823,16 @@ class FleetProfileService:
                         prior_application.updated_at = now
                         continue
                     prior_ordinal = prior_progress.workload_intent_ordinal
+                    if prior_progress.admission_pending:
+                        self._set_application_state(
+                            session, prior_application, "cancelled"
+                        )
+                        prior_application.status_reason = (
+                            "Profile order was replaced before admission by a later "
+                            "scoped intent"
+                        )
+                        prior_application.updated_at = now
+                        continue
                     if (
                         prior_ordinal is None
                         or prior_ordinal >= workload_intent_ordinal
@@ -3682,35 +3844,54 @@ class FleetProfileService:
                         "issued effects retain their own cancellation receipts"
                     )
                     prior_application.updated_at = now
-            row = FleetProfileApplication(
-                id=application_id,
-                request_key=request_key,
-                profile_id=preview.profile_id,
-                profile_digest=preview.profile_digest,
-                plan_digest=preview.plan_digest,
-                state="succeeded" if not preview.steps else "queued",
-                plan=preview.model_dump(mode="json"),
-                current_step=0,
-                current_operation_id=None,
-                progress=FleetProfileApplicationProgress(
-                    operation_kind=operation_kind,
-                    attempt=attempt,
-                    retry_of_application_id=retry_of_application_id,
-                    intended_profile=intended,
-                    workload_intent_ordinal=workload_intent_ordinal,
-                    completed_steps=0,
-                    total_steps=len(preview.steps),
-                ).model_dump(mode="json"),
-                result=(
+            progress = FleetProfileApplicationProgress(
+                operation_kind=operation_kind,
+                attempt=attempt,
+                retry_of_application_id=retry_of_application_id,
+                intended_profile=intended,
+                workload_intent_ordinal=workload_intent_ordinal,
+                completed_steps=0,
+                total_steps=len(preview.steps),
+            ).model_dump(mode="json")
+            row = existing
+            if row is None:
+                row = FleetProfileApplication(
+                    id=application_id,
+                    request_key=request_key,
+                    profile_id=preview.profile_id,
+                    profile_digest=preview.profile_digest,
+                    plan_digest=preview.plan_digest,
+                    state="succeeded" if not preview.steps else "queued",
+                    plan=preview.model_dump(mode="json"),
+                    current_step=0,
+                    current_operation_id=None,
+                    progress=progress,
+                    result=(
+                        {"changed": False, "completed_steps": 0}
+                        if not preview.steps
+                        else None
+                    ),
+                    actor=actor,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+            else:
+                row.profile_id = preview.profile_id
+                row.profile_digest = preview.profile_digest
+                row.plan_digest = preview.plan_digest
+                row.state = "succeeded" if not preview.steps else "queued"
+                row.plan = preview.model_dump(mode="json")
+                row.current_step = 0
+                row.current_operation_id = None
+                row.progress = progress
+                row.result = (
                     {"changed": False, "completed_steps": 0}
                     if not preview.steps
                     else None
-                ),
-                actor=actor,
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(row)
+                )
+                row.status_reason = None
+                row.updated_at = now
             session.flush()
             reserve_profile_disk(
                 session,
@@ -4432,6 +4613,7 @@ class FleetProfileService:
         if self._switch_adapter is None:
             return False
         now = _aware(self._clock())
+        pending_admission_observed = self._observe_pending_admissions(now)
         parked_observed = self._observe_parked_applications(now)
         recovery_deferred = False
         cancellation_observed = self._observe_pending_cancellation(now)
@@ -4490,7 +4672,12 @@ class FleetProfileService:
                 .limit(1)
             )
             if row is None:
-                return cancellation_observed or parked_observed or recovery_deferred
+                return (
+                    pending_admission_observed
+                    or cancellation_observed
+                    or parked_observed
+                    or recovery_deferred
+                )
             try:
                 plan = _persisted_profile_plan(row)
                 progress = _persisted_profile_progress(row)
@@ -4557,7 +4744,8 @@ class FleetProfileService:
                 if child.state in _CHILD_PENDING_STATES:
                     if row.state == "running" and not session.is_modified(row):
                         return (
-                            cancellation_observed
+                            pending_admission_observed
+                            or cancellation_observed
                             or parked_observed
                             or recovery_deferred
                         )
@@ -4715,6 +4903,89 @@ class FleetProfileService:
                 current.status_reason = str(error)[:512]
             current.updated_at = _aware(self._clock())
         return True
+
+    def _observe_pending_admissions(self, now: datetime) -> bool:
+        """Retry reviewed applications that could not acquire admission locks."""
+
+        candidate: tuple[str, str, str, FleetProfilePreview] | None = None
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(FleetProfileApplication)
+                .where(FleetProfileApplication.state == "waiting-for-operator")
+                .order_by(
+                    FleetProfileApplication.updated_at.desc(),
+                    FleetProfileApplication.created_at.desc(),
+                    FleetProfileApplication.id.desc(),
+                )
+                .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
+            )
+            for row in rows:
+                try:
+                    progress = _persisted_profile_progress(row)
+                    plan = _persisted_profile_plan(row)
+                except FleetProfileConflict:
+                    continue
+                if not progress.admission_pending or progress.cancellation is not None:
+                    continue
+                if (
+                    progress.admission_retry_at is not None
+                    and _aware(progress.admission_retry_at) > now
+                ):
+                    continue
+                candidate = (row.id, row.request_key, row.actor, plan)
+                break
+        if candidate is None:
+            return False
+        application_id, request_key, actor, plan = candidate
+        try:
+            self._queue_application(
+                plan,
+                request_key=request_key,
+                actor=actor,
+                operation_kind="fleet-profile.apply",
+                pending_application_id=application_id,
+            )
+        except (FleetProfileAdmissionBusy, FleetProfileAdmissionEffectBusy) as error:
+            self._defer_pending_application(application_id, str(error))
+            return True
+        except FleetProfileStalePlanConflict as error:
+            self._finish_pending_admission(
+                application_id,
+                state="cancelled",
+                reason=f"Pending profile intent was superseded: {error}",
+            )
+            return True
+        except (FleetProfileConflict, FleetProfilePermissionDenied, KeyError) as error:
+            self._finish_pending_admission(
+                application_id,
+                state="failed",
+                reason=str(error) or "Profile admission could not be resumed",
+            )
+            return True
+        return True
+
+    def _finish_pending_admission(
+        self,
+        application_id: str,
+        *,
+        state: FleetProfileOperationState,
+        reason: str,
+    ) -> None:
+        now = _aware(self._clock())
+        with self._sessions.begin() as session:
+            row = session.get(FleetProfileApplication, application_id)
+            if row is None:
+                return
+            progress = _persisted_profile_progress(row)
+            progress_data = progress.model_dump(mode="json")
+            progress_data["admission_pending"] = False
+            progress_data["admission_retry_at"] = None
+            row.progress = FleetProfileApplicationProgress.model_validate_json(
+                canonical_message(progress_data), strict=True
+            ).model_dump(mode="json")
+            row.state = state
+            row.status_reason = reason[:512]
+            row.updated_at = now
 
     def _observe_parked_applications(self, now: datetime) -> bool:
         """Record the ending of a parked application whose child has ended.
@@ -5739,6 +6010,7 @@ class FleetProfileService:
 
 __all__ = [
     "FleetProfileAdmissionBusy",
+    "FleetProfileAdmissionEffectBusy",
     "FleetProfileConflict",
     "FleetProfileService",
     "FleetProfileStalePlanConflict",

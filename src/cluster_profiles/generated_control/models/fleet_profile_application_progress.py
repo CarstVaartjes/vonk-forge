@@ -7,10 +7,12 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
+from dateutil.parser import isoparse
 from typing import cast
 from typing import cast, Union
 from typing import Literal, cast
 from typing import Union
+import datetime
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
@@ -32,6 +34,9 @@ class FleetProfileApplicationProgress:
     """ Typed progress tree persisted with every profile application.
 
         Attributes:
+            admission_attempt (Union[Unset, int]):  Default: 0.
+            admission_pending (Union[Unset, bool]):  Default: False.
+            admission_retry_at (Union[None, Unset, datetime.datetime]):
             attempt (Union[Unset, int]):  Default: 1.
             cancellation (Union['FleetProfileApplicationCancellationIntent', None, Unset]):
             child_progress (Union['FleetProfileChildProgress', None, Unset]):
@@ -47,6 +52,9 @@ class FleetProfileApplicationProgress:
             workload_intent_ordinal (Union[None, Unset, int]):
      """
 
+    admission_attempt: Union[Unset, int] = 0
+    admission_pending: Union[Unset, bool] = False
+    admission_retry_at: Union[None, Unset, datetime.datetime] = UNSET
     attempt: Union[Unset, int] = 1
     cancellation: Union['FleetProfileApplicationCancellationIntent', None, Unset] = UNSET
     child_progress: Union['FleetProfileChildProgress', None, Unset] = UNSET
@@ -71,6 +79,18 @@ class FleetProfileApplicationProgress:
         from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
         from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
         from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
+        admission_attempt = self.admission_attempt
+
+        admission_pending = self.admission_pending
+
+        admission_retry_at: Union[None, Unset, str]
+        if isinstance(self.admission_retry_at, Unset):
+            admission_retry_at = UNSET
+        elif isinstance(self.admission_retry_at, datetime.datetime):
+            admission_retry_at = self.admission_retry_at.isoformat()
+        else:
+            admission_retry_at = self.admission_retry_at
+
         attempt = self.attempt
 
         cancellation: Union[None, Unset, dict[str, Any]]
@@ -148,6 +168,12 @@ class FleetProfileApplicationProgress:
 
         field_dict.update({
         })
+        if admission_attempt is not UNSET:
+            field_dict["admission_attempt"] = admission_attempt
+        if admission_pending is not UNSET:
+            field_dict["admission_pending"] = admission_pending
+        if admission_retry_at is not UNSET:
+            field_dict["admission_retry_at"] = admission_retry_at
         if attempt is not UNSET:
             field_dict["attempt"] = attempt
         if cancellation is not UNSET:
@@ -187,6 +213,30 @@ class FleetProfileApplicationProgress:
         from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
         from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
         d = dict(src_dict)
+        admission_attempt = d.pop("admission_attempt", UNSET)
+
+        admission_pending = d.pop("admission_pending", UNSET)
+
+        def _parse_admission_retry_at(data: object) -> Union[None, Unset, datetime.datetime]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                admission_retry_at_type_0 = isoparse(data)
+
+
+
+                return admission_retry_at_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, Unset, datetime.datetime], data)
+
+        admission_retry_at = _parse_admission_retry_at(d.pop("admission_retry_at", UNSET))
+
+
         attempt = d.pop("attempt", UNSET)
 
         def _parse_cancellation(data: object) -> Union['FleetProfileApplicationCancellationIntent', None, Unset]:
@@ -342,6 +392,9 @@ class FleetProfileApplicationProgress:
 
 
         fleet_profile_application_progress = cls(
+            admission_attempt=admission_attempt,
+            admission_pending=admission_pending,
+            admission_retry_at=admission_retry_at,
             attempt=attempt,
             cancellation=cancellation,
             child_progress=child_progress,

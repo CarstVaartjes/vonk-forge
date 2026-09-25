@@ -4945,6 +4945,29 @@
         "additionalProperties": false,
         "description": "Typed progress tree persisted with every profile application.",
         "properties": {
+          "admission_attempt": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Admission Attempt",
+            "type": "integer"
+          },
+          "admission_pending": {
+            "default": false,
+            "title": "Admission Pending",
+            "type": "boolean"
+          },
+          "admission_retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admission Retry At"
+          },
           "attempt": {
             "default": 1,
             "minimum": 1.0,
