@@ -1997,9 +1997,9 @@ class FleetProfileService:
         This is a short SQL-only transaction; contention anywhere in the
         admission work refuses before effects and releases the transaction.
         """
-        try:
-            with self._sessions.begin() as session:
-                self._authorize(session, actor)
+        with self._sessions.begin() as session:
+            self._authorize(session, actor)
+            try:
                 acquire_admission_keys(
                     session,
                     tuple(node_admission_key(node_id) for node_id in node_ids),
@@ -2016,17 +2016,28 @@ class FleetProfileService:
                             "IN SHARE ROW EXCLUSIVE MODE NOWAIT"
                         )
                     )
-                yield session
-        except AdmissionLockBusy as error:
-            raise FleetProfileAdmissionBusy(
-                "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
-            ) from error
-        except OperationalError as error:
-            if is_admission_contention(error):
+            except AdmissionLockBusy as error:
                 raise FleetProfileAdmissionBusy(
                     "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
-                ) from None
-            raise
+                ) from error
+            except OperationalError as error:
+                if is_admission_contention(error):
+                    raise FleetProfileAdmissionBusy(
+                        "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
+                    ) from None
+                raise
+            try:
+                yield session
+            except AdmissionLockBusy as error:
+                raise FleetProfileConflict(
+                    "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
+                ) from error
+            except OperationalError as error:
+                if is_admission_contention(error):
+                    raise FleetProfileConflict(
+                        "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
+                    ) from None
+                raise
 
     @staticmethod
     def _next_profile_number(session: Session) -> int:
