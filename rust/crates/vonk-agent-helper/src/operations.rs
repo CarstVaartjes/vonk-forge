@@ -6680,7 +6680,10 @@ mod tests {
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].first().map(String::as_str), Some("container"));
         assert_eq!(calls[0].get(1).map(String::as_str), Some("ls"));
-        assert_eq!(calls[1], vec!["container", "rm", container_id]);
+        assert_eq!(
+            calls[1],
+            vec!["container".to_owned(), "rm".to_owned(), container_id]
+        );
     }
 
     #[test]
