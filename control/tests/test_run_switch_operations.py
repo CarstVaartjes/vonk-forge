@@ -4443,6 +4443,62 @@ def _make_install_specs_missing_placement_authority(
         installation.plan = stored_plan
 
 
+def _record_successful_reconcile_member(
+    sessions, lifecycle, job_id: str, node_id: str
+) -> dict[str, object]:
+    with sessions() as session:
+        child = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job_id,
+                AgentOperation.node_id == node_id,
+            )
+        )
+        assert child is not None
+        payload = RecipeReconcilePayload.model_validate(child.payload)
+        source_operation = session.get(AgentOperation, payload.install_operation_id)
+        assert source_operation is not None
+        source_attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == source_operation.id,
+                AgentOperationAttempt.attempt == source_operation.current_attempt,
+            )
+        )
+        assert source_attempt is not None
+        receipt = RecipeReconcileResult(
+            reconciled=True,
+            node_id=payload.node_id,
+            installation_id=payload.installation_id,
+            install_operation_id=payload.install_operation_id,
+            install_operation_payload_sha256=(payload.install_operation_payload_sha256),
+            plan_digest=payload.plan_digest,
+            recipe_revision_id=payload.recipe_revision_id,
+            recipe_content_sha256=payload.recipe_content_sha256,
+            compiled_spec_canonical_sha256=(payload.compiled_spec_canonical_sha256),
+            removed_bytes=1,
+            cleanup_receipt_sha256=hashlib.sha256(
+                f"cleanup:{node_id}".encode()
+            ).hexdigest(),
+        )
+        evidence = receipt.model_dump(mode="json")
+    with sessions.begin() as session:
+        child = session.get(AgentOperation, child.id)
+        assert child is not None
+        child.current_attempt = 1
+        session.add(
+            AgentOperationAttempt(
+                operation_id=child.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=NOW + timedelta(minutes=1),
+                agent_certificate_serial=source_attempt.agent_certificate_serial,
+                state="succeeded",
+                result=evidence,
+            )
+        )
+    lifecycle.record_node_result(job_id, node_id, succeeded=True, evidence=evidence)
+    return evidence
+
+
 def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_strict(
     tmp_path: Path,
 ) -> None:
@@ -4659,6 +4715,150 @@ def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts
     assert {item.node_id for item in cleanup_result.reconciliation_receipts} == set(
         nodes
     )
+
+
+def test_new_reconcile_review_reuses_exact_partial_receipt_and_releases_last_claim(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    _make_install_specs_missing_placement_authority(
+        sessions, installation.owner_id, nodes
+    )
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+    )
+    first_plan = service.preview_cleanup(
+        RunSwitchCleanupPreviewRequest(
+            installation_id=installation.owner_id,
+            cleanup_mode="reconcile",
+        ),
+        actor="admin",
+    )
+    assert first_plan.allowed, [
+        (item.code, item.detail) for item in first_plan.blockers
+    ]
+    first = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation.owner_id,
+            cleanup_mode="reconcile",
+            plan_digest=first_plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert service.tick() is True
+    first_child_id = _child_operation_id(service.get(first.operation_id))
+    assert first_child_id is not None
+
+    first_receipt = _record_successful_reconcile_member(
+        sessions, lifecycle, first_child_id, nodes[0]
+    )
+    lifecycle.record_node_result(
+        first_child_id,
+        nodes[1],
+        succeeded=False,
+        evidence={
+            "failure_kind": "temporary-dependency",
+            "reason": "temporary dependency",
+        },
+    )
+    for _ in range(6):
+        if service.get(first.operation_id).state not in {"queued", "running"}:
+            break
+        service.tick()
+    assert service.get(first.operation_id).state == "failed"
+    with sessions() as session:
+        partial = session.get(RecipeInstallation, installation.owner_id)
+        assert partial is not None and partial.state == "partial"
+        members = tuple(
+            session.scalars(
+                select(InstallationNode)
+                .where(InstallationNode.installation_id == installation.owner_id)
+                .order_by(InstallationNode.rank)
+            )
+        )
+        assert [(node.node_id, node.state) for node in members] == [
+            (nodes[0], "uninstalled"),
+            (nodes[1], "failed"),
+        ]
+        claims = tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == installation.owner_id
+                )
+            )
+        )
+        assert claims and all(item.state == "active" for item in claims)
+
+    retry_plan = service.preview_cleanup(
+        RunSwitchCleanupPreviewRequest(
+            installation_id=installation.owner_id,
+            cleanup_mode="reconcile",
+        ),
+        actor="admin",
+    )
+    assert retry_plan.allowed, [
+        (item.code, item.detail) for item in retry_plan.blockers
+    ]
+    assert retry_plan.reconciliation_authority is not None
+    assert [
+        (target.node_id, target.state, target.cleanup_receipt_sha256)
+        for target in retry_plan.reconciliation_authority.targets
+    ] == [
+        (
+            nodes[0],
+            "reconciled",
+            first_receipt["cleanup_receipt_sha256"],
+        ),
+        (nodes[1], "pending", None),
+    ]
+    retry = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation.owner_id,
+            cleanup_mode="reconcile",
+            plan_digest=retry_plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert service.tick() is True
+    retry_child_id = _child_operation_id(service.get(retry.operation_id))
+    assert retry_child_id is not None
+    with sessions() as session:
+        retry_children = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == retry_child_id
+                )
+            )
+        )
+        assert [(child.node_id, child.kind) for child in retry_children] == [
+            (nodes[1], "recipe.reconcile")
+        ]
+    _record_successful_reconcile_member(sessions, lifecycle, retry_child_id, nodes[1])
+    with sessions() as session:
+        completed = session.get(RecipeInstallation, installation.owner_id)
+        assert completed is not None and completed.state == "uninstalled"
+        claims = tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == installation.owner_id
+                )
+            )
+        )
+        assert claims and all(item.state == "released" for item in claims)
 
 
 def test_scoped_cleanup_removes_the_installation_through_run_switch(
