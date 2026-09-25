@@ -1515,7 +1515,37 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .ok()
                 .map(|value| value.to_string());
             let Some(found_installation) = found_installation else {
-                return Err(OperationError::InvalidArtifact);
+                // Older agents could leave a stopped managed container without
+                // an installation binding. It cannot be attributed to the
+                // current installation, but its exact Vonk run name and
+                // stopped state prove that it is a retired attempt rather
+                // than a live effect. Retire only that narrow shape; running,
+                // malformed, or ambiguously named containers remain blockers.
+                let run_name = fields[2]
+                    .split(',')
+                    .map(str::trim)
+                    .find(|name| name.strip_prefix("vonk-").is_some());
+                let Some(run_name) = run_name else {
+                    return Err(OperationError::InvalidArtifact);
+                };
+                let Some(run_id) = run_name.strip_prefix("vonk-") else {
+                    return Err(OperationError::InvalidArtifact);
+                };
+                let Ok(parsed_run_id) = uuid::Uuid::parse_str(run_id) else {
+                    return Err(OperationError::InvalidArtifact);
+                };
+                if parsed_run_id.to_string() != run_id || !matches!(fields[1], "exited" | "dead") {
+                    return Err(OperationError::InvalidArtifact);
+                }
+                let removed = self.run_docker(&[
+                    "container".to_owned(),
+                    "rm".to_owned(),
+                    fields[0].to_owned(),
+                ])?;
+                if !removed.success || removed.exit_code != Some(0) {
+                    return Err(OperationError::CommandFailed);
+                }
+                continue;
             };
             if found_installation != fields[4] {
                 return Err(OperationError::InvalidArtifact);
@@ -4235,6 +4265,41 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct ReconciliationCleanupRunner {
+        listing: CommandOutput,
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl ReconciliationCleanupRunner {
+        fn new(listing: CommandOutput) -> Self {
+            Self {
+                listing,
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl CommandRunner for ReconciliationCleanupRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(executable, Path::new("/usr/bin/docker"));
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            match arguments.get(1).map(String::as_str) {
+                Some("ls") => Ok(self.listing.clone()),
+                Some("rm") => Ok(CommandOutput {
+                    success: true,
+                    stdout: arguments
+                        .get(2)
+                        .map(|id| format!("{id}\n").into_bytes())
+                        .unwrap_or_default(),
+                    stderr: Vec::new(),
+                    exit_code: Some(0),
+                }),
+                _ => panic!("unexpected Docker operation: {arguments:?}"),
+            }
+        }
+    }
+
     fn helper_reconciliation_fixture() -> (
         TempDir,
         ManagedRoots,
@@ -6591,6 +6656,31 @@ mod tests {
             assert!(runtime_cache.exists());
             assert!(!receipt_path.exists());
         }
+    }
+
+    #[test]
+    fn reconciliation_retires_stopped_unbound_vonk_run_before_publishing_receipt() {
+        let (_temp, roots, identity, runtime_cache, _shared_cache) =
+            helper_reconciliation_fixture();
+        let run_id = "40000000-0000-4000-8000-000000000004";
+        let container_id = "a".repeat(64);
+        let runner = ReconciliationCleanupRunner::new(CommandOutput {
+            success: true,
+            stdout: format!("{container_id}\texited\tvonk-{run_id}\ttrue\t\n").into_bytes(),
+            stderr: Vec::new(),
+            exit_code: Some(0),
+        });
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
+
+        executor.runtime_reconcile_installation(&identity).unwrap();
+
+        assert!(!runtime_cache.exists());
+        let calls = runner.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].first().map(String::as_str), Some("container"));
+        assert_eq!(calls[0].get(1).map(String::as_str), Some("ls"));
+        assert_eq!(calls[1], vec!["container", "rm", container_id]);
     }
 
     #[test]
