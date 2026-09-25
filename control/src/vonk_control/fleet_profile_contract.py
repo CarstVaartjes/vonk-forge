@@ -846,6 +846,9 @@ class FleetProfileApplicationProgress(_StrictModel):
 
     attempt: int = Field(default=1, ge=1)
     retry_of_application_id: UuidId | None = None
+    admission_pending: bool = False
+    admission_attempt: int = Field(default=0, ge=0)
+    admission_retry_at: datetime | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
     workload_intent_ordinal: int | None = Field(default=None, ge=1)
     operation_kind: FleetProfileOperationKind | None = None

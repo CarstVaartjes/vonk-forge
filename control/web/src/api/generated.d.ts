@@ -2788,6 +2788,18 @@ export interface components {
          */
         FleetProfileApplicationProgress: {
             /**
+             * Admission Attempt
+             * @default 0
+             */
+            admission_attempt: number;
+            /**
+             * Admission Pending
+             * @default false
+             */
+            admission_pending: boolean;
+            /** Admission Retry At */
+            admission_retry_at?: string | null;
+            /**
              * Attempt
              * @default 1
              */

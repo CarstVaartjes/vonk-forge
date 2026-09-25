@@ -485,10 +485,10 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
         assert reservation is not None and reservation.amount_bytes == 0
 
 
-def test_profile_load_refuses_a_run_while_shared_node_admission_is_held(
+def test_profile_load_parks_while_shared_node_admission_is_held(
     tmp_path, postgres_engine
 ) -> None:
-    sessions, _, planner, profile, api, headers, _, nodes = _capacity_profile(
+    sessions, profiles, planner, profile, api, headers, _, nodes = _capacity_profile(
         tmp_path, postgres_engine
     )
     lifecycle = planner._lifecycle
@@ -565,17 +565,17 @@ def test_profile_load_refuses_a_run_while_shared_node_admission_is_held(
                     thread_id != run_thread_ids[0] and key == expected_key
                     for thread_id, key in observed_keys
                 )
-                assert response.status_code == 409, response.text
-                assert "busy" in response.json()["detail"].lower()
+                assert response.status_code == 202, response.text
+                assert "busy" in response.json()["status_reason"].lower()
                 with sessions() as session:
-                    assert (
-                        session.scalar(
-                            select(FleetProfileApplication.id).where(
-                                FleetProfileApplication.request_key == request_key
-                            )
+                    parked = session.scalar(
+                        select(FleetProfileApplication).where(
+                            FleetProfileApplication.request_key == request_key
                         )
-                        is None
                     )
+                    assert parked is not None
+                    assert parked.state == "waiting-for-operator"
+                    assert parked.progress["admission_pending"] is True
                     assert set(
                         session.execute(
                             select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
@@ -591,13 +591,12 @@ def test_profile_load_refuses_a_run_while_shared_node_admission_is_held(
         )
 
     assert started.id
+    assert profiles.tick()
     with sessions() as session:
         assert session.scalar(select(Job.id).where(Job.id == started.id)) is not None
-        assert (
-            session.scalar(
-                select(FleetProfileApplication.id).where(
-                    FleetProfileApplication.request_key == request_key
-                )
+        application = session.scalar(
+            select(FleetProfileApplication).where(
+                FleetProfileApplication.request_key == request_key
             )
-            is None
         )
+        assert application is not None

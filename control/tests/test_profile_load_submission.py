@@ -754,7 +754,7 @@ def test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation(
 
 
 @pytest.mark.parametrize("locked_model", [Job, AgentOperation])
-def test_superseded_child_contention_refuses_without_holding_admission(
+def test_superseded_child_contention_is_parked_without_holding_admission(
     tmp_path, postgres_engine, locked_model
 ):
     sessions, lifecycle, _adapter, service, profile, installed, _nodes = (
@@ -809,12 +809,16 @@ def test_superseded_child_contention_refuses_without_holding_admission(
             )
             try:
                 assert attempted.wait(timeout=5)
-                # The lock is still held. Admission must refuse now, not wait
-                # for the worker whose effects it is trying to supersede.
+                # The lock is still held. Admission must park the reviewed
+                # intent now, not wait for the worker whose effects it is
+                # trying to supersede.
                 response = future.result(timeout=1)
-                assert response.status_code == 409, response.text
+                assert response.status_code == 202, response.text
                 with sessions() as session:
-                    assert session.scalar(select(FleetProfileApplication)) is None
+                    parked = session.scalar(select(FleetProfileApplication))
+                    assert parked is not None
+                    assert parked.state == "waiting-for-operator"
+                    assert parked.progress["admission_pending"] is True
                     assert (
                         tuple(
                             session.scalars(
@@ -830,12 +834,9 @@ def test_superseded_child_contention_refuses_without_holding_admission(
     finally:
         locker.close()
         event.remove(postgres_engine, "before_cursor_execute", before_lock)
-    retried = api.post(
-        f"/api/profile/{profile.number}/load", headers=headers, json=request_body
-    )
-    assert retried.status_code == 202, retried.text
-    assert retried.json()["request_key"] == request_body["request_key"]
+    assert service.tick()
     with sessions() as session:
         accepted = tuple(session.scalars(select(FleetProfileApplication)))
         assert len(accepted) == 1
         assert accepted[0].request_key == request_body["request_key"]
+        assert accepted[0].progress["admission_pending"] is False
