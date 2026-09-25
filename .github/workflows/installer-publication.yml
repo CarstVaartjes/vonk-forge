@@ -100,7 +100,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Install readiness runtime
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -289,7 +289,7 @@ jobs:
           ref: ${{ needs.authority.outputs.source_sha }}
 
       - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -524,7 +524,7 @@ jobs:
 
       - name: Install uv and Python
         timeout-minutes: 5
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -863,7 +863,7 @@ jobs:
           printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
 
       - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -968,7 +968,7 @@ jobs:
           ref: ${{ needs.authority.outputs.source_sha }}
 
       - name: Install canonical publication model runtime
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -1158,7 +1158,7 @@ jobs:
           persist-credentials: false
 
       - name: Install canonical publication model runtime
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
