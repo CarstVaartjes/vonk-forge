@@ -157,7 +157,7 @@ jobs:
       - parallel:
           - name: Build API once to local OCI and exact registry digest
             id: build_api
-            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+            uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
             with:
               context: .
               file: control/Dockerfile
@@ -177,7 +177,7 @@ jobs:
 
           - name: Build worker once to local OCI and exact registry digest
             id: build_worker
-            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+            uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
             with:
               context: .
               file: control/Dockerfile
@@ -198,7 +198,7 @@ jobs:
           - name: Build Hermes once to local OCI and exact registry digest
             id: build_hermes
             if: steps.reuse_hermes.outputs.digest == ''
-            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+            uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
             with:
               context: ${{ runner.temp }}/image-contexts/hermes
               file: ${{ runner.temp }}/image-contexts/hermes/Dockerfile
@@ -218,7 +218,7 @@ jobs:
           - name: Build LiteLLM once to local OCI and exact registry digest
             id: build_litellm
             if: steps.reuse_litellm.outputs.digest == ''
-            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+            uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
             with:
               context: ${{ runner.temp }}/image-contexts/litellm
               file: ${{ runner.temp }}/image-contexts/litellm/deploy/compose/litellm/Dockerfile
