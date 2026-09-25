@@ -385,7 +385,8 @@ def _transition(
         "partner_stop_receipts": [
             _stop(reference.run_id, reference.assigned_node_id, reference.assigned_rank)
             for reference in target.canaries
-            if reference.run_id in review["stop_run_ids"]
+            if reference.run_id is not None
+            and reference.run_id in _as_list(review["stop_run_ids"])
         ],
         "pre_transition_fleet_snapshot": _snapshot(
             target,
@@ -441,7 +442,7 @@ def _cleanup_review_receipt(
     )
     loaded_ids = sorted(
         str(presence["run_id"])
-        for node in snapshot["nodes"]
+        for node in _as_list(snapshot["nodes"])
         for presence in node["loaded"]
     )
     aliases_by_run = {
@@ -490,7 +491,7 @@ def _cleanup_application(
     review = _as_mapping(request["review"])
     references = {item.run_id: item for item in target.canaries}
     stop_receipts = []
-    for run_id in review["stop_run_ids"]:
+    for run_id in _as_list(review["stop_run_ids"]):
         reference = references.get(str(run_id))
         node_id = reference.assigned_node_id if reference else target.node_id
         rank = (
@@ -510,7 +511,7 @@ def _cleanup_application(
         "profile_digest": review["profile_digest"],
         "plan_digest": review["plan_digest"],
         "stop_receipts": stop_receipts,
-        "released_run_proofs": list(review["released_run_proofs"]),
+        "released_run_proofs": _as_list(review["released_run_proofs"]),
         "fleet_snapshot": _snapshot(
             target,
             active=None,
@@ -523,6 +524,11 @@ def _cleanup_application(
 
 
 MappingLike = Mapping[str, object]
+
+
+def _as_list(value: object) -> list[Any]:
+    assert isinstance(value, list)
+    return value
 
 
 def _as_mapping(value: object) -> dict[str, object]:
@@ -951,7 +957,7 @@ def test_partner_run_left_in_actual_fleet_snapshot_blocks_transition(
     def partner_left(request: MappingLike) -> MappingLike:
         result = dict(transition(request))
         snapshot = dict(result["fleet_snapshot"])
-        nodes = [dict(node) for node in snapshot["nodes"]]
+        nodes = [dict(node) for node in _as_list(snapshot["nodes"])]
         node_b = nodes[1]
         node_b["loaded"] = [
             {
@@ -1402,7 +1408,7 @@ def test_cleanup_completion_resumes_from_original_review_without_new_plan_or_app
         assert request["request_key"] == _record_payload(completion)["request_key"]
         assert request["review_digest"] == _record_payload(completion)["review_digest"]
         assert request["persisted_receipt"] == persisted
-        fresh = dict(persisted)
+        fresh = _as_mapping(persisted)
         fresh["fleet_snapshot"] = _snapshot(
             target,
             active=None,
@@ -1472,7 +1478,7 @@ def test_cleanup_lost_apply_response_reuses_saved_review_and_request(
         calls["reconciled"] += 1
         assert request["resume_reviewed"] is True
         assert request["request_key"] == persisted_request_key
-        result = dict(accepted_receipt)
+        result = _as_mapping(accepted_receipt)
         result["fleet_snapshot"] = _snapshot(
             target,
             active=None,
@@ -1592,7 +1598,7 @@ def test_lane_two_reactivation_uses_exact_prior_lane_release_after_restart(
                 lane_two,
                 ledger,
                 pre,
-                candidate_run_ids=request["partner_run_ids"],
+                candidate_run_ids=_as_list(request["partner_run_ids"]),
             )
         )
         if corrupt:
@@ -1759,7 +1765,9 @@ def test_noop_failed_lane_cleanup_requires_prior_typed_stops_and_fresh_idle_flee
         lane_two, ledger, prepare_cleanup=prepare_lane_two_cleanup
     )
     assert preview.receipt["stop_run_ids"] == []
-    assert [proof["run_id"] for proof in preview.receipt["released_run_proofs"]] == [
+    assert [
+        proof["run_id"] for proof in _as_list(preview.receipt["released_run_proofs"])
+    ] == [
         RUN_A,
         RUN_B,
     ]
@@ -1789,4 +1797,4 @@ def test_noop_failed_lane_cleanup_requires_prior_typed_stops_and_fresh_idle_flee
         if item.get("event") == "lane_recovery.cleanup.completed"
         and _record_payload(item).get("lane_id") == 2
     )
-    assert _record_payload(cleanup)["receipt"]["stop_receipts"] == []
+    assert _as_mapping(_record_payload(cleanup)["receipt"])["stop_receipts"] == []

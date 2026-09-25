@@ -1016,9 +1016,15 @@ def record_lane_cleanup(
                 "application_updated_at": persisted_receipt.get(
                     "application_updated_at"
                 ),
-                "stop_run_ids": list(review.receipt["stop_run_ids"]),
-                "stop_aliases": list(review.receipt["stop_aliases"]),
-                "released_run_proofs": list(review.receipt["released_run_proofs"]),
+                "stop_run_ids": _string_list(
+                    review.receipt["stop_run_ids"], "reviewed stop run IDs"
+                ),
+                "stop_aliases": _string_list(
+                    review.receipt["stop_aliases"], "reviewed stop aliases"
+                ),
+                "released_run_proofs": _object_list(
+                    review.receipt["released_run_proofs"], "reviewed release proofs"
+                ),
                 "fleet_node_ids": list(target.fleet_node_ids),
                 "persisted_receipt": dict(persisted_receipt),
             }
@@ -1107,8 +1113,12 @@ def record_lane_cleanup(
             "profile_digest": review.profile_digest,
             "plan_digest": review.plan_digest,
             "stop_run_ids": reviewed_stop_ids,
-            "stop_aliases": list(review.receipt["stop_aliases"]),
-            "released_run_proofs": list(review.receipt["released_run_proofs"]),
+            "stop_aliases": _string_list(
+                review.receipt["stop_aliases"], "reviewed stop aliases"
+            ),
+            "released_run_proofs": _object_list(
+                review.receipt["released_run_proofs"], "reviewed release proofs"
+            ),
             "fleet_node_ids": list(target.fleet_node_ids),
         }
     )
@@ -1586,11 +1596,14 @@ def _validate_cleanup_review(
     for run_id in actual_stops:
         reference = references_by_run.get(run_id)
         expected_alias = aliases_by_run[run_id]
-        expected_revision = (
-            target.recipe_revision_id
-            if run_id == active_run_id
-            else _str(reference.recipe_revision_id, "cleanup canary revision")
-        )
+        if run_id == active_run_id:
+            expected_revision = target.recipe_revision_id
+        else:
+            if reference is None:
+                raise QualificationError("cleanup stop has no exact canary reference")
+            expected_revision = _str(
+                reference.recipe_revision_id, "cleanup canary revision"
+            )
         expected_ranks = dict(expected_stops[run_id])
         projection = view["loaded_runs"][run_id]
         if (
