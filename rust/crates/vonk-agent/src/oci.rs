@@ -2538,7 +2538,7 @@ fn read_reconciliation_directory_identity(path: &Path) -> Result<Option<(u64, u6
 fn read_reconciliation_checkpoint(
     path: &Path,
 ) -> Result<Option<InstallationReconciliationCheckpoint>, OciError> {
-    let mut file = match OpenOptions::new()
+    let file = match OpenOptions::new()
         .read(true)
         .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
         .open(path)
@@ -2767,12 +2767,12 @@ fn canonical_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        InstallationReconciliationCheckpoint, InstallationReconciliationState, OciError,
-        OciRuntime, SHA256_OPEN_FILE_CALLS, canonical_protocol_json, ensure_runtime_tmp,
-        materialize_compiled_models, protocol_sha256, read_installation_metadata,
-        read_reconciliation_directory_identity, reconciliation_checkpoint_path,
-        reconciliation_directory_bytes, reconciliation_quarantine_path, release_page_cache,
-        unique_plan_artifacts, write_installation_metadata, write_reconciliation_checkpoint,
+        InstallationReconciliationState, OciError, OciRuntime, SHA256_OPEN_FILE_CALLS,
+        canonical_protocol_json, ensure_runtime_tmp, materialize_compiled_models, protocol_sha256,
+        read_installation_metadata, read_reconciliation_directory_identity,
+        reconciliation_checkpoint_path, reconciliation_directory_bytes,
+        reconciliation_quarantine_path, release_page_cache, unique_plan_artifacts,
+        write_installation_metadata, write_reconciliation_checkpoint,
     };
     use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
     use serde_json::{Value, json};
@@ -2938,7 +2938,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_checkpoint_recovers_after_partial_or_complete_quarantine_deletion() {
+    fn reconciliation_removing_checkpoint_recovers_after_partial_or_complete_quarantine_deletion() {
         for delete_quarantine_before_retry in [false, true] {
             let directory = tempdir().unwrap();
             let data_root = directory.path().join("data");
@@ -3001,7 +3001,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_installation_without_checkpoint_is_not_cleanup_success() {
+    fn reconciliation_missing_installation_without_checkpoint_is_not_cleanup_success() {
         let directory = tempdir().unwrap();
         let data_root = directory.path().join("data");
         fs::create_dir_all(data_root.join("installations")).unwrap();

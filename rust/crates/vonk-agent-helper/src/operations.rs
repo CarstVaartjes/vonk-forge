@@ -4177,12 +4177,14 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        CommandOutput, CommandRunner, HostRuntimeAction, HostRuntimeRequest, JobCancellationFence,
+        CommandOutput, CommandRunner, HostRuntimeAction, HostRuntimeRequest,
+        INSTALLATION_RECONCILIATION_DIRECTORY, JobCancellationFence, MAX_COMMAND_OUTPUT_BYTES,
         MAX_COMPILED_MODEL_PATH_CHARS, ManagedRoots, OperationError, OperationExecutor,
         RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION, RuntimeImageReceipt, bounded_container_exit_code,
         finish_timed_out_job, hex_sha256, loaded_image_source, parse_publication,
         parse_runtime_stop, validate_docker_run,
     };
+    use vonk_agent_protocol::{RecipeReconciliationIdentity, canonical_json};
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
 
@@ -4206,6 +4208,110 @@ mod tests {
                 }),
             })
         }
+    }
+
+    #[derive(Clone)]
+    struct ReconciliationListingRunner {
+        response: CommandOutput,
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl ReconciliationListingRunner {
+        fn new(response: CommandOutput) -> Self {
+            Self {
+                response,
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl CommandRunner for ReconciliationListingRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(executable, Path::new("/usr/bin/docker"));
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            assert_eq!(arguments.get(0).map(String::as_str), Some("container"));
+            assert_eq!(arguments.get(1).map(String::as_str), Some("ls"));
+            Ok(self.response.clone())
+        }
+    }
+
+    fn helper_reconciliation_fixture() -> (
+        TempDir,
+        ManagedRoots,
+        RecipeReconciliationIdentity,
+        PathBuf,
+        PathBuf,
+    ) {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("controller-data");
+        let agent_data = temp.path().join("spark-agent-data");
+        let roots = ManagedRoots::under(&data).with_agent_data(&agent_data);
+        fs::create_dir_all(&roots.data).unwrap();
+        let installation_id = uuid::Uuid::new_v4();
+        let installation = agent_data
+            .join("installations")
+            .join(installation_id.to_string());
+        let runtime_cache = installation.join("runtime-cache");
+        let shared_cache = agent_data.join("shared-model-cache").join("model.bin");
+        fs::create_dir_all(&runtime_cache.join("home/private")).unwrap();
+        fs::create_dir_all(shared_cache.parent().unwrap()).unwrap();
+        fs::set_permissions(&installation, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&runtime_cache, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            runtime_cache.join("home"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::set_permissions(
+            runtime_cache.join("home/private"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::write(
+            runtime_cache.join("home/private/private-cache.bin"),
+            b"private",
+        )
+        .unwrap();
+        fs::write(&shared_cache, b"shared model cache").unwrap();
+
+        let recipe_digest = "e".repeat(64);
+        let spec = serde_json::json!({
+            "identity": {"recipe_revision_sha256": recipe_digest},
+            "invalid legacy-shaped plan": {"opaque": [false, null]},
+        });
+        let spec_canonical = canonical_json(&spec).unwrap();
+        let identity = RecipeReconciliationIdentity {
+            compiled_spec_canonical_sha256: hex_sha256(&spec_canonical),
+            install_operation_id: uuid::Uuid::new_v4(),
+            install_operation_payload_sha256: "a".repeat(64),
+            installation_id,
+            node_id: format!("spk_{}", "b".repeat(32)),
+            plan_digest: "c".repeat(64),
+            recipe_content_sha256: recipe_digest.clone(),
+            recipe_revision_id: uuid::Uuid::new_v4(),
+            schema_version: 1,
+        };
+        fs::write(
+            installation.join("spec.json"),
+            serde_json::to_vec(&spec).unwrap(),
+        )
+        .unwrap();
+        fs::set_permissions(
+            installation.join("spec.json"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        fs::write(
+            installation.join("recipe-content.sha256"),
+            recipe_digest.as_bytes(),
+        )
+        .unwrap();
+        fs::set_permissions(
+            installation.join("recipe-content.sha256"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        (temp, roots, identity, runtime_cache, shared_cache)
     }
 
     #[derive(Clone, Copy)]
@@ -6167,7 +6273,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(&temp.path().join("agent-data"));
         let installation_id = "10000000-0000-4000-8000-000000000001";
-        let installation = roots.agent_data.join("installations").join(installation_id);
+        let installation = roots
+            .agent_data
+            .join("installations")
+            .join(&installation_id);
         let cache = installation.join("runtime-cache");
         let private = cache.join("home/private/nested");
         let models = installation.join("models/primary");
@@ -6306,6 +6415,286 @@ mod tests {
         executor(&roots)
             .runtime_installation_cleanup(installation_id)
             .unwrap();
+    }
+
+    #[test]
+    fn reconciliation_clears_only_private_cache_and_replays_after_agent_removal() {
+        let (_temp, roots, identity, runtime_cache, shared_cache) = helper_reconciliation_fixture();
+        let runner = ReconciliationListingRunner::new(CommandOutput {
+            success: true,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            exit_code: Some(0),
+        });
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
+
+        executor.runtime_reconcile_installation(&identity).unwrap();
+        assert!(!runtime_cache.exists());
+        assert_eq!(fs::read(&shared_cache).unwrap(), b"shared model cache");
+        let receipt_path = roots
+            .data
+            .join(INSTALLATION_RECONCILIATION_DIRECTORY)
+            .join(format!("{}.json", identity.installation_id));
+        assert!(receipt_path.is_file());
+
+        let calls = runner.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        let arguments = &calls[0];
+        assert!(!arguments.iter().any(|argument| argument == "--filter"));
+        let template = arguments.last().unwrap();
+        assert!(template.contains(".Label"));
+        assert!(template.as_bytes().contains(&b'\t'));
+        assert!(!template.contains(r"\t"));
+        drop(calls);
+
+        // The agent may finish deleting its exact installation after the
+        // helper's acknowledgement is lost. The helper tombstone must retain
+        // enough identity to replay that same authorization without the
+        // deleted marker or malformed plan.
+        let installation = roots
+            .agent_data
+            .join("installations")
+            .join(identity.installation_id.to_string());
+        fs::remove_dir_all(&installation).unwrap();
+        executor.runtime_reconcile_installation(&identity).unwrap();
+        assert!(receipt_path.is_file());
+        assert_eq!(fs::read(&shared_cache).unwrap(), b"shared model cache");
+    }
+
+    #[test]
+    fn reconciliation_refuses_a_replacement_directory_even_with_matching_contract_bytes() {
+        let (_temp, roots, identity, _runtime_cache, _shared_cache) =
+            helper_reconciliation_fixture();
+        let executor = OperationExecutor::new(
+            roots.clone(),
+            &[0; 32],
+            ReconciliationListingRunner::new(CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+                exit_code: Some(0),
+            }),
+            None,
+        )
+        .unwrap();
+        executor.runtime_reconcile_installation(&identity).unwrap();
+
+        let installation = roots
+            .agent_data
+            .join("installations")
+            .join(identity.installation_id.to_string());
+        let original = roots
+            .agent_data
+            .join("installations")
+            .join(format!("{}.original", identity.installation_id));
+        let spec = fs::read(installation.join("spec.json")).unwrap();
+        let recipe = fs::read(installation.join("recipe-content.sha256")).unwrap();
+        fs::rename(&installation, &original).unwrap();
+        fs::create_dir(&installation).unwrap();
+        fs::set_permissions(&installation, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(installation.join("spec.json"), spec).unwrap();
+        fs::set_permissions(
+            installation.join("spec.json"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        fs::write(installation.join("recipe-content.sha256"), recipe).unwrap();
+        fs::set_permissions(
+            installation.join("recipe-content.sha256"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            executor.runtime_reconcile_installation(&identity),
+            Err(OperationError::InvalidArtifact)
+        ));
+        assert!(installation.is_dir());
+        assert!(original.is_dir());
+    }
+
+    #[test]
+    fn reconciliation_does_not_treat_a_missing_installation_as_prior_cleanup_proof() {
+        let (_temp, roots, identity, _runtime_cache, _shared_cache) =
+            helper_reconciliation_fixture();
+        let installation = roots
+            .agent_data
+            .join("installations")
+            .join(identity.installation_id.to_string());
+        fs::remove_dir_all(&installation).unwrap();
+        let receipt_path = roots
+            .data
+            .join(INSTALLATION_RECONCILIATION_DIRECTORY)
+            .join(format!("{}.json", identity.installation_id));
+        let executor = OperationExecutor::new(
+            roots,
+            &[0; 32],
+            ReconciliationListingRunner::new(CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+                exit_code: Some(0),
+            }),
+            None,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            executor.runtime_reconcile_installation(&identity),
+            Err(OperationError::UnsafePath)
+        ));
+        assert!(!receipt_path.exists());
+    }
+
+    #[test]
+    fn reconciliation_refuses_active_unknown_failed_or_truncated_runtime_inventory() {
+        for case in 0..5 {
+            let (_temp, roots, identity, runtime_cache, _shared_cache) =
+                helper_reconciliation_fixture();
+            let stdout = match case {
+                0 => format!(
+                    "{}\trunning\tvonk-{}\ttrue\t{}\n",
+                    "1".repeat(64),
+                    RUN_ID,
+                    identity.installation_id
+                )
+                .into_bytes(),
+                1 => format!("{}\texited\tvonk-old-{}\ttrue\t\n", "2".repeat(64), RUN_ID)
+                    .into_bytes(),
+                2 => {
+                    format!("{}\texited\tvonk-legacy-{}\t\t\n", "3".repeat(64), RUN_ID).into_bytes()
+                }
+                3 => Vec::new(),
+                _ => vec![b'x'; MAX_COMMAND_OUTPUT_BYTES as usize + 1],
+            };
+            let response = CommandOutput {
+                success: case != 3,
+                stdout,
+                stderr: if case == 3 {
+                    b"docker inventory unavailable".to_vec()
+                } else {
+                    Vec::new()
+                },
+                exit_code: Some(if case == 3 { 1 } else { 0 }),
+            };
+            let receipt_path = roots
+                .data
+                .join(INSTALLATION_RECONCILIATION_DIRECTORY)
+                .join(format!("{}.json", identity.installation_id));
+            let executor = OperationExecutor::new(
+                roots,
+                &[0; 32],
+                ReconciliationListingRunner::new(response),
+                None,
+            )
+            .unwrap();
+
+            assert!(executor.runtime_reconcile_installation(&identity).is_err());
+            assert!(runtime_cache.exists());
+            assert!(!receipt_path.exists());
+        }
+    }
+
+    #[test]
+    fn reconciliation_lock_blocks_start_owner_and_published_tombstone_blocks_stale_start() {
+        let (_temp, roots, identity, runtime_cache, _shared_cache) =
+            helper_reconciliation_fixture();
+        let empty_listing = || {
+            ReconciliationListingRunner::new(CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+                exit_code: Some(0),
+            })
+        };
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], empty_listing(), None).unwrap();
+        let installation_id = identity.installation_id.to_string();
+
+        // START holds this exact per-installation runtime fence through its
+        // Docker call. A cleanup request arriving during that critical section
+        // must be deferred without removing the cache or recording a receipt.
+        let start_guard = executor
+            .lock_installation_runtime(&installation_id)
+            .unwrap();
+        assert!(matches!(
+            executor.runtime_reconcile_installation(&identity),
+            Err(OperationError::InstallationReconciliationBusy)
+        ));
+        assert!(runtime_cache.exists());
+        drop(start_guard);
+
+        executor.runtime_reconcile_installation(&identity).unwrap();
+        assert!(!runtime_cache.exists());
+
+        // A stale, already-issued START may attempt to recreate the mount path
+        // after cleanup. Recreate only that path to exercise runtime_start's
+        // real lock/tombstone gate after normal request validation.
+        let installation = roots
+            .agent_data
+            .join("installations")
+            .join(&installation_id);
+        let model = installation
+            .join("models")
+            .join(uuid::Uuid::new_v4().to_string())
+            .join("model.gguf");
+        fs::create_dir_all(model.parent().unwrap()).unwrap();
+        fs::write(&model, b"model").unwrap();
+        fs::create_dir_all(installation.join("runtime-cache/home")).unwrap();
+        fs::set_permissions(
+            installation.join("runtime-cache"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::set_permissions(
+            installation.join("runtime-cache/home"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        let run_root = roots.agent_data.join("runs").join(RUN_ID);
+        fs::create_dir_all(run_root.join("outputs/tmp")).unwrap();
+        fs::create_dir_all(run_root.join("inputs")).unwrap();
+        let run_metadata = roots.agent_data.join("run-metadata").join(RUN_ID);
+        fs::create_dir_all(&run_metadata).unwrap();
+        fs::write(run_metadata.join("runtime.json"), b"{}").unwrap();
+        let mut docker_arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+        for argument in &mut docker_arguments {
+            *argument = argument.replace(
+                "installations/installation-1/runtime-cache",
+                &format!("installations/{installation_id}/runtime-cache"),
+            );
+        }
+        let image_reference = docker_arguments
+            .iter()
+            .find(|argument| argument.starts_with("localhost/vonk/"))
+            .unwrap()
+            .clone();
+        let archive_sha256 = "4".repeat(64);
+        let registry_index_digest = format!("sha256:{}", "5".repeat(64));
+        let platform_manifest_digest = format!("sha256:{}", "c".repeat(64));
+        let mut start_arguments = vec![
+            archive_sha256,
+            registry_index_digest,
+            platform_manifest_digest,
+            image_reference,
+        ];
+        start_arguments.extend(docker_arguments);
+        super::validate_docker_run(&start_arguments[4..], &roots, None)
+            .expect("stale START fixture passes base Docker request validation");
+        super::validate_docker_run_with_archive(
+            &start_arguments[4..],
+            &roots,
+            None,
+            Some(&start_arguments[0]),
+            Some(&start_arguments[1]),
+        )
+        .expect("stale START fixture passes ordinary request validation");
+
+        assert!(matches!(
+            executor.runtime_start(&start_arguments, true),
+            Err(OperationError::InvalidArtifact)
+        ));
     }
 
     #[test]
