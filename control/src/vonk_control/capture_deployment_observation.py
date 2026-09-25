@@ -257,14 +257,11 @@ def capture(
         raise CaptureError("Docker Controller container is not running")
     repository_digests = image.repo_digests
     matching_repository_digest = f"{API_REPOSITORY}@{expected_digest}"
-    actual_repository_digest = next(
-        (
-            value
-            for value in repository_digests
-            if value.startswith(API_REPOSITORY + "@sha256:")
-        ),
-        None,
-    )
+    actual_repository_digests = {
+        value
+        for value in repository_digests
+        if value.startswith(API_REPOSITORY + "@sha256:")
+    }
 
     try:
         build = ControllerBuildMetadata.model_validate_json(
@@ -275,13 +272,13 @@ def capture(
             "running Controller build metadata is missing or invalid"
         ) from error
 
-    if actual_repository_digest is None:
+    if not actual_repository_digests:
         _clear_controller(observation_path)
         raise CaptureError(
             "running Controller image has no matching immutable repository digest"
         )
     if (
-        actual_repository_digest != matching_repository_digest
+        matching_repository_digest not in actual_repository_digests
         or build.source_commit != release.source_sha
     ):
         _clear_controller(observation_path)
@@ -293,7 +290,11 @@ def capture(
         source="Verified accepted release and running Docker Controller instance",
         observed_at=clock(),
         source_commit=build.source_commit,
-        image_digest=actual_repository_digest.rsplit("@", 1)[1],
+        image_digest=next(
+            value
+            for value in actual_repository_digests
+            if value == matching_repository_digest
+        ).rsplit("@", 1)[1],
         manifest_sha256=hashlib.sha256(release_raw).hexdigest(),
         container_id=container_id,
     )

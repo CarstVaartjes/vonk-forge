@@ -149,8 +149,9 @@ def release_signer(tmp_path_factory):
     return private_key, public_key_path
 
 
+@pytest.mark.parametrize("additional_manifest", [False, True])
 def test_capture_records_actual_accepted_instance_and_preserves_other_evidence(
-    tmp_path, release_signer
+    tmp_path, release_signer, additional_manifest
 ):
     private_key, public_key_path = release_signer
     path = tmp_path / "observations.json"
@@ -162,8 +163,11 @@ def test_capture_records_actual_accepted_instance_and_preserves_other_evidence(
         + b"\n"
     )
 
+    request = _signed_request(private_key)
+    if additional_manifest:
+        request.image.repo_digests.insert(0, f"{API_REPOSITORY}@sha256:{'f' * 64}")
     result = capture(
-        _signed_request(private_key),
+        request,
         observation_path=path,
         build_metadata_path=build_path,
         public_key_path=public_key_path,
