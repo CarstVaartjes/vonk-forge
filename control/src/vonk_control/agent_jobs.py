@@ -110,6 +110,7 @@ _RECIPE_CAPABILITIES = frozenset(
         AgentOperation.RECIPE_JOB_RUN.value,
         AgentOperation.RECIPE_STOP.value,
         AgentOperation.RECIPE_UNINSTALL.value,
+        AgentOperation.RECIPE_RECONCILE.value,
     }
 )
 _MUTATING_OPERATIONS = frozenset(
@@ -124,6 +125,7 @@ _MUTATING_OPERATIONS = frozenset(
         AgentOperation.RECIPE_JOB_RUN.value,
         AgentOperation.RECIPE_STOP.value,
         AgentOperation.RECIPE_UNINSTALL.value,
+        AgentOperation.RECIPE_RECONCILE.value,
     }
 )
 _WORKLOAD_INTENT_OPERATIONS = frozenset(
@@ -135,6 +137,7 @@ _WORKLOAD_INTENT_OPERATIONS = frozenset(
         AgentOperation.RECIPE_JOB_RUN.value,
         AgentOperation.RECIPE_STOP.value,
         AgentOperation.RECIPE_UNINSTALL.value,
+        AgentOperation.RECIPE_RECONCILE.value,
     }
 )
 _LIFECYCLE_RESTART_OPERATIONS = frozenset(
@@ -143,6 +146,7 @@ _LIFECYCLE_RESTART_OPERATIONS = frozenset(
         AgentOperation.RECIPE_START.value,
         AgentOperation.RECIPE_STOP.value,
         AgentOperation.RECIPE_UNINSTALL.value,
+        AgentOperation.RECIPE_RECONCILE.value,
     }
 )
 _RESTART_REISSUE_OPERATIONS = _LIFECYCLE_RESTART_OPERATIONS | frozenset(
@@ -188,6 +192,8 @@ def superseded_cancellation_deadline(result: object) -> datetime | None:
 
 
 _RUNTIME_CAPABILITIES = frozenset({"agent.runtime.rust.v1", "runtime.vonk.v1"})
+EXACT_LIFECYCLE_RESUME_CAPABILITY = "agent.lifecycle.resume.exact.v1"
+RECIPE_RECONCILE_FEATURE_CAPABILITY = "recipe.reconcile.v1"
 _NEXT_CAPABILITIES = _RUNTIME_CAPABILITIES | _RECIPE_CAPABILITIES
 _OPTIONAL_CAPABILITIES = frozenset(
     {
@@ -196,7 +202,8 @@ _OPTIONAL_CAPABILITIES = frozenset(
         "recipe.start.two-phase.v1",
         "recipe.run.inspect.exact.v1",
         "recipe.run.inspect.receipt.v1",
-        "agent.lifecycle.resume.exact.v1",
+        EXACT_LIFECYCLE_RESUME_CAPABILITY,
+        RECIPE_RECONCILE_FEATURE_CAPABILITY,
     }
 )
 _KNOWN_CAPABILITIES = _NEXT_CAPABILITIES | _OPTIONAL_CAPABILITIES
@@ -225,6 +232,7 @@ def _safe_retry_failure(kind: str, state: str, result: Mapping[str, object]) -> 
         AgentOperation.ARTIFACT_DISTRIBUTION.value,
         AgentOperation.RECIPE_STOP.value,
         AgentOperation.RECIPE_UNINSTALL.value,
+        AgentOperation.RECIPE_RECONCILE.value,
     } or (
         kind == AgentOperation.RECIPE_START.value
         and result.get("error_code") == "runtime_observation_unavailable"
@@ -622,6 +630,7 @@ def retire_exhausted_operations_in_session(
         "recipe.stop",
         "recipe.install",
         "recipe.uninstall",
+        "recipe.reconcile",
     }:
         previous = {} if job.result is None else job.result
         if job.result is not None:

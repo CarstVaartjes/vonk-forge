@@ -119,6 +119,7 @@ from .recipe_operations import (
     RecipeInstallPreflightExpired,
     RecipeOperationConflict,
     RecipeOperationService,
+    RecipeReconciliationBlocked,
 )
 from .recipe_runtime_specs import (
     RUNTIME_INTERFACE,
@@ -190,6 +191,7 @@ from .run_switch_contract import (
     RunSwitchReason,
     RunSwitchReasonScope,
     RunSwitchReasonSeverity,
+    RunSwitchReconciliationAuthority,
     RunSwitchRetention,
     RunSwitchRuntimeImageReferenceIntent,
     RunSwitchStopApplyRequest,
@@ -1735,6 +1737,55 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     "run-switch.uninstall_target_unavailable"
                 )
+            if plan.cleanup_mode == "reconcile":
+                authority = plan.reconciliation_authority
+                if authority is None:
+                    raise RunSwitchOperationConflict(
+                        "run-switch.reconciliation-authority-unavailable"
+                    )
+                reconcile_request_id = str(
+                    uuid.uuid5(uuid.UUID(request_key), "reconcile")
+                )
+                adopted = self._lifecycle.adopt_owned_operation(
+                    reconcile_request_id,
+                    kind="recipe.reconcile",
+                    owner_kind="installation",
+                    owner_id=installation_id,
+                )
+                if adopted is not None:
+                    return PhaseExecution(
+                        adopted.id, {"installation_id": installation_id}
+                    )
+                self._lifecycle.reconcile_superseded_unissued(
+                    "recipe.reconcile", installation_id, ordinal
+                )
+                self._observe_older_issued(
+                    "recipe.reconcile", installation_id, ordinal
+                )
+                try:
+                    value = self._lifecycle.reconcile_installation(
+                        installation_id,
+                        expected_authority=authority.model_dump(mode="json"),
+                        run_switch_plan_digest=plan.plan_digest,
+                        actor=actor,
+                        request_id=reconcile_request_id,
+                        workload_intent_ordinal=ordinal,
+                    )
+                except InstallAdmissionBusy:
+                    raise
+                except (
+                    KeyError,
+                    RecipeOperationConflict,
+                    RuntimeError,
+                    TypeError,
+                    ValueError,
+                ) as error:
+                    raise RunSwitchOperationConflict(
+                        f"run-switch.reconciliation-start-failed: {error}"
+                    ) from error
+                return PhaseExecution(
+                    value.id, {"installation_id": installation_id}
+                )
             if plan.cleanup_disposition == "abandon":
                 # The installation's own assessment proved the plan never
                 # reached a node, so no agent order is queued.  The lifecycle
@@ -1796,7 +1847,7 @@ class RecipeLifecyclePhaseExecutor:
             return PhaseExecution(value.id, {"installation_id": installation_id})
         if phase.kind == "final_verify":
             if plan.action == "cleanup":
-                return self._verify_cleanup(plan)
+                return self._verify_cleanup(plan, request_key=request_key)
             if plan.action == "install":
                 return self._verify_installation(plan, progress)
             run_id = plan.run_id
@@ -1990,7 +2041,9 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution(result=evidence, waiting=True)
         raise RunSwitchOperationConflict("run-switch.installation-verification-failed")
 
-    def _verify_cleanup(self, plan: RunSwitchPlan) -> PhaseExecution:
+    def _verify_cleanup(
+        self, plan: RunSwitchPlan, *, request_key: str
+    ) -> PhaseExecution:
         """Observe whether the scoped removal has actually taken effect.
 
         The installation row and its active runs are the authority, so the
@@ -2001,24 +2054,83 @@ class RecipeLifecyclePhaseExecutor:
         installation_id = plan.installation_id
         if installation_id is None:
             raise RunSwitchOperationConflict("run-switch.uninstall_target_unavailable")
+        exact_reconciliation_receipts = True
+        reconcile_request_id: str | None = None
+        reconciliation_receipts: list[dict[str, object]] = []
+        if plan.cleanup_mode == "reconcile":
+            if self._lifecycle is None or plan.reconciliation_authority is None:
+                raise RunSwitchOperationConflict(
+                    "run-switch.reconciliation-authority-unavailable"
+                )
+            reconcile_request_id = str(
+                uuid.uuid5(uuid.UUID(request_key), "reconcile")
+            )
+            verified_receipts = self._lifecycle.reconciliation_operation_receipts(
+                    reconcile_request_id,
+                    expected_authority=plan.reconciliation_authority.model_dump(
+                        mode="json"
+                    ),
+                )
+            exact_reconciliation_receipts = verified_receipts is not None
+            if verified_receipts is not None:
+                reconciliation_receipts = [
+                    receipt.model_dump(mode="json") for receipt in verified_receipts
+                ]
         with self._sessions() as session:
             installation = session.get(RecipeInstallation, installation_id)
-            active_runs = (
-                int(
-                    session.scalar(
-                        select(func.count())
-                        .select_from(RecipeRun)
-                        .where(
-                            RecipeRun.installation_id == installation_id,
-                            RecipeRun.state.in_(_ACTIVE_RUN_STATES),
-                        )
-                    )
-                    or 0
+            members = tuple(
+                session.scalars(
+                    select(InstallationNode)
+                    .where(InstallationNode.installation_id == installation_id)
+                    .order_by(InstallationNode.rank, InstallationNode.node_id)
                 )
-                if installation is not None
-                else 0
             )
-        removed = installation is None or installation.state == "uninstalled"
+            runs = tuple(
+                session.scalars(
+                    select(RecipeRun).where(
+                        RecipeRun.installation_id == installation_id
+                    )
+                )
+            )
+            active_runs = (
+                sum(
+                    run.state != "stopped" or run.route_state != "withdrawn"
+                    for run in runs
+                )
+            )
+        if plan.cleanup_mode == "reconcile":
+            expected_members = {
+                (node.node_id, node.rank, node.role)
+                for node in plan.spark_group.nodes
+            }
+            exact_members = {
+                (node.node_id, node.rank, node.role) for node in members
+            } == expected_members
+            removed = (
+                installation is not None
+                and installation.state == "uninstalled"
+                and exact_members
+                and all(node.state == "uninstalled" for node in members)
+                and exact_reconciliation_receipts
+            )
+            if not exact_reconciliation_receipts:
+                raise RunSwitchOperationConflict(
+                    "run-switch.reconciliation-receipt-verification-failed"
+                )
+            if (
+                installation is None
+                or installation.state != "uninstalled"
+                or not exact_members
+                or any(
+                    node.state != "uninstalled" or node.evidence_digest is None
+                    for node in members
+                )
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.reconciliation-state-verification-failed"
+                )
+        else:
+            removed = installation is None or installation.state == "uninstalled"
         evidence = {
             "installation_id": installation_id,
             "installation_state": (
@@ -2026,6 +2138,16 @@ class RecipeLifecyclePhaseExecutor:
             ),
             "removed": removed,
             "active_runs": active_runs,
+            "cleanup_mode": plan.cleanup_mode,
+            **(
+                {
+                    "reconciliation_request_id": reconcile_request_id,
+                    "exact_reconciliation_receipts": exact_reconciliation_receipts,
+                    "reconciliation_receipts": reconciliation_receipts,
+                }
+                if plan.cleanup_mode == "reconcile"
+                else {}
+            ),
         }
         if removed and not active_runs:
             return PhaseExecution(result={"final_verified": True, **evidence})
@@ -2414,6 +2536,9 @@ class RunSwitchOperationService:
         installation_id = (
             request if isinstance(request, str) else request.installation_id
         )
+        cleanup_mode: Literal["uninstall", "reconcile"] = (
+            "uninstall" if isinstance(request, str) else request.cleanup_mode
+        )
         invocation = (
             InvocationMetadata() if isinstance(request, str) else request.invocation
         )
@@ -2422,7 +2547,13 @@ class RunSwitchOperationService:
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
                 raise KeyError(installation_id)
-            revision = _active_recipe_revision(session, installation.recipe_revision_id)
+            revision = (
+                session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+                if cleanup_mode == "reconcile"
+                else _active_recipe_revision(session, installation.recipe_revision_id)
+            )
+            if revision is not None and revision.kind != "recipe":
+                revision = None
             mapping = session.get(ClusterMapping, installation.mapping_id)
             mapping_nodes = tuple(
                 session.scalars(
@@ -2510,15 +2641,90 @@ class RunSwitchOperationService:
             blockers: list[RunSwitchReason] = []
             warnings = [*document_warnings, *fit_warnings, *inspection.warnings]
             cleanup_disposition: Literal["uninstall", "abandon"] = "uninstall"
+            reconciliation_authority: RunSwitchReconciliationAuthority | None = None
             if self._lifecycle is None:
                 blockers.append(
                     _as_reason(
-                        "run-switch.uninstall-assessment-unavailable",
+                        (
+                            "run-switch.reconciliation-assessment-unavailable"
+                            if cleanup_mode == "reconcile"
+                            else "run-switch.uninstall-assessment-unavailable"
+                        ),
                         "Cleanup cannot be assessed without the lifecycle service.",
                         scope="operation",
                         node_ids=node_ids,
                     )
                 )
+            elif cleanup_mode == "reconcile":
+                try:
+                    authority = self._lifecycle.preview_reconciliation_authority(
+                        installation_id,
+                        session=session,
+                        allow_active_reconciliation=True,
+                    )
+                    reconciliation_authority = (
+                        RunSwitchReconciliationAuthority.model_validate(
+                            authority.document()
+                        )
+                    )
+                except RecipeReconciliationBlocked as error:
+                    blockers.append(
+                        _as_reason(
+                            f"run-switch.{error.code}",
+                            error.detail,
+                            scope="operation",
+                            node_ids=node_ids,
+                        )
+                    )
+                except (
+                    KeyError,
+                    RecipeOperationConflict,
+                    RuntimeError,
+                    TypeError,
+                    ValueError,
+                ) as error:
+                    blockers.append(
+                        _as_reason(
+                            "run-switch.reconciliation-assessment-unavailable",
+                            f"The installation cannot be represented by an exact reconciliation authority: {error}",
+                            scope="operation",
+                            node_ids=node_ids,
+                        )
+                    )
+                else:
+                    if (
+                        self._lifecycle.assess_superseded_unissued(
+                            "recipe.reconcile", installation_id
+                        )
+                        or self._lifecycle.assess_superseded_issued(
+                            "recipe.reconcile", installation_id
+                        )
+                        is not None
+                    ):
+                        warnings.append(
+                            _as_reason(
+                                "run-switch.reconciliation-prerequisite",
+                                "The prior exact reconciliation attempt will be retired or observed before new cleanup is queued.",
+                                scope="operation",
+                                node_ids=node_ids,
+                                severity="warning",
+                            )
+                        )
+                    completed_nodes = [
+                        target.node_id
+                        for target in reconciliation_authority.targets
+                        if target.state == "reconciled"
+                    ]
+                    if completed_nodes:
+                        warnings.append(
+                            _as_reason(
+                                "run-switch.reconciliation-receipts-retained",
+                                "Previously verified node cleanup receipts will be reused.",
+                                scope="node",
+                                node_ids=completed_nodes,
+                                severity="warning",
+                            )
+                        )
             else:
                 try:
                     assessment = self._lifecycle.preview_uninstall(installation_id)
@@ -2597,6 +2803,7 @@ class RunSwitchOperationService:
                 stop_before_transfer=False,
                 stop_before_prepare=False,
                 cleanup_disposition=cleanup_disposition,
+                cleanup_mode=cleanup_mode,
             )
             storage = self._storage(inspection, retention="retain-cached")
             preparation = self._preparation(
@@ -2623,6 +2830,8 @@ class RunSwitchOperationService:
                 "installation_id": installation.id,
                 "installation_state": installation.state,
                 "cleanup_disposition": cleanup_disposition,
+                "cleanup_mode": cleanup_mode,
+                "reconciliation_authority": reconciliation_authority,
                 "recipe_build_id": installation.recipe_build_id,
                 "image_digest": installation.image_digest,
                 "start_plan_digest": None,
@@ -5751,6 +5960,7 @@ class RunSwitchOperationService:
         build_required: bool = False,
         build_on_target: bool = False,
         cleanup_disposition: Literal["uninstall", "abandon"] = "uninstall",
+        cleanup_mode: Literal["uninstall", "reconcile"] = "uninstall",
     ) -> list[RunSwitchPhase]:
         node_ids = [node.node_id for node in group.nodes]
         phases: list[RunSwitchPhase] = []
@@ -5770,6 +5980,9 @@ class RunSwitchOperationService:
                         "Abandon the persisted plan that never reached a node; "
                         "there are no installed bytes to remove."
                         if cleanup_disposition == "abandon"
+                        else "Reconcile the exact stored installation effects from "
+                        "successful install provenance while preserving shared caches."
+                        if cleanup_mode == "reconcile"
                         else "Remove the installation that is no longer desired, "
                         "scoped to its authorized membership."
                     ),
@@ -5781,7 +5994,12 @@ class RunSwitchOperationService:
                     kind="final_verify",
                     state="planned" if not blockers else "blocked",
                     node_ids=node_ids,
-                    detail="Verify the installation and its runtime are removed.",
+                    detail=(
+                        "Verify exact reconciliation receipts and retained reservations "
+                        "for every rank before final release."
+                        if cleanup_mode == "reconcile"
+                        else "Verify the installation and its runtime are removed."
+                    ),
                 )
             )
             return phases

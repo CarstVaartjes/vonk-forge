@@ -12,7 +12,11 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
-from vonk_agent_protocol import DistributionAssignment, OperationProgress
+from vonk_agent_protocol import (
+    DistributionAssignment,
+    OperationProgress,
+    RecipeReconcileResult,
+)
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 
@@ -1022,10 +1026,38 @@ class RunSwitchCleanupVerifyResult(_RunSwitchPhaseBase):
     final_verified: bool
     installation_id: UuidId
     removed: bool
+    cleanup_mode: Literal["uninstall", "reconcile"] = "uninstall"
     active_runs: int = Field(default=0, ge=0)
     installation_state: (
         Annotated[str, StringConstraints(min_length=1, max_length=24)] | None
     ) = None
+    reconciliation_request_id: UuidId | None = None
+    exact_reconciliation_receipts: bool | None = None
+    reconciliation_receipts: list[RecipeReconcileResult] = Field(
+        default_factory=list, max_length=32
+    )
+
+    @model_validator(mode="after")
+    def cleanup_receipts_match_mode(self) -> RunSwitchCleanupVerifyResult:
+        if self.cleanup_mode == "uninstall":
+            if (
+                self.reconciliation_request_id is not None
+                or self.exact_reconciliation_receipts is not None
+                or self.reconciliation_receipts
+            ):
+                raise ValueError("ordinary uninstall cannot carry reconciliation receipts")
+            return self
+        node_ids = [receipt.node_id for receipt in self.reconciliation_receipts]
+        if (
+            self.reconciliation_request_id is None
+            or self.exact_reconciliation_receipts is None
+            or node_ids != sorted(set(node_ids))
+            or (self.final_verified and not self.exact_reconciliation_receipts)
+            or (self.exact_reconciliation_receipts and not node_ids)
+            or (not self.exact_reconciliation_receipts and node_ids)
+        ):
+            raise ValueError("reconciliation completion lacks exact ordered receipts")
+        return self
 
 
 class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):

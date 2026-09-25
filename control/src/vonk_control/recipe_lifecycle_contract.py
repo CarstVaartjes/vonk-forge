@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     RecipeBuildEvidence,
     RecipeImageImportEvidence,
     RecipeJobRunResult,
+    RecipeReconcileResult,
     RecipeStartCollectiveReadinessEvidence,
     RecipeStartRankLaunchEvidence,
     RecipeStartSingleEvidence,
@@ -63,6 +64,7 @@ LifecycleNodeResult = Annotated[
     | TensorParallelStartEvidence
     | RecipeStopResult
     | RecipeUninstallResult
+    | RecipeReconcileResult
     | RemovedRecipeNodeResult
     | AgentFailureResult
     | LifecycleCodeFailureResult,
@@ -224,6 +226,8 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
         evidence_models = (RecipeStopResult,)
     elif kind == "recipe.uninstall":
         evidence_models = (RecipeUninstallResult, RemovedRecipeNodeResult)
+    elif kind == "recipe.reconcile":
+        evidence_models = (RecipeReconcileResult,)
     else:
         return
     evidence_models = (*evidence_models, AgentFailureResult, LifecycleCodeFailureResult)
