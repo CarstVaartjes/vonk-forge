@@ -3380,6 +3380,21 @@ class FleetProfileService:
 
         now = _aware(self._clock())
         application_id = str(uuid.uuid4())
+        # The application identity is unique even while admission is parked.
+        # Bind that execution identity before the first durable insert so two
+        # concurrent reviewed loads cannot collide on the unique plan digest,
+        # and so the receipt cannot change identity after a caller observes it.
+        pending_plan_digest = _digest(
+            {
+                "schema_version": 2,
+                "reconciliation_digest": preview.plan_digest,
+                "retry_of_application_id": None,
+                "request_key": request_key,
+            }
+        )
+        pending_preview = preview.model_copy(
+            update={"plan_digest": pending_plan_digest}
+        )
         with self._sessions.begin() as session:
             self._authorize(session, actor)
             existing = session.scalar(
@@ -3418,12 +3433,12 @@ class FleetProfileService:
                 request_key=request_key,
                 profile_id=preview.profile_id,
                 profile_digest=preview.profile_digest,
-                plan_digest=preview.plan_digest,
+                plan_digest=pending_plan_digest,
                 # Keep the short synchronous admission attempt visible as a
                 # normal queued application.  If it cannot bind, the defer
                 # path changes this to waiting-for-operator before returning.
                 state="queued",
-                plan=preview.model_dump(mode="json"),
+                plan=pending_preview.model_dump(mode="json"),
                 current_step=0,
                 current_operation_id=None,
                 progress=FleetProfileApplicationProgress(
