@@ -233,7 +233,7 @@ class RunSwitchCleanupApplyRequest(RunSwitchCleanupPreviewRequest):
 
 
 class RunSwitchReconciliationTarget(_StrictModel):
-    """One exact installed node effect and its successful source operation."""
+    """One exact rank and its current cleanup receipt state."""
 
     node_id: NodeId
     rank: int = Field(ge=0, le=31)
@@ -242,6 +242,14 @@ class RunSwitchReconciliationTarget(_StrictModel):
     install_operation_id: UuidId
     install_operation_payload_sha256: Digest
     compiled_spec_canonical_sha256: Digest
+    state: Literal["pending", "reconciled"]
+    cleanup_receipt_sha256: Digest | None = None
+
+    @model_validator(mode="after")
+    def receipt_matches_state(self) -> RunSwitchReconciliationTarget:
+        if (self.state == "reconciled") != (self.cleanup_receipt_sha256 is not None):
+            raise ValueError("reconciliation receipt does not match target state")
+        return self
 
 
 class RunSwitchReconciliationAuthority(_StrictModel):
@@ -662,7 +670,8 @@ class RunSwitchPlan(RunSwitchAssessment):
             authority.installation_id != self.installation_id
             or authority.recipe_revision_id != self.recipe_revision_id
             or authority.recipe_content_sha256 != self.recipe_content_sha256
-            or authority.mapping_id != (self.mapping.mapping_id if self.mapping else None)
+            or authority.mapping_id
+            != (self.mapping.mapping_id if self.mapping else None)
             or authority.mapping_generation
             != (self.mapping.mapping_generation if self.mapping else None)
             or authority.image_digest != self.image_digest
@@ -1253,9 +1262,9 @@ __all__ = [
     "RunSwitchCachedTransferResult",
     "RunSwitchCapabilityEvidenceState",
     "RunSwitchChangeEffect",
-    "RunSwitchCleanupResult",
     "RunSwitchCleanupApplyRequest",
     "RunSwitchCleanupPreviewRequest",
+    "RunSwitchCleanupResult",
     "RunSwitchContainerBuildResult",
     "RunSwitchContainerBuildState",
     "RunSwitchCoverage",
