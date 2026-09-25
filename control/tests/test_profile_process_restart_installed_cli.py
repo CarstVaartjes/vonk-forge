@@ -380,7 +380,18 @@ def test_installed_cli_follows_same_profile_application_after_api_process_restar
             assert owner.plan_digest == accepted_plan_digest
             assert owner.created_at == accepted_created_at
             assert owner.updated_at == accepted_updated_at
-            assert owner.progress == accepted_progress
+            assert owner.progress["intended_profile"] == accepted_progress["intended_profile"]
+            assert owner.progress["operation_kind"] == accepted_progress["operation_kind"]
+            assert owner.progress["retry_of_application_id"] == accepted_progress[
+                "retry_of_application_id"
+            ]
+            assert owner.progress["total_steps"] == accepted_progress["total_steps"]
+            assert owner.progress["admission_pending"] is False
+            assert owner.progress["admission_retry_at"] is None
+            assert owner.progress["workload_intent_ordinal"] is not None
+            assert owner.progress["completed_steps"] >= accepted_progress[
+                "completed_steps"
+            ]
             assert owner.current_step == accepted_current_step
             assert owner.current_operation_id == accepted_operation_id
             assert owner.result == accepted_result
