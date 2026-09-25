@@ -1137,6 +1137,7 @@ def apply_failed_dual_cleanup(
             "terminal_record_sha256": target.canary_record_sha256,
             "source_application_id": target.application_id,
             "source_application_request_key": target.application_request_key,
+            "active_run_id": _failed_run_id(target),
             "stop_run_ids": [_failed_run_id(target)],
             "stop_aliases": [target.alias],
             "fleet_node_ids": sorted(target.fleet_node_ids),
@@ -1239,6 +1240,7 @@ def apply_failed_dual_cleanup(
         "source_application_id": target.application_id,
         "source_application_request_key": target.application_request_key,
         "source_application_updated_at": target.application_updated_at,
+        "active_run_id": _failed_run_id(target),
         "profile_number": review.profile_number,
         "profile_id": review.profile_id,
         "profile_digest": review.profile_digest,
@@ -1730,12 +1732,6 @@ def _validate_failed_stop_receipts(target: FailedDualCanaryTarget, raw: object) 
     observation = _mapping(
         receipt.get("final_observation"), "failed-canary final stop observation"
     )
-    expected_ranks = [
-        {"node_id": node_id, "rank": rank, "state": "stopped"}
-        for node_id, rank in sorted(
-            target.node_to_rank.items(), key=lambda item: item[1]
-        )
-    ]
     if (
         receipt.get("run_id") != target.run_id
         or receipt.get("operation_state") != "succeeded"
@@ -1744,11 +1740,15 @@ def _validate_failed_stop_receipts(target: FailedDualCanaryTarget, raw: object) 
         or observation.get("run_id") != target.run_id
         or observation.get("state") != "stopped"
         or observation.get("route_state") != "withdrawn"
-        or observation.get("ranks") != expected_ranks
     ):
         raise QualificationError(
             "failed-canary cleanup stop lacks exact final rank verification"
         )
+    _validate_stopped_rank_receipts(
+        target,
+        observation.get("ranks"),
+        label="failed-canary cleanup",
+    )
 
 
 def _validate_failed_cleanup_receipt(
@@ -2742,11 +2742,6 @@ def _validate_stop_receipts(
         raise QualificationError("dual cleanup must contain one exact run stop receipt")
     receipt = _mapping(raw[0], "dual run stop receipt")
     observation = _mapping(receipt.get("final_observation"), "final stop observation")
-    ranks = observation.get("ranks")
-    expected_ranks = [
-        {"node_id": node_id, "rank": target.node_to_rank[node_id], "state": "stopped"}
-        for node_id, _rank in _rank_order(target)
-    ]
     if (
         receipt.get("run_id") != target.run_id
         or receipt.get("operation_state") != "succeeded"
@@ -2755,11 +2750,55 @@ def _validate_stop_receipts(
         or observation.get("run_id") != target.run_id
         or observation.get("state") != "stopped"
         or observation.get("route_state") != "withdrawn"
-        or ranks != expected_ranks
     ):
         raise QualificationError(
             "dual cleanup stop receipt lacks exact final rank verification"
         )
+    _validate_stopped_rank_receipts(
+        target,
+        observation.get("ranks"),
+        label="dual cleanup",
+    )
+
+
+def _validate_stopped_rank_receipts(
+    target: DualRecoveryTarget | FailedDualCanaryTarget,
+    raw: object,
+    *,
+    label: str,
+) -> None:
+    expected = dict(target.node_to_rank)
+    if not isinstance(raw, list) or len(raw) != len(expected):
+        raise QualificationError(f"{label} stop must contain both rank receipts")
+    allowed_fields = {"node_id", "rank", "role", "state", "fresh"}
+    observed: dict[str, int] = {}
+    ranks_seen: set[int] = set()
+    for item in raw:
+        row = _mapping(item, f"{label} stopped rank receipt")
+        if set(row) - allowed_fields:
+            raise QualificationError(f"{label} stop rank receipt has unknown fields")
+        node_id = _required_string(row.get("node_id"), f"{label} stopped rank node")
+        rank = row.get("rank")
+        _required_string(row.get("role"), f"{label} stopped rank role")
+        state = _required_string(row.get("state"), f"{label} stopped rank state")
+        fresh = row.get("fresh")
+        if "fresh" in row and fresh is not None and type(fresh) is not bool:
+            raise QualificationError(f"{label} stopped rank freshness is invalid")
+        if (
+            node_id not in expected
+            or type(rank) is not int
+            or expected[node_id] != rank
+            or node_id in observed
+            or rank in ranks_seen
+            or state != "stopped"
+        ):
+            raise QualificationError(
+                f"{label} stop rank receipts contain duplicate, unknown, or active ranks"
+            )
+        observed[node_id] = rank
+        ranks_seen.add(rank)
+    if observed != expected:
+        raise QualificationError(f"{label} stop does not verify both assigned ranks")
 
 
 def _validate_cleanup_event(

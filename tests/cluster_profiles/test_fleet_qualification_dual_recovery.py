@@ -446,12 +446,7 @@ def _failed_cleanup_result(
                     "run_id": target.run_id,
                     "state": "stopped",
                     "route_state": "withdrawn",
-                    "ranks": [
-                        {"node_id": node_id, "rank": rank, "state": "stopped"}
-                        for node_id, rank in sorted(
-                            target.node_to_rank.items(), key=lambda item: item[1]
-                        )
-                    ],
+                    "ranks": _stopped_rank_rows(target.node_to_rank),
                 },
             }
         ],
@@ -486,17 +481,25 @@ def _cleanup_result(
                     "run_id": target.run_id,
                     "state": "stopped",
                     "route_state": "withdrawn",
-                    "ranks": [
-                        {"node_id": node_id, "rank": rank, "state": "stopped"}
-                        for node_id, rank in sorted(
-                            target.node_to_rank.items(), key=lambda item: item[1]
-                        )
-                    ],
+                    "ranks": _stopped_rank_rows(target.node_to_rank),
                 },
             }
         ],
         "fleet_snapshot": dict(fleet_snapshot),
     }
+
+
+def _stopped_rank_rows(node_to_rank: Mapping[str, int]) -> list[dict[str, object]]:
+    return [
+        {
+            "node_id": node_id,
+            "rank": rank,
+            "role": "entrypoint" if rank == 0 else "worker",
+            "state": "stopped",
+            "fresh": None,
+        }
+        for node_id, rank in sorted(node_to_rank.items(), key=lambda item: item[1])
+    ]
 
 
 def _reconciled_cleanup_result(
@@ -1253,6 +1256,7 @@ def test_failed_dual_canary_cleanup_releases_only_its_exact_run_and_reconciles(
     assert (
         applied[0]["source_application_request_key"] == target.application_request_key
     )
+    assert applied[0]["active_run_id"] == RUN_ID
     assert applied[0]["run_id"] == RUN_ID
     assert applied[0]["stop_run_ids"] == [RUN_ID]
     assert applied[0]["node_to_rank"] == {NODE_A: 0, NODE_B: 1}
@@ -1291,6 +1295,7 @@ def test_failed_dual_canary_cleanup_releases_only_its_exact_run_and_reconciles(
     assert reconciled[0]["resume_completed"] is True
     assert reconciled[0]["application_id"] == "33333333-3333-4333-8333-333333333333"
     assert reconciled[0]["source_application_id"] == target.application_id
+    assert reconciled[0]["active_run_id"] == RUN_ID
     assert (
         reconciled[0]["source_application_request_key"]
         == target.application_request_key
@@ -1305,6 +1310,53 @@ def test_failed_dual_canary_cleanup_releases_only_its_exact_run_and_reconciles(
         )
         == 1
     )
+
+
+@pytest.mark.parametrize("malformation", ["duplicate", "unknown-node"])
+def test_failed_dual_cleanup_rejects_duplicate_or_unknown_typed_stop_ranks(
+    tmp_path: Path, malformation: str
+) -> None:
+    ledger = EvidenceLedger(tmp_path / f"failed-dual-stop-ranks-{malformation}.jsonl")
+    target = _failed_target(ledger)
+    prepare = lambda request: _failed_cleanup_review(target, request)
+    review_failed_dual_cleanup(target, ledger, prepare_cleanup=prepare)
+    idle = _snapshot(5, state="idle")
+
+    def cleanup(request: Mapping[str, object]) -> Mapping[str, object]:
+        result = _failed_cleanup_result(target, request, idle)
+        stop_receipt = result["stop_receipts"][0]
+        assert isinstance(stop_receipt, Mapping)
+        final_observation = stop_receipt["final_observation"]
+        assert isinstance(final_observation, dict)
+        ranks = final_observation["ranks"]
+        assert isinstance(ranks, list)
+        if malformation == "duplicate":
+            ranks[1] = dict(ranks[0])
+        else:
+            assert isinstance(ranks[1], dict)
+            ranks[1]["node_id"] = "spk_" + "9" * 32
+        return result
+
+    with pytest.raises(
+        QualificationError,
+        match="duplicate, unknown, or active ranks",
+    ):
+        apply_failed_dual_cleanup(
+            target,
+            ledger,
+            prepare_cleanup=prepare,
+            apply_authorized=True,
+            cleanup_to_idle=cleanup,
+            reconcile_cleanup=lambda _request: pytest.fail(
+                "failed cleanup has not completed and cannot be reconciled"
+            ),
+            endpoint_exists=lambda _alias: False,
+        )
+    assert not [
+        record
+        for record in ledger.records
+        if record.get("event") == "dual_recovery.failed_cleanup.completed"
+    ]
 
 
 def test_failed_dual_canary_without_run_identity_cannot_release_on_absence_alone(
