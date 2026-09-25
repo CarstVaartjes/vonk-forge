@@ -227,6 +227,53 @@ esac
     ) in skopeo_log.read_text()
 
 
+def test_development_image_publication_reports_immutable_tag_digest_conflict(
+    tmp_path: Path,
+) -> None:
+    expected = f"sha256:{'a' * 64}"
+    observed = f"sha256:{'b' * 64}"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    skopeo = fake_bin / "skopeo"
+    skopeo.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${{@: -1}}" == *@sha256:* ]]; then
+  printf '%s\\n' '{expected}'
+else
+  printf '%s\\n' '{observed}'
+fi
+"""
+    )
+    skopeo.chmod(0o755)
+
+    result = subprocess.run(
+        [
+            ROOT / "scripts/publish-immutable-image",
+            "api",
+            "ghcr.io/carstvaartjes/vonk-forge-api",
+            expected,
+            "dev-sha-" + "c" * 40,
+            tmp_path / "api.accepted-digest",
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+        },
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "refusing to overwrite immutable api image tag: "
+        f"existing={observed} expected={expected}"
+    ) in result.stderr
+
+
 def test_development_image_digest_collection_rejects_missing_parallel_output(
     tmp_path: Path,
 ) -> None:
