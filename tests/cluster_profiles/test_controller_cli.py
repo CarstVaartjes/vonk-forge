@@ -673,7 +673,11 @@ def test_download_is_one_step_and_repeated_calls_keep_server_operation_states() 
                 "kind": "recipe.image.availability.v2",
                 "id": "recipe-download",
                 "request_id": "11111111-1111-4111-8111-111111111111",
-                "request": {"kind": "selector", "selector": "qwen-code", "force": True},
+                "request": {
+                    "kind": "selector",
+                    "selector": "qwen-code",
+                    "force": False,
+                },
             },
         }
     )
@@ -697,6 +701,39 @@ def test_download_is_one_step_and_repeated_calls_keep_server_operation_states() 
         "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
     }
+
+
+def test_recipe_download_rejects_a_forced_selector_intent_receipt() -> None:
+    selector = "qwen-code"
+    request_key = "11111111-1111-4111-8111-111111111111"
+    path = f"/api/recipe/{selector}/download"
+    lookup = f"/api/recipe/requests/{request_key}"
+    receipt = {
+        "schema_version": 2,
+        "id": "recipe-download",
+        "request_id": request_key,
+        "kind": "recipe.image.availability.v2",
+        "request": {"kind": "selector", "selector": selector, "force": True},
+        "state": "running",
+    }
+    client = FakeClient({("POST", path): receipt, ("GET", lookup): receipt})
+
+    status, payload = run(
+        (
+            "recipe",
+            "download",
+            selector,
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    assert "acceptance is unknown" in str(payload.get("error")).lower()
+    assert [call[:2] for call in client.calls] == [("POST", path), ("GET", lookup)]
 
 
 def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None:
@@ -2817,7 +2854,7 @@ def test_recipe_download_follows_its_canonical_receipt_id() -> None:
         "request_id": "11111111-1111-4111-8111-111111111111",
         "kind": "recipe.image.availability.v2",
         "state": "queued",
-        "request": {"kind": "selector", "selector": "qwen-code", "force": True},
+        "request": {"kind": "selector", "selector": "qwen-code", "force": False},
     }
     client = FakeClient(
         {
@@ -2851,7 +2888,7 @@ def test_recipe_cancel_recovers_accepted_request_after_lost_response() -> None:
         "request_id": "22222222-2222-4222-8222-222222222222",
         "kind": "recipe.image.availability.v2",
         "state": "cancelling",
-        "request": {"kind": "selector", "selector": "qwen-code", "force": True},
+        "request": {"kind": "selector", "selector": "qwen-code", "force": False},
         "cancellation": {
             "cancel_requested": True,
             "cancel_requested_at": "2026-09-23T12:00:00+00:00",
@@ -2955,7 +2992,11 @@ def test_detach_returns_acceptance_without_observing_operation() -> None:
                 "id": "download-2",
                 "kind": "recipe.image.availability.v2",
                 "request_id": "11111111-1111-4111-8111-111111111111",
-                "request": {"kind": "selector", "selector": "qwen-code", "force": True},
+                "request": {
+                    "kind": "selector",
+                    "selector": "qwen-code",
+                    "force": False,
+                },
             }
         }
     )
