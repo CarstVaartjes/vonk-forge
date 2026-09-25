@@ -923,8 +923,10 @@ def test_rank_loss_waits_for_withdrawn_route_and_fresh_timestamp_not_cursor(
     ]
     assert len(route_records) == 1
     assert route_records[0]["record_sha256"] != rank_loss_records[0]["record_sha256"]
+    route_payload = route_records[0]["payload"]
+    assert isinstance(route_payload, Mapping)
     assert (
-        route_records[0]["payload"]["rank_loss_record_sha256"]
+        route_payload["rank_loss_record_sha256"]
         == rank_loss_records[0]["record_sha256"]
     )
     assert calls == {"verify": 0, "smoke": 0}
@@ -1009,7 +1011,9 @@ def test_wrong_rank_smoke_receipt_is_rejected_without_cross_lane_attribution(
 
     def wrong_rank(request: Mapping[str, object]) -> Mapping[str, object]:
         receipt = _smoke_receipt(target, request)
-        receipt["rank"] = 1 - int(request["rank"])
+        rank = request["rank"]
+        assert type(rank) is int
+        receipt["rank"] = 1 - rank
         return receipt
 
     with pytest.raises(QualificationError, match="changed its run, rank, or cases"):
@@ -1322,5 +1326,5 @@ def test_failed_dual_canary_without_run_identity_cannot_release_on_absence_alone
     assert not [
         record
         for record in ledger.records
-        if record.get("event", "").startswith("dual_recovery.failed_cleanup.")
+        if str(record.get("event", "")).startswith("dual_recovery.failed_cleanup.")
     ]
