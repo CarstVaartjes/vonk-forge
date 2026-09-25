@@ -36,6 +36,10 @@ class PlatformObservation(ProvenanceModel):
     source_commit: Commit | None = None
     image_digest: ImageDigest | None = None
     manifest_sha256: Sha256 | None = None
+    # Internal capture binding; it is intentionally not projected in DeploymentProvenance.
+    container_id: (
+        Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")] | None
+    ) = None
 
 
 class PhysicalAcceptanceReceipt(ProvenanceModel):
