@@ -4229,7 +4229,7 @@ mod tests {
         fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
             assert_eq!(executable, Path::new("/usr/bin/docker"));
             self.calls.lock().unwrap().push(arguments.to_vec());
-            assert_eq!(arguments.get(0).map(String::as_str), Some("container"));
+            assert_eq!(arguments.first().map(String::as_str), Some("container"));
             assert_eq!(arguments.get(1).map(String::as_str), Some("ls"));
             Ok(self.response.clone())
         }
@@ -4253,7 +4253,7 @@ mod tests {
             .join(installation_id.to_string());
         let runtime_cache = installation.join("runtime-cache");
         let shared_cache = agent_data.join("shared-model-cache").join("model.bin");
-        fs::create_dir_all(&runtime_cache.join("home/private")).unwrap();
+        fs::create_dir_all(runtime_cache.join("home/private")).unwrap();
         fs::create_dir_all(shared_cache.parent().unwrap()).unwrap();
         fs::set_permissions(&installation, fs::Permissions::from_mode(0o700)).unwrap();
         fs::set_permissions(&runtime_cache, fs::Permissions::from_mode(0o700)).unwrap();
@@ -6273,10 +6273,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(&temp.path().join("agent-data"));
         let installation_id = "10000000-0000-4000-8000-000000000001";
-        let installation = roots
-            .agent_data
-            .join("installations")
-            .join(&installation_id);
+        let installation = roots.agent_data.join("installations").join(installation_id);
         let cache = installation.join("runtime-cache");
         let private = cache.join("home/private/nested");
         let models = installation.join("models/primary");

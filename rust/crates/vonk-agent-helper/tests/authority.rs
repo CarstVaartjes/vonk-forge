@@ -1005,10 +1005,7 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     // Even a pending cleanup request cannot erase an already active run.
     mark_fresh_start();
     executor
-        .execute(&runtime_operation(
-            &request,
-            hex_sha256(&canonical_json(&request).unwrap()),
-        ))
+        .execute(&runtime_operation(&request, digest.clone()))
         .unwrap();
     assert!(
         private_tmp.join("old-engine-state").is_file(),

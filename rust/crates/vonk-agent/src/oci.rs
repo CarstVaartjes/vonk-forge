@@ -2890,7 +2890,7 @@ mod tests {
         let runtime_cache = installation.join("runtime-cache");
         fs::create_dir(&runtime_cache).unwrap();
         fs::write(runtime_cache.join("private-cache.bin"), vec![3_u8; 8192]).unwrap();
-        fs::set_permissions(&runtime_cache, fs::Permissions::from_mode(0))
+        fs::set_permissions(&runtime_cache, fs::Permissions::from_mode(0o0))
             .expect("test owns the cache directory metadata");
 
         assert_eq!(
