@@ -551,129 +551,135 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<InstallationReconciliationProgress, OciError> {
         identity.validate().map_err(|_| OciError::Artifact)?;
         let installation_id = identity.installation_id.to_string();
-        let _lock = self.lock_installation_reconciliation(&installation_id)?;
-        let root = self.ensure_installation_reconciliation_root()?;
-        let checkpoint_path = reconciliation_checkpoint_path(&root, &installation_id)?;
-        let quarantine = reconciliation_quarantine_path(&root, &installation_id)?;
-        let installation = managed_path(self.data_root, "installations", &installation_id)?;
+        let lock = self.lock_installation_reconciliation(&installation_id)?;
+        let result = (|| {
+            let root = self.ensure_installation_reconciliation_root()?;
+            let checkpoint_path = reconciliation_checkpoint_path(&root, &installation_id)?;
+            let quarantine = reconciliation_quarantine_path(&root, &installation_id)?;
+            let installation = managed_path(self.data_root, "installations", &installation_id)?;
 
-        if let Some(checkpoint) = read_reconciliation_checkpoint(&checkpoint_path)? {
-            if checkpoint.schema_version != INSTALLATION_RECONCILIATION_SCHEMA_VERSION
-                || checkpoint.identity != *identity
+            if let Some(checkpoint) = read_reconciliation_checkpoint(&checkpoint_path)? {
+                if checkpoint.schema_version != INSTALLATION_RECONCILIATION_SCHEMA_VERSION
+                    || checkpoint.identity != *identity
+                {
+                    return Err(OciError::Artifact);
+                }
+                match checkpoint.state {
+                    InstallationReconciliationState::Complete => {
+                        if path_exists_without_following(&installation)?
+                            || path_exists_without_following(&quarantine)?
+                        {
+                            return Err(OciError::Artifact);
+                        }
+                        return Ok(InstallationReconciliationProgress {
+                            complete: true,
+                            removed_bytes: checkpoint.removed_bytes,
+                            cleanup_receipt_sha256: Some(reconciliation_receipt_sha256(
+                                &checkpoint,
+                            )?),
+                        });
+                    }
+                    InstallationReconciliationState::Prepared => {
+                        let location = match (
+                            read_reconciliation_directory_identity(&installation)?,
+                            read_reconciliation_directory_identity(&quarantine)?,
+                        ) {
+                            (Some(identity), None) | (None, Some(identity)) => identity,
+                            _ => return Err(OciError::Artifact),
+                        };
+                        if location
+                            != (
+                                checkpoint.installation_device,
+                                checkpoint.installation_inode,
+                            )
+                        {
+                            return Err(OciError::Artifact);
+                        }
+                        return Ok(InstallationReconciliationProgress {
+                            complete: false,
+                            removed_bytes: checkpoint.removed_bytes,
+                            cleanup_receipt_sha256: None,
+                        });
+                    }
+                    InstallationReconciliationState::Removing => {
+                        match (
+                            read_reconciliation_directory_identity(&installation)?,
+                            read_reconciliation_directory_identity(&quarantine)?,
+                        ) {
+                            (None, None) => {}
+                            (None, Some(found))
+                                if found
+                                    == (
+                                        checkpoint.installation_device,
+                                        checkpoint.installation_inode,
+                                    ) => {}
+                            _ => return Err(OciError::Artifact),
+                        }
+                        return Ok(InstallationReconciliationProgress {
+                            complete: false,
+                            removed_bytes: checkpoint.removed_bytes,
+                            cleanup_receipt_sha256: None,
+                        });
+                    }
+                }
+            }
+
+            if path_exists_without_following(&quarantine)? {
+                return Err(OciError::Artifact);
+            }
+            let directory_metadata = fs::symlink_metadata(&installation)?;
+            if !trusted_installation_directory(&directory_metadata) {
+                return Err(OciError::Artifact);
+            }
+            let spec_path = installation.join("spec.json");
+            let spec_metadata = fs::symlink_metadata(&spec_path)?;
+            if !trusted_receipt_metadata(&spec_metadata)
+                || spec_metadata.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64
             {
                 return Err(OciError::Artifact);
             }
-            match checkpoint.state {
-                InstallationReconciliationState::Complete => {
-                    if path_exists_without_following(&installation)?
-                        || path_exists_without_following(&quarantine)?
-                    {
-                        return Err(OciError::Artifact);
-                    }
-                    return Ok(InstallationReconciliationProgress {
-                        complete: true,
-                        removed_bytes: checkpoint.removed_bytes,
-                        cleanup_receipt_sha256: Some(reconciliation_receipt_sha256(&checkpoint)?),
-                    });
-                }
-                InstallationReconciliationState::Prepared => {
-                    let location = match (
-                        read_reconciliation_directory_identity(&installation)?,
-                        read_reconciliation_directory_identity(&quarantine)?,
-                    ) {
-                        (Some(identity), None) | (None, Some(identity)) => identity,
-                        _ => return Err(OciError::Artifact),
-                    };
-                    if location
-                        != (
-                            checkpoint.installation_device,
-                            checkpoint.installation_inode,
-                        )
-                    {
-                        return Err(OciError::Artifact);
-                    }
-                    return Ok(InstallationReconciliationProgress {
-                        complete: false,
-                        removed_bytes: checkpoint.removed_bytes,
-                        cleanup_receipt_sha256: None,
-                    });
-                }
-                InstallationReconciliationState::Removing => {
-                    match (
-                        read_reconciliation_directory_identity(&installation)?,
-                        read_reconciliation_directory_identity(&quarantine)?,
-                    ) {
-                        (None, None) => {}
-                        (None, Some(found))
-                            if found
-                                == (
-                                    checkpoint.installation_device,
-                                    checkpoint.installation_inode,
-                                ) => {}
-                        _ => return Err(OciError::Artifact),
-                    }
-                    return Ok(InstallationReconciliationProgress {
-                        complete: false,
-                        removed_bytes: checkpoint.removed_bytes,
-                        cleanup_receipt_sha256: None,
-                    });
-                }
+            let spec_bytes =
+                read_regular_file(&spec_path, MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64)?;
+            let spec_value: serde_json::Value = serde_json::from_slice(&spec_bytes)?;
+            let canonical_spec =
+                canonical_protocol_json(&spec_value).map_err(|_| OciError::Artifact)?;
+            if protocol_sha256(&canonical_spec) != identity.compiled_spec_canonical_sha256 {
+                return Err(OciError::Artifact);
             }
-        }
-
-        if path_exists_without_following(&quarantine)? {
-            return Err(OciError::Artifact);
-        }
-        let directory_metadata = fs::symlink_metadata(&installation)?;
-        if !trusted_installation_directory(&directory_metadata) {
-            return Err(OciError::Artifact);
-        }
-        let spec_path = installation.join("spec.json");
-        let spec_metadata = fs::symlink_metadata(&spec_path)?;
-        if !trusted_receipt_metadata(&spec_metadata)
-            || spec_metadata.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64
-        {
-            return Err(OciError::Artifact);
-        }
-        let spec_bytes =
-            read_regular_file(&spec_path, MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64)?;
-        let spec_value: serde_json::Value = serde_json::from_slice(&spec_bytes)?;
-        let canonical_spec =
-            canonical_protocol_json(&spec_value).map_err(|_| OciError::Artifact)?;
-        if protocol_sha256(&canonical_spec) != identity.compiled_spec_canonical_sha256 {
-            return Err(OciError::Artifact);
-        }
-        let recipe_path = installation.join("recipe-content.sha256");
-        let recipe_metadata = fs::symlink_metadata(&recipe_path)?;
-        if !trusted_receipt_metadata(&recipe_metadata) {
-            return Err(OciError::Artifact);
-        }
-        let recipe_digest = String::from_utf8(read_regular_file(&recipe_path, 64)?)
-            .map_err(|_| OciError::Artifact)?;
-        let embedded_recipe_digest = spec_value
-            .get("identity")
-            .and_then(|value| value.get("recipe_revision_sha256"))
-            .and_then(serde_json::Value::as_str);
-        if recipe_digest != identity.recipe_content_sha256
-            || embedded_recipe_digest != Some(identity.recipe_content_sha256.as_str())
-        {
-            return Err(OciError::Artifact);
-        }
-        let removed_bytes = reconciliation_directory_bytes(&installation)?;
-        let checkpoint = InstallationReconciliationCheckpoint {
-            schema_version: INSTALLATION_RECONCILIATION_SCHEMA_VERSION,
-            state: InstallationReconciliationState::Prepared,
-            identity: identity.clone(),
-            installation_device: directory_metadata.dev(),
-            installation_inode: directory_metadata.ino(),
-            removed_bytes,
-        };
-        write_reconciliation_checkpoint(&root, &checkpoint_path, &checkpoint)?;
-        Ok(InstallationReconciliationProgress {
-            complete: false,
-            removed_bytes,
-            cleanup_receipt_sha256: None,
-        })
+            let recipe_path = installation.join("recipe-content.sha256");
+            let recipe_metadata = fs::symlink_metadata(&recipe_path)?;
+            if !trusted_receipt_metadata(&recipe_metadata) {
+                return Err(OciError::Artifact);
+            }
+            let recipe_digest = String::from_utf8(read_regular_file(&recipe_path, 64)?)
+                .map_err(|_| OciError::Artifact)?;
+            let embedded_recipe_digest = spec_value
+                .get("identity")
+                .and_then(|value| value.get("recipe_revision_sha256"))
+                .and_then(serde_json::Value::as_str);
+            if recipe_digest != identity.recipe_content_sha256
+                || embedded_recipe_digest != Some(identity.recipe_content_sha256.as_str())
+            {
+                return Err(OciError::Artifact);
+            }
+            let removed_bytes = reconciliation_directory_bytes(&installation)?;
+            let checkpoint = InstallationReconciliationCheckpoint {
+                schema_version: INSTALLATION_RECONCILIATION_SCHEMA_VERSION,
+                state: InstallationReconciliationState::Prepared,
+                identity: identity.clone(),
+                installation_device: directory_metadata.dev(),
+                installation_inode: directory_metadata.ino(),
+                removed_bytes,
+            };
+            write_reconciliation_checkpoint(&root, &checkpoint_path, &checkpoint)?;
+            Ok(InstallationReconciliationProgress {
+                complete: false,
+                removed_bytes,
+                cleanup_receipt_sha256: None,
+            })
+        })();
+        drop(lock);
+        result
     }
 
     /// Finish the exact identity-bound removal. Rename first moves the
@@ -685,97 +691,101 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<InstallationReconciliationProgress, OciError> {
         identity.validate().map_err(|_| OciError::Artifact)?;
         let installation_id = identity.installation_id.to_string();
-        let _lock = self.lock_installation_reconciliation(&installation_id)?;
-        let root = self.ensure_installation_reconciliation_root()?;
-        let checkpoint_path = reconciliation_checkpoint_path(&root, &installation_id)?;
-        let quarantine = reconciliation_quarantine_path(&root, &installation_id)?;
-        let installation = managed_path(self.data_root, "installations", &installation_id)?;
-        let mut checkpoint =
-            read_reconciliation_checkpoint(&checkpoint_path)?.ok_or(OciError::Artifact)?;
-        if checkpoint.schema_version != INSTALLATION_RECONCILIATION_SCHEMA_VERSION
-            || checkpoint.identity != *identity
-        {
-            return Err(OciError::Artifact);
-        }
-        if checkpoint.state == InstallationReconciliationState::Complete {
+        let lock = self.lock_installation_reconciliation(&installation_id)?;
+        let result = (|| {
+            let root = self.ensure_installation_reconciliation_root()?;
+            let checkpoint_path = reconciliation_checkpoint_path(&root, &installation_id)?;
+            let quarantine = reconciliation_quarantine_path(&root, &installation_id)?;
+            let installation = managed_path(self.data_root, "installations", &installation_id)?;
+            let mut checkpoint =
+                read_reconciliation_checkpoint(&checkpoint_path)?.ok_or(OciError::Artifact)?;
+            if checkpoint.schema_version != INSTALLATION_RECONCILIATION_SCHEMA_VERSION
+                || checkpoint.identity != *identity
+            {
+                return Err(OciError::Artifact);
+            }
+            if checkpoint.state == InstallationReconciliationState::Complete {
+                if path_exists_without_following(&installation)?
+                    || path_exists_without_following(&quarantine)?
+                {
+                    return Err(OciError::Artifact);
+                }
+                return Ok(InstallationReconciliationProgress {
+                    complete: true,
+                    removed_bytes: checkpoint.removed_bytes,
+                    cleanup_receipt_sha256: Some(reconciliation_receipt_sha256(&checkpoint)?),
+                });
+            }
+
+            match checkpoint.state {
+                InstallationReconciliationState::Prepared => {
+                    match (
+                        read_reconciliation_directory_identity(&installation)?,
+                        read_reconciliation_directory_identity(&quarantine)?,
+                    ) {
+                        (Some(found), None) => {
+                            if found
+                                != (
+                                    checkpoint.installation_device,
+                                    checkpoint.installation_inode,
+                                )
+                            {
+                                return Err(OciError::Artifact);
+                            }
+                            fs::rename(&installation, &quarantine)?;
+                            File::open(self.data_root.join("installations"))?.sync_all()?;
+                            File::open(&root)?.sync_all()?;
+                        }
+                        (None, Some(found)) => {
+                            if found
+                                != (
+                                    checkpoint.installation_device,
+                                    checkpoint.installation_inode,
+                                )
+                            {
+                                return Err(OciError::Artifact);
+                            }
+                        }
+                        _ => return Err(OciError::Artifact),
+                    }
+                    checkpoint.state = InstallationReconciliationState::Removing;
+                    write_reconciliation_checkpoint(&root, &checkpoint_path, &checkpoint)?;
+                }
+                InstallationReconciliationState::Removing => match (
+                    read_reconciliation_directory_identity(&installation)?,
+                    read_reconciliation_directory_identity(&quarantine)?,
+                ) {
+                    (None, None) => {}
+                    (None, Some(found))
+                        if found
+                            == (
+                                checkpoint.installation_device,
+                                checkpoint.installation_inode,
+                            ) => {}
+                    _ => return Err(OciError::Artifact),
+                },
+                InstallationReconciliationState::Complete => unreachable!("handled above"),
+            }
+
+            if path_exists_without_following(&quarantine)? {
+                fs::remove_dir_all(&quarantine)?;
+                File::open(&root)?.sync_all()?;
+            }
             if path_exists_without_following(&installation)?
                 || path_exists_without_following(&quarantine)?
             {
                 return Err(OciError::Artifact);
             }
-            return Ok(InstallationReconciliationProgress {
+            checkpoint.state = InstallationReconciliationState::Complete;
+            write_reconciliation_checkpoint(&root, &checkpoint_path, &checkpoint)?;
+            Ok(InstallationReconciliationProgress {
                 complete: true,
                 removed_bytes: checkpoint.removed_bytes,
                 cleanup_receipt_sha256: Some(reconciliation_receipt_sha256(&checkpoint)?),
-            });
-        }
-
-        match checkpoint.state {
-            InstallationReconciliationState::Prepared => {
-                match (
-                    read_reconciliation_directory_identity(&installation)?,
-                    read_reconciliation_directory_identity(&quarantine)?,
-                ) {
-                    (Some(found), None) => {
-                        if found
-                            != (
-                                checkpoint.installation_device,
-                                checkpoint.installation_inode,
-                            )
-                        {
-                            return Err(OciError::Artifact);
-                        }
-                        fs::rename(&installation, &quarantine)?;
-                        File::open(self.data_root.join("installations"))?.sync_all()?;
-                        File::open(&root)?.sync_all()?;
-                    }
-                    (None, Some(found)) => {
-                        if found
-                            != (
-                                checkpoint.installation_device,
-                                checkpoint.installation_inode,
-                            )
-                        {
-                            return Err(OciError::Artifact);
-                        }
-                    }
-                    _ => return Err(OciError::Artifact),
-                }
-                checkpoint.state = InstallationReconciliationState::Removing;
-                write_reconciliation_checkpoint(&root, &checkpoint_path, &checkpoint)?;
-            }
-            InstallationReconciliationState::Removing => match (
-                read_reconciliation_directory_identity(&installation)?,
-                read_reconciliation_directory_identity(&quarantine)?,
-            ) {
-                (None, None) => {}
-                (None, Some(found))
-                    if found
-                        == (
-                            checkpoint.installation_device,
-                            checkpoint.installation_inode,
-                        ) => {}
-                _ => return Err(OciError::Artifact),
-            },
-            InstallationReconciliationState::Complete => unreachable!("handled above"),
-        }
-
-        if path_exists_without_following(&quarantine)? {
-            fs::remove_dir_all(&quarantine)?;
-            File::open(&root)?.sync_all()?;
-        }
-        if path_exists_without_following(&installation)?
-            || path_exists_without_following(&quarantine)?
-        {
-            return Err(OciError::Artifact);
-        }
-        checkpoint.state = InstallationReconciliationState::Complete;
-        write_reconciliation_checkpoint(&root, &checkpoint_path, &checkpoint)?;
-        Ok(InstallationReconciliationProgress {
-            complete: true,
-            removed_bytes: checkpoint.removed_bytes,
-            cleanup_receipt_sha256: Some(reconciliation_receipt_sha256(&checkpoint)?),
-        })
+            })
+        })();
+        drop(lock);
+        result
     }
 
     fn ensure_installation_reconciliation_root(&self) -> Result<PathBuf, OciError> {
