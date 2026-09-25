@@ -3411,7 +3411,10 @@ class FleetProfileService:
                 profile_id=preview.profile_id,
                 profile_digest=preview.profile_digest,
                 plan_digest=preview.plan_digest,
-                state="waiting-for-operator",
+                # Keep the short synchronous admission attempt visible as a
+                # normal queued application.  If it cannot bind, the defer
+                # path changes this to waiting-for-operator before returning.
+                state="queued",
                 plan=preview.model_dump(mode="json"),
                 current_step=0,
                 current_operation_id=None,
@@ -3438,7 +3441,11 @@ class FleetProfileService:
             return self._application_view(row)
 
     def _defer_pending_application(
-        self, application_id: str, reason: str
+        self,
+        application_id: str,
+        reason: str,
+        *,
+        retry_delay: timedelta | None = None,
     ) -> FleetProfileApplicationView:
         """Record bounded retry state after a nonblocking admission refusal."""
 
@@ -3449,7 +3456,11 @@ class FleetProfileService:
                 raise KeyError(application_id)
             progress = _persisted_profile_progress(row)
             attempt = progress.admission_attempt + 1
-            next_retry = now + _admission_retry_delay(attempt)
+            next_retry = now + (
+                _admission_retry_delay(attempt)
+                if retry_delay is None
+                else retry_delay
+            )
             progress_data = progress.model_dump(mode="json")
             progress_data["admission_pending"] = True
             progress_data["admission_attempt"] = attempt
@@ -3471,6 +3482,7 @@ class FleetProfileService:
         )
         if replay is not None:
             return replay
+        pending: FleetProfileApplicationView | None = None
         try:
             preview = self.preview(profile_id)
             if preview.plan_digest != plan_digest:
@@ -3510,11 +3522,25 @@ class FleetProfileService:
                     return self._defer_pending_application(
                         pending.id,
                         "Profile admission is waiting for the active workload owner to finish; the Controller will retry automatically.",
+                        retry_delay=timedelta(0),
                     )
             raise FleetProfileAdmissionBusy(
                 "Profile admission retry schedule was exhausted"
             )
-        except (FleetProfileConflict, KeyError):
+        except (
+            FleetProfileConflict,
+            FleetProfilePermissionDenied,
+            KeyError,
+        ) as error:
+            if pending is not None:
+                with self._sessions.begin() as session:
+                    row = session.get(FleetProfileApplication, pending.id)
+                    if row is not None and _persisted_profile_progress(
+                        row
+                    ).admission_pending:
+                        session.delete(row)
+            if isinstance(error, FleetProfilePermissionDenied):
+                raise
             # Another identical submission can commit after our first lookup.
             # Its accepted receipt wins over a newly stale preview or a busy
             # admission boundary; this read never refreshes the approved intent.
@@ -3586,6 +3612,10 @@ class FleetProfileService:
                     pending_application_id == existing.id
                     and _persisted_profile_progress(existing).admission_pending
                 )
+                if pending and existing.state == "cancelled":
+                    raise FleetProfileConflict(
+                        "Profile application was superseded by a later intent"
+                    )
                 if not pending:
                     return self._matching_application(
                         existing,
@@ -4659,11 +4689,16 @@ class FleetProfileService:
                 FleetProfileApplication.progress["cancellation"]["state"].as_string(),
                 "",
             )
+            admission_pending = func.coalesce(
+                FleetProfileApplication.progress["admission_pending"].as_boolean(),
+                False,
+            )
             row = session.scalar(
                 select(FleetProfileApplication)
                 .where(
                     FleetProfileApplication.state.in_(("queued", "running")),
                     cancellation_state != "cancelling",
+                    admission_pending.is_(False),
                 )
                 .order_by(
                     FleetProfileApplication.created_at, FleetProfileApplication.id
