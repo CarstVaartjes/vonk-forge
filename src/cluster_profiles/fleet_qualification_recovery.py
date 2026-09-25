@@ -63,7 +63,7 @@ class _CleanupContext(TypedDict):
 
 @dataclass(frozen=True, slots=True)
 class CanaryReference:
-    lane_id: str
+    lane_id: int
     record_sha256: str
     recipe_key: str
     recipe_content_sha256: str
@@ -81,7 +81,7 @@ class CanaryReference:
 class LaneRecoveryTarget:
     campaign_id: str
     batch_id: str
-    lane_id: str
+    lane_id: int
     recipe_key: str
     recipe_content_sha256: str
     package_sha256: str
@@ -182,13 +182,13 @@ def review_lane_transition(
             "profile_digest": target.profile_digest,
             "plan_digest": target.plan_digest,
             "preferred_run_id": target.original_run_id,
-            "stop_run_ids": list(target.partner_run_ids),
-            "stop_aliases": list(target.partner_aliases),
+            "partner_run_ids": list(target.partner_run_ids),
+            "partner_aliases": list(target.partner_aliases),
             "fleet_node_ids": list(target.fleet_node_ids),
             "allow_reactivation": target.allow_reactivation,
         }
     )
-    review = _validate_transition_review(target, request_key, receipt)
+    review = _validate_transition_review(target, request_key, receipt, ledger)
     review_digest = _digest(dict(review))
     previous = _event(ledger, target, target_digest, "lane_recovery.plan_reviewed")
     if previous is None:
@@ -214,12 +214,16 @@ def review_lane_transition(
             or previous_payload.get("review_digest") != review_digest
             or previous_payload.get("review") != dict(review)
         ):
-            raise QualificationError("lane transition preview changed after durable review")
+            raise QualificationError(
+                "lane transition preview changed after durable review"
+            )
     return LaneTransitionReview(
         target_digest=target_digest,
         request_key=request_key,
         review_digest=review_digest,
-        profile_number=_positive_int(review.get("profile_number"), "reviewed profile number"),
+        profile_number=_positive_int(
+            review.get("profile_number"), "reviewed profile number"
+        ),
         profile_id=str(review["profile_id"]),
         profile_digest=str(review["profile_digest"]),
         plan_digest=str(review["plan_digest"]),
@@ -245,7 +249,9 @@ def recover_single_lane(
     saved plan must still match before effects are submitted.
     """
 
-    review = review_lane_transition(target, ledger, prepare_transition=prepare_transition)
+    review = review_lane_transition(
+        target, ledger, prepare_transition=prepare_transition
+    )
     target_digest = review.target_digest
     transition_key = review.request_key
     if type(apply_authorized) is not bool:
@@ -296,7 +302,9 @@ def recover_single_lane(
     else:
         transitioned_payload = _payload(transitioned)
         if transitioned_payload.get("review_digest") != review.review_digest:
-            raise QualificationError("applied transition differs from its durable review")
+            raise QualificationError(
+                "applied transition differs from its durable review"
+            )
         receipt_value = _payload(transitioned).get("receipt")
         active = _validate_transition(
             target,
@@ -435,7 +443,9 @@ def _advance_recovery(
         )
     baseline_payload = _payload(baseline)
     baseline_boot_id = _str(baseline_payload.get("boot_id"), "baseline boot ID")
-    baseline_cursor = _cursor(baseline_payload.get("event_cursor"), "baseline event cursor")
+    baseline_cursor = _cursor(
+        baseline_payload.get("event_cursor"), "baseline event cursor"
+    )
     baseline_generated_at = _timestamp(
         baseline_payload.get("generated_at"), "baseline Fleet generated_at"
     )
@@ -450,7 +460,9 @@ def _advance_recovery(
         or baseline_cursor < transition_cursor
         or baseline_authority != transition_authority
     ):
-        raise QualificationError("durable boot baseline predates the reviewed lane transition")
+        raise QualificationError(
+            "durable boot baseline predates the reviewed lane transition"
+        )
 
     offline = _event(ledger, target, target_digest, "lane_recovery.offline_observed")
     newly_observed_offline = False
@@ -484,8 +496,13 @@ def _advance_recovery(
                 reason="offline telemetry carries a changed boot ID without an ordered observation",
             )
         offline_cursor = _cursor(state.get("event_cursor"), "offline event cursor")
-        offline_generated_at = _timestamp(state.get("generated_at"), "offline Fleet generated_at")
-        if offline_cursor < baseline_cursor or offline_generated_at <= baseline_generated_at:
+        offline_generated_at = _timestamp(
+            state.get("generated_at"), "offline Fleet generated_at"
+        )
+        if (
+            offline_cursor < baseline_cursor
+            or offline_generated_at <= baseline_generated_at
+        ):
             return LaneRecoveryProgress(
                 "awaiting-host-offline",
                 target_digest,
@@ -518,7 +535,9 @@ def _advance_recovery(
         or offline_payload.get("online_state") != "offline"
     ):
         raise QualificationError("offline checkpoint differs from exact lane baseline")
-    offline_cursor = _cursor(offline_payload.get("event_cursor"), "offline event cursor")
+    offline_cursor = _cursor(
+        offline_payload.get("event_cursor"), "offline event cursor"
+    )
     _require_same_authority(offline_payload, baseline_authority)
     offline_generated_at = _timestamp(
         offline_payload.get("generated_at"), "offline Fleet generated_at"
@@ -527,7 +546,9 @@ def _advance_recovery(
         offline_cursor < baseline_cursor
         or offline_generated_at <= baseline_generated_at
     ):
-        raise QualificationError("offline Fleet observation is stale against its boot baseline")
+        raise QualificationError(
+            "offline Fleet observation is stale against its boot baseline"
+        )
     if newly_observed_offline:
         return LaneRecoveryProgress(
             "awaiting-host-online",
@@ -573,7 +594,10 @@ def _advance_recovery(
         observation_generated_at = _timestamp(
             state.get("generated_at"), "recovered Fleet generated_at"
         )
-        if observation_cursor < offline_cursor or observation_generated_at <= offline_generated_at:
+        if (
+            observation_cursor < offline_cursor
+            or observation_generated_at <= offline_generated_at
+        ):
             return LaneRecoveryProgress(
                 "awaiting-fresh-fleet-observation",
                 target_digest,
@@ -618,7 +642,9 @@ def _advance_recovery(
         else:
             boot_payload = _payload(boot_observed)
             if boot_payload.get("observed_boot_id") != boot_id:
-                raise QualificationError("target host rebooted again before recovery completed")
+                raise QualificationError(
+                    "target host rebooted again before recovery completed"
+                )
             if observation_cursor < _cursor(
                 boot_payload.get("event_cursor"), "observed boot event cursor"
             ):
@@ -684,7 +710,9 @@ def _advance_recovery(
         or recovered_payload.get("baseline_boot_id") != baseline_boot_id
         or recovered_boot_id == baseline_boot_id
     ):
-        raise QualificationError("recovered checkpoint differs from exact lane identity")
+        raise QualificationError(
+            "recovered checkpoint differs from exact lane identity"
+        )
     _require_same_authority(recovered_payload, baseline_authority)
     recovered_cursor = _cursor(
         recovered_payload.get("event_cursor"), "recovered event cursor"
@@ -693,7 +721,8 @@ def _advance_recovery(
         recovered_payload.get("generated_at"), "recovered Fleet generated_at"
     )
     recovered_telemetry_at = _timestamp(
-        recovered_payload.get("telemetry_observed_at"), "recovered telemetry observed_at"
+        recovered_payload.get("telemetry_observed_at"),
+        "recovered telemetry observed_at",
     )
     if (
         recovered_cursor < offline_cursor
@@ -708,9 +737,13 @@ def _advance_recovery(
         current.get("generated_at"), "current Fleet generated_at"
     )
     current_cursor = _cursor(current.get("event_cursor"), "current Fleet cursor")
-    current_telemetry_at = _timestamp(
-        current.get("telemetry_observed_at"), "current telemetry observed_at"
-    ) if current.get("telemetry_observed_at") is not None else recovered_telemetry_at
+    current_telemetry_at = (
+        _timestamp(
+            current.get("telemetry_observed_at"), "current telemetry observed_at"
+        )
+        if current.get("telemetry_observed_at") is not None
+        else recovered_telemetry_at
+    )
     if (
         current["online_state"] != "online"
         or current.get("telemetry_freshness") != "live"
@@ -724,7 +757,9 @@ def _advance_recovery(
 
     smoke = _event(ledger, target, target_digest, "lane_recovery.smoke_completed")
     if smoke is None:
-        smoke_request = _event(ledger, target, target_digest, "lane_recovery.smoke.requested")
+        smoke_request = _event(
+            ledger, target, target_digest, "lane_recovery.smoke.requested"
+        )
         smoke_key = _request_key("smoke", target, target_digest)
         if smoke_request is None:
             smoke_request = ledger.append(
@@ -831,7 +866,9 @@ def review_lane_cleanup(
     _require_canary_records(target, ledger)
     context = _cleanup_context(target, ledger, target_digest)
     terminal_record = context["terminal_record"]
-    terminal_sha256 = _str(terminal_record.get("record_sha256"), "cleanup terminal record SHA-256")
+    terminal_sha256 = _str(
+        terminal_record.get("record_sha256"), "cleanup terminal record SHA-256"
+    )
     request_key = _request_key("cleanup", target, target_digest)
     intent = _event(ledger, target, target_digest, "lane_recovery.cleanup.intent")
     intent_values = {
@@ -850,12 +887,20 @@ def review_lane_cleanup(
             recipe=target.recipe_key,
             payload={**_envelope(target, target_digest), **intent_values},
         )
-    elif any(_payload(intent).get(key) != value for key, value in intent_values.items()):
+    elif any(
+        _payload(intent).get(key) != value for key, value in intent_values.items()
+    ):
         raise QualificationError("lane cleanup intent changed its exact release set")
     receipt = prepare_cleanup(
         {
             **_envelope(target, target_digest),
-            **intent_values,
+            "request_key": request_key,
+            "cleanup_mode": context["cleanup_mode"],
+            "terminal_event": context["terminal_event"],
+            "terminal_record_sha256": terminal_sha256,
+            "active_run_id": context["active_run_id"],
+            "expected_stop_run_ids": sorted(context["stop_assignments"]),
+            "expected_stop_aliases": list(context["stop_aliases"]),
             "fleet_node_ids": list(target.fleet_node_ids),
             "recovery_profile_number": context.get("recovery_profile_number"),
             "recovery_profile_id": context.get("recovery_profile_id"),
@@ -873,9 +918,12 @@ def review_lane_cleanup(
         context["stop_assignments"],
         context["stop_aliases"],
         receipt,
+        ledger,
     )
     review_digest = _digest(dict(review))
-    previous = _event(ledger, target, target_digest, "lane_recovery.cleanup.plan_reviewed")
+    previous = _event(
+        ledger, target, target_digest, "lane_recovery.cleanup.plan_reviewed"
+    )
     if previous is None:
         ledger.append(
             "lane_recovery.cleanup.plan_reviewed",
@@ -898,7 +946,9 @@ def review_lane_cleanup(
         target_digest=target_digest,
         request_key=request_key,
         review_digest=review_digest,
-        profile_number=_positive_int(review.get("profile_number"), "reviewed cleanup profile number"),
+        profile_number=_positive_int(
+            review.get("profile_number"), "reviewed cleanup profile number"
+        ),
         profile_id=str(review["profile_id"]),
         profile_digest=str(review["profile_digest"]),
         plan_digest=str(review["plan_digest"]),
@@ -913,91 +963,173 @@ def record_lane_cleanup(
     prepare_cleanup: Callable[[Mapping[str, object]], Mapping[str, object]],
     apply_authorized: bool,
     cleanup_to_idle: Callable[[Mapping[str, object]], Mapping[str, object]],
+    reconcile_cleanup: Callable[[Mapping[str, object]], Mapping[str, object]]
+    | None = None,
 ) -> LaneRecoveryProgress:
-    """Apply reviewed cleanup and require exact stop receipts and empty Fleet."""
+    """Apply reviewed cleanup and resume its receipt after a process restart."""
 
-    review = review_lane_cleanup(target, ledger, prepare_cleanup=prepare_cleanup)
     if type(apply_authorized) is not bool:
         raise QualificationError("lane cleanup apply authorization must be explicit")
-    if apply_authorized is not True:
-        return LaneRecoveryProgress(
-            "awaiting-explicit-cleanup",
-            review.target_digest,
-            reason="the exact whole-Fleet cleanup is reviewed; rerun with explicit apply authorization",
+    target_digest = _digest(_target_binding(target))
+    _validate_target(target, require_passing_lane=False)
+    _require_canary_records(target, ledger)
+    context = _cleanup_context(target, ledger, target_digest)
+    cleanup = _event(ledger, target, target_digest, "lane_recovery.cleanup.completed")
+
+    if cleanup is not None:
+        review = _load_cleanup_review(target, ledger, target_digest, context)
+        persisted_receipt = _validate_cleanup_completion(
+            target, review, context, cleanup
         )
-    context = _cleanup_context(target, ledger, review.target_digest)
-    expected_stops = context["stop_assignments"]
-    active_run_id = str(context["active_run_id"])
-    cleanup = _event(
-        ledger, target, review.target_digest, "lane_recovery.cleanup.completed"
-    )
-    if cleanup is None:
-        receipt = cleanup_to_idle(
+        active_run_id = str(context["active_run_id"])
+        if apply_authorized is not True:
+            return LaneRecoveryProgress(
+                "awaiting-explicit-cleanup",
+                review.target_digest,
+                active_run_id=active_run_id,
+                reason="cleanup already completed; explicit apply is required to reconcile its Fleet release",
+            )
+        if reconcile_cleanup is None:
+            raise QualificationError(
+                "completed cleanup resume requires a fresh Controller reconciliation callback"
+            )
+        persisted_snapshot = _fleet_view(
+            persisted_receipt.get("fleet_snapshot"), target.fleet_node_ids
+        )
+        reconciliation = reconcile_cleanup(
             {
                 **_envelope(target, review.target_digest),
                 "request_key": review.request_key,
                 "review_digest": review.review_digest,
                 "review": dict(review.receipt),
+                "resume_completed": True,
                 "cleanup_mode": context["cleanup_mode"],
                 "terminal_event": context["terminal_event"],
-                "terminal_record_sha256": context["terminal_record"].get("record_sha256"),
+                "terminal_record_sha256": context["terminal_record"].get(
+                    "record_sha256"
+                ),
                 "profile_number": review.profile_number,
                 "profile_id": review.profile_id,
                 "profile_digest": review.profile_digest,
                 "plan_digest": review.plan_digest,
-                "stop_run_ids": sorted(expected_stops),
-                "stop_aliases": sorted(set(target.partner_aliases) | {target.alias}),
+                "application_id": persisted_receipt.get("application_id"),
+                "application_updated_at": persisted_receipt.get(
+                    "application_updated_at"
+                ),
+                "stop_run_ids": list(review.receipt["stop_run_ids"]),
+                "stop_aliases": list(review.receipt["stop_aliases"]),
+                "released_run_proofs": list(review.receipt["released_run_proofs"]),
                 "fleet_node_ids": list(target.fleet_node_ids),
+                "persisted_receipt": dict(persisted_receipt),
             }
         )
+        fresh_receipt = _validate_cleanup_application(
+            target,
+            review,
+            context,
+            reconciliation,
+            expected_application_id=str(persisted_receipt["application_id"]),
+            expected_application_updated_at=str(
+                persisted_receipt["application_updated_at"]
+            ),
+        )
+        if fresh_receipt.get("stop_receipts") != persisted_receipt.get("stop_receipts"):
+            raise QualificationError(
+                "cleanup resume changed the exact Controller stop receipts"
+            )
+        fresh_snapshot = _fleet_view(
+            fresh_receipt.get("fleet_snapshot"), target.fleet_node_ids
+        )
         if (
-            receipt.get("request_key") != review.request_key
-            or receipt.get("review_digest") != review.review_digest
-            or receipt.get("application_state") != "succeeded"
-            or receipt.get("profile_number") != review.profile_number
-            or receipt.get("profile_id") != review.profile_id
-            or receipt.get("profile_digest") != review.profile_digest
-            or receipt.get("plan_digest") != review.plan_digest
-            or not isinstance(receipt.get("application_id"), str)
-            or not receipt.get("application_id")
+            fresh_snapshot["generated_at"] <= persisted_snapshot["generated_at"]
+            or fresh_snapshot["event_cursor"] < persisted_snapshot["event_cursor"]
+            or fresh_snapshot["authority_revision"]
+            != persisted_snapshot["authority_revision"]
         ):
-            raise QualificationError("lane cleanup application differs from its reviewed plan")
-        _validate_stopped_runs(target, expected_stops, receipt.get("stop_receipts"))
-        fleet = _fleet_view(receipt.get("fleet_snapshot"), target.fleet_node_ids)
-        if fleet["generated_at"] < _timestamp(
-            receipt.get("application_updated_at"), "completed cleanup application time"
-        ):
-            raise QualificationError("cleanup Fleet projection predates completed application")
-        if fleet.get("loaded_runs") or fleet.get("published_route_aliases"):
-            raise QualificationError("cleanup FleetSnapshot still contains a workload or route")
-        cleanup = ledger.append(
-            "lane_recovery.cleanup.completed",
+            raise QualificationError(
+                "cleanup resume Fleet projection is not newer than its durable completion"
+            )
+        reconciliation_digest = _digest(dict(fresh_receipt))
+        ledger.append(
+            "lane_recovery.cleanup.reconciled",
             plan_digest=target.campaign_id,
             recipe=target.recipe_key,
             payload={
                 **_envelope(target, review.target_digest),
                 "request_key": review.request_key,
                 "review_digest": review.review_digest,
-                "cleanup_mode": context["cleanup_mode"],
-                "terminal_event": context["terminal_event"],
-                "terminal_record_sha256": context["terminal_record"].get("record_sha256"),
-                "receipt": dict(receipt),
+                "cleanup_record_sha256": cleanup.get("record_sha256"),
+                "application_id": fresh_receipt.get("application_id"),
+                "application_updated_at": fresh_receipt.get("application_updated_at"),
+                "receipt_sha256": reconciliation_digest,
+                "receipt": dict(fresh_receipt),
             },
         )
-    else:
-        payload = _payload(cleanup)
-        if payload.get("review_digest") != review.review_digest:
-            raise QualificationError("completed cleanup differs from its durable review")
-        receipt = _mapping(payload.get("receipt"), "persisted cleanup receipt")
-        _validate_stopped_runs(target, expected_stops, receipt.get("stop_receipts"))
-        fleet = _fleet_view(receipt.get("fleet_snapshot"), target.fleet_node_ids)
-        if fleet["generated_at"] < _timestamp(
-            receipt.get("application_updated_at"), "persisted cleanup application time"
-        ):
-            raise QualificationError("persisted cleanup Fleet projection predates completed application")
-        if fleet.get("loaded_runs") or fleet.get("published_route_aliases"):
-            raise QualificationError("persisted cleanup FleetSnapshot is not empty")
-    receipt_body = _mapping(_payload(cleanup).get("receipt"), "completed cleanup receipt")
+        return LaneRecoveryProgress(
+            "cleanup-completed",
+            review.target_digest,
+            active_run_id=active_run_id,
+            receipt_sha256=reconciliation_digest,
+        )
+
+    target_digest = _digest(_target_binding(target))
+    saved_review = _event(
+        ledger, target, target_digest, "lane_recovery.cleanup.plan_reviewed"
+    )
+    resume_reviewed = saved_review is not None
+    review = (
+        _load_cleanup_review(target, ledger, target_digest, context)
+        if resume_reviewed
+        else review_lane_cleanup(target, ledger, prepare_cleanup=prepare_cleanup)
+    )
+    if apply_authorized is not True:
+        return LaneRecoveryProgress(
+            "awaiting-explicit-cleanup",
+            review.target_digest,
+            reason="the exact whole-Fleet cleanup is reviewed; rerun with explicit apply authorization",
+        )
+    reviewed_stop_ids = _string_list(
+        review.receipt.get("stop_run_ids"), "reviewed cleanup stop run IDs"
+    )
+    active_run_id = str(context["active_run_id"])
+    receipt = cleanup_to_idle(
+        {
+            **_envelope(target, review.target_digest),
+            "request_key": review.request_key,
+            "review_digest": review.review_digest,
+            "review": dict(review.receipt),
+            "resume_reviewed": resume_reviewed,
+            "cleanup_mode": context["cleanup_mode"],
+            "terminal_event": context["terminal_event"],
+            "terminal_record_sha256": context["terminal_record"].get("record_sha256"),
+            "profile_number": review.profile_number,
+            "profile_id": review.profile_id,
+            "profile_digest": review.profile_digest,
+            "plan_digest": review.plan_digest,
+            "stop_run_ids": reviewed_stop_ids,
+            "stop_aliases": list(review.receipt["stop_aliases"]),
+            "released_run_proofs": list(review.receipt["released_run_proofs"]),
+            "fleet_node_ids": list(target.fleet_node_ids),
+        }
+    )
+    validated_receipt = _validate_cleanup_application(target, review, context, receipt)
+    cleanup = ledger.append(
+        "lane_recovery.cleanup.completed",
+        plan_digest=target.campaign_id,
+        recipe=target.recipe_key,
+        payload={
+            **_envelope(target, review.target_digest),
+            "request_key": review.request_key,
+            "review_digest": review.review_digest,
+            "cleanup_mode": context["cleanup_mode"],
+            "terminal_event": context["terminal_event"],
+            "terminal_record_sha256": context["terminal_record"].get("record_sha256"),
+            "receipt": dict(validated_receipt),
+        },
+    )
+    receipt_body = _mapping(
+        _payload(cleanup).get("receipt"), "completed cleanup receipt"
+    )
     return LaneRecoveryProgress(
         "cleanup-completed",
         review.target_digest,
@@ -1020,7 +1152,6 @@ def _validate_target(
             raise QualificationError(f"lane recovery {label} is invalid")
     for label, value in (
         ("batch ID", target.batch_id),
-        ("lane ID", target.lane_id),
         ("recipe key", target.recipe_key),
         ("recipe revision ID", target.recipe_revision_id),
         ("route alias", target.alias),
@@ -1029,34 +1160,52 @@ def _validate_target(
     ):
         if not isinstance(value, str) or not value:
             raise QualificationError(f"lane recovery {label} is invalid")
+    if type(target.lane_id) is not int or target.lane_id < 1:
+        raise QualificationError("lane recovery lane ID must be a positive integer")
     if target.original_run_id is not None and (
         not isinstance(target.original_run_id, str) or not target.original_run_id
     ):
         raise QualificationError("lane recovery original run ID is invalid")
     if require_passing_lane and target.original_run_id is None:
-        raise QualificationError("lane recovery requires an exact passing canary run ID")
+        raise QualificationError(
+            "lane recovery requires an exact passing canary run ID"
+        )
     if type(target.profile_number) is not int or target.profile_number < 1:
         raise QualificationError("lane recovery profile number is invalid")
     if set(target.node_to_rank) != {target.node_id} or any(
         type(rank) is not int or rank < 0 for rank in target.node_to_rank.values()
     ):
         raise QualificationError("lane recovery target must bind its exact node/rank")
-    if not target.smoke_case_ids or any(
-        not isinstance(case_id, str) or not case_id for case_id in target.smoke_case_ids
-    ) or len(set(target.smoke_case_ids)) != len(target.smoke_case_ids):
+    if (
+        not target.smoke_case_ids
+        or any(
+            not isinstance(case_id, str) or not case_id
+            for case_id in target.smoke_case_ids
+        )
+        or len(set(target.smoke_case_ids)) != len(target.smoke_case_ids)
+    ):
         raise QualificationError("lane recovery fixture case list is invalid")
-    if not target.fleet_node_ids or len(set(target.fleet_node_ids)) != len(
-        target.fleet_node_ids
-    ) or target.node_id not in target.fleet_node_ids:
+    if (
+        not target.fleet_node_ids
+        or len(set(target.fleet_node_ids)) != len(target.fleet_node_ids)
+        or target.node_id not in target.fleet_node_ids
+    ):
         raise QualificationError("lane recovery whole-Fleet roster is invalid")
     if len(set(target.partner_run_ids)) != len(target.partner_run_ids) or len(
         set(target.partner_aliases)
     ) != len(target.partner_aliases):
         raise QualificationError("lane recovery partner identities are duplicated")
-    if target.original_run_id in target.partner_run_ids or target.alias in target.partner_aliases:
+    if (
+        target.original_run_id in target.partner_run_ids
+        or target.alias in target.partner_aliases
+    ):
         raise QualificationError("lane recovery lane overlaps a partner identity")
     lane_ids = [item.lane_id for item in target.canaries]
-    if not target.canaries or len(set(lane_ids)) != len(lane_ids):
+    if (
+        not target.canaries
+        or len(set(lane_ids)) != len(lane_ids)
+        or any(type(lane_id) is not int or lane_id < 1 for lane_id in lane_ids)
+    ):
         raise QualificationError("paired canary references are empty or duplicated")
     own = [item for item in target.canaries if item.lane_id == target.lane_id]
     if len(own) != 1:
@@ -1074,7 +1223,9 @@ def _validate_target(
         own_ref.recipe_revision_id != target.recipe_revision_id
         or own_ref.alias != target.alias
     ):
-        raise QualificationError("this lane canary applied a different revision or route")
+        raise QualificationError(
+            "this lane canary applied a different revision or route"
+        )
     if require_passing_lane and (
         own_ref.outcome_event != "canary.completed"
         or own_ref.run_id != target.original_run_id
@@ -1085,7 +1236,9 @@ def _validate_target(
     ):
         raise QualificationError("this lane canary differs from the recovery target")
     if not require_passing_lane and own_ref.run_id != target.original_run_id:
-        raise QualificationError("cleanup target run differs from its own canary outcome")
+        raise QualificationError(
+            "cleanup target run differs from its own canary outcome"
+        )
     for reference in target.canaries:
         if reference.outcome_event not in {"canary.completed", "canary.failed"}:
             raise QualificationError("paired lane outcome event is not terminal")
@@ -1104,7 +1257,9 @@ def _validate_target(
                 reference.node_to_rank,
             )
         ):
-            raise QualificationError("passing paired canary lacks an exact run identity")
+            raise QualificationError(
+                "passing paired canary lacks an exact run identity"
+            )
         if reference.run_id is not None and any(
             value is None
             for value in (
@@ -1113,11 +1268,15 @@ def _validate_target(
                 reference.node_to_rank,
             )
         ):
-            raise QualificationError("applied failed canary lacks an exact run identity")
+            raise QualificationError(
+                "applied failed canary lacks an exact run identity"
+            )
         if reference.node_to_rank is not None and dict(reference.node_to_rank) != {
             reference.assigned_node_id: reference.assigned_rank
         }:
-            raise QualificationError("paired canary rank receipt differs from its assignment")
+            raise QualificationError(
+                "paired canary rank receipt differs from its assignment"
+            )
     assigned_nodes = [item.assigned_node_id for item in target.canaries]
     if len(set(assigned_nodes)) != len(assigned_nodes):
         raise QualificationError("paired lane assignments overlap the same Spark")
@@ -1136,7 +1295,9 @@ def _validate_target(
     if other_runs != set(target.partner_run_ids) or other_aliases != set(
         target.partner_aliases
     ):
-        raise QualificationError("partner canary references do not match stop identities")
+        raise QualificationError(
+            "partner canary references do not match stop identities"
+        )
 
 
 def _require_canary_records(target: LaneRecoveryTarget, ledger: EvidenceLedger) -> None:
@@ -1147,16 +1308,19 @@ def _require_canary_records(target: LaneRecoveryTarget, ledger: EvidenceLedger) 
             if record.get("record_sha256") == reference.record_sha256
         ]
         if len(matches) != 1:
-            raise QualificationError("paired canary record reference is missing or ambiguous")
+            raise QualificationError(
+                "paired canary record reference is missing or ambiguous"
+            )
         record = matches[0]
         payload = _payload(record)
         ranks = payload.get("node_to_rank")
         if (
-            record.get("event") != reference.outcome_event
+            type(payload.get("lane_id")) is not int
+            or payload.get("lane_id") != reference.lane_id
+            or record.get("event") != reference.outcome_event
             or record.get("plan_digest") != target.campaign_id
             or record.get("recipe") != reference.recipe_key
             or payload.get("batch_id") != target.batch_id
-            or payload.get("lane_id") != reference.lane_id
             or payload.get("recipe_content_sha256") != reference.recipe_content_sha256
             or payload.get("package_sha256") != reference.package_sha256
             or payload.get("assigned_node_id") != reference.assigned_node_id
@@ -1185,13 +1349,16 @@ def _require_canary_records(target: LaneRecoveryTarget, ledger: EvidenceLedger) 
                 )
             )
         ):
-            raise QualificationError("paired canary reference is not exact recipe/lane evidence")
+            raise QualificationError(
+                "paired canary reference is not exact recipe/lane evidence"
+            )
 
 
 def _validate_transition_review(
     target: LaneRecoveryTarget,
     request_key: str,
     receipt: Mapping[str, object],
+    ledger: EvidenceLedger,
 ) -> Mapping[str, object]:
     expected_keys = {
         "request_key",
@@ -1205,6 +1372,7 @@ def _validate_transition_review(
         "keep_run_id",
         "stop_run_ids",
         "stop_aliases",
+        "released_partner_proofs",
     }
     if set(receipt) != expected_keys:
         raise QualificationError("lane transition review has an unexpected shape")
@@ -1233,12 +1401,13 @@ def _validate_transition_review(
     if (expected_keep is not None and expected_keep != target.original_run_id) or (
         expected_keep is None and not target.allow_reactivation
     ):
-        raise QualificationError("reviewed transition does not preserve the exact lane run")
-    if (
-        receipt.get("request_key") != request_key
-        or receipt.get("reviewed") is not True
-    ):
-        raise QualificationError("lane transition review lacks its exact request binding")
+        raise QualificationError(
+            "reviewed transition does not preserve the exact lane run"
+        )
+    if receipt.get("request_key") != request_key or receipt.get("reviewed") is not True:
+        raise QualificationError(
+            "lane transition review lacks its exact request binding"
+        )
     if (
         _positive_int(receipt.get("profile_number"), "reviewed profile number") < 1
         or not isinstance(receipt.get("profile_id"), str)
@@ -1246,10 +1415,12 @@ def _validate_transition_review(
         or not _is_sha256(receipt.get("profile_digest"))
         or not _is_sha256(receipt.get("plan_digest"))
     ):
-        raise QualificationError("lane transition review lacks an exact profile and plan identity")
-    if set(_string_list(receipt.get("fleet_node_ids"), "transition Fleet roster")) != set(
-        target.fleet_node_ids
-    ):
+        raise QualificationError(
+            "lane transition review lacks an exact profile and plan identity"
+        )
+    if set(
+        _string_list(receipt.get("fleet_node_ids"), "transition Fleet roster")
+    ) != set(target.fleet_node_ids):
         raise QualificationError("lane transition changed the reviewed Fleet roster")
     if (
         assignment.get("recipe_key") != target.recipe_key
@@ -1259,21 +1430,61 @@ def _validate_transition_review(
         or assignment.get("alias") != target.alias
         or assignment.get("node_to_rank") != dict(target.node_to_rank)
     ):
-        raise QualificationError("reviewed profile assignment changed the exact recipe or target")
+        raise QualificationError(
+            "reviewed profile assignment changed the exact recipe or target"
+        )
     assignment_run_id = assignment.get("run_id")
     if assignment_run_id is not None and not isinstance(assignment_run_id, str):
         raise QualificationError("reviewed assignment run ID is invalid")
     if expected_keep == target.original_run_id:
         if assignment_run_id not in (None, target.original_run_id):
-            raise QualificationError("reviewed assignment replaced the preserved canary run")
+            raise QualificationError(
+                "reviewed assignment replaced the preserved canary run"
+            )
     elif assignment_run_id is not None:
-        raise QualificationError("reactivated lane review unexpectedly binds a prior run")
-    if _string_list(receipt.get("stop_run_ids"), "reviewed partner runs") != sorted(
-        target.partner_run_ids
-    ) or _string_list(receipt.get("stop_aliases"), "reviewed partner routes") != sorted(
-        target.partner_aliases
+        raise QualificationError(
+            "reactivated lane review unexpectedly binds a prior run"
+        )
+    partner_assignments = _partner_assignments(target)
+    stop_run_ids = _string_list(receipt.get("stop_run_ids"), "reviewed partner runs")
+    stop_aliases = _string_list(receipt.get("stop_aliases"), "reviewed partner routes")
+    if (
+        stop_run_ids != sorted(set(stop_run_ids))
+        or not set(stop_run_ids) <= set(partner_assignments)
+        or stop_aliases != sorted(set(stop_aliases))
+        or set(stop_aliases)
+        != {
+            _str(
+                next(item.alias for item in target.canaries if item.run_id == run_id),
+                "reviewed partner route",
+            )
+            for run_id in stop_run_ids
+        }
     ):
-        raise QualificationError("reviewed transition does not stop the exact paired partner")
+        raise QualificationError(
+            "reviewed transition changed its exact active partner stop set"
+        )
+    missing_partner_runs = sorted(set(partner_assignments) - set(stop_run_ids))
+    raw_proofs = receipt.get("released_partner_proofs")
+    proofs = _object_list(raw_proofs, "reviewed prior partner release proof")
+    if [item.get("run_id") for item in proofs] != missing_partner_runs:
+        raise QualificationError(
+            "reviewed transition omits a prior proof for an absent partner"
+        )
+    references_by_run = {
+        item.run_id: item
+        for item in target.canaries
+        if item.run_id is not None and item.lane_id != target.lane_id
+    }
+    for proof, run_id in zip(proofs, missing_partner_runs, strict=True):
+        expected_proof = _prior_partner_release_proof(
+            target, references_by_run[run_id], ledger
+        )
+        expected_proof.pop("source_fleet_snapshot")
+        if dict(proof) != expected_proof:
+            raise QualificationError(
+                "reviewed transition prior release proof is misattributed"
+            )
     return dict(receipt)
 
 
@@ -1287,6 +1498,7 @@ def _validate_cleanup_review(
     expected_stops: Mapping[str, Mapping[str, int]],
     expected_aliases: Sequence[str],
     receipt: Mapping[str, object],
+    ledger: EvidenceLedger,
 ) -> Mapping[str, object]:
     expected_keys = {
         "request_key",
@@ -1302,9 +1514,28 @@ def _validate_cleanup_review(
         "active_run_id",
         "stop_run_ids",
         "stop_aliases",
+        "released_run_proofs",
+        "pre_cleanup_fleet_snapshot",
     }
     if set(receipt) != expected_keys:
         raise QualificationError("lane cleanup review has an unexpected shape")
+    actual_stops = _string_list(receipt.get("stop_run_ids"), "cleanup stopped run IDs")
+    actual_aliases = _string_list(
+        receipt.get("stop_aliases"), "cleanup stopped aliases"
+    )
+    aliases_by_run: dict[str, str] = {}
+    for run_id in actual_stops:
+        reference = next(
+            (item for item in target.canaries if item.run_id == run_id), None
+        )
+        if reference is not None and reference.alias is not None:
+            aliases_by_run[run_id] = reference.alias
+        elif run_id == active_run_id:
+            aliases_by_run[run_id] = target.alias
+        else:
+            raise QualificationError(
+                "cleanup stop names a run without exact route identity"
+            )
     if (
         receipt.get("request_key") != request_key
         or receipt.get("reviewed") is not True
@@ -1312,19 +1543,94 @@ def _validate_cleanup_review(
         or receipt.get("terminal_event") != terminal_event
         or receipt.get("terminal_record_sha256") != terminal_record_sha256
         or receipt.get("active_run_id") != active_run_id
-        or _positive_int(receipt.get("profile_number"), "reviewed cleanup profile number") < 1
+        or _positive_int(
+            receipt.get("profile_number"), "reviewed cleanup profile number"
+        )
+        < 1
         or not isinstance(receipt.get("profile_id"), str)
         or not receipt.get("profile_id")
         or not _is_sha256(receipt.get("profile_digest"))
         or not _is_sha256(receipt.get("plan_digest"))
         or set(_string_list(receipt.get("fleet_node_ids"), "cleanup Fleet roster"))
         != set(target.fleet_node_ids)
-        or _string_list(receipt.get("stop_run_ids"), "cleanup stopped run IDs")
-        != sorted(expected_stops)
-        or _string_list(receipt.get("stop_aliases"), "cleanup stopped aliases")
-        != sorted(expected_aliases)
+        or actual_stops != sorted(set(actual_stops))
+        or not set(actual_stops) <= set(expected_stops)
+        or actual_aliases != sorted(set(actual_aliases))
+        or set(actual_aliases) != set(aliases_by_run.values())
+        or not set(actual_aliases) <= set(expected_aliases)
     ):
-        raise QualificationError("lane cleanup review changed its exact whole-Fleet effects")
+        raise QualificationError(
+            "lane cleanup review changed its exact whole-Fleet effects"
+        )
+    missing_runs = sorted(set(expected_stops) - set(actual_stops))
+    proofs = _object_list(
+        receipt.get("released_run_proofs"), "reviewed prior cleanup release proof"
+    )
+    if [item.get("run_id") for item in proofs] != missing_runs:
+        raise QualificationError(
+            "cleanup review omits proof for a previously released run"
+        )
+    references_by_run = {
+        item.run_id: item for item in target.canaries if item.run_id is not None
+    }
+    for proof, run_id in zip(proofs, missing_runs, strict=True):
+        reference = references_by_run.get(run_id)
+        if reference is None:
+            raise QualificationError("cleanup prior release run is not a bound canary")
+        expected_proof = _prior_partner_release_proof(target, reference, ledger)
+        expected_proof.pop("source_fleet_snapshot")
+        if dict(proof) != expected_proof:
+            raise QualificationError("cleanup prior release proof is misattributed")
+    view = _fleet_view(receipt.get("pre_cleanup_fleet_snapshot"), target.fleet_node_ids)
+    if set(view["loaded_runs"]) != set(actual_stops):
+        raise QualificationError(
+            "cleanup review stop set differs from fresh pre-cleanup Fleet"
+        )
+    references_by_run = {
+        item.run_id: item for item in target.canaries if item.run_id is not None
+    }
+    for run_id in actual_stops:
+        reference = references_by_run.get(run_id)
+        expected_alias = aliases_by_run[run_id]
+        expected_revision = (
+            target.recipe_revision_id
+            if run_id == active_run_id
+            else _str(reference.recipe_revision_id, "cleanup canary revision")
+        )
+        expected_ranks = dict(expected_stops[run_id])
+        projection = view["loaded_runs"][run_id]
+        if (
+            projection["alias"] != expected_alias
+            or projection["recipe_revision_id"] != expected_revision
+            or projection["ranks"] != expected_ranks
+            or projection["route_states"] != {"published"}
+        ):
+            raise QualificationError(
+                "cleanup pre-Fleet view changed an exact stop run or route identity"
+            )
+    for proof in proofs:
+        run_id = _str(proof.get("run_id"), "released cleanup run ID")
+        alias = _str(proof.get("alias"), "released cleanup route alias")
+        source_generated_at = _timestamp(
+            proof.get("source_fleet_generated_at"), "source cleanup Fleet time"
+        )
+        source_cursor = _cursor(
+            proof.get("source_fleet_event_cursor"), "source cleanup Fleet cursor"
+        )
+        source_authority = _str(
+            proof.get("source_fleet_authority_revision"),
+            "source cleanup authority revision",
+        )
+        if (
+            run_id in view["loaded_runs"]
+            or alias in view["published_route_aliases"]
+            or view["generated_at"] <= source_generated_at
+            or view["event_cursor"] < source_cursor
+            or view["authority_revision"] != source_authority
+        ):
+            raise QualificationError(
+                "cleanup pre-Fleet view does not freshly confirm prior release"
+            )
     return dict(receipt)
 
 
@@ -1341,6 +1647,242 @@ def _partner_assignments(
     }
 
 
+def prior_partner_release_proofs(
+    target: LaneRecoveryTarget,
+    ledger: EvidenceLedger,
+    fleet_snapshot: Mapping[str, object],
+    *,
+    candidate_run_ids: Sequence[str] | None = None,
+) -> tuple[dict[str, object], ...]:
+    """Bind absent paired runs to earlier reviewed stops and a fresh Fleet view.
+
+    The returned records are suitable for embedding in a transition or cleanup
+    review. A missing run without a durable typed stop receipt remains a hard
+    blocker; the current snapshot must also be newer than the source release.
+    """
+
+    _validate_target(target, require_passing_lane=False)
+    _require_canary_records(target, ledger)
+    all_canaries = {
+        reference.run_id: dict(
+            reference.node_to_rank
+            or {reference.assigned_node_id: reference.assigned_rank}
+        )
+        for reference in target.canaries
+        if reference.run_id is not None
+    }
+    all_partners = _partner_assignments(target)
+    candidates = (
+        sorted(all_partners) if candidate_run_ids is None else sorted(candidate_run_ids)
+    )
+    current = _fleet_view(fleet_snapshot, target.fleet_node_ids)
+    if len(candidates) != len(set(candidates)) or not set(candidates) <= (
+        set(all_canaries) | set(current["loaded_runs"])
+    ):
+        raise QualificationError(
+            "prior release proof request changed paired run identities"
+        )
+    proofs: list[dict[str, object]] = []
+    reference_by_run = {
+        reference.run_id: reference
+        for reference in target.canaries
+        if reference.run_id is not None
+    }
+    for run_id in candidates:
+        if run_id in current["loaded_runs"]:
+            continue
+        reference = reference_by_run.get(run_id)
+        if reference is None:
+            raise QualificationError(
+                "absent prior release run has no bound canary identity"
+            )
+        if reference.alias in current["published_route_aliases"]:
+            raise QualificationError("absent partner run still has its published route")
+        proof = _prior_partner_release_proof(target, reference, ledger)
+        source_snapshot = _fleet_view(
+            proof["source_fleet_snapshot"], target.fleet_node_ids
+        )
+        if (
+            run_id in source_snapshot["loaded_runs"]
+            or reference.alias in source_snapshot["published_route_aliases"]
+            or current["generated_at"] <= source_snapshot["generated_at"]
+            or current["event_cursor"] < source_snapshot["event_cursor"]
+            or current["authority_revision"] != source_snapshot["authority_revision"]
+        ):
+            raise QualificationError(
+                "absent partner lacks a fresh Fleet observation after its exact release"
+            )
+        proofs.append(
+            {
+                key: value
+                for key, value in proof.items()
+                if key != "source_fleet_snapshot"
+            }
+        )
+    return tuple(proofs)
+
+
+def _prior_partner_release_proof(
+    target: LaneRecoveryTarget,
+    reference: CanaryReference,
+    ledger: EvidenceLedger,
+) -> dict[str, object]:
+    """Return the latest exact earlier transition/cleanup stop for one canary."""
+
+    if (
+        reference.run_id is None
+        or reference.alias is None
+        or reference.node_to_rank is None
+    ):
+        raise QualificationError(
+            "prior partner release requires an exact applied canary"
+        )
+    by_lane = {item.lane_id: item for item in target.canaries}
+    for source_record in reversed(ledger.records):
+        event = source_record.get("event")
+        if event not in {
+            "lane_recovery.transitioned",
+            "lane_recovery.cleanup.completed",
+        }:
+            continue
+        if source_record.get("plan_digest") != target.campaign_id:
+            continue
+        source_payload = _payload(source_record)
+        if source_payload.get("batch_id") != target.batch_id:
+            continue
+        source_lane = source_payload.get("lane_id")
+        source_ref = by_lane.get(source_lane) if type(source_lane) is int else None
+        if source_ref is None or source_record.get("recipe") != source_ref.recipe_key:
+            continue
+        source_target_digest = source_payload.get("target_digest")
+        if not isinstance(source_target_digest, str):
+            continue
+        review_event_name = (
+            "lane_recovery.plan_reviewed"
+            if event == "lane_recovery.transitioned"
+            else "lane_recovery.cleanup.plan_reviewed"
+        )
+        review_records = [
+            item
+            for item in ledger.records
+            if item.get("plan_digest") == target.campaign_id
+            and item.get("recipe") == source_ref.recipe_key
+            and item.get("event") == review_event_name
+            and _payload(item).get("batch_id") == target.batch_id
+            and _payload(item).get("lane_id") == source_lane
+            and _payload(item).get("target_digest") == source_target_digest
+        ]
+        if len(review_records) != 1:
+            continue
+        review_payload = _payload(review_records[0])
+        review = _mapping(review_payload.get("review"), "prior stop plan review")
+        review_digest = _digest(dict(review))
+        if (
+            source_payload.get("review_digest") != review_digest
+            or review_payload.get("review_digest") != review_digest
+            or source_payload.get("request_key") != review_payload.get("request_key")
+            or review_payload.get("request_key") != review.get("request_key")
+        ):
+            continue
+        stop_ids = _string_list(
+            review.get("stop_run_ids"), "prior reviewed stop run IDs"
+        )
+        if reference.run_id not in stop_ids:
+            continue
+        stop_aliases = _string_list(
+            review.get("stop_aliases"), "prior reviewed stop aliases"
+        )
+        if reference.alias not in stop_aliases:
+            raise QualificationError(
+                "prior reviewed stop omitted the exact partner route"
+            )
+        receipt = _mapping(
+            source_payload.get("receipt"), "prior stop application receipt"
+        )
+        if (
+            receipt.get("request_key") != review.get("request_key")
+            or receipt.get("review_digest") != review_digest
+            or receipt.get("application_state") != "succeeded"
+            or receipt.get("profile_number") != review.get("profile_number")
+            or receipt.get("profile_id") != review.get("profile_id")
+            or receipt.get("profile_digest") != review.get("profile_digest")
+            or receipt.get("plan_digest") != review.get("plan_digest")
+            or not isinstance(receipt.get("application_id"), str)
+            or not receipt.get("application_id")
+        ):
+            raise QualificationError(
+                "prior stop application differs from its reviewed plan"
+            )
+        source_stop_ids = sorted(set(stop_ids))
+        if source_stop_ids != sorted(stop_ids) or len(stop_ids) != len(set(stop_ids)):
+            raise QualificationError("prior reviewed stop identities are not canonical")
+        canary_by_run = {
+            item.run_id: item for item in target.canaries if item.run_id is not None
+        }
+        expected_assignments = {
+            run: dict(canary_by_run[run].node_to_rank or {})
+            for run in stop_ids
+            if run in canary_by_run
+        }
+        if set(expected_assignments) != set(stop_ids):
+            raise QualificationError("prior stop review names an unbound paired run")
+        stop_receipt_key = (
+            "partner_stop_receipts"
+            if event == "lane_recovery.transitioned"
+            else "stop_receipts"
+        )
+        raw_stop_receipts = receipt.get(stop_receipt_key)
+        _validate_stopped_runs(target, expected_assignments, raw_stop_receipts)
+        matching_stop = next(
+            item
+            for item in _object_list(raw_stop_receipts, "prior typed stop receipt")
+            if item.get("run_id") == reference.run_id
+        )
+        fleet_value = receipt.get("fleet_snapshot")
+        source_fleet = _fleet_view(fleet_value, target.fleet_node_ids)
+        application_updated_at = _timestamp(
+            receipt.get("application_updated_at"), "prior stop application update time"
+        )
+        if (
+            source_fleet["generated_at"] < application_updated_at
+            or reference.run_id in source_fleet["loaded_runs"]
+            or reference.alias in source_fleet["published_route_aliases"]
+        ):
+            raise QualificationError("prior stop lacks fresh whole-Fleet release proof")
+        return {
+            "run_id": reference.run_id,
+            "recipe_key": reference.recipe_key,
+            "recipe_content_sha256": reference.recipe_content_sha256,
+            "package_sha256": reference.package_sha256,
+            "lane_id": reference.lane_id,
+            "canary_record_sha256": reference.record_sha256,
+            "assigned_node_id": reference.assigned_node_id,
+            "assigned_rank": reference.assigned_rank,
+            "alias": reference.alias,
+            "node_to_rank": dict(reference.node_to_rank),
+            "source_event": str(event),
+            "source_lane_id": source_lane,
+            "source_record_sha256": _str(
+                source_record.get("record_sha256"), "prior stop ledger record digest"
+            ),
+            "source_application_id": receipt.get("application_id"),
+            "source_application_updated_at": receipt.get("application_updated_at"),
+            "source_stop_receipt_sha256": _digest(dict(matching_stop)),
+            "source_fleet_snapshot_sha256": _digest(
+                dict(_mapping(fleet_value, "prior stop FleetSnapshot"))
+            ),
+            "source_fleet_generated_at": source_fleet["generated_at"].isoformat(),
+            "source_fleet_event_cursor": source_fleet["event_cursor"],
+            "source_fleet_authority_revision": source_fleet["authority_revision"],
+            "source_fleet_snapshot": dict(
+                _mapping(fleet_value, "prior stop FleetSnapshot")
+            ),
+        }
+    raise QualificationError(
+        "absent partner canary has no exact same-batch typed stop and release receipt"
+    )
+
+
 def _cleanup_context(
     target: LaneRecoveryTarget,
     ledger: EvidenceLedger,
@@ -1348,7 +1890,9 @@ def _cleanup_context(
 ) -> _CleanupContext:
     completed = _event(ledger, target, target_digest, "lane_recovery.completed")
     own_reference = next(
-        reference for reference in target.canaries if reference.lane_id == target.lane_id
+        reference
+        for reference in target.canaries
+        if reference.lane_id == target.lane_id
     )
     for reference in target.canaries:
         if reference.outcome_event == "canary.failed" and reference.run_id is None:
@@ -1357,7 +1901,9 @@ def _cleanup_context(
             )
     if completed is not None:
         if own_reference.outcome_event != "canary.completed":
-            raise QualificationError("recovery completion is not tied to a passing own canary")
+            raise QualificationError(
+                "recovery completion is not tied to a passing own canary"
+            )
         payload = _payload(completed)
         active_run_id = _str(payload.get("active_run_id"), "completed lane run ID")
         active_assignment = _mapping(
@@ -1365,7 +1911,9 @@ def _cleanup_context(
         )
         _validate_active_identity(target, active_assignment)
         if active_assignment.get("run_id") != active_run_id:
-            raise QualificationError("completed lane assignment changed its run identity")
+            raise QualificationError(
+                "completed lane assignment changed its run identity"
+            )
         terminal_record: Mapping[str, object] = completed
         terminal_event = "lane_recovery.completed"
         cleanup_mode = "recovered-lane"
@@ -1389,7 +1937,9 @@ def _cleanup_context(
             if record.get("record_sha256") == own_reference.record_sha256
         ]
         if len(terminal_matches) != 1:
-            raise QualificationError("failed canary terminal record is absent or ambiguous")
+            raise QualificationError(
+                "failed canary terminal record is absent or ambiguous"
+            )
         terminal_record = terminal_matches[0]
         terminal_payload = _payload(terminal_record)
         if (
@@ -1398,7 +1948,9 @@ def _cleanup_context(
             or terminal_record.get("recipe") != target.recipe_key
             or terminal_payload.get("run_id") != active_run_id
         ):
-            raise QualificationError("failed canary cleanup terminal attribution is invalid")
+            raise QualificationError(
+                "failed canary cleanup terminal attribution is invalid"
+            )
         recovery_profile = {
             "recovery_profile_number": None,
             "recovery_profile_id": None,
@@ -1450,6 +2002,181 @@ def _cleanup_context(
     }
 
 
+def _load_cleanup_review(
+    target: LaneRecoveryTarget,
+    ledger: EvidenceLedger,
+    target_digest: str,
+    context: _CleanupContext,
+) -> LaneCleanupReview:
+    terminal_sha256 = _str(
+        context["terminal_record"].get("record_sha256"),
+        "cleanup terminal record SHA-256",
+    )
+    request_key = _request_key("cleanup", target, target_digest)
+    expected_intent = {
+        **_envelope(target, target_digest),
+        "request_key": request_key,
+        "cleanup_mode": context["cleanup_mode"],
+        "terminal_event": context["terminal_event"],
+        "terminal_record_sha256": terminal_sha256,
+        "active_run_id": context["active_run_id"],
+        "stop_run_ids": sorted(context["stop_assignments"]),
+        "stop_aliases": context["stop_aliases"],
+    }
+    intent = _require_event(
+        ledger, target, target_digest, "lane_recovery.cleanup.intent"
+    )
+    if _payload(intent) != expected_intent:
+        raise QualificationError(
+            "durable cleanup intent changed its exact release identities"
+        )
+    reviewed = _require_event(
+        ledger, target, target_digest, "lane_recovery.cleanup.plan_reviewed"
+    )
+    reviewed_payload = _payload(reviewed)
+    receipt = _mapping(reviewed_payload.get("review"), "durable cleanup review")
+    review_digest = _digest(dict(receipt))
+    if (
+        set(reviewed_payload)
+        != set(_envelope(target, target_digest))
+        | {"request_key", "review_digest", "review"}
+        or reviewed_payload.get("request_key") != request_key
+        or reviewed_payload.get("review_digest") != review_digest
+    ):
+        raise QualificationError(
+            "durable cleanup review digest or attribution is invalid"
+        )
+    valid = _validate_cleanup_review(
+        target,
+        request_key,
+        str(context["cleanup_mode"]),
+        str(context["terminal_event"]),
+        terminal_sha256,
+        str(context["active_run_id"]),
+        context["stop_assignments"],
+        context["stop_aliases"],
+        receipt,
+        ledger,
+    )
+    return LaneCleanupReview(
+        target_digest=target_digest,
+        request_key=request_key,
+        review_digest=review_digest,
+        profile_number=_positive_int(
+            valid.get("profile_number"), "durable cleanup profile number"
+        ),
+        profile_id=str(valid["profile_id"]),
+        profile_digest=str(valid["profile_digest"]),
+        plan_digest=str(valid["plan_digest"]),
+        receipt=valid,
+    )
+
+
+def _validate_cleanup_application(
+    target: LaneRecoveryTarget,
+    review: LaneCleanupReview,
+    context: _CleanupContext,
+    value: Mapping[str, object],
+    *,
+    expected_application_id: str | None = None,
+    expected_application_updated_at: str | None = None,
+) -> dict[str, object]:
+    receipt = _mapping(value, "cleanup application receipt")
+    application_id = receipt.get("application_id")
+    application_updated_at = receipt.get("application_updated_at")
+    if (
+        receipt.get("request_key") != review.request_key
+        or receipt.get("review_digest") != review.review_digest
+        or receipt.get("application_state") != "succeeded"
+        or receipt.get("profile_number") != review.profile_number
+        or receipt.get("profile_id") != review.profile_id
+        or receipt.get("profile_digest") != review.profile_digest
+        or receipt.get("plan_digest") != review.plan_digest
+        or not isinstance(application_id, str)
+        or not application_id
+        or (
+            expected_application_id is not None
+            and application_id != expected_application_id
+        )
+        or not isinstance(application_updated_at, str)
+        or (
+            expected_application_updated_at is not None
+            and application_updated_at != expected_application_updated_at
+        )
+    ):
+        raise QualificationError(
+            "lane cleanup application differs from its reviewed plan"
+        )
+    _timestamp(application_updated_at, "completed cleanup application time")
+    stop_run_ids = _string_list(
+        review.receipt.get("stop_run_ids"), "reviewed cleanup stopped run IDs"
+    )
+    stop_assignments = {
+        run_id: context["stop_assignments"][run_id] for run_id in stop_run_ids
+    }
+    _validate_stopped_runs(target, stop_assignments, receipt.get("stop_receipts"))
+    if receipt.get("released_run_proofs") != review.receipt.get("released_run_proofs"):
+        raise QualificationError("cleanup application changed its prior release proofs")
+    fleet = _fleet_view(receipt.get("fleet_snapshot"), target.fleet_node_ids)
+    pre_cleanup = _fleet_view(
+        review.receipt.get("pre_cleanup_fleet_snapshot"), target.fleet_node_ids
+    )
+    if fleet["generated_at"] < _timestamp(
+        application_updated_at, "completed cleanup application time"
+    ):
+        raise QualificationError(
+            "cleanup Fleet projection predates completed application"
+        )
+    if (
+        fleet["generated_at"] <= pre_cleanup["generated_at"]
+        or fleet["event_cursor"] < pre_cleanup["event_cursor"]
+        or fleet["authority_revision"] != pre_cleanup["authority_revision"]
+    ):
+        raise QualificationError(
+            "cleanup Fleet projection is not fresh after its reviewed pre-state"
+        )
+    if fleet.get("loaded_runs") or fleet.get("published_route_aliases"):
+        raise QualificationError(
+            "cleanup FleetSnapshot still contains a workload or route"
+        )
+    return dict(receipt)
+
+
+def _validate_cleanup_completion(
+    target: LaneRecoveryTarget,
+    review: LaneCleanupReview,
+    context: _CleanupContext,
+    record: Mapping[str, object],
+) -> dict[str, object]:
+    payload = _payload(record)
+    expected_keys = set(_envelope(target, review.target_digest)) | {
+        "request_key",
+        "review_digest",
+        "cleanup_mode",
+        "terminal_event",
+        "terminal_record_sha256",
+        "receipt",
+    }
+    if (
+        set(payload) != expected_keys
+        or payload.get("request_key") != review.request_key
+        or payload.get("review_digest") != review.review_digest
+        or payload.get("cleanup_mode") != context["cleanup_mode"]
+        or payload.get("terminal_event") != context["terminal_event"]
+        or payload.get("terminal_record_sha256")
+        != context["terminal_record"].get("record_sha256")
+    ):
+        raise QualificationError(
+            "completed cleanup differs from its durable reviewed intent"
+        )
+    return _validate_cleanup_application(
+        target,
+        review,
+        context,
+        _mapping(payload.get("receipt"), "persisted cleanup receipt"),
+    )
+
+
 def _validate_transition(
     target: LaneRecoveryTarget,
     review: LaneTransitionReview,
@@ -1464,8 +2191,12 @@ def _validate_transition(
         or receipt.get("profile_digest") != review.profile_digest
         or receipt.get("plan_digest") != review.plan_digest
     ):
-        raise QualificationError("lane transition differs from its reviewed profile plan")
-    if not isinstance(receipt.get("application_id"), str) or not receipt.get("application_id"):
+        raise QualificationError(
+            "lane transition differs from its reviewed profile plan"
+        )
+    if not isinstance(receipt.get("application_id"), str) or not receipt.get(
+        "application_id"
+    ):
         raise QualificationError("lane transition lacks a durable application identity")
     active = _mapping(receipt.get("active"), "active lane receipt")
     _validate_active_identity(target, active)
@@ -1473,11 +2204,15 @@ def _validate_transition(
     reactivated = active.get("reactivated") is True
     if review.receipt.get("keep_run_id") == target.original_run_id:
         if run_id != target.original_run_id or reactivated:
-            raise QualificationError("lane transition replaced the exact retained canary run")
+            raise QualificationError(
+                "lane transition replaced the exact retained canary run"
+            )
     elif run_id == target.original_run_id or not (
         target.allow_reactivation and reactivated
     ):
-        raise QualificationError("lane transition replaced the exact canary run without authority")
+        raise QualificationError(
+            "lane transition replaced the exact canary run without authority"
+        )
     if reactivated:
         smoke = _mapping(active.get("reactivation_smoke"), "lane reactivation smoke")
         _validate_smoke_receipt(
@@ -1491,21 +2226,68 @@ def _validate_transition(
     elif run_id != target.original_run_id:
         raise QualificationError("lane run identity is invalid")
     stop_receipts = receipt.get("partner_stop_receipts")
+    reviewed_stop_ids = _string_list(
+        review.receipt.get("stop_run_ids"), "reviewed transition stop run IDs"
+    )
+    all_partner_assignments = _partner_assignments(target)
     partner_assignments = {
-        item.run_id: dict(item.node_to_rank or {item.assigned_node_id: item.assigned_rank})
-        for item in target.canaries
-        if item.lane_id != target.lane_id and item.run_id is not None
+        run_id: all_partner_assignments[run_id] for run_id in reviewed_stop_ids
     }
     _validate_stopped_runs(target, partner_assignments, stop_receipts)
-    pre = _fleet_view(receipt.get("pre_transition_fleet_snapshot"), target.fleet_node_ids)
+    pre = _fleet_view(
+        receipt.get("pre_transition_fleet_snapshot"), target.fleet_node_ids
+    )
     post = _fleet_view(receipt.get("fleet_snapshot"), target.fleet_node_ids)
+    keep_run_id = review.receipt.get("keep_run_id")
+    expected_pre_runs = set(reviewed_stop_ids)
+    if isinstance(keep_run_id, str):
+        expected_pre_runs.add(keep_run_id)
+    if set(pre["loaded_runs"]) != expected_pre_runs:
+        raise QualificationError(
+            "transition pre-Fleet view changed its exact active and released runs"
+        )
+    raw_released = _object_list(
+        review.receipt.get("released_partner_proofs"),
+        "reviewed prior partner release proof",
+    )
+    for proof in raw_released:
+        run_id = _str(proof.get("run_id"), "released partner run ID")
+        alias = _str(proof.get("alias"), "released partner route alias")
+        source_generated_at = _timestamp(
+            proof.get("source_fleet_generated_at"), "source release Fleet time"
+        )
+        source_cursor = _cursor(
+            proof.get("source_fleet_event_cursor"), "source release Fleet cursor"
+        )
+        source_authority = _str(
+            proof.get("source_fleet_authority_revision"),
+            "source release authority revision",
+        )
+        if (
+            run_id in pre["loaded_runs"]
+            or alias in pre["published_route_aliases"]
+            or pre["generated_at"] <= source_generated_at
+            or pre["event_cursor"] < source_cursor
+            or pre["authority_revision"] != source_authority
+        ):
+            raise QualificationError(
+                "transition pre-Fleet view does not freshly confirm prior partner release"
+            )
     application_updated_at = _timestamp(
         receipt.get("application_updated_at"), "completed transition application time"
     )
-    if post["generated_at"] < pre["generated_at"] or post["event_cursor"] < pre["event_cursor"]:
-        raise QualificationError("transition Fleet projection predates its pre-transition view")
+    if (
+        post["generated_at"] < pre["generated_at"]
+        or post["event_cursor"] < pre["event_cursor"]
+        or post["authority_revision"] != pre["authority_revision"]
+    ):
+        raise QualificationError(
+            "transition Fleet projection predates its pre-transition view"
+        )
     if post["generated_at"] < application_updated_at:
-        raise QualificationError("transition Fleet projection predates completed application")
+        raise QualificationError(
+            "transition Fleet projection predates completed application"
+        )
     _validate_lane_projection(target, active, post, require_serving=True)
     return dict(active)
 
@@ -1523,7 +2305,9 @@ def _validate_active_identity(
         or not isinstance(active.get("run_id"), str)
         or not active.get("run_id")
     ):
-        raise QualificationError("active lane run changed recipe, node, rank, or route identity")
+        raise QualificationError(
+            "active lane run changed recipe, node, rank, or route identity"
+        )
 
 
 def _validate_observation(
@@ -1570,7 +2354,9 @@ def _fleet_view(value: object, expected_node_ids: Sequence[str]) -> _FleetView:
     if snapshot.get("schema_version") != 1:
         raise QualificationError("FleetSnapshot schema version is invalid")
     event_cursor = _cursor(snapshot.get("event_cursor"), "FleetSnapshot event cursor")
-    generated_at = _timestamp(snapshot.get("generated_at"), "FleetSnapshot generated_at")
+    generated_at = _timestamp(
+        snapshot.get("generated_at"), "FleetSnapshot generated_at"
+    )
     authority_revision = _str(
         snapshot.get("authority_revision"), "FleetSnapshot authority revision"
     )
@@ -1661,7 +2447,9 @@ def _fleet_view(value: object, expected_node_ids: Sequence[str]) -> _FleetView:
             "port_count",
         }
         if set(reservations) != expected_reservations:
-            raise QualificationError("Fleet reservation snapshot is incomplete or invalid")
+            raise QualificationError(
+                "Fleet reservation snapshot is incomplete or invalid"
+            )
         reservation_values: dict[str, int] = {}
         for key in expected_reservations:
             reservation_values[key] = _nonnegative_int(
@@ -1712,7 +2500,9 @@ def _validate_lane_projection(
     for candidate_run in candidate_runs:
         presence = loaded_runs.get(candidate_run)
         if presence is not None and candidate_run != run_id:
-            raise QualificationError("a replaced canary run remains loaded in the Fleet")
+            raise QualificationError(
+                "a replaced canary run remains loaded in the Fleet"
+            )
         if presence is not None:
             expected_alias = target.alias
             expected_revision = target.recipe_revision_id
@@ -1722,10 +2512,14 @@ def _validate_lane_projection(
                 or presence.get("recipe_revision_id") != expected_revision
                 or dict(presence.get("ranks", {})) != expected_node_to_rank
             ):
-                raise QualificationError("Fleet run projection changed the exact lane identity")
+                raise QualificationError(
+                    "Fleet run projection changed the exact lane identity"
+                )
     aliases = view["published_route_aliases"]
     if aliases - {target.alias}:
-        raise QualificationError("whole-Fleet snapshot contains a foreign published route")
+        raise QualificationError(
+            "whole-Fleet snapshot contains a foreign published route"
+        )
     target_node = view["nodes"][target.node_id]
     if require_serving and (
         set(loaded_runs) != {run_id}
@@ -1734,7 +2528,9 @@ def _validate_lane_projection(
         or target_node.get("telemetry_freshness") != "live"
         or target_node.get("boot_id") is None
     ):
-        raise QualificationError("post-transition Fleet projection does not serve the exact lane")
+        raise QualificationError(
+            "post-transition Fleet projection does not serve the exact lane"
+        )
 
 
 def _validate_stopped_runs(
@@ -1752,7 +2548,9 @@ def _validate_stopped_runs(
         if run_id in by_run:
             raise QualificationError("duplicate final stop receipt for a run")
         if receipt.get("operation_state") != "succeeded":
-            raise QualificationError("run stop operation has no successful terminal receipt")
+            raise QualificationError(
+                "run stop operation has no successful terminal receipt"
+            )
         final = _mapping(receipt.get("final_observation"), "run final observation")
         ranks = final.get("ranks")
         if (
@@ -1764,7 +2562,9 @@ def _validate_stopped_runs(
             or not isinstance(ranks, list)
             or not ranks
         ):
-            raise QualificationError("run stop lacks exact final stopped-and-withdrawn proof")
+            raise QualificationError(
+                "run stop lacks exact final stopped-and-withdrawn proof"
+            )
         rank_keys: set[tuple[str, int]] = set()
         for raw_rank in ranks:
             rank = _mapping(raw_rank, "stopped rank receipt")
@@ -1781,7 +2581,9 @@ def _validate_stopped_runs(
             rank_keys.add((node_id, rank_number))
         expected = expected_assignments.get(run_id)
         if expected is None or rank_keys != set(expected.items()):
-            raise QualificationError("run final stop receipt changed its canary node/rank assignment")
+            raise QualificationError(
+                "run final stop receipt changed its canary node/rank assignment"
+            )
         by_run[run_id] = receipt
     if set(by_run) != set(expected_assignments):
         raise QualificationError("final stop receipts do not cover exact required runs")
@@ -1806,7 +2608,9 @@ def _validate_serving_receipt(
         or receipt.get("route_state") != "published"
         or receipt.get("healthy") is not True
     ):
-        raise QualificationError("post-reboot serving receipt changed exact lane identity")
+        raise QualificationError(
+            "post-reboot serving receipt changed exact lane identity"
+        )
 
 
 def _validate_smoke_receipt(
@@ -1835,12 +2639,17 @@ def _validate_smoke_receipt(
         or receipt.get("alias") != target.alias
         or receipt.get("node_to_rank") != dict(target.node_to_rank)
         or receipt.get("boot_id") != boot_id
-        or (application_id is not None and receipt.get("application_id") != application_id)
+        or (
+            application_id is not None
+            and receipt.get("application_id") != application_id
+        )
         or (require_record_sha256 and not _is_sha256(receipt.get("record_sha256")))
         or not valid_cases
         or observed_ids != list(target.smoke_case_ids)
     ):
-        raise QualificationError("post-reboot fixture smoke is incomplete or misattributed")
+        raise QualificationError(
+            "post-reboot fixture smoke is incomplete or misattributed"
+        )
 
 
 def _active_boot_id(
@@ -1862,10 +2671,14 @@ def _reject_conflicting_lane_evidence(
             and str(record.get("event", "")).startswith("lane_recovery.")
         ):
             payload = _payload(record)
-            if payload.get("batch_id") == target.batch_id and payload.get(
-                "lane_id"
-            ) == target.lane_id and payload.get("target_digest") != target_digest:
-                raise QualificationError("durable lane recovery evidence has a changed target")
+            if (
+                payload.get("batch_id") == target.batch_id
+                and payload.get("lane_id") == target.lane_id
+                and payload.get("target_digest") != target_digest
+            ):
+                raise QualificationError(
+                    "durable lane recovery evidence has a changed target"
+                )
 
 
 def _event(
@@ -1927,7 +2740,9 @@ def _check_recovery_event_reviews(
             or payload.get("recovery_profile_digest") != review.profile_digest
             or payload.get("recovery_plan_digest") != review.plan_digest
         ):
-            raise QualificationError(f"durable {name} event changed lane review identity")
+            raise QualificationError(
+                f"durable {name} event changed lane review identity"
+            )
 
 
 def _load_transition_review(
@@ -1949,12 +2764,14 @@ def _load_transition_review(
         or payload.get("review_digest") != digest
     ):
         raise QualificationError("durable lane transition review digest is invalid")
-    valid = _validate_transition_review(target, request_key, receipt)
+    valid = _validate_transition_review(target, request_key, receipt, ledger)
     return LaneTransitionReview(
         target_digest=target_digest,
         request_key=request_key,
         review_digest=digest,
-        profile_number=_positive_int(valid.get("profile_number"), "durable reviewed profile number"),
+        profile_number=_positive_int(
+            valid.get("profile_number"), "durable reviewed profile number"
+        ),
         profile_id=str(valid["profile_id"]),
         profile_digest=str(valid["profile_digest"]),
         plan_digest=str(valid["plan_digest"]),
@@ -2035,9 +2852,7 @@ def _review_envelope(
     }
 
 
-def _request_key(
-    action: str, target: LaneRecoveryTarget, target_digest: str
-) -> str:
+def _request_key(action: str, target: LaneRecoveryTarget, target_digest: str) -> str:
     return str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
@@ -2081,6 +2896,12 @@ def _string_list(value: object, label: str) -> list[str]:
     return result
 
 
+def _object_list(value: object, label: str) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        raise QualificationError(f"{label} list is invalid")
+    return [_mapping(item, label) for item in value]
+
+
 def _is_sha256(value: object) -> bool:
     return isinstance(value, str) and _SHA256.fullmatch(value) is not None
 
@@ -2120,4 +2941,6 @@ def _timestamp(value: object, label: str) -> datetime:
 
 def _require_same_authority(value: Mapping[str, object], expected: str) -> None:
     if value.get("authority_revision") != expected:
-        raise QualificationError("Fleet authority revision changed during lane recovery")
+        raise QualificationError(
+            "Fleet authority revision changed during lane recovery"
+        )
