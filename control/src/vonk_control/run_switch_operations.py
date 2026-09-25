@@ -7266,6 +7266,8 @@ class RunSwitchOperationService:
             state=job.state,
             plan_digest=plan.plan_digest,
             request_key=job.request_id,
+            cleanup_mode=(plan.cleanup_mode if plan.action == "cleanup" else None),
+            installation_id=(plan.installation_id if plan.action == "cleanup" else None),
             node_ids=list(job.targets),
             current_phase=current_phase,
             completed_phases=completed,
