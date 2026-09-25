@@ -113,13 +113,13 @@ jobs:
 
       - parallel:
           - name: Restore accepted hermes digest and signed evidence
-            uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+            uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
             with:
               path: ${{ runner.temp }}/accepted-image-cache/hermes
               key: accepted-hermes-${{ steps.image_inputs.outputs.hermes_key }}
 
           - name: Restore accepted litellm digest and signed evidence
-            uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+            uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
             with:
               path: ${{ runner.temp }}/accepted-image-cache/litellm
               key: accepted-litellm-${{ steps.image_inputs.outputs.litellm_key }}
