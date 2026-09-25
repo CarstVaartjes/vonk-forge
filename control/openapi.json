@@ -321,7 +321,8 @@
           "recipe.start",
           "recipe.job.run.v1",
           "recipe.stop",
-          "recipe.uninstall"
+          "recipe.uninstall",
+          "recipe.reconcile"
         ],
         "title": "AgentOperation",
         "type": "string"
@@ -1243,6 +1244,157 @@
         "title": "ArtifactSlotContract",
         "type": "object"
       },
+      "ArtifactStorageImpact": {
+        "additionalProperties": false,
+        "description": "Byte impact with unknown values preserved as unknown, never guessed.",
+        "properties": {
+          "artifact_digests": {
+            "items": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Artifact Digests",
+            "type": "array"
+          },
+          "artifact_set_bytes": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Set Bytes"
+          },
+          "artifact_set_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Set Sha256"
+          },
+          "copied_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Copied Bytes",
+            "type": "integer"
+          },
+          "missing_nas_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Nas Bytes"
+          },
+          "missing_spark_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Spark Bytes"
+          },
+          "nas_coverage": {
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Nas Coverage",
+            "type": "string"
+          },
+          "reclaimable_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reclaimable Bytes",
+            "type": "integer"
+          },
+          "reclaimable_digests": {
+            "items": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Reclaimable Digests",
+            "type": "array"
+          },
+          "reclaimed_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reclaimed Bytes",
+            "type": "integer"
+          },
+          "required_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Bytes"
+          },
+          "retention": {
+            "enum": [
+              "retain-cached",
+              "reclaim-unreferenced"
+            ],
+            "title": "Retention",
+            "type": "string"
+          },
+          "reused_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reused Bytes",
+            "type": "integer"
+          },
+          "running_coverage": {
+            "default": "unknown",
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Running Coverage",
+            "type": "string"
+          },
+          "spark_coverage": {
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Spark Coverage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nas_coverage",
+          "spark_coverage",
+          "retention"
+        ],
+        "title": "ArtifactStorageImpact",
+        "type": "object"
+      },
       "ArtifactVerificationEvidence": {
         "additionalProperties": false,
         "description": "One node's immutable artifact handoff evidence.",
@@ -1730,6 +1882,68 @@
         "title": "BuildArgument",
         "type": "object"
       },
+      "BuildCompatibilityEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "evidence_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Digest"
+          },
+          "expected_architecture": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Expected Architecture",
+            "type": "string"
+          },
+          "observed_architecture": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Architecture"
+          },
+          "state": {
+            "enum": [
+              "compatible",
+              "incompatible",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_architecture",
+          "state"
+        ],
+        "title": "BuildCompatibilityEvidence",
+        "type": "object"
+      },
       "BuildContext": {
         "additionalProperties": false,
         "properties": {
@@ -1787,6 +2001,49 @@
           "path"
         ],
         "title": "BuildPatch",
+        "type": "object"
+      },
+      "BuildSourceEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "source_bundle_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Bundle Sha256"
+          },
+          "state": {
+            "enum": [
+              "available",
+              "missing",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "BuildSourceEvidence",
         "type": "object"
       },
       "CacheRemovalAsset": {
@@ -2079,6 +2336,80 @@
           "reason"
         ],
         "title": "CancelRequest",
+        "type": "object"
+      },
+      "CapabilityEvidence": {
+        "additionalProperties": false,
+        "description": "One capability's declaration and evidence, kept separate by owner.",
+        "properties": {
+          "declared": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declared"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "evidence": {
+            "enum": [
+              "tested",
+              "observed",
+              "not-tested",
+              "unknown"
+            ],
+            "title": "Evidence",
+            "type": "string"
+          },
+          "evidence_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Digest"
+          },
+          "name": {
+            "maxLength": 96,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "support": {
+            "enum": [
+              "supported",
+              "unsupported",
+              "unknown"
+            ],
+            "title": "Support",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "declared",
+          "evidence",
+          "support"
+        ],
+        "title": "CapabilityEvidence",
         "type": "object"
       },
       "CapacityReservations": {
@@ -7984,6 +8315,59 @@
         "title": "InventoryState",
         "type": "object"
       },
+      "InvocationMetadata": {
+        "additionalProperties": false,
+        "description": "Context for audit and tracing which has no decision-making authority.",
+        "properties": {
+          "context": {
+            "additionalProperties": {
+              "maxLength": 256,
+              "type": "string"
+            },
+            "maxProperties": 16,
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Context",
+            "type": "object"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "origin": {
+            "default": "operator",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$",
+            "title": "Origin",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "InvocationMetadata",
+        "type": "object"
+      },
       "JobChange": {
         "additionalProperties": false,
         "properties": {
@@ -9671,6 +10055,78 @@
           "recipe_id"
         ],
         "title": "ManagedCatalogWithdrawnRecipe",
+        "type": "object"
+      },
+      "MappingSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "reuse",
+              "create"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Generation"
+          },
+          "mapping_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Id"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SparkGroupNode"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Nodes",
+            "type": "array"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "maxProperties": 128,
+            "title": "Parameters",
+            "type": "object"
+          },
+          "placement_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Placement Digest",
+            "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mapping_id",
+          "topology_name",
+          "placement_digest",
+          "action",
+          "nodes"
+        ],
+        "title": "MappingSelection",
         "type": "object"
       },
       "MemoryUsageUncertainty": {
@@ -17963,6 +18419,127 @@
         "title": "RunSwitchAssessment",
         "type": "object"
       },
+      "RunSwitchBuildEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "build_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Id"
+          },
+          "build_input_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Input Sha256"
+          },
+          "builder_node_id": {
+            "anyOf": [
+              {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Builder Node Id"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/BuildCompatibilityEvidence"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "image_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Bytes"
+          },
+          "image_digest": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Digest"
+          },
+          "oci_layout_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oci Layout Sha256"
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/RuntimeImageStorageImpact"
+          },
+          "source": {
+            "$ref": "#/components/schemas/BuildSourceEvidence"
+          },
+          "state": {
+            "enum": [
+              "available",
+              "planned",
+              "building",
+              "failed",
+              "missing",
+              "incompatible",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "build_id",
+          "image_digest",
+          "source",
+          "compatibility",
+          "runtime"
+        ],
+        "title": "RunSwitchBuildEvidence",
+        "type": "object"
+      },
       "RunSwitchCachedTransferResult": {
         "additionalProperties": false,
         "properties": {
@@ -18160,6 +18737,97 @@
           }
         },
         "title": "RunSwitchChildProgress",
+        "type": "object"
+      },
+      "RunSwitchCleanupApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup_mode": {
+            "default": "uninstall",
+            "enum": [
+              "uninstall",
+              "reconcile"
+            ],
+            "title": "Cleanup Mode",
+            "type": "string"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "invocation": {
+            "$ref": "#/components/schemas/InvocationMetadata"
+          },
+          "plan_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Digest"
+          },
+          "request_key": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Key"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "installation_id"
+        ],
+        "title": "RunSwitchCleanupApplyRequest",
+        "type": "object"
+      },
+      "RunSwitchCleanupPreviewRequest": {
+        "additionalProperties": false,
+        "description": "Ask Run/Switch to remove one installation that is no longer desired.\n\nCleanup is authorized by the installation's own uninstall assessment, so it\nnever requires launch readiness: removing work must not depend on being able\nto start work.  Run/Switch still owns the sequencing, the child reference\nand the retry budget for the removal.",
+        "properties": {
+          "cleanup_mode": {
+            "default": "uninstall",
+            "enum": [
+              "uninstall",
+              "reconcile"
+            ],
+            "title": "Cleanup Mode",
+            "type": "string"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "invocation": {
+            "$ref": "#/components/schemas/InvocationMetadata"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "installation_id"
+        ],
+        "title": "RunSwitchCleanupPreviewRequest",
         "type": "object"
       },
       "RunSwitchCleanupResult": {
@@ -18534,6 +19202,84 @@
         "title": "RunSwitchInstallationVerifyResult",
         "type": "object"
       },
+      "RunSwitchMemberProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Completed Bytes",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "transfer",
+                  "verify",
+                  "prepare",
+                  "cleanup",
+                  "stop",
+                  "start",
+                  "uninstall",
+                  "final_verify"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "total_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Bytes"
+          }
+        },
+        "required": [
+          "node_id",
+          "state"
+        ],
+        "title": "RunSwitchMemberProgress",
+        "type": "object"
+      },
       "RunSwitchMemberReceipt": {
         "additionalProperties": false,
         "description": "Durable member projection emitted by a child distribution operation.",
@@ -18772,6 +19518,172 @@
           "progress"
         ],
         "title": "RunSwitchModelDownloadResult",
+        "type": "object"
+      },
+      "RunSwitchOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "install",
+              "run",
+              "switch",
+              "stop",
+              "cleanup"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "cleanup_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "uninstall",
+                  "reconcile"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Mode"
+          },
+          "completed_phases": {
+            "items": {
+              "enum": [
+                "transfer",
+                "verify",
+                "prepare",
+                "cleanup",
+                "stop",
+                "start",
+                "uninstall",
+                "final_verify"
+              ],
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Completed Phases",
+            "type": "array"
+          },
+          "current_phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "transfer",
+                  "verify",
+                  "prepare",
+                  "cleanup",
+                  "stop",
+                  "start",
+                  "uninstall",
+                  "final_verify"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Phase"
+          },
+          "installation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Id"
+          },
+          "kind": {
+            "enum": [
+              "recipe.run-switch.v2",
+              "recipe.stop.v2",
+              "recipe.cleanup.v2"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/RunSwitchProgress"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchOperationResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          }
+        },
+        "required": [
+          "operation_id",
+          "kind",
+          "action",
+          "state",
+          "plan_digest",
+          "request_key",
+          "node_ids",
+          "completed_phases",
+          "progress"
+        ],
+        "title": "RunSwitchOperation",
         "type": "object"
       },
       "RunSwitchOperationResult": {
@@ -19220,6 +20132,468 @@
         "title": "RunSwitchOperationResult",
         "type": "object"
       },
+      "RunSwitchPhase": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "index": {
+            "maximum": 31.0,
+            "minimum": 0.0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "transfer",
+              "verify",
+              "prepare",
+              "cleanup",
+              "stop",
+              "start",
+              "uninstall",
+              "final_verify"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "operation_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Digest"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "retained",
+              "skipped",
+              "blocked"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "subphase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "container-build",
+                  "model-download",
+                  "runtime-image",
+                  "runtime-plan",
+                  "target-copy",
+                  "runtime-install"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subphase"
+          }
+        },
+        "required": [
+          "index",
+          "kind",
+          "state",
+          "detail"
+        ],
+        "title": "RunSwitchPhase",
+        "type": "object"
+      },
+      "RunSwitchPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "install",
+              "run",
+              "switch",
+              "stop",
+              "cleanup"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "alias": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alias"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "maxItems": 128,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "build": {
+            "$ref": "#/components/schemas/RunSwitchBuildEvidence"
+          },
+          "cleanup_disposition": {
+            "default": "uninstall",
+            "enum": [
+              "uninstall",
+              "abandon"
+            ],
+            "title": "Cleanup Disposition",
+            "type": "string"
+          },
+          "cleanup_mode": {
+            "default": "uninstall",
+            "enum": [
+              "uninstall",
+              "reconcile"
+            ],
+            "title": "Cleanup Mode",
+            "type": "string"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "maxItems": 128,
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "effective_settings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveSettingsSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fit": {
+            "$ref": "#/components/schemas/SparkFit"
+          },
+          "fit_after_stop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SparkFit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fit_current": {
+            "$ref": "#/components/schemas/SparkFit"
+          },
+          "freshness": {
+            "items": {
+              "$ref": "#/components/schemas/FreshnessEvidence"
+            },
+            "maxItems": 128,
+            "title": "Freshness",
+            "type": "array"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "image_digest": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Digest"
+          },
+          "installation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Id"
+          },
+          "installation_state": {
+            "anyOf": [
+              {
+                "maxLength": 24,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation State"
+          },
+          "invocation": {
+            "$ref": "#/components/schemas/InvocationMetadata"
+          },
+          "mapping": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MappingSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model_capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityEvidence"
+            },
+            "maxItems": 128,
+            "title": "Model Capabilities",
+            "type": "array"
+          },
+          "model_content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Content Sha256"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchPhase"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Phases",
+            "type": "array"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "post_stop_memory_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConditionalPostStopMemoryCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preparation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RolloutPreparation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recipe_build_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Build Id"
+          },
+          "recipe_capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityEvidence"
+            },
+            "maxItems": 128,
+            "title": "Recipe Capabilities",
+            "type": "array"
+          },
+          "recipe_content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Content Sha256"
+          },
+          "recipe_revision_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Revision Id"
+          },
+          "reclaimed_bytes": {
+            "minimum": 0.0,
+            "title": "Reclaimed Bytes",
+            "type": "integer"
+          },
+          "reconciliation_authority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchReconciliationAuthority"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "runtime_storage": {
+            "$ref": "#/components/schemas/RuntimeImageStorageImpact"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "spark_group": {
+            "$ref": "#/components/schemas/SparkGroup"
+          },
+          "start_plan_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Plan Digest"
+          },
+          "stop_before_prepare": {
+            "default": false,
+            "title": "Stop Before Prepare",
+            "type": "boolean"
+          },
+          "stop_before_transfer": {
+            "default": false,
+            "title": "Stop Before Transfer",
+            "type": "boolean"
+          },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/StopImpact"
+            },
+            "maxItems": 128,
+            "title": "Stops",
+            "type": "array"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/ArtifactStorageImpact"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReason"
+            },
+            "maxItems": 128,
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "alias",
+          "fit_current",
+          "fit_after_stop",
+          "stops",
+          "allowed",
+          "blockers",
+          "warnings",
+          "generated_at",
+          "action",
+          "model_content_sha256",
+          "recipe_revision_id",
+          "recipe_content_sha256",
+          "run_id",
+          "spark_group",
+          "mapping",
+          "installation_id",
+          "installation_state",
+          "recipe_build_id",
+          "image_digest",
+          "start_plan_digest",
+          "model_capabilities",
+          "recipe_capabilities",
+          "fit",
+          "storage",
+          "runtime_storage",
+          "build",
+          "conflicts",
+          "reclaimed_bytes",
+          "phases",
+          "invocation",
+          "plan_digest"
+        ],
+        "title": "RunSwitchPlan",
+        "type": "object"
+      },
       "RunSwitchPreparedResult": {
         "additionalProperties": false,
         "properties": {
@@ -19245,6 +20619,150 @@
           "prepared"
         ],
         "title": "RunSwitchPreparedResult",
+        "type": "object"
+      },
+      "RunSwitchProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Completed Bytes",
+            "type": "integer"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchMemberProgress"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Members",
+            "type": "array"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "transfer",
+                  "verify",
+                  "prepare",
+                  "cleanup",
+                  "stop",
+                  "start",
+                  "uninstall",
+                  "final_verify"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "phase_count": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Phase Count",
+            "type": "integer"
+          },
+          "phase_index": {
+            "maximum": 31.0,
+            "minimum": 0.0,
+            "title": "Phase Index",
+            "type": "integer"
+          },
+          "start_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Deadline"
+          },
+          "startup_budget_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startup Budget Seconds"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "subphase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "container-build",
+                  "model-download",
+                  "runtime-image",
+                  "runtime-plan",
+                  "target-copy",
+                  "runtime-install"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subphase"
+          },
+          "total_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Bytes"
+          },
+          "total_bytes_known": {
+            "title": "Total Bytes Known",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "phase_index",
+          "phase_count",
+          "phase",
+          "state",
+          "total_bytes_known",
+          "members"
+        ],
+        "title": "RunSwitchProgress",
         "type": "object"
       },
       "RunSwitchRankReceipt": {
@@ -19355,6 +20873,181 @@
           "scope"
         ],
         "title": "RunSwitchReason",
+        "type": "object"
+      },
+      "RunSwitchReconciliationAuthority": {
+        "additionalProperties": false,
+        "description": "Controller-owned identity and effect binding for installation repair.\n\nThe accepted installation plan remains opaque.  This authority records its\ncanonical fingerprint and binds each target to the successful original\n``recipe.install`` operation that supplied the persisted compiled spec.\nIt never claims that malformed launch metadata is executable.",
+        "properties": {
+          "image_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "minimum": 1.0,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "model_content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Content Sha256"
+          },
+          "original_plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Original Plan Digest",
+            "type": "string"
+          },
+          "recipe_build_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Build Id"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "stored_plan_canonical_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Stored Plan Canonical Sha256",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchReconciliationTarget"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "installation_id",
+          "original_plan_digest",
+          "recipe_revision_id",
+          "recipe_content_sha256",
+          "mapping_id",
+          "mapping_generation",
+          "recipe_build_id",
+          "image_digest",
+          "model_content_sha256",
+          "stored_plan_canonical_sha256",
+          "targets"
+        ],
+        "title": "RunSwitchReconciliationAuthority",
+        "type": "object"
+      },
+      "RunSwitchReconciliationTarget": {
+        "additionalProperties": false,
+        "description": "One exact rank and its current cleanup receipt state.",
+        "properties": {
+          "cleanup_receipt_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Receipt Sha256"
+          },
+          "compiled_spec_canonical_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Compiled Spec Canonical Sha256",
+            "type": "string"
+          },
+          "install_operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Install Operation Id",
+            "type": "string"
+          },
+          "install_operation_payload_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Install Operation Payload Sha256",
+            "type": "string"
+          },
+          "installed_bytes": {
+            "minimum": 0.0,
+            "title": "Installed Bytes",
+            "type": "integer"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "rank": {
+            "maximum": 31.0,
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "reconciled"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "installed_bytes",
+          "install_operation_id",
+          "install_operation_payload_sha256",
+          "compiled_spec_canonical_sha256",
+          "state"
+        ],
+        "title": "RunSwitchReconciliationTarget",
         "type": "object"
       },
       "RunSwitchRuntimeImageReferenceIntent": {
@@ -20394,6 +22087,187 @@
           "runtime_interface_label"
         ],
         "title": "RuntimeImageReceipt",
+        "type": "object"
+      },
+      "RuntimeImageStorageImpact": {
+        "additionalProperties": false,
+        "properties": {
+          "build_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Id"
+          },
+          "copied_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Copied Bytes",
+            "type": "integer"
+          },
+          "image_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Bytes"
+          },
+          "image_digest": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Digest"
+          },
+          "missing_image_distribution_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Image Distribution Bytes"
+          },
+          "missing_nas_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Nas Bytes"
+          },
+          "missing_spark_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Spark Bytes"
+          },
+          "nas_coverage": {
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Nas Coverage",
+            "type": "string"
+          },
+          "oci_layout_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oci Layout Sha256"
+          },
+          "preparation_required": {
+            "title": "Preparation Required",
+            "type": "boolean"
+          },
+          "reclaimable_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reclaimable Bytes",
+            "type": "integer"
+          },
+          "reclaimable_digests": {
+            "items": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Reclaimable Digests",
+            "type": "array"
+          },
+          "registry_manifest_digest": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry Manifest Digest"
+          },
+          "required_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Bytes"
+          },
+          "reused_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reused Bytes",
+            "type": "integer"
+          },
+          "running_coverage": {
+            "default": "unknown",
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Running Coverage",
+            "type": "string"
+          },
+          "spark_coverage": {
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Spark Coverage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "build_id",
+          "preparation_required",
+          "image_digest",
+          "nas_coverage",
+          "spark_coverage"
+        ],
+        "title": "RuntimeImageStorageImpact",
         "type": "object"
       },
       "RuntimePreflightFinding": {
@@ -29310,6 +31184,212 @@
         "summary": "Recipe Status"
       }
     },
+    "/api/recipe/installations/{installation_id}/reconcile": {
+      "post": {
+        "operationId": "applyRecipeInstallationReconciliation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunSwitchCleanupApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSwitchOperation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Apply Installation Reconciliation"
+      }
+    },
+    "/api/recipe/installations/{installation_id}/reconcile/preview": {
+      "post": {
+        "operationId": "previewRecipeInstallationReconciliation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunSwitchCleanupPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSwitchPlan"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Preview Installation Reconciliation"
+      }
+    },
     "/api/recipe/library": {
       "get": {
         "operationId": "listRecipeLibrary",
@@ -30579,6 +32659,84 @@
           }
         ],
         "summary": "Review Remove"
+      }
+    },
+    "/api/run-switch/operations/{operation_id}": {
+      "get": {
+        "operationId": "getRunSwitchOperation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSwitchOperation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Run Switch Operation"
       }
     }
   }
